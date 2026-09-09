@@ -1304,7 +1304,8 @@
         "TenantLookup",
         "clear_database_runtime",
         "get_database_runtime",
-        "install_database_runtime"
+        "install_database_runtime",
+        "set_database_runtime_required"
       ],
       "status": "declared"
     },

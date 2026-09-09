@@ -86,6 +86,7 @@ __all__ = [
     "clear_database_runtime",
     "get_database_runtime",
     "install_database_runtime",
+    "set_database_runtime_required",
 ]
 
 #: The one Postgres setting every composed module's RLS policy reads, via
@@ -567,14 +568,32 @@ class DatabaseRuntime:
 # still the reference runtime, reached through one more indirection.
 _installed_runtime: DatabaseRuntime | None = None
 
+# Whether falling back to the reference runtime is a REFUSAL rather than a
+# default. Independent of `_installed_runtime`: a deployment states this once
+# (typically via `ProductAssemblySpec.require_database_runtime`, applied by
+# `create_app`) to make "nobody installed a runtime" a loud boot-time defect
+# instead of a silent slide onto `dotmac_kernel.db`. See
+# `set_database_runtime_required`.
+_required: bool = False
+
 
 class NoDatabaseRuntimeError(RuntimeError):
     """`get_database_runtime` could not produce a runtime.
 
-    Only raised when no product runtime is installed AND the reference
-    runtime's own import fails — e.g. a test that made `dotmac_kernel.db`
-    unimportable without installing a replacement. A real deployment always
-    has one or the other.
+    Raised in two distinct cases, both meaning "there is no runtime to hand
+    back":
+
+    * No product runtime is installed and this deployment declared
+      `require_database_runtime` (`set_database_runtime_required(True)`) —
+      falling back to the reference runtime is REFUSED, not attempted. This is
+      the case a deployment proving the reference runtime is genuinely
+      unreachable depends on: without it, a missed
+      `ProductAssemblySpec.database_runtime` binding silently succeeds against
+      `dotmac_kernel.db` instead of failing loudly.
+    * No product runtime is installed, nothing declared it required, AND the
+      reference runtime's own import fails — e.g. a test that made
+      `dotmac_kernel.db` unimportable without installing a replacement. A real
+      deployment that never opts into strictness always has one or the other.
     """
 
 
@@ -600,29 +619,66 @@ def install_database_runtime(runtime: DatabaseRuntime) -> None:
 
 def clear_database_runtime() -> None:
     """Uninstall the product runtime, reverting `get_database_runtime` to the
-    reference assembly's instance.
+    reference assembly's instance (or to a refusal — see
+    `set_database_runtime_required`).
 
     `create_app` calls this whenever a spec declares no `database_runtime`, so
     a second app built in the same process cannot inherit a previous spec's
     installed runtime — the same reset discipline as
     `install_surface_globals`/`install_stylesheets` for the other per-process
-    globals `create_app` owns.
+    globals `create_app` owns. It does NOT touch `_required`: strictness is a
+    deployment's own declared policy, not a side effect of which runtime
+    happens to be installed.
     """
     global _installed_runtime
     _installed_runtime = None
+
+
+def set_database_runtime_required(required: bool) -> None:
+    """Declare whether an absent installed runtime is a REFUSAL or a fallback.
+
+    `create_app` calls this with `spec.require_database_runtime` on every
+    build, so it resets the same way `clear_database_runtime` does for a
+    second app in one process. A CLI or worker entry point that never calls
+    `create_app` at all may call this directly — strictness is a property of
+    the process's declared intent, not of `create_app` specifically.
+
+    `True` makes `get_database_runtime()` raise `NoDatabaseRuntimeError`
+    instead of importing `dotmac_kernel.db` when nothing is installed. This is
+    the seam's own answer to "the seam exists, but nothing forces its use": a
+    product that forgets to set `ProductAssemblySpec.database_runtime` gets a
+    boot-time refusal naming the gap, not a silent slide onto the reference
+    assembly's runtime.
+    """
+    global _required
+    _required = required
 
 
 def get_database_runtime() -> DatabaseRuntime:
     """The runtime every kernel-owned request, middleware, startup-check,
     CLI and worker path resolves through.
 
-    An installed product runtime always wins. Absent one, this is the
-    reference assembly's `dotmac_kernel.db.runtime` — imported HERE, lazily,
-    which is what keeps this module (and everything that calls this function
-    at module scope) importable without a `DATABASE_URL`.
+    An installed product runtime always wins. Absent one:
+
+    * if this deployment declared `require_database_runtime`
+      (`set_database_runtime_required(True)`), this raises
+      `NoDatabaseRuntimeError` WITHOUT ever importing `dotmac_kernel.db` — the
+      whole point of strict mode is that a missed binding fails loudly instead
+      of silently reaching the reference runtime;
+    * otherwise this is the reference assembly's `dotmac_kernel.db.runtime` —
+      imported HERE, lazily, which is what keeps this module (and everything
+      that calls this function at module scope) importable without a
+      `DATABASE_URL`.
     """
     if _installed_runtime is not None:
         return _installed_runtime
+    if _required:
+        raise NoDatabaseRuntimeError(
+            "no product DatabaseRuntime is installed and this deployment "
+            "declared require_database_runtime — falling back to the "
+            "reference assembly's dotmac_kernel.db.runtime is refused, not "
+            "defaulted. Set ProductAssemblySpec.database_runtime."
+        )
     try:
         from dotmac_kernel.db import runtime as _reference_runtime
     except Exception as exc:  # pragma: no cover - exercised by the seam test

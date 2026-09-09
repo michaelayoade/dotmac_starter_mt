@@ -151,6 +151,24 @@ class ProductAssemblySpec:
     # read it runs, so `dotmac_kernel.db` — and the `DATABASE_URL` it would
     # otherwise require at import — is never reached for that deployment.
     database_runtime: DatabaseRuntime | None = None
+    # Make an ABSENT `database_runtime` a boot-time REFUSAL instead of a
+    # silent fallback to `dotmac_kernel.db.runtime`.
+    #
+    # The seam above exists, but nothing about `database_runtime` being
+    # optional forces a product to use it — a deployment that simply forgets
+    # to set it gets the eager reference runtime with no complaint, which is
+    # the same defect shape this seam exists to close, one level up. Setting
+    # this to `True` states the opposite intent: "this deployment's whole
+    # purpose depends on the reference runtime being unreachable" (a pilot
+    # proving that property, for instance). `create_app` then refuses to
+    # build when `database_runtime` is None — before anything could import
+    # `dotmac_kernel.db` — naming the missing binding rather than defaulting
+    # around it.
+    #
+    # False (the reference assembly's setting) preserves today's behaviour
+    # exactly: an unset `database_runtime` falls back to the reference
+    # runtime, silently, same as before this field existed.
+    require_database_runtime: bool = False
     # The deployment's tenancy TOPOLOGY, declared rather than inferred.
     #
     # This creates NO code path. ADR-0003 is explicit that a single-tenant

@@ -40,7 +40,13 @@ _EXPECTED_STAGES = (
 )
 
 
-def _run_probe(tmp_path: Path, probe: Path = PROBE) -> subprocess.CompletedProcess[str]:
+def _run_probe(
+    tmp_path: Path,
+    probe: Path = PROBE,
+    *,
+    source_root: Path = KERNEL_SOURCE,
+    argv: tuple[str, ...] = (),
+) -> subprocess.CompletedProcess[str]:
     env = {
         key: value
         for key, value in os.environ.items()
@@ -48,7 +54,8 @@ def _run_probe(tmp_path: Path, probe: Path = PROBE) -> subprocess.CompletedProce
     }
     program = (
         "import runpy, sys; "
-        f"sys.path.insert(0, {str(KERNEL_SOURCE)!r}); "
+        f"sys.path.insert(0, {str(source_root)!r}); "
+        f"sys.argv = [{str(probe)!r}, *{list(argv)!r}]; "
         f"runpy.run_path({str(probe)!r}, run_name='__main__')"
     )
     return subprocess.run(  # noqa: S603
@@ -71,6 +78,58 @@ def test_every_named_path_runs_on_the_product_runtime_while_db_is_unimportable(
             f"expected stage missing from probe output: {stage!r}\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
+
+
+def test_strict_mode_refuses_a_missed_binding_without_importing_the_reference(
+    tmp_path: Path,
+) -> None:
+    """The seam existing is not the same as the seam being USED.
+
+    `get_database_runtime()`'s fallback to `dotmac_kernel.db.runtime` is
+    correct for the reference assembly, but it means a product that simply
+    forgets to set `ProductAssemblySpec.database_runtime` gets the eager
+    reference runtime with no complaint — the same defect shape one level up.
+    `require_database_runtime=True` is the declared opt-out: `create_app`
+    must refuse to build, and the refusal itself must not import
+    `dotmac_kernel.db` (a refusal that reaches the thing it refuses to fall
+    back to would prove nothing).
+    """
+    result = _run_probe(tmp_path, argv=("strict",))
+    assert result.returncode == 0, result.stderr
+    assert (
+        "PASS strict mode: create_app refused a missed database_runtime "
+        "binding without ever importing dotmac_kernel.db"
+    ) in result.stdout
+
+
+def test_strict_mode_is_a_no_op_when_a_runtime_is_supplied(tmp_path: Path) -> None:
+    """Near-miss half: declaring `require_database_runtime=True` alongside a
+    REAL `database_runtime` must build normally — strictness only refuses the
+    missing-binding case, it does not forbid the field's normal, satisfied
+    use. This reuses the full probe (`main()`), which never sets
+    `require_database_runtime`; the point here is that setting it does not
+    change behaviour once a runtime is actually installed, checked by editing
+    the probe's own spec construction to add the flag."""
+    import shutil
+
+    planted_root = tmp_path / "strict-satisfied-src"
+    shutil.copytree(KERNEL_SOURCE, planted_root)
+
+    probe_source = PROBE.read_text()
+    anchor = "        database_runtime=runtime,\n"
+    assert probe_source.count(anchor) == 1, "probe spec construction has changed shape"
+    planted_probe_source = probe_source.replace(
+        anchor,
+        anchor + "        require_database_runtime=True,\n",
+        1,
+    )
+    planted_probe = tmp_path / "strict_satisfied_probe.py"
+    planted_probe.write_text(planted_probe_source)
+
+    result = _run_probe(tmp_path, probe=planted_probe, source_root=planted_root)
+    assert result.returncode == 0, result.stderr
+    for stage in _EXPECTED_STAGES:
+        assert stage in result.stdout
 
 
 def test_the_probe_genuinely_blocks_the_reference_runtime(tmp_path: Path) -> None:

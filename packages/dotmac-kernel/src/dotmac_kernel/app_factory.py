@@ -527,11 +527,25 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # `install_surface_globals`/`install_stylesheets` below: a second
     # `create_app` in one process must not inherit a previous spec's
     # installed runtime.
+    #
+    # `require_database_runtime=True` with no `database_runtime` set is a
+    # MISSED BINDING, not "use the reference runtime" — refuse here, before
+    # `dotmac_kernel.db` could ever be imported for this deployment, naming
+    # exactly what is missing rather than silently defaulting around it.
     from dotmac_kernel.session_runtime import (
         clear_database_runtime,
         install_database_runtime,
+        set_database_runtime_required,
     )
 
+    if spec.database_runtime is None and spec.require_database_runtime:
+        raise RuntimeError(
+            f"product assembly {spec.name!r} declares require_database_runtime=True "
+            "but supplies no database_runtime. Falling back to the reference "
+            "assembly's dotmac_kernel.db.runtime is refused for this deployment "
+            "— set ProductAssemblySpec.database_runtime."
+        )
+    set_database_runtime_required(spec.require_database_runtime)
     if spec.database_runtime is not None:
         install_database_runtime(spec.database_runtime)
     else:

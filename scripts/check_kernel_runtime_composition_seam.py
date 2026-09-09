@@ -252,5 +252,62 @@ def main() -> None:
     print("PASS dotmac_kernel.db stayed unimported for the whole probe")
 
 
+def main_strict_refusal() -> None:
+    """The other half of the seam: nothing forces a product to USE it.
+
+    `get_database_runtime()`'s fallback is correct for the reference
+    assembly, but it means a product that simply forgets to set
+    `ProductAssemblySpec.database_runtime` silently gets the eager reference
+    runtime — the same defect shape this whole seam exists to close, one
+    level up. `require_database_runtime=True` is the declared opt-out of that
+    fallback: `create_app` must refuse to build, and must do so WITHOUT ever
+    importing `dotmac_kernel.db` — a refusal that itself imported the module
+    it is refusing to fall back to would prove nothing.
+    """
+    from dotmac_kernel.api_documentation import (
+        ApiDocumentationPolicy,
+        DocumentationExposure,
+    )
+    from dotmac_kernel.app_factory import create_app
+    from dotmac_kernel.assembly import ProductAssemblySpec
+
+    spec = ProductAssemblySpec(
+        name="strict-mode-probe",
+        database_runtime=None,
+        require_database_runtime=True,
+        api_documentation=ApiDocumentationPolicy(
+            environment="development",
+            interactive=DocumentationExposure.DISABLED,
+            document=DocumentationExposure.DISABLED,
+            rationale="probe: no documentation surface needed",
+        ),
+        web_enabled=False,
+    )
+
+    try:
+        create_app(spec)
+    except RuntimeError as exc:
+        assert "require_database_runtime" in str(
+            exc
+        ), f"create_app refused for the wrong reason: {exc}"
+    else:
+        raise AssertionError(
+            "create_app built successfully with require_database_runtime=True "
+            "and no database_runtime — the missed-binding refusal did not fire"
+        )
+
+    assert sys.modules.get("dotmac_kernel.db") is None, (
+        "the strict refusal itself imported dotmac_kernel.db — a refusal "
+        "that reaches the thing it is refusing to fall back to proves nothing"
+    )
+    print(
+        "PASS strict mode: create_app refused a missed database_runtime "
+        "binding without ever importing dotmac_kernel.db"
+    )
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "strict":
+        main_strict_refusal()
+    else:
+        main()
