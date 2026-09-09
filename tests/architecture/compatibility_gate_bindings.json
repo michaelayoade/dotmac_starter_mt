@@ -1,0 +1,20 @@
+{
+  "schema": "compatibility_gate_bindings_v1",
+  "bindings": {
+    "academy": {
+      "revision": null,
+      "evidence": null,
+      "_note": "Awaiting Academy #130 (re-derived and merged). Unbound: no immutable revision has been named yet."
+    },
+    "erp": {
+      "revision": null,
+      "evidence": null,
+      "_note": "Awaiting an exact immutable ERP readiness revision. Unbound: none exists yet."
+    },
+    "sub": {
+      "revision": null,
+      "evidence": null,
+      "_note": "Awaiting an exact immutable Sub readiness revision. Unbound: none exists yet."
+    }
+  }
+}

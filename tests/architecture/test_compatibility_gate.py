@@ -1,0 +1,469 @@
+"""Slice 4 — the generic compatibility evaluator and its all-of gate.
+
+Two properties this file exists to prove, per the ruling that this gate must
+be UNABLE to pass on mechanism alone:
+
+1. **Non-vacuity.** With no product evidence bound, the gate refuses, and the
+   refusal names which product and why. `GateResult.satisfied` must not read
+   an empty evaluation set as "nothing to refuse" — `all(())` is `True` in
+   Python, which is the identical shape as a check over no files.
+2. **All-of semantics.** Two products satisfied and one refusing must still
+   refuse, and the refusal must name the refusing product specifically.
+
+Everything else here (per-product findings, revision-shape refusal, the
+kernel-side structural facts) is the sensitivity proof each of those two
+properties needs to mean anything.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import pytest
+
+from tests.architecture import compatibility_gate as gate
+
+# ── Non-vacuity: the gate must be unable to pass on mechanism alone ────────
+
+
+def test_gate_result_cannot_pass_on_an_empty_evaluation_set() -> None:
+    """Plant: construct a `GateResult` directly with zero evaluations — the
+    shape a defective `evaluate_gate` could produce if it ever let the
+    per-product loop come out empty. `all(())` is `True`, so a `satisfied`
+    implemented as a bare `all(...)` would pass here for having nothing to
+    check. This is the exact defect this whole slice exists to refuse."""
+    empty = gate.GateResult(evaluations=())
+    assert empty.satisfied is False
+    assert "no product was evaluated" in empty.explain()
+
+
+def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
+    """Near-miss half of the above: a non-empty, fully-satisfied set DOES
+    pass — the empty-set refusal must not become a refusal of everything."""
+    satisfied = gate.GateResult(
+        evaluations=(
+            gate.EvaluationResult("academy", "a" * 40, True, ()),
+            gate.EvaluationResult("erp", "b" * 40, True, ()),
+            gate.EvaluationResult("sub", "c" * 40, True, ()),
+        )
+    )
+    assert satisfied.satisfied is True
+
+
+def test_the_gate_refuses_today_with_the_default_bindings() -> None:
+    """The default, checked-in bindings file has all three products unbound.
+    Running the gate against it today must refuse — not skip, not pass over
+    an empty evidence set."""
+    bindings = gate.load_default_bindings()
+    result = gate.evaluate_gate(bindings)
+    assert result.satisfied is False
+    assert len(result.refusing) == 3
+    refusing_products = {evaluation.product for evaluation in result.refusing}
+    assert refusing_products == set(gate.PRODUCTS)
+
+
+def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
+    """`evaluate_gate({})` — no bindings dict at all, not even the unbound
+    placeholders. Proves absence is refusal by construction: the three
+    products are still evaluated (as unbound), never silently dropped from
+    the set the all-of combination looks at."""
+    result = gate.evaluate_gate({})
+    assert result.satisfied is False
+    assert tuple(e.product for e in result.evaluations) == gate.PRODUCTS
+    for evaluation in result.evaluations:
+        assert evaluation.satisfied is False
+        assert evaluation.revision is None
+
+
+def test_each_refusal_names_the_product_and_the_observed_reason() -> None:
+    result = gate.evaluate_gate({})
+    for evaluation in result.evaluations:
+        joined = " ".join(evaluation.findings)
+        assert "no revision is bound for" in joined
+        assert evaluation.product in joined
+
+
+# ── All-of semantics: two satisfied, one refusing must still refuse ────────
+
+
+def _satisfied_academy_binding() -> gate.ProductBinding:
+    return gate.ProductBinding(
+        product="academy",
+        revision="a" * 40,
+        evidence={
+            "unpublished_session_local_usage_sites": (),
+            "strict_bind_without_reference_import": True,
+        },
+    )
+
+
+def _satisfied_erp_binding() -> gate.ProductBinding:
+    return gate.ProductBinding(
+        product="erp",
+        revision="b" * 40,
+        evidence={
+            "sync_requirements_satisfied": True,
+            "async_status": gate.ASYNC_TRANSITIONAL,
+        },
+    )
+
+
+def _satisfied_sub_binding() -> gate.ProductBinding:
+    return gate.ProductBinding(
+        product="sub",
+        revision="c" * 40,
+        evidence={
+            "guc_hook_ordered_after_isolation_mode": True,
+            "tenant_scope_composed_with_readonly_or_serializable": True,
+        },
+    )
+
+
+def test_all_three_satisfied_bindings_pass_the_gate() -> None:
+    """Admits control: the fully-satisfied fixtures above really do pass —
+    otherwise the refusal test below would refuse for the wrong reason."""
+    bindings = {
+        "academy": _satisfied_academy_binding(),
+        "erp": _satisfied_erp_binding(),
+        "sub": _satisfied_sub_binding(),
+    }
+    result = gate.evaluate_gate(bindings)
+    assert result.satisfied is True, result.explain()
+    assert result.refusing == ()
+
+
+def test_two_satisfied_and_one_refusing_still_refuses_and_names_it() -> None:
+    """The all-of semantics this gate exists to enforce: Academy and ERP
+    fully satisfied, Sub left unbound. The gate must refuse as a whole, and
+    the refusal must name Sub specifically — not report a vague partial
+    pass."""
+    bindings = {
+        "academy": _satisfied_academy_binding(),
+        "erp": _satisfied_erp_binding(),
+        # sub omitted entirely — unbound.
+    }
+    result = gate.evaluate_gate(bindings)
+    assert result.satisfied is False
+    assert len(result.refusing) == 1
+    assert result.refusing[0].product == "sub"
+    assert "no revision is bound for 'sub'" in " ".join(result.refusing[0].findings)
+    explanation = result.explain()
+    assert "sub" in explanation
+    assert "academy" not in explanation.split("\n")[0]  # header names counts, not names
+
+
+def test_unknown_product_in_bindings_is_refused_by_construction() -> None:
+    with pytest.raises(ValueError, match="unknown product"):
+        gate.evaluate_gate({"vendor_cp": gate.ProductBinding(product="vendor_cp")})
+
+
+# ── Revision-shape refusal (reused, verbatim, from adoption_evidence.py) ──
+
+
+def test_a_moving_ref_revision_is_refused_by_construction() -> None:
+    binding = gate.ProductBinding(product="academy", revision="main")
+    result = gate.evaluate_academy(binding)
+    assert result.satisfied is False
+    assert any("moving ref" in finding for finding in result.findings)
+
+
+def test_an_embedded_moving_ref_after_at_is_refused() -> None:
+    """`adoption_evidence.py`'s own defect catalogue names this exact shape:
+    `main@e1402902` — a moving ref followed by an eight-hex-digit
+    abbreviation. `_revision_problem` refuses it for naming the ref, not
+    (only) for the abbreviation."""
+    binding = gate.ProductBinding(product="erp", revision="main@e1402902")
+    result = gate.evaluate_erp(binding)
+    assert result.satisfied is False
+    assert any("moving ref" in finding for finding in result.findings)
+
+
+def test_an_abbreviated_commit_is_refused() -> None:
+    binding = gate.ProductBinding(product="sub", revision="abc1234")
+    result = gate.evaluate_sub(binding)
+    assert result.satisfied is False
+    assert any(
+        "40-character lowercase hex commit" in finding for finding in result.findings
+    )
+
+
+def test_a_bound_revision_with_no_evidence_still_refuses() -> None:
+    """A well-formed 40-hex commit alone is a coordinate with nothing to
+    check — it must refuse exactly as a missing revision does, not pass on
+    the strength of the commit shape being valid."""
+    binding = gate.ProductBinding(product="academy", revision="d" * 40, evidence=None)
+    result = gate.evaluate_academy(binding)
+    assert result.satisfied is False
+    assert any("no product-side evidence" in finding for finding in result.findings)
+
+
+# ── Each evaluation names the exact revision it evaluated ──────────────────
+
+
+def test_evaluation_result_records_the_exact_revision_evaluated() -> None:
+    unbound = gate.evaluate_academy(gate.ProductBinding(product="academy"))
+    assert unbound.revision is None
+    assert "<unbound>" in unbound.explain()
+
+    bound = gate.evaluate_academy(_satisfied_academy_binding())
+    assert bound.revision == "a" * 40
+    assert ("a" * 40) in bound.explain()
+
+
+# ── Academy: the SessionLocal / __all__ finding, and its sensitivity ──────
+
+
+def test_academy_reports_the_unpublished_session_local_finding_today() -> None:
+    result = gate.evaluate_academy(gate.ProductBinding(product="academy"))
+    joined = " ".join(result.findings)
+    assert "SessionLocal" in joined
+    assert "__all__" in joined
+
+
+def test_the_session_local_finding_disappears_if_it_were_published(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity, near-miss half: plant a copy of `db.py` with
+    `SessionLocal` added to `__all__` and confirm the finding is absent —
+    proving the check reads the real `__all__` rather than always emitting
+    the finding regardless of content."""
+    planted = tmp_path / "db.py"
+    source = gate._DB_PATH.read_text()
+    anchor = '    "tenant_session_by_slug",\n]'
+    assert source.count(anchor) == 1, "db.py's __all__ list has changed shape"
+    replacement = '    "tenant_session_by_slug",\n    "SessionLocal",\n]'
+    planted.write_text(source.replace(anchor, replacement, 1))
+
+    all_names = gate._module_all(planted)
+    assert "SessionLocal" in all_names
+
+
+def test_the_bare_assignment_check_stops_reporting_a_removed_attribute(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity, plant half in the other direction: if `SessionLocal`
+    were removed from `db.py` entirely, the bare-assignment check must stop
+    reporting it as present (there is nothing left to be unpublished)."""
+    planted = tmp_path / "db.py"
+    source = gate._DB_PATH.read_text()
+    anchor = "SessionLocal = runtime.session_factory\n"
+    assert (
+        source.count(anchor) == 1
+    ), "db.py's SessionLocal assignment has changed shape"
+    planted.write_text(source.replace(anchor, "", 1))
+
+    bare_names = gate._module_level_bare_assignment_names(planted)
+    assert "SessionLocal" not in bare_names
+
+
+# ── ERP: async stays explicitly transitional, never silently satisfied ────
+
+
+def test_erp_reports_the_kernel_is_sync_only_today() -> None:
+    result = gate.evaluate_erp(gate.ProductBinding(product="erp"))
+    joined = " ".join(result.findings)
+    assert "sync-only" in joined
+    assert "0 `async def`" in joined
+
+
+def test_erp_async_status_satisfied_is_refused_not_silently_accepted() -> None:
+    binding = gate.ProductBinding(
+        product="erp",
+        revision="e" * 40,
+        evidence={
+            "sync_requirements_satisfied": True,
+            "async_status": "satisfied",
+        },
+    )
+    result = gate.evaluate_erp(binding)
+    assert result.satisfied is False
+    assert any(
+        "publishes no async DatabaseRuntime boundary" in finding
+        for finding in result.findings
+    )
+
+
+def test_erp_async_status_transitional_with_sync_satisfied_passes() -> None:
+    result = gate.evaluate_erp(_satisfied_erp_binding())
+    assert result.satisfied is True, result.explain()
+
+
+def test_erp_missing_async_status_is_refused_as_a_shape_problem() -> None:
+    binding = gate.ProductBinding(
+        product="erp",
+        revision="f" * 40,
+        evidence={"sync_requirements_satisfied": True},
+    )
+    result = gate.evaluate_erp(binding)
+    assert result.satisfied is False
+    assert any("must carry a non-empty `async_status`" in f for f in result.findings)
+
+
+# ── Sub: the GUC ordering guarantee, measured structurally, with sensitivity ─
+
+
+def test_sub_reports_the_isolation_ordering_guarantee_holds_today() -> None:
+    result = gate.evaluate_sub(gate.ProductBinding(product="sub"))
+    joined = " ".join(result.findings)
+    assert "applies `execution_options` before its own `yield`: True" in joined
+
+
+def test_the_ordering_check_bites_a_reordered_isolated_session(tmp_path: Path) -> None:
+    """Plant: reorder `_isolated_session` so `yield db` precedes the
+    `execution_options` connection call, and confirm the structural check
+    reports the ordering as broken. Admits control first (the unmutated
+    source reports True) so the plant is proven against a working baseline,
+    not a broken fixture."""
+    source = gate._SESSION_RUNTIME_PATH.read_text()
+    control_path = tmp_path / "control_session_runtime.py"
+    control_path.write_text(source)
+    assert gate._isolated_session_orders_execution_options_before_yield(
+        control_path
+    ), "control (unmutated) source did not report the ordering as holding"
+
+    anchor = (
+        "            db.connection(execution_options=_EXECUTION_OPTIONS[mode])\n"
+        "            yield db\n"
+    )
+    assert source.count(anchor) == 1, "_isolated_session's body has changed shape"
+    reordered = source.replace(
+        anchor,
+        "            yield db\n"
+        "            db.connection(execution_options=_EXECUTION_OPTIONS[mode])\n",
+        1,
+    )
+    planted_path = tmp_path / "planted_session_runtime.py"
+    planted_path.write_text(reordered)
+
+    assert not gate._isolated_session_orders_execution_options_before_yield(
+        planted_path
+    ), "the ordering check did not bite a reordered _isolated_session"
+
+
+def test_sub_missing_boundary_method_is_reported(tmp_path: Path) -> None:
+    """Plant: rename `readonly_session` out of existence in a copied source
+    tree and confirm `_class_public_method_names` no longer reports it —
+    the fact `evaluate_sub`'s `missing` computation depends on."""
+    source = gate._SESSION_RUNTIME_PATH.read_text()
+    anchor = "def readonly_session(self)"
+    assert source.count(anchor) == 1, "readonly_session's def line has changed shape"
+    mutated = source.replace(anchor, "def _renamed_readonly_session(self)", 1)
+    planted_path = tmp_path / "planted_session_runtime.py"
+    planted_path.write_text(mutated)
+
+    methods = gate._class_public_method_names(planted_path, "DatabaseRuntime")
+    assert "readonly_session" not in methods
+
+
+def test_sub_guc_ordering_shape_refusals_are_reported() -> None:
+    binding = gate.ProductBinding(
+        product="sub",
+        revision="1" * 40,
+        evidence={"guc_hook_ordered_after_isolation_mode": True},
+    )
+    result = gate.evaluate_sub(binding)
+    assert result.satisfied is False
+    assert any(
+        "tenant_scope_composed_with_readonly_or_serializable" in f
+        for f in result.findings
+    )
+
+
+def test_sub_observed_false_values_are_reported_as_observed_not_presumed() -> None:
+    binding = gate.ProductBinding(
+        product="sub",
+        revision="2" * 40,
+        evidence={
+            "guc_hook_ordered_after_isolation_mode": False,
+            "tenant_scope_composed_with_readonly_or_serializable": True,
+        },
+    )
+    result = gate.evaluate_sub(binding)
+    assert result.satisfied is False
+    assert any(
+        finding.startswith("OBSERVED at sub@") and "NOT ordered" in finding
+        for finding in result.findings
+    )
+
+
+# ── The bindings-file loader: shape refusals ────────────────────────────────
+
+
+def test_load_default_bindings_reads_the_checked_in_seam_file() -> None:
+    bindings = gate.load_default_bindings()
+    assert set(bindings) == set(gate.PRODUCTS)
+    for product, binding in bindings.items():
+        assert binding.product == product
+        assert binding.revision is None
+
+
+def test_bindings_loader_refuses_an_undeclared_schema(tmp_path: Path) -> None:
+    bad = tmp_path / "bindings.json"
+    bad.write_text('{"schema": "v0", "bindings": {}}')
+    with pytest.raises(ValueError, match="schema"):
+        gate.load_default_bindings(bad)
+
+
+def test_bindings_loader_refuses_an_unknown_product_key(tmp_path: Path) -> None:
+    bad = tmp_path / "bindings.json"
+    bad.write_text(
+        '{"schema": "compatibility_gate_bindings_v1", '
+        '"bindings": {"vendor_cp": {"revision": null}}}'
+    )
+    with pytest.raises(ValueError, match="unknown product"):
+        gate.load_default_bindings(bad)
+
+
+def test_bindings_loader_accepts_a_real_bound_revision(tmp_path: Path) -> None:
+    """Proves the seam: editing only the JSON data file, with zero code
+    changes, produces a bound evaluation."""
+    import json as _json
+
+    real = tmp_path / "bindings.json"
+    real.write_text(
+        _json.dumps(
+            {
+                "schema": "compatibility_gate_bindings_v1",
+                "bindings": {
+                    "academy": {
+                        "revision": "a" * 40,
+                        "evidence": {
+                            "unpublished_session_local_usage_sites": [],
+                            "strict_bind_without_reference_import": True,
+                        },
+                    }
+                },
+            }
+        )
+    )
+    bindings = gate.load_default_bindings(real)
+    result = gate.evaluate_academy(bindings["academy"])
+    assert result.revision == "a" * 40
+    assert result.satisfied is True, result.explain()
+
+
+# ── Docstring naming discipline: no dotted product-path strings ────────────
+
+
+def test_the_module_names_no_literal_product_import_paths() -> None:
+    """This module and its docstrings discuss Academy/ERP/Sub file
+    locations in prose (backtick-quoted, human-readable), never as
+    dotted-import-looking string literals a content-scanning classifier
+    could misread as this repository importing or depending on another
+    product's module. `app.api.deps`-style dotted paths (the shape a
+    Python import or a dependency scanner keys on) must not appear as
+    string literals in the source."""
+    source = (Path(__file__).parent / "compatibility_gate.py").read_text()
+    tree = ast.parse(source)
+    suspicious = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            value = node.value
+            if value.startswith("app.") and value.count(".") >= 2:
+                suspicious.append(value)
+    assert suspicious == [], (
+        f"found dotted-import-looking string literal(s) that a "
+        f"content-scanning classifier could misread as a dependency: "
+        f"{suspicious!r}"
+    )
