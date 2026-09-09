@@ -46,7 +46,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.config import settings
-from dotmac_kernel.session_runtime import DatabaseRuntime
+from dotmac_kernel.session_runtime import DatabaseRuntime, is_binding_sealed_strict
 
 __all__ = [
     "conflict_savepoint",
@@ -62,6 +62,26 @@ __all__ = [
     "tenant_session",
     "tenant_session_by_slug",
 ]
+
+# The mirror image of `session_runtime.bind_database_runtime`'s own
+# `sys.modules` check, so the refusal holds regardless of which side happens
+# to run first: a STRICT process binding is a claim that the reference
+# runtime was never constructed, and importing this module builds one on the
+# very next statement. Checked BEFORE `create_engine` runs (inside
+# `DatabaseRuntime.from_urls`) — a refusal that raised only after already
+# opening a connection pool would have already done the thing the strict
+# binding exists to rule out.
+if is_binding_sealed_strict():
+    raise RuntimeError(
+        "dotmac_kernel.db refuses to construct the reference runtime: this "
+        "process already sealed a REQUIRED database-runtime binding "
+        "(typically ProductAssemblySpec.require_database_runtime). Importing "
+        "this module now would build an engine the deployment explicitly "
+        "refused to fall back to -- find what imported dotmac_kernel.db (a "
+        "module-scope import reached during manifest/feature discovery is "
+        "the usual cause) and make it lazy, or resolve through "
+        "dotmac_kernel.session_runtime.resolve_database_runtime() instead."
+    )
 
 #: The reference assembly's instance. Public so a consumer that already depends
 #: on this module's configuration can pass the runtime where one is wanted,

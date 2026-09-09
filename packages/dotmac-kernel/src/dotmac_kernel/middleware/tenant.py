@@ -40,7 +40,7 @@ from starlette.types import ASGIApp
 from dotmac_kernel.config import settings
 from dotmac_kernel.errors import envelope
 from dotmac_kernel.models import Tenant, TenantDomain
-from dotmac_kernel.session_runtime import get_database_runtime
+from dotmac_kernel.session_runtime import resolve_database_runtime
 from dotmac_kernel.tenancy import single_tenant_binding
 
 logger = logging.getLogger(__name__)
@@ -51,24 +51,25 @@ _STATIC_PATH_PREFIX = "/static/"
 
 
 def resolver_session() -> AbstractContextManager[Session]:
-    """Enter the installed (or reference) runtime's resolver boundary.
+    """Enter the bound (or reference) runtime's resolver boundary.
 
-    Resolved through `get_database_runtime` rather than importing
-    `dotmac_kernel.db` directly, so a product that installed its own
-    `DatabaseRuntime` (`ProductAssemblySpec.database_runtime`) is resolved
-    against ITS tenant table here, not the reference assembly's — and so that
-    ``TenantResolverMiddleware``, imported while ``app_factory`` defines the
-    public ``create_app`` surface, never forces the reference runtime's engine
-    construction merely to import that public constructor: any import of the
-    reference assembly stays inside `get_database_runtime`'s deferred fallback,
-    reached only when no product runtime is installed and only at call time.
+    Resolved through `resolve_database_runtime` rather than importing
+    `dotmac_kernel.db` directly, so a product that sealed its own
+    `DatabaseRuntime` binding (`ProductAssemblySpec.database_runtime`) is
+    resolved against ITS tenant table here, not the reference assembly's —
+    and so that ``TenantResolverMiddleware``, imported while ``app_factory``
+    defines the public ``create_app`` surface, never forces the reference
+    runtime's engine construction merely to import that public constructor:
+    any import of the reference assembly stays inside
+    `resolve_database_runtime`'s deferred fallback, reached only when nothing
+    is bound and only at call time.
 
-    Keep this named adapter rather than calling `get_database_runtime()`
+    Keep this named adapter rather than calling `resolve_database_runtime()`
     inside ``_resolve`` directly: the middleware tests replace it with a
     recording context manager, proving health/static bypasses and ordinary
     resolution against the same seam.
     """
-    return get_database_runtime().resolver_session()
+    return resolve_database_runtime().resolver_session()
 
 
 def _is_static_path(path: str) -> bool:
@@ -180,14 +181,6 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
                 "rejected host for tenant slug=%s on a deployment bound to slug=%s",
                 tenant.slug,
                 bound,
-            )
-            return None
-        return tenant
-        if tenant.slug.lower() != self._single_tenant:
-            logger.warning(
-                "rejected host for tenant slug=%s on a deployment locked to slug=%s",
-                tenant.slug,
-                self._single_tenant,
             )
             return None
         return tenant
