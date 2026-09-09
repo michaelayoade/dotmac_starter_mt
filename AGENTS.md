@@ -71,9 +71,11 @@ specifics) points here and must never fork these rules.
    (`tests/architecture/test_session_authority.py`,
    `tests/architecture/test_session_runtime_is_engine_free.py`)
 9. **Feature services never call `db.rollback()`.** Expected conflicts use
-   `dotmac_kernel.db.conflict_savepoint`, with the mutation INSIDE the `with`
-   block — a bare rollback wipes the transaction's `SET LOCAL` tenant
-   context. Full rationale: `docs/ARCHITECTURE.md` § "Conflict handling".
+   `dotmac_kernel.transactions.conflict_savepoint` — the engine-free public
+   owner, not the eager `dotmac_kernel.db` re-export — with the mutation
+   INSIDE the `with` block — a bare rollback wipes the transaction's
+   `SET LOCAL` tenant context. Full rationale: `docs/ARCHITECTURE.md` §
+   "Conflict handling".
    (`tests/architecture/test_no_feature_rollback.py`; canaries in
    `tests/test_conflict_rls_context.py`)
 10. **Every registered `SettingSpec` has a real reader** under `app/`

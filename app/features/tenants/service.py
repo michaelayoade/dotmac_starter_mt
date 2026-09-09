@@ -28,7 +28,6 @@ from uuid import UUID
 
 from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.capabilities import active_capabilities
-from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.entitlements import grant_entitlement
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
 from dotmac_kernel.identity import normalize_email, person_display_name
@@ -42,6 +41,7 @@ from dotmac_kernel.models import (
     UserCredential,
 )
 from dotmac_kernel.security import hash_password
+from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
