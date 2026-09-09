@@ -10,6 +10,7 @@ document is the bug.
 |---|---|
 | Released | `0.1.0a1` through **`0.1.0a16`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention, a15 adds typed outbound repair and runtime safety, and a16 adds the domain-owned payload gate plus durable polling evidence |
 | Declared | `0.1.0a17` adds product-port descriptor v3, carrying the domain's payload contract or dated grace separately from the product wire — it does not change SPI 1.4 |
+| Local incubation | An unallocated successor adds additive **SPI 1.5** provisioning contracts only; it is not a release and carries no persistence migration |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
@@ -28,6 +29,12 @@ When present, the mapping is exact, included in the manifest digest and checked
 at discovery and invocation. This lets one plugin expose an ingress-only
 receive capability and a delivery-only send capability without either factory
 lying about the other.
+
+SPI 1.5 adds the `PROVISION` mode and one handler with typed `plan`, `apply`,
+`observe` and `cancel` operations. It does not move payload ownership into the
+connector: the product still owns the capability contract and exact plan, and
+the connector still claims only that contract's digest. The Integrator refuses
+a rewritten plan before any later persistence layer could accept it.
 
 The `InboundEvent.disposition` field declared for a7 defaults to `deliver`.
 Existing connectors therefore keep their behaviour; connectors may explicitly
@@ -73,7 +80,7 @@ that boundary.
 
 ### One protocol per mode
 
-`ConnectorMode` is a **closed** union of three members. Each adds exactly one
+`ConnectorMode` is a **closed** union of four members. Each adds exactly one
 factory:
 
 | Mode | Plugin protocol | Factory | Returns |
@@ -81,6 +88,7 @@ factory:
 | `DELIVERY` | `DeliveryPlugin` | `handler_for` | `CapabilityHandler` |
 | `INGRESS` | `IngressPlugin` | `ingress_handler_for` | `IngressHandler` |
 | `POLL` | `PollPlugin` | `poll_handler_for` | `PollHandler` |
+| `PROVISION` | `ProvisionPlugin` | `provisioning_handler_for` | `ProvisioningHandler` |
 
 That table is `MODE_PROTOCOLS`, a read-only mapping asserted exhaustive at
 import. A mode cannot be added without deciding what makes it runnable — the

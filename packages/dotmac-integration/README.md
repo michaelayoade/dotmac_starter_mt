@@ -39,6 +39,12 @@ capability payload contract (or dated schema grace) and independently names the
 wire the assembly must render. The module persists and revalidates both without
 authoring either contract.
 
+**Incubation successor, not allocated or released:** the local provisioning
+slice adds additive SPI 1.5's provider-neutral plan/apply/observe/cancel
+contract. It adds no persistence, migration or assembly wiring; the released
+and declared package history above remains unchanged until a release owner
+allocates a successor.
+
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to
 the installation; a new revision or changed binding invalidates activation
@@ -66,11 +72,17 @@ protocol per mode it declares:
 | `DELIVERY` | `DeliveryPlugin` | `handler_for` | `CapabilityHandler` |
 | `INGRESS` | `IngressPlugin` | `ingress_handler_for` | `IngressHandler` |
 | `POLL` | `PollPlugin` | `poll_handler_for` | `PollHandler` |
+| `PROVISION` | `ProvisionPlugin` | `provisioning_handler_for` | `ProvisioningHandler` |
 
 A declared mode is a promise the module verifies at discovery, in both
 directions and including the shape of the handler that comes back. A mode
 declared and not implemented fails at the first dispatch; one implemented and
 not declared never gets its workers started. Both used to pass.
+
+For `PROVISION`, the owning product supplies an ordered plan and its canonical
+hash. The connector may validate and execute that plan but the Integrator
+refuses any returned plan that inserts, removes, reorders or rewrites a step.
+The current slice deliberately stops at that call boundary.
 
 Ingress connectors receive one immutable `IngressRequest` — the raw bytes, the
 headers and the query params, preserved exactly and handed to all three hooks as
