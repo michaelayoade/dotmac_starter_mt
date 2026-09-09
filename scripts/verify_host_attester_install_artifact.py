@@ -193,14 +193,25 @@ def assert_install_and_observe_round_trips_through_real_pip(
             not_after="2100-01-01T00:00:00Z",
         )
 
+    #: `AttestationTrustPolicy` requires a non-empty `installed_roots`
+    #: collection even though `download_verify_install_and_attest` never
+    #: verifies against it (it only SIGNS the installed half — see the
+    #: function's own docstring). `AttestationTrustRootV2.__post_init__`
+    #: still validates every root's fingerprint against its OWN key material
+    #: unconditionally, whether or not that root is ever consulted — so this
+    #: placeholder's fingerprint must be genuinely derived from its own key,
+    #: not an arbitrary constant, or construction itself fails before either
+    #: property under test gets to run.
+    unused_host_key = b"unused-host-key-never-verified-against"
+    unused_host_fp = "sha256:" + hashlib.sha256(unused_host_key).hexdigest()
     trust_policy = AttestationTrustPolicy(
         (_root(CANDIDATE_ATTESTATION_PURPOSE, "starter-release", fp, key),),
         (
             _root(
                 INSTALLED_OBSERVATION_PURPOSE,
                 "target-local-host",
-                "sha256:" + "0" * 64,
-                b"unused-host-key",
+                unused_host_fp,
+                unused_host_key,
             ),
         ),
         "starter-release-workflow",
@@ -229,6 +240,19 @@ def assert_install_and_observe_round_trips_through_real_pip(
     signature = hmac.new(key, envelope.signed_bytes(), hashlib.sha256).hexdigest()
     envelope = dataclasses.replace(envelope, signature=signature)
 
+    # A SEPARATE destination directory from the wheel's own location.
+    # `download_exact_wheel` opens `workdir / <filename>` with `open(...,
+    # "wb")` — which TRUNCATES that path — after already opening the source
+    # via `file://`. If the destination and the source resolved to the same
+    # path, that truncation would corrupt the very bytes still being read
+    # from underneath the open read handle, producing a spurious digest
+    # mismatch that would misreport a harness bug as a pipeline defect. The
+    # download itself is still real: a genuine `file://` fetch of the exact
+    # candidate wheel, into a genuinely distinct file, still real pip
+    # installed and re-observed below.
+    download_workdir = wheel.parent / "download-proof"
+    download_workdir.mkdir(exist_ok=True)
+
     now = datetime(2026, 6, 1, tzinfo=UTC)
     result = install.download_verify_install_and_attest(
         candidate=envelope,
@@ -236,13 +260,13 @@ def assert_install_and_observe_round_trips_through_real_pip(
         trust_policy=trust_policy,
         now=now,
         download_url=f"file://{wheel.resolve()}",
-        workdir=wheel.parent,
+        workdir=download_workdir,
         expected_host_identity="host:artifact-rehearsal",
         signer=_HmacSigner(),
         issuer="artifact-rehearsal",
         key_id="rehearsal-key",
         algorithm=algorithm,
-        public_key_fingerprint="sha256:" + "0" * 64,
+        public_key_fingerprint=unused_host_fp,
         custody_domain="target-local-host",
         trust_root_version="rehearsal-v1",
         observation_id="artifact-rehearsal-installed",
