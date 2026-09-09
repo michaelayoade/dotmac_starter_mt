@@ -276,14 +276,15 @@ def require_machine_scope(scope: str):
 
     # `dotmac_kernel.deps.get_db`, not `dotmac_kernel.db.get_db` directly:
     # `deps.get_db` resolves the runtime through
-    # `session_runtime.get_database_runtime` (kernel-runtime-composition-seam),
-    # so a product that installed its own `DatabaseRuntime` is served here
-    # too — importing `dotmac_kernel.db` from this module would bind every
-    # machine-scoped route to the reference assembly's instance regardless of
-    # what the product configured. `deps` itself builds no engine at import
-    # (its own `dotmac_kernel.db` reach is function-local), so this import is
-    # safe at module scope and `import dotmac_kernel` still requires no
-    # DATABASE_URL — the same floor probe `deps.py`/`app_factory.py` protect.
+    # `session_runtime.resolve_database_runtime` (kernel-runtime-composition
+    # -seam), so a product that sealed its own `DatabaseRuntime` binding is
+    # served here too — importing `dotmac_kernel.db` from this module would
+    # bind every machine-scoped route to the reference assembly's instance
+    # regardless of what the product configured. `deps` itself builds no
+    # engine at import (its own `dotmac_kernel.db` reach is function-local),
+    # so this import is safe at module scope and `import dotmac_kernel`
+    # still requires no DATABASE_URL — the same floor probe
+    # `deps.py`/`app_factory.py` protect.
     from dotmac_kernel.deps import get_db
 
     def dependency(request: Request, db: Session = Depends(get_db)) -> MachinePrincipal:

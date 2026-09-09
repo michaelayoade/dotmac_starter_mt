@@ -1301,11 +1301,11 @@
         "CANONICAL_TENANT_SETTING",
         "DatabaseRuntime",
         "NoDatabaseRuntimeError",
+        "RuntimeBindingError",
         "TenantLookup",
-        "clear_database_runtime",
-        "get_database_runtime",
-        "install_database_runtime",
-        "set_database_runtime_required"
+        "bind_database_runtime",
+        "is_binding_sealed_strict",
+        "resolve_database_runtime"
       ],
       "status": "declared"
     },

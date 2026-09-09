@@ -71,8 +71,10 @@ to reset, so there is no reset that can be skipped.
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event, text
@@ -575,7 +577,7 @@ class DatabaseRuntime:
 # OWN import time (`is_binding_sealed_strict`), before constructing any
 # engine — so the refusal is symmetric regardless of which side happens to
 # run first.
-_binding: "_Binding | None" = None
+_binding: _Binding | None = None
 
 
 class NoDatabaseRuntimeError(RuntimeError):
