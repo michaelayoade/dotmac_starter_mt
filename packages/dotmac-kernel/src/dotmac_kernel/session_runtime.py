@@ -557,17 +557,21 @@ class DatabaseRuntime:
 # assembly's configuration even for a product that supplied its own.
 #
 # ONE process supports ONE binding — not a per-application slot, and not a
-# freely-mutable global either. `bind_database_runtime` seals it:
+# freely-mutable global either. `bind_database_runtime` seals it through
+# exactly THREE named transitions, kept separate on purpose (see that
+# function's own docstring for why filing one under another is the exact
+# defect this seam exists to close):
 #
-# * reinstalling the IDENTICAL runtime, at the same or a STRONGER policy, is
-#   idempotent (a second `create_app` call composing the same spec must not
+# * IDEMPOTENCE — the IDENTICAL runtime, at the IDENTICAL policy, changes
+#   nothing (a second `create_app` call composing the same spec must not
 #   fail on that alone);
-# * a DIFFERENT runtime, or WEAKENING an already-required binding, refuses —
-#   a second application in this process binding something else is a
-#   configuration conflict, never a silent clobber of the first;
-# * there is no public function that clears a binding or downgrades its
-#   strictness. The only way a binding's policy gets stronger is a caller
-#   asking for that explicitly, and nothing ever asks for weaker.
+# * MONOTONIC PROMOTION — the SAME runtime, `required` going False -> True.
+#   The binding DOES change; permitted only because strictness tightens;
+# * REFUSAL — everything else: a DIFFERENT runtime (any policy), or the SAME
+#   runtime with `required` going True -> False (a downgrade). A second
+#   application in this process binding something else is a configuration
+#   conflict, never a silent clobber of the first, and there is no public
+#   function that clears a binding or downgrades its strictness.
 #
 # ## Why a boolean check is not enough
 #
@@ -633,20 +637,28 @@ def bind_database_runtime(runtime: DatabaseRuntime, *, required: bool = False) -
     by `create_app`) with a `DatabaseRuntime` it built from its own DSNs,
     credentials and tenant lookup.
 
-    * First call: seals `(runtime, required)`.
-    * Reinstalling the IDENTICAL `runtime` object, at the same policy or
-      asking for MORE strictness (`required=True` over an existing
-      non-required binding), is idempotent — the binding becomes (or stays)
-      required.
-    * A DIFFERENT `runtime` object refuses, always.
-    * The SAME `runtime` but WEAKENING an already-`required` binding
-      (`required=False` over an existing `required=True`) refuses — there is
-      no public way to downgrade strictness once sealed.
-    * `required=True` refuses if `dotmac_kernel.db` has already CLAIMED the
-      reference-runtime slot (`_claim_reference_runtime_import`, called at
-      its own import, before constructing any engine) — atomically, under
-      the same lock that import uses, so there is no window between a
-      boolean read and this call in which the two could disagree.
+    THREE DIFFERENT transitions, named separately and DELIBERATELY not
+    collapsed into one "idempotent" bucket — filing a change under
+    idempotence is how a seal quietly loosens the next time someone adds a
+    field and calls varying IT idempotent too:
+
+    * First call, or a call whose `(runtime, required)` are BOTH IDENTICAL to
+      what is already sealed: **IDEMPOTENCE**. Nothing changes; calling
+      twice with the same arguments is exactly as safe as calling once (a
+      second `create_app` composing the identical spec, for instance).
+    * The SAME `runtime` object, `required` going `False` -> `True`:
+      **MONOTONIC PROMOTION**. The binding DOES change — strictness only
+      ever tightens, and this is the one permitted way it does.
+    * ANYTHING ELSE — a DIFFERENT `runtime` object (regardless of policy), or
+      the SAME `runtime` with `required` going `True` -> `False` (a
+      downgrade): **REFUSAL**. There is no public way to switch runtimes or
+      loosen strictness once sealed.
+    * `required=True` additionally REFUSES if `dotmac_kernel.db` has already
+      CLAIMED the reference-runtime slot (`_claim_reference_runtime_import`,
+      called at its own import, before constructing any engine) —
+      atomically, under the same lock that import uses, so there is no
+      window between a boolean read and this call in which the two could
+      disagree.
     """
     if not isinstance(runtime, DatabaseRuntime):
         raise TypeError(
@@ -657,33 +669,35 @@ def bind_database_runtime(runtime: DatabaseRuntime, *, required: bool = False) -
     with _claim_lock:
         if required and _reference_claimed:
             raise RuntimeBindingError(
-                "cannot bind a REQUIRED runtime: the reference-runtime "
-                "import already claimed this process's slot, so the "
-                "reference runtime it constructs may already exist. Bind "
-                "before anything imports dotmac_kernel.db — commonly an "
-                "eager module-scope import reached during manifest/feature "
-                "discovery, before create_app ever ran."
+                "REFUSAL: cannot bind a REQUIRED runtime — the "
+                "reference-runtime import already claimed this process's "
+                "slot, so the reference runtime it constructs may already "
+                "exist. Bind before anything imports dotmac_kernel.db — "
+                "commonly an eager module-scope import reached during "
+                "manifest/feature discovery, before create_app ever ran."
             )
         if _binding is None:
             _binding = _Binding(runtime=runtime, required=required)
             return
         if runtime is not _binding.runtime:
             raise RuntimeBindingError(
-                "a different DatabaseRuntime is already bound in this "
-                "process — one process supports one runtime binding; a "
-                "second application or caller binding another instance is "
-                "a configuration conflict, not a switch"
+                "REFUSAL: a different DatabaseRuntime is already bound in "
+                "this process — one process supports one runtime binding; "
+                "a second application or caller binding another instance "
+                "is a configuration conflict, not a switch"
             )
         if _binding.required and not required:
             raise RuntimeBindingError(
-                "the bound runtime is already required (strict); a later "
-                "call asking for required=False would downgrade it, which "
-                "is refused — strictness is monotonic and has no public "
-                "way back down"
+                "REFUSAL: the bound runtime is already required (strict); "
+                "a later call asking for required=False would DOWNGRADE "
+                "it, which is refused — strictness is monotonic and has no "
+                "public way back down"
             )
         if required and not _binding.required:
+            # MONOTONIC PROMOTION: same runtime, optional -> required. The
+            # binding changes; permitted because strictness only tightens.
             _binding = _Binding(runtime=runtime, required=True)
-        # else: identical (runtime, required) — idempotent, nothing to do.
+        # else: IDEMPOTENCE — identical (runtime, required), nothing to do.
 
 
 def _claim_reference_runtime_import() -> None:

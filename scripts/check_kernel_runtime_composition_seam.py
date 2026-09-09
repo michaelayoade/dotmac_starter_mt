@@ -76,15 +76,19 @@ from __future__ import annotations
 import sys
 
 # THE FIRST THING THIS PROCESS DOES, before any `dotmac_kernel` import: make
-# `dotmac_kernel.db` unimportable -- UNLESS this run is the fallback
-# sensitivity control (`argv[1] == "fallback"`), which needs the reference
-# runtime genuinely reachable in order to prove the authenticated-request
-# stage fails without an installed product runtime. `sys.modules[name] = None`
-# is Python's own mechanism for the block (import machinery raises
-# `ImportError: import of {name} halted; None in sys.modules` for any later
-# `import dotmac_kernel.db` or `from dotmac_kernel.db import ...`, anywhere in
-# the process).
-if not (len(sys.argv) > 1 and sys.argv[1] == "fallback"):
+# `dotmac_kernel.db` unimportable -- UNLESS this run needs it GENUINELY
+# reachable to prove something about reaching it: the fallback sensitivity
+# control (`argv[1] == "fallback"`, proving the authenticated-request stage
+# fails without a bound runtime) and the paired plant proving a reference
+# IMPORT arriving AFTER a strict bind refuses
+# (`argv[1] == "after-strict-bind"` — it needs to actually ATTEMPT the
+# import to prove the refusal, not have it pre-empted by this block).
+# `sys.modules[name] = None` is Python's own mechanism for the block (import
+# machinery raises `ImportError: import of {name} halted; None in
+# sys.modules` for any later `import dotmac_kernel.db` or
+# `from dotmac_kernel.db import ...`, anywhere in the process).
+_NEEDS_REFERENCE_REACHABLE = {"fallback", "after-strict-bind"}
+if not (len(sys.argv) > 1 and sys.argv[1] in _NEEDS_REFERENCE_REACHABLE):
     sys.modules["dotmac_kernel.db"] = None  # type: ignore[assignment]
 
 
@@ -429,21 +433,62 @@ def main_fallback_sensitivity() -> None:
     )
 
 
-def main_second_binding_conflict() -> None:
-    """One process supports one runtime binding — a second, DIFFERENT one
-    cannot clobber the first.
+#: Kept SEPARATE on purpose (`session_runtime.bind_database_runtime`'s own
+#: docstring explains why): filing MONOTONIC PROMOTION under "idempotent" is
+#: exactly how a future field addition could smuggle in a real change under
+#: cover of an established "idempotent rebinding is fine" exemption. Four
+#: transitions, four probe entry points, four independent processes — no
+#: shared state between them to accidentally blur the distinction.
 
-    Binds runtime `R1` as `required=True`, then attempts to bind a different
-    runtime `R2`. The second call must refuse (`RuntimeBindingError`), and
-    `resolve_database_runtime()` must still answer `R1` afterwards — a
-    second application (or a careless second `create_app` call with a
-    genuinely different spec) in the same process cannot silently take over
-    what the first one sealed.
 
-    Also proves the other direction of idempotence: reinstalling `R1` itself,
-    identically, succeeds (no-op) rather than refusing — "one binding" does
-    not mean "one call".
-    """
+def main_rebind_idempotent() -> None:
+    """IDEMPOTENCE: the IDENTICAL runtime, at the IDENTICAL policy, changes
+    nothing. Calling `bind_database_runtime` twice with the same arguments
+    is exactly as safe as calling it once."""
+    from dotmac_kernel.session_runtime import (
+        DatabaseRuntime,
+        bind_database_runtime,
+        resolve_database_runtime,
+    )
+    from sqlalchemy import create_engine
+
+    runtime = DatabaseRuntime(engine=create_engine("sqlite://"))
+    bind_database_runtime(runtime, required=True)
+    assert resolve_database_runtime() is runtime
+
+    bind_database_runtime(runtime, required=True)  # identical: idempotent
+    assert resolve_database_runtime() is runtime
+    print("PASS idempotence: reinstalling the identical (runtime, policy) succeeded")
+
+
+def main_rebind_monotonic_promotion() -> None:
+    """MONOTONIC PROMOTION: the SAME runtime, `required` going False -> True.
+    The binding DOES change here — that is what makes it a promotion and not
+    idempotence — and it is permitted only because strictness tightens."""
+    from dotmac_kernel.session_runtime import (
+        DatabaseRuntime,
+        bind_database_runtime,
+        resolve_database_runtime,
+    )
+    from sqlalchemy import create_engine
+
+    runtime = DatabaseRuntime(engine=create_engine("sqlite://"))
+    bind_database_runtime(runtime, required=False)
+    assert resolve_database_runtime() is runtime
+
+    bind_database_runtime(runtime, required=True)  # same runtime, stricter
+    assert resolve_database_runtime() is runtime
+    print(
+        "PASS monotonic promotion: the same runtime's policy tightened from "
+        "optional to required"
+    )
+
+
+def main_rebind_refuses_a_different_runtime() -> None:
+    """REFUSAL (cause 1 of 2): a DIFFERENT `DatabaseRuntime` object, at any
+    policy, is never accepted — one process supports one binding, and a
+    second application or caller supplying a different instance is a
+    configuration conflict, never a silent clobber of the first."""
     from dotmac_kernel.session_runtime import (
         DatabaseRuntime,
         RuntimeBindingError,
@@ -456,15 +501,6 @@ def main_second_binding_conflict() -> None:
     runtime_two = DatabaseRuntime(engine=create_engine("sqlite://"))
 
     bind_database_runtime(runtime_one, required=True)
-    assert resolve_database_runtime() is runtime_one
-
-    # Idempotent: reinstalling the IDENTICAL runtime, at the same policy,
-    # succeeds rather than refusing.
-    bind_database_runtime(runtime_one, required=True)
-    assert resolve_database_runtime() is runtime_one
-    print("PASS idempotence: reinstalling the identical binding succeeded")
-
-    # A DIFFERENT runtime refuses outright.
     try:
         bind_database_runtime(runtime_two, required=True)
     except RuntimeBindingError:
@@ -479,14 +515,27 @@ def main_second_binding_conflict() -> None:
         "answers — a refusal must leave the sealed binding untouched"
     )
     print(
-        "PASS second-binding conflict: a different runtime was refused and "
-        "the original binding is still authoritative"
+        "PASS refusal (different runtime): a second, different runtime was "
+        "refused and the original binding is still authoritative"
     )
 
-    # The SAME runtime but a WEAKER policy (required True -> False) also
-    # refuses — no public way to downgrade strictness once sealed.
+
+def main_rebind_refuses_a_downgrade() -> None:
+    """REFUSAL (cause 2 of 2): the SAME runtime, `required` going True ->
+    False (a downgrade). There is no public way to loosen strictness once
+    sealed — this is the same REFUSAL outcome as a different runtime, but a
+    genuinely different cause, and the probe/test names say so separately."""
+    from dotmac_kernel.session_runtime import (
+        DatabaseRuntime,
+        RuntimeBindingError,
+        bind_database_runtime,
+    )
+    from sqlalchemy import create_engine
+
+    runtime = DatabaseRuntime(engine=create_engine("sqlite://"))
+    bind_database_runtime(runtime, required=True)
     try:
-        bind_database_runtime(runtime_one, required=False)
+        bind_database_runtime(runtime, required=False)
     except RuntimeBindingError:
         pass
     else:
@@ -495,7 +544,10 @@ def main_second_binding_conflict() -> None:
             "binding to required=False — strictness is supposed to be "
             "monotonic with no public way back down"
         )
-    print("PASS strictness is monotonic: weakening an already-required binding refused")
+    print(
+        "PASS refusal (downgrade): weakening an already-required binding "
+        "to optional was refused"
+    )
 
 
 def main_real_assembly_strict() -> None:
@@ -516,6 +568,18 @@ def main_real_assembly_strict() -> None:
     rebased onto that fix, importing `app.assembly` imports `dotmac_kernel.db`
     unconditionally and this test FAILS — correctly: it is testing the
     post-migration world, not working around the pre-migration one.
+
+    Not just import-time silence: entering the ASGI lifespan
+    (`with TestClient(app) as client`) drives the REAL boot sequence,
+    including `_run_enabled_seeds` -> `seed_platform_defaults` (the
+    `settings` feature's seed hook, which now resolves
+    `resolve_database_runtime()` rather than a deferred
+    `dotmac_kernel.db.platform_session` import — see `app/features/settings
+    /seed.py`). This proves strict composition resolves through the bound
+    runtime along MORE than one path: composing the manifests (no import),
+    AND running the startup seed against the product engine — verified by
+    querying `product_runtime`'s own database directly afterwards for the
+    rows the seed should have written there, not the reference assembly's.
     """
     import os
 
@@ -527,8 +591,12 @@ def main_real_assembly_strict() -> None:
     import dataclasses
 
     from dotmac_kernel import create_app
+    from dotmac_kernel.models import Base
     from dotmac_kernel.session_runtime import DatabaseRuntime
-    from sqlalchemy import create_engine
+    from dotmac_kernel.settings_models import DomainSetting
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.pool import StaticPool
 
     import app.assembly
 
@@ -537,13 +605,24 @@ def main_real_assembly_strict() -> None:
         "the eager-import predecessor has not landed on this branch"
     )
 
-    product_runtime = DatabaseRuntime(engine=create_engine("sqlite://"))
+    # StaticPool (like main()'s own engine): the ASGI lifespan's seed hook
+    # runs off the event loop via asyncio.to_thread, a different thread than
+    # this one, and an unshared `:memory:` connection per thread would
+    # silently see an empty database.
+    product_engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(product_engine)
+    product_runtime = DatabaseRuntime(engine=product_engine)
+
     spec = dataclasses.replace(
         app.assembly.assembly,
         database_runtime=product_runtime,
         require_database_runtime=True,
     )
-    create_app(spec)
+    app = create_app(spec)
 
     assert "dotmac_kernel.db" not in sys.modules, (
         "create_app(spec) on the REAL assembly, under a strict binding, "
@@ -554,15 +633,105 @@ def main_real_assembly_strict() -> None:
         "manifests under a strict binding left dotmac_kernel.db unloaded"
     )
 
+    with TestClient(app) as client:
+        # Entering the lifespan runs _run_enabled_seeds -> the settings
+        # feature's seed_platform_defaults() -- a REAL write, through
+        # resolve_database_runtime(), while dotmac_kernel.db stays unloaded.
+        health = client.get("/health")
+        assert health.status_code == 200, health.text
+
+    assert "dotmac_kernel.db" not in sys.modules, (
+        "running the real assembly's lifespan (including the settings "
+        "feature's seed hook) under a strict binding still imported "
+        "dotmac_kernel.db"
+    )
+    with product_runtime.platform_session() as verify_db:
+        seeded = verify_db.scalars(select(DomainSetting)).first()
+        assert seeded is not None, (
+            "seed_platform_defaults() ran (the lifespan completed) but wrote "
+            "no row into the PRODUCT runtime's own database -- it did not "
+            "actually resolve the bound runtime"
+        )
+    print(
+        "PASS real assembly, strict, through seeding: the settings feature's "
+        "startup seed wrote into the PRODUCT runtime, and dotmac_kernel.db "
+        "stayed unloaded through the whole lifespan"
+    )
+
+
+def main_reference_import_after_strict_bind() -> None:
+    """Paired plant, ORDERING 2 of 2: a reference-runtime IMPORT arriving
+    AFTER a strict bind must refuse — before constructing any engine.
+
+    Ordering 1 of 2 — an eager reference import arriving BEFORE a strict
+    bind, so the bind itself refuses against the recorded claim — is proved
+    by `main_real_assembly_strict`'s plant counterpart in the test file
+    (`test_one_eager_feature_import_defeats_a_strict_binding`, which
+    reintroduces one eager `dotmac_kernel.db` import into a copy of
+    `app.assembly` and shows `bind_database_runtime` refuse). The atomic
+    claim (`session_runtime._claim_lock`) exists precisely to make the
+    outcome independent of which side runs first — proving only one
+    ordering would leave the other genuinely untested, an asymmetric proof
+    of a claim advertised as mutual.
+
+    This run needs `dotmac_kernel.db` GENUINELY importable (see the
+    module-level guard above, which exempts `argv[1] == "after-strict-bind"`)
+    so the import can actually be attempted and observed to refuse, rather
+    than being pre-empted by the unrelated `sys.modules[...] = None` block
+    every other stage in this probe relies on.
+    """
+    import os
+
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./after-strict-bind.sqlite3")
+    os.environ.setdefault(
+        "PLATFORM_DATABASE_URL", "sqlite:///./after-strict-bind.sqlite3"
+    )
+
+    from dotmac_kernel.session_runtime import DatabaseRuntime, bind_database_runtime
+    from sqlalchemy import create_engine
+
+    product_runtime = DatabaseRuntime(engine=create_engine("sqlite://"))
+    bind_database_runtime(product_runtime, required=True)
+
+    try:
+        import dotmac_kernel.db  # noqa: F401
+    except RuntimeError as exc:
+        assert "already sealed a REQUIRED" in str(
+            exc
+        ), f"the import refused, but for the wrong reason: {exc}"
+    else:
+        raise AssertionError(
+            "dotmac_kernel.db imported successfully AFTER a strict binding "
+            "was already sealed — the atomic claim did not refuse the "
+            "losing order"
+        )
+    assert "dotmac_kernel.db" not in sys.modules, (
+        "dotmac_kernel.db's refusal still left a (presumably half-built) "
+        "module object registered in sys.modules"
+    )
+    print(
+        "PASS paired plant (reference-after-bind): dotmac_kernel.db refused "
+        "to import after a strict binding was already sealed, before "
+        "constructing any engine"
+    )
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "strict":
         main_strict_refusal()
     elif len(sys.argv) > 1 and sys.argv[1] == "fallback":
         main_fallback_sensitivity()
-    elif len(sys.argv) > 1 and sys.argv[1] == "second-binding":
-        main_second_binding_conflict()
+    elif len(sys.argv) > 1 and sys.argv[1] == "rebind-idempotent":
+        main_rebind_idempotent()
+    elif len(sys.argv) > 1 and sys.argv[1] == "rebind-promotion":
+        main_rebind_monotonic_promotion()
+    elif len(sys.argv) > 1 and sys.argv[1] == "rebind-refuses-different-runtime":
+        main_rebind_refuses_a_different_runtime()
+    elif len(sys.argv) > 1 and sys.argv[1] == "rebind-refuses-downgrade":
+        main_rebind_refuses_a_downgrade()
     elif len(sys.argv) > 1 and sys.argv[1] == "real-assembly":
         main_real_assembly_strict()
+    elif len(sys.argv) > 1 and sys.argv[1] == "after-strict-bind":
+        main_reference_import_after_strict_bind()
     else:
         main()

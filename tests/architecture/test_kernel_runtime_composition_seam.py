@@ -321,28 +321,91 @@ def test_a_docstring_mention_of_the_reference_module_is_not_flagged(
         assert stage in result.stdout
 
 
-def test_second_binding_conflict_is_refused(tmp_path: Path) -> None:
-    """One process supports one runtime binding — a second, DIFFERENT one
-    cannot clobber the first, and downgrading strictness has no public path.
+# `bind_database_runtime` has exactly THREE named transitions (see its own
+# docstring for why they are named separately rather than filed under one
+# "idempotent rebinding" label): IDEMPOTENCE, MONOTONIC PROMOTION, and
+# REFUSAL — and REFUSAL has two distinct causes. Four tests, four probe
+# entry points, one transition (or refusal cause) each — never one test
+# covering more than one, which is exactly how promotion could get quietly
+# filed under idempotence and the seal loosen without anyone deciding to
+# loosen it.
 
-    `main_second_binding_conflict()` proves BOTH directions of idempotence in
-    one process: reinstalling the IDENTICAL binding succeeds; a DIFFERENT
-    runtime refuses and leaves the original authoritative; weakening an
-    already-required binding also refuses.
-    """
-    result = _run_probe(tmp_path, argv=("second-binding",))
+
+def test_rebinding_the_identical_runtime_and_policy_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    """IDEMPOTENCE: the IDENTICAL runtime, at the IDENTICAL policy, changes
+    nothing. Calling `bind_database_runtime` twice with the same arguments
+    is exactly as safe as calling it once (a second `create_app` call
+    composing the identical spec, for instance)."""
+    result = _run_probe(tmp_path, argv=("rebind-idempotent",))
     assert result.returncode == 0, result.stderr
-    for marker in (
-        "PASS idempotence: reinstalling the identical binding succeeded",
-        "PASS second-binding conflict: a different runtime was refused and "
-        "the original binding is still authoritative",
-        "PASS strictness is monotonic: weakening an already-required "
-        "binding refused",
-    ):
-        assert marker in result.stdout, (
-            f"expected marker missing: {marker!r}\nstdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
-        )
+    assert (
+        "PASS idempotence: reinstalling the identical (runtime, policy) " "succeeded"
+    ) in result.stdout
+
+
+def test_the_same_runtime_may_be_promoted_from_optional_to_required(
+    tmp_path: Path,
+) -> None:
+    """MONOTONIC PROMOTION: the SAME runtime, `required` going False -> True.
+    The binding DOES change here — that is what makes it a promotion and not
+    idempotence — and it is permitted only because strictness tightens,
+    never loosens."""
+    result = _run_probe(tmp_path, argv=("rebind-promotion",))
+    assert result.returncode == 0, result.stderr
+    assert (
+        "PASS monotonic promotion: the same runtime's policy tightened from "
+        "optional to required"
+    ) in result.stdout
+
+
+def test_binding_a_different_runtime_is_refused(tmp_path: Path) -> None:
+    """REFUSAL, cause 1 of 2: a DIFFERENT `DatabaseRuntime` object, at any
+    policy, is never accepted — one process supports one binding, and a
+    second application supplying a different instance is a configuration
+    conflict, never a silent clobber of the first."""
+    result = _run_probe(tmp_path, argv=("rebind-refuses-different-runtime",))
+    assert result.returncode == 0, result.stderr
+    assert (
+        "PASS refusal (different runtime): a second, different runtime was "
+        "refused and the original binding is still authoritative"
+    ) in result.stdout
+
+
+def test_downgrading_an_already_required_binding_is_refused(tmp_path: Path) -> None:
+    """REFUSAL, cause 2 of 2: the SAME runtime, `required` going True ->
+    False (a downgrade). There is no public way to loosen strictness once
+    sealed — a distinct cause from a different runtime, even though both
+    land on the same REFUSAL outcome, which is why this gets its own test
+    rather than being folded into the different-runtime one."""
+    result = _run_probe(tmp_path, argv=("rebind-refuses-downgrade",))
+    assert result.returncode == 0, result.stderr
+    assert (
+        "PASS refusal (downgrade): weakening an already-required binding "
+        "to optional was refused"
+    ) in result.stdout
+
+
+def test_reference_import_after_a_strict_bind_is_refused(tmp_path: Path) -> None:
+    """Paired plant, ORDERING 2 of 2: a reference-runtime IMPORT arriving
+    AFTER a strict bind must refuse — before constructing any engine.
+
+    Ordering 1 of 2 is `test_one_eager_feature_import_defeats_a_strict_binding`
+    below (an eager reference import arriving BEFORE a strict bind, so the
+    BIND refuses against the recorded claim). The atomic claim
+    (`session_runtime._claim_lock`) exists precisely to make the outcome
+    independent of which side runs first; proving only one ordering would
+    leave the other genuinely untested — a claim advertised as mutual but
+    only checked in one direction.
+    """
+    result = _run_probe(tmp_path, argv=("after-strict-bind",))
+    assert result.returncode == 0, result.stderr
+    assert (
+        "PASS paired plant (reference-after-bind): dotmac_kernel.db refused "
+        "to import after a strict binding was already sealed, before "
+        "constructing any engine"
+    ) in result.stdout
 
 
 def test_real_assembly_strict_composition_leaves_the_reference_unloaded(
@@ -357,8 +420,15 @@ def test_real_assembly_strict_composition_leaves_the_reference_unloaded(
     module-level `ProductAssemblySpec(...)` call), before `create_app` ever
     runs. `main_real_assembly_strict()` imports the real `app.assembly`,
     rebinds it to a product runtime under `require_database_runtime=True`,
-    calls the real `create_app`, and asserts `dotmac_kernel.db` never entered
-    `sys.modules` at any point.
+    calls the real `create_app`, asserts `dotmac_kernel.db` never entered
+    `sys.modules`, THEN enters the ASGI lifespan (driving the real startup
+    seed hook, `app/features/settings/seed.py::seed_platform_defaults`,
+    which now resolves `resolve_database_runtime()` rather than a deferred
+    `dotmac_kernel.db` import) and verifies the seeded row landed in the
+    PRODUCT runtime's own database — proving strict composition resolves
+    through the bound runtime along more than the one "nothing imported"
+    path: manifest composition AND a real runtime consumer both land on the
+    product engine.
 
     KNOWN TO CURRENTLY FAIL on `main` / this branch's base: several feature
     services (`app/features/{tenants,parties,rbac,auth,custom_fields}
@@ -378,10 +448,17 @@ def test_real_assembly_strict_composition_leaves_the_reference_unloaded(
         "branch rebases onto the conflict_savepoint eager-import predecessor "
         f"(#678)\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert (
+    for marker in (
         "PASS real assembly, strict: composing app.assembly's real feature "
-        "manifests under a strict binding left dotmac_kernel.db unloaded"
-    ) in result.stdout
+        "manifests under a strict binding left dotmac_kernel.db unloaded",
+        "PASS real assembly, strict, through seeding: the settings "
+        "feature's startup seed wrote into the PRODUCT runtime, and "
+        "dotmac_kernel.db stayed unloaded through the whole lifespan",
+    ):
+        assert marker in result.stdout, (
+            f"expected marker missing: {marker!r}\nstdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
 
 
 def test_one_eager_feature_import_defeats_a_strict_binding(tmp_path: Path) -> None:
