@@ -75,6 +75,7 @@ import threading
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event, text
@@ -104,6 +105,51 @@ TenantLookup = Callable[[Session, str], "tuple[Any, Any]"]
 # name is therefore validated against the Postgres identifier grammar before it
 # can reach a statement — `schema.name`, lowercase, no quoting, no separators.
 _SETTING_NAME = re.compile(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$")
+
+
+class _TransactionMode(Enum):
+    """One of the two per-transaction PostgreSQL isolation modes this
+    runtime knows how to apply. Deliberately NOT a general execution-options
+    passthrough (see the module docstring's "one capability" scope) — every
+    value here maps to exactly one `readonly_session`/`serializable_session`
+    surface, and there is no way for a caller to reach `_EXECUTION_OPTIONS`
+    with an arbitrary key.
+    """
+
+    READ_ONLY = "read_only"
+    SERIALIZABLE = "serializable"
+
+
+#: The exact SQLAlchemy execution options each mode applies, keyed by
+#: `_TransactionMode`. `isolation_level` is portable SQLAlchemy;
+#: `postgresql_readonly` is the PG-dialect option that gets a
+#: DBAPI-**enforced** write refusal, not merely a label (see
+#: `readonly_session`'s docstring). Both are "transactional" SQLAlchemy
+#: connection characteristics (`sqlalchemy.engine.characteristics
+#: .IsolationLevelCharacteristic`/`dialects.postgresql.base
+#: .PGReadOnlyConnectionCharacteristic`, both `transactional = True`).
+#:
+#: MEASURED (pinned `sqlalchemy==2.0.51`,
+#: `site-packages/sqlalchemy/orm/session.py`
+#: `SessionTransaction._connection_for_bind`, lines 1157-1168): applying
+#: execution options to a bind that already has a connection established
+#: does NOT raise. It emits an `SAWarning` ("Connection is already
+#: established for the given bind; execution_options ignored") and returns
+#: the existing connection UNCHANGED — a late call is silently discarded,
+#: not refused. So the ordering guarantee below cannot be delegated to
+#: SQLAlchemy; `_isolated_session` checks the session's own state itself,
+#: before calling `Session.connection(execution_options=...)`, and raises
+#: `_IsolationModeTooLateError` on its own behalf if a connection/transaction
+#: is already established for the bind.
+_EXECUTION_OPTIONS: dict[_TransactionMode, dict[str, Any]] = {
+    _TransactionMode.READ_ONLY: {
+        "isolation_level": "REPEATABLE READ",
+        "postgresql_readonly": True,
+    },
+    _TransactionMode.SERIALIZABLE: {
+        "isolation_level": "SERIALIZABLE",
+    },
+}
 
 
 def _default_tenant_lookup(db: Session, slug: str) -> tuple[Any, Any]:
@@ -428,6 +474,124 @@ class DatabaseRuntime:
             db.close()
 
     @contextmanager
+    def _isolated_session(
+        self, mode: _TransactionMode
+    ) -> Generator[Session, None, None]:
+        """Owned non-request boundary running under `mode` for its ONE
+        transaction. Shared implementation behind `readonly_session` and
+        `serializable_session` — not itself public (see `_TransactionMode`).
+
+        THE ordering guarantee this exists to prove: `Session.connection
+        (execution_options=...)` is the FIRST operation this method performs
+        on `db` — before the caller (or a nested `tenant_scope`) can issue
+        any statement, including a tenant GUC. `SessionTransaction
+        ._connection_for_bind` applies `conn.execution_options(**options)`
+        BEFORE it calls `conn.begin()`, and BEFORE it dispatches
+        `after_begin` — so calling `db.connection(execution_options=...)`
+        here, ahead of anything else, guarantees the mode is set ahead of
+        the transaction's BEGIN and ahead of any `after_begin` listener
+        (Sub's tenant-GUC hook among them; `tenant_scope`'s own listener
+        follows the identical composition — see its docstring below).
+
+        THIS GUARANTEE IS NOT SQLALCHEMY'S TO KEEP. `isolation_level` and
+        `postgresql_readonly` are both "transactional" connection
+        characteristics, but SQLAlchemy 2.0.51's
+        `SessionTransaction._connection_for_bind` does not raise when
+        execution options are applied to a bind that already has a
+        connection established — it warns (`SAWarning`) and returns the
+        existing connection with the options silently discarded (measured;
+        see `_EXECUTION_OPTIONS`'s comment for the exact file/line). A
+        caller that reached this method with an already-transacted `db`
+        would therefore get a session that silently runs at the DEFAULT
+        isolation, not the one its name promises — the dominant failure
+        shape this ordering guarantee exists to rule out.
+
+        So the refusal is the Kernel's own, checked BEFORE the first
+        statement this method issues: `db.in_transaction()` is `True` only
+        once a transaction has begun on this session (autobegin included),
+        which is also the precondition under which SQLAlchemy would have
+        silently discarded the options above. `_isolated_session` always
+        constructs a fresh session immediately above, so this branch is not
+        reachable through today's only two callers, `readonly_session` and
+        `serializable_session` — it exists so a FUTURE caller that reuses or
+        otherwise pre-touches a session before reaching this method fails
+        loudly instead of inheriting the default isolation under a name
+        that promises otherwise. `_IsolationModeTooLateError` stays private
+        (not in `__all__`, not in `public_exports.json`) for exactly that
+        reason: no public path can trigger it today, and it subclasses
+        `RuntimeError` so a caller that already catches `RuntimeError` loses
+        nothing — the PR that introduces the future caller is the right
+        place to promote the name, with that caller as its named consumer.
+
+        Same disposal contract as `platform_session`/`tenant_session`:
+        commit on success, rollback on error, close always — no second
+        transaction boundary.
+        """
+        db = self._session_factory()
+        try:
+            if db.in_transaction():
+                raise _IsolationModeTooLateError(
+                    f"Cannot apply isolation mode {mode.value!r}: this "
+                    "session has already begun a transaction (a statement "
+                    "ran, or a connection was already established, before "
+                    "the mode could be applied). SQLAlchemy does not raise "
+                    "in this situation -- it silently discards the late "
+                    "execution options and keeps running at the DEFAULT "
+                    "isolation, so the Kernel refuses here instead of "
+                    "handing back a session whose isolation contradicts its "
+                    "name."
+                )
+            db.connection(execution_options=_EXECUTION_OPTIONS[mode])
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    @contextmanager
+    def readonly_session(self) -> Generator[Session, None, None]:
+        """A REPEATABLE READ transaction PostgreSQL also refuses writes on.
+
+        `postgresql_readonly=True` is not a label the application merely
+        respects — it puts the underlying Postgres transaction in `READ
+        ONLY` mode, so an `INSERT`/`UPDATE`/`DELETE` inside the block is
+        refused by the SERVER (Postgres error `25006
+        read_only_sql_transaction`, surfaced as `sqlalchemy.exc
+        .InternalError`), not merely by convention. Sub's
+        `migration_source_export.py` is the motivating caller: an export
+        that must see one consistent snapshot and must never itself write to
+        it.
+
+        Compose with `tenant_scope(db, tenant_id)` INSIDE the block for a
+        tenant-scoped read-only transaction — the mode is already
+        established by the time `tenant_scope` issues its first GUC
+        statement (see `_isolated_session`'s docstring), so the ordering
+        guarantee holds for the combination too.
+        """
+        with self._isolated_session(_TransactionMode.READ_ONLY) as db:
+            yield db
+
+    @contextmanager
+    def serializable_session(self) -> Generator[Session, None, None]:
+        """A SERIALIZABLE, write-capable transaction.
+
+        The strictest PostgreSQL isolation level, applied before the first
+        statement so every read the transaction takes part in also becomes
+        part of its serializable history — a level chosen after the
+        transaction already has statements queued would only protect what
+        came after it applied. Sub's `party_identity_backfill.py` is the
+        motivating caller: a write that must not observe, or be observed as,
+        a partial identity merge under concurrent traffic.
+
+        Compose with `tenant_scope(db, tenant_id)` inside the block, same as
+        `readonly_session`.
+        """
+        with self._isolated_session(_TransactionMode.SERIALIZABLE) as db:
+            yield db
+
+    @contextmanager
     def tenant_session(self, tenant_id: object) -> Generator[Session, None, None]:
         """Non-request TENANT-scoped boundary — CLI commands, jobs, workers.
 
@@ -621,6 +785,31 @@ class RuntimeBindingError(RuntimeError):
     """`bind_database_runtime` refused: a different runtime, a weaker policy,
     or the reference-runtime import already claimed the slot a strict bind
     needs."""
+
+
+class _IsolationModeTooLateError(RuntimeError):
+    """`_isolated_session` refused: the session it was handed had already
+    begun a transaction, so applying a per-transaction isolation mode now
+    would be too late to be trustworthy.
+
+    Raised BY THE KERNEL, not by SQLAlchemy: SQLAlchemy 2.0.51 does not
+    raise in this situation (measured — see `_EXECUTION_OPTIONS`'s comment
+    and `_isolated_session`'s docstring for the file/line and the exact
+    silently-ignored behaviour). Without this check, `readonly_session()`/
+    `serializable_session()` could hand back a session that silently runs at
+    the DEFAULT isolation while its name promises REPEATABLE READ + read-only
+    or SERIALIZABLE.
+
+    DELIBERATELY PRIVATE: not in `__all__`, not in `public_exports.json`.
+    `_isolated_session` always constructs a fresh session, so no caller
+    reachable through today's public surface (`readonly_session`,
+    `serializable_session`) can trigger this branch — publishing the name
+    now would add a permanent contract entry with no public consumer. It
+    subclasses `RuntimeError`, so a future caller that reuses a session
+    before reaching `_isolated_session` still fails loudly and is still
+    catchable generically; that future caller's own PR is the place to
+    promote this name, with itself as the named consumer.
+    """
 
 
 @dataclass(frozen=True)
