@@ -37,6 +37,42 @@ lowercase hex commit or it is refused by construction, including a moving ref
 embedded after ``@`` (``adoption_evidence._revision_problem`` handles that
 identical case). This module does not invent a second revision-shape grammar.
 
+``pinned_at`` / ``composed_at`` (members of ``adoption_evidence
+.ASSERTION_KINDS`` / ``.AST_ASSERTION_KINDS``) are reused as the only two
+accepted ``kind`` values for a ``protected_main_row`` — the row proving a
+bound revision is an ancestor of the product repository's protected ``main``
+(see "Three distinct refusal reasons" below). No third, gate-local kind name
+is invented for this.
+
+``INSTALLATION_KINDS``' own lesson — a pin is installation, never adoption —
+is why a well-formed, protected-main-anchored commit is still only
+COMPATIBILITY evidence here, never adoption evidence: this gate answers "can
+the Kernel satisfy this", not "has the product composed it". Adoption stays
+0/3 and nothing in this slice changes that (see "Compatibility only" above).
+
+Three distinct refusal reasons
+---------------------------------
+
+**Ruling, 2026-09-09: bind only protected-`main` revisions that already
+carry the final readiness evidence — never a branch head.** A branch head is
+a moving target (force-pushable, rebasable away, abandonable), so binding one
+would make the gate's evidence unreproducible — exactly the failure mode
+"exact immutable revision" already exists to rule out one level up. A
+reviewer must be able to tell, from the finding text alone, which of three
+distinct things is wrong:
+
+1. **No revision bound at all** (``revision is None``) — "no revision is
+   bound for ``'<product>'``".
+2. **A moving ref** (a branch name, ``HEAD``, ``main``, or one embedded after
+   ``@``) — "... is a moving ref ..." / "... names the moving ref ...".
+3. **Not confirmed as an ancestor of protected `main`** — a well-formed,
+   40-hex commit with no (or an invalid) ``protected_main_row`` in its
+   evidence — "... carries no `protected_main_row` proving it is an ancestor
+   of the product repository's protected `main`". A valid-looking SHA that
+   exists only on a branch lands HERE, not in reason 1 or 2: it is a real
+   coordinate shape, just not one this gate accepts without proof of
+   reachability from protected `main`.
+
 The absence-is-refusal rule
 -----------------------------
 
@@ -49,6 +85,13 @@ which refuses. ``GateResult.satisfied`` additionally refuses an EMPTY
 that read that as "nothing to refuse" would be the identical defect this
 whole programme has been chasing — a check over no files, passing for having
 nothing to check). See ``test_the_gate_cannot_pass_on_an_empty_evaluation_set``.
+
+**None of the three products has a protected-`main` revision carrying final
+readiness evidence today** (Academy #130 is being re-derived under Governance
+#87, merged as ``6fbeffca``, in a separate lane this slice does not touch;
+ERP and Sub have no readiness revision named yet). A run today therefore
+refuses on reason 3 (or reason 1, for a product with no revision named at
+all) for all three products — never a pass on an empty evidence set.
 
 What this module does NOT establish (unmonitored, stated per ADR-0018)
 --------------------------------------------------------------------------
@@ -73,7 +116,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from tests.architecture.adoption_evidence import IMMUTABLE_COMMIT, MOVING_REFS
+from tests.architecture.adoption_evidence import (
+    ASSERTION_KINDS,
+    AST_ASSERTION_KINDS,
+    IMMUTABLE_COMMIT,
+    MOVING_REFS,
+)
 
 _HERE: Final = Path(__file__).resolve().parent
 _REPO_ROOT: Final = _HERE.parents[1]
@@ -96,6 +144,23 @@ PRODUCTS: Final = ("academy", "erp", "sub")
 #: second accepted value is a schema decision with a reviewer, not something
 #: a bound revision's evidence gets to assert into existence.
 ASYNC_TRANSITIONAL: Final = "transitional"
+
+#: The only accepted `kind` values for a `protected_main_row` — reused
+#: VERBATIM from `adoption_evidence.py`'s own closed vocabulary rather than a
+#: gate-local invention. `pinned_at` is an assertion that a file's field held
+#: a value at an immutable commit; `composed_at` is an assertion about a
+#: syntax tree at an immutable commit. Either shape can carry "this exact
+#: commit is part of protected `main`'s history" (a CI-recorded merge-base or
+#: fast-forward check, addressed the same way any other tree fact is
+#: addressed here). Asserted a proper subset of the union below, so a rename
+#: on either side is caught rather than silently drifting apart.
+PROTECTED_MAIN_PROOF_KINDS: Final = frozenset({"pinned_at", "composed_at"})
+if not PROTECTED_MAIN_PROOF_KINDS <= (ASSERTION_KINDS | AST_ASSERTION_KINDS):
+    raise RuntimeError(
+        "PROTECTED_MAIN_PROOF_KINDS must stay a subset of adoption_evidence"
+        ".py's own closed vocabulary — this constant reuses those names, it "
+        "does not invent a parallel one"
+    )
 
 
 # ── AST reads of the Kernel's own tree (pure, offline, deterministic) ──────
@@ -239,6 +304,72 @@ def _revision_problem(product: str, revision: object) -> str | None:
     )
 
 
+def _protected_main_problem(
+    product: str, revision: str | None, evidence: Mapping[str, object]
+) -> str | None:
+    """Refusal reason 3, distinct from reasons 1 and 2 above: a well-formed
+    40-hex commit is not, by itself, evidence it is reachable from the
+    product repository's protected `main` — a branch head is force-pushable,
+    rebasable away, or abandonable, so binding one would make this gate's
+    evidence unreproducible. Only called once `_revision_problem` has
+    already returned `None` for the same revision, so `revision` here is
+    always a genuine 40-hex commit.
+
+    The proof this predicate demands is `evidence["protected_main_row"]`: a
+    single row shaped like an `adoption_evidence.py` row (reusing that
+    module's own `pinned_at`/`composed_at` kinds, never a gate-local kind),
+    naming the SAME commit, with a non-empty `expected` recording what a
+    protected-`main` ancestry check (e.g. `git merge-base --is-ancestor`)
+    actually found. This module does not run that check itself — same
+    "NOT BUILT, the coordinates are the fetch instruction" limitation
+    `adoption_evidence.py`'s own `UNMONITORED_BY_THIS_GATE` already states
+    for `assertion_resolution` — it verifies the CLAIM is well-formed and
+    coherent with the bound revision, not that the ancestry check was run
+    correctly.
+    """
+    if revision is None:  # pragma: no cover - callers gate on _revision_problem first
+        return f"no revision is bound for {product!r}"
+    row = evidence.get("protected_main_row")
+    if not isinstance(row, Mapping):
+        return (
+            f"{product}'s bound revision {revision!r} carries no "
+            "`protected_main_row` proving it is an ancestor of the product "
+            "repository's protected `main` — a valid-looking 40-hex commit "
+            "that exists only on a branch is refused by construction, "
+            "because a branch head can be force-pushed, rebased away, or "
+            "abandoned, which would make this gate's evidence unreproducible"
+        )
+    kind = row.get("kind")
+    if kind not in PROTECTED_MAIN_PROOF_KINDS:
+        return (
+            f"{product}'s `protected_main_row.kind` is {kind!r}; the only "
+            f"accepted kinds are {sorted(PROTECTED_MAIN_PROOF_KINDS)!r}, "
+            "reused verbatim from adoption_evidence.py's own closed "
+            "vocabulary — an unknown kind is a claim this gate does not "
+            "know how to verify"
+        )
+    row_repository = row.get("repository")
+    if not isinstance(row_repository, str) or not row_repository.strip():
+        return (
+            f"{product}'s `protected_main_row.repository` must be a "
+            "non-empty string naming the product repository"
+        )
+    row_commit = row.get("commit")
+    if row_commit != revision:
+        return (
+            f"{product}'s `protected_main_row.commit` {row_commit!r} does "
+            f"not match the bound revision {revision!r}; an ancestry proof "
+            "for a DIFFERENT commit is not evidence for THIS one"
+        )
+    expected = row.get("expected")
+    if not isinstance(expected, str) or not expected.strip():
+        return (
+            f"{product}'s `protected_main_row.expected` must record what "
+            "the protected-`main` ancestry check actually found"
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class ProductBinding:
     """The evidence-binding seam's unit. Binding the real three revisions is
@@ -328,10 +459,14 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
     as a finding about the SUCCESSOR's sufficiency, unconditionally — never
     worked around by this evaluator inferring what Academy "probably" does.
 
-    PRODUCT-SIDE (needs a bound revision + captured evidence): whether
+    PRODUCT-SIDE (needs a bound revision + captured evidence, on a commit
+    PROVEN an ancestor of Academy's protected `main` via `evidence
+    ["protected_main_row"]` — see `_protected_main_problem`): whether
     Academy's own tree still reaches `dotmac_kernel.db.SessionLocal` by name,
     and whether a strict bind was observed to succeed against it. Refused
-    when unbound, per the module's absence-is-refusal rule.
+    when unbound, per the module's absence-is-refusal rule, and refused
+    separately (a distinct reason) when the revision is real but not proven
+    to be on protected `main`.
     """
     findings: list[str] = []
 
@@ -376,6 +511,18 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
             "nothing captured against it is a coordinate with nothing to "
             "check, which this gate treats as a refusal rather than a pass"
         )
+        return EvaluationResult(
+            product="academy",
+            revision=binding.revision,
+            satisfied=False,
+            findings=tuple(findings),
+        )
+
+    protected_main_problem = _protected_main_problem(
+        "academy", binding.revision, evidence
+    )
+    if protected_main_problem is not None:
+        findings.append(f"MEASURED: {protected_main_problem}")
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
@@ -487,6 +634,16 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
             "nothing captured against it is a coordinate with nothing to "
             "check, which this gate treats as a refusal rather than a pass"
         )
+        return EvaluationResult(
+            product="erp",
+            revision=binding.revision,
+            satisfied=False,
+            findings=tuple(findings),
+        )
+
+    protected_main_problem = _protected_main_problem("erp", binding.revision, evidence)
+    if protected_main_problem is not None:
+        findings.append(f"MEASURED: {protected_main_problem}")
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
@@ -608,6 +765,16 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
             "nothing captured against it is a coordinate with nothing to "
             "check, which this gate treats as a refusal rather than a pass"
         )
+        return EvaluationResult(
+            product="sub",
+            revision=binding.revision,
+            satisfied=False,
+            findings=tuple(findings),
+        )
+
+    protected_main_problem = _protected_main_problem("sub", binding.revision, evidence)
+    if protected_main_problem is not None:
+        findings.append(f"MEASURED: {protected_main_problem}")
         return EvaluationResult(
             product="sub",
             revision=binding.revision,

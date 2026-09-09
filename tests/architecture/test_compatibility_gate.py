@@ -87,11 +87,22 @@ def test_each_refusal_names_the_product_and_the_observed_reason() -> None:
 # ── All-of semantics: two satisfied, one refusing must still refuse ────────
 
 
+def _protected_main_row(repository: str, commit: str) -> dict[str, str]:
+    return {
+        "kind": "pinned_at",
+        "repository": repository,
+        "commit": commit,
+        "expected": f"git merge-base --is-ancestor {commit} origin/main succeeded",
+    }
+
+
 def _satisfied_academy_binding() -> gate.ProductBinding:
+    revision = "a" * 40
     return gate.ProductBinding(
         product="academy",
-        revision="a" * 40,
+        revision=revision,
         evidence={
+            "protected_main_row": _protected_main_row("dotmac_academy_app", revision),
             "unpublished_session_local_usage_sites": (),
             "strict_bind_without_reference_import": True,
         },
@@ -99,10 +110,12 @@ def _satisfied_academy_binding() -> gate.ProductBinding:
 
 
 def _satisfied_erp_binding() -> gate.ProductBinding:
+    revision = "b" * 40
     return gate.ProductBinding(
         product="erp",
-        revision="b" * 40,
+        revision=revision,
         evidence={
+            "protected_main_row": _protected_main_row("dotmac_erp", revision),
             "sync_requirements_satisfied": True,
             "async_status": gate.ASYNC_TRANSITIONAL,
         },
@@ -110,10 +123,12 @@ def _satisfied_erp_binding() -> gate.ProductBinding:
 
 
 def _satisfied_sub_binding() -> gate.ProductBinding:
+    revision = "c" * 40
     return gate.ProductBinding(
         product="sub",
-        revision="c" * 40,
+        revision=revision,
         evidence={
+            "protected_main_row": _protected_main_row("dotmac_sub", revision),
             "guc_hook_ordered_after_isolation_mode": True,
             "tenant_scope_composed_with_readonly_or_serializable": True,
         },
@@ -198,6 +213,144 @@ def test_a_bound_revision_with_no_evidence_still_refuses() -> None:
     assert any("no product-side evidence" in finding for finding in result.findings)
 
 
+# ── Reason 3: a real commit that is not proven an ancestor of protected main ─
+
+
+def test_a_well_formed_commit_with_no_protected_main_proof_is_refused() -> None:
+    """A valid-looking 40-hex commit with no `protected_main_row` at all —
+    the exact shape a branch-only SHA takes. Must be refused, and the
+    refusal text must be reason 3 (protected `main`), not reason 1 (no
+    revision bound) or reason 2 (moving ref)."""
+    binding = gate.ProductBinding(
+        product="academy",
+        revision="7" * 40,
+        evidence={
+            "unpublished_session_local_usage_sites": (),
+            "strict_bind_without_reference_import": True,
+        },
+    )
+    result = gate.evaluate_academy(binding)
+    assert result.satisfied is False
+    joined = " ".join(result.findings)
+    assert "protected `main`" in joined
+    assert "no revision is bound" not in joined
+    assert "moving ref" not in joined
+
+
+def test_the_three_refusal_reasons_are_textually_distinguishable() -> None:
+    """Reason 1 (unbound), reason 2 (moving ref) and reason 3 (real commit,
+    unproven protected-main ancestry) each carry a distinguishing phrase
+    absent from the other two — a reviewer must be able to tell them apart
+    from the finding text alone."""
+    unbound = gate.evaluate_academy(gate.ProductBinding(product="academy"))
+    moving_ref = gate.evaluate_academy(
+        gate.ProductBinding(product="academy", revision="main")
+    )
+    unproven = gate.evaluate_academy(
+        gate.ProductBinding(
+            product="academy",
+            revision="8" * 40,
+            evidence={
+                "unpublished_session_local_usage_sites": (),
+                "strict_bind_without_reference_import": True,
+            },
+        )
+    )
+
+    unbound_text = " ".join(unbound.findings)
+    moving_ref_text = " ".join(moving_ref.findings)
+    unproven_text = " ".join(unproven.findings)
+
+    assert "no revision is bound" in unbound_text
+    assert "no revision is bound" not in moving_ref_text
+    assert "no revision is bound" not in unproven_text
+
+    assert "moving ref" in moving_ref_text
+    assert "moving ref" not in unbound_text
+    assert "moving ref" not in unproven_text
+
+    assert "protected `main`" in unproven_text
+    assert "protected `main`" not in unbound_text
+    assert "protected `main`" not in moving_ref_text
+
+
+def test_protected_main_row_with_an_unknown_kind_is_refused() -> None:
+    revision = "9" * 40
+    binding = gate.ProductBinding(
+        product="erp",
+        revision=revision,
+        evidence={
+            "protected_main_row": {
+                "kind": "workflow_run",  # an attestation kind, not reused here
+                "repository": "dotmac_erp",
+                "commit": revision,
+                "expected": "ran",
+            },
+            "sync_requirements_satisfied": True,
+            "async_status": gate.ASYNC_TRANSITIONAL,
+        },
+    )
+    result = gate.evaluate_erp(binding)
+    assert result.satisfied is False
+    joined = " ".join(result.findings)
+    assert "accepted kinds are" in joined
+    assert "pinned_at" in joined and "composed_at" in joined
+
+
+def test_protected_main_row_with_a_mismatched_commit_is_refused() -> None:
+    revision = "1" * 40
+    other_commit = "2" * 40
+    binding = gate.ProductBinding(
+        product="sub",
+        revision=revision,
+        evidence={
+            "protected_main_row": _protected_main_row("dotmac_sub", other_commit),
+            "guc_hook_ordered_after_isolation_mode": True,
+            "tenant_scope_composed_with_readonly_or_serializable": True,
+        },
+    )
+    result = gate.evaluate_sub(binding)
+    assert result.satisfied is False
+    assert any(
+        "does not match the bound revision" in finding for finding in result.findings
+    )
+
+
+def test_protected_main_row_missing_expected_is_refused() -> None:
+    revision = "3" * 40
+    binding = gate.ProductBinding(
+        product="academy",
+        revision=revision,
+        evidence={
+            "protected_main_row": {
+                "kind": "pinned_at",
+                "repository": "dotmac_academy_app",
+                "commit": revision,
+            },
+            "unpublished_session_local_usage_sites": (),
+            "strict_bind_without_reference_import": True,
+        },
+    )
+    result = gate.evaluate_academy(binding)
+    assert result.satisfied is False
+    assert any(
+        "protected_main_row.expected` must record" in finding
+        for finding in result.findings
+    )
+
+
+def test_protected_main_proof_kinds_reuse_adoption_evidences_vocabulary() -> None:
+    """`PROTECTED_MAIN_PROOF_KINDS` reuses `adoption_evidence.py`'s own
+    closed vocabulary rather than inventing a parallel one — proven by
+    membership, not by comment."""
+    from tests.architecture import adoption_evidence
+
+    assert gate.PROTECTED_MAIN_PROOF_KINDS == {"pinned_at", "composed_at"}
+    assert gate.PROTECTED_MAIN_PROOF_KINDS <= (
+        adoption_evidence.ASSERTION_KINDS | adoption_evidence.AST_ASSERTION_KINDS
+    )
+
+
 # ── Each evaluation names the exact revision it evaluated ──────────────────
 
 
@@ -268,10 +421,12 @@ def test_erp_reports_the_kernel_is_sync_only_today() -> None:
 
 
 def test_erp_async_status_satisfied_is_refused_not_silently_accepted() -> None:
+    revision = "e" * 40
     binding = gate.ProductBinding(
         product="erp",
-        revision="e" * 40,
+        revision=revision,
         evidence={
+            "protected_main_row": _protected_main_row("dotmac_erp", revision),
             "sync_requirements_satisfied": True,
             "async_status": "satisfied",
         },
@@ -290,10 +445,14 @@ def test_erp_async_status_transitional_with_sync_satisfied_passes() -> None:
 
 
 def test_erp_missing_async_status_is_refused_as_a_shape_problem() -> None:
+    revision = "f" * 40
     binding = gate.ProductBinding(
         product="erp",
-        revision="f" * 40,
-        evidence={"sync_requirements_satisfied": True},
+        revision=revision,
+        evidence={
+            "protected_main_row": _protected_main_row("dotmac_erp", revision),
+            "sync_requirements_satisfied": True,
+        },
     )
     result = gate.evaluate_erp(binding)
     assert result.satisfied is False
@@ -357,10 +516,14 @@ def test_sub_missing_boundary_method_is_reported(tmp_path: Path) -> None:
 
 
 def test_sub_guc_ordering_shape_refusals_are_reported() -> None:
+    revision = "1" * 40
     binding = gate.ProductBinding(
         product="sub",
-        revision="1" * 40,
-        evidence={"guc_hook_ordered_after_isolation_mode": True},
+        revision=revision,
+        evidence={
+            "protected_main_row": _protected_main_row("dotmac_sub", revision),
+            "guc_hook_ordered_after_isolation_mode": True,
+        },
     )
     result = gate.evaluate_sub(binding)
     assert result.satisfied is False
@@ -371,10 +534,12 @@ def test_sub_guc_ordering_shape_refusals_are_reported() -> None:
 
 
 def test_sub_observed_false_values_are_reported_as_observed_not_presumed() -> None:
+    revision = "2" * 40
     binding = gate.ProductBinding(
         product="sub",
-        revision="2" * 40,
+        revision=revision,
         evidence={
+            "protected_main_row": _protected_main_row("dotmac_sub", revision),
             "guc_hook_ordered_after_isolation_mode": False,
             "tenant_scope_composed_with_readonly_or_serializable": True,
         },
@@ -420,6 +585,7 @@ def test_bindings_loader_accepts_a_real_bound_revision(tmp_path: Path) -> None:
     changes, produces a bound evaluation."""
     import json as _json
 
+    revision = "a" * 40
     real = tmp_path / "bindings.json"
     real.write_text(
         _json.dumps(
@@ -427,8 +593,11 @@ def test_bindings_loader_accepts_a_real_bound_revision(tmp_path: Path) -> None:
                 "schema": "compatibility_gate_bindings_v1",
                 "bindings": {
                     "academy": {
-                        "revision": "a" * 40,
+                        "revision": revision,
                         "evidence": {
+                            "protected_main_row": _protected_main_row(
+                                "dotmac_academy_app", revision
+                            ),
                             "unpublished_session_local_usage_sites": [],
                             "strict_bind_without_reference_import": True,
                         },

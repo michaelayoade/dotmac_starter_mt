@@ -4,17 +4,17 @@
     "academy": {
       "revision": null,
       "evidence": null,
-      "_note": "Awaiting Academy #130 (re-derived and merged). Unbound: no immutable revision has been named yet."
+      "_note": "Awaiting Academy #130, re-derived under Governance #87 (merged as 6fbeffca) in a separate lane. Unbound: no protected-main revision carrying final readiness evidence has been named yet. When bound, evidence must also carry protected_main_row (kind pinned_at|composed_at, commit == revision, expected naming the ancestry check result) -- a branch-only SHA is refused even if well-formed."
     },
     "erp": {
       "revision": null,
       "evidence": null,
-      "_note": "Awaiting an exact immutable ERP readiness revision. Unbound: none exists yet."
+      "_note": "Awaiting an exact protected-main ERP readiness revision. Unbound: none exists yet. See academy's note for the protected_main_row shape required once bound."
     },
     "sub": {
       "revision": null,
       "evidence": null,
-      "_note": "Awaiting an exact immutable Sub readiness revision. Unbound: none exists yet."
+      "_note": "Awaiting an exact protected-main Sub readiness revision. Unbound: none exists yet. See academy's note for the protected_main_row shape required once bound."
     }
   }
 }
