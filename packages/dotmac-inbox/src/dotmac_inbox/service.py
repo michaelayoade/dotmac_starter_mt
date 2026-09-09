@@ -192,8 +192,10 @@ def create_conversation(
         subject=subject or identity.subject,
         tags=list(tags) or None,
     )
-    # Lazy by design: importing dotmac_kernel.db constructs configured engines,
-    # while reading this package's manifest/version must require no database.
+    # Lazy by design, as a matter of local style: reading this package's
+    # manifest/version must require no database, even though
+    # `dotmac_kernel.transactions` (unlike `dotmac_kernel.db`) is itself
+    # engine-free.
     from dotmac_kernel.transactions import conflict_savepoint
 
     try:
