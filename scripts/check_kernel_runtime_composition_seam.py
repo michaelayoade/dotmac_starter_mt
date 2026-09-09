@@ -25,15 +25,19 @@ against:
   ASGI lifespan (`with TestClient(app) as client`), runs
   `_required_setting_errors()` (a startup check) through
   `get_database_runtime().platform_session()` and serves `/health`.
-* **An authenticated request** — `POST /platform/auth/login` then
-  `POST /platform/auth/logout` against `platform_auth_router` mounted with no
-  other machinery: `login`/`require_platform_admin` resolve their session
-  through `dotmac_kernel.deps.get_platform_db`, which resolves the runtime
-  through `get_database_runtime()`.
-* **A CLI-shaped entry point** — a function in the shape of
-  `scripts/create_platform_admin.py` (build one, from a script that owns no
-  request), but reached through `get_database_runtime().platform_session()`
-  instead of building its own engine.
+* **An authenticated request** — `POST /platform/auth/logout` against
+  `platform_auth_router` mounted with no other machinery, driven by a
+  PRE-SEEDED `PlatformSession` row rather than a minted password: this probe
+  proves the runtime seam, not the credential lifecycle, so it never calls
+  `login()` and never hashes a password (hard rule 42 — password hashing has
+  one owner, `dotmac_kernel.credential_lifecycle`, and a probe with no real
+  credential to verify has no business calling it either). `require_platform_admin`
+  resolves its session through `dotmac_kernel.deps.get_platform_db`, which
+  resolves the runtime through `get_database_runtime()`.
+* **A CLI-shaped entry point** — a tenant-provisioning command (no credential
+  material involved at all) reached through
+  `get_database_runtime().platform_session()` instead of building its own
+  engine.
 * **A worker path** — `dotmac_kernel.messaging.worker.run_once` is handed
   `get_database_runtime().platform_session_factory`/`.session_factory`
   directly (its documented contract: it "NEVER constructs an engine or a
@@ -76,9 +80,10 @@ def main() -> None:
     )
     from dotmac_kernel.app_factory import create_app
     from dotmac_kernel.assembly import ProductAssemblySpec
-    from dotmac_kernel.models import Base
-    from dotmac_kernel.models_platform import PlatformAdmin
-    from dotmac_kernel.security import hash_password
+    from dotmac_kernel.models import Base, Tenant
+    from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
+    from dotmac_kernel.platform_auth import issue_platform_token
+    from dotmac_kernel.security import hash_token
     from dotmac_kernel.session_runtime import DatabaseRuntime, get_database_runtime
     from fastapi.testclient import TestClient
     from sqlalchemy import create_engine
@@ -99,14 +104,26 @@ def main() -> None:
     Base.metadata.create_all(engine)
     runtime = DatabaseRuntime(engine=engine)
 
-    seeded_email = "probe-admin@platform.example.test"
-    seeded_password = "probe-password-not-a-secret"  # noqa: S105  # nosec B105 -- fixture
+    # A pre-seeded admin + session, not a minted password: this probe proves
+    # the RUNTIME seam, not the credential lifecycle (hard rule 42 — password
+    # hashing has one owner, `dotmac_kernel.credential_lifecycle`, and `login()`
+    # is never called here, so `password_hash` holds an inert placeholder no
+    # code ever hashes or verifies). `issue_platform_token`/`hash_token` are
+    # the kernel's own SESSION-token machinery, not password hashing.
     with runtime.platform_session() as seed_db:
+        admin = PlatformAdmin(
+            email="probe-admin@platform.example.test",
+            password_hash="unused-not-a-real-credential-hash",  # noqa: S106  # nosec B106 -- inert, never hashed or verified
+            is_active=True,
+        )
+        seed_db.add(admin)
+        seed_db.flush()
+        seeded_token, expires_at = issue_platform_token(admin.id)
         seed_db.add(
-            PlatformAdmin(
-                email=seeded_email,
-                password_hash=hash_password(seeded_password),
-                is_active=True,
+            PlatformSession(
+                admin_id=admin.id,
+                token_hash=hash_token(seeded_token),
+                expires_at=expires_at,
             )
         )
 
@@ -152,53 +169,36 @@ def main() -> None:
     platform_app = FastAPI()
     platform_app.include_router(platform_auth_router)
     with TestClient(platform_app, base_url="http://localhost") as platform_client:
-        login = platform_client.post(
-            "/platform/auth/login",
-            json={"email": seeded_email, "password": seeded_password},
-        )
-        assert login.status_code == 200, login.text
-        token = login.json()["access_token"]
-
+        # No `login()` call: the session was pre-seeded above. This is exactly
+        # `require_platform_admin` (the authenticated-request guard) resolving
+        # `deps.get_platform_db` -> `get_database_runtime()` against the
+        # product runtime, on a real bearer token this probe never hashed a
+        # password to obtain.
         logout = platform_client.post(
             "/platform/auth/logout",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"Authorization": f"Bearer {seeded_token}"},
         )
         assert logout.status_code == 204, logout.text
     print(
-        "PASS authenticated request: platform login+logout resolved "
+        "PASS authenticated request: platform logout resolved "
         "deps.get_platform_db through the product runtime"
     )
 
     # ── A CLI-SHAPED ENTRY POINT ──────────────────────────────────────────────
     #
-    # Same job as `scripts/create_platform_admin.py` (bootstrap/rotate a
-    # platform admin from a non-request caller), reached through
-    # `get_database_runtime()` instead of that script's own `create_engine`.
-    def cli_upsert_platform_admin(email: str, password: str) -> None:
+    # A tenant-provisioning command — no credential material involved —
+    # reached through `get_database_runtime()` instead of building its own
+    # engine, the way a real CLI script would.
+    def cli_create_tenant(slug: str, name: str) -> None:
         with get_database_runtime().platform_session() as db:
-            from sqlalchemy import func, select
+            db.add(Tenant(slug=slug, name=name))
 
-            admin = db.scalars(
-                select(PlatformAdmin).where(
-                    func.lower(PlatformAdmin.email) == email.lower()
-                )
-            ).first()
-            if admin is None:
-                db.add(
-                    PlatformAdmin(email=email, password_hash=hash_password(password))
-                )
-            else:
-                admin.password_hash = hash_password(password)
-
-    cli_upsert_platform_admin("probe-cli-admin@platform.example.test", "another-pw")
+    cli_create_tenant("probe-cli-tenant", "Probe CLI Tenant")
     with runtime.platform_session() as verify_db:
-        from sqlalchemy import func, select
+        from sqlalchemy import select
 
         found = verify_db.scalars(
-            select(PlatformAdmin).where(
-                func.lower(PlatformAdmin.email)
-                == "probe-cli-admin@platform.example.test"
-            )
+            select(Tenant).where(Tenant.slug == "probe-cli-tenant")
         ).first()
         assert found is not None, "the CLI-shaped entry point did not persist"
     print("PASS CLI entry point: upsert ran through get_database_runtime()")

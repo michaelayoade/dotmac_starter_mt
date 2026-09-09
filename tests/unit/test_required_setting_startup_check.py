@@ -176,10 +176,15 @@ def test_a_clean_run_returns_the_validators_findings(monkeypatch) -> None:
     def _resolver():
         yield _Session()
 
-    import dotmac_kernel.db as db_mod
+    import dotmac_kernel.session_runtime as session_runtime
     import dotmac_kernel.settings_resolver as sr
 
-    monkeypatch.setattr(db_mod, "platform_session", _resolver, raising=True)
+    monkeypatch.setattr(
+        session_runtime,
+        "get_database_runtime",
+        lambda: _FakeRuntime(_resolver),
+        raising=True,
+    )
     monkeypatch.setattr(
         sr, "seed_settings_from_env", lambda _db: order.append("seed"), raising=True
     )
