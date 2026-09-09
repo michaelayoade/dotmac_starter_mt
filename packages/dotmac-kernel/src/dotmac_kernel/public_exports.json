@@ -1302,7 +1302,6 @@
       "exports": [
         "CANONICAL_TENANT_SETTING",
         "DatabaseRuntime",
-        "IsolationModeTooLateError",
         "NoDatabaseRuntimeError",
         "RuntimeBindingError",
         "TenantLookup",

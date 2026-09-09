@@ -38,9 +38,11 @@ Because SQLAlchemy cannot be relied on to refuse, `_isolated_session` (the
 private implementation behind both `readonly_session` and
 `serializable_session`) refuses ON ITS OWN BEHALF: before calling
 `Session.connection(execution_options=...)`, it checks `db.in_transaction()`
-and raises `dotmac_kernel.session_runtime.IsolationModeTooLateError` if a
-transaction has already begun on that session.
-`test_readonly_session_refuses_a_session_that_already_has_a_transaction`
+and raises `dotmac_kernel.session_runtime._IsolationModeTooLateError` if a
+transaction has already begun on that session. That error stays PRIVATE
+(not in `__all__`, not in `public_exports.json`) because no caller reachable
+through today's public surface can trigger it — see that class's own
+docstring. `test_readonly_session_refuses_a_session_that_already_has_a_transaction`
 below plants exactly the situation `_isolated_session`'s docstring warns
 about — a session handed to it that already began a transaction — and shows
 the KERNEL refuses loudly, not SQLAlchemy.
@@ -59,7 +61,7 @@ import warnings
 import pytest
 from dotmac_kernel.db import runtime
 from dotmac_kernel.models import Role
-from dotmac_kernel.session_runtime import IsolationModeTooLateError
+from dotmac_kernel.session_runtime import _IsolationModeTooLateError
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import DBAPIError, SAWarning
 from sqlalchemy.orm import Session
@@ -191,10 +193,15 @@ def test_readonly_session_refuses_a_session_that_already_has_a_transaction(
     `_isolated_session`'s docstring warns about a future caller that reuses
     or otherwise pre-touches a session before reaching it. There is no such
     caller today — `_isolated_session` always constructs a fresh session —
-    so this plants that exact situation directly: `_session_factory` is
-    patched to hand back a session that has already executed a statement
-    (autobegun a transaction), then the PUBLIC `readonly_session()` is
-    exercised exactly as a real caller would use it.
+    so THIS GUARD IS UNREACHABLE THROUGH THE PUBLIC API as it stands: no
+    combination of public calls on `readonly_session()`/`serializable_session()`
+    can hand `_isolated_session` an already-transacted session. To plant the
+    situation at all, this test reaches PAST the public surface and patches
+    the private `_session_factory` attribute to hand back a session that has
+    already executed a statement (autobegun a transaction); only then is the
+    PUBLIC `readonly_session()` exercised, exactly as a real caller would use
+    it. `_IsolationModeTooLateError` itself stays private for the identical
+    reason — see its own docstring.
 
     Sensitivity: if the Kernel's own `db.in_transaction()` check in
     `_isolated_session` were removed, this would not raise at all —
@@ -203,14 +210,14 @@ def test_readonly_session_refuses_a_session_that_already_has_a_transaction(
     raising — so `readonly_session()` would silently hand back a session
     running at the DEFAULT isolation, not REPEATABLE READ + read-only. That
     silent-default outcome, not an exception of any kind, is the actual
-    defect this test exists to catch; `IsolationModeTooLateError` is the
+    defect this test exists to catch; `_IsolationModeTooLateError` is the
     Kernel's replacement for the raise SQLAlchemy does not provide.
     """
     pre_transacted = runtime.session_factory()
     pre_transacted.execute(text("SELECT 1"))  # begins the transaction, unscoped
     monkeypatch.setattr(runtime, "_session_factory", lambda: pre_transacted)
 
-    with pytest.raises(IsolationModeTooLateError, match="already begun a transaction"):
+    with pytest.raises(_IsolationModeTooLateError, match="already begun a transaction"):
         with runtime.readonly_session():
             pass
 

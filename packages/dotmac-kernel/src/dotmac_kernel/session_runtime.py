@@ -84,7 +84,6 @@ from sqlalchemy.orm import Session, sessionmaker
 __all__ = [
     "CANONICAL_TENANT_SETTING",
     "DatabaseRuntime",
-    "IsolationModeTooLateError",
     "NoDatabaseRuntimeError",
     "RuntimeBindingError",
     "TenantLookup",
@@ -140,7 +139,7 @@ class _TransactionMode(Enum):
 #: not refused. So the ordering guarantee below cannot be delegated to
 #: SQLAlchemy; `_isolated_session` checks the session's own state itself,
 #: before calling `Session.connection(execution_options=...)`, and raises
-#: `IsolationModeTooLateError` on its own behalf if a connection/transaction
+#: `_IsolationModeTooLateError` on its own behalf if a connection/transaction
 #: is already established for the bind.
 _EXECUTION_OPTIONS: dict[_TransactionMode, dict[str, Any]] = {
     _TransactionMode.READ_ONLY: {
@@ -513,10 +512,16 @@ class DatabaseRuntime:
         which is also the precondition under which SQLAlchemy would have
         silently discarded the options above. `_isolated_session` always
         constructs a fresh session immediately above, so this branch is not
-        reachable through today's only two callers — it exists so a FUTURE
-        caller that reuses or otherwise pre-touches a session before
-        reaching this method fails loudly instead of inheriting the
-        default isolation under a name that promises otherwise.
+        reachable through today's only two callers, `readonly_session` and
+        `serializable_session` — it exists so a FUTURE caller that reuses or
+        otherwise pre-touches a session before reaching this method fails
+        loudly instead of inheriting the default isolation under a name
+        that promises otherwise. `_IsolationModeTooLateError` stays private
+        (not in `__all__`, not in `public_exports.json`) for exactly that
+        reason: no public path can trigger it today, and it subclasses
+        `RuntimeError` so a caller that already catches `RuntimeError` loses
+        nothing — the PR that introduces the future caller is the right
+        place to promote the name, with that caller as its named consumer.
 
         Same disposal contract as `platform_session`/`tenant_session`:
         commit on success, rollback on error, close always — no second
@@ -525,7 +530,7 @@ class DatabaseRuntime:
         db = self._session_factory()
         try:
             if db.in_transaction():
-                raise IsolationModeTooLateError(
+                raise _IsolationModeTooLateError(
                     f"Cannot apply isolation mode {mode.value!r}: this "
                     "session has already begun a transaction (a statement "
                     "ran, or a connection was already established, before "
@@ -782,7 +787,7 @@ class RuntimeBindingError(RuntimeError):
     needs."""
 
 
-class IsolationModeTooLateError(RuntimeError):
+class _IsolationModeTooLateError(RuntimeError):
     """`_isolated_session` refused: the session it was handed had already
     begun a transaction, so applying a per-transaction isolation mode now
     would be too late to be trustworthy.
@@ -794,6 +799,16 @@ class IsolationModeTooLateError(RuntimeError):
     `serializable_session()` could hand back a session that silently runs at
     the DEFAULT isolation while its name promises REPEATABLE READ + read-only
     or SERIALIZABLE.
+
+    DELIBERATELY PRIVATE: not in `__all__`, not in `public_exports.json`.
+    `_isolated_session` always constructs a fresh session, so no caller
+    reachable through today's public surface (`readonly_session`,
+    `serializable_session`) can trigger this branch — publishing the name
+    now would add a permanent contract entry with no public consumer. It
+    subclasses `RuntimeError`, so a future caller that reuses a session
+    before reaching `_isolated_session` still fails loudly and is still
+    catchable generically; that future caller's own PR is the place to
+    promote this name, with itself as the named consumer.
     """
 
 
