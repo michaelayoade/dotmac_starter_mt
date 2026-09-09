@@ -405,6 +405,7 @@ from .trusted_host_source import (
     CandidateAttestationSubjectV2,
     InstalledHostAttestationSubjectV2,
     verify_attestation_pair,
+    verify_candidate_attestation,
 )
 from .vantage import (
     PRIVATE_RANGES,
@@ -735,5 +736,6 @@ __all__ = [
     "CandidateAttestationSubjectV2",
     "InstalledHostAttestationSubjectV2",
     "verify_attestation_pair",
+    "verify_candidate_attestation",
     "attest_authorization_receipt_v2",
 ]

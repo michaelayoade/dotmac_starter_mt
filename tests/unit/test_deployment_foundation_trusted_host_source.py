@@ -23,6 +23,7 @@ from dotmac_deployment_foundation.trusted_host_source import (
     CandidateAttestationSubjectV2,
     InstalledHostAttestationSubjectV2,
     verify_attestation_pair,
+    verify_candidate_attestation,
 )
 
 NOW = datetime(2026, 9, 7, tzinfo=UTC)
@@ -497,3 +498,204 @@ def test_malformed_verification_inputs_are_named(changes: dict[str, object]) -> 
     with pytest.raises(SpecError) as raised:
         verify_attestation_pair(**arguments)  # type: ignore[arg-type]
     assert raised.value.code == trusted_host_source.OBSERVATION_MALFORMED
+
+
+# ── the candidate-verification seam ─────────────────────────────────────────
+
+
+def test_seam_returns_the_authenticated_candidate_subject() -> None:
+    """A trusted host workload gets the verified subject back, not a bare
+    envelope and not something it handed in itself."""
+    candidate, _ = _pair()
+    subject = verify_candidate_attestation(
+        candidate=candidate, verifier=Verifier(), trust_policy=_policy(), now=NOW
+    )
+    assert isinstance(subject, CandidateAttestationSubjectV2)
+    assert subject.package == "dotmac-deployment-foundation"
+    assert subject.version == "0.4.0a2"
+
+
+def test_seam_negative_control_refuses_a_key_outside_the_resolved_roots() -> None:
+    """A valid-looking envelope signed by a key not in the Control-resolved
+    candidate roots is refused, not silently trusted."""
+    candidate, _ = _pair()
+    outside_root_key = dataclasses.replace(
+        candidate, public_key_fingerprint="sha256:" + "e" * 64
+    )
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_candidate_attestation(
+            candidate=outside_root_key,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            now=NOW,
+        )
+    assert raised.value.code == "trusted-host-source-key-not-trusted"
+
+
+def test_seam_signature_has_no_parameter_a_caller_could_use_to_bypass_it() -> None:
+    """The signature itself, not a docstring, makes the bypass inexpressible:
+    no subject, receipt, digest, or bare-root parameter exists to smuggle a
+    caller-chosen fact past verification."""
+    import inspect
+
+    parameters = set(inspect.signature(verify_candidate_attestation).parameters)
+    assert parameters == {"candidate", "verifier", "trust_policy", "now"}
+    for forbidden in ("subject", "receipt", "digest", "root", "roots"):
+        assert forbidden not in parameters
+
+
+def test_module_carries_no_mutable_trust_state_a_caller_could_poison() -> None:
+    """There is no module-level mutable (a registry, a cache, a default root
+    list) through which a caller could inject trust material instead of
+    going through the resolved `AttestationTrustPolicy` parameter."""
+    for name, value in vars(trusted_host_source).items():
+        if name.startswith("_") or not isinstance(value, list | dict | set):
+            continue
+        pytest.fail(f"unexpected module-level mutable {name!r} = {value!r}")
+
+
+def test_pair_reuses_the_seam_rather_than_a_parallel_implementation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`verify_attestation_pair` must call the seam for its candidate half.
+    Replacing the seam with a spy proves the call happens and its return
+    value is what feeds the rest of the pair check, rather than the pair
+    re-deriving the subject some other way."""
+    candidate, installed = _pair()
+    calls: list[dict[str, object]] = []
+    real_seam = trusted_host_source.verify_candidate_attestation
+
+    def spy(**kwargs: object) -> CandidateAttestationSubjectV2:
+        calls.append(kwargs)
+        return real_seam(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(trusted_host_source, "verify_candidate_attestation", spy)
+    assert (
+        trusted_host_source.verify_attestation_pair(
+            candidate=candidate,
+            installed=installed,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+        is None
+    )
+    assert len(calls) == 1
+    assert calls[0]["candidate"] is candidate
+
+    # If the spy returns a WRONG subject, the pair's own downstream digest
+    # binding check must be the thing that catches it -- proving the pair
+    # actually consumes the seam's return value rather than recomputing an
+    # equivalent subject in parallel.
+    def wrong_subject_spy(**kwargs: object) -> CandidateAttestationSubjectV2:
+        real: CandidateAttestationSubjectV2 = real_seam(**kwargs)  # type: ignore[arg-type]
+        return dataclasses.replace(real, version="tampered")
+
+    monkeypatch.setattr(
+        trusted_host_source, "verify_candidate_attestation", wrong_subject_spy
+    )
+    with pytest.raises(PreconditionFailed) as raised:
+        trusted_host_source.verify_attestation_pair(
+            candidate=candidate,
+            installed=installed,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+    assert raised.value.code == "trusted-host-source-subject-mismatch"
+
+
+def test_a_defect_in_shared_verification_surfaces_in_both_entry_points() -> None:
+    """Plant: neuter the crypto seam so it accepts anything. If the seam and
+    `verify_attestation_pair` shared one code path, the SAME defect makes
+    BOTH wrongly accept a bad signature. Two independent implementations
+    could disagree; this one plant proves they do not exist here."""
+    candidate, installed = _pair()
+    bad_signature = dataclasses.replace(candidate, signature="not-a-signature")
+
+    # Sensitivity control: with the real verifier, both refuse.
+    with pytest.raises(PreconditionFailed) as seam_control:
+        verify_candidate_attestation(
+            candidate=bad_signature,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            now=NOW,
+        )
+    assert seam_control.value.code == "trusted-host-source-signature-invalid"
+    with pytest.raises(PreconditionFailed) as pair_control:
+        verify_attestation_pair(
+            candidate=bad_signature,
+            installed=installed,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+    assert pair_control.value.code == "trusted-host-source-signature-invalid"
+
+    class AlwaysTrueVerifier:
+        def verify(self, **_: object) -> bool:
+            return True
+
+    subject = verify_candidate_attestation(
+        candidate=bad_signature,
+        verifier=AlwaysTrueVerifier(),
+        trust_policy=_policy(),
+        now=NOW,
+    )
+    assert subject.package == "dotmac-deployment-foundation"
+    assert (
+        verify_attestation_pair(
+            candidate=bad_signature,
+            installed=installed,
+            verifier=AlwaysTrueVerifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+        is None
+    )
+
+
+def test_no_parallel_candidate_verification_call_site_exists() -> None:
+    """Static guard: `verify_attestation_pair` must call the shared seam
+    rather than repeating an inline `_verify(..., CANDIDATE_ATTESTATION_
+    PURPOSE, ...)` call. Fails if a future change reintroduces a second,
+    parallel candidate-authentication code path."""
+    import inspect
+
+    pair_source = inspect.getsource(verify_attestation_pair)
+    assert "verify_candidate_attestation(" in pair_source
+    assert "CANDIDATE_ATTESTATION_PURPOSE" not in pair_source
+
+    module_source = inspect.getsource(trusted_host_source)
+    # Exactly one call-site use as an argument (the declaration and the
+    # __all__ / import entries are the only other legitimate occurrences).
+    assert module_source.count("        CANDIDATE_ATTESTATION_PURPOSE,\n") == 1
+
+
+def test_same_key_signed_both_survives_the_refactor_with_distinct_roots() -> None:
+    """Re-proves SAME_KEY_SIGNED_BOTH after the refactor. Building a policy
+    from one shared key trips TRUST_ROOTS_NOT_DISTINCT at construction
+    before verify_attestation_pair ever runs, so this uses two UNRELATED
+    roots in the policy but reuses one signing key on both envelopes."""
+    candidate, installed = _pair()
+    installed_same_key = dataclasses.replace(
+        installed,
+        public_key_fingerprint=CANDIDATE_FP,
+        signature=hmac.new(
+            CANDIDATE_KEY, installed.signed_bytes(), hashlib.sha256
+        ).hexdigest(),
+    )
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_attestation_pair(
+            candidate=candidate,
+            installed=installed_same_key,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+    assert raised.value.code == SAME_KEY_SIGNED_BOTH
