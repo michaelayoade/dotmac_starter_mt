@@ -32,7 +32,7 @@ PROBE = ROOT / "scripts" / "check_kernel_runtime_composition_seam.py"
 
 _EXPECTED_STAGES = (
     "PASS boot: create_app + startup validation ran on the product runtime",
-    "PASS authenticated request: platform login+logout resolved "
+    "PASS authenticated request: platform logout resolved "
     "deps.get_platform_db through the product runtime",
     "PASS CLI entry point: upsert ran through get_database_runtime()",
     "PASS worker path: run_once reached the product runtime's session",
@@ -78,6 +78,32 @@ def test_every_named_path_runs_on_the_product_runtime_while_db_is_unimportable(
             f"expected stage missing from probe output: {stage!r}\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
+
+
+def test_authenticated_request_stage_fails_when_the_fallback_is_restored(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity control for the authenticated-request stage.
+
+    That stage sidesteps `login()` to avoid hashing a password (hard rule 42),
+    driving `POST /platform/auth/logout` from a pre-seeded session instead of
+    a minted credential. That is only a proof of the runtime seam if it
+    genuinely depends on which runtime is installed — otherwise it is a stub
+    that would pass whether or not the seam works, and would keep passing if
+    the seam were deleted.
+
+    `main_fallback_sensitivity()` (`argv[1] == "fallback"`) seeds the
+    IDENTICAL session into the product's own runtime but never installs it,
+    with `dotmac_kernel.db` genuinely importable this time (the fallback is
+    deliberately live). The reference runtime it falls back to is a
+    different, empty database, so the same logout call must be REFUSED.
+    """
+    result = _run_probe(tmp_path, argv=("fallback",))
+    assert result.returncode == 0, result.stderr
+    assert "PASS fallback sensitivity:" in result.stdout, (
+        f"the fallback sensitivity control did not report success\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
 
 
 def test_strict_mode_refuses_a_missed_binding_without_importing_the_reference(
