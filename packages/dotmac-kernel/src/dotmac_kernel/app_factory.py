@@ -517,6 +517,26 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     Raises `dotmac_kernel.modules.ModuleRegistryError` (a `ValueError`) if the
     module set is incoherent."""
+    # FIRST, before anything else can read it: install (or clear) the
+    # product's database runtime (kernel-runtime-composition-seam). A spec
+    # declaring `database_runtime` makes every kernel-owned path — the
+    # startup checks below, `dotmac_kernel.deps`, `middleware.tenant`, a
+    # machine-key dependency — resolve through THAT instance instead of the
+    # reference assembly's `dotmac_kernel.db.runtime`. `clear_database_runtime`
+    # on the None branch is the same reset discipline as
+    # `install_surface_globals`/`install_stylesheets` below: a second
+    # `create_app` in one process must not inherit a previous spec's
+    # installed runtime.
+    from dotmac_kernel.session_runtime import (
+        clear_database_runtime,
+        install_database_runtime,
+    )
+
+    if spec.database_runtime is not None:
+        install_database_runtime(spec.database_runtime)
+    else:
+        clear_database_runtime()
+
     setup_logging()
 
     disabled = set(spec.disabled_modules)

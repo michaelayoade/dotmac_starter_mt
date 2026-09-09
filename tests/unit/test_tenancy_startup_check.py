@@ -14,13 +14,22 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
-from dotmac_kernel import app_factory
+from dotmac_kernel import app_factory, session_runtime
 from dotmac_kernel.tenancy import clear_single_tenant_binding, single_tenant_binding
 
 
 class _FakeTenant:
     def __init__(self, slug: str) -> None:
         self.slug = slug
+
+
+class _FakeRuntime:
+    """A stand-in `DatabaseRuntime`, resolved through `get_database_runtime`
+    (kernel-runtime-composition-seam) rather than `dotmac_kernel.db` directly
+    — `_tenancy_errors` no longer imports `dotmac_kernel.db` itself."""
+
+    def __init__(self, resolver) -> None:
+        self.resolver_session = resolver
 
 
 def _fake_db(slugs: list[str]):
@@ -53,9 +62,11 @@ def _run(
     monkeypatch: pytest.MonkeyPatch, *, tenancy: str, slugs: list[str]
 ) -> list[str]:
     monkeypatch.setattr(app_factory.settings, "tenancy", tenancy, raising=False)
-    import dotmac_kernel.db as db_module
-
-    monkeypatch.setattr(db_module, "resolver_session", _fake_db(slugs))
+    monkeypatch.setattr(
+        session_runtime,
+        "get_database_runtime",
+        lambda: _FakeRuntime(_fake_db(slugs)),
+    )
     return app_factory._tenancy_errors()
 
 
@@ -97,13 +108,14 @@ def test_an_unreachable_store_is_not_a_tenancy_verdict(
     makes for its own store.
     """
     monkeypatch.setattr(app_factory.settings, "tenancy", "single", raising=False)
-    import dotmac_kernel.db as db_module
 
     @contextmanager
     def _boom():
         raise RuntimeError("connection refused")
         yield  # pragma: no cover
 
-    monkeypatch.setattr(db_module, "resolver_session", _boom)
+    monkeypatch.setattr(
+        session_runtime, "get_database_runtime", lambda: _FakeRuntime(_boom)
+    )
     assert app_factory._tenancy_errors() == []
     assert single_tenant_binding() is None

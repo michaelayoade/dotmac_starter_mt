@@ -32,6 +32,7 @@ from dotmac_kernel.planes import (
     ModulePlaneSelection,
     validate_module_plane_selections,
 )
+from dotmac_kernel.session_runtime import DatabaseRuntime
 from dotmac_kernel.web_surfaces import (
     AuthenticationProfileBinding,
     BrowserCapabilityProvision,
@@ -133,6 +134,23 @@ class ProductAssemblySpec:
     # Provider implementations keyed by interface (e.g. a ProvisioningProvider).
     # Empty for the reference assembly.
     providers: Mapping[str, object] = field(default_factory=dict)
+    # The product's OWN `DatabaseRuntime` (kernel-runtime-composition-seam).
+    # None (the reference assembly's setting) means `create_app` installs
+    # nothing and every kernel-owned path (`dotmac_kernel.deps`,
+    # `middleware.tenant`, the startup checks in this module, a machine-key
+    # dependency, a CLI/worker entry point that calls
+    # `dotmac_kernel.session_runtime.get_database_runtime`) falls back to the
+    # reference assembly's own instance, `dotmac_kernel.db.runtime`.
+    #
+    # A product with its own deployment configuration, credentials and tenant
+    # identity constructs its own `DatabaseRuntime` (hard rule 8: exactly two
+    # files own transaction authority, and this is not a third — it is the
+    # PRODUCT's single instance of the same class the reference assembly
+    # instantiates in `dotmac_kernel/db.py`) and sets it here. `create_app`
+    # installs it via `install_database_runtime` before anything that could
+    # read it runs, so `dotmac_kernel.db` — and the `DATABASE_URL` it would
+    # otherwise require at import — is never reached for that deployment.
+    database_runtime: DatabaseRuntime | None = None
     # The deployment's tenancy TOPOLOGY, declared rather than inferred.
     #
     # This creates NO code path. ADR-0003 is explicit that a single-tenant
