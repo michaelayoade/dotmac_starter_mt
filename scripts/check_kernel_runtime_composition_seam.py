@@ -607,7 +607,7 @@ def main_real_assembly_strict() -> None:
     from dotmac_kernel import create_app
     from dotmac_kernel.models import Base
     from dotmac_kernel.session_runtime import DatabaseRuntime
-    from dotmac_kernel.settings_models import DomainSetting
+    from dotmac_kernel.settings_models import DomainSetting, DomainSettingHistory
     from fastapi.testclient import TestClient
     from sqlalchemy import create_engine, select
     from sqlalchemy.pool import StaticPool
@@ -672,10 +672,21 @@ def main_real_assembly_strict() -> None:
     # mod_tkt` before this function's own assertions ever run — a FIXTURE
     # defect, not a finding about the seam. The property under test is
     # about IMPORTS AND BINDING, and the only runtime consumer this function
-    # actually drives is the settings feature's seed hook, which touches
-    # exactly one table (`domain_settings`) — so the fix is to create only
-    # that table, which also means no module schema is ever selected and
-    # there is nothing to ATTACH.
+    # actually drives is the settings feature's seed hook — so the fix is to
+    # create only what THAT hook actually writes, which also means no module
+    # schema is ever selected and there is nothing to ATTACH.
+    #
+    # Read `ensure_by_key` (the function `seed_platform_defaults` calls) end
+    # to end rather than growing this list by trial-and-error against CI:
+    # it writes the `DomainSetting` row itself, then unconditionally calls
+    # `_record_history`, which writes one `DomainSettingHistory` row and
+    # flushes — the second and LAST table this path touches. It also calls
+    # `_emit_change`, which is a no-op unless `SETTINGS_CHANGE_EVENTS` is
+    # set (unset here) and, even when active, swallows its own exceptions
+    # rather than propagating them — so it cannot be a third table this
+    # narrowed set needs. `.__table__` off each MAPPED CLASS, not a
+    # restated table-name string, so the set stays derived from the models
+    # `ensure_by_key` actually uses.
     #
     # `create_test_engine()` (the repo's existing fixture,
     # `tests/unit/conftest.py` and `dotmac_kernel.testing.harness` use it
@@ -698,7 +709,10 @@ def main_real_assembly_strict() -> None:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(product_engine, tables=[DomainSetting.__table__])
+    Base.metadata.create_all(
+        product_engine,
+        tables=[DomainSetting.__table__, DomainSettingHistory.__table__],
+    )
     product_runtime = DatabaseRuntime(engine=product_engine)
 
     spec = dataclasses.replace(
