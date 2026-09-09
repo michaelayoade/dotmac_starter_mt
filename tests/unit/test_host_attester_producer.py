@@ -15,6 +15,7 @@ indistinguishable from one that cannot refuse.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import hashlib
 import hmac
@@ -334,3 +335,78 @@ def test_the_leak_detector_itself_flags_a_planted_digest_parameter() -> None:
         raise NotImplementedError
 
     assert _names_leak_an_installed_digest(_signature_names(_decoy))
+
+
+# ── canonicalization: one writer, called, never restated ────────────────────
+
+
+def test_host_attester_carries_no_canonicalizer_of_its_own() -> None:
+    """`trusted_host_source.candidate_subject_digest` is the ONE computation
+    that binds an installed observation to its candidate subject —
+    `verify_attestation_pair` (imported unmodified from Foundation, above)
+    uses this exact function too. A producer-side restatement of
+    `json.dumps(doc, sort_keys=True, ...)` here would be a second answer to
+    the one question the package already answers: two independent
+    implementations of one canonicalization that could silently drift,
+    exactly the shape `tests/unit/test_deployment_foundation_recovery_plan.
+    py::test_the_TOOLING_canonicalizing_population_has_not_moved` exists to
+    catch across every script in this directory. This module must contain no
+    such call at all — it must call the package's own writer instead."""
+    source = (SCRIPTS / "host_attester.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+        if name == "dumps" and any(kw.arg == "sort_keys" for kw in node.keywords):
+            pytest.fail(
+                "host_attester.py canonicalizes for itself with "
+                "json.dumps(..., sort_keys=...) — it must call "
+                "trusted_host_source.candidate_subject_digest instead"
+            )
+    assert (
+        "candidate_subject_digest(" in source
+    ), "host_attester.py no longer calls the package's canonicalizer at all"
+
+
+def test_the_canonicalizer_plant_would_have_been_caught() -> None:
+    """SENSITIVITY PLANT: the exact shape this module used to carry — a
+    local `json.dumps(doc, sort_keys=True, ...)` call — must be detected by
+    the same walk, or the clean result above proves nothing about the
+    module's actual history."""
+    decoy = (
+        "import json\n"
+        "def f(d):\n"
+        "    return json.dumps(d, sort_keys=True, separators=(',', ':'))\n"
+    )
+    tree = ast.parse(decoy)
+    found = any(
+        isinstance(node, ast.Call)
+        and (getattr(node.func, "attr", None) or getattr(node.func, "id", None))
+        == "dumps"
+        and any(kw.arg == "sort_keys" for kw in node.keywords)
+        for node in ast.walk(tree)
+    )
+    assert found
+
+
+def test_build_installed_attestation_calls_the_packages_digest_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proves the WIRING, not just the absence of a local implementation:
+    `build_installed_attestation` must call `trusted_host_source.
+    candidate_subject_digest`, not merely happen to produce the same bytes
+    some other way."""
+    import dotmac_deployment_foundation.trusted_host_source as trusted_host_source
+
+    host_source = _host_source()
+    calls: list[object] = []
+    real = trusted_host_source.candidate_subject_digest
+
+    def spy(candidate):
+        calls.append(candidate)
+        return real(candidate)
+
+    monkeypatch.setattr(HOST_ATTESTER, "candidate_subject_digest", spy)
+    _build(host_source)
+    assert len(calls) == 1

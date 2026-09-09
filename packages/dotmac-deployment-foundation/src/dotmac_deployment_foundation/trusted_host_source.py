@@ -50,6 +50,7 @@ __all__ = [
     "AttestationVerifier",
     "CandidateAttestationSubjectV2",
     "InstalledHostAttestationSubjectV2",
+    "candidate_subject_digest",
     "verify_attestation_pair",
     "verify_candidate_attestation",
 ]
@@ -624,6 +625,29 @@ def verify_candidate_attestation(
     return CandidateAttestationSubjectV2.from_mapping(candidate.subject_mapping())
 
 
+def candidate_subject_digest(candidate: CandidateAttestationSubjectV2) -> Digest:
+    """The one computation that binds an installed observation to the
+    candidate subject it was measured against.
+
+    A host-side signer needs this SAME value to populate `InstalledHost
+    AttestationSubjectV2.candidate_subject_digest` before this module's own
+    `verify_attestation_pair` recomputes it (below) for comparison. Exposing
+    it here, rather than leaving each side to restate `json.dumps(...,
+    sort_keys=True, ...)` by hand, is what makes drift between the producer
+    and the verifier impossible rather than merely unlikely — the exact
+    property `execution_plan.py`/`recovery_plan.py` already hold for PLAN
+    canonicalization via `canonical_plan.canonical_plan_bytes`, generalised
+    to this module's own subject documents. `_canonical` stays private:
+    nothing outside this module needs the raw bytes, only this one digest.
+    """
+    if not isinstance(candidate, CandidateAttestationSubjectV2):
+        raise SpecError(
+            "candidate_subject_digest requires a CandidateAttestationSubjectV2",
+            code=OBSERVATION_MALFORMED,
+        )
+    return Digest.of(_canonical(candidate.canonical_document()))
+
+
 def verify_attestation_pair(
     *,
     candidate: AttestationEnvelopeV2 | None,
@@ -682,7 +706,7 @@ def verify_attestation_pair(
     installed_subject = InstalledHostAttestationSubjectV2.from_mapping(
         installed.subject_mapping()
     )
-    expected = Digest.of(_canonical(candidate_subject.canonical_document()))
+    expected = candidate_subject_digest(candidate_subject)
     if installed_subject.candidate_subject_digest != expected:
         raise PreconditionFailed(
             "installed host does not bind candidate subject", code=SUBJECT_MISMATCH

@@ -92,11 +92,9 @@ you were never given twice.
 from __future__ import annotations
 
 import dataclasses
-import json
 from datetime import UTC, datetime
 from typing import Final, Protocol, runtime_checkable
 
-from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.host_source import HostSource
 from dotmac_deployment_foundation.trusted_host_source import (
@@ -106,6 +104,7 @@ from dotmac_deployment_foundation.trusted_host_source import (
     AttestationEnvelopeV2,
     CandidateAttestationSubjectV2,
     InstalledHostAttestationSubjectV2,
+    candidate_subject_digest,
 )
 
 __all__ = [
@@ -114,27 +113,15 @@ __all__ = [
     "candidate_subject_from_host_source",
 ]
 
-
-#: Deliberately NOT imported from `trusted_host_source.py`: that module keeps
-#: this computation PRIVATE (`_canonical`). The identical canonicalization —
-#: sorted keys, no incidental whitespace, `allow_nan=False` — is restated here
-#: rather than reaching into another module's private internals. Any drift
-#: would surface immediately: this file's own tests build a candidate subject,
-#: compute its digest with this function, and confirm `verify_attestation_pair`
-#: (imported unmodified from Foundation) accepts the resulting pair.
-def _candidate_subject_digest(candidate: CandidateAttestationSubjectV2) -> Digest:
-    if not isinstance(candidate, CandidateAttestationSubjectV2):
-        raise SpecError(
-            "_candidate_subject_digest requires a CandidateAttestationSubjectV2",
-            code=OBSERVATION_MALFORMED,
-        )
-    canonical = json.dumps(
-        candidate.canonical_document(),
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode()
-    return Digest.of(canonical)
+#: The candidate-subject-binding digest is a document `trusted_host_source.py`
+#: already owns a canonicalizer for: `verify_attestation_pair` recomputes this
+#: exact value, over this exact document, to compare against what a host
+#: signed. A producer-side restatement of `json.dumps(..., sort_keys=True,
+#: ...)` here would be a second answer to the one question the package's own
+#: `candidate_subject_digest` already answers — the same shape
+#: `execution_plan.py`/`recovery_plan.py` refuse by routing through
+#: `canonical_plan.canonical_plan_bytes` instead of canonicalizing for
+#: themselves. This module calls the package's function directly.
 
 
 #: A placeholder the envelope constructor accepts (non-empty text) so its
@@ -229,7 +216,7 @@ def build_installed_attestation(
         host_source.distribution,
         host_source.version,
         host_source.artifact_digest,
-        _candidate_subject_digest(candidate_subject),
+        candidate_subject_digest(candidate_subject),
     )
 
     envelope = AttestationEnvelopeV2(
