@@ -429,7 +429,9 @@ PRODUCT_SPECS: Final[Mapping[str, ProductSpec]] = {
                 "statement-timeout-and-pool-tuning-set-at-construction",
                 "compatibility",
             ),
-            RequirementSpec("legacy-tenant-guc-is-a-single-named-value", "compatibility"),
+            RequirementSpec(
+                "legacy-tenant-guc-is-a-single-named-value", "compatibility"
+            ),
             RequirementSpec(
                 "no-runtime-bypass-rls-guc-writer-remains", "compatibility"
             ),
@@ -480,7 +482,10 @@ PRODUCT_SPECS: Final[Mapping[str, ProductSpec]] = {
 if set(PRODUCT_SPECS) != set(PRODUCTS):
     raise RuntimeError("PRODUCT_SPECS must declare exactly the names in PRODUCTS")
 
-def _duplicate_requirement_ids(specs: Mapping[str, ProductSpec]) -> dict[str, list[str]]:
+
+def _duplicate_requirement_ids(
+    specs: Mapping[str, ProductSpec],
+) -> dict[str, list[str]]:
     """Guard 1: for each product, the requirement ids its `ProductSpec`
     selects, if any id is selected more than once — a duplicate would make
     one product-authored `satisfied` boolean silently shadow another,
@@ -1193,10 +1198,13 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
             artefact_digest=outcome.digest,
         )
 
+    academy_status = (
+        "satisfied" if requirements.compatibility_satisfied else "evaluation_refused"
+    )
     return EvaluationResult(
         product="academy",
         revision=binding.revision,
-        status="satisfied" if requirements.compatibility_satisfied else "evaluation_refused",
+        status=academy_status,
         findings=tuple(findings),
         artefact_digest=outcome.digest,
     )
@@ -1269,10 +1277,13 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
             artefact_digest=outcome.digest,
         )
 
+    erp_status = (
+        "satisfied" if requirements.compatibility_satisfied else "evaluation_refused"
+    )
     return EvaluationResult(
         product="erp",
         revision=binding.revision,
-        status="satisfied" if requirements.compatibility_satisfied else "evaluation_refused",
+        status=erp_status,
         findings=tuple(findings),
         artefact_digest=outcome.digest,
     )
@@ -1357,9 +1368,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
             artefact_digest=outcome.digest,
         )
 
-    satisfied = (
-        not missing and ordering_holds and requirements.compatibility_satisfied
-    )
+    satisfied = not missing and ordering_holds and requirements.compatibility_satisfied
     return EvaluationResult(
         product="sub",
         revision=binding.revision,

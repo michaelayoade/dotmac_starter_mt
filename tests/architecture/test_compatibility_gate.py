@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -98,18 +99,19 @@ def _record(*, repository: str, subject: str, requirements: list[dict]) -> dict:
     }
 
 
-_ACADEMY_SATISFIED_REQUIREMENTS = [
-    _requirement("strict_bind_without_reference_import", satisfied=True),
-    _requirement("no_unpublished_session_local_usage", satisfied=True),
-]
-_ERP_SATISFIED_REQUIREMENTS = [
-    _requirement("sync_requirements_satisfied", satisfied=True),
-    _requirement(gate.ASYNC_TRANSITIONAL_REQUIREMENT_ID, satisfied=True),
-]
-_SUB_SATISFIED_REQUIREMENTS = [
-    _requirement("guc_hook_ordered_after_isolation_mode", satisfied=True),
-    _requirement("tenant_scope_composed_with_readonly_or_serializable", satisfied=True),
-]
+def _satisfied_requirements_for(product: str) -> list[dict]:
+    """A record satisfying every id `PRODUCT_SPECS[product]` selects —
+    generated from the fixed spec itself, so this fixture can never drift
+    from the ids the module actually reads."""
+    return [
+        _requirement(requirement.requirement_id, satisfied=True)
+        for requirement in gate.PRODUCT_SPECS[product].requirements
+    ]
+
+
+_ACADEMY_SATISFIED_REQUIREMENTS = _satisfied_requirements_for("academy")
+_ERP_SATISFIED_REQUIREMENTS = _satisfied_requirements_for("erp")
+_SUB_SATISFIED_REQUIREMENTS = _satisfied_requirements_for("sub")
 _SATISFIED_REQUIREMENTS = {
     "academy": _ACADEMY_SATISFIED_REQUIREMENTS,
     "erp": _ERP_SATISFIED_REQUIREMENTS,
@@ -156,18 +158,31 @@ def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
     assert satisfied.satisfied is True
 
 
-def test_the_gate_refuses_today_with_the_default_bindings() -> None:
-    """The checked-in bindings file binds no revision for any product today
-    — the two source-material SHAs are explicitly NOT final bindings.
-    Running the gate must refuse, and every product's status must be
-    `unbound`, not a status implying a wrong or incompatible commit."""
+def test_the_gate_refuses_without_a_configured_clone_even_with_a_real_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The checked-in bindings file now binds the three real protected-`main`
+    coordinates (Academy #134, ERP #523, Sub #3041) — every product's
+    `revision` is a well-formed 40-hex commit, not `None`. Without a
+    configured local clone (the ordinary state on a workstation, as opposed
+    to the CI job that exports `COMPAT_GATE_CLONE_*`), the runner cannot
+    fetch a record and every evaluation refuses at `evidence_incomplete` —
+    NOT `unbound` (a revision IS named) and NOT `evaluation_refused` (no
+    record was ever read to disagree with)."""
+    for spec in gate.PRODUCT_SPECS.values():
+        monkeypatch.delenv(spec.clone_env_var, raising=False)
+
     bindings = gate.load_default_bindings()
+    for product in gate.PRODUCTS:
+        assert bindings[product].revision is not None
+        assert gate.IMMUTABLE_COMMIT.fullmatch(bindings[product].revision)
+
     result = gate.evaluate_gate(bindings)
     assert result.satisfied is False
     assert len(result.refusing) == 3
     for evaluation in result.evaluations:
-        assert evaluation.status == "unbound"
-        assert evaluation.revision is None
+        assert evaluation.status == "evidence_incomplete"
+        assert evaluation.revision is not None
 
 
 def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
@@ -438,14 +453,19 @@ def test_subject_mismatch_refuses(
 def test_missing_requirement_id_refuses_as_evidence_incomplete(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Guard 2: a record that omits one of `PRODUCT_SPECS["sub"]`'s SELECTED
+    ids refuses at `evidence_incomplete`, naming the absent id — never a
+    silent pass and never `evaluation_refused` (that status is reserved for
+    an id that IS present with `satisfied: false`)."""
     spec = gate.PRODUCT_SPECS["sub"]
+    first_id = spec.requirements[0].requirement_id
     repo = _init_repo(tmp_path, "sub-clone")
     record = _record(
         repository=spec.repository,
         subject=spec.subject,
-        requirements=[
-            _requirement("guc_hook_ordered_after_isolation_mode", satisfied=True)
-        ],
+        # Only the first selected id — every other one Starter reads is
+        # simply absent from this record.
+        requirements=[_requirement(first_id, satisfied=True)],
     )
     revision = _commit_readiness_record(repo, record)
     _mark_as_protected_main(repo, revision)
@@ -454,23 +474,29 @@ def test_missing_requirement_id_refuses_as_evidence_incomplete(
     result = gate.evaluate_sub(gate.ProductBinding(product="sub", revision=revision))
     assert result.status == "evidence_incomplete"
     assert any("no requirement with id" in f for f in result.findings)
+    missing_ids = {r.requirement_id for r in spec.requirements[1:]}
+    joined = " ".join(result.findings)
+    assert all(missing_id in joined for missing_id in missing_ids)
 
 
 def test_a_requirement_present_but_not_satisfied_refuses_as_evaluation_refused(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The product-authored `satisfied: false` is read and trusted — this is
+    """Guard 6: a false ERP compatibility-role fact still refuses. The
+    product-authored `satisfied: false` is read and trusted — this is
     exactly what "legitimate here, and only here" means: ERP's own CI wrote
     this false, and the gate reports it, never overrides it."""
     spec = gate.PRODUCT_SPECS["erp"]
+    failing_id = next(
+        r.requirement_id for r in spec.requirements if r.role == "compatibility"
+    )
+    requirements = [
+        _requirement(r.requirement_id, satisfied=(r.requirement_id != failing_id))
+        for r in spec.requirements
+    ]
     repo = _init_repo(tmp_path, "erp-clone")
     record = _record(
-        repository=spec.repository,
-        subject=spec.subject,
-        requirements=[
-            _requirement("sync_requirements_satisfied", satisfied=False),
-            _requirement(gate.ASYNC_TRANSITIONAL_REQUIREMENT_ID, satisfied=True),
-        ],
+        repository=spec.repository, subject=spec.subject, requirements=requirements
     )
     revision = _commit_readiness_record(repo, record)
     _mark_as_protected_main(repo, revision)
@@ -478,9 +504,235 @@ def test_a_requirement_present_but_not_satisfied_refuses_as_evaluation_refused(
 
     result = gate.evaluate_erp(gate.ProductBinding(product="erp", revision=revision))
     assert result.status == "evaluation_refused"
-    assert any(
-        "OBSERVED" in f and "sync_requirements_satisfied" in f for f in result.findings
+    assert any("OBSERVED" in f and failing_id in f for f in result.findings)
+
+
+def test_a_false_sub_compatibility_fact_also_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard 6, Sub half: all eight of Sub's selected ids are
+    `role="compatibility"`, so any one of them being `false` refuses —
+    there is no adoption-state escape hatch for Sub."""
+    spec = gate.PRODUCT_SPECS["sub"]
+    failing_id = spec.requirements[-1].requirement_id
+    requirements = [
+        _requirement(r.requirement_id, satisfied=(r.requirement_id != failing_id))
+        for r in spec.requirements
+    ]
+    repo = _init_repo(tmp_path, "sub-clone")
+    record = _record(
+        repository=spec.repository, subject=spec.subject, requirements=requirements
     )
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    result = gate.evaluate_sub(gate.ProductBinding(product="sub", revision=revision))
+    assert result.status == "evaluation_refused"
+    assert any("OBSERVED" in f and failing_id in f for f in result.findings)
+
+
+def test_academy_adoption_debt_is_reported_but_never_refuses_compatibility(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard 5, and the ruling's substantive verdict rule: Academy's five
+    selected ids are ALL `role="adoption_state"`. A record where every one
+    of them is `false` — exactly today's real Academy record shape — must
+    still evaluate `satisfied` (never `evaluation_refused`), and every false
+    value must be visible, labelled as adoption state, in `findings`."""
+    spec = gate.PRODUCT_SPECS["academy"]
+    requirements = [
+        _requirement(r.requirement_id, satisfied=False) for r in spec.requirements
+    ]
+    repo = _init_repo(tmp_path, "academy-clone")
+    record = _record(
+        repository=spec.repository, subject=spec.subject, requirements=requirements
+    )
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    result = gate.evaluate_academy(
+        gate.ProductBinding(product="academy", revision=revision)
+    )
+    assert result.status == "satisfied", result.explain()
+    joined = " ".join(result.findings)
+    for r in spec.requirements:
+        assert r.requirement_id in joined
+    assert "ADOPTION STATE" in joined
+    assert "OBSERVED" not in joined  # never reported as a compatibility refusal
+
+
+def test_extra_product_owned_requirements_are_permitted_and_ignored(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard 7: a record may carry requirement ids Starter does not select
+    at all — those extra product-owned facts are simply never looked up,
+    satisfied or not, and never affect the verdict."""
+    spec = gate.PRODUCT_SPECS["sub"]
+    requirements = [
+        *_SUB_SATISFIED_REQUIREMENTS,
+        _requirement(
+            "an-extra-product-owned-fact-starter-never-reads", satisfied=False
+        ),
+    ]
+    repo = _init_repo(tmp_path, "sub-clone")
+    record = _record(
+        repository=spec.repository, subject=spec.subject, requirements=requirements
+    )
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    result = gate.evaluate_sub(gate.ProductBinding(product="sub", revision=revision))
+    assert result.status == "satisfied", result.explain()
+
+
+def test_duplicate_selected_requirement_ids_refuse() -> None:
+    """Guard 1: constructing a `ProductSpec` mapping that selects the same
+    requirement id twice for one product is refused by
+    `_duplicate_requirement_ids` — the exact function `PRODUCT_SPECS` itself
+    is validated through at import time."""
+    duplicated = {
+        "academy": gate.ProductSpec(
+            product="academy",
+            repository="dotmac_academy_app",
+            subject="academy-kernel-successor-readiness",
+            clone_env_var="COMPAT_GATE_CLONE_DOTMAC_ACADEMY_APP",
+            requirements=(
+                gate.RequirementSpec("some-id", "adoption_state"),
+                gate.RequirementSpec("some-id", "adoption_state"),
+            ),
+        ),
+    }
+    problems = gate._duplicate_requirement_ids(duplicated)
+    assert problems == {"academy": ["some-id"]}
+
+
+def test_the_real_product_specs_table_has_no_duplicate_selected_ids() -> None:
+    """Admits control for guard 1: the real, checked-in `PRODUCT_SPECS` is
+    duplicate-free (proven by successfully importing the module at all —
+    the same check raises `RuntimeError` at import time otherwise)."""
+    assert gate._duplicate_requirement_ids(gate.PRODUCT_SPECS) == {}
+
+
+def test_requirement_spec_rejects_an_unknown_role() -> None:
+    with pytest.raises(ValueError, match="unknown role"):
+        gate.RequirementSpec("some-id", "not-a-real-role")
+
+
+def test_bindings_loader_refuses_a_requirements_field(tmp_path: Path) -> None:
+    """Guard 3: a binding row cannot select or rename requirement ids —
+    `requirements` is not among `ALLOWED_BINDING_ROW_KEYS`, so a row that
+    tries to carry one is refused the same way an `evidence` row is."""
+    bad = tmp_path / "bindings.json"
+    bad.write_text(
+        json.dumps(
+            {
+                "schema": "compatibility_gate_bindings_v1",
+                "bindings": {
+                    "erp": {
+                        "revision": "a" * 40,
+                        "requirements": ["single-sync-engine-construction-site"],
+                    }
+                },
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="unrecognised"):
+        gate.load_default_bindings(bad)
+
+
+def test_bindings_loader_refuses_a_role_or_disposition_field(tmp_path: Path) -> None:
+    """Guard 5: a binding row cannot reclassify a requirement's disposition
+    either — `role`/`disposition` are not among `ALLOWED_BINDING_ROW_KEYS`,
+    so a row attempting to turn a compatibility requirement into an
+    adoption-state observation (or the reverse) is refused the same way."""
+    for bad_key in ("role", "disposition"):
+        bad = tmp_path / f"bindings-{bad_key}.json"
+        bad.write_text(
+            json.dumps(
+                {
+                    "schema": "compatibility_gate_bindings_v1",
+                    "bindings": {
+                        "academy": {
+                            "revision": "a" * 40,
+                            bad_key: "compatibility",
+                        }
+                    },
+                }
+            )
+        )
+        with pytest.raises(ValueError, match="unrecognised"):
+            gate.load_default_bindings(bad)
+
+
+# ── Guard 4: no evaluator function may spell a requirement-id literal ──────
+
+_REQUIREMENT_ID_SHAPE = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\b")
+
+
+def _requirement_id_shaped_literals_in_evaluators(source: str) -> list[tuple[str, str]]:
+    """Parses `source`, walks every module-level function named
+    `evaluate_*`, and returns `(function_name, literal)` for every string
+    constant anywhere in that function's body (including nested f-string
+    literal segments) that contains a hyphen-joined, 3+-token lowercase slug
+    — the shape every real product requirement id uses. `PRODUCT_SPECS`
+    itself lives outside any `evaluate_*` function, so a legitimate id
+    declared there is never scanned; only a literal an evaluator spells
+    itself is caught."""
+    tree = ast.parse(source)
+    hits: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("evaluate_"):
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                    for match in _REQUIREMENT_ID_SHAPE.finditer(sub.value):
+                        hits.append((node.name, match.group(0)))
+    return hits
+
+
+def test_no_evaluator_local_requirement_id_literals() -> None:
+    """The real, checked-in `compatibility_gate.py`: zero requirement-id-
+    shaped literals inside any `evaluate_*` function body. Every lookup goes
+    through `_evaluate_readiness_requirements`, which reads
+    `PRODUCT_SPECS[...].requirements` — a table declared OUTSIDE every
+    evaluator function."""
+    source = (Path(__file__).parent / "compatibility_gate.py").read_text()
+    hits = _requirement_id_shaped_literals_in_evaluators(source)
+    assert hits == [], (
+        f"found requirement-id-shaped literal(s) inside an evaluate_* "
+        f"function body, outside PRODUCT_SPECS: {hits!r}"
+    )
+
+
+def test_the_scan_bites_a_planted_hardcoded_requirement_id() -> None:
+    """Sensitivity, defect half: plant a fresh `evaluate_*` function whose
+    body hardcodes a requirement-id-shaped literal (exactly the third-layer
+    regression guard 4 exists to catch) and confirm the scan names it."""
+    planted = (
+        "def evaluate_planted(binding):\n"
+        "    entry = record.requirement('a-planted-hardcoded-requirement-id')\n"
+        "    return entry\n"
+    )
+    hits = _requirement_id_shaped_literals_in_evaluators(planted)
+    assert hits == [("evaluate_planted", "a-planted-hardcoded-requirement-id")]
+
+
+def test_the_scan_does_not_bite_an_unrelated_short_or_underscored_literal() -> None:
+    """Sensitivity, near-miss half: a two-token hyphenated phrase (below the
+    3-token minimum any real requirement id has), a single status word, and
+    an underscore-joined Python-symbol-shaped docstring mention must NOT be
+    flagged — the scan targets the hyphenated, 3+-token requirement-id
+    shape specifically, not every multi-word string in an evaluator."""
+    near_miss = (
+        "def evaluate_near_miss(binding):\n"
+        "    '''Mentions bind_database_runtime and resolve_database_runtime.'''\n"
+        "    status = 'evidence_incomplete'\n"
+        "    note = 'kernel-side'\n"
+        "    return status, note\n"
+    )
+    assert _requirement_id_shaped_literals_in_evaluators(near_miss) == []
 
 
 # ── The digest: reproducible, and never authoritative as input ─────────────
@@ -616,11 +868,14 @@ def test_sub_missing_boundary_method_is_reported(tmp_path: Path) -> None:
 
 
 def test_load_default_bindings_reads_the_checked_in_seam_file() -> None:
+    """The checked-in file now binds the three real protected-`main`
+    coordinates — every product's `revision` is a well-formed 40-hex commit."""
     bindings = gate.load_default_bindings()
     assert set(bindings) == set(gate.PRODUCTS)
     for product, binding in bindings.items():
         assert binding.product == product
-        assert binding.revision is None
+        assert binding.revision is not None
+        assert gate.IMMUTABLE_COMMIT.fullmatch(binding.revision)
 
 
 def test_bindings_loader_refuses_an_undeclared_schema(tmp_path: Path) -> None:
