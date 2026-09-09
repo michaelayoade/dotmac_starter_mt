@@ -55,6 +55,7 @@ def _run_probe(
     probe: Path = PROBE,
     *,
     source_root: Path = KERNEL_SOURCE,
+    app_root: Path | None = None,
     argv: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     env = {
@@ -62,9 +63,12 @@ def _run_probe(
         for key, value in os.environ.items()
         if key not in {"DATABASE_URL", "PLATFORM_DATABASE_URL", "PYTHONPATH"}
     }
+    path_entries = [str(source_root)]
+    if app_root is not None:
+        path_entries.insert(0, str(app_root))
     program = (
         "import runpy, sys; "
-        f"sys.path.insert(0, {str(source_root)!r}); "
+        f"sys.path[0:0] = {path_entries!r}; "
         f"sys.argv = [{str(probe)!r}, *{list(argv)!r}]; "
         f"runpy.run_path({str(probe)!r}, run_name='__main__')"
     )
@@ -121,7 +125,7 @@ def test_strict_mode_refuses_a_missed_binding_without_importing_the_reference(
 ) -> None:
     """The seam existing is not the same as the seam being USED.
 
-    `get_database_runtime()`'s fallback to `dotmac_kernel.db.runtime` is
+    `resolve_database_runtime()`'s fallback to `dotmac_kernel.db.runtime` is
     correct for the reference assembly, but it means a product that simply
     forgets to set `ProductAssemblySpec.database_runtime` gets the eager
     reference runtime with no complaint — the same defect shape one level up.
@@ -315,3 +319,119 @@ def test_a_docstring_mention_of_the_reference_module_is_not_flagged(
     assert result.returncode == 0, result.stderr
     for stage in _EXPECTED_STAGES:
         assert stage in result.stdout
+
+
+def test_second_binding_conflict_is_refused(tmp_path: Path) -> None:
+    """One process supports one runtime binding — a second, DIFFERENT one
+    cannot clobber the first, and downgrading strictness has no public path.
+
+    `main_second_binding_conflict()` proves BOTH directions of idempotence in
+    one process: reinstalling the IDENTICAL binding succeeds; a DIFFERENT
+    runtime refuses and leaves the original authoritative; weakening an
+    already-required binding also refuses.
+    """
+    result = _run_probe(tmp_path, argv=("second-binding",))
+    assert result.returncode == 0, result.stderr
+    for marker in (
+        "PASS idempotence: reinstalling the identical binding succeeded",
+        "PASS second-binding conflict: a different runtime was refused and "
+        "the original binding is still authoritative",
+        "PASS strictness is monotonic: weakening an already-required "
+        "binding refused",
+    ):
+        assert marker in result.stdout, (
+            f"expected marker missing: {marker!r}\nstdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+
+
+def test_real_assembly_strict_composition_leaves_the_reference_unloaded(
+    tmp_path: Path,
+) -> None:
+    """Acceptance against the REAL Starter assembly, in a fresh interpreter
+    — not the zero-feature surrogate every other test in this file uses.
+
+    A bespoke `ProductAssemblySpec` with no feature manifests cannot see the
+    sharpest hazard this seam exists to close: `app.assembly` composes
+    `FEATURE_MODULES` via `load_manifests` at IMPORT TIME (`app/assembly.py`'s
+    module-level `ProductAssemblySpec(...)` call), before `create_app` ever
+    runs. `main_real_assembly_strict()` imports the real `app.assembly`,
+    rebinds it to a product runtime under `require_database_runtime=True`,
+    calls the real `create_app`, and asserts `dotmac_kernel.db` never entered
+    `sys.modules` at any point.
+
+    KNOWN TO CURRENTLY FAIL on `main` / this branch's base: several feature
+    services (`app/features/{tenants,parties,rbac,auth,custom_fields}
+    /service.py`) still import `conflict_savepoint` from `dotmac_kernel.db`
+    at module scope, so `import app.assembly` alone already reaches
+    `dotmac_kernel.db`. The predecessor `refactor/conflict-savepoint-engine-
+    free-owner` (#678) moves those onto the already-public, engine-free
+    `dotmac_kernel.transactions.conflict_savepoint`; this test is written to
+    the POST-rebase world and will pass once this branch rebases onto that
+    fix, not before. It is deliberately NOT weakened, skipped or marked
+    xfail to make that pass silently — a failure here, right now, is exactly
+    the ordering dependency, stated rather than hidden.
+    """
+    result = _run_probe(tmp_path, app_root=ROOT, argv=("real-assembly",))
+    assert result.returncode == 0, (
+        "real-assembly strict composition failed -- expected until this "
+        "branch rebases onto the conflict_savepoint eager-import predecessor "
+        f"(#678)\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert (
+        "PASS real assembly, strict: composing app.assembly's real feature "
+        "manifests under a strict binding left dotmac_kernel.db unloaded"
+    ) in result.stdout
+
+
+def test_one_eager_feature_import_defeats_a_strict_binding(tmp_path: Path) -> None:
+    """Plant: reintroduce ONE eager `dotmac_kernel.db` import into a copy of
+    the real `app.assembly` and observe strict composition REFUSE.
+
+    This is the acceptance criterion for the whole lane, independent of
+    whether the predecessor migration has landed here yet: it manufactures
+    the exact broken state (one feature service importing
+    `dotmac_kernel.db` at module scope) on top of whatever this tree
+    currently has, and proves `bind_database_runtime`'s atomic claim catches
+    it — `import app.assembly` reaches `dotmac_kernel.db` before
+    `create_app` ever calls `bind_database_runtime(..., required=True)`, so
+    the bind loses the race and refuses with `RuntimeBindingError`.
+    """
+    import shutil
+
+    planted_app_root = tmp_path / "planted-app-root"
+    shutil.copytree(ROOT / "app", planted_app_root / "app")
+    service_path = planted_app_root / "app" / "features" / "parties" / "service.py"
+    source = service_path.read_text()
+    anchor = "from dotmac_kernel.crud import CRUDManager\n"
+    assert anchor in source, "parties/service.py's import block has changed shape"
+    if "from dotmac_kernel.db import conflict_savepoint" not in source:
+        source = source.replace(
+            anchor,
+            anchor + "from dotmac_kernel.db import conflict_savepoint  # noqa: F401\n",
+            1,
+        )
+    service_path.write_text(source)
+
+    probe_source = PROBE.read_text()
+    planted_probe = tmp_path / "planted_real_assembly_probe.py"
+    planted_probe.write_text(probe_source)
+
+    result = _run_probe(
+        tmp_path,
+        probe=planted_probe,
+        app_root=planted_app_root,
+        argv=("real-assembly",),
+    )
+    assert result.returncode != 0, (
+        "strict composition of the real assembly succeeded even with an "
+        "eager dotmac_kernel.db import planted back into a feature service "
+        "— the guard did not bite a real transitive reach"
+    )
+    assert (
+        "RuntimeBindingError" in result.stderr
+        or "already reached dotmac_kernel.db" in result.stderr
+    ), (
+        f"refused, but not for the expected reason\nstdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )

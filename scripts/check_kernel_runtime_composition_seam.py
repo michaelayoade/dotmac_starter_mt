@@ -369,7 +369,7 @@ def main_fallback_sensitivity() -> None:
     from sqlalchemy.pool import StaticPool
 
     # The PRODUCT's own runtime — built and seeded exactly like `main()` —
-    # but deliberately NEVER installed via `install_database_runtime` or
+    # but deliberately NEVER bound via `bind_database_runtime` or
     # `ProductAssemblySpec.database_runtime`.
     product_engine = create_engine(
         "sqlite://",
@@ -519,19 +519,18 @@ def main_real_assembly_strict() -> None:
     """
     import os
 
-    os.environ.setdefault(
-        "DATABASE_URL", "sqlite:///./real-assembly-strict.sqlite3"
-    )
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./real-assembly-strict.sqlite3")
     os.environ.setdefault(
         "PLATFORM_DATABASE_URL", "sqlite:///./real-assembly-strict.sqlite3"
     )
 
     import dataclasses
 
-    import app.assembly
     from dotmac_kernel import create_app
     from dotmac_kernel.session_runtime import DatabaseRuntime
     from sqlalchemy import create_engine
+
+    import app.assembly
 
     assert "dotmac_kernel.db" not in sys.modules, (
         "importing app.assembly ALONE already reached dotmac_kernel.db — "
