@@ -2670,19 +2670,27 @@ _OPTIONALITY = {"dev": True, "ops": False, "docs": True}
 #: both optional, so neither is in the default.
 _EXPECTED_DEFAULT_GROUPS = frozenset({"main", "ops"})
 
-#: The four REAL fleet install commands named in Michael's ruling, quoted in
-#: full — every flag each product's checked-in build recipe actually
-#: carries. A faithful tokenization of every one of these must resolve to
-#: exactly `{"main"}`; a truncated tokenization (dropping the trailing
-#: flags) was the defect this whole parser rewrite exists to close.
-_REAL_FLEET_RECIPES = (
-    ("ERP Dockerfile:50", "poetry install --only main --no-root --no-ansi"),
-    (
-        "ERP Dockerfile.hardened:53",
-        "poetry install --only main --no-interaction --no-ansi",
-    ),
-    ("Sub Dockerfile:40", "poetry install --only main --no-interaction --no-ansi"),
-    ("Starter Dockerfile:63", "poetry install --only main --no-root --no-interaction"),
+#: This repository's own root — used ONLY to read THIS repository's own,
+#: real, live `Dockerfile` from disk (never a hand-copied line number; see
+#: `test_starters_own_live_dockerfile_poetry_install_line_selects_main`
+#: below). Per F2, this module never asserts a path/line fact about a
+#: DIFFERENT repository — Starter's own CI cannot open one to keep such a
+#: claim honest. Matches the `REPO = Path(__file__).resolve().parents[2]`
+#: convention `test_poetry_toolchain_contract.py` already uses for the
+#: identical reason.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: A SYNTHETIC, multi-line `RUN` instruction modelled on the general shape
+#: Michael's ruling named — a BuildKit secret mount, two leading
+#: environment assignments (one of them a credential whose VALUE contains a
+#: `$(...)` command substitution), backslash continuations, and a `poetry
+#: install` line beneath them. Not a citation of any specific external
+#: repository's file — see the module docstring's F2 note.
+_SYNTHETIC_MULTILINE_RUN_WITH_MOUNT_AND_CREDENTIAL_ENV = (
+    "RUN --mount=type=secret,id=example_token,required=true \\\n"
+    "    EXAMPLE_HTTP_BASIC_USERNAME=ci-reader \\\n"
+    '    EXAMPLE_HTTP_BASIC_PASSWORD="$(cat /run/secrets/example_token)" \\\n'
+    "    poetry install --only main --no-root --no-ansi"
 )
 
 #: Templated/command-substitution forms `parse_install_command` must refuse
@@ -2795,18 +2803,13 @@ def test_direct_install_recipe_construction_raises():
         InstallRecipe(tool="poetry", subcommand="install", flags=(), source="x")
 
 
-def test_install_recipe_bypass_is_not_directly_reachable_either():
-    """The internal `_construct_install_recipe` bypass exists ONLY for
-    `parse_install_command` to use — it is not part of the public surface a
-    test imports, and this test documents that by NOT importing it (see the
-    negative sweep tests below for the structural proof that no OTHER call
-    site in the module reaches it either)."""
-    assert "_construct_install_recipe" not in {
-        "InstallRecipe",
-        "InstallRecipeParseError",
-        "parse_install_command",
-        "explain_recipe_selection_refusal",
-    }
+#: (The prior version of this test compared a string literal against four
+#: string literals declared two lines above it in this same file — an
+#: assertion that could not fail for any edit to `composition_schema.py`
+#: at all. Removed; the real property — that no call site in the module
+#: reaches the internal bypass except through `parse_install_command` — is
+#: what the negative sweep tests below actually observe, by execution,
+#: against real and planted source.)
 
 
 # --- Item 1: `parse_install_command` takes the complete raw command line ---
@@ -2817,7 +2820,7 @@ def test_parse_install_command_takes_the_complete_raw_command_line_string():
     command line — and tokenizes it itself; a caller supplies text, never a
     pre-built tuple of flags."""
     recipe = parse_install_command(
-        "poetry install --only main --no-root --no-ansi", source="Dockerfile:50"
+        "poetry install --only main --no-root --no-ansi", source="Dockerfile"
     )
     assert recipe.tool == "poetry"
     assert recipe.subcommand == "install"
@@ -2826,11 +2829,11 @@ def test_parse_install_command_takes_the_complete_raw_command_line_string():
         ("--no-root", ""),
         ("--no-ansi", ""),
     )
-    assert recipe.source == "Dockerfile:50"
+    assert recipe.source == "Dockerfile"
 
 
 def test_parse_install_command_with_fewer_than_two_tokens_raises_named():
-    with pytest.raises(InstallRecipeParseError, match="fewer than two tokens"):
+    with pytest.raises(InstallRecipeParseError, match="no executable/subcommand pair"):
         parse_install_command("poetry", source="bad-source")
 
 
@@ -2844,37 +2847,135 @@ def test_parse_install_command_with_a_bare_positional_token_raises_named():
         parse_install_command("poetry install extra-positional", source="bad-source")
 
 
-# --- Item 3 / item 6: the four real fleet recipes, quoted in full ----------
+# --- Item 3/6: the multi-line RUN grammar, against a SYNTHETIC recipe and
+# --- against this repository's own real, live Dockerfile ------------------
 
 
-def test_item3_each_real_fleet_recipe_parses_and_selects_main():
-    """Item 3 — the block this whole correction exists to clear. Each of
-    the four real, FULL command lines named in Michael's ruling (inert
-    flags included) tokenizes via `parse_install_command` and resolves to
-    exactly `{"main"}`. Before this fix, a faithful tokenization of every
-    one of these returned `None` (unknown) — the ERP correction was
-    derivable only from a falsified, truncated recipe."""
-    for source, command_line in _REAL_FLEET_RECIPES:
-        recipe = parse_install_command(command_line, source=source)
-        result = _universe((recipe,))
-        assert result == frozenset({"main"}), (source, command_line, result)
+def test_item3_synthetic_multiline_run_with_mount_and_credential_env_selects_main():
+    """Item 3 — the block this whole correction exists to clear, and its
+    OWN correction (F1): a faithful full-instruction reading, including a
+    BuildKit secret mount and two leading environment assignments (one
+    containing a `$(...)` command substitution in its VALUE), must still
+    resolve to exactly `{"main"}`. Before this fix, the parser's blanket
+    `$`/backtick-anywhere check refused this shape outright — the same
+    block arriving through a different door than the original flag
+    truncation. SYNTHETIC: modelled on the general shape, not a citation of
+    any specific external repository's file (see the module docstring's F2
+    note)."""
+    recipe = parse_install_command(
+        _SYNTHETIC_MULTILINE_RUN_WITH_MOUNT_AND_CREDENTIAL_ENV, source="synthetic"
+    )
+    assert recipe.tool == "poetry"
+    assert recipe.subcommand == "install"
+    result = _universe((recipe,))
+    assert result == frozenset({"main"})
+
+
+def test_docker_mount_option_is_consumed_without_affecting_selection():
+    recipe = parse_install_command(
+        "RUN --mount=type=cache,target=/root/.cache poetry install --only main",
+        source="synthetic",
+    )
+    assert _universe((recipe,)) == frozenset({"main"})
+
+
+def test_multiple_leading_env_assignments_are_opaque_context_never_inspected():
+    """Clause 3: even a `$(...)`-containing VALUE in a leading environment
+    assignment must never be grounds for refusal — it is never parsed or
+    inspected at all."""
+    recipe = parse_install_command(
+        'FOO=bar BAZ="$(cat /run/secrets/x)" poetry install --only main',
+        source="synthetic",
+    )
+    assert _universe((recipe,)) == frozenset({"main"})
+
+
+def test_templated_only_value_is_still_refused_even_with_a_credential_env_prefix():
+    """Clause 6's own regression guard: widening the grammar to tolerate
+    templating in an environment assignment's value must NOT widen it to
+    tolerate templating in the actual dependency-selection argument."""
+    with pytest.raises(InstallRecipeParseError):
+        parse_install_command(
+            "FOO=bar poetry install --only $(malicious)", source="synthetic"
+        )
+
+
+def test_templated_executable_is_refused_even_after_a_valid_prefix():
+    with pytest.raises(InstallRecipeParseError):
+        parse_install_command("FOO=bar $(evil) install --only main", source="synthetic")
+
+
+def test_shell_wrapper_and_chained_commands_still_return_unknown():
+    """'Shell wrappers, && chains, pipes, or any other unmodelled structure
+    still return unknown' — widening the grammar for RUN prefixes is not
+    license to start interpreting shell. `&&` produces a bare token this
+    parser does not model, so it still refuses (via the ordinary bare-token
+    check), never silently picking one side of the chain."""
+    with pytest.raises(InstallRecipeParseError):
+        parse_install_command(
+            "poetry install --only main && echo done", source="synthetic"
+        )
 
 
 def test_item6_worked_examples_reproduce_their_cited_source_lines_exactly():
     """Item 6. The worked example in `InstallRecipe`'s own docstring claims
     `parse_install_command("poetry install --only main --no-root
-    --no-ansi", source="Dockerfile:50")` produces
+    --no-ansi", source="Dockerfile")` produces
     `flags=(("--only", "main"), ("--no-root", ""), ("--no-ansi", ""))` —
     this test re-executes that literal claim rather than trusting the
-    docstring prose."""
+    docstring prose. Per F2 the example is representative, not a citation
+    of a specific external file, so `source` here is the generic
+    `"Dockerfile"` the docstring itself now uses."""
     recipe = parse_install_command(
-        "poetry install --only main --no-root --no-ansi", source="Dockerfile:50"
+        "poetry install --only main --no-root --no-ansi", source="Dockerfile"
     )
     assert recipe.flags == (
         ("--only", "main"),
         ("--no-root", ""),
         ("--no-ansi", ""),
     )
+
+
+def test_starters_own_live_dockerfile_poetry_install_line_selects_main():
+    """F2's real-recipe requirement: reads THIS repository's own, real,
+    live `Dockerfile` from disk — never a hand-copied line number, which is
+    exactly what went stale here before (a prior draft cited
+    `Dockerfile:63`; the real line is elsewhere and moves over time).
+    Locates the instruction by CONTENT after joining backslash
+    continuations the same way `parse_install_command` does, then asserts
+    what it actually parses to — not what a comment claims it says."""
+    dockerfile_text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    joined = schema._join_backslash_continuations(dockerfile_text)
+    # Select by STRUCTURE, not by substring. A comment mentioning
+    # `poetry install` in prose is not an instruction, and matching it was
+    # this very defect one layer down: the first version of this test found
+    # Dockerfile's own explanatory comment alongside the real RUN line.
+    candidates = [
+        line.strip()
+        for line in joined.splitlines()
+        if line.strip().startswith("RUN ")
+        and (" poetry install" in line or " poetry sync" in line)
+    ]
+    assert len(candidates) == 1, candidates
+    recipe = parse_install_command(
+        candidates[0], source="this repository's own Dockerfile"
+    )
+    assert recipe.tool == "poetry"
+    assert recipe.subcommand in ("install", "sync")
+    result = _universe((recipe,))
+    assert result == frozenset({"main"})
+
+
+def test_shlex_value_error_is_wrapped_as_install_recipe_parse_error_naming_source():
+    """Malformed shell quoting is documented as a covered refusal case; a
+    bare `shlex.split` `ValueError` must never leak past
+    `parse_install_command` — a product catching `InstallRecipeParseError`
+    to record `unknown` must not get an uncaught exception instead."""
+    with pytest.raises(InstallRecipeParseError) as excinfo:
+        parse_install_command(
+            'poetry install --only "unterminated', source="QuoteMarker:1"
+        )
+    assert "QuoteMarker:1" in str(excinfo.value)
 
 
 # --- Item 5: the closed inert set -------------------------------------------

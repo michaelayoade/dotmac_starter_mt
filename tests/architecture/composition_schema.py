@@ -330,30 +330,32 @@ What ``installation`` means — the production-profile boundary
 
 Ruled by Michael, closing an ambiguity an independent review found in the
 phrase this dimension used to carry ("the distribution is resolved and
-installed"): that phrase does not decide a real case. ``dotmac_erp`` pinned
-``dotmac-deployment-foundation`` in its **dev** dependency group, so the
-distribution is resolved in ``poetry.lock`` — but ERP's ``Dockerfile:50``
-runs ``poetry install --only main --no-root --no-ansi``, so it never reaches
-the deployed image. Reading ``installation`` as "resolved in the lock" let
-ERP record ``installation: true`` for a distribution its production image
-never contains. If Sub or Academy read the same word as "present in the
-deployed image" instead, the three records stop being comparable — the
-exact failure this schema exists to end, arriving through an undefined term
-rather than a divergent field name.
+installed"): that phrase does not decide a real case. The motivating case
+was a product pinning a distribution into a **dev** dependency group, so
+the distribution was resolved in its ``poetry.lock`` — but that product's
+production build step ran an install command that excluded that group, so
+the distribution never reached the deployed image. Reading ``installation``
+as "resolved in the lock" let that product record ``installation: true``
+for a distribution its production image never actually contained.
 
-Quote the real fleet recipes here IN FULL, not truncated to their
-group-selecting flag — an independent review found that quoting only
-``--only main`` and dropping the trailing flags a real Dockerfile actually
-carries produced a derivation that could only be exercised against a
-falsified recipe. These four are the ones that motivated the closed inert
-set below (see :func:`parse_install_command`):
-
-.. code-block:: text
-
-    ERP Dockerfile:50            poetry install --only main --no-root --no-ansi
-    ERP Dockerfile.hardened:53   poetry install --only main --no-interaction --no-ansi
-    Sub Dockerfile:40            poetry install --only main --no-interaction --no-ansi
-    Starter Dockerfile:63        poetry install --only main --no-root --no-interaction
+DELIBERATE SCOPE NOTE (F2): an earlier draft of this section, and of this
+module's own tests, cited specific external paths and line numbers —
+``ERP Dockerfile:50``, ``Sub Dockerfile:40``, and similar — as though they
+were live, current facts. They cannot be: this repository's own CI has no
+access to ``dotmac_erp``'s or ``dotmac_sub``'s checked-out trees, so a
+citation like that is an unverifiable claim the moment it is written, and
+it WILL rot silently — this module's own ``Starter Dockerfile:63`` citation
+had already gone stale (the real line moved to ``:68``) before that fact
+was even caught. Michael's ruling: remove cross-repository path/line
+assertions from this module entirely, since CI cannot read those trees to
+keep them honest. Each product's own validator owns citing and testing its
+own real recipe file; nothing in THIS module asserts a fact about a
+repository it cannot open. Where this module needs a REAL recipe to test
+against, it reads its own, actual, live ``Dockerfile`` from disk at test
+time (see ``test_composition_schema.py``, which locates the instruction by
+CONTENT rather than a hand-copied line number) — everything else is an
+explicitly SYNTHETIC example, modelled on real shapes but never presented
+as a citation of any specific external file.
 
 The ruling, stated plainly:
 
@@ -361,9 +363,8 @@ The ruling, stated plainly:
   member of the dependency set the product's actual DEPLOYED ARTIFACT
   installs — the set an operator running that artifact in production really
   has on disk. For a Poetry-based product this is the group (or groups) its
-  build step actually passes to the installer for the image it ships (e.g.
-  ERP's ``poetry install --only main --no-root --no-ansi``), never every
-  group the lock file happens to resolve.
+  build step actually passes to the installer for the image it ships, never
+  every group the lock file happens to resolve.
 * **What does not count.** A distribution resolved only into a development,
   test, or tooling dependency group, and excluded from the artifact the
   product deploys, is ``installation = false`` — **even though it appears in
@@ -375,23 +376,23 @@ The ruling, stated plainly:
   the union of every declared dependency group so the resolver can prove one
   consistent dependency graph; it is not, and was never meant to be, a
   statement about what ships. Treating it as one collapses "could be
-  installed" and "is installed in production" into the same fact, which is
-  exactly the reading that produced ERP's wrong ``installation: true`` for
-  ``dotmac-deployment-foundation``. A future reader who "simplifies"
-  ``installation`` back to "present in the lock" reintroduces precisely this
-  defect — this section exists so that simplification has to look this
-  paragraph in the eye first.
+  installed" and "is installed in production" into the same fact — exactly
+  the reading that produced the motivating case's wrong ``installation:
+  true``. A future reader who "simplifies" ``installation`` back to
+  "present in the lock" reintroduces precisely this defect — this section
+  exists so that simplification has to look this paragraph in the eye
+  first.
 
-This is why the concrete consequence Michael named is a REQUIRED EVIDENCE
-CORRECTION, not tuning: ERP's ``dotmac-deployment-foundation`` row changes
+This is why the concrete consequence Michael originally named is a REQUIRED
+EVIDENCE CORRECTION, not tuning: the affected product's row changes
 ``installation: true -> false``, with ``runtime_consumption`` remaining
-``false`` and both module dimensions remaining ``not_applicable`` (it is a
-``universal-facility``, so those two dimensions were never real questions
-for it in the first place — see the dimension-value bullets above). Under
-pipeline step 4 (`_step_installation_absent`), this correction alone flips
-that row's derived state from whatever `installation = true` had produced to
-``NOT_COMPOSED`` — the derivation pipeline itself is unchanged; only the
-input dimension value is now honestly recorded. See
+``false`` and both module dimensions remaining ``not_applicable`` (a
+``universal-facility`` distribution, so those two dimensions were never real
+questions for it in the first place — see the dimension-value bullets
+above). Under pipeline step 4 (`_step_installation_absent`), this
+correction alone flips that row's derived state from whatever `installation
+= true` had produced to ``NOT_COMPOSED`` — the derivation pipeline itself
+is unchanged; only the input dimension value is now honestly recorded. See
 :func:`derive_installation_dimension` immediately below for the one shared
 derivation a product uses to compute this measurement, so it is not
 re-invented three times and cannot be satisfied by accident with the full
@@ -408,11 +409,10 @@ and only one of them needs parsing at all:
   itself writes a ``groups`` field onto every ``[[package]]`` entry in
   ``poetry.lock``. :func:`derive_lock_group_membership` reads it directly
   with ``tomllib`` — no parsing, no heuristic, no substring search anywhere
-  in this half. (Verified directly against ERP's real lock file at the time
-  of this ruling: exactly two groups exist there, ``{"main", "dev"}``, and
-  ``dotmac-deployment-foundation`` is the only ``dotmac-*`` package in
-  ``dev`` — every other one is in ``main``. Under this ruling exactly that
-  one row moves, independently confirming the case Michael named.)
+  in this half. (Per F2, this module does not assert what any specific
+  external repository's real lock file contains — that verification, for
+  the motivating case, lives in the affected product's own validator and
+  evidence document, not here.)
 * **Whether a declared group is optional is ALSO STRUCTURED DATA, but a
   DIFFERENT document.** ``poetry.lock`` never carries this fact.
   :func:`derive_group_optionality` reads
@@ -486,9 +486,13 @@ the named groups (a no-op for a name already in the default). ``--without
 <groups>`` installs the computed default MINUS the named groups. ``sync``
 takes the identical group-selecting flags as ``install``.
 
-**The closed inert set.** Every one of the four real fleet recipes quoted
-above carries at least one flag that never affects WHICH groups install —
-``--no-root``, ``--no-interaction``, ``--no-ansi``. :data:`_INERT_FLAGS` is
+**The closed inert set.** Real production install recipes commonly carry
+at least one flag that never affects WHICH groups install —
+``--no-root``, ``--no-interaction``, ``--no-ansi``, the three that
+motivated this set (see ``test_composition_schema.py`` for the synthetic
+shapes and this repository's own live ``Dockerfile``, which this module's
+own tests read from disk rather than assert about by citation).
+:data:`_INERT_FLAGS` is
 the CLOSED set of exactly these three; :func:`parse_install_command` keeps
 them on the parsed recipe (they are real tokens; dropping them would be the
 identical truncation this section exists to forbid), and the selection
@@ -557,14 +561,15 @@ as it was.
 one checked-in, deployed recipe. :func:`derive_installation_group_universe`
 takes the FULL tuple of a product's recipes and returns the UNION of every
 one's selected groups: a dependency reaching only one deployed profile is
-still installed. (No real product in this fleet is known to have more than
-one today — Sub, specifically, has exactly ONE Poetry install recipe and
-declares only a single ``dev`` group; a prior draft of this docstring wrongly
-cited "Sub's separate application, worker, and operator recipes" as a real
-example, which was never true of any repository. The multi-recipe shape
-below is exercised only as an explicitly SYNTHETIC scenario — see the test
-module — precisely so this capability is proven without inventing a
-cross-repository citation.) It refuses (returns ``None``) the WHOLE
+still installed. Per F2, this module makes NO claim about how many real
+install recipes any specific external product actually has — a prior draft
+asserted "Sub's separate application, worker, and operator recipes" as a
+real example, and a later draft's attempted correction asserted a specific
+count for a different product; both are exactly the kind of cross-repository
+fact this module cannot keep honest from here. The multi-recipe shape is
+exercised only as an explicitly SYNTHETIC scenario in this module's own
+tests, modelled on the general capability, never presented as a citation of
+any repository's real recipe count. It refuses (returns ``None``) the WHOLE
 derivation, rather than silently dropping the offending recipe from the
 union, the moment ANY one supplied recipe fails to parse — a silently
 dropped recipe could hide a real production installation behind a shape
@@ -1395,20 +1400,25 @@ class InstallRecipe:
     CONSTRUCTOR — `InstallRecipe(...)` raises `TypeError`, the identical
     precedent `CompositionRecord.__new__` already sets in this module (see
     that class). The ONLY way to produce one is `parse_install_command`
-    below, which takes the COMPLETE raw command-line string a product read
-    from its own checked-in build recipe and tokenizes it itself — a caller
-    can never hand-build a pre-truncated `flags` tuple that silently drops
-    real tokens (e.g. the `--no-root --no-ansi` a real ERP `Dockerfile`
-    line also carries). See the module docstring's "What a recipe is, and
-    the one way to get one" section for why this is load-bearing rather
-    than incidental.
+    below, which takes the COMPLETE raw text of a product's checked-in build
+    recipe (a possibly multi-line `Dockerfile` `RUN` instruction) and
+    tokenizes it itself — a caller can never hand-build a pre-truncated
+    `flags` tuple that silently drops real tokens, and can no longer
+    silently pick a single line out of a longer instruction either (see
+    `parse_install_command`'s own docstring for the two-stage grammar that
+    makes both true). See the module docstring's "What a recipe is, and the
+    one way to get one" section for why this is load-bearing rather than
+    incidental. Per F2, no docstring in this module cites a specific
+    external repository's file/line as a verified fact — this repository's
+    own CI cannot read another repository's tree to keep such a citation
+    honest; the worked example below is REPRESENTATIVE of a real production
+    shape, not a claim about any particular file.
 
-    Worked example, quoting ERP's real `Dockerfile:50` VERBATIM — every
-    token, nothing dropped:
+    Worked example — every token, nothing dropped:
 
         >>> recipe = parse_install_command(
         ...     "poetry install --only main --no-root --no-ansi",
-        ...     source="Dockerfile:50",
+        ...     source="Dockerfile",
         ... )
         >>> recipe.tool, recipe.subcommand
         ('poetry', 'install')
@@ -1485,90 +1495,161 @@ _INERT_FLAGS: Final[frozenset[str]] = frozenset(
     {"--no-root", "--no-interaction", "--no-ansi"}
 )
 
+#: A leading Docker `RUN` option in `--flag=value` form (e.g.
+#: `--mount=type=secret,id=x,required=true`) — the ONE syntactic shape
+#: Docker RUN options take, and structurally distinct from every Poetry
+#: flag this parser recognises (`--only`/`--with`/`--without` always take
+#: their argument as a SEPARATE following token, never `=`-attached). This
+#: is what lets the two grammars share one token stream without ambiguity.
+_DOCKER_RUN_OPTION_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^--[A-Za-z][A-Za-z0-9-]*="
+)
 
-def parse_install_command(command_line: str, *, source: str) -> InstallRecipe:
+#: A leading shell environment assignment (`NAME=value`, no `--` prefix) —
+#: e.g. `POETRY_HTTP_BASIC_FORGEJO_USERNAME=ci-reader`. Consumed and
+#: discarded WITHOUT inspecting the value at all (clause 3 of Michael's
+#: ruling) — a credential value containing `$(...)` command substitution
+#: is irrelevant to dependency-group selection and must never be grounds
+#: for refusal.
+_ENV_ASSIGNMENT_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*="
+)
+
+
+def _join_backslash_continuations(command_text: str) -> str:
+    """Join a multi-line Dockerfile `RUN` instruction's backslash
+    continuations into one logical line — clause 1 of Michael's ruling.
+    Replaces every `\\` immediately followed by a newline (and that next
+    line's leading whitespace) with a single space; a line that does NOT
+    end in a continuation is left exactly as-is. Applied unconditionally —
+    a single-line command passed in is returned unchanged, since it
+    contains no continuation to join."""
+    return re.sub(r"\\[ \t]*\n[ \t]*", " ", command_text)
+
+
+def parse_install_command(command_text: str, *, source: str) -> InstallRecipe:
     """The ONLY way to construct an `InstallRecipe`. Takes the COMPLETE raw
-    command-line string a product read from its own checked-in build recipe
-    (e.g. the full text of a `Dockerfile` `RUN` instruction — every flag,
-    not a caller's own pre-selected subset) and `source` (e.g.
-    `"Dockerfile:50"` — the line this command line was read from; read by
-    `explain_recipe_selection_refusal` for real diagnostics, and by this
-    function itself in every error it raises).
+    text of a product's checked-in build recipe — the full, possibly
+    MULTI-LINE `RUN` instruction exactly as it appears in a `Dockerfile`,
+    backslash continuations, a leading `RUN`, Docker options, credential
+    environment assignments and all — never a caller's own pre-selected
+    subset or a single hand-picked line inside a longer instruction. `source`
+    (e.g. `"Dockerfile"`) is read by `explain_recipe_selection_refusal` for
+    real diagnostics, and by this function itself in every error it raises.
 
-    REFUSES A TEMPLATED COMMAND LINE FIRST, before any tokenization at all
-    — every recognised templating/substitution form (`$VAR`, `${VAR}`,
-    `${{ ... }}`, `$(...)`, `` `...` ``) contains a `$` or a backtick
-    somewhere in the text, so this function refuses outright the moment
-    EITHER character appears anywhere in `command_line`, rather than
-    trying to locate the templated value precisely. This is deliberately
-    the SAME check, in the SAME place, for every templated shape: an
-    earlier version of this parser caught a quoted `${{ ... }}` value here
-    (because its embedded spaces broke shell tokenization into bare,
-    unrecognised tokens) while letting `${GROUPS}`/`$GROUPS` — single,
-    well-formed tokens — through tokenization intact, to be refused only
-    later, downstream, by `_select_recipe_groups`. That was TWO different
-    refusal mechanisms producing the same eventual answer for different
-    templated shapes, which is fragile in exactly the way Michael's ruling
-    forbids: a caller that inspects the `InstallRecipe` between parsing and
-    selection would see `${GROUPS}` sitting in `flags` as though it were a
-    real group name. Every templated form now fails identically, here,
-    before an `InstallRecipe` is ever constructed.
+    A two-stage parse, per Michael's ruling:
 
-    Tokenizes the remainder with `shlex.split` (POSIX shell word-splitting
-    — handles quoting the way a real shell does). The first two tokens
-    become `tool`/`subcommand`. Of the remainder: each of
-    `_GROUP_SELECTING_FLAGS` consumes the NEXT token as its single
-    argument; every other token beginning with `--` is recorded as a
-    zero-argument flag (`flags` entry with an empty-string argument) —
-    this is what lets `--no-root`, `--no-interaction`, and `--no-ansi`
-    survive tokenization intact rather than being silently dropped, the
-    exact defect a prior version of this module's worked examples modelled
-    by omission.
+    1. **Join.** `_join_backslash_continuations` collapses the (possibly
+       multi-line) instruction into one logical command line.
+    2. **Tokenize and walk a fixed prefix grammar**, in order:
+
+       a. an optional leading literal `RUN` token, consumed and discarded;
+       b. zero or more Docker `RUN` options in `--flag=value` form (e.g.
+          `--mount=type=secret,...`) — consumed WITHOUT inspecting their
+          value at all, never affecting selection;
+       c. zero or more leading environment assignments (`NAME=value`,
+          `_ENV_ASSIGNMENT_PATTERN`) — consumed as OPAQUE CONTEXT: their
+          values are never parsed, never inspected, and are NEVER grounds
+          for refusal, even when (as with a real credential assignment
+          such as `PASSWORD="$(cat /run/secrets/x)"`) they contain a `$`
+          or a backtick. This is clause 3 and the direct correction to an
+          earlier version of this function, which refused ANY `$`/backtick
+          anywhere in the whole command line and so refused every real
+          multi-line fleet `RUN` instruction under its own stated reading;
+       d. the next two tokens become `tool`/`subcommand` (clause 4 — Poetry
+          must appear directly after the consumed prefix); refused here
+          (`InstallRecipeParseError`) ONLY if either token is itself
+          templated (clause 6 — the executable and subcommand are two of
+          the three places substitution DOES matter);
+       e. every remaining token is a Poetry flag, parsed exactly as
+          before: `_GROUP_SELECTING_FLAGS` each consume the NEXT token as
+          their single argument, refusing (`InstallRecipeParseError`) if
+          THAT argument is templated (clause 6's third place — a
+          dependency-selection argument) or absent; every other token
+          beginning with `--` is recorded as a zero-argument flag.
+
+    Whether `tool`/`subcommand` actually equal `"poetry"`/`"install"` (or
+    `"sync"`) is NOT checked here — an unrecognised tool or subcommand
+    still produces a valid `InstallRecipe`, refused later, gracefully (not
+    by exception), by `_select_recipe_groups`; this function only enforces
+    the STRUCTURAL shape of the prefix and the templating boundary.
+
+    Anything this fixed grammar cannot resolve — a shell wrapper, `&&`
+    chains, pipes, subshells, or any other structure this function does
+    not model — is NOT specially interpreted; it falls through to the
+    existing bare-token/flag checks below and is refused
+    (`InstallRecipeParseError`) the same way an unrecognised token always
+    was. Widening this grammar to cover mount options and environment
+    assignments is not license to start interpreting shell generally.
 
     Raises `InstallRecipeParseError`, naming `source` and the offending
-    text, when: `command_line` contains a `$` or a backtick (templated —
-    see above); it tokenizes to fewer than two tokens; a group-selecting
-    flag is the last token or is immediately followed by another flag (no
-    argument to consume); or any token is neither a `--`-prefixed flag nor
-    the argument just consumed by a group-selecting flag. This function
-    still never judges whether a FLAG NAME is recognised (e.g. `--no-dev`)
-    — that stays `_select_recipe_groups`' job, strictly after this parse
-    succeeds; only the templating check runs this early, because it is the
-    one thing that must never depend on which flag it happens to modify.
+    text, when: `shlex.split` itself cannot tokenize the text (malformed
+    quoting — wrapped from the bare `ValueError` `shlex` raises, so a
+    caller catching this one exception type never sees an uncaught
+    `ValueError`); no `tool`/`subcommand` pair remains after the prefix is
+    consumed; the executable or subcommand token is templated; a
+    group-selecting flag is the last token or is immediately followed by
+    another flag (no argument to consume); that argument is templated; or
+    any token is neither a `--`-prefixed flag nor the argument just
+    consumed by a group-selecting flag.
     """
-    if "$" in command_line or "`" in command_line:
+    joined = _join_backslash_continuations(command_text)
+    try:
+        tokens = shlex.split(joined)
+    except ValueError as exc:
         raise InstallRecipeParseError(
-            f"{source}: command line contains a templated/substituted value "
-            f"($ or backtick) and is refused before any tokenization or "
-            f"lock lookup: {command_line!r}"
-        )
-    tokens = shlex.split(command_line)
-    if len(tokens) < 2:
+            f"{source}: command text could not be tokenized as shell syntax "
+            f"({exc}): {command_text!r}"
+        ) from exc
+
+    index = 0
+    if index < len(tokens) and tokens[index] == "RUN":
+        index += 1
+    while index < len(tokens) and _DOCKER_RUN_OPTION_PATTERN.match(tokens[index]):
+        index += 1
+    while index < len(tokens) and _ENV_ASSIGNMENT_PATTERN.match(tokens[index]):
+        index += 1
+
+    if index + 1 >= len(tokens):
         raise InstallRecipeParseError(
-            f"{source}: command line tokenizes to fewer than two tokens: "
-            f"{command_line!r}"
+            f"{source}: no executable/subcommand pair found after the "
+            f"RUN-option/environment-assignment prefix: {command_text!r}"
         )
-    tool, subcommand, *rest = tokens
+    tool = tokens[index]
+    subcommand = tokens[index + 1]
+    rest = tokens[index + 2 :]
+
+    if _is_templated_value(tool) or _is_templated_value(subcommand):
+        raise InstallRecipeParseError(
+            f"{source}: templated executable or subcommand is refused: "
+            f"{command_text!r}"
+        )
 
     flags: list[tuple[str, str]] = []
-    index = 0
-    while index < len(rest):
-        token = rest[index]
+    i = 0
+    while i < len(rest):
+        token = rest[i]
         if not token.startswith("--"):
             raise InstallRecipeParseError(
-                f"{source}: unexpected bare token {token!r} in {command_line!r}"
+                f"{source}: unexpected bare token {token!r} in {command_text!r}"
             )
         if token in _GROUP_SELECTING_FLAGS:
-            if index + 1 >= len(rest) or rest[index + 1].startswith("--"):
+            if i + 1 >= len(rest) or rest[i + 1].startswith("--"):
                 raise InstallRecipeParseError(
                     f"{source}: {token!r} has no following argument in "
-                    f"{command_line!r}"
+                    f"{command_text!r}"
                 )
-            flags.append((token, rest[index + 1]))
-            index += 2
+            argument = rest[i + 1]
+            if _is_templated_value(argument):
+                raise InstallRecipeParseError(
+                    f"{source}: templated value {argument!r} in {token} is a "
+                    "dependency-selection argument and is refused"
+                )
+            flags.append((token, argument))
+            i += 2
             continue
         flags.append((token, ""))
-        index += 1
+        i += 1
 
     return _construct_install_recipe(
         tool=tool, subcommand=subcommand, flags=tuple(flags), source=source
@@ -1778,8 +1859,9 @@ def _select_recipe_groups(
     `[inert flags]` above means: zero or more of the CLOSED set
     `_INERT_FLAGS` (`--no-root`, `--no-interaction`, `--no-ansi`), in any
     position, any combination, accepted without changing the selected
-    groups — this is what makes every one of the four real fleet recipes
-    named in the module docstring resolve at all.
+    groups — this is what makes a real production recipe carrying one of
+    these (this repository's own live `Dockerfile` among them) resolve at
+    all.
 
     Refused (`groups=None`, `reason` naming `recipe.source`) rather than
     guessed at: a different tool, or a subcommand other than
@@ -1894,24 +1976,40 @@ def find_install_recipe_construction_call_sites(source_code: str) -> tuple[str, 
     can be pointed at a SYNTHETIC source in a test, proving it can refuse,
     not just at this module's own already-clean source) for every call
     site that would let a caller build an `InstallRecipe` OUTSIDE
-    `parse_install_command`:
+    `parse_install_command`, by any of the THREE ways this module's own
+    code could do it:
 
     * a direct `InstallRecipe(...)` construction — refused at runtime by
       `InstallRecipe.__new__`, but this is a STATIC sweep catching the
-      ATTEMPT itself, in source, before it would ever run; or
+      ATTEMPT itself, in source, before it would ever run;
     * a call to the internal `_construct_install_recipe` bypass from
-      anywhere other than inside `parse_install_command`'s own body — the
-      one other way to "supply parsed token tuples" directly, skipping the
-      raw-command tokenizer entirely.
+      anywhere other than inside `parse_install_command`'s own body; or
+    * a direct `object.__new__(InstallRecipe)` call from anywhere other
+      than inside `_construct_install_recipe`'s own body — the SAME
+      bypass `_construct_install_recipe` itself uses, reachable by anyone
+      willing to copy its four-line body rather than call it. Before this
+      check existed, this was the one genuinely SILENT bypass: invisible
+      to this sweep AND to the `InstallRecipe.__new__` runtime guard,
+      since neither is consulted by a caller that builds the object with
+      `object.__new__` directly and populates it with `object.__setattr__`
+      the same way `_construct_install_recipe` does.
 
     Returns a tuple naming the enclosing function (by its `def` name, or
     `"<module>"` for module-level code) of each offending call site — empty
     when none exist. Uses the same `ast`-walk technique already used
     elsewhere in this module (see `_find_module_manifest_call`,
-    `classify_registration_call_site`'s callers) rather than a substring
-    search, so a call spread across a multi-line literal or written via an
-    aliased import is still found the same way a real reviewer reading the
-    AST would find it.
+    `classify_registration_call_site`'s callers).
+
+    SCOPE, STATED PLAINLY rather than implied: this is a literal, bare-name
+    AST match — `Name`/`Attribute` nodes whose written name is exactly
+    `InstallRecipe`, `_construct_install_recipe`, or `object.__new__`
+    applied to a literal `InstallRecipe` argument. It does NOT resolve
+    imports or aliases: `from tests.architecture.composition_schema import
+    InstallRecipe as IR` followed by `IR(...)` is NOT caught, and neither
+    is construction via `getattr(module, "InstallRecipe")(...)` or any
+    other indirection. This is a structural lint for the direct, literal
+    forms actually written in THIS module's own source — not a full
+    alias-resolving analysis, and it makes no claim to be one.
     """
     tree = ast.parse(source_code)
     offenders: list[str] = []
@@ -1948,6 +2046,18 @@ def find_install_recipe_construction_call_sites(source_code: str) -> tuple[str, 
                 and self._enclosing() != "parse_install_command"
             ):
                 offenders.append(self._enclosing())
+            elif (
+                called_name == "__new__"
+                and isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "object"
+                and any(
+                    isinstance(arg, ast.Name) and arg.id == "InstallRecipe"
+                    for arg in node.args
+                )
+                and self._enclosing() != "_construct_install_recipe"
+            ):
+                offenders.append(self._enclosing())
             self.generic_visit(node)
 
     _Visitor().visit(tree)
@@ -1964,18 +2074,16 @@ def derive_installation_group_universe(
     deployed install recipe a product supplies. A dependency reaching only
     ONE deployed profile is still installed (Michael's ruling): this is a
     UNION over every supplied recipe, never an intersection or a single
-    privileged recipe. (Today no real product in this fleet is known to
-    supply more than one recipe — see the module docstring's note
-    correcting the earlier, incorrect "Sub's separate application, worker,
-    and operator recipes" citation. This function is proven against an
-    explicitly SYNTHETIC multi-recipe scenario in the test module.)
+    privileged recipe. Per F2, this module makes no claim about how many
+    real recipes any specific external product has — see the module
+    docstring's note. This function is proven against an explicitly
+    SYNTHETIC multi-recipe scenario in the test module.
 
     Returns `None` — refused, never defaulted — when:
 
     * `recipes` is empty: no authoritative checked-in recipe at all, the
       Academy case. Absence of a recipe is absence of evidence, never
-      evidence of absence, and never treated like ERP's fully-measurable
-      case; or
+      evidence of absence; or
     * ANY supplied recipe's shape is not recognised by
       `_parse_single_recipe_group_selection` — including a `--with`/
       `--without`/bare-install recipe whose default set cannot be computed
