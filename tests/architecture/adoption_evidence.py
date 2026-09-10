@@ -1628,35 +1628,221 @@ def python_composition_problems(
     return [_problem(where, f"unknown construct {construct!r}")]
 
 
-def declared_dependency_version(toml_text: str, distribution: str) -> str | None:
-    """The version a consumer's `pyproject.toml` pins `distribution` to.
+_NAME_SEPARATORS: Final = re.compile(r"[-_.]+")
+_PEP508_HEAD: Final = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?P<extras>\[[^\]]*\])?"
+)
+_BARE_VERSION: Final = re.compile(r"^[0-9][A-Za-z0-9.!+*-]*$")
+_DIRECT_REFERENCE_KEYS: Final = ("path", "git", "url")
 
-    Handles both spellings Poetry accepts — a bare string and an inline table —
-    because a checker that understood only one would silently return None for
-    the other and report "not pinned" about a file that pins it.
+
+def _normalized_distribution(name: str) -> str:
+    """PEP 503 normalization, so `dotmac_kernel` and `dotmac-kernel` are one name."""
+    return _NAME_SEPARATORS.sub("-", name.strip()).lower()
+
+
+def canonical_constraint(text: str) -> str:
+    """One spelling for two conventions that mean the same requirement.
+
+    Poetry writes an exact requirement bare (`"0.1.0a2"`); PEP 508 writes it with
+    the operator (`"==0.1.0a2"`).  Comparing the raw strings would report drift
+    between a file and a dossier that agree, so every comparison in this module
+    goes through here.  Anything that is not a bare version is only whitespace-
+    collapsed: `^0.1` and `>=0.1,<0.2` mean the same thing to a resolver but not
+    to this function, and answering that question is a resolver's job, not a
+    string's.
     """
+    collapsed = re.sub(r"\s+", "", text)
+    if _BARE_VERSION.match(collapsed):
+        return f"=={collapsed}"
+    return collapsed
+
+
+def _pep621_constraint(
+    entry: object, wanted: str, *, where: str
+) -> tuple[str | None, str | None]:
+    """`(constraint, problem)` for ONE entry of a PEP 621 dependency list.
+
+    `(None, None)` means "this entry is about some other distribution" — the only
+    case in which saying nothing is honest.
+    """
+    if not isinstance(entry, str):
+        return None, (
+            f"{where} holds a {type(entry).__name__}; PEP 621 declares a list of "
+            "PEP 508 requirement STRINGS, so a file this checker cannot read is "
+            "reported rather than skipped"
+        )
+    requirement = entry.split(";", 1)[0].strip()
+    head = _PEP508_HEAD.match(requirement)
+    if head is None or not head.group("name"):
+        return None, f"{where} holds {entry!r}, which is not a PEP 508 requirement"
+    if _normalized_distribution(head.group("name")) != wanted:
+        return None, None
+    remainder = requirement[head.end() :].strip()
+    if remainder.startswith("@"):
+        return None, (
+            f"{where} declares {head.group('name')} by direct reference "
+            f"({remainder!r}), which carries no version. That is not the same "
+            "fact as an absent dependency and must not be reported as one"
+        )
+    if not remainder:
+        return None, (
+            f"{where} declares {head.group('name')} with no version constraint. "
+            "The dependency is present and unpinned — reporting it as absent "
+            "would name the wrong defect"
+        )
+    return remainder, None
+
+
+def _poetry_constraint(
+    entry: object, *, name: str, where: str
+) -> tuple[str | None, str | None]:
+    """`(constraint, problem)` for one value of a Poetry dependency table."""
+    if isinstance(entry, str):
+        return entry, None
+    if isinstance(entry, Mapping):
+        version = entry.get("version")
+        if isinstance(version, str):
+            return version, None
+        for key in _DIRECT_REFERENCE_KEYS:
+            if key in entry:
+                return None, (
+                    f"{where} declares {name} by {key}, which carries no version. "
+                    "That is not the same fact as an absent dependency and must "
+                    "not be reported as one"
+                )
+        return None, f"{where} declares {name} as a table with no `version` key"
+    return None, (
+        f"{where} declares {name} as a {type(entry).__name__}, which is neither a "
+        "constraint string nor a table"
+    )
+
+
+def _agreed_constraint(
+    found: Sequence[tuple[str, str]],
+) -> tuple[str | None, str | None]:
+    """The one constraint a set of declarations agrees on, or the disagreement.
+
+    `found` is `(where, constraint)` pairs.  Two declarations of one distribution
+    that disagree is exactly the drift this module exists to catch, so it refuses
+    instead of letting declaration order decide.
+    """
+    if not found:
+        return None, None
+    canonical = {canonical_constraint(constraint) for _, constraint in found}
+    if len(canonical) > 1:
+        detail = ", ".join(
+            f"{where} pins {constraint!r}" for where, constraint in found
+        )
+        return None, (
+            f"one file declares {len(canonical)} different constraints for the "
+            f"same distribution ({detail}). Which one the build resolves is not "
+            "readable from the file, so this refuses rather than picking one"
+        )
+    return found[0][1], None
+
+
+def declared_dependency_version(
+    toml_text: str, distribution: str
+) -> tuple[str | None, str | None]:
+    """`(version, problem)` for the pin a consumer's `pyproject.toml` declares.
+
+    Two authorities, three spellings, and one of each shape used to be silently
+    unreadable.  PEP 621's `[project].dependencies` is a LIST of PEP 508 strings;
+    Poetry's `[tool.poetry.dependencies]` is a TABLE keyed by name.  The previous
+    implementation appended the PEP 621 list to a list of tables and then skipped
+    every non-Mapping, so a file that pinned the distribution in the standard,
+    authoritative place returned `None` — and its caller reported "composes a
+    module it does not depend on" about a file that depends on it.
+
+    `[project]` is authoritative and `[tool.poetry]` is source enrichment; where
+    both declare the distribution and disagree, this refuses rather than letting
+    table order decide.  The return is a PAIR precisely so that a caller cannot
+    read an answer without the refusal beside it: `None` means the distribution
+    is genuinely absent, never that the file was unreadable.
+    """
+    wanted = _normalized_distribution(distribution)
     document = tomllib.loads(toml_text)
-    tool = document.get("tool")
-    poetry = tool.get("poetry") if isinstance(tool, Mapping) else None
-    groups: list[Any] = []
-    if isinstance(poetry, Mapping):
-        groups.append(poetry.get("dependencies"))
-        for group in (poetry.get("group") or {}).values():
-            if isinstance(group, Mapping):
-                groups.append(group.get("dependencies"))
+
+    project_found: list[tuple[str, str]] = []
+    poetry_found: list[tuple[str, str]] = []
+
     project = document.get("project")
     if isinstance(project, Mapping):
-        groups.append(project.get("dependencies"))
+        lists: list[tuple[str, Any]] = [
+            ("[project].dependencies", project.get("dependencies"))
+        ]
+        optional = project.get("optional-dependencies")
+        if isinstance(optional, Mapping):
+            lists.extend(
+                (f"[project.optional-dependencies].{extra}", entries)
+                for extra, entries in optional.items()
+            )
+        for where, entries in lists:
+            if entries is None:
+                continue
+            if not isinstance(entries, Sequence) or isinstance(entries, str):
+                return None, (
+                    f"{where} is a {type(entries).__name__}; PEP 621 declares a "
+                    "list of requirement strings"
+                )
+            for entry in entries:
+                constraint, problem = _pep621_constraint(entry, wanted, where=where)
+                if problem is not None:
+                    return None, problem
+                if constraint is not None:
+                    project_found.append((where, constraint))
 
-    for table in groups:
-        if not isinstance(table, Mapping):
-            continue
-        entry = table.get(distribution)
-        if isinstance(entry, str):
-            return entry
-        if isinstance(entry, Mapping) and isinstance(entry.get("version"), str):
-            return str(entry["version"])
-    return None
+    tool = document.get("tool")
+    poetry = tool.get("poetry") if isinstance(tool, Mapping) else None
+    if isinstance(poetry, Mapping):
+        tables: list[tuple[str, Any]] = [
+            ("[tool.poetry.dependencies]", poetry.get("dependencies"))
+        ]
+        group = poetry.get("group")
+        if isinstance(group, Mapping):
+            for label, body in group.items():
+                if isinstance(body, Mapping):
+                    tables.append(
+                        (
+                            f"[tool.poetry.group.{label}.dependencies]",
+                            body.get("dependencies"),
+                        )
+                    )
+        for where, table in tables:
+            if not isinstance(table, Mapping):
+                continue
+            for name, entry in table.items():
+                if _normalized_distribution(str(name)) != wanted:
+                    continue
+                constraint, problem = _poetry_constraint(
+                    entry, name=str(name), where=where
+                )
+                if problem is not None:
+                    return None, problem
+                if constraint is not None:
+                    poetry_found.append((where, constraint))
+
+    project_version, project_problem = _agreed_constraint(project_found)
+    if project_problem is not None:
+        return None, project_problem
+    poetry_version, poetry_problem = _agreed_constraint(poetry_found)
+    if poetry_problem is not None:
+        return None, poetry_problem
+
+    if project_version is not None and poetry_version is not None:
+        if canonical_constraint(project_version) != canonical_constraint(
+            poetry_version
+        ):
+            return None, (
+                f"[project].dependencies pins {distribution} "
+                f"{project_version!r} while [tool.poetry] pins it "
+                f"{poetry_version!r}. `[project]` is the authority and "
+                "`[tool.poetry]` is source enrichment, but a file whose two "
+                "declarations disagree is drift, not enrichment"
+            )
+        return project_version, None
+    return project_version if project_version is not None else poetry_version, None
 
 
 def composition_claim_problems(
@@ -1721,8 +1907,10 @@ def composition_claim_problems(
             )
 
     if rows and pin_source is not None:
-        pinned = declared_dependency_version(pin_source, distribution)
-        if pinned is None:
+        pinned, pin_problem = declared_dependency_version(pin_source, distribution)
+        if pin_problem is not None:
+            problems.append(_problem(where, pin_problem))
+        elif pinned is None:
             problems.append(
                 _problem(
                     where,
@@ -1731,7 +1919,9 @@ def composition_claim_problems(
                     "depend on",
                 )
             )
-        elif expected_pin is not None and pinned != expected_pin:
+        elif expected_pin is not None and canonical_constraint(
+            pinned
+        ) != canonical_constraint(expected_pin):
             problems.append(
                 _problem(
                     where,
