@@ -17,6 +17,7 @@ from tests.architecture.composition_schema import (
     CompositionCoverageReport,
     CompositionRecord,
     CompositionState,
+    DimensionalIncoherence,
     DimensionValue,
     IncompatibleSchemaVersion,
     PackageClassification,
@@ -77,47 +78,72 @@ def _baseline_record(
 def test_derivation_table_for_optional_module_is_exhaustive_and_hand_checked():
     """Every (installation, module_registration, migration_lineage) combination
     for a classification where both dimensions apply (`optional-module`) maps
-    to exactly one state. The expected table is written by hand here — not
-    derived from the implementation — so this is a real check, not a
-    tautology."""
+    to exactly one outcome — a `CompositionState` or a refused
+    `DimensionalIncoherence`. The expected outcome is written by hand here —
+    not derived from the implementation — so this is a real check, not a
+    tautology. `runtime_consumption` is held fixed at `unknown` throughout,
+    since it never participates except when `installation` is `false` (see
+    the dedicated contradiction tests below for that axis).
+
+    Hand-derived rule, matching the pinned pipeline order exactly:
+
+    * any of the three is `unknown` -> `evidence_incomplete` (step 2 fires
+      regardless of what `installation` is, since step 2 precedes both the
+      contradiction check and the installation-absent derivation).
+    * else, `installation == false`:
+        * `registration == true` or `lineage == true` -> refused
+          (`DimensionalIncoherence`, step 3).
+        * otherwise (`registration == false` and `lineage == false`) ->
+          `not_composed` (step 4).
+    * else (`installation == true`): the ruled registration/lineage table
+      (step 6; step 5 never fires for `optional-module`).
+    """
     dims = (TRUE, FALSE, UNKNOWN)
-    expected: dict[
-        tuple[DimensionValue, DimensionValue, DimensionValue], CompositionState
-    ] = {}
+    seen = 0
     for installation in dims:
         for registration in dims:
             for lineage in dims:
-                if installation == UNKNOWN:
-                    expected_state = CompositionState.EVIDENCE_INCOMPLETE
+                seen += 1
+                record = _optional_module_record(
+                    installation=installation,
+                    module_registration=registration,
+                    migration_lineage=lineage,
+                )
+                case = (
+                    f"installation={installation}, "
+                    f"module_registration={registration}, "
+                    f"migration_lineage={lineage}"
+                )
+
+                if UNKNOWN in (installation, registration, lineage):
+                    assert (
+                        derive_composition_state(record)
+                        == CompositionState.EVIDENCE_INCOMPLETE
+                    ), case
                 elif installation == FALSE:
-                    expected_state = CompositionState.NOT_COMPOSED
-                elif registration == UNKNOWN or lineage == UNKNOWN:
-                    expected_state = CompositionState.EVIDENCE_INCOMPLETE
-                elif registration == TRUE and lineage == TRUE:
-                    expected_state = CompositionState.FULLY_COMPOSED
-                elif registration == FALSE and lineage == TRUE:
-                    expected_state = CompositionState.LINEAGE_ONLY
-                elif registration == TRUE and lineage == FALSE:
-                    expected_state = CompositionState.INVALID
+                    if registration == TRUE or lineage == TRUE:
+                        with pytest.raises(DimensionalIncoherence):
+                            derive_composition_state(record)
+                    else:
+                        assert registration == FALSE and lineage == FALSE
+                        assert (
+                            derive_composition_state(record)
+                            == CompositionState.NOT_COMPOSED
+                        ), case
                 else:
-                    assert registration == FALSE and lineage == FALSE
-                    expected_state = CompositionState.NOT_COMPOSED
-                expected[(installation, registration, lineage)] = expected_state
+                    assert installation == TRUE
+                    if registration == TRUE and lineage == TRUE:
+                        expected_state = CompositionState.FULLY_COMPOSED
+                    elif registration == FALSE and lineage == TRUE:
+                        expected_state = CompositionState.LINEAGE_ONLY
+                    elif registration == TRUE and lineage == FALSE:
+                        expected_state = CompositionState.INVALID
+                    else:
+                        assert registration == FALSE and lineage == FALSE
+                        expected_state = CompositionState.NOT_COMPOSED
+                    assert derive_composition_state(record) == expected_state, case
 
-    assert len(expected) == 27, "hand table must cover all 3x3x3 combinations"
-
-    for (installation, registration, lineage), expected_state in expected.items():
-        record = _optional_module_record(
-            installation=installation,
-            module_registration=registration,
-            migration_lineage=lineage,
-        )
-        actual_state = derive_composition_state(record)
-        assert actual_state == expected_state, (
-            f"installation={installation}, module_registration={registration}, "
-            f"migration_lineage={lineage}: expected {expected_state}, got "
-            f"{actual_state}"
-        )
+    assert seen == 27, "hand table must cover all 3x3x3 combinations"
 
 
 def test_derivation_table_for_platform_baseline_classifications():
@@ -181,6 +207,161 @@ def test_not_composed_only_reached_when_coverage_actually_proved_absence():
         module_registration=FALSE, migration_lineage=FALSE
     )
     assert derive_composition_state(genuinely_absent) == CompositionState.NOT_COMPOSED
+
+
+# ---------------------------------------------------------------------------
+# 1b. The derivation ORDER is pinned by tests, not just its outcomes.
+# ---------------------------------------------------------------------------
+
+
+def test_missing_installation_with_runtime_evidence_is_refused_not_not_composed():
+    """Consequence test (coordinator correction): a distribution reporting
+    `installation = false` alongside `runtime_consumption = true` is the
+    sharpest form of the contradiction — a not-installed distribution
+    cannot show real runtime consumption, so this is either a measurement
+    error or a genuine hazard, and the schema must say so by refusing
+    rather than filing it as `not_composed`."""
+    hazard = CompositionRecord(
+        product="hazard-probe",
+        distribution="dotmac-example",
+        classification=PackageClassification.OPTIONAL_MODULE,
+        installation=FALSE,
+        module_registration=FALSE,
+        migration_lineage=FALSE,
+        runtime_consumption=TRUE,
+    )
+    with pytest.raises(DimensionalIncoherence, match="runtime_consumption"):
+        derive_composition_state(hazard)
+
+
+def test_optional_module_with_no_registration_mechanism_never_derives_not_applicable():
+    """Consequence test: an `optional-module` distribution with no
+    registration mechanism records `module_registration = false`
+    ("absent"), and the pinned ordering can never reach `not_applicable`
+    for it — `_step_not_applicable` itself refuses to fire for a
+    classification where the dimensions apply, regardless of where it sits
+    in the pipeline."""
+    record = _optional_module_record(module_registration=FALSE, migration_lineage=FALSE)
+    state = derive_composition_state(record)
+    assert state == CompositionState.NOT_COMPOSED
+    assert state != CompositionState.NOT_APPLICABLE
+    # The not_applicable step itself, run in isolation, defers — it cannot
+    # produce not_applicable for a classification where the dimensions apply.
+    assert schema._step_not_applicable(record) is None
+
+
+def test_universal_facility_with_inapplicable_dims_derives_not_applicable():
+    """Consequence test: a `universal-facility` distribution — inapplicable
+    `module_registration`/`migration_lineage` by classification — derives
+    `not_applicable` once it is confirmed installed and nothing else
+    blocks the pipeline."""
+    record = _baseline_record(
+        classification=PackageClassification.UNIVERSAL_FACILITY, installation=TRUE
+    )
+    assert derive_composition_state(record) == CompositionState.NOT_APPLICABLE
+
+
+def test_ordering_pins_unknown_refusal_ahead_of_contradiction_check():
+    """`installation=false` (a step-3 contradiction trigger, paired with
+    `module_registration=true`) together with `migration_lineage=unknown`
+    (a step-2 trigger) has exactly one correct answer under the ruled
+    order (step 2 before step 3): `evidence_incomplete`. Under the REVERSE
+    order this same input would instead raise `DimensionalIncoherence` —
+    so this single input distinguishes the two orders directly, rather
+    than merely checking an outcome multiple orders could reach."""
+    record = _optional_module_record(
+        installation=FALSE, module_registration=TRUE, migration_lineage=UNKNOWN
+    )
+    assert derive_composition_state(record) == CompositionState.EVIDENCE_INCOMPLETE
+
+
+def test_ordering_pins_contradiction_check_ahead_of_installation_absent_derivation():
+    """`installation=false` with `module_registration=true` and
+    `migration_lineage=false` (no unknowns at all) triggers ONLY the
+    step-3 contradiction condition. Under the ruled order (3 before 4)
+    this raises; under the REVERSE order step 4 would fire first and
+    unconditionally return `not_composed`, swallowing the contradiction —
+    this is the exact defect the coordinator's correction targets."""
+    record = _optional_module_record(
+        installation=FALSE, module_registration=TRUE, migration_lineage=FALSE
+    )
+    with pytest.raises(DimensionalIncoherence):
+        derive_composition_state(record)
+
+
+def test_shipped_pipeline_order_matches_the_ruled_sequence():
+    """Pins the ordering as an artifact, not just as a property of scattered
+    outcomes: the exact sequence of step functions `derive_composition_state`
+    runs, by name, in order."""
+    assert [step.__name__ for step in schema._DERIVATION_PIPELINE] == [
+        "_step_validate_coherence",
+        "_step_refuse_required_unknown",
+        "_step_refuse_contradictions",
+        "_step_installation_absent",
+        "_step_not_applicable",
+        "_step_registration_lineage_table",
+    ]
+
+
+def test_pipeline_ordering_is_pinned_not_incidental():
+    """The strongest form of the ordering proof: build the SAME step
+    functions the module ships, but with `_step_installation_absent` moved
+    ahead of `_step_refuse_contradictions` (exactly the bug the coordinator
+    named). For the genuinely contradictory record above, the shipped
+    pipeline refuses it while this reordered pipeline silently derives
+    `not_composed` — proving the ORDER itself, not merely the step set,
+    decides the answer, so a test that only checked final states under the
+    shipped order could not have distinguished a correctly- from an
+    incorrectly-ordered implementation."""
+    contradiction = _optional_module_record(
+        installation=FALSE, module_registration=TRUE, migration_lineage=FALSE
+    )
+
+    with pytest.raises(DimensionalIncoherence):
+        derive_composition_state(contradiction)
+
+    reordered_steps = (
+        schema._step_validate_coherence,
+        schema._step_refuse_required_unknown,
+        schema._step_installation_absent,  # moved ahead of the contradiction refusal
+        schema._step_refuse_contradictions,
+        schema._step_not_applicable,
+        schema._step_registration_lineage_table,
+    )
+    assert set(reordered_steps) == set(schema._DERIVATION_PIPELINE)
+    assert reordered_steps != schema._DERIVATION_PIPELINE
+
+    reordered_result = None
+    for step in reordered_steps:
+        reordered_result = step(contradiction)
+        if reordered_result is not None:
+            break
+    assert reordered_result == CompositionState.NOT_COMPOSED, (
+        "the reordered pipeline swallows the contradiction instead of "
+        "refusing it — proving the shipped order is load-bearing"
+    )
+
+
+def test_validate_coherence_step_refuses_a_record_that_bypassed_construction():
+    """Defence in depth for pipeline step 1: even a `CompositionRecord`
+    instance that bypassed `__post_init__` entirely (constructed via
+    `object.__new__`, simulating a hypothetical future construction-path
+    defect) is still refused by the pipeline's own first step, rather than
+    silently deriving a state from incoherent dimensions."""
+    broken = object.__new__(CompositionRecord)
+    object.__setattr__(broken, "product", "erp")
+    object.__setattr__(broken, "distribution", "dotmac-example")
+    object.__setattr__(
+        broken, "classification", PackageClassification.UNIVERSAL_FACILITY
+    )
+    object.__setattr__(broken, "installation", TRUE)
+    # Incoherent: universal-facility never applies to module_registration.
+    object.__setattr__(broken, "module_registration", TRUE)
+    object.__setattr__(broken, "migration_lineage", NA)
+    object.__setattr__(broken, "runtime_consumption", UNKNOWN)
+
+    with pytest.raises(DimensionalIncoherence):
+        derive_composition_state(broken)
 
 
 # ---------------------------------------------------------------------------

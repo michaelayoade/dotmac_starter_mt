@@ -71,6 +71,60 @@ dataclass has no ``state`` field, so supplying one raises ``TypeError``, and
 :func:`composition_record_from_payload` explicitly rejects a payload carrying
 a ``state``/``fully_composed`` key even alongside otherwise-valid dimensions.
 
+The derivation pipeline, in order
+----------------------------------
+
+:func:`derive_composition_state` is a fixed, ordered pipeline of small steps
+(``_DERIVATION_PIPELINE``, a tuple of functions each returning either a
+decided :class:`CompositionState` or ``None`` to defer to the next step).
+The order is load-bearing, not incidental — a reordered pipeline reaches a
+DIFFERENT, wrong answer for at least one real input (see
+``test_pipeline_ordering_is_pinned_not_incidental`` in the test module,
+which builds the reordered pipeline and shows the divergence directly):
+
+1. **Validate coherence** — the classification/`NOT_APPLICABLE` invariants
+   :class:`CompositionRecord`'s constructor already enforces, re-asserted
+   here as the pipeline's own first line of defence
+   (``DimensionalIncoherence``, not silently tolerated even if a record
+   somehow bypassed construction).
+2. **Refuse any required dimension left `UNKNOWN`** — `installation`
+   always; `module_registration`/`migration_lineage` only when the
+   classification says they apply. Returns `EVIDENCE_INCOMPLETE`.
+3. **Refuse contradictions** — `installation = FALSE` (confirmed absent)
+   together with `module_registration`, `migration_lineage`, OR
+   `runtime_consumption` reporting `TRUE` is not a state, it is a
+   contradiction: a distribution that is not installed cannot be
+   registered, have lineage, or show runtime consumption. This raises
+   ``DimensionalIncoherence`` — a not-installed distribution with runtime
+   evidence is the sharpest form of it, and is refused rather than filed as
+   `NOT_COMPOSED`.
+4. **`installation = FALSE` with complete negative evidence** (step 3 has
+   already cleared every contradiction) derives `NOT_COMPOSED`.
+5. **Classification-derived `NOT_APPLICABLE`** — reached only once
+   `installation` is confirmed `TRUE` and no contradiction or unknown
+   blocked the pipeline. If neither `module_registration` nor
+   `migration_lineage` applies to this classification, the state is
+   `NOT_APPLICABLE`. Because step 4 runs first, a platform-baseline
+   distribution that is genuinely not installed still reports
+   `NOT_COMPOSED`, never `NOT_APPLICABLE` — "not applicable" is a claim
+   about the QUESTION, not a substitute for "not observed."
+6. Otherwise the ruled table over `module_registration` /
+   `migration_lineage`: both present -> `FULLY_COMPOSED`; lineage only ->
+   `LINEAGE_ONLY`; registration without lineage -> `INVALID`; neither
+   (both measured `FALSE`) -> `NOT_COMPOSED`.
+
+Three consequences the pipeline order exists to guarantee, each with its
+own test: an `optional-module` with no registration mechanism records
+`module_registration = FALSE` and the pipeline can never reach
+`NOT_APPLICABLE` for it (step 5's classification check would refuse that
+combination via step 1 long before step 5 is reached); a
+`universal-facility` with inapplicable module dimensions reaches
+`NOT_APPLICABLE` exactly when installed and otherwise uncontradicted; and a
+distribution reporting `installation = FALSE` alongside `runtime_consumption
+= TRUE` is refused outright (step 3) rather than silently filed as
+`NOT_COMPOSED` (which is what step 4 alone, without step 3 ahead of it,
+would have done — the exact defect this ordering fixes).
+
 The registration boundary
 --------------------------
 
@@ -126,7 +180,7 @@ of a violation as a field).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final
@@ -170,6 +224,14 @@ class IncompatibleSchemaVersion(ValueError):
     """A payload does not declare `CURRENT_SCHEMA_VERSION` and is refused
     outright — no translation, no partial read, no defaulting of any absent
     dimension."""
+
+
+class DimensionalIncoherence(ValueError):
+    """Raised by `derive_composition_state`'s pipeline when a record's own
+    dimensions cannot jointly be true of one real distribution — refused
+    outright, never silently resolved to a state. Covers both the
+    classification/`NOT_APPLICABLE` invariant (pipeline step 1) and the
+    installation-absent-with-present-evidence contradiction (step 3)."""
 
 
 # ---------------------------------------------------------------------------
@@ -446,42 +508,130 @@ class CompositionState(str, Enum):
     NOT_APPLICABLE = "not_applicable"
 
 
-def derive_composition_state(record: CompositionRecord) -> CompositionState:
-    """The one, pure, mechanical derivation. Never reads anything but the
-    record's own dimensions and its classification's applicability rules.
+def _step_validate_coherence(record: CompositionRecord) -> CompositionState | None:
+    """Pipeline step 1. Re-asserts the same classification/`NOT_APPLICABLE`
+    invariant `CompositionRecord.__post_init__` already enforces at
+    construction. In normal operation this can never fire — construction
+    already refused an incoherent record — but it is restated here,
+    deliberately first, so the ordered pipeline is complete on its own and
+    so a record that reaches this function by any other path (e.g. a test
+    that bypasses `__post_init__` to simulate a construction-layer defect)
+    is still refused before any state is derived from it."""
+    for field_name, value, applies in (
+        (
+            "module_registration",
+            record.module_registration,
+            record.classification.module_registration_applies,
+        ),
+        (
+            "migration_lineage",
+            record.migration_lineage,
+            record.classification.migration_lineage_applies,
+        ),
+    ):
+        is_not_applicable = value is DimensionValue.NOT_APPLICABLE
+        if applies and is_not_applicable:
+            raise DimensionalIncoherence(
+                f"{record.product}/{record.distribution}: {field_name} "
+                f"applies to classification {record.classification.value!r} "
+                "and cannot be not_applicable"
+            )
+        if not applies and not is_not_applicable:
+            raise DimensionalIncoherence(
+                f"{record.product}/{record.distribution}: {field_name} does "
+                f"not apply to classification {record.classification.value!r} "
+                "and must be not_applicable"
+            )
+    if record.installation is DimensionValue.NOT_APPLICABLE:
+        raise DimensionalIncoherence(
+            f"{record.product}/{record.distribution}: installation is never "
+            "not_applicable"
+        )
+    return None
 
-    Order matters and is deliberate:
 
-    1. `installation is UNKNOWN` refuses first — nothing downstream can be
-       trusted if we do not even know whether the distribution is present.
-    2. `installation is FALSE` (confirmed absent) is `NOT_COMPOSED` —
-       nothing installed is trivially nothing composed, regardless of what
-       classification would otherwise require.
-    3. From here `installation is TRUE`. If neither `module_registration`
-       nor `migration_lineage` applies to this classification, the question
-       does not apply to this distribution: `NOT_APPLICABLE`.
-    4. Any APPLICABLE dimension left `UNKNOWN` refuses: `EVIDENCE_INCOMPLETE`.
-    5. Otherwise the ruled table: registration + lineage -> `FULLY_COMPOSED`;
-       lineage only -> `LINEAGE_ONLY`; registration without lineage ->
-       `INVALID`; neither (both measured `FALSE`, i.e. coverage actually
-       proved the absence) -> `NOT_COMPOSED`.
-    """
+def _step_refuse_required_unknown(
+    record: CompositionRecord,
+) -> CompositionState | None:
+    """Pipeline step 2. `installation` is always required. `registration`/
+    `lineage` are required exactly when their classification says they
+    apply. `runtime_consumption` is deliberately NOT checked here — it is
+    never a required dimension for certifying a composition state (see the
+    module docstring); it only participates, separately, in step 3's
+    contradiction check."""
     if record.installation is DimensionValue.UNKNOWN:
         return CompositionState.EVIDENCE_INCOMPLETE
+    if (
+        record.classification.module_registration_applies
+        and record.module_registration is DimensionValue.UNKNOWN
+    ):
+        return CompositionState.EVIDENCE_INCOMPLETE
+    if (
+        record.classification.migration_lineage_applies
+        and record.migration_lineage is DimensionValue.UNKNOWN
+    ):
+        return CompositionState.EVIDENCE_INCOMPLETE
+    return None
+
+
+def _step_refuse_contradictions(
+    record: CompositionRecord,
+) -> CompositionState | None:
+    """Pipeline step 3. `installation = FALSE` (confirmed absent) together
+    with ANY of registration, lineage, or runtime consumption reporting
+    `TRUE` is refused outright — a not-installed distribution cannot be
+    registered, have lineage, or show runtime consumption, so seeing one is
+    either a measurement error or a real hazard, never a state to file."""
+    if record.installation is not DimensionValue.FALSE:
+        return None
+    contradicting = [
+        name
+        for name, value in (
+            ("module_registration", record.module_registration),
+            ("migration_lineage", record.migration_lineage),
+            ("runtime_consumption", record.runtime_consumption),
+        )
+        if value is DimensionValue.TRUE
+    ]
+    if contradicting:
+        raise DimensionalIncoherence(
+            f"{record.product}/{record.distribution}: installation is false "
+            f"(absent) but {contradicting!r} report true — refused, not "
+            "filed as not_composed"
+        )
+    return None
+
+
+def _step_installation_absent(record: CompositionRecord) -> CompositionState | None:
+    """Pipeline step 4. Reached only once step 3 has cleared every
+    contradiction, so `installation = FALSE` here always comes with
+    complete negative evidence from the other three dimensions."""
     if record.installation is DimensionValue.FALSE:
         return CompositionState.NOT_COMPOSED
+    return None
 
+
+def _step_not_applicable(record: CompositionRecord) -> CompositionState | None:
+    """Pipeline step 5. Reached only once `installation` is confirmed
+    `TRUE` (steps 2 and 4 already handled `UNKNOWN`/`FALSE`). If neither
+    `module_registration` nor `migration_lineage` applies to this
+    classification, the composition question itself does not apply."""
+    if (
+        not record.classification.module_registration_applies
+        and not record.classification.migration_lineage_applies
+    ):
+        return CompositionState.NOT_APPLICABLE
+    return None
+
+
+def _step_registration_lineage_table(
+    record: CompositionRecord,
+) -> CompositionState | None:
+    """Pipeline step 6, the ruled table. Reached only once installation is
+    `TRUE`, at least one of registration/lineage applies, and neither
+    applicable dimension is `UNKNOWN`."""
     registration_applies = record.classification.module_registration_applies
     lineage_applies = record.classification.migration_lineage_applies
-
-    if not registration_applies and not lineage_applies:
-        return CompositionState.NOT_APPLICABLE
-
-    if registration_applies and record.module_registration is DimensionValue.UNKNOWN:
-        return CompositionState.EVIDENCE_INCOMPLETE
-    if lineage_applies and record.migration_lineage is DimensionValue.UNKNOWN:
-        return CompositionState.EVIDENCE_INCOMPLETE
-
     registered = (
         registration_applies and record.module_registration is DimensionValue.TRUE
     )
@@ -494,6 +644,37 @@ def derive_composition_state(record: CompositionRecord) -> CompositionState:
     if registered and not has_lineage:
         return CompositionState.INVALID
     return CompositionState.NOT_COMPOSED
+
+
+#: The pinned, ordered derivation pipeline. `derive_composition_state` is a
+#: thin loop over exactly this tuple, in exactly this order — the order is
+#: the ruled contract, not an implementation detail; see the module
+#: docstring's "The derivation pipeline, in order" section and
+#: `test_pipeline_ordering_is_pinned_not_incidental`.
+_DERIVATION_PIPELINE: Final[
+    tuple[Callable[[CompositionRecord], CompositionState | None], ...]
+] = (
+    _step_validate_coherence,
+    _step_refuse_required_unknown,
+    _step_refuse_contradictions,
+    _step_installation_absent,
+    _step_not_applicable,
+    _step_registration_lineage_table,
+)
+
+
+def derive_composition_state(record: CompositionRecord) -> CompositionState:
+    """The one, pure, mechanical derivation. Runs `_DERIVATION_PIPELINE` in
+    order and returns the first step's decided state; a step that finds a
+    genuine contradiction raises `DimensionalIncoherence` instead of
+    returning. The final step (the ruled registration/lineage table) always
+    decides, so this function always either returns a `CompositionState` or
+    raises."""
+    for step in _DERIVATION_PIPELINE:
+        result = step(record)
+        if result is not None:
+            return result
+    raise AssertionError("unreachable: _step_registration_lineage_table always decides")
 
 
 # ---------------------------------------------------------------------------
