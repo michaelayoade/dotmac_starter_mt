@@ -61,7 +61,10 @@ Four dimensions, per product x distribution
 ============================  ===============================================
 dimension                     meaning
 ============================  ===============================================
-``installation``               the distribution is resolved and installed
+``installation``               the distribution is installed into the
+                                PRODUCTION profile the product actually
+                                deploys — never merely resolved into a lock
+                                file (see "What ``installation`` means" below)
 ``module_registration``        its actual ``ModuleManifest`` is registered
                                 through the consumed assembly — nothing else
                                 counts (see "The registration boundary" below)
@@ -321,6 +324,166 @@ authoritative regression fixtures that pin THIS module's own classifier
 logic against a snapshot someone once read by hand — never product evidence
 about ERP's or Sub's current registration state, and never a re-derivation
 of it. Nothing in this module or its tests may cite them as such.
+
+What ``installation`` means — the production-profile boundary
+-----------------------------------------------------------------
+
+Ruled by Michael, closing an ambiguity an independent review found in the
+phrase this dimension used to carry ("the distribution is resolved and
+installed"): that phrase does not decide a real case. ``dotmac_erp`` pinned
+``dotmac-deployment-foundation`` in its **dev** dependency group, so the
+distribution is resolved in ``poetry.lock`` — but ERP's ``Dockerfile:50``
+runs ``poetry install --only main``, so it never reaches the deployed image.
+Reading ``installation`` as "resolved in the lock" let ERP record
+``installation: true`` for a distribution its production image never
+contains. If Sub or Academy read the same word as "present in the deployed
+image" instead, the three records stop being comparable — the exact failure
+this schema exists to end, arriving through an undefined term rather than a
+divergent field name.
+
+The ruling, stated plainly:
+
+* **What counts.** ``installation = true`` means the distribution is a
+  member of the dependency set the product's actual DEPLOYED ARTIFACT
+  installs — the set an operator running that artifact in production really
+  has on disk. For a Poetry-based product this is the group (or groups) its
+  build step actually passes to the installer for the image it ships (e.g.
+  ERP's ``poetry install --only main``), never every group the lock file
+  happens to resolve.
+* **What does not count.** A distribution resolved only into a development,
+  test, or tooling dependency group, and excluded from the artifact the
+  product deploys, is ``installation = false`` — **even though it appears in
+  ``poetry.lock``** alongside every genuinely production dependency,
+  identically and without distinction. Lock membership answers "does a
+  resolver consider this version compatible," never "does the running
+  system have it."
+* **Why the distinction exists.** ``poetry.lock`` (or any lock file) records
+  the union of every declared dependency group so the resolver can prove one
+  consistent dependency graph; it is not, and was never meant to be, a
+  statement about what ships. Treating it as one collapses "could be
+  installed" and "is installed in production" into the same fact, which is
+  exactly the reading that produced ERP's wrong ``installation: true`` for
+  ``dotmac-deployment-foundation``. A future reader who "simplifies"
+  ``installation`` back to "present in the lock" reintroduces precisely this
+  defect — this section exists so that simplification has to look this
+  paragraph in the eye first.
+
+This is why the concrete consequence Michael named is a REQUIRED EVIDENCE
+CORRECTION, not tuning: ERP's ``dotmac-deployment-foundation`` row changes
+``installation: true -> false``, with ``runtime_consumption`` remaining
+``false`` and both module dimensions remaining ``not_applicable`` (it is a
+``universal-facility``, so those two dimensions were never real questions
+for it in the first place — see the dimension-value bullets above). Under
+pipeline step 4 (`_step_installation_absent`), this correction alone flips
+that row's derived state from whatever `installation = true` had produced to
+``NOT_COMPOSED`` — the derivation pipeline itself is unchanged; only the
+input dimension value is now honestly recorded. See
+:func:`derive_installation_dimension` immediately below for the one shared
+derivation a product uses to compute this measurement, so it is not
+re-invented three times and cannot be satisfied by accident with the full
+lock set.
+
+``derive_installation_dimension`` — a structured read plus one narrow parse
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A product does not get to assert ``installation`` by interpreting the
+sentence above for itself. The question splits cleanly into two halves with
+two different evidence shapes, and only one of them needs parsing at all:
+
+* **Which group(s) a distribution resolves into is STRUCTURED DATA.** Poetry
+  itself writes a ``groups`` field onto every ``[[package]]`` entry in
+  ``poetry.lock``. :func:`derive_lock_group_membership` reads it directly
+  with ``tomllib`` — no parsing, no heuristic, no substring search anywhere
+  in this half. (Verified directly against ERP's real lock file at the time
+  of this ruling: exactly two groups exist there, ``{"main", "dev"}``, and
+  ``dotmac-deployment-foundation`` is the only ``dotmac-*`` package in
+  ``dev`` — every other one is in ``main``. Under this ruling exactly that
+  one row moves, independently confirming the case Michael named.)
+* **Which groups the product's deployed artifact SELECTS is the only part
+  that requires reading a recipe** — a real, structural parse of the
+  install command (tool, subcommand, group-selecting flag and its
+  argument), never a substring search for a literal like ``"--only main"``
+  (that would only move the exact defect ``classify_registration_call_site``
+  exists to avoid — see "The registration boundary" above — into a seventh
+  place). :func:`_parse_single_recipe_group_selection` does this parse; a
+  recipe shape it does not recognise is refused, never guessed at, and a
+  refusal NEVER widens the selected set to "every group" and never narrows
+  it to "no groups" — it is simply not evidence, and evidence absent is
+  ``DimensionValue.UNKNOWN``, exactly as clause 3 of Michael's ruling
+  requires.
+
+**What a recipe is.** :class:`InstallRecipe` holds a checked-in install
+command as PARSED TOKENS — ``tool``, ``subcommand``, and ``flags`` (ordered
+``(flag, argument)`` pairs) — never a raw command-line string a caller has
+already pre-interpreted. ``source`` is PROVENANCE ONLY (the same convention
+as :attr:`AssemblyConsumptionTrace.boot_entry_point`): it records which file
+grounded the measurement for a human reader, and the parser never reads it.
+Whoever builds an :class:`InstallRecipe` is responsible for making it a
+faithful tokenization of the real command their product's build step
+executes — this module has no access to another repository's ``Dockerfile``
+and does not claim to have read one.
+
+**Recognised recipe shapes (Poetry only, today).**
+``_parse_single_recipe_group_selection`` recognises exactly:
+
+* ``poetry install --only <g1>[,<g2>...]`` — selects EXACTLY the named
+  groups; nothing is implied.
+* ``poetry install --with <g1>[,<g2>...]`` — selects the implicit default
+  group ``"main"`` PLUS every named group.
+
+**Everything else is refused (returns ``None``, never a guess):** a
+different tool or subcommand; ``--only`` and ``--with`` both present at once
+(``--only`` already fully determines the selection, and combining it with
+``--with`` is not a shape this parser resolves); ``--without`` (its effect
+depends on which groups are non-optional by default in ``pyproject.toml``,
+which is unknowable from the command line alone); a bare ``poetry install``
+with no group-selecting flag at all (same reason); any other, unrecognised
+flag; or a blank/empty flag argument (e.g. an unresolved build-arg
+substitution such as ``--only ${GROUPS}``). None of these silently becomes
+"every group" — that is the exact failure direction clause 4 exists to
+forbid.
+
+**The union across every deployed profile.** A product may have more than
+one checked-in, deployed recipe — Sub's separate application, worker, and
+operator recipes are the named case. :func:`derive_installation_group_universe`
+takes the FULL tuple of a product's recipes and returns the UNION of every
+one's selected groups: a dependency reaching only one deployed profile is
+still installed. It refuses (returns ``None``) the WHOLE derivation, rather
+than silently dropping the offending recipe from the union, the moment ANY
+one supplied recipe fails to parse — a silently dropped recipe could hide a
+real production installation behind a shape this parser simply failed to
+read, and that failure must never look identical to "this recipe
+legitimately installs nothing." It also refuses when ``recipes`` is empty —
+no authoritative checked-in recipe at all, the Academy case: absence of a
+recipe is absence of evidence, never evidence of absence, and never treated
+like ERP's fully-measurable case.
+
+**The cross-check, and the final derivation.** :func:`derive_installation_dimension`
+combines the two halves for one distribution. It refuses (``UNKNOWN``) when
+either half is unmeasurable (`derive_lock_group_membership` or
+`derive_installation_group_universe` returned `None`), and ALSO refuses when
+the recipe-selected groups are not a subset of the lock's own declared
+groups — a recipe naming a group the lock has no entries for at all is not a
+product with zero production dependencies, it is a derivation reading a
+stale or wrong recipe, and treating that as "nothing is installed" would
+make every ``installation`` in that product ``false`` while looking like a
+clean, confident answer (the vacuous-pass shape this cross-check exists to
+catch). Only once both halves are measured and mutually consistent does it
+return ``TRUE`` (the distribution's lock groups intersect the selected
+groups) or ``FALSE`` (they do not, including a distribution absent from the
+lock entirely — it cannot be installed into a group it was never resolved
+into) — never ``NOT_APPLICABLE`` (see the module docstring's ``installation``
+invariant: it is never that value for any classification).
+
+This is a DERIVATION over facts a product itself has already checked in —
+it is not wired into :func:`composition_record_from_payload`, which still
+accepts a plain ``installation: DimensionValue`` on the payload (see "Do not
+change any dimension value, state derivation, or the pipeline");
+:func:`derive_installation_dimension` is the one shared way a product
+computes that value BEFORE it writes the payload, so the derivation is not
+re-invented three times and, because "present in the lock" alone is never
+sufficient to reach ``TRUE`` (the recipe half must independently select a
+matching group), cannot be satisfied by accident with the full lock set.
 
 The catalogue universe
 ------------------------
@@ -1020,6 +1183,243 @@ class RegistrationEvidence:
         if self.kind is RegistrationEvidenceKind.INDETERMINATE_ASSEMBLY_CONSUMPTION:
             return DimensionValue.UNKNOWN
         return DimensionValue.FALSE
+
+
+# ---------------------------------------------------------------------------
+# The installation boundary: production-profile group selection, split into
+# a structured lock read and a recipe parse. See the module docstring's
+# "What `installation` means" section for the ruling and why the split is
+# shaped this way.
+#
+# Group MEMBERSHIP of a distribution (which groups a package resolves into)
+# is structured data Poetry itself writes into `poetry.lock` — the `groups`
+# field on every `[[package]]` entry — and is read here with `tomllib`
+# alone, never a heuristic or a substring search.
+#
+# Which groups the product's deployed artifact SELECTS is the only part
+# that requires reading a recipe: a real parse of the install command's
+# structure (tool, subcommand, group-selecting flag and its argument), never
+# a substring search for a literal like `"--only main"` — that would move
+# the exact defect `classify_registration_call_site` exists to avoid (see
+# "The registration boundary" above) into a seventh place.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LockGroupMembership:
+    """The dependency-group membership `poetry.lock` itself declares,
+    reduced to exactly what `installation` needs: which group(s) each
+    distribution resolves into, and the full set of group names the lock
+    mentions at all (used to cross-check a recipe's selected groups below —
+    see `derive_installation_dimension`)."""
+
+    groups_by_distribution: Mapping[str, frozenset[str]]
+    all_declared_groups: frozenset[str]
+
+
+def derive_lock_group_membership(
+    lock_document: Mapping[str, object],
+) -> LockGroupMembership | None:
+    """Read `[[package]]` entries' `name`/`groups` fields from an
+    ALREADY-PARSED `poetry.lock` document — this function never reads a
+    file or calls `tomllib.load` itself, exactly like
+    `composition_records_from_envelope` takes an already-parsed document.
+
+    Returns `None` — refused, never defaulted — when:
+
+    * the document carries no non-empty `package` list at all; or
+    * ANY `[[package]]` entry is missing a well-formed `name` string; or
+    * ANY `[[package]]` entry has no `groups` field, or a `groups` field
+      that is not a non-empty list of non-empty strings.
+
+    The last case is the older-lock-format caveat: `groups` is present in
+    current Poetry lock files but was not always. A lock with even one
+    entry carrying no group information at all cannot honestly answer which
+    groups install where, so the WHOLE document is refused — not read as
+    "the packages that do have `groups` are the only ones that matter." A
+    caller with a genuinely old-format lock gets `None` here, which
+    `derive_installation_dimension` turns into `DimensionValue.UNKNOWN`,
+    never an assumption that everything is `main`.
+    """
+    packages = lock_document.get("package")
+    if not isinstance(packages, list) or not packages:
+        return None
+
+    groups_by_distribution: dict[str, frozenset[str]] = {}
+    all_groups: set[str] = set()
+    for entry in packages:
+        if not isinstance(entry, Mapping):
+            return None
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            return None
+        groups = entry.get("groups")
+        if (
+            not isinstance(groups, list)
+            or not groups
+            or not all(isinstance(g, str) and g for g in groups)
+        ):
+            return None
+        groups_by_distribution[name] = frozenset(groups)
+        all_groups.update(groups)
+
+    return LockGroupMembership(
+        groups_by_distribution=groups_by_distribution,
+        all_declared_groups=frozenset(all_groups),
+    )
+
+
+@dataclass(frozen=True)
+class InstallRecipe:
+    """One checked-in install command, as PARSED TOKENS — never a raw
+    command-line string a caller has already pre-interpreted. Construct
+    this by tokenizing the actual command a product's build step executes
+    (e.g. `RUN poetry install --only main` becomes
+    `InstallRecipe(tool="poetry", subcommand="install",
+    flags=(("--only", "main"),), source="Dockerfile:50")`).
+
+    `source` is PROVENANCE ONLY — the same convention as
+    `AssemblyConsumptionTrace.boot_entry_point` — recording which file
+    grounded the measurement for a human reader; the parser below never
+    reads it. Whoever builds an `InstallRecipe` is responsible for making it
+    a faithful tokenization of the real command their product's build step
+    executes; this module has no access to another repository's
+    `Dockerfile` and does not claim to have read one.
+    """
+
+    tool: str
+    subcommand: str
+    flags: tuple[tuple[str, str], ...]
+    source: str
+
+
+def _parse_single_recipe_group_selection(
+    recipe: InstallRecipe,
+) -> frozenset[str] | None:
+    """Parse ONE recipe's install command structure into the exact set of
+    dependency groups it selects, or `None` if the recipe's shape is not one
+    of the two recognised forms below — never a guess.
+
+    Recognised shapes (Poetry only, today):
+
+    * `poetry install --only <g1>[,<g2>...]` — selects EXACTLY the named
+      groups, nothing implied.
+    * `poetry install --with <g1>[,<g2>...]` — selects the implicit default
+      group `"main"` PLUS every named group.
+
+    Refused (returns `None`) rather than guessed at: a different tool or
+    subcommand; `--only` and `--with` both present at once (`--only` already
+    fully determines the selection, and combining it with `--with` is not a
+    shape this parser resolves); `--without` (its effect depends on which
+    groups are non-optional by default in `pyproject.toml`, unknowable from
+    the command line alone); a bare `poetry install` with no group-selecting
+    flag at all (same reason); any other, unrecognised flag present anywhere
+    in the recipe; or a blank/empty flag argument (e.g. an unresolved
+    build-arg substitution such as `--only ${GROUPS}` collapsing to an empty
+    or templated string). None of these silently becomes "every group" —
+    that is the exact failure direction this parser exists to forbid.
+    """
+    if recipe.tool != "poetry" or recipe.subcommand != "install":
+        return None
+
+    flag_names = [name for name, _ in recipe.flags]
+    has_only = "--only" in flag_names
+    has_with = "--with" in flag_names
+    has_without = "--without" in flag_names
+    if has_without or (has_only and has_with) or (not has_only and not has_with):
+        return None
+
+    groups: set[str] = {"main"} if has_with else set()
+    for name, argument in recipe.flags:
+        if name not in ("--only", "--with"):
+            return None
+        parts = [part.strip() for part in argument.split(",")]
+        if not argument.strip() or any(not part for part in parts):
+            return None
+        groups.update(parts)
+    return frozenset(groups)
+
+
+def derive_installation_group_universe(
+    recipes: tuple[InstallRecipe, ...],
+) -> frozenset[str] | None:
+    """The full set of dependency groups selected across every checked-in,
+    deployed install recipe a product supplies — e.g. Sub's separate
+    application, worker, and operator recipes. A dependency reaching only
+    ONE deployed profile is still installed (Michael's ruling): this is a
+    UNION over every supplied recipe, never an intersection or a single
+    privileged recipe.
+
+    Returns `None` — refused, never defaulted — when:
+
+    * `recipes` is empty: no authoritative checked-in recipe at all, the
+      Academy case. Absence of a recipe is absence of evidence, never
+      evidence of absence, and never treated like ERP's fully-measurable
+      case; or
+    * ANY supplied recipe's shape is not recognised by
+      `_parse_single_recipe_group_selection`. One unparseable recipe refuses
+      the WHOLE derivation rather than silently dropping it from the union —
+      a silently dropped recipe could hide a real production installation
+      behind a shape this parser simply failed to read, and that failure
+      must never look identical to "this recipe legitimately installs
+      nothing."
+    """
+    if not recipes:
+        return None
+    groups: set[str] = set()
+    for recipe in recipes:
+        selected = _parse_single_recipe_group_selection(recipe)
+        if selected is None:
+            return None
+        groups.update(selected)
+    return frozenset(groups)
+
+
+def derive_installation_dimension(
+    *,
+    distribution: str,
+    lock_membership: LockGroupMembership | None,
+    recipes: tuple[InstallRecipe, ...],
+) -> DimensionValue:
+    """The one function that decides `installation` for one product x
+    distribution, combining the structured lock read with the recipe parse.
+    Never returns `NOT_APPLICABLE` — see the module docstring's
+    `installation` invariant: it is never that value for any classification.
+
+    `UNKNOWN` — evidence absent or unresolvable, never defaulted to `FALSE`
+    or to "the full lock set" — is returned when:
+
+    * `lock_membership` is `None` (no lock, or a lock `derive_lock_group_
+      membership` refused — including the older-lock-format case where
+      `groups` is absent entirely); or
+    * `derive_installation_group_universe(recipes)` refused (no recipe, or
+      an unparseable one); or
+    * the recipe-selected groups are not a subset of `lock_membership.
+      all_declared_groups`. A recipe selecting a group the lock has no
+      entries for at all is not a product with zero production
+      dependencies — it is a derivation reading a stale or wrong recipe,
+      and is refused rather than silently read as "nothing is installed"
+      (which would make every `installation` in that product `false` while
+      looking like a clean, confident answer — the vacuous-pass shape this
+      cross-check exists to catch).
+
+    Otherwise: `TRUE` if `distribution`'s lock groups intersect the selected
+    production groups, `FALSE` if `distribution` has no intersecting group —
+    including the case where `distribution` does not appear in the lock at
+    all (it cannot be installed into any group it was never resolved into)."""
+    if lock_membership is None:
+        return DimensionValue.UNKNOWN
+    selected = derive_installation_group_universe(recipes)
+    if selected is None:
+        return DimensionValue.UNKNOWN
+    if not selected.issubset(lock_membership.all_declared_groups):
+        return DimensionValue.UNKNOWN
+    distribution_groups = lock_membership.groups_by_distribution.get(distribution)
+    if distribution_groups is None:
+        return DimensionValue.FALSE
+    return (
+        DimensionValue.TRUE if distribution_groups & selected else DimensionValue.FALSE
+    )
 
 
 # ---------------------------------------------------------------------------
