@@ -585,13 +585,14 @@ def _manifest_source_path(packages_root: Path, distribution: str) -> Path:
             f"{distribution!r} is not a safe single distribution component"
         )
     import_package = distribution.replace("-", "_")
-    package_dir = root / distribution
-    source_dir = package_dir / "src" / import_package
-    path = source_dir / "manifest.py"
-    if any(candidate.is_symlink() for candidate in (package_dir, source_dir, path)):
-        raise ManifestDeclarationError(
-            f"{distribution}: manifest path contains a symlink"
-        )
+    relative_path = Path(distribution) / "src" / import_package / "manifest.py"
+    path = root
+    for component in relative_path.parts:
+        path /= component
+        if path.is_symlink():
+            raise ManifestDeclarationError(
+                f"{distribution}: manifest path component {path} is a symlink"
+            )
     path = path.resolve()
     if not path.is_relative_to(root):
         raise ManifestDeclarationError(
@@ -877,7 +878,11 @@ def measure_starter_boot_assembly_consumption(
         )
 
     main_source = main_path.read_text()
-    imported = "from app.assembly import assembly" in main_source
+    assembly_source = assembly_path.read_text()
+    imported = (
+        "from app.assembly import assembly" in main_source
+        and "assembly = ProductAssemblySpec(" in assembly_source
+    )
 
     consumed: bool | None = None
     if imported and "create_app(assembly)" in main_source and factory_path.is_file():
@@ -979,7 +984,7 @@ class RegistrationEvidence:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class CompositionRecord:
     """One product x distribution's measured dimensions. Deliberately has NO
     `state` field: `CompositionRecord(..., state=...)` raises `TypeError`
@@ -997,12 +1002,13 @@ class CompositionRecord:
     installed, or unmeasured.
 
     `migration_lineage_manifest_applies` (Ruling 1) is deliberately absent
-    from the generated ``__init__``. Optional-module records can therefore
-    only be produced by the module-private derived builder used by
-    :func:`composition_record_from_payload` after it has read the real
-    dossier and manifest. Direct construction refuses an optional-module
-    because it has no authoritative applicability fact; there is no legacy
-    ``None -> True`` fallback.
+    from any public constructor. ``__new__`` always refuses, so records are
+    allocated only inside :func:`composition_record_from_payload` after it
+    has read the real dossier and manifest. Pure derivation tests that need
+    synthetic records use an explicit ``object.__new__`` bypass in the test
+    module; that bypass is intentionally not production evidence. There is
+    no adjacent boolean-taking builder and no legacy ``None -> True``
+    fallback.
     """
 
     product: str
@@ -1012,48 +1018,23 @@ class CompositionRecord:
     module_registration: DimensionValue
     migration_lineage: DimensionValue
     runtime_consumption: DimensionValue
-    migration_lineage_manifest_applies: bool = field(init=False, repr=False)
+    __migration_lineage_manifest_applies: bool = field(init=False, repr=False)
 
-    @classmethod
-    def _from_derived_manifest_applicability(
-        cls,
-        *,
-        product: str,
-        distribution: str,
-        classification: PackageClassification,
-        installation: DimensionValue,
-        module_registration: DimensionValue,
-        migration_lineage: DimensionValue,
-        runtime_consumption: DimensionValue,
-        manifest_applies: bool,
-    ) -> CompositionRecord:
-        if not isinstance(manifest_applies, bool):
-            raise TypeError("manifest_applies must be a derived bool")
-        record = cls.__new__(cls)
-        for name, value in (
-            ("product", product),
-            ("distribution", distribution),
-            ("classification", classification),
-            ("installation", installation),
-            ("module_registration", module_registration),
-            ("migration_lineage", migration_lineage),
-            ("runtime_consumption", runtime_consumption),
-            ("migration_lineage_manifest_applies", manifest_applies),
-        ):
-            object.__setattr__(record, name, value)
-        record.__post_init__()
-        return record
+    def __new__(cls, *args: object, **kwargs: object) -> CompositionRecord:
+        del args, kwargs
+        raise TypeError(
+            "CompositionRecord is derived by composition_record_from_payload; "
+            "it has no public constructor"
+        )
+
+    @property
+    def migration_lineage_manifest_applies(self) -> bool:
+        """Starter-derived output; never a constructor or payload input."""
+        return self.__migration_lineage_manifest_applies
 
     def __post_init__(self) -> None:
-        if self.classification is PackageClassification.OPTIONAL_MODULE and not hasattr(
-            self, "migration_lineage_manifest_applies"
-        ):
-            raise ValueError(
-                "optional-module records require manifest applicability derived "
-                "by composition_record_from_payload"
-            )
-        if not hasattr(self, "migration_lineage_manifest_applies"):
-            object.__setattr__(self, "migration_lineage_manifest_applies", False)
+        if not isinstance(self.__migration_lineage_manifest_applies, bool):
+            raise TypeError("manifest applicability must be a derived bool")
         if self.installation is DimensionValue.NOT_APPLICABLE:
             raise ValueError(
                 f"{self.product}/{self.distribution}: installation is never "
@@ -1195,16 +1176,23 @@ def composition_record_from_payload(
             )
         )
 
-    return CompositionRecord._from_derived_manifest_applicability(
-        product=str(payload["product"]),
-        distribution=distribution,
-        classification=classification,
-        installation=DimensionValue(payload["installation"]),
-        module_registration=DimensionValue(payload["module_registration"]),
-        migration_lineage=DimensionValue(payload["migration_lineage"]),
-        runtime_consumption=DimensionValue(payload["runtime_consumption"]),
-        manifest_applies=manifest_lineage_applicability,
-    )
+    record = object.__new__(CompositionRecord)
+    for name, value in (
+        ("product", str(payload["product"])),
+        ("distribution", distribution),
+        ("classification", classification),
+        ("installation", DimensionValue(payload["installation"])),
+        ("module_registration", DimensionValue(payload["module_registration"])),
+        ("migration_lineage", DimensionValue(payload["migration_lineage"])),
+        ("runtime_consumption", DimensionValue(payload["runtime_consumption"])),
+        (
+            "_CompositionRecord__migration_lineage_manifest_applies",
+            manifest_lineage_applicability,
+        ),
+    ):
+        object.__setattr__(record, name, value)
+    record.__post_init__()
+    return record
 
 
 # ---------------------------------------------------------------------------

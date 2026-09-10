@@ -95,16 +95,20 @@ def _derived_record(
     visibly private prevents pure state-table tests from becoming evidence
     for the ingestion boundary.
     """
-    return CompositionRecord._from_derived_manifest_applicability(
-        product=product,
-        distribution=distribution,
-        classification=classification,
-        installation=installation,
-        module_registration=module_registration,
-        migration_lineage=migration_lineage,
-        runtime_consumption=runtime_consumption,
-        manifest_applies=manifest_applies,
-    )
+    record = object.__new__(CompositionRecord)
+    for name, value in (
+        ("product", product),
+        ("distribution", distribution),
+        ("classification", classification),
+        ("installation", installation),
+        ("module_registration", module_registration),
+        ("migration_lineage", migration_lineage),
+        ("runtime_consumption", runtime_consumption),
+        ("_CompositionRecord__migration_lineage_manifest_applies", manifest_applies),
+    ):
+        object.__setattr__(record, name, value)
+    record.__post_init__()
+    return record
 
 
 def _optional_module_record(
@@ -458,7 +462,9 @@ def test_validate_coherence_step_refuses_a_record_that_bypassed_construction():
     object.__setattr__(broken, "module_registration", TRUE)
     object.__setattr__(broken, "migration_lineage", NA)
     object.__setattr__(broken, "runtime_consumption", UNKNOWN)
-    object.__setattr__(broken, "migration_lineage_manifest_applies", False)
+    object.__setattr__(
+        broken, "_CompositionRecord__migration_lineage_manifest_applies", False
+    )
 
     with pytest.raises(DimensionalIncoherence):
         derive_composition_state(broken)
@@ -590,6 +596,23 @@ def test_deleting_the_boot_entry_point_makes_the_trace_indeterminate(tmp_path: P
     trace = measure_starter_boot_assembly_consumption(tmp_path)
     assert trace.imported_by_boot_entry_point is None
     assert trace.consumed_by_a_real_effect is None
+    assert trace.classify() is AssemblyConsumptionKind.INDETERMINATE
+
+
+def test_an_empty_assembly_file_cannot_satisfy_the_positive_control(tmp_path: Path):
+    """Existence is not evidence that ``assembly`` is actually declared."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "main.py").write_text(
+        "from app.assembly import assembly\ncreate_app(assembly)\n"
+    )
+    (app_dir / "assembly.py").write_text("# no ProductAssemblySpec here\n")
+    factory_dir = tmp_path / "packages" / "dotmac-kernel" / "src" / "dotmac_kernel"
+    factory_dir.mkdir(parents=True)
+    (factory_dir / "app_factory.py").write_text("ModuleRegistry(spec.modules)\n")
+
+    trace = measure_starter_boot_assembly_consumption(tmp_path)
+    assert trace.imported_by_boot_entry_point is False
     assert trace.classify() is AssemblyConsumptionKind.INDETERMINATE
 
 
@@ -771,7 +794,7 @@ def test_platform_baseline_cannot_record_false_where_not_applicable_is_required(
     it at all, so `false` (a claim that it applies and was not satisfied) is
     just as wrong as `true` would be."""
     with pytest.raises(ValueError, match="not_applicable"):
-        CompositionRecord(
+        _derived_record(
             product="sub",
             distribution="dotmac-kernel",
             classification=PackageClassification.UNIVERSAL_FACILITY,
@@ -2122,6 +2145,26 @@ def test_manifest_symlink_escape_is_refused(tmp_path: Path):
         )
 
 
+def test_manifest_intermediate_src_symlink_is_refused_inside_root(tmp_path: Path):
+    """Containment alone cannot detect an in-root intermediate redirect."""
+    packages_root = tmp_path / "packages"
+    package_dir = packages_root / "dotmac-intermediate"
+    package_dir.mkdir(parents=True)
+    redirected_src = packages_root / "redirected-src"
+    manifest_dir = redirected_src / "dotmac_intermediate"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "manifest.py").write_text(
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        'module = ModuleManifest(code="redirected", version="0.1.0a1", core=False)\n'
+    )
+    (package_dir / "src").symlink_to(redirected_src, target_is_directory=True)
+
+    with pytest.raises(ManifestDeclarationError, match="src.*symlink"):
+        derive_migration_lineage_applicability_from_manifest(
+            packages_root, "dotmac-intermediate"
+        )
+
+
 def test_absent_manifest_file_is_refused_by_name(tmp_path: Path):
     """The easy outcome-3 case — no manifest.py at all — still refused by
     name rather than defaulted. Named explicitly per the brief: this is the
@@ -2225,19 +2268,22 @@ def test_direct_constructor_cannot_accept_manifest_applicability():
         )
 
 
-def test_private_derived_builder_refuses_non_boolean_applicability():
-    """Even the internal handoff cannot treat a truthy value as authority."""
+def test_record_validation_refuses_non_boolean_applicability_after_a_bypass():
+    """Even ``object.__new__`` cannot make a truthy value authoritative."""
+    record = object.__new__(CompositionRecord)
+    for name, value in (
+        ("product", "erp"),
+        ("distribution", "dotmac-example"),
+        ("classification", PackageClassification.OPTIONAL_MODULE),
+        ("installation", TRUE),
+        ("module_registration", TRUE),
+        ("migration_lineage", TRUE),
+        ("runtime_consumption", UNKNOWN),
+        ("_CompositionRecord__migration_lineage_manifest_applies", 1),
+    ):
+        object.__setattr__(record, name, value)
     with pytest.raises(TypeError, match="derived bool"):
-        CompositionRecord._from_derived_manifest_applicability(
-            product="erp",
-            distribution="dotmac-example",
-            classification=PackageClassification.OPTIONAL_MODULE,
-            installation=TRUE,
-            module_registration=TRUE,
-            migration_lineage=TRUE,
-            runtime_consumption=UNKNOWN,
-            manifest_applies=1,  # type: ignore[arg-type]
-        )
+        record.__post_init__()
 
 
 # ---------------------------------------------------------------------------
