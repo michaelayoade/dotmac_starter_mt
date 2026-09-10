@@ -375,6 +375,7 @@ of a violation as a field).
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -389,6 +390,22 @@ from typing import Final
 #: The one schema version this module reads. Bumped only by a deliberate,
 #: reviewed migration — never silently, and never with a translation layer
 #: bolted on for an older tag (see module docstring).
+#:
+#: CLOSED-SHAPE NOTE (dated 2026-09-10): `dimensional-composition.v2` was
+#: OPEN-shaped from its introduction until this change —
+#: `composition_record_from_payload` read only the fields it recognized and
+#: silently dropped anything else, so a payload could carry an undeclared
+#: key (an `api_key` value was the planted, measured case) and still be
+#: accepted. This change makes v2 a CLOSED shape: an unrecognized key is now
+#: refused by name. This is a deliberate TIGHTENING of the same version
+#: string, not a new `v3` — no payload that was ever honestly v2-shaped
+#: (i.e. carried only the fields this schema actually defines) is affected,
+#: and no honest producer should have been relying on an unknown key being
+#: accepted. Do not read `dimensional-composition.v2` as meaning one fixed
+#: validation behaviour across time; it means "the current, evolving
+#: definition of this schema," exactly as this note demonstrates. See
+#: `composition_record_from_payload`'s "CLOSED SHAPE" docstring section and
+#: `_KNOWN_PAYLOAD_FIELDS`.
 CURRENT_SCHEMA_VERSION: Final[str] = "dimensional-composition.v2"
 
 #: Every dimension a `dimensional-composition.v1` payload MUST declare
@@ -412,6 +429,32 @@ _DERIVED_ONLY_FIELDS: Final[tuple[str, ...]] = (
     "state",
     "fully_composed",
     "migration_lineage_manifest_applies",
+)
+
+#: Optional payload fields `dimensional-composition.v2` recognizes beyond
+#: `schema_version` and `REQUIRED_PAYLOAD_FIELDS` — currently none. This
+#: tuple exists so a future genuinely-optional field has one place to be
+#: declared; until one is added, the CLOSED payload shape is exactly
+#: `{"schema_version"} | set(REQUIRED_PAYLOAD_FIELDS)` (see
+#: `_KNOWN_PAYLOAD_FIELDS` and `composition_record_from_payload`'s unknown-
+#: key refusal below). `_DERIVED_ONLY_FIELDS` is deliberately NOT folded in
+#: here — a payload carrying one of those is refused by its own, more
+#: specific check before the unknown-key check ever runs, and stays that way
+#: whether or not this tuple ever grows.
+_KNOWN_OPTIONAL_PAYLOAD_FIELDS: Final[tuple[str, ...]] = ()
+
+#: The full set of keys a `dimensional-composition.v2` payload may carry.
+#: Anything outside this set is refused by `composition_record_from_payload`
+#: — see that function's closed-shape check. This is what makes the shape
+#: CLOSED rather than open: earlier v2 silently ignored any key it did not
+#: recognize (including, notably, an `api_key`-shaped one), which let a
+#: payload carry arbitrary undeclared content — including a credential —
+#: straight through ingestion. That silent-drop behaviour is the defect this
+#: set exists to close; see the module docstring's "Why v2 exists" section
+#: for the analogous history on the registration boundary, and note this is
+#: a SEPARATE defect from that one.
+_KNOWN_PAYLOAD_FIELDS: Final[frozenset[str]] = frozenset(
+    {"schema_version", *REQUIRED_PAYLOAD_FIELDS, *_KNOWN_OPTIONAL_PAYLOAD_FIELDS}
 )
 
 #: The literal legacy tag Academy's ``composed_distributions`` exporter used.
@@ -1116,6 +1159,18 @@ def composition_record_from_payload(
     accept an authority-shaped input while leaving a producer believing its
     value mattered. A product asserting its own applicability would be
     authoring a derivation this schema exists to prevent.
+
+    CLOSED SHAPE (tightened within v2, not a new version — see the module
+    docstring's "Schema identity" note): a payload may carry `schema_version`
+    plus exactly `REQUIRED_PAYLOAD_FIELDS`, nothing else. Any other key —
+    `api_key`, `note`, a typo'd dimension name, anything — is refused by
+    name, listing every offending key at once rather than only the first.
+    This was measured to be false before this change: a payload carrying an
+    `api_key` field alongside the eight legitimate fields was silently
+    accepted, with the extra key simply never read. A closed shape is what
+    lets this schema's evidence documents be treated as validated data
+    rather than free-form text for secret-scanning purposes; an open shape
+    cannot make that claim honestly. See `_KNOWN_PAYLOAD_FIELDS`.
     """
     declared = payload.get("schema_version")
     if declared != CURRENT_SCHEMA_VERSION:
@@ -1141,6 +1196,18 @@ def composition_record_from_payload(
             f"payload declares {CURRENT_SCHEMA_VERSION!r} but is missing "
             f"required field(s) {missing!r}; a missing dimension is refused, "
             "never defaulted to unknown"
+        )
+
+    unknown = sorted(set(payload) - _KNOWN_PAYLOAD_FIELDS)
+    if unknown:
+        raise IncompatibleSchemaVersion(
+            f"payload declares {CURRENT_SCHEMA_VERSION!r} but carries "
+            f"unrecognized field(s) {unknown!r}; {CURRENT_SCHEMA_VERSION!r} "
+            "is a closed shape — only schema_version and "
+            f"{list(REQUIRED_PAYLOAD_FIELDS)!r} are accepted, and an "
+            "unrecognized key is refused rather than silently dropped (this "
+            "is what keeps arbitrary content, including a credential, from "
+            "riding through ingestion unnoticed)"
         )
 
     distribution = str(payload["distribution"])
@@ -1193,6 +1260,186 @@ def composition_record_from_payload(
         object.__setattr__(record, name, value)
     record.__post_init__()
     return record
+
+
+# ---------------------------------------------------------------------------
+# Envelope ingestion — the shared document Academy, ERP, and Sub each
+# publish, closed the same way the record shape above is closed.
+# ---------------------------------------------------------------------------
+
+#: Every top-level key one `dimensional-composition.v2` envelope document
+#: must declare. There are no optional top-level keys today — unlike
+#: `REQUIRED_PAYLOAD_FIELDS`, this tuple has no sibling `_KNOWN_OPTIONAL_*`
+#: constant because nothing here is genuinely optional yet; a future
+#: optional top-level field gets its own constant the same way the record
+#: shape's did, rather than being folded into this one silently.
+REQUIRED_ENVELOPE_FIELDS: Final[tuple[str, ...]] = (
+    "schema_version",
+    "product",
+    "starter_catalogue_revision",
+    "records",
+)
+
+#: The full set of top-level keys an envelope document may carry. Anything
+#: outside this set is refused by `composition_records_from_envelope`,
+#: naming every offender at once — the same closed-shape policy
+#: `_KNOWN_PAYLOAD_FIELDS` applies one level down, to each record.
+_KNOWN_ENVELOPE_FIELDS: Final[frozenset[str]] = frozenset(REQUIRED_ENVELOPE_FIELDS)
+
+#: Exactly 40 lowercase hexadecimal characters — the shape of a git commit
+#: SHA-1, and nothing more. `composition_records_from_envelope` uses this to
+#: validate `starter_catalogue_revision`'s SHAPE only; see that function's
+#: docstring for why confirming the value actually names a real, protected-
+#: main-ancestor commit is deliberately left to the consuming gate.
+_STARTER_CATALOGUE_REVISION_SHAPE: Final[re.Pattern[str]] = re.compile(
+    r"^[0-9a-f]{40}$"
+)
+
+
+class EnvelopeIncoherence(ValueError):
+    """An envelope document's own top-level claims are inconsistent with the
+    `records` it carries — two rows naming the same `distribution`, or a row
+    whose own `product` disagrees with the envelope's declared `product`.
+    Refused outright, never resolved by silently picking one side. This is
+    the envelope-level analogue of `DimensionalIncoherence`: a shape check
+    (`IncompatibleSchemaVersion`, reused from the record boundary for every
+    top-level shape refusal below) cannot see a cross-record contradiction,
+    only a single field's own well-formedness — that is what this class is
+    for."""
+
+
+def composition_records_from_envelope(
+    document: Mapping[str, object], packages_root: Path
+) -> tuple[CompositionRecord, ...]:
+    """Parse one product's `dimensional-composition.v2` envelope: the shared
+    document shape
+
+        {"schema_version": ..., "product": ..., "starter_catalogue_revision":
+         ..., "records": [...]}
+
+    that Academy, ERP, and Sub each publish, one flat
+    `composition_record_from_payload`-shaped record per distribution under
+    `records`. This is the one reader all three read through — before it
+    existed, the three repositories had independently invented three
+    envelopes for the same meaning (one spelled the revision field
+    `derived_against`, another `starter_protected_main_revision`, and one
+    carried no `product` key at all), which is exactly the kind of
+    same-field-three-shapes defect this schema exists to end (see the
+    module docstring's opening paragraph).
+
+    Takes an ALREADY-PARSED document — this function never reads a file and
+    never calls `json.load`. Whoever loads the JSON off disk owns that
+    refusal (malformed JSON, an unreadable path, a bad encoding); those are
+    a separate, prior concern already handled in each product repository,
+    and duplicating that check here would just be a second, divergent copy
+    of it.
+
+    Refuses outright, in each case naming the offending key(s)/value:
+
+    * an unrecognized top-level key — CLOSED shape, exactly like
+      `composition_record_from_payload`'s record shape: only
+      `REQUIRED_ENVELOPE_FIELDS` are accepted, and every offending key is
+      named at once, not just the first;
+    * a missing required top-level key;
+    * a `schema_version` other than `CURRENT_SCHEMA_VERSION` — named, no
+      adapter, no partial read, identical policy to the record boundary;
+    * an absent, non-string, or empty `product`;
+    * a `starter_catalogue_revision` that is not exactly 40 lowercase hex
+      characters. This checks SHAPE ONLY. It never confirms the value names
+      a real commit, let alone a protected-main ancestor of this
+      repository — this function has no git access, and even if it did,
+      ancestry is the consuming gate's job against its own git history, not
+      an ingestion-time concern of this schema;
+    * a `records` value that is not a list;
+    * an EMPTY `records` list. An evidence document asserting zero
+      distributions is refused rather than read as a vacuous pass — a
+      caller with nothing to report does not get to submit "no rows" as
+      proof of anything;
+    * two rows in `records` declaring the same `distribution`;
+    * any row whose own `product` field disagrees with the envelope's
+      `product`.
+
+    Every row is parsed through `composition_record_from_payload` itself —
+    the closed record shape enforced there (including its own unrecognized-
+    key refusal) applies to every row here, not only to a record ingested on
+    its own.
+    """
+    declared_version = document.get("schema_version")
+    if declared_version != CURRENT_SCHEMA_VERSION:
+        raise IncompatibleSchemaVersion(
+            f"refusing envelope with schema_version={declared_version!r}; "
+            f"this reads only {CURRENT_SCHEMA_VERSION!r} envelopes — no "
+            "translation, no partial read"
+        )
+
+    missing = [f for f in REQUIRED_ENVELOPE_FIELDS if f not in document]
+    if missing:
+        raise IncompatibleSchemaVersion(
+            f"envelope declares {CURRENT_SCHEMA_VERSION!r} but is missing "
+            f"required top-level field(s) {missing!r}"
+        )
+
+    unknown = sorted(set(document) - _KNOWN_ENVELOPE_FIELDS)
+    if unknown:
+        raise IncompatibleSchemaVersion(
+            f"envelope declares {CURRENT_SCHEMA_VERSION!r} but carries "
+            f"unrecognized top-level field(s) {unknown!r}; an envelope is a "
+            f"closed shape — only {list(REQUIRED_ENVELOPE_FIELDS)!r} are "
+            "accepted"
+        )
+
+    product = document["product"]
+    if not isinstance(product, str) or not product.strip():
+        raise IncompatibleSchemaVersion(
+            f"envelope 'product' must be a non-empty string, got {product!r}"
+        )
+
+    revision = document["starter_catalogue_revision"]
+    if not isinstance(revision, str) or not _STARTER_CATALOGUE_REVISION_SHAPE.match(
+        revision
+    ):
+        raise IncompatibleSchemaVersion(
+            "envelope 'starter_catalogue_revision' must be exactly 40 "
+            f"lowercase hexadecimal characters, got {revision!r}"
+        )
+
+    records_value = document["records"]
+    if not isinstance(records_value, list):
+        raise IncompatibleSchemaVersion(
+            f"envelope 'records' must be a list, got {type(records_value).__name__}"
+        )
+    if not records_value:
+        raise IncompatibleSchemaVersion(
+            "envelope 'records' is empty; an evidence document asserting "
+            "zero distributions is refused, not read as a vacuous pass"
+        )
+
+    distribution_counts: dict[str, int] = {}
+    for row in records_value:
+        if isinstance(row, Mapping):
+            name = row.get("distribution")
+            if isinstance(name, str):
+                distribution_counts[name] = distribution_counts.get(name, 0) + 1
+    duplicates = sorted(
+        name for name, count in distribution_counts.items() if count > 1
+    )
+    if duplicates:
+        raise EnvelopeIncoherence(
+            f"envelope for product {product!r} declares duplicate "
+            f"distribution(s) {duplicates!r} in 'records'"
+        )
+
+    records: list[CompositionRecord] = []
+    for row in records_value:
+        record = composition_record_from_payload(row, packages_root)
+        if record.product != product:
+            raise EnvelopeIncoherence(
+                f"record for distribution {record.distribution!r} declares "
+                f"product {record.product!r} but the envelope declares "
+                f"product {product!r}"
+            )
+        records.append(record)
+    return tuple(records)
 
 
 # ---------------------------------------------------------------------------

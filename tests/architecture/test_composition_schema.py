@@ -43,6 +43,7 @@ from tests.architecture.composition_schema import (
     CompositionState,
     DimensionalIncoherence,
     DimensionValue,
+    EnvelopeIncoherence,
     IncompatibleSchemaVersion,
     ManifestDeclarationError,
     PackageClassification,
@@ -55,6 +56,7 @@ from tests.architecture.composition_schema import (
     build_runtime_exposure_report,
     classify_registration_call_site,
     composition_record_from_payload,
+    composition_records_from_envelope,
     derive_composition_state,
     derive_distribution_universe,
     derive_migration_lineage_applicability_from_manifest,
@@ -1062,6 +1064,232 @@ def test_payload_cannot_supply_migration_lineage_manifest_applies():
         IncompatibleSchemaVersion, match="migration_lineage_manifest_applies"
     ):
         composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+
+
+# ---------------------------------------------------------------------------
+# 5c. Closed shape — an unrecognized payload key is refused, not silently
+#     dropped. Michael planted an `api_key` field alongside a legitimate
+#     payload and it was accepted, with the key simply never read; a
+#     product could put arbitrary content, including a credential, into a
+#     composition record and ingestion would not refuse it.
+# ---------------------------------------------------------------------------
+
+#: The exact legitimate payload every closed-shape test below either reuses
+#: unmodified (the near-miss) or extends with an offending key. Kept as one
+#: literal so the near-miss and the plants are provably the same shape apart
+#: from the extra key(s).
+_LEGITIMATE_PAYLOAD = {
+    "schema_version": schema.CURRENT_SCHEMA_VERSION,
+    "product": "erp",
+    "distribution": "dotmac-accounting",
+    "classification": "optional-module",
+    "installation": "true",
+    "module_registration": "true",
+    "migration_lineage": "true",
+    "runtime_consumption": "true",
+}
+
+
+def test_payload_with_an_unknown_field_is_refused_naming_it():
+    """The measured defect: a payload carrying every legitimate field plus
+    one unrecognized key (`api_key`, the planted credential-shaped field)
+    must be refused, and the refusal must name `api_key` specifically —
+    not just refuse the payload for some other reason."""
+    payload = {**_LEGITIMATE_PAYLOAD, "api_key": "AKIAIOSFODNN7EXAMPLE"}
+    with pytest.raises(IncompatibleSchemaVersion, match="api_key"):
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+
+
+def test_payload_with_several_unknown_fields_names_all_of_them():
+    """A checker that refuses on the first offending key and stops would
+    hide every other stray key from the caller trying to fix the payload.
+    Both `api_key` and `note` must appear in the one raised message."""
+    payload = {
+        **_LEGITIMATE_PAYLOAD,
+        "api_key": "AKIAIOSFODNN7EXAMPLE",
+        "note": "arbitrary prose",
+    }
+    with pytest.raises(IncompatibleSchemaVersion) as excinfo:
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    message = str(excinfo.value)
+    assert "api_key" in message
+    assert "note" in message
+
+
+def test_payload_with_only_the_known_fields_is_still_accepted():
+    """Near-miss: the exact legitimate payload — every known field, nothing
+    else — is not refused by the closed-shape check. Without this, a
+    checker that refuses every payload would equally satisfy the two plants
+    above."""
+    record = composition_record_from_payload(
+        dict(_LEGITIMATE_PAYLOAD), REPO_PACKAGES_ROOT
+    )
+    assert record.product == "erp"
+    assert record.distribution == "dotmac-accounting"
+
+
+def test_derived_only_field_refusal_stays_a_distinct_message_from_unknown_key():
+    """The existing derived-only refusal
+    (`migration_lineage_manifest_applies`, a real field name that simply may
+    never appear on an input payload) must keep producing ITS OWN message —
+    naming the derived/legacy-field defect — rather than being swallowed by
+    the generic unknown-key path this change adds. Two different defects
+    (authoring a derivation vs. carrying undeclared content) deserve two
+    different diagnoses."""
+    payload = {**_LEGITIMATE_PAYLOAD, "migration_lineage_manifest_applies": True}
+    with pytest.raises(IncompatibleSchemaVersion) as excinfo:
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    message = str(excinfo.value)
+    assert "migration_lineage_manifest_applies" in message
+    assert "derived/legacy field" in message
+    assert "closed shape" not in message
+
+
+# ---------------------------------------------------------------------------
+# 5d. The envelope reader — the shared document shape Academy, ERP, and Sub
+#     each publish (`{schema_version, product, starter_catalogue_revision,
+#     records}`), closed the same way the record shape above is closed.
+# ---------------------------------------------------------------------------
+
+#: A valid 40-lowercase-hex `starter_catalogue_revision`. Not a real commit
+#: — `composition_records_from_envelope` only validates shape, never
+#: ancestry, so a fixture SHA that never existed is exactly the right
+#: fixture for exercising that boundary.
+_VALID_REVISION = "a" * 40
+
+#: Two real, coherent `optional-module` rows for product "erp" — reusing
+#: `_LEGITIMATE_PAYLOAD` for the first row keeps it provably identical to
+#: the record-level near-miss above; the second row is the same shape
+#: against a different real distribution, so the envelope tests exercise
+#: more than one row.
+_ENVELOPE_ROW_ACCOUNTING = dict(_LEGITIMATE_PAYLOAD)
+_ENVELOPE_ROW_BILLING = {**_LEGITIMATE_PAYLOAD, "distribution": "dotmac-billing"}
+
+#: The exact legitimate envelope every closed-shape test below either
+#: reuses unmodified (the near-miss / acceptance tests) or mutates with one
+#: offending change — same discipline as `_LEGITIMATE_PAYLOAD` above.
+_LEGITIMATE_ENVELOPE = {
+    "schema_version": schema.CURRENT_SCHEMA_VERSION,
+    "product": "erp",
+    "starter_catalogue_revision": _VALID_REVISION,
+    "records": [_ENVELOPE_ROW_ACCOUNTING, _ENVELOPE_ROW_BILLING],
+}
+
+
+def test_a_real_three_product_shaped_envelope_is_accepted_and_records_match():
+    """The base case: a document shaped exactly like what Academy, ERP, and
+    Sub publish, with more than one row, is accepted, and the records
+    returned correspond to the input rows (right product, right
+    distributions, in order)."""
+    records = composition_records_from_envelope(
+        dict(_LEGITIMATE_ENVELOPE), REPO_PACKAGES_ROOT
+    )
+    assert [r.distribution for r in records] == [
+        "dotmac-accounting",
+        "dotmac-billing",
+    ]
+    assert all(r.product == "erp" for r in records)
+
+
+def test_envelope_with_only_known_fields_and_valid_rows_is_accepted():
+    """Near-miss: every top-level field and every row field legitimate,
+    nothing extra. Without this, a reader that refuses every envelope would
+    equally satisfy every refusal test below."""
+    records = composition_records_from_envelope(
+        dict(_LEGITIMATE_ENVELOPE), REPO_PACKAGES_ROOT
+    )
+    assert len(records) == 2
+
+
+def test_envelope_with_an_unknown_top_level_field_is_refused_naming_it():
+    """The three-repository defect in miniature: a document carrying an
+    extra top-level key (`signing_key`, standing in for the kind of stray
+    field the record-level fix already refuses) must be refused, naming it,
+    the same way an unrecognized record field is."""
+    envelope = {**_LEGITIMATE_ENVELOPE, "signing_key": "AKIAIOSFODNN7EXAMPLE"}
+    with pytest.raises(IncompatibleSchemaVersion, match="signing_key"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_missing_a_required_top_level_field_is_refused_naming_it():
+    envelope = dict(_LEGITIMATE_ENVELOPE)
+    del envelope["starter_catalogue_revision"]
+    with pytest.raises(IncompatibleSchemaVersion, match="starter_catalogue_revision"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_with_a_stale_schema_version_is_refused_naming_it():
+    envelope = {
+        **_LEGITIMATE_ENVELOPE,
+        "schema_version": schema.LEGACY_SCHEMA_VERSION_V1,
+    }
+    with pytest.raises(IncompatibleSchemaVersion, match="dimensional-composition.v1"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_with_an_empty_product_is_refused():
+    envelope = {**_LEGITIMATE_ENVELOPE, "product": ""}
+    with pytest.raises(IncompatibleSchemaVersion, match="product"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_with_a_malformed_starter_catalogue_revision_is_refused():
+    """Shape only: not 40 lowercase hex characters. This test says nothing
+    about, and must never be read as testing, whether a well-shaped
+    revision names a real or protected-main-ancestor commit — that is
+    explicitly out of scope for this function (see its docstring)."""
+    envelope = {**_LEGITIMATE_ENVELOPE, "starter_catalogue_revision": "not-a-sha"}
+    with pytest.raises(IncompatibleSchemaVersion, match="starter_catalogue_revision"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_with_records_not_a_list_is_refused():
+    envelope = {**_LEGITIMATE_ENVELOPE, "records": "dotmac-accounting"}
+    with pytest.raises(IncompatibleSchemaVersion, match="records"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_with_empty_records_is_refused_not_read_as_a_vacuous_pass():
+    """The specific control the coordinator asked to be distinguished: an
+    empty `records` list is refused outright, never returned as an empty
+    tuple. A caller catching only `IncompatibleSchemaVersion` and treating
+    a successful-but-empty return as "nothing to report" would be exactly
+    the vacuous-pass hazard this refusal exists to prevent."""
+    envelope = {**_LEGITIMATE_ENVELOPE, "records": []}
+    with pytest.raises(IncompatibleSchemaVersion, match="empty"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_with_a_duplicate_distribution_is_refused_naming_it():
+    envelope = {
+        **_LEGITIMATE_ENVELOPE,
+        "records": [_ENVELOPE_ROW_ACCOUNTING, dict(_ENVELOPE_ROW_ACCOUNTING)],
+    }
+    with pytest.raises(EnvelopeIncoherence, match="dotmac-accounting"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_row_disagreeing_with_the_envelope_product_is_refused():
+    mismatched_row = {**_ENVELOPE_ROW_BILLING, "product": "sub"}
+    envelope = {
+        **_LEGITIMATE_ENVELOPE,
+        "records": [_ENVELOPE_ROW_ACCOUNTING, mismatched_row],
+    }
+    with pytest.raises(EnvelopeIncoherence, match="dotmac-billing"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
+
+
+def test_envelope_row_still_enforces_the_closed_record_shape():
+    """Every row travels through `composition_record_from_payload`, so the
+    closed record shape (this same commit series' earlier fix) applies to
+    every row in an envelope, not only to a record ingested on its own."""
+    tainted_row = {**_ENVELOPE_ROW_BILLING, "api_key": "AKIAIOSFODNN7EXAMPLE"}
+    envelope = {
+        **_LEGITIMATE_ENVELOPE,
+        "records": [_ENVELOPE_ROW_ACCOUNTING, tainted_row],
+    }
+    with pytest.raises(IncompatibleSchemaVersion, match="api_key"):
+        composition_records_from_envelope(envelope, REPO_PACKAGES_ROOT)
 
 
 def test_payload_ingestion_propagates_a_contradictory_manifest_refusal(
