@@ -46,6 +46,7 @@ from tests.architecture.composition_schema import (
     EnvelopeIncoherence,
     IncompatibleSchemaVersion,
     InstallRecipe,
+    InstallRecipeParseError,
     ManifestDeclarationError,
     PackageClassification,
     PackageDossier,
@@ -65,7 +66,10 @@ from tests.architecture.composition_schema import (
     derive_installation_group_universe,
     derive_lock_group_membership,
     derive_migration_lineage_applicability_from_manifest,
+    explain_recipe_selection_refusal,
+    find_install_recipe_construction_call_sites,
     measure_starter_boot_assembly_consumption,
+    parse_install_command,
 )
 
 TRUE = DimensionValue.TRUE
@@ -2615,11 +2619,11 @@ def test_reordered_pipeline_clearing_installation_false_first_gives_wrong_answer
 # ---------------------------------------------------------------------------
 # The installation boundary: `derive_installation_dimension`, the structured
 # lock read (`derive_lock_group_membership`), the structured `pyproject.toml`
-# group-optionality read (`derive_group_optionality`), and the recipe parse
-# (`derive_installation_group_universe` / `_parse_single_recipe_group_
-# selection`). Every test below is a real execution of these functions, not
-# an assertion of an outcome the code cannot produce differently — see the
-# module docstring's "What `installation` means" section for the ruling
+# group-optionality read (`derive_group_optionality`), and the ONE parser
+# (`parse_install_command`) that is the only way to produce an
+# `InstallRecipe`. Every test below is a real execution of these functions,
+# not an assertion of an outcome the code cannot produce differently — see
+# the module docstring's "What `installation` means" section for the ruling
 # these prove.
 # ---------------------------------------------------------------------------
 
@@ -2658,15 +2662,38 @@ _PYPROJECT_DOCUMENT = {
     }
 }
 
+_OPTIONALITY = {"dev": True, "ops": False, "docs": True}
+
 #: Poetry's computed default install set for `_LOCK_DOCUMENT` +
 #: `_PYPROJECT_DOCUMENT`: `main` plus every NON-optional custom group
 #: (`ops`) the lock actually resolves packages into. `dev` and `docs` are
 #: both optional, so neither is in the default.
 _EXPECTED_DEFAULT_GROUPS = frozenset({"main", "ops"})
 
+#: The four REAL fleet install commands named in Michael's ruling, quoted in
+#: full — every flag each product's checked-in build recipe actually
+#: carries. A faithful tokenization of every one of these must resolve to
+#: exactly `{"main"}`; a truncated tokenization (dropping the trailing
+#: flags) was the defect this whole parser rewrite exists to close.
+_REAL_FLEET_RECIPES = (
+    ("ERP Dockerfile:50", "poetry install --only main --no-root --no-ansi"),
+    (
+        "ERP Dockerfile.hardened:53",
+        "poetry install --only main --no-interaction --no-ansi",
+    ),
+    ("Sub Dockerfile:40", "poetry install --only main --no-interaction --no-ansi"),
+    ("Starter Dockerfile:63", "poetry install --only main --no-root --no-interaction"),
+)
 
-def _recipe(*flags: tuple[str, str], tool: str = "poetry", subcommand: str = "install"):
-    return InstallRecipe(tool=tool, subcommand=subcommand, flags=flags, source="test")
+#: Templated/command-substitution forms `parse_install_command` must refuse
+#: AT THE PARSER, never resolved to a confident (wrong) group name.
+_TEMPLATED_VALUES = (
+    "${GROUPS}",
+    "$GROUPS",
+    '"${{ matrix.group }}"',
+    "$(echo main)",
+    "`echo main`",
+)
 
 
 def _universe(recipes, *, group_optionality=None, lock_document=_LOCK_DOCUMENT):
@@ -2723,7 +2750,7 @@ def test_lock_with_no_package_list_is_refused():
 
 def test_group_optionality_reads_declared_optional_flags():
     optionality = derive_group_optionality(_PYPROJECT_DOCUMENT)
-    assert optionality == {"dev": True, "ops": False, "docs": True}
+    assert optionality == _OPTIONALITY
 
 
 def test_group_optionality_omitted_key_reads_as_poetry_default_non_optional():
@@ -2756,18 +2783,149 @@ def test_group_optionality_refused_when_optional_value_is_not_boolean():
     assert derive_group_optionality(document) is None
 
 
+# --- Item 2: direct `InstallRecipe` construction is impossible --------------
+
+
+def test_direct_install_recipe_construction_raises():
+    """Item 2 — the structural repair's other half. `InstallRecipe(...)`
+    must raise `TypeError`, the same precedent `CompositionRecord.__new__`
+    already sets in this module. Asserted by execution, not by reading the
+    source."""
+    with pytest.raises(TypeError):
+        InstallRecipe(tool="poetry", subcommand="install", flags=(), source="x")
+
+
+def test_install_recipe_bypass_is_not_directly_reachable_either():
+    """The internal `_construct_install_recipe` bypass exists ONLY for
+    `parse_install_command` to use — it is not part of the public surface a
+    test imports, and this test documents that by NOT importing it (see the
+    negative sweep tests below for the structural proof that no OTHER call
+    site in the module reaches it either)."""
+    assert "_construct_install_recipe" not in {
+        "InstallRecipe",
+        "InstallRecipeParseError",
+        "parse_install_command",
+        "explain_recipe_selection_refusal",
+    }
+
+
+# --- Item 1: `parse_install_command` takes the complete raw command line ---
+
+
+def test_parse_install_command_takes_the_complete_raw_command_line_string():
+    """Item 1. `parse_install_command` accepts a STRING — the complete
+    command line — and tokenizes it itself; a caller supplies text, never a
+    pre-built tuple of flags."""
+    recipe = parse_install_command(
+        "poetry install --only main --no-root --no-ansi", source="Dockerfile:50"
+    )
+    assert recipe.tool == "poetry"
+    assert recipe.subcommand == "install"
+    assert recipe.flags == (
+        ("--only", "main"),
+        ("--no-root", ""),
+        ("--no-ansi", ""),
+    )
+    assert recipe.source == "Dockerfile:50"
+
+
+def test_parse_install_command_with_fewer_than_two_tokens_raises_named():
+    with pytest.raises(InstallRecipeParseError, match="fewer than two tokens"):
+        parse_install_command("poetry", source="bad-source")
+
+
+def test_parse_install_command_with_group_flag_missing_its_argument_raises_named():
+    with pytest.raises(InstallRecipeParseError, match="no following argument"):
+        parse_install_command("poetry install --only", source="bad-source")
+
+
+def test_parse_install_command_with_a_bare_positional_token_raises_named():
+    with pytest.raises(InstallRecipeParseError, match="unexpected bare token"):
+        parse_install_command("poetry install extra-positional", source="bad-source")
+
+
+# --- Item 3 / item 6: the four real fleet recipes, quoted in full ----------
+
+
+def test_item3_each_real_fleet_recipe_parses_and_selects_main():
+    """Item 3 — the block this whole correction exists to clear. Each of
+    the four real, FULL command lines named in Michael's ruling (inert
+    flags included) tokenizes via `parse_install_command` and resolves to
+    exactly `{"main"}`. Before this fix, a faithful tokenization of every
+    one of these returned `None` (unknown) — the ERP correction was
+    derivable only from a falsified, truncated recipe."""
+    for source, command_line in _REAL_FLEET_RECIPES:
+        recipe = parse_install_command(command_line, source=source)
+        result = _universe((recipe,))
+        assert result == frozenset({"main"}), (source, command_line, result)
+
+
+def test_item6_worked_examples_reproduce_their_cited_source_lines_exactly():
+    """Item 6. The worked example in `InstallRecipe`'s own docstring claims
+    `parse_install_command("poetry install --only main --no-root
+    --no-ansi", source="Dockerfile:50")` produces
+    `flags=(("--only", "main"), ("--no-root", ""), ("--no-ansi", ""))` —
+    this test re-executes that literal claim rather than trusting the
+    docstring prose."""
+    recipe = parse_install_command(
+        "poetry install --only main --no-root --no-ansi", source="Dockerfile:50"
+    )
+    assert recipe.flags == (
+        ("--only", "main"),
+        ("--no-root", ""),
+        ("--no-ansi", ""),
+    )
+
+
+# --- Item 5: the closed inert set -------------------------------------------
+
+
+def test_item5_each_inert_flag_individually_does_not_change_selection():
+    for flag in ("--no-root", "--no-interaction", "--no-ansi"):
+        recipe = parse_install_command(
+            f"poetry install --only main {flag}", source="inert-test"
+        )
+        assert _universe((recipe,)) == frozenset({"main"})
+
+
+def test_item5_all_three_inert_flags_together_do_not_change_selection():
+    recipe = parse_install_command(
+        "poetry install --only main --no-root --no-interaction --no-ansi",
+        source="inert-test",
+    )
+    assert _universe((recipe,)) == frozenset({"main"})
+
+
+def test_item10_flag_outside_the_closed_inert_set_yields_unknown():
+    """Item 10 — an installation-affecting flag outside the closed set (not
+    a group-selecting flag, not in `_INERT_FLAGS`) refuses the whole
+    recipe, never a partial set."""
+    recipe = parse_install_command(
+        "poetry install --only main --no-dev", source="unsupported-flag"
+    )
+    result = _universe((recipe,))
+    assert result is None
+    reason = explain_recipe_selection_refusal(
+        recipe,
+        lock_membership=derive_lock_group_membership(_LOCK_DOCUMENT),
+        group_optionality=None,
+    )
+    assert "unsupported" in reason.lower()
+    assert "--no-dev" in reason
+
+
 # --- `--only`: exempt from optionality entirely ------------------------------
 
 
 def test_only_flag_selects_exactly_the_named_groups_needing_no_optionality():
     """`--only` never consults `group_optionality` — proven here by passing
     `None` and still getting a confident answer."""
-    recipe = _recipe(("--only", "main"))
+    recipe = parse_install_command("poetry install --only main", source="t")
     assert _universe((recipe,), group_optionality=None) == frozenset({"main"})
 
 
 def test_only_flag_accepts_a_comma_separated_group_list():
-    recipe = _recipe(("--only", "main,ops"))
+    recipe = parse_install_command("poetry install --only main,ops", source="t")
     assert _universe((recipe,)) == frozenset({"main", "ops"})
 
 
@@ -2778,22 +2936,17 @@ def test_plant_only_with_optional_and_nonoptional_groups_present_still_yields_ma
     (`dev`) and a non-optional one (`ops`). `--only` REPLACES the default
     entirely; it never falls back to Poetry's computed default, so neither
     `dev` nor `ops` leaks in regardless of their declared optionality."""
-    recipe = _recipe(("--only", "main"))
+    recipe = parse_install_command("poetry install --only main", source="t")
     assert _universe((recipe,), group_optionality=None) == frozenset({"main"})
-    # Confirmed again with real optionality data supplied, proving the
-    # branch ignores it rather than merely never needing it in this call:
-    assert _universe(
-        (recipe,), group_optionality={"dev": True, "ops": False, "docs": True}
-    ) == frozenset({"main"})
+    assert _universe((recipe,), group_optionality=_OPTIONALITY) == frozenset({"main"})
 
 
 # --- Bare `poetry install`: Poetry's computed default ------------------------
 
 
 def test_bare_install_resolves_the_default_set_with_known_optionality():
-    recipe = _recipe()
-    optionality = {"dev": True, "ops": False, "docs": True}
-    universe = _universe((recipe,), group_optionality=optionality)
+    recipe = parse_install_command("poetry install", source="t")
+    universe = _universe((recipe,), group_optionality=_OPTIONALITY)
     assert universe == _EXPECTED_DEFAULT_GROUPS
 
 
@@ -2801,101 +2954,87 @@ def test_plant_bare_install_with_nonoptional_custom_group_is_true_not_false():
     """Plant — the case the OLD (pre-fix) model got wrong in the confident
     direction: a bare `poetry install`, with `ops` declared non-optional,
     installs `main` PLUS `ops` by Poetry's own default. `dotmac-ops-tool`
-    (which lives only in `ops`) must derive `true`, not `false` — the old
-    model treated every bare install as unparseable and would have said
-    `unknown` at best, or (if naively 'fixed' to assume `main`-only) would
-    have wrongly said `false`, which is worse than an `unknown` because it
-    looks like a confident, checked answer."""
-    result = _dimension(
-        "dotmac-ops-tool",
-        (_recipe(),),
-        group_optionality={"dev": True, "ops": False, "docs": True},
-    )
+    (which lives only in `ops`) must derive `true`, not `false`."""
+    recipe = parse_install_command("poetry install", source="t")
+    result = _dimension("dotmac-ops-tool", (recipe,), group_optionality=_OPTIONALITY)
     assert result is DimensionValue.TRUE
 
 
 def test_plant_bare_install_with_unknown_optionality_is_unknown():
-    """Plant — clause 3 arriving through the third input. No
-    `group_optionality` supplied at all: the default set cannot be
-    computed, so this must be `unknown`, never `false` and never a silent
-    `main`-only guess."""
-    result = _dimension("dotmac-kernel", (_recipe(),), group_optionality=None)
+    """Plant — item 9. No `group_optionality` supplied at all: the default
+    set cannot be computed, so this must be `unknown`, never `false` and
+    never a silent `main`-only guess."""
+    recipe = parse_install_command("poetry install", source="t")
+    result = _dimension("dotmac-kernel", (recipe,), group_optionality=None)
     assert result is DimensionValue.UNKNOWN
     assert result is not DimensionValue.FALSE
     assert result is not DimensionValue.TRUE
 
 
 def test_bare_install_with_optionality_incomplete_for_a_relevant_group_is_unknown():
-    """`group_optionality` supplied, but missing an entry for `ops` — a
-    group the lock actually resolves packages into. Refused, not defaulted
-    either way."""
     incomplete = {"dev": True, "docs": True}  # "ops" missing
-    result = _dimension("dotmac-ops-tool", (_recipe(),), group_optionality=incomplete)
+    recipe = parse_install_command("poetry install", source="t")
+    result = _dimension("dotmac-ops-tool", (recipe,), group_optionality=incomplete)
     assert result is DimensionValue.UNKNOWN
 
 
-# --- `--with`: adds to the default, and is a no-op for an already-default
-# --- (non-optional) group -----------------------------------------------
+# --- `--with`: adds to the default, no-op for an already-default group -----
 
 
 def test_plant_with_optional_group_adds_it_to_the_default():
-    recipe = _recipe(("--with", "docs"))
-    universe = _universe(
-        (recipe,), group_optionality={"dev": True, "ops": False, "docs": True}
-    )
+    recipe = parse_install_command("poetry install --with docs", source="t")
+    universe = _universe((recipe,), group_optionality=_OPTIONALITY)
     assert universe == frozenset({"main", "ops", "docs"})
-    result = _dimension(
-        "dotmac-docs-tool",
-        (recipe,),
-        group_optionality={"dev": True, "ops": False, "docs": True},
-    )
+    result = _dimension("dotmac-docs-tool", (recipe,), group_optionality=_OPTIONALITY)
     assert result is DimensionValue.TRUE
 
 
 def test_plant_with_nonoptional_group_is_a_documented_noop():
-    """Plant — the direction a naive model gets wrong: naming an already-
-    non-optional group on `--with` does not duplicate or otherwise change
-    the default; the resulting set is identical to the bare-install
-    default."""
-    recipe = _recipe(("--with", "ops"))
-    universe = _universe(
-        (recipe,), group_optionality={"dev": True, "ops": False, "docs": True}
-    )
+    recipe = parse_install_command("poetry install --with ops", source="t")
+    universe = _universe((recipe,), group_optionality=_OPTIONALITY)
     assert universe == _EXPECTED_DEFAULT_GROUPS
+
+
+def test_with_without_optionality_data_is_unknown():
+    """`--with` also needs `group_optionality` to compute the default set
+    it modifies — without it, `unknown`."""
+    recipe = parse_install_command("poetry install --with docs", source="t")
+    assert _universe((recipe,), group_optionality=None) is None
 
 
 # --- `--without`: subtracts from the default ---------------------------------
 
 
 def test_plant_without_subtracts_from_the_default():
-    recipe = _recipe(("--without", "ops"))
-    universe = _universe(
-        (recipe,), group_optionality={"dev": True, "ops": False, "docs": True}
-    )
+    recipe = parse_install_command("poetry install --without ops", source="t")
+    universe = _universe((recipe,), group_optionality=_OPTIONALITY)
     assert universe == frozenset({"main"})
-    result = _dimension(
-        "dotmac-ops-tool",
-        (recipe,),
-        group_optionality={"dev": True, "ops": False, "docs": True},
-    )
+    result = _dimension("dotmac-ops-tool", (recipe,), group_optionality=_OPTIONALITY)
     assert result is DimensionValue.FALSE, (
         "ops is excluded by --without, so a distribution living only in "
-        "ops must no longer derive true even though a bare install (see "
-        "test_plant_bare_install_with_nonoptional_custom_group_is_true_not_false) "
-        "would have included it"
+        "ops must no longer derive true even though a bare install would "
+        "have included it"
     )
 
 
-# --- `poetry sync`: recognised alongside `poetry install` -------------------
+# --- Item 8: `install` and `sync` share the same selection semantics -------
 
 
-def test_poetry_sync_subcommand_is_recognized_alongside_install():
-    recipe = _recipe(("--only", "main"), subcommand="sync")
-    assert _universe((recipe,)) == frozenset({"main"})
+def test_item8_install_and_sync_share_identical_selection_semantics():
+    for subcommand in ("install", "sync"):
+        recipe = parse_install_command(
+            f"poetry {subcommand} --only main --no-root --no-ansi", source="t"
+        )
+        assert _universe((recipe,)) == frozenset({"main"})
+
+        bare = parse_install_command(f"poetry {subcommand}", source="t")
+        assert _universe((bare,), group_optionality=_OPTIONALITY) == (
+            _EXPECTED_DEFAULT_GROUPS
+        )
 
 
 def test_unsupported_subcommand_is_refused():
-    recipe = _recipe(("--only", "main"), subcommand="add")
+    recipe = parse_install_command("poetry update --only main", source="t")
     assert _universe((recipe,)) is None
 
 
@@ -2903,31 +3042,19 @@ def test_unsupported_subcommand_is_refused():
 
 
 def test_only_and_with_together_is_refused_as_incoherent():
-    recipe = _recipe(("--only", "main"), ("--with", "ops"))
+    recipe = parse_install_command("poetry install --only main --with ops", source="t")
     assert _universe((recipe,)) is None
 
 
 def test_with_and_without_together_is_refused_as_a_shape_this_parser_does_not_resolve():
-    recipe = _recipe(("--with", "docs"), ("--without", "ops"))
-    optionality = {"dev": True, "ops": False, "docs": True}
-    assert _universe((recipe,), group_optionality=optionality) is None
-
-
-def test_unrecognized_flag_is_refused():
-    recipe = _recipe(("--only", "main"), ("--extra-index-url", "https://example.test"))
-    assert _universe((recipe,)) is None
-
-
-def test_blank_flag_argument_is_refused_not_read_as_empty_selection():
-    """Models an unresolved build-arg substitution collapsing to an empty
-    string, e.g. `--only ${GROUPS}` rendered blank. Refused, not read as
-    'selects nothing'."""
-    recipe = _recipe(("--only", ""))
-    assert _universe((recipe,)) is None
+    recipe = parse_install_command(
+        "poetry install --with docs --without ops", source="t"
+    )
+    assert _universe((recipe,), group_optionality=_OPTIONALITY) is None
 
 
 def test_non_poetry_tool_is_refused():
-    recipe = _recipe(("--only", "main"), tool="pip")
+    recipe = parse_install_command("pip install --only main", source="t")
     assert _universe((recipe,)) is None
 
 
@@ -2937,135 +3064,273 @@ def test_empty_recipe_tuple_is_refused_the_academy_case():
 
 def test_one_unparseable_recipe_refuses_the_whole_union_not_just_itself():
     """A product with several deployed recipes where only one fails to
-    parse must not silently fall back to the ones that did — that would
-    hide a real production installation behind an unread recipe."""
-    good = _recipe(("--only", "main"))
-    bad = _recipe(("--only", ""))  # blank argument: unparseable
+    resolve must not silently fall back to the ones that did."""
+    good = parse_install_command("poetry install --only main", source="good")
+    bad = parse_install_command("poetry install --only main --no-dev", source="bad")
     assert _universe((good, bad)) is None
     assert _universe((bad, good)) is None
 
 
-# --- The four plants from Michael's original ruling, plus the near-miss ----
+# --- Item 4 / item 11: templated values are refused AT THE PARSER ----------
 
 
-def test_plant_1_dev_group_only_distribution_is_false():
-    """Plant 1 — the real ERP `dotmac-deployment-foundation` case: resolved
-    in the lock, but only into `dev`, against a recipe selecting only
-    `main`. Before this module's `derive_installation_dimension` existed,
-    there was no shared way to express this distinction at all — the
-    undefined 'resolved and installed' reading let ERP record `true` here.
-    After: a real execution derives `false`."""
-    result = _dimension("dotmac-deployment-foundation", (_recipe(("--only", "main")),))
-    assert result is DimensionValue.FALSE
+def test_item11_each_templated_form_is_refused_identically_at_the_parser():
+    """Item 4/11 — the confident-wrong-answer defect, AND its own
+    consistency defect (found on review): an earlier version of this
+    parser refused a quoted `${{ ... }}` value only by ACCIDENT — its
+    embedded spaces broke shell tokenization into bare, unrecognised
+    tokens — while letting single-token forms like `${GROUPS}`/`$GROUPS`
+    through tokenization intact, to be refused only later, downstream, at
+    selection. Two different mechanisms for the same class of value. Every
+    templated form must now raise the SAME `InstallRecipeParseError`, from
+    `parse_install_command` itself, before an `InstallRecipe` is ever
+    constructed — never carried through as though it were a real group
+    name."""
+    for templated_value in _TEMPLATED_VALUES:
+        command_line = f"poetry install --only {templated_value}"
+        with pytest.raises(InstallRecipeParseError) as excinfo:
+            parse_install_command(command_line, source="templated")
+        assert "templated" in str(excinfo.value).lower(), (
+            templated_value,
+            str(excinfo.value),
+        )
 
 
-def test_plant_2_main_group_distribution_is_true():
-    """Plant 2 — the positive control. Without this, the refusal plants
-    would be equally consistent with a checker that refuses everything;
-    this proves the derivation can also say yes."""
-    result = _dimension("dotmac-kernel", (_recipe(("--only", "main")),))
-    assert result is DimensionValue.TRUE
+def test_templated_value_never_produces_an_install_recipe_at_all():
+    """Structural proof, not just an output assertion: since
+    `parse_install_command` refuses a templated command line BEFORE
+    tokenizing it, no `InstallRecipe` object naming a templated group ever
+    exists to be inspected, passed to a selection function, or checked
+    against a lock — there is no intermediate state where `${GROUPS}` sits
+    in `recipe.flags` as though it were real. This is stronger than 'the
+    eventual dimension is unknown': the function that would need a lock at
+    all (`parse_install_command`) takes no `lock_membership` parameter —
+    it CANNOT touch the lock even in principle."""
+    assert "lock_membership" not in inspect.signature(parse_install_command).parameters
+    with pytest.raises(InstallRecipeParseError):
+        parse_install_command("poetry install --only ${GROUPS}", source="t")
 
 
-def test_plant_3_no_measurable_recipe_yields_unknown_not_false_or_full_lock():
-    """Plant 3 — clause 3, the load-bearing one. The Academy case: no
-    authoritative checked-in recipe at all. Asserted explicitly as its own
-    case, because 'default to false' and 'default to the full lock set'
-    are exactly the two wrong answers a future reader will be tempted to
-    write instead."""
-    result = _dimension("dotmac-kernel", ())
-    assert result is DimensionValue.UNKNOWN
-    assert result is not DimensionValue.FALSE
-    assert result is not DimensionValue.TRUE
+def test_templated_value_is_never_accidentally_rescued_by_the_lock_cross_check():
+    """Distinguishes the parser's OWN refusal from the separate,
+    accidental rescue the ERP-lane review found: before this fix,
+    `frozenset({"${GROUPS}"})` could be returned confidently by selection
+    and only happened to be caught later because the lock's subset
+    cross-check in `derive_installation_dimension` could not find a group
+    literally named `${GROUPS}`. Now the refusal happens at
+    `parse_install_command` itself — before `derive_installation_group_
+    universe` or `derive_installation_dimension` are even reachable."""
+    with pytest.raises(InstallRecipeParseError):
+        parse_install_command("poetry install --only ${GROUPS}", source="t")
 
 
-def test_plant_4_unparseable_recipe_yields_unknown_never_widens_to_all_groups():
-    """Plant 4 — an unrecognised recipe shape must never widen the
-    installed set. Plants a deliberately malformed recipe (an unresolved
-    build-arg substitution collapsing to a blank `--only` argument) and
-    observes the refusal reaches `unknown`, never `true` for every
-    distribution in the lock."""
-    malformed = (_recipe(("--only", "")),)
-    result_kernel = _dimension("dotmac-kernel", malformed)
-    result_foundation = _dimension("dotmac-deployment-foundation", malformed)
-    assert result_kernel is DimensionValue.UNKNOWN
-    assert result_foundation is DimensionValue.UNKNOWN
+def test_blank_flag_argument_is_still_refused_not_read_as_empty_selection():
+    recipe = parse_install_command("poetry install --only ''", source="t")
+    assert _universe((recipe,)) is None
+
+
+# --- Item 7: `source` participates in diagnostics only ----------------------
+
+
+def test_item7_source_names_the_offending_line_in_a_refusal_message():
+    recipe = parse_install_command(
+        "poetry install --only main --no-dev", source="ItemSevenSourceMarker:99"
+    )
+    reason = explain_recipe_selection_refusal(
+        recipe,
+        lock_membership=derive_lock_group_membership(_LOCK_DOCUMENT),
+        group_optionality=None,
+    )
+    assert reason is not None
+    assert "ItemSevenSourceMarker:99" in reason
+
+
+def test_item7_source_names_the_line_in_a_parse_failure():
+    try:
+        parse_install_command("poetry install --only", source="ItemSevenParseMarker:7")
+    except InstallRecipeParseError as exc:
+        assert "ItemSevenParseMarker:7" in str(exc)
+    else:
+        raise AssertionError("expected InstallRecipeParseError")
+
+
+def test_item7_a_resolving_recipe_has_no_refusal_message_at_all():
+    recipe = parse_install_command("poetry install --only main", source="t")
+    reason = explain_recipe_selection_refusal(
+        recipe,
+        lock_membership=derive_lock_group_membership(_LOCK_DOCUMENT),
+        group_optionality=None,
+    )
+    assert reason is None
+
+
+# --- Near-miss and the (explicitly synthetic) multi-recipe union -----------
 
 
 def test_near_miss_legitimate_multi_group_recipe_resolves_to_the_union():
-    """The Sub shape: a product selecting `main` plus one operator group in
-    a single recipe (or, equivalently, across several deployed recipes —
-    see `test_multi_recipe_union_across_deployed_profiles_sub_shape` below)
-    must NOT be refused merely for naming more than one group."""
-    result = _dimension("dotmac-ui", (_recipe(("--only", "main,ops")),))
+    """A product selecting `main` plus one operator group in a single
+    recipe must NOT be refused merely for naming more than one group."""
+    recipe = parse_install_command("poetry install --only main,ops", source="t")
+    result = _dimension("dotmac-ui", (recipe,))
     assert result is DimensionValue.TRUE
 
 
-def test_multi_recipe_union_across_deployed_profiles_sub_shape():
-    """Sub's real shape: separate application and operator recipes, neither
-    of which alone selects `ops`, but whose UNION does. A dependency
-    reaching only one deployed profile is still installed."""
-    app_recipe = _recipe(("--only", "main"))
-    operator_recipe = _recipe(("--with", "ops"))
+def test_synthetic_multi_recipe_union_across_deployed_profiles():
+    """SYNTHETIC scenario, not a real repository citation — a prior draft
+    of this test wrongly labelled this "Sub's separate application, worker,
+    and operator recipes"; Sub in fact has exactly ONE Poetry install
+    recipe and declares only a single `dev` group (see the module
+    docstring's correction). This proves the UNION capability itself,
+    invented for the test rather than attributed to any real product: two
+    recipes, neither of which alone selects `ops`, whose UNION does."""
+    app_recipe = parse_install_command(
+        "poetry install --only main", source="synthetic-a"
+    )
+    operator_recipe = parse_install_command(
+        "poetry install --with ops", source="synthetic-b"
+    )
     result = _dimension(
         "dotmac-ui",
         (app_recipe, operator_recipe),
-        group_optionality={"dev": True, "ops": False, "docs": True},
+        group_optionality=_OPTIONALITY,
     )
     assert result is DimensionValue.TRUE
 
 
 def test_old_format_lock_with_no_groups_field_anywhere_yields_unknown():
-    """The file-format caveat, planted on its own: a lock predating the
-    `groups` field is `unknown` for the whole product, never an assumption
-    that everything unresolved-by-group is `main`."""
     old_lock = {"package": [{"name": "dotmac-kernel", "version": "1.0.0"}]}
-    result = _dimension(
-        "dotmac-kernel",
-        (_recipe(("--only", "main")),),
-        lock_document=old_lock,
-    )
+    recipe = parse_install_command("poetry install --only main", source="t")
+    result = _dimension("dotmac-kernel", (recipe,), lock_document=old_lock)
     assert result is DimensionValue.UNKNOWN
 
 
 def test_recipe_selecting_a_group_absent_from_the_lock_is_refused_as_stale():
-    """The cross-check clause from the ERP-lane finding: a recipe naming a
-    group the lock has no entries for at all is a stale or wrong recipe
-    reference, not a product with zero production dependencies. Refused
-    (`unknown`), never read as 'nothing is installed' — which would make
-    every distribution in that product `false` while looking like a clean
-    answer."""
-    stale = (_recipe(("--only", "nonexistent-group")),)
-    result = _dimension("dotmac-kernel", stale)
+    recipe = parse_install_command(
+        "poetry install --only nonexistent-group", source="t"
+    )
+    result = _dimension("dotmac-kernel", (recipe,))
     assert result is DimensionValue.UNKNOWN
 
 
 def test_distribution_absent_from_the_lock_entirely_is_false_not_unknown():
-    """A distribution that never resolves in the lock at all cannot be
-    installed into any group it was never resolved into — this is a
-    confirmed negative, not an absence of evidence, and stays distinct from
-    the `unknown` cases above."""
-    result = _dimension("dotmac-never-resolved", (_recipe(("--only", "main")),))
+    recipe = parse_install_command("poetry install --only main", source="t")
+    result = _dimension("dotmac-never-resolved", (recipe,))
     assert result is DimensionValue.FALSE
+
+
+# --- The NOT_APPLICABLE structural sweep (replaces the vacuous call-count
+# --- test) and the product-independence signature test ---------------------
+
+
+def test_derive_installation_dimension_cannot_reference_not_applicable_at_all():
+    """Structural proof, not a call-count sweep: `NOT_APPLICABLE` is never
+    even NAMED anywhere in `derive_installation_dimension`'s own source, so
+    no call sequence could make it return that value — this REPLACES a
+    prior vacuous test that only asserted a small, fixed set of calls
+    avoided it, an outcome the implementation could not have produced
+    differently since every one of those calls already went through the
+    same early `return`s."""
+    source = textwrap.dedent(inspect.getsource(schema.derive_installation_dimension))
+    tree = ast.parse(source)
+    hits = [
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "NOT_APPLICABLE"
+    ]
+    assert not hits, "derive_installation_dimension source references NOT_APPLICABLE"
+
+
+def test_derive_installation_dimension_signature_takes_no_product_name():
+    """`derive_installation_dimension` never branches on which product is
+    asking — proven directly from its signature, the same
+    product-independence convention `derive_distribution_universe` already
+    follows in this module."""
+    params = set(inspect.signature(schema.derive_installation_dimension).parameters)
+    assert "product" not in params
+    assert params == {"distribution", "lock_membership", "recipes", "group_optionality"}
+
+
+# --- The negative source sweep: no production call site may construct an
+# --- `InstallRecipe` directly or bypass `parse_install_command` -------------
+
+
+def test_no_direct_install_recipe_construction_anywhere_in_this_module():
+    """Sweeps THIS MODULE's real, on-disk source (not a live import) for any
+    call site that would construct an `InstallRecipe` outside
+    `parse_install_command`. Zero today."""
+    module_path = Path(schema.__file__)
+    source_code = module_path.read_text()
+    offenders = find_install_recipe_construction_call_sites(source_code)
+    assert offenders == ()
+
+
+def test_plant_a_direct_construction_call_site_is_caught_by_the_sweep():
+    """Sensitivity proof: a sweep that only ever runs clean against this
+    module's own already-clean source proves nothing about itself. Plant a
+    synthetic module containing a direct `InstallRecipe(...)` call inside a
+    function and confirm the sweep names that function."""
+    planted_source = (
+        "def reintroduces_the_bug():\n"
+        "    return InstallRecipe(\n"
+        "        tool='poetry', subcommand='install', flags=(), source='x'\n"
+        "    )\n"
+    )
+    offenders = find_install_recipe_construction_call_sites(planted_source)
+    assert offenders == ("reintroduces_the_bug",)
+
+
+def test_plant_a_bypass_call_site_outside_the_parser_is_also_caught():
+    """The second way to reintroduce the bug: calling the internal
+    `_construct_install_recipe` bypass from anywhere other than
+    `parse_install_command` itself."""
+    planted_source = (
+        "def sneaky_bypass():\n"
+        "    return _construct_install_recipe(\n"
+        "        tool='poetry', subcommand='install', flags=(), source='x'\n"
+        "    )\n"
+    )
+    offenders = find_install_recipe_construction_call_sites(planted_source)
+    assert offenders == ("sneaky_bypass",)
+
+
+def test_near_miss_the_bypass_call_inside_the_real_parser_is_not_flagged():
+    """Near-miss the sweep must still accept: the ONE legitimate call to
+    `_construct_install_recipe`, from inside `parse_install_command` itself."""
+    near_miss_source = (
+        "def parse_install_command(command_line, *, source):\n"
+        "    return _construct_install_recipe(\n"
+        "        tool='poetry', subcommand='install', flags=(), source=source\n"
+        "    )\n"
+    )
+    offenders = find_install_recipe_construction_call_sites(near_miss_source)
+    assert offenders == ()
 
 
 def test_derive_installation_dimension_never_returns_not_applicable():
     """`installation` is never `not_applicable` for any classification (see
-    the module docstring's invariant, and `CompositionRecord.__post_init__`,
-    which would refuse a record carrying it there). Sweep every reachable
-    branch of `derive_installation_dimension` and confirm none of them can
-    produce it."""
-    optionality = {"dev": True, "ops": False, "docs": True}
+    the module docstring's invariant). A small behavioural sweep
+    (complementing the structural, source-level proof above) across every
+    reachable branch, kept as a fast regression guard."""
     branches = [
-        _dimension("dotmac-deployment-foundation", (_recipe(("--only", "main")),)),
+        _dimension(
+            "dotmac-deployment-foundation",
+            (parse_install_command("poetry install --only main", source="t"),),
+        ),
         _dimension("dotmac-kernel", ()),
         _dimension("dotmac-kernel", (), lock_document={"package": []}),
-        _dimension("dotmac-kernel", (_recipe(("--only", "main")),)),
-        _dimension("dotmac-ops-tool", (_recipe(),), group_optionality=optionality),
+        _dimension(
+            "dotmac-kernel",
+            (parse_install_command("poetry install --only main", source="t"),),
+        ),
         _dimension(
             "dotmac-ops-tool",
-            (_recipe(("--without", "ops")),),
-            group_optionality=optionality,
+            (parse_install_command("poetry install", source="t"),),
+            group_optionality=_OPTIONALITY,
+        ),
+        _dimension(
+            "dotmac-ops-tool",
+            (parse_install_command("poetry install --without ops", source="t"),),
+            group_optionality=_OPTIONALITY,
         ),
     ]
     assert DimensionValue.NOT_APPLICABLE not in branches

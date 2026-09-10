@@ -333,13 +333,27 @@ phrase this dimension used to carry ("the distribution is resolved and
 installed"): that phrase does not decide a real case. ``dotmac_erp`` pinned
 ``dotmac-deployment-foundation`` in its **dev** dependency group, so the
 distribution is resolved in ``poetry.lock`` — but ERP's ``Dockerfile:50``
-runs ``poetry install --only main``, so it never reaches the deployed image.
-Reading ``installation`` as "resolved in the lock" let ERP record
-``installation: true`` for a distribution its production image never
-contains. If Sub or Academy read the same word as "present in the deployed
-image" instead, the three records stop being comparable — the exact failure
-this schema exists to end, arriving through an undefined term rather than a
-divergent field name.
+runs ``poetry install --only main --no-root --no-ansi``, so it never reaches
+the deployed image. Reading ``installation`` as "resolved in the lock" let
+ERP record ``installation: true`` for a distribution its production image
+never contains. If Sub or Academy read the same word as "present in the
+deployed image" instead, the three records stop being comparable — the
+exact failure this schema exists to end, arriving through an undefined term
+rather than a divergent field name.
+
+Quote the real fleet recipes here IN FULL, not truncated to their
+group-selecting flag — an independent review found that quoting only
+``--only main`` and dropping the trailing flags a real Dockerfile actually
+carries produced a derivation that could only be exercised against a
+falsified recipe. These four are the ones that motivated the closed inert
+set below (see :func:`parse_install_command`):
+
+.. code-block:: text
+
+    ERP Dockerfile:50            poetry install --only main --no-root --no-ansi
+    ERP Dockerfile.hardened:53   poetry install --only main --no-interaction --no-ansi
+    Sub Dockerfile:40            poetry install --only main --no-interaction --no-ansi
+    Starter Dockerfile:63        poetry install --only main --no-root --no-interaction
 
 The ruling, stated plainly:
 
@@ -348,8 +362,8 @@ The ruling, stated plainly:
   installs — the set an operator running that artifact in production really
   has on disk. For a Poetry-based product this is the group (or groups) its
   build step actually passes to the installer for the image it ships (e.g.
-  ERP's ``poetry install --only main``), never every group the lock file
-  happens to resolve.
+  ERP's ``poetry install --only main --no-root --no-ansi``), never every
+  group the lock file happens to resolve.
 * **What does not count.** A distribution resolved only into a development,
   test, or tooling dependency group, and excluded from the artifact the
   product deploys, is ``installation = false`` — **even though it appears in
@@ -421,18 +435,47 @@ and only one of them needs parsing at all:
   requires, now arriving through a third input (missing/incomplete group
   optionality) exactly as readily as through the first two.
 
-**What a recipe is.** :class:`InstallRecipe` holds a checked-in install
-command as PARSED TOKENS — ``tool``, ``subcommand``, and ``flags`` (ordered
-``(flag, argument)`` pairs) — never a raw command-line string a caller has
-already pre-interpreted. ``source`` is PROVENANCE ONLY (the same convention
-as :attr:`AssemblyConsumptionTrace.boot_entry_point`): it records which file
-grounded the measurement for a human reader, and the parser never reads it.
-Whoever builds an :class:`InstallRecipe` is responsible for making it a
-faithful tokenization of the real command their product's build step
-executes — this module has no access to another repository's ``Dockerfile``
-and does not claim to have read one. As Michael has confirmed, this contract
-cannot enforce that a caller's tokens actually came from its real deployment
-files; that proof lives in each product's own validator, not here.
+**What a recipe is, and the one way to get one.** :class:`InstallRecipe`
+holds a checked-in install command as PARSED TOKENS — ``tool``,
+``subcommand``, and ``flags`` (ordered ``(flag, argument)`` pairs) — but it
+has NO public constructor. ``InstallRecipe(...)`` raises ``TypeError``, the
+identical precedent :class:`CompositionRecord` already sets in this module.
+The ONLY way to produce one is :func:`parse_install_command`, which takes the
+COMPLETE raw command-line STRING a product read from its own checked-in
+build recipe — the full text of a ``Dockerfile`` ``RUN`` instruction, every
+flag and all — and tokenizes it itself. This is deliberate and load-bearing,
+not incidental convenience: an earlier version of this module let a caller
+hand-build an ``InstallRecipe`` from a pre-selected tuple of flags, and the
+two worked examples in this very docstring modelled ``RUN poetry install
+--only main --no-root --no-ansi`` as ``flags=(("--only", "main"),)`` —
+silently dropping two real tokens while citing the real file. A closed
+selection-semantics table (see below) is worthless if a caller upstream of
+it can quietly pre-truncate the command before this module ever sees it;
+routing every recipe through one shared tokenizer removes that whole
+failure class rather than merely documenting against it. As Michael has
+confirmed, this contract still cannot enforce that the STRING a caller
+passes to :func:`parse_install_command` actually came from its named file —
+that proof lives in each product's own validator, not here — but it CAN,
+and now does, refuse to let a caller cherry-pick which tokens of an honestly
+supplied command line survive tokenization.
+
+``source`` is READ, not decorative: :func:`explain_recipe_selection_refusal`
+(see below) reads it to name exactly which checked-in line produced a
+refusal, and :class:`InstallRecipeParseError` reads it to name which line
+could not even be tokenized. Michael's words: decorative provenance is
+worse than none, because it reads as a check to everyone downstream while
+checking nothing. A field only earns a place on this dataclass once
+something in the module actually consults it, and both of these do. Be
+precise about what that consultation DOES and DOES NOT establish: ``source``
+is used FOR DIAGNOSTICS ONLY — a human-readable label naming which
+checked-in line a refusal or parse failure is ABOUT. Nothing in this module
+reads a file, computes a hash, or otherwise confirms that the string a
+caller actually passed to :func:`parse_install_command` came from the file
+``source`` names, or from any file at all. That is exactly the boundary
+Michael has confirmed stays with each product's own validator (see above);
+this module's use of ``source`` is real, but it is diagnostic labelling, not
+provenance proof, and no docstring in this module may be read as claiming
+otherwise.
 
 **Poetry's real group semantics (Poetry 2.4).** A bare ``poetry install``
 installs ``main`` plus every group NOT declared optional. ``--only
@@ -443,31 +486,60 @@ the named groups (a no-op for a name already in the default). ``--without
 <groups>`` installs the computed default MINUS the named groups. ``sync``
 takes the identical group-selecting flags as ``install``.
 
+**The closed inert set.** Every one of the four real fleet recipes quoted
+above carries at least one flag that never affects WHICH groups install —
+``--no-root``, ``--no-interaction``, ``--no-ansi``. :data:`_INERT_FLAGS` is
+the CLOSED set of exactly these three; :func:`parse_install_command` keeps
+them on the parsed recipe (they are real tokens; dropping them would be the
+identical truncation this section exists to forbid), and the selection
+logic accepts them without letting them change the selected groups. Closed
+means closed: a flag OUTSIDE this set that could plausibly affect which
+packages install (e.g. ``--extras``, ``--no-dev``, an unknown future Poetry
+flag) is never silently added to the inert set and never silently ignored —
+it refuses to ``UNKNOWN``, exactly like an unrecognised shape. Growing this
+set is a reviewed, deliberate edit naming the new flag's real semantics,
+never an automatic "unknown flags are probably harmless" fallback.
+
 **Recognised recipe shapes (``poetry install``/``poetry sync`` only,
-today).** ``_parse_single_recipe_group_selection`` recognises exactly:
+today).** ``_select_recipe_groups`` recognises exactly:
 
-* ``poetry {install,sync} --only <g1>[,<g2>...]`` — selects EXACTLY the
-  named groups; nothing is implied, and `_default_group_selection` (hence
-  ``group_optionality``) is NEVER consulted for this branch. Say this
-  plainly so a future reader does not "unify" it with the ``--with`` branch
-  below and reintroduce the exact bug this distinction exists to prevent:
-  ``--only`` names the complete set outright; it does not modify a default.
-* ``poetry {install,sync} --with <g1>[,<g2>...]`` — Poetry's computed
-  default set (:func:`_default_group_selection`) PLUS every named group.
-* ``poetry {install,sync} --without <g1>[,<g2>...]`` — Poetry's computed
-  default set MINUS every named group.
-* a bare ``poetry {install,sync}`` with no group-selecting flag at all —
-  exactly Poetry's computed default set.
+* ``poetry {install,sync} --only <g1>[,<g2>...] [inert flags]`` — selects
+  EXACTLY the named groups; nothing is implied, and `_default_group_
+  selection` (hence ``group_optionality``) is NEVER consulted for this
+  branch. Say this plainly so a future reader does not "unify" it with the
+  ``--with`` branch below and reintroduce the exact bug this distinction
+  exists to prevent: ``--only`` names the complete set outright; it does
+  not modify a default.
+* ``poetry {install,sync} --with <g1>[,<g2>...] [inert flags]`` — Poetry's
+  computed default set (:func:`_default_group_selection`) PLUS every named
+  group.
+* ``poetry {install,sync} --without <g1>[,<g2>...] [inert flags]`` —
+  Poetry's computed default set MINUS every named group.
+* a bare ``poetry {install,sync} [inert flags]`` with no group-selecting
+  flag at all — exactly Poetry's computed default set.
 
-**Everything else is refused (returns ``None``, never a guess):** a
-different tool, or a subcommand other than ``install``/``sync``; ``--only``
-combined with ``--with`` or ``--without``; ``--with`` and ``--without`` both
-present at once; any other, unrecognised flag; a blank/empty flag argument
-(e.g. an unresolved build-arg substitution such as ``--only ${GROUPS}``);
-or — for the ``--with``/``--without``/bare-install branches — a
-`_default_group_selection` refusal. None of these silently becomes "every
+**Everything else is refused (returns ``None``/``UNKNOWN``, never a
+guess):** a different tool, or a subcommand other than ``install``/``sync``;
+``--only`` combined with ``--with`` or ``--without``; ``--with`` and
+``--without`` both present at once; ANY flag that is neither a
+group-selecting flag nor a member of the closed inert set (clause 5/10 —
+this is the check that used to make every real fleet recipe unparseable,
+because ``--no-root``/``--no-interaction``/``--no-ansi`` were simply absent
+from the old recognised-shape list); or a blank flag argument. A TEMPLATED
+argument (``$VAR``, ``${VAR}``, ``${{ ... }}``, ``$(...)``/`` `...` ``
+command substitution) never even reaches this function — see
+:func:`parse_install_command`, which refuses any command line containing a
+``$`` or a backtick BEFORE tokenizing it at all, so every templated shape
+is refused the same way, in the same place, and a templated value can never
+be accidentally rescued only by the downstream lock cross-check failing to
+find it. (``_is_templated_value`` below still guards this function too, as
+defense in depth for the one remaining path that can populate
+``recipe.flags`` — but by construction no `InstallRecipe` produced by
+`parse_install_command` can ever carry one.) Also refused — for the
+``--with``/``--without``/bare-install branches only — a
+`_default_group_selection` failure. None of these silently becomes "every
 group" or silently narrows to "no groups" — that is the exact failure
-direction clause 4 exists to forbid.
+direction clause 4/11 exists to forbid.
 
 **Poetry's computed default, and why `--only` is exempt from it.**
 :func:`_default_group_selection` is ``main`` plus every group
@@ -481,20 +553,26 @@ complete set directly, so it needs no optionality input and is unaffected
 by this whole clause — the one branch this ruling's clause 1 leaves exactly
 as it was.
 
-**The union across every deployed profile.** A product may have more than
-one checked-in, deployed recipe — Sub's separate application, worker, and
-operator recipes are the named case. :func:`derive_installation_group_universe`
+**The union across every deployed profile.** A product MAY have more than
+one checked-in, deployed recipe. :func:`derive_installation_group_universe`
 takes the FULL tuple of a product's recipes and returns the UNION of every
 one's selected groups: a dependency reaching only one deployed profile is
-still installed. It refuses (returns ``None``) the WHOLE derivation, rather
-than silently dropping the offending recipe from the union, the moment ANY
-one supplied recipe fails to parse — a silently dropped recipe could hide a
-real production installation behind a shape this parser simply failed to
-read, and that failure must never look identical to "this recipe
-legitimately installs nothing." It also refuses when ``recipes`` is empty —
-no authoritative checked-in recipe at all, the Academy case: absence of a
-recipe is absence of evidence, never evidence of absence, and never treated
-like ERP's fully-measurable case.
+still installed. (No real product in this fleet is known to have more than
+one today — Sub, specifically, has exactly ONE Poetry install recipe and
+declares only a single ``dev`` group; a prior draft of this docstring wrongly
+cited "Sub's separate application, worker, and operator recipes" as a real
+example, which was never true of any repository. The multi-recipe shape
+below is exercised only as an explicitly SYNTHETIC scenario — see the test
+module — precisely so this capability is proven without inventing a
+cross-repository citation.) It refuses (returns ``None``) the WHOLE
+derivation, rather than silently dropping the offending recipe from the
+union, the moment ANY one supplied recipe fails to parse — a silently
+dropped recipe could hide a real production installation behind a shape
+this parser simply failed to read, and that failure must never look
+identical to "this recipe legitimately installs nothing." It also refuses
+when ``recipes`` is empty — no authoritative checked-in recipe at all, the
+Academy case: absence of a recipe is absence of evidence, never evidence of
+absence, and never treated like ERP's fully-measurable case.
 
 **The cross-check, and the final derivation.** :func:`derive_installation_dimension`
 combines all three inputs for one distribution. It refuses (``UNKNOWN``)
@@ -580,6 +658,7 @@ from __future__ import annotations
 
 import ast
 import re
+import shlex
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -1310,28 +1389,190 @@ def derive_lock_group_membership(
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class InstallRecipe:
-    """One checked-in install command, as PARSED TOKENS — never a raw
-    command-line string a caller has already pre-interpreted. Construct
-    this by tokenizing the actual command a product's build step executes
-    (e.g. `RUN poetry install --only main` becomes
-    `InstallRecipe(tool="poetry", subcommand="install",
-    flags=(("--only", "main"),), source="Dockerfile:50")`).
+    """One checked-in install command, as PARSED TOKENS. Has NO PUBLIC
+    CONSTRUCTOR — `InstallRecipe(...)` raises `TypeError`, the identical
+    precedent `CompositionRecord.__new__` already sets in this module (see
+    that class). The ONLY way to produce one is `parse_install_command`
+    below, which takes the COMPLETE raw command-line string a product read
+    from its own checked-in build recipe and tokenizes it itself — a caller
+    can never hand-build a pre-truncated `flags` tuple that silently drops
+    real tokens (e.g. the `--no-root --no-ansi` a real ERP `Dockerfile`
+    line also carries). See the module docstring's "What a recipe is, and
+    the one way to get one" section for why this is load-bearing rather
+    than incidental.
 
-    `source` is PROVENANCE ONLY — the same convention as
-    `AssemblyConsumptionTrace.boot_entry_point` — recording which file
-    grounded the measurement for a human reader; the parser below never
-    reads it. Whoever builds an `InstallRecipe` is responsible for making it
-    a faithful tokenization of the real command their product's build step
-    executes; this module has no access to another repository's
-    `Dockerfile` and does not claim to have read one.
+    Worked example, quoting ERP's real `Dockerfile:50` VERBATIM — every
+    token, nothing dropped:
+
+        >>> recipe = parse_install_command(
+        ...     "poetry install --only main --no-root --no-ansi",
+        ...     source="Dockerfile:50",
+        ... )
+        >>> recipe.tool, recipe.subcommand
+        ('poetry', 'install')
+        >>> recipe.flags
+        (('--only', 'main'), ('--no-root', ''), ('--no-ansi', ''))
+
+    `source` is READ, not decorative: `explain_recipe_selection_refusal`
+    and `InstallRecipeParseError` both name it in their output — but it is
+    used FOR DIAGNOSTICS ONLY. `source` NAMES the file a caller SAYS this
+    command line came from; this module makes no claim, and takes no
+    action, to verify that the string a caller actually passed to
+    `parse_install_command` matches `source`, or came from that file at
+    all — see `parse_install_command`'s own docstring and the module
+    docstring's provenance note. A field only belongs on this dataclass
+    once something in the module actually consults it — see the module
+    docstring's note on Michael's "decorative provenance is worse than
+    none" — but being consulted for diagnostics is the full extent of what
+    `source` proves.
     """
 
     tool: str
     subcommand: str
     flags: tuple[tuple[str, str], ...]
     source: str
+
+    def __new__(cls, *args: object, **kwargs: object) -> InstallRecipe:
+        del args, kwargs
+        raise TypeError(
+            "InstallRecipe is produced by parse_install_command; it has no "
+            "public constructor"
+        )
+
+
+class InstallRecipeParseError(ValueError):
+    """The raw command-line string read from a product's checked-in build
+    recipe could not be tokenized into an `InstallRecipe` at all — this is
+    a SYNTACTIC failure (malformed shell quoting, fewer than two tokens, a
+    group-selecting flag with no following argument, or a bare token that
+    is neither a `--`-prefixed flag nor a group-selecting flag's argument),
+    distinct from the SEMANTIC refusals `_select_recipe_groups` returns for
+    a syntactically valid but unresolvable recipe (unsupported flag,
+    templated value, missing optionality data). Raised BY NAME, always
+    naming `source` and the exact command-line text — the diagnostic use
+    `source` exists for."""
+
+
+def _construct_install_recipe(
+    *, tool: str, subcommand: str, flags: tuple[tuple[str, str], ...], source: str
+) -> InstallRecipe:
+    """The one bypass of `InstallRecipe.__new__`'s refusal, used ONLY by
+    `parse_install_command` — the same `object.__new__` + `object.__setattr__`
+    pattern `composition_record_from_payload` already uses to populate
+    `CompositionRecord` after its own constructor refusal."""
+    recipe = object.__new__(InstallRecipe)
+    object.__setattr__(recipe, "tool", tool)
+    object.__setattr__(recipe, "subcommand", subcommand)
+    object.__setattr__(recipe, "flags", flags)
+    object.__setattr__(recipe, "source", source)
+    return recipe
+
+
+#: The group-selecting flags: the only tokens that consume a following
+#: token as their argument. Every other `--`-prefixed token is a
+#: zero-argument (boolean) flag.
+_GROUP_SELECTING_FLAGS: Final[frozenset[str]] = frozenset(
+    {"--only", "--with", "--without"}
+)
+
+#: The CLOSED set of flags accepted without changing which groups install —
+#: see the module docstring's "The closed inert set" section for why these
+#: three, and why growing this set is a reviewed, named edit rather than an
+#: "unknown flags are probably harmless" fallback.
+_INERT_FLAGS: Final[frozenset[str]] = frozenset(
+    {"--no-root", "--no-interaction", "--no-ansi"}
+)
+
+
+def parse_install_command(command_line: str, *, source: str) -> InstallRecipe:
+    """The ONLY way to construct an `InstallRecipe`. Takes the COMPLETE raw
+    command-line string a product read from its own checked-in build recipe
+    (e.g. the full text of a `Dockerfile` `RUN` instruction — every flag,
+    not a caller's own pre-selected subset) and `source` (e.g.
+    `"Dockerfile:50"` — the line this command line was read from; read by
+    `explain_recipe_selection_refusal` for real diagnostics, and by this
+    function itself in every error it raises).
+
+    REFUSES A TEMPLATED COMMAND LINE FIRST, before any tokenization at all
+    — every recognised templating/substitution form (`$VAR`, `${VAR}`,
+    `${{ ... }}`, `$(...)`, `` `...` ``) contains a `$` or a backtick
+    somewhere in the text, so this function refuses outright the moment
+    EITHER character appears anywhere in `command_line`, rather than
+    trying to locate the templated value precisely. This is deliberately
+    the SAME check, in the SAME place, for every templated shape: an
+    earlier version of this parser caught a quoted `${{ ... }}` value here
+    (because its embedded spaces broke shell tokenization into bare,
+    unrecognised tokens) while letting `${GROUPS}`/`$GROUPS` — single,
+    well-formed tokens — through tokenization intact, to be refused only
+    later, downstream, by `_select_recipe_groups`. That was TWO different
+    refusal mechanisms producing the same eventual answer for different
+    templated shapes, which is fragile in exactly the way Michael's ruling
+    forbids: a caller that inspects the `InstallRecipe` between parsing and
+    selection would see `${GROUPS}` sitting in `flags` as though it were a
+    real group name. Every templated form now fails identically, here,
+    before an `InstallRecipe` is ever constructed.
+
+    Tokenizes the remainder with `shlex.split` (POSIX shell word-splitting
+    — handles quoting the way a real shell does). The first two tokens
+    become `tool`/`subcommand`. Of the remainder: each of
+    `_GROUP_SELECTING_FLAGS` consumes the NEXT token as its single
+    argument; every other token beginning with `--` is recorded as a
+    zero-argument flag (`flags` entry with an empty-string argument) —
+    this is what lets `--no-root`, `--no-interaction`, and `--no-ansi`
+    survive tokenization intact rather than being silently dropped, the
+    exact defect a prior version of this module's worked examples modelled
+    by omission.
+
+    Raises `InstallRecipeParseError`, naming `source` and the offending
+    text, when: `command_line` contains a `$` or a backtick (templated —
+    see above); it tokenizes to fewer than two tokens; a group-selecting
+    flag is the last token or is immediately followed by another flag (no
+    argument to consume); or any token is neither a `--`-prefixed flag nor
+    the argument just consumed by a group-selecting flag. This function
+    still never judges whether a FLAG NAME is recognised (e.g. `--no-dev`)
+    — that stays `_select_recipe_groups`' job, strictly after this parse
+    succeeds; only the templating check runs this early, because it is the
+    one thing that must never depend on which flag it happens to modify.
+    """
+    if "$" in command_line or "`" in command_line:
+        raise InstallRecipeParseError(
+            f"{source}: command line contains a templated/substituted value "
+            f"($ or backtick) and is refused before any tokenization or "
+            f"lock lookup: {command_line!r}"
+        )
+    tokens = shlex.split(command_line)
+    if len(tokens) < 2:
+        raise InstallRecipeParseError(
+            f"{source}: command line tokenizes to fewer than two tokens: "
+            f"{command_line!r}"
+        )
+    tool, subcommand, *rest = tokens
+
+    flags: list[tuple[str, str]] = []
+    index = 0
+    while index < len(rest):
+        token = rest[index]
+        if not token.startswith("--"):
+            raise InstallRecipeParseError(
+                f"{source}: unexpected bare token {token!r} in {command_line!r}"
+            )
+        if token in _GROUP_SELECTING_FLAGS:
+            if index + 1 >= len(rest) or rest[index + 1].startswith("--"):
+                raise InstallRecipeParseError(
+                    f"{source}: {token!r} has no following argument in "
+                    f"{command_line!r}"
+                )
+            flags.append((token, rest[index + 1]))
+            index += 2
+            continue
+        flags.append((token, ""))
+        index += 1
+
+    return _construct_install_recipe(
+        tool=tool, subcommand=subcommand, flags=tuple(flags), source=source
+    )
 
 
 def derive_group_optionality(
@@ -1392,15 +1633,53 @@ def derive_group_optionality(
     return optionality
 
 
-def _default_group_selection(
+#: Matches a shell/template variable reference this parser refuses to
+#: resolve rather than pass through as a literal group name: `$VAR`,
+#: `${VAR}`, `${{ ... }}` (GitHub Actions / CI template expressions),
+#: `$(...)` command substitution, or `` `...` `` backtick command
+#: substitution.
+_TEMPLATED_VALUE_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\$\{\{.*?\}\}|\$\{[^}]*\}|\$\([^)]*\)|`[^`]*`|\$[A-Za-z_][A-Za-z0-9_]*"
+)
+
+
+def _is_templated_value(value: str) -> bool:
+    """True for a value containing a shell/template variable reference —
+    checked BEFORE any lock lookup (see `_parse_group_list_flags_outcome`),
+    so a templated group name is refused BY THE PARSER and is never
+    accidentally rescued only because the lock cross-check in
+    `derive_installation_dimension` happens not to find a matching group
+    name. Two prior docstring versions in this module claimed templated
+    strings were refused while nothing actually checked for one; this
+    function is what makes that claim true."""
+    return bool(_TEMPLATED_VALUE_PATTERN.search(value))
+
+
+@dataclass(frozen=True)
+class _GroupSelectionOutcome:
+    """The single internal result type both public views of one recipe's
+    group selection share — see `_select_recipe_groups`. `groups` is `None`
+    exactly when `reason` is populated (a human-readable message naming
+    `recipe.source`), and non-`None` exactly when `reason` is `None`.
+    Keeping both public views (`_parse_single_recipe_group_selection`'s
+    frozenset-or-`None`, and `explain_recipe_selection_refusal`'s
+    message-or-`None`) as thin readers of ONE shared computation is what
+    guarantees the diagnostic can never drift from the actual decision."""
+
+    groups: frozenset[str] | None
+    reason: str | None
+
+
+def _default_group_selection_outcome(
+    recipe: InstallRecipe,
     lock_membership: LockGroupMembership,
     group_optionality: Mapping[str, bool] | None,
-) -> frozenset[str] | None:
+) -> _GroupSelectionOutcome:
     """Poetry's own default install set — the set a bare `poetry install`,
     `--with`, and `--without` all start from: `main` plus every group the
     product declares NON-optional. This is the half `--only` never needs
-    (see `_parse_single_recipe_group_selection`'s docstring for why `--only`
-    is exempt): `--only` names the complete installed set outright, while
+    (see `_select_recipe_groups`'s docstring for why `--only` is exempt):
+    `--only` names the complete installed set outright, while
     `--with`/`--without`/bare install all MODIFY this computed default, so
     computing it wrong here would silently corrupt every one of those three
     shapes.
@@ -1408,42 +1687,173 @@ def _default_group_selection(
     Only groups `lock_membership.all_declared_groups` actually names are
     considered — a group with zero resolved packages cannot change which
     distributions are installed regardless of its optionality. Refuses
-    (returns `None`, never a guess) when `group_optionality` is `None`
+    (`groups=None`, never a guess) when `group_optionality` is `None`
     entirely, or when ANY such group (other than the implicit, always-
     mandatory `main`) has no known entry in it — a default set that cannot
     be computed is not an empty set and is not `main`-only."""
     if group_optionality is None:
-        return None
+        return _GroupSelectionOutcome(
+            None,
+            f"{recipe.source}: no group-optionality data supplied; Poetry's "
+            "computed default install set cannot be resolved without it",
+        )
     default = {"main"}
     for group in lock_membership.all_declared_groups:
         if group == "main":
             continue
         if group not in group_optionality:
-            return None
+            return _GroupSelectionOutcome(
+                None,
+                f"{recipe.source}: optionality unknown for group {group!r}, "
+                "which the lock resolves packages into",
+            )
         if not group_optionality[group]:
             default.add(group)
-    return frozenset(default)
+    return _GroupSelectionOutcome(frozenset(default), None)
 
 
-def _parse_group_list_flags(
+def _parse_group_list_flags_outcome(
     recipe: InstallRecipe, *, allowed: frozenset[str]
-) -> frozenset[str] | None:
-    """Collect every group name named across `recipe`'s flags, requiring
-    EVERY flag on the recipe to be a member of `allowed` (an unrelated,
-    unrecognised flag anywhere on the command refuses the whole recipe) and
-    every flag argument to be a non-empty, comma-separated group list with
-    no blank entries (e.g. an unresolved build-arg substitution collapsing
-    to an empty or templated string is refused, not read as an empty
-    selection)."""
+) -> _GroupSelectionOutcome:
+    """Collect every group name named across `recipe`'s flags whose name is
+    in `allowed` (every other flag on the recipe was already validated by
+    `_select_recipe_groups` before this is called). Refuses when a flag
+    argument is TEMPLATED (`_is_templated_value`, checked first — before
+    any comma-splitting or lock lookup) or is blank/empty after splitting
+    on commas (e.g. an unresolved build-arg substitution collapsing to an
+    empty string)."""
     groups: set[str] = set()
     for name, argument in recipe.flags:
         if name not in allowed:
-            return None
+            continue
+        if _is_templated_value(argument):
+            return _GroupSelectionOutcome(
+                None,
+                f"{recipe.source}: templated value {argument!r} in {name} "
+                "is refused before any lock lookup",
+            )
         parts = [part.strip() for part in argument.split(",")]
         if not argument.strip() or any(not part for part in parts):
-            return None
+            return _GroupSelectionOutcome(
+                None,
+                f"{recipe.source}: blank group name in {name} {argument!r}",
+            )
         groups.update(parts)
-    return frozenset(groups)
+    return _GroupSelectionOutcome(frozenset(groups), None)
+
+
+def _select_recipe_groups(
+    recipe: InstallRecipe,
+    *,
+    lock_membership: LockGroupMembership,
+    group_optionality: Mapping[str, bool] | None,
+) -> _GroupSelectionOutcome:
+    """The one function that decides ONE recipe's selected group set, or
+    refuses with a reason naming `recipe.source`. Both public views —
+    `_parse_single_recipe_group_selection` (frozenset-or-`None`) and
+    `explain_recipe_selection_refusal` (message-or-`None`) — are thin reads
+    of this single computation; see `_GroupSelectionOutcome`.
+
+    Recognised shapes (Poetry `install`/`sync` only, today):
+
+    * `poetry {install,sync} --only <g1>[,<g2>...] [inert flags]` — selects
+      EXACTLY the named groups, nothing implied. `--only` needs NO
+      optionality input at all — it names the complete installed set
+      outright rather than modifying Poetry's computed default, so
+      `group_optionality`/`_default_group_selection_outcome` are never
+      consulted for this branch. A future reader who "unifies" this branch
+      with the `--with` branch below, treating `--only` as `default |
+      named`, reintroduces exactly the bug this distinction exists to
+      prevent — `--only` never includes `main` or anything else unless the
+      argument names it.
+    * `poetry {install,sync} --with <g1>[,<g2>...] [inert flags]` —
+      Poetry's computed default set PLUS every named group. Naming an
+      already-non-optional (already-default) group here is a documented
+      no-op, not an error.
+    * `poetry {install,sync} --without <g1>[,<g2>...] [inert flags]` —
+      Poetry's computed default set MINUS every named group.
+    * a bare `poetry {install,sync} [inert flags]` with no group-selecting
+      flag at all — exactly Poetry's computed default set.
+
+    `[inert flags]` above means: zero or more of the CLOSED set
+    `_INERT_FLAGS` (`--no-root`, `--no-interaction`, `--no-ansi`), in any
+    position, any combination, accepted without changing the selected
+    groups — this is what makes every one of the four real fleet recipes
+    named in the module docstring resolve at all.
+
+    Refused (`groups=None`, `reason` naming `recipe.source`) rather than
+    guessed at: a different tool, or a subcommand other than
+    `install`/`sync`; ANY flag that is neither a group-selecting flag nor a
+    member of `_INERT_FLAGS` (clause 5/10 of Michael's ruling — a flag
+    outside the closed set that could plausibly affect installation is
+    never silently treated as inert); `--only` combined with `--with` or
+    `--without`; `--with` and `--without` both present at once; a blank or
+    templated flag argument (clause 11 — checked in
+    `_parse_group_list_flags_outcome`, strictly before any lock lookup); or
+    — for the `--with`/`--without`/bare-install branches only — a
+    `_default_group_selection_outcome` refusal. None of these silently
+    becomes "every group" or silently narrows to "no groups".
+    """
+    if recipe.tool != "poetry" or recipe.subcommand not in ("install", "sync"):
+        return _GroupSelectionOutcome(
+            None,
+            f"{recipe.source}: {recipe.tool} {recipe.subcommand} is not a "
+            "recognised poetry install/sync command",
+        )
+
+    flag_names = [name for name, _ in recipe.flags]
+    unsupported = sorted(
+        {
+            name
+            for name in flag_names
+            if name not in _GROUP_SELECTING_FLAGS and name not in _INERT_FLAGS
+        }
+    )
+    if unsupported:
+        return _GroupSelectionOutcome(
+            None,
+            f"{recipe.source}: unsupported installation-affecting flag(s) "
+            f"{unsupported!r} — outside the closed group-selecting/inert set",
+        )
+
+    has_only = "--only" in flag_names
+    has_with = "--with" in flag_names
+    has_without = "--without" in flag_names
+
+    if has_only:
+        if has_with or has_without:
+            return _GroupSelectionOutcome(
+                None, f"{recipe.source}: --only combined with --with/--without"
+            )
+        return _parse_group_list_flags_outcome(recipe, allowed=frozenset({"--only"}))
+
+    if has_with and has_without:
+        return _GroupSelectionOutcome(
+            None, f"{recipe.source}: --with combined with --without"
+        )
+
+    default_outcome = _default_group_selection_outcome(
+        recipe, lock_membership, group_optionality
+    )
+    if default_outcome.groups is None:
+        return default_outcome
+    default = default_outcome.groups
+
+    if not has_with and not has_without:
+        return _GroupSelectionOutcome(default, None)
+    if has_with:
+        with_outcome = _parse_group_list_flags_outcome(
+            recipe, allowed=frozenset({"--with"})
+        )
+        if with_outcome.groups is None:
+            return with_outcome
+        return _GroupSelectionOutcome(default | with_outcome.groups, None)
+    without_outcome = _parse_group_list_flags_outcome(
+        recipe, allowed=frozenset({"--without"})
+    )
+    if without_outcome.groups is None:
+        return without_outcome
+    return _GroupSelectionOutcome(default - without_outcome.groups, None)
 
 
 def _parse_single_recipe_group_selection(
@@ -1452,74 +1862,96 @@ def _parse_single_recipe_group_selection(
     lock_membership: LockGroupMembership,
     group_optionality: Mapping[str, bool] | None,
 ) -> frozenset[str] | None:
-    """Parse ONE recipe's install command structure into the exact set of
-    dependency groups it selects, or `None` if the recipe's shape is not one
-    of the recognised forms below — never a guess.
+    """Thin frozenset-or-`None` view of `_select_recipe_groups` — the value
+    `derive_installation_group_universe` consumes. See that function's
+    docstring for the recognised shapes and refusal cases."""
+    return _select_recipe_groups(
+        recipe, lock_membership=lock_membership, group_optionality=group_optionality
+    ).groups
 
-    Recognised shapes (Poetry `install`/`sync` only, today):
 
-    * `poetry {install,sync} --only <g1>[,<g2>...]` — selects EXACTLY the
-      named groups, nothing implied. `--only` needs NO optionality input at
-      all — it names the complete installed set outright rather than
-      modifying Poetry's computed default, so `group_optionality`/
-      `_default_group_selection` are never consulted for this branch. A
-      future reader who "unifies" this branch with the other three,
-      treating `--only` as `default | named` like `--with`, reintroduces
-      exactly the bug this distinction exists to prevent — `--only` never
-      includes `main` or anything else unless the argument names it.
-    * `poetry {install,sync} --with <g1>[,<g2>...]` — Poetry's computed
-      default set (see `_default_group_selection`) PLUS every named group.
-      Naming an already-non-optional (already-default) group here is a
-      documented no-op, not an error.
-    * `poetry {install,sync} --without <g1>[,<g2>...]` — Poetry's computed
-      default set MINUS every named group.
-    * a bare `poetry {install,sync}` with no group-selecting flag at all —
-      exactly Poetry's computed default set.
+def explain_recipe_selection_refusal(
+    recipe: InstallRecipe,
+    *,
+    lock_membership: LockGroupMembership,
+    group_optionality: Mapping[str, bool] | None,
+) -> str | None:
+    """The one place `InstallRecipe.source` is read for real diagnostic
+    value (see the module docstring's note on Michael's "decorative
+    provenance is worse than none"). Returns `None` if `recipe` resolves to
+    a group selection, or a message NAMING `recipe.source` and the exact
+    reason otherwise. Shares `_select_recipe_groups` with
+    `_parse_single_recipe_group_selection` — one decision, two thin views
+    of it — so this diagnostic can never drift from the actual refusal
+    logic."""
+    return _select_recipe_groups(
+        recipe, lock_membership=lock_membership, group_optionality=group_optionality
+    ).reason
 
-    Refused (returns `None`) rather than guessed at: a different tool, or a
-    subcommand other than `install`/`sync`; `--only` combined with `--with`
-    or `--without` (`--only` already fully determines the selection, and
-    combining it with either is not a shape this parser resolves); `--with`
-    and `--without` both present at once (not a shape this parser
-    resolves); any other, unrecognised flag present anywhere in the
-    recipe; a blank/empty flag argument; or — for the `--with`/`--without`/
-    bare-install branches only — a `_default_group_selection` refusal (no
-    `group_optionality`, or optionality unknown for a group the lock
-    actually resolves packages into). None of these silently becomes
-    "every group" or silently narrows to "no groups" — that is the exact
-    failure direction this parser exists to forbid.
+
+def find_install_recipe_construction_call_sites(source_code: str) -> tuple[str, ...]:
+    """Sweep SOURCE TEXT (never a live import — this takes a string so it
+    can be pointed at a SYNTHETIC source in a test, proving it can refuse,
+    not just at this module's own already-clean source) for every call
+    site that would let a caller build an `InstallRecipe` OUTSIDE
+    `parse_install_command`:
+
+    * a direct `InstallRecipe(...)` construction — refused at runtime by
+      `InstallRecipe.__new__`, but this is a STATIC sweep catching the
+      ATTEMPT itself, in source, before it would ever run; or
+    * a call to the internal `_construct_install_recipe` bypass from
+      anywhere other than inside `parse_install_command`'s own body — the
+      one other way to "supply parsed token tuples" directly, skipping the
+      raw-command tokenizer entirely.
+
+    Returns a tuple naming the enclosing function (by its `def` name, or
+    `"<module>"` for module-level code) of each offending call site — empty
+    when none exist. Uses the same `ast`-walk technique already used
+    elsewhere in this module (see `_find_module_manifest_call`,
+    `classify_registration_call_site`'s callers) rather than a substring
+    search, so a call spread across a multi-line literal or written via an
+    aliased import is still found the same way a real reviewer reading the
+    AST would find it.
     """
-    if recipe.tool != "poetry" or recipe.subcommand not in ("install", "sync"):
-        return None
+    tree = ast.parse(source_code)
+    offenders: list[str] = []
 
-    flag_names = [name for name, _ in recipe.flags]
-    has_only = "--only" in flag_names
-    has_with = "--with" in flag_names
-    has_without = "--without" in flag_names
+    class _Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self._stack: list[str] = []
 
-    if has_only:
-        if has_with or has_without:
-            return None
-        return _parse_group_list_flags(recipe, allowed=frozenset({"--only"}))
+        def _enclosing(self) -> str:
+            return self._stack[-1] if self._stack else "<module>"
 
-    if has_with and has_without:
-        return None
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self._stack.append(node.name)
+            self.generic_visit(node)
+            self._stack.pop()
 
-    default = _default_group_selection(lock_membership, group_optionality)
-    if default is None:
-        return None
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self._stack.append(node.name)
+            self.generic_visit(node)
+            self._stack.pop()
 
-    if not has_with and not has_without:
-        return default
-    if has_with:
-        with_groups = _parse_group_list_flags(recipe, allowed=frozenset({"--with"}))
-        if with_groups is None:
-            return None
-        return default | with_groups
-    without_groups = _parse_group_list_flags(recipe, allowed=frozenset({"--without"}))
-    if without_groups is None:
-        return None
-    return default - without_groups
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            called_name: str | None = None
+            if isinstance(func, ast.Name):
+                called_name = func.id
+            elif isinstance(func, ast.Attribute):
+                called_name = func.attr
+
+            if called_name == "InstallRecipe":
+                offenders.append(self._enclosing())
+            elif (
+                called_name == "_construct_install_recipe"
+                and self._enclosing() != "parse_install_command"
+            ):
+                offenders.append(self._enclosing())
+            self.generic_visit(node)
+
+    _Visitor().visit(tree)
+    return tuple(offenders)
 
 
 def derive_installation_group_universe(
@@ -1529,11 +1961,14 @@ def derive_installation_group_universe(
     group_optionality: Mapping[str, bool] | None,
 ) -> frozenset[str] | None:
     """The full set of dependency groups selected across every checked-in,
-    deployed install recipe a product supplies — e.g. Sub's separate
-    application, worker, and operator recipes. A dependency reaching only
+    deployed install recipe a product supplies. A dependency reaching only
     ONE deployed profile is still installed (Michael's ruling): this is a
     UNION over every supplied recipe, never an intersection or a single
-    privileged recipe.
+    privileged recipe. (Today no real product in this fleet is known to
+    supply more than one recipe — see the module docstring's note
+    correcting the earlier, incorrect "Sub's separate application, worker,
+    and operator recipes" citation. This function is proven against an
+    explicitly SYNTHETIC multi-recipe scenario in the test module.)
 
     Returns `None` — refused, never defaulted — when:
 
@@ -1577,7 +2012,10 @@ def derive_installation_dimension(
     distribution, combining the structured lock read, the structured
     `pyproject.toml` group-optionality read, and the recipe parse. Never
     returns `NOT_APPLICABLE` — see the module docstring's `installation`
-    invariant: it is never that value for any classification.
+    invariant: it is never that value for any classification. Takes no
+    product name and branches on none — the same product-independence
+    convention `derive_distribution_universe` already follows in this
+    module.
 
     `UNKNOWN` — evidence absent or unresolvable, never defaulted to `FALSE`
     or to "the full lock set" — is returned when:
@@ -1586,10 +2024,12 @@ def derive_installation_dimension(
       membership` refused — including the older-lock-format case where
       `groups` is absent entirely); or
     * `derive_installation_group_universe(recipes, ...)` refused — no
-      recipe; an unparseable one; or, for any recipe that needed Poetry's
-      computed default set (`--with`, `--without`, or a bare install),
-      `group_optionality` was absent or incomplete for a group the lock
-      actually resolves packages into (see `_default_group_selection`); or
+      recipe; an unparseable one; a recipe carrying a flag outside the
+      closed group-selecting/inert set; a templated flag argument; or, for
+      any recipe that needed Poetry's computed default set (`--with`,
+      `--without`, or a bare install), `group_optionality` was absent or
+      incomplete for a group the lock actually resolves packages into (see
+      `_default_group_selection_outcome`); or
     * the recipe-selected groups are not a subset of `lock_membership.
       all_declared_groups`. A recipe selecting a group the lock has no
       entries for at all is not a product with zero production
