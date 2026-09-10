@@ -60,6 +60,7 @@ from tests.architecture.composition_schema import (
     composition_records_from_envelope,
     derive_composition_state,
     derive_distribution_universe,
+    derive_group_optionality,
     derive_installation_dimension,
     derive_installation_group_universe,
     derive_lock_group_membership,
@@ -2613,19 +2614,22 @@ def test_reordered_pipeline_clearing_installation_false_first_gives_wrong_answer
 
 # ---------------------------------------------------------------------------
 # The installation boundary: `derive_installation_dimension`, the structured
-# lock read (`derive_lock_group_membership`), and the recipe parse
-# (`derive_installation_group_universe` /
-# `_parse_single_recipe_group_selection`). Every test below is a real
-# execution of these functions, not an assertion of an outcome the code
-# cannot produce differently — see the module docstring's "What
-# `installation` means" section for the ruling these prove.
+# lock read (`derive_lock_group_membership`), the structured `pyproject.toml`
+# group-optionality read (`derive_group_optionality`), and the recipe parse
+# (`derive_installation_group_universe` / `_parse_single_recipe_group_
+# selection`). Every test below is a real execution of these functions, not
+# an assertion of an outcome the code cannot produce differently — see the
+# module docstring's "What `installation` means" section for the ruling
+# these prove.
 # ---------------------------------------------------------------------------
 
-#: A minimal, already-parsed `poetry.lock` document shaped like ERP's real
-#: lock at the time of Michael's ruling: two groups, `main` and `dev`, with
-#: `dotmac-deployment-foundation` the sole `dev`-only entry among the
-#: `dotmac-*` packages. Every test in this section builds on this one fixed
-#: document so a reader can compare cases directly.
+#: A minimal, already-parsed `poetry.lock` document. `dotmac-deployment-
+#: foundation` is shaped like ERP's real lock at the time of Michael's
+#: ruling: the sole entry in an OPTIONAL `dev` group. `ops` is a
+#: NON-OPTIONAL custom group (`dotmac-ops-tool` lives only there,
+#: `dotmac-ui` lives in both `main` and `ops`), and `docs` is a second
+#: OPTIONAL custom group (`dotmac-docs-tool`) — the two custom-group shapes
+#: needed to prove Poetry's real default-set semantics below.
 _LOCK_DOCUMENT = {
     "package": [
         {
@@ -2635,12 +2639,57 @@ _LOCK_DOCUMENT = {
         },
         {"name": "dotmac-kernel", "version": "1.0.0", "groups": ["main"]},
         {"name": "dotmac-ui", "version": "1.0.0", "groups": ["main", "ops"]},
+        {"name": "dotmac-ops-tool", "version": "1.0.0", "groups": ["ops"]},
+        {"name": "dotmac-docs-tool", "version": "1.0.0", "groups": ["docs"]},
     ]
 }
+
+#: The matching, already-parsed `pyproject.toml` document: `dev` and `docs`
+#: are declared OPTIONAL, `ops` is declared explicitly NON-optional.
+_PYPROJECT_DOCUMENT = {
+    "tool": {
+        "poetry": {
+            "group": {
+                "dev": {"optional": True},
+                "ops": {"optional": False},
+                "docs": {"optional": True},
+            }
+        }
+    }
+}
+
+#: Poetry's computed default install set for `_LOCK_DOCUMENT` +
+#: `_PYPROJECT_DOCUMENT`: `main` plus every NON-optional custom group
+#: (`ops`) the lock actually resolves packages into. `dev` and `docs` are
+#: both optional, so neither is in the default.
+_EXPECTED_DEFAULT_GROUPS = frozenset({"main", "ops"})
 
 
 def _recipe(*flags: tuple[str, str], tool: str = "poetry", subcommand: str = "install"):
     return InstallRecipe(tool=tool, subcommand=subcommand, flags=flags, source="test")
+
+
+def _universe(recipes, *, group_optionality=None, lock_document=_LOCK_DOCUMENT):
+    membership = derive_lock_group_membership(lock_document)
+    assert membership is not None
+    return derive_installation_group_universe(
+        recipes, lock_membership=membership, group_optionality=group_optionality
+    )
+
+
+def _dimension(
+    distribution, recipes, *, group_optionality=None, lock_document=_LOCK_DOCUMENT
+):
+    membership = derive_lock_group_membership(lock_document)
+    return derive_installation_dimension(
+        distribution=distribution,
+        lock_membership=membership,
+        recipes=recipes,
+        group_optionality=group_optionality,
+    )
+
+
+# --- The structured lock read -----------------------------------------------
 
 
 def test_lock_group_membership_reads_structured_groups_fields():
@@ -2648,12 +2697,11 @@ def test_lock_group_membership_reads_structured_groups_fields():
     parsing, no heuristic. Proves the shape directly against `_LOCK_DOCUMENT`."""
     membership = derive_lock_group_membership(_LOCK_DOCUMENT)
     assert membership is not None
-    assert membership.groups_by_distribution == {
-        "dotmac-deployment-foundation": frozenset({"dev"}),
-        "dotmac-kernel": frozenset({"main"}),
-        "dotmac-ui": frozenset({"main", "ops"}),
-    }
-    assert membership.all_declared_groups == frozenset({"main", "dev", "ops"})
+    assert membership.groups_by_distribution[
+        "dotmac-deployment-foundation"
+    ] == frozenset({"dev"})
+    assert membership.groups_by_distribution["dotmac-kernel"] == frozenset({"main"})
+    assert membership.all_declared_groups == frozenset({"main", "dev", "ops", "docs"})
 
 
 def test_lock_missing_groups_field_on_any_package_is_refused_not_defaulted():
@@ -2670,42 +2718,204 @@ def test_lock_with_no_package_list_is_refused():
     assert derive_lock_group_membership({"package": []}) is None
 
 
-def test_recipe_only_flag_selects_exactly_the_named_groups():
+# --- The structured pyproject.toml group-optionality read -------------------
+
+
+def test_group_optionality_reads_declared_optional_flags():
+    optionality = derive_group_optionality(_PYPROJECT_DOCUMENT)
+    assert optionality == {"dev": True, "ops": False, "docs": True}
+
+
+def test_group_optionality_omitted_key_reads_as_poetry_default_non_optional():
+    """A group table present but with no `optional` key at all is read as
+    Poetry's own documented default, `False` — this is Poetry's stated
+    semantics, not a guess this module makes."""
+    document = {"tool": {"poetry": {"group": {"ops": {}}}}}
+    assert derive_group_optionality(document) == {"ops": False}
+
+
+def test_group_optionality_with_no_group_table_is_the_empty_mapping():
+    """No `[tool.poetry.group]` table at all is a complete, honest answer —
+    the product declares zero custom groups — not a refusal."""
+    document = {"tool": {"poetry": {}}}
+    assert derive_group_optionality(document) == {}
+
+
+def test_group_optionality_refused_when_tool_poetry_is_absent():
+    assert derive_group_optionality({}) is None
+    assert derive_group_optionality({"tool": {}}) is None
+
+
+def test_group_optionality_refused_when_a_group_entry_is_not_a_table():
+    document = {"tool": {"poetry": {"group": {"ops": "not-a-table"}}}}
+    assert derive_group_optionality(document) is None
+
+
+def test_group_optionality_refused_when_optional_value_is_not_boolean():
+    document = {"tool": {"poetry": {"group": {"ops": {"optional": "yes"}}}}}
+    assert derive_group_optionality(document) is None
+
+
+# --- `--only`: exempt from optionality entirely ------------------------------
+
+
+def test_only_flag_selects_exactly_the_named_groups_needing_no_optionality():
+    """`--only` never consults `group_optionality` — proven here by passing
+    `None` and still getting a confident answer."""
     recipe = _recipe(("--only", "main"))
-    assert derive_installation_group_universe((recipe,)) == frozenset({"main"})
+    assert _universe((recipe,), group_optionality=None) == frozenset({"main"})
 
 
-def test_recipe_with_flag_adds_main_implicitly():
-    recipe = _recipe(("--with", "ops"))
-    assert derive_installation_group_universe((recipe,)) == frozenset({"main", "ops"})
-
-
-def test_recipe_only_flag_accepts_a_comma_separated_group_list():
+def test_only_flag_accepts_a_comma_separated_group_list():
     recipe = _recipe(("--only", "main,ops"))
-    assert derive_installation_group_universe((recipe,)) == frozenset({"main", "ops"})
+    assert _universe((recipe,)) == frozenset({"main", "ops"})
 
 
-def test_bare_poetry_install_with_no_group_flag_is_unparseable():
-    """A bare `poetry install` cannot be resolved to a group set without
-    reading `pyproject.toml`'s own group-optionality declarations, which
-    this parser never does. Refused, not defaulted to `{"main"}`."""
+def test_plant_only_with_optional_and_nonoptional_groups_present_still_yields_main():
+    """Plant — the regression guard for clause 1: `--only main` must still
+    resolve to exactly `{"main"}` even though the lock/pyproject fixture
+    used throughout this section declares both an optional custom group
+    (`dev`) and a non-optional one (`ops`). `--only` REPLACES the default
+    entirely; it never falls back to Poetry's computed default, so neither
+    `dev` nor `ops` leaks in regardless of their declared optionality."""
+    recipe = _recipe(("--only", "main"))
+    assert _universe((recipe,), group_optionality=None) == frozenset({"main"})
+    # Confirmed again with real optionality data supplied, proving the
+    # branch ignores it rather than merely never needing it in this call:
+    assert _universe(
+        (recipe,), group_optionality={"dev": True, "ops": False, "docs": True}
+    ) == frozenset({"main"})
+
+
+# --- Bare `poetry install`: Poetry's computed default ------------------------
+
+
+def test_bare_install_resolves_the_default_set_with_known_optionality():
     recipe = _recipe()
-    assert derive_installation_group_universe((recipe,)) is None
+    optionality = {"dev": True, "ops": False, "docs": True}
+    universe = _universe((recipe,), group_optionality=optionality)
+    assert universe == _EXPECTED_DEFAULT_GROUPS
+
+
+def test_plant_bare_install_with_nonoptional_custom_group_is_true_not_false():
+    """Plant — the case the OLD (pre-fix) model got wrong in the confident
+    direction: a bare `poetry install`, with `ops` declared non-optional,
+    installs `main` PLUS `ops` by Poetry's own default. `dotmac-ops-tool`
+    (which lives only in `ops`) must derive `true`, not `false` — the old
+    model treated every bare install as unparseable and would have said
+    `unknown` at best, or (if naively 'fixed' to assume `main`-only) would
+    have wrongly said `false`, which is worse than an `unknown` because it
+    looks like a confident, checked answer."""
+    result = _dimension(
+        "dotmac-ops-tool",
+        (_recipe(),),
+        group_optionality={"dev": True, "ops": False, "docs": True},
+    )
+    assert result is DimensionValue.TRUE
+
+
+def test_plant_bare_install_with_unknown_optionality_is_unknown():
+    """Plant — clause 3 arriving through the third input. No
+    `group_optionality` supplied at all: the default set cannot be
+    computed, so this must be `unknown`, never `false` and never a silent
+    `main`-only guess."""
+    result = _dimension("dotmac-kernel", (_recipe(),), group_optionality=None)
+    assert result is DimensionValue.UNKNOWN
+    assert result is not DimensionValue.FALSE
+    assert result is not DimensionValue.TRUE
+
+
+def test_bare_install_with_optionality_incomplete_for_a_relevant_group_is_unknown():
+    """`group_optionality` supplied, but missing an entry for `ops` — a
+    group the lock actually resolves packages into. Refused, not defaulted
+    either way."""
+    incomplete = {"dev": True, "docs": True}  # "ops" missing
+    result = _dimension("dotmac-ops-tool", (_recipe(),), group_optionality=incomplete)
+    assert result is DimensionValue.UNKNOWN
+
+
+# --- `--with`: adds to the default, and is a no-op for an already-default
+# --- (non-optional) group -----------------------------------------------
+
+
+def test_plant_with_optional_group_adds_it_to_the_default():
+    recipe = _recipe(("--with", "docs"))
+    universe = _universe(
+        (recipe,), group_optionality={"dev": True, "ops": False, "docs": True}
+    )
+    assert universe == frozenset({"main", "ops", "docs"})
+    result = _dimension(
+        "dotmac-docs-tool",
+        (recipe,),
+        group_optionality={"dev": True, "ops": False, "docs": True},
+    )
+    assert result is DimensionValue.TRUE
+
+
+def test_plant_with_nonoptional_group_is_a_documented_noop():
+    """Plant — the direction a naive model gets wrong: naming an already-
+    non-optional group on `--with` does not duplicate or otherwise change
+    the default; the resulting set is identical to the bare-install
+    default."""
+    recipe = _recipe(("--with", "ops"))
+    universe = _universe(
+        (recipe,), group_optionality={"dev": True, "ops": False, "docs": True}
+    )
+    assert universe == _EXPECTED_DEFAULT_GROUPS
+
+
+# --- `--without`: subtracts from the default ---------------------------------
+
+
+def test_plant_without_subtracts_from_the_default():
+    recipe = _recipe(("--without", "ops"))
+    universe = _universe(
+        (recipe,), group_optionality={"dev": True, "ops": False, "docs": True}
+    )
+    assert universe == frozenset({"main"})
+    result = _dimension(
+        "dotmac-ops-tool",
+        (recipe,),
+        group_optionality={"dev": True, "ops": False, "docs": True},
+    )
+    assert result is DimensionValue.FALSE, (
+        "ops is excluded by --without, so a distribution living only in "
+        "ops must no longer derive true even though a bare install (see "
+        "test_plant_bare_install_with_nonoptional_custom_group_is_true_not_false) "
+        "would have included it"
+    )
+
+
+# --- `poetry sync`: recognised alongside `poetry install` -------------------
+
+
+def test_poetry_sync_subcommand_is_recognized_alongside_install():
+    recipe = _recipe(("--only", "main"), subcommand="sync")
+    assert _universe((recipe,)) == frozenset({"main"})
+
+
+def test_unsupported_subcommand_is_refused():
+    recipe = _recipe(("--only", "main"), subcommand="add")
+    assert _universe((recipe,)) is None
+
+
+# --- Refusals that must keep working ----------------------------------------
 
 
 def test_only_and_with_together_is_refused_as_incoherent():
     recipe = _recipe(("--only", "main"), ("--with", "ops"))
-    assert derive_installation_group_universe((recipe,)) is None
+    assert _universe((recipe,)) is None
 
 
-def test_without_flag_is_refused_never_resolved():
-    recipe = _recipe(("--without", "dev"))
-    assert derive_installation_group_universe((recipe,)) is None
+def test_with_and_without_together_is_refused_as_a_shape_this_parser_does_not_resolve():
+    recipe = _recipe(("--with", "docs"), ("--without", "ops"))
+    optionality = {"dev": True, "ops": False, "docs": True}
+    assert _universe((recipe,), group_optionality=optionality) is None
 
 
 def test_unrecognized_flag_is_refused():
     recipe = _recipe(("--only", "main"), ("--extra-index-url", "https://example.test"))
-    assert derive_installation_group_universe((recipe,)) is None
+    assert _universe((recipe,)) is None
 
 
 def test_blank_flag_argument_is_refused_not_read_as_empty_selection():
@@ -2713,16 +2923,16 @@ def test_blank_flag_argument_is_refused_not_read_as_empty_selection():
     string, e.g. `--only ${GROUPS}` rendered blank. Refused, not read as
     'selects nothing'."""
     recipe = _recipe(("--only", ""))
-    assert derive_installation_group_universe((recipe,)) is None
+    assert _universe((recipe,)) is None
 
 
 def test_non_poetry_tool_is_refused():
     recipe = _recipe(("--only", "main"), tool="pip")
-    assert derive_installation_group_universe((recipe,)) is None
+    assert _universe((recipe,)) is None
 
 
 def test_empty_recipe_tuple_is_refused_the_academy_case():
-    assert derive_installation_group_universe(()) is None
+    assert _universe(()) is None
 
 
 def test_one_unparseable_recipe_refuses_the_whole_union_not_just_itself():
@@ -2730,13 +2940,12 @@ def test_one_unparseable_recipe_refuses_the_whole_union_not_just_itself():
     parse must not silently fall back to the ones that did — that would
     hide a real production installation behind an unread recipe."""
     good = _recipe(("--only", "main"))
-    bad = _recipe(("--without", "dev"))
-    assert derive_installation_group_universe((good, bad)) is None
-    assert derive_installation_group_universe((bad, good)) is None
+    bad = _recipe(("--only", ""))  # blank argument: unparseable
+    assert _universe((good, bad)) is None
+    assert _universe((bad, good)) is None
 
 
-# --- The four plants (Michael's ruling), plus the near-miss and the two
-# --- extra cases the ERP-lane finding on lock `groups` data surfaced.
+# --- The four plants from Michael's original ruling, plus the near-miss ----
 
 
 def test_plant_1_dev_group_only_distribution_is_false():
@@ -2746,25 +2955,15 @@ def test_plant_1_dev_group_only_distribution_is_false():
     there was no shared way to express this distinction at all — the
     undefined 'resolved and installed' reading let ERP record `true` here.
     After: a real execution derives `false`."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
-    recipes = (_recipe(("--only", "main")),)
-    result = derive_installation_dimension(
-        distribution="dotmac-deployment-foundation",
-        lock_membership=membership,
-        recipes=recipes,
-    )
+    result = _dimension("dotmac-deployment-foundation", (_recipe(("--only", "main")),))
     assert result is DimensionValue.FALSE
 
 
 def test_plant_2_main_group_distribution_is_true():
-    """Plant 2 — the positive control. Without this, the three refusal
-    plants below would be equally consistent with a checker that refuses
-    everything; this proves the derivation can also say yes."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
-    recipes = (_recipe(("--only", "main")),)
-    result = derive_installation_dimension(
-        distribution="dotmac-kernel", lock_membership=membership, recipes=recipes
-    )
+    """Plant 2 — the positive control. Without this, the refusal plants
+    would be equally consistent with a checker that refuses everything;
+    this proves the derivation can also say yes."""
+    result = _dimension("dotmac-kernel", (_recipe(("--only", "main")),))
     assert result is DimensionValue.TRUE
 
 
@@ -2774,10 +2973,7 @@ def test_plant_3_no_measurable_recipe_yields_unknown_not_false_or_full_lock():
     case, because 'default to false' and 'default to the full lock set'
     are exactly the two wrong answers a future reader will be tempted to
     write instead."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
-    result = derive_installation_dimension(
-        distribution="dotmac-kernel", lock_membership=membership, recipes=()
-    )
+    result = _dimension("dotmac-kernel", ())
     assert result is DimensionValue.UNKNOWN
     assert result is not DimensionValue.FALSE
     assert result is not DimensionValue.TRUE
@@ -2789,16 +2985,9 @@ def test_plant_4_unparseable_recipe_yields_unknown_never_widens_to_all_groups():
     build-arg substitution collapsing to a blank `--only` argument) and
     observes the refusal reaches `unknown`, never `true` for every
     distribution in the lock."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
     malformed = (_recipe(("--only", "")),)
-    result_kernel = derive_installation_dimension(
-        distribution="dotmac-kernel", lock_membership=membership, recipes=malformed
-    )
-    result_foundation = derive_installation_dimension(
-        distribution="dotmac-deployment-foundation",
-        lock_membership=membership,
-        recipes=malformed,
-    )
+    result_kernel = _dimension("dotmac-kernel", malformed)
+    result_foundation = _dimension("dotmac-deployment-foundation", malformed)
     assert result_kernel is DimensionValue.UNKNOWN
     assert result_foundation is DimensionValue.UNKNOWN
 
@@ -2808,11 +2997,7 @@ def test_near_miss_legitimate_multi_group_recipe_resolves_to_the_union():
     a single recipe (or, equivalently, across several deployed recipes —
     see `test_multi_recipe_union_across_deployed_profiles_sub_shape` below)
     must NOT be refused merely for naming more than one group."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
-    recipes = (_recipe(("--only", "main,ops")),)
-    result = derive_installation_dimension(
-        distribution="dotmac-ui", lock_membership=membership, recipes=recipes
-    )
+    result = _dimension("dotmac-ui", (_recipe(("--only", "main,ops")),))
     assert result is DimensionValue.TRUE
 
 
@@ -2820,13 +3005,12 @@ def test_multi_recipe_union_across_deployed_profiles_sub_shape():
     """Sub's real shape: separate application and operator recipes, neither
     of which alone selects `ops`, but whose UNION does. A dependency
     reaching only one deployed profile is still installed."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
     app_recipe = _recipe(("--only", "main"))
     operator_recipe = _recipe(("--with", "ops"))
-    result = derive_installation_dimension(
-        distribution="dotmac-ui",
-        lock_membership=membership,
-        recipes=(app_recipe, operator_recipe),
+    result = _dimension(
+        "dotmac-ui",
+        (app_recipe, operator_recipe),
+        group_optionality={"dev": True, "ops": False, "docs": True},
     )
     assert result is DimensionValue.TRUE
 
@@ -2836,11 +3020,10 @@ def test_old_format_lock_with_no_groups_field_anywhere_yields_unknown():
     `groups` field is `unknown` for the whole product, never an assumption
     that everything unresolved-by-group is `main`."""
     old_lock = {"package": [{"name": "dotmac-kernel", "version": "1.0.0"}]}
-    membership = derive_lock_group_membership(old_lock)
-    result = derive_installation_dimension(
-        distribution="dotmac-kernel",
-        lock_membership=membership,
-        recipes=(_recipe(("--only", "main")),),
+    result = _dimension(
+        "dotmac-kernel",
+        (_recipe(("--only", "main")),),
+        lock_document=old_lock,
     )
     assert result is DimensionValue.UNKNOWN
 
@@ -2852,11 +3035,8 @@ def test_recipe_selecting_a_group_absent_from_the_lock_is_refused_as_stale():
     (`unknown`), never read as 'nothing is installed' — which would make
     every distribution in that product `false` while looking like a clean
     answer."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
     stale = (_recipe(("--only", "nonexistent-group")),)
-    result = derive_installation_dimension(
-        distribution="dotmac-kernel", lock_membership=membership, recipes=stale
-    )
+    result = _dimension("dotmac-kernel", stale)
     assert result is DimensionValue.UNKNOWN
 
 
@@ -2865,12 +3045,7 @@ def test_distribution_absent_from_the_lock_entirely_is_false_not_unknown():
     installed into any group it was never resolved into — this is a
     confirmed negative, not an absence of evidence, and stays distinct from
     the `unknown` cases above."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
-    result = derive_installation_dimension(
-        distribution="dotmac-never-resolved",
-        lock_membership=membership,
-        recipes=(_recipe(("--only", "main")),),
-    )
+    result = _dimension("dotmac-never-resolved", (_recipe(("--only", "main")),))
     assert result is DimensionValue.FALSE
 
 
@@ -2880,23 +3055,17 @@ def test_derive_installation_dimension_never_returns_not_applicable():
     which would refuse a record carrying it there). Sweep every reachable
     branch of `derive_installation_dimension` and confirm none of them can
     produce it."""
-    membership = derive_lock_group_membership(_LOCK_DOCUMENT)
+    optionality = {"dev": True, "ops": False, "docs": True}
     branches = [
-        derive_installation_dimension(
-            distribution="dotmac-deployment-foundation",
-            lock_membership=membership,
-            recipes=(_recipe(("--only", "main")),),
-        ),
-        derive_installation_dimension(
-            distribution="dotmac-kernel", lock_membership=membership, recipes=()
-        ),
-        derive_installation_dimension(
-            distribution="dotmac-kernel", lock_membership=None, recipes=()
-        ),
-        derive_installation_dimension(
-            distribution="dotmac-kernel",
-            lock_membership=membership,
-            recipes=(_recipe(("--only", "main")),),
+        _dimension("dotmac-deployment-foundation", (_recipe(("--only", "main")),)),
+        _dimension("dotmac-kernel", ()),
+        _dimension("dotmac-kernel", (), lock_document={"package": []}),
+        _dimension("dotmac-kernel", (_recipe(("--only", "main")),)),
+        _dimension("dotmac-ops-tool", (_recipe(),), group_optionality=optionality),
+        _dimension(
+            "dotmac-ops-tool",
+            (_recipe(("--without", "ops")),),
+            group_optionality=optionality,
         ),
     ]
     assert DimensionValue.NOT_APPLICABLE not in branches

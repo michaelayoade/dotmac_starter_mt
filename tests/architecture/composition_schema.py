@@ -383,12 +383,12 @@ derivation a product uses to compute this measurement, so it is not
 re-invented three times and cannot be satisfied by accident with the full
 lock set.
 
-``derive_installation_dimension`` — a structured read plus one narrow parse
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``derive_installation_dimension`` — three structured inputs, one narrow parse
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A product does not get to assert ``installation`` by interpreting the
-sentence above for itself. The question splits cleanly into two halves with
-two different evidence shapes, and only one of them needs parsing at all:
+sentence above for itself. The question splits into three evidence shapes,
+and only one of them needs parsing at all:
 
 * **Which group(s) a distribution resolves into is STRUCTURED DATA.** Poetry
   itself writes a ``groups`` field onto every ``[[package]]`` entry in
@@ -399,6 +399,14 @@ two different evidence shapes, and only one of them needs parsing at all:
   ``dotmac-deployment-foundation`` is the only ``dotmac-*`` package in
   ``dev`` — every other one is in ``main``. Under this ruling exactly that
   one row moves, independently confirming the case Michael named.)
+* **Whether a declared group is optional is ALSO STRUCTURED DATA, but a
+  DIFFERENT document.** ``poetry.lock`` never carries this fact.
+  :func:`derive_group_optionality` reads
+  ``[tool.poetry.group.<name>] optional = true|false`` from an
+  already-parsed ``pyproject.toml`` document — Poetry 2.4, "Installing
+  group dependencies". This is required ONLY for the three recipe shapes
+  that modify Poetry's own computed default install set (see below);
+  ``--only`` never needs it.
 * **Which groups the product's deployed artifact SELECTS is the only part
   that requires reading a recipe** — a real, structural parse of the
   install command (tool, subcommand, group-selecting flag and its
@@ -410,7 +418,8 @@ two different evidence shapes, and only one of them needs parsing at all:
   refusal NEVER widens the selected set to "every group" and never narrows
   it to "no groups" — it is simply not evidence, and evidence absent is
   ``DimensionValue.UNKNOWN``, exactly as clause 3 of Michael's ruling
-  requires.
+  requires, now arriving through a third input (missing/incomplete group
+  optionality) exactly as readily as through the first two.
 
 **What a recipe is.** :class:`InstallRecipe` holds a checked-in install
 command as PARSED TOKENS — ``tool``, ``subcommand``, and ``flags`` (ordered
@@ -421,27 +430,56 @@ grounded the measurement for a human reader, and the parser never reads it.
 Whoever builds an :class:`InstallRecipe` is responsible for making it a
 faithful tokenization of the real command their product's build step
 executes — this module has no access to another repository's ``Dockerfile``
-and does not claim to have read one.
+and does not claim to have read one. As Michael has confirmed, this contract
+cannot enforce that a caller's tokens actually came from its real deployment
+files; that proof lives in each product's own validator, not here.
 
-**Recognised recipe shapes (Poetry only, today).**
-``_parse_single_recipe_group_selection`` recognises exactly:
+**Poetry's real group semantics (Poetry 2.4).** A bare ``poetry install``
+installs ``main`` plus every group NOT declared optional. ``--only
+<groups>`` REPLACES that entirely — it installs exactly the named groups,
+regardless of optionality, and excludes every other group even a
+non-optional one. ``--with <groups>`` installs the computed default PLUS
+the named groups (a no-op for a name already in the default). ``--without
+<groups>`` installs the computed default MINUS the named groups. ``sync``
+takes the identical group-selecting flags as ``install``.
 
-* ``poetry install --only <g1>[,<g2>...]`` — selects EXACTLY the named
-  groups; nothing is implied.
-* ``poetry install --with <g1>[,<g2>...]`` — selects the implicit default
-  group ``"main"`` PLUS every named group.
+**Recognised recipe shapes (``poetry install``/``poetry sync`` only,
+today).** ``_parse_single_recipe_group_selection`` recognises exactly:
+
+* ``poetry {install,sync} --only <g1>[,<g2>...]`` — selects EXACTLY the
+  named groups; nothing is implied, and `_default_group_selection` (hence
+  ``group_optionality``) is NEVER consulted for this branch. Say this
+  plainly so a future reader does not "unify" it with the ``--with`` branch
+  below and reintroduce the exact bug this distinction exists to prevent:
+  ``--only`` names the complete set outright; it does not modify a default.
+* ``poetry {install,sync} --with <g1>[,<g2>...]`` — Poetry's computed
+  default set (:func:`_default_group_selection`) PLUS every named group.
+* ``poetry {install,sync} --without <g1>[,<g2>...]`` — Poetry's computed
+  default set MINUS every named group.
+* a bare ``poetry {install,sync}`` with no group-selecting flag at all —
+  exactly Poetry's computed default set.
 
 **Everything else is refused (returns ``None``, never a guess):** a
-different tool or subcommand; ``--only`` and ``--with`` both present at once
-(``--only`` already fully determines the selection, and combining it with
-``--with`` is not a shape this parser resolves); ``--without`` (its effect
-depends on which groups are non-optional by default in ``pyproject.toml``,
-which is unknowable from the command line alone); a bare ``poetry install``
-with no group-selecting flag at all (same reason); any other, unrecognised
-flag; or a blank/empty flag argument (e.g. an unresolved build-arg
-substitution such as ``--only ${GROUPS}``). None of these silently becomes
-"every group" — that is the exact failure direction clause 4 exists to
-forbid.
+different tool, or a subcommand other than ``install``/``sync``; ``--only``
+combined with ``--with`` or ``--without``; ``--with`` and ``--without`` both
+present at once; any other, unrecognised flag; a blank/empty flag argument
+(e.g. an unresolved build-arg substitution such as ``--only ${GROUPS}``);
+or — for the ``--with``/``--without``/bare-install branches — a
+`_default_group_selection` refusal. None of these silently becomes "every
+group" or silently narrows to "no groups" — that is the exact failure
+direction clause 4 exists to forbid.
+
+**Poetry's computed default, and why `--only` is exempt from it.**
+:func:`_default_group_selection` is ``main`` plus every group
+``lock_membership.all_declared_groups`` names that ``group_optionality``
+declares non-optional. It refuses (``None``) — never guesses ``main``-only
+or "every group" — when ``group_optionality`` is absent entirely, or when
+ANY lock-declared group other than ``main`` has no known entry in it. A
+default set that cannot be computed is not an empty set and is not
+``main``. ``--only`` never calls this function at all: it names the
+complete set directly, so it needs no optionality input and is unaffected
+by this whole clause — the one branch this ruling's clause 1 leaves exactly
+as it was.
 
 **The union across every deployed profile.** A product may have more than
 one checked-in, deployed recipe — Sub's separate application, worker, and
@@ -459,20 +497,21 @@ recipe is absence of evidence, never evidence of absence, and never treated
 like ERP's fully-measurable case.
 
 **The cross-check, and the final derivation.** :func:`derive_installation_dimension`
-combines the two halves for one distribution. It refuses (``UNKNOWN``) when
-either half is unmeasurable (`derive_lock_group_membership` or
-`derive_installation_group_universe` returned `None`), and ALSO refuses when
-the recipe-selected groups are not a subset of the lock's own declared
-groups — a recipe naming a group the lock has no entries for at all is not a
-product with zero production dependencies, it is a derivation reading a
-stale or wrong recipe, and treating that as "nothing is installed" would
-make every ``installation`` in that product ``false`` while looking like a
-clean, confident answer (the vacuous-pass shape this cross-check exists to
-catch). Only once both halves are measured and mutually consistent does it
-return ``TRUE`` (the distribution's lock groups intersect the selected
-groups) or ``FALSE`` (they do not, including a distribution absent from the
-lock entirely — it cannot be installed into a group it was never resolved
-into) — never ``NOT_APPLICABLE`` (see the module docstring's ``installation``
+combines all three inputs for one distribution. It refuses (``UNKNOWN``)
+when the lock is unmeasurable, when
+`derive_installation_group_universe` refused (which now also covers an
+unresolvable Poetry default set), and ALSO refuses when the recipe-selected
+groups are not a subset of the lock's own declared groups — a recipe
+naming a group the lock has no entries for at all is not a product with
+zero production dependencies, it is a derivation reading a stale or wrong
+recipe, and treating that as "nothing is installed" would make every
+``installation`` in that product ``false`` while looking like a clean,
+confident answer (the vacuous-pass shape this cross-check exists to catch).
+Only once every input is measured and mutually consistent does it return
+``TRUE`` (the distribution's lock groups intersect the selected groups) or
+``FALSE`` (they do not, including a distribution absent from the lock
+entirely — it cannot be installed into a group it was never resolved into)
+— never ``NOT_APPLICABLE`` (see the module docstring's ``installation``
 invariant: it is never that value for any classification).
 
 This is a DERIVATION over facts a product itself has already checked in —
@@ -483,7 +522,9 @@ change any dimension value, state derivation, or the pipeline");
 computes that value BEFORE it writes the payload, so the derivation is not
 re-invented three times and, because "present in the lock" alone is never
 sufficient to reach ``TRUE`` (the recipe half must independently select a
-matching group), cannot be satisfied by accident with the full lock set.
+matching group, and for three of its four shapes must also resolve a real
+Poetry default from real optionality data), cannot be satisfied by accident
+with the full lock set.
 
 The catalogue universe
 ------------------------
@@ -1293,45 +1334,110 @@ class InstallRecipe:
     source: str
 
 
-def _parse_single_recipe_group_selection(
-    recipe: InstallRecipe,
-) -> frozenset[str] | None:
-    """Parse ONE recipe's install command structure into the exact set of
-    dependency groups it selects, or `None` if the recipe's shape is not one
-    of the two recognised forms below — never a guess.
+def derive_group_optionality(
+    pyproject_document: Mapping[str, object],
+) -> Mapping[str, bool] | None:
+    """Read the declared optional-or-not flag for every custom dependency
+    group from an ALREADY-PARSED `pyproject.toml` document —
+    `[tool.poetry.group.<name>] optional = true|false` (Poetry 2.4,
+    "Installing group dependencies" —
+    https://python-poetry.org/docs/managing-dependencies/#installing-group-dependencies)
+    — never inferred from `poetry.lock`'s `groups` field, which records
+    which packages resolve into which group and carries no information at
+    all about whether a group itself is optional.
 
-    Recognised shapes (Poetry only, today):
+    The returned mapping covers only groups `pyproject.toml` declares a
+    `[tool.poetry.group.<name>]` table for. The implicit `main` group is
+    NEVER a member of it — `main` is not a `[tool.poetry.group]` entry at
+    all (it is the base `[tool.poetry.dependencies]` section) and is always
+    mandatory; `_default_group_selection` below special-cases it rather
+    than looking it up here.
 
-    * `poetry install --only <g1>[,<g2>...]` — selects EXACTLY the named
-      groups, nothing implied.
-    * `poetry install --with <g1>[,<g2>...]` — selects the implicit default
-      group `"main"` PLUS every named group.
+    Returns `None` — refused, never defaulted — when:
 
-    Refused (returns `None`) rather than guessed at: a different tool or
-    subcommand; `--only` and `--with` both present at once (`--only` already
-    fully determines the selection, and combining it with `--with` is not a
-    shape this parser resolves); `--without` (its effect depends on which
-    groups are non-optional by default in `pyproject.toml`, unknowable from
-    the command line alone); a bare `poetry install` with no group-selecting
-    flag at all (same reason); any other, unrecognised flag present anywhere
-    in the recipe; or a blank/empty flag argument (e.g. an unresolved
-    build-arg substitution such as `--only ${GROUPS}` collapsing to an empty
-    or templated string). None of these silently becomes "every group" —
-    that is the exact failure direction this parser exists to forbid.
+    * the document has no `tool.poetry` table at all; or
+    * `tool.poetry.group`, if present, is not a table of tables; or
+    * any declared group's own table is not a table, or its `optional` key
+      (when present) is not a boolean.
+
+    An OMITTED `optional` key inside an otherwise well-formed group table is
+    read as Poetry's own documented default, `False` (non-optional) — this
+    is Poetry's stated semantics, not a guess this module makes on a
+    caller's behalf. A group with NO declared `[tool.poetry.group]` table
+    at all is simply absent from the returned mapping; a caller that needs
+    that group's optionality (every group `poetry.lock` actually resolves
+    packages into, other than `main`) must treat an absent entry as
+    unmeasurable — see `_default_group_selection`, which does exactly that.
     """
-    if recipe.tool != "poetry" or recipe.subcommand != "install":
+    tool = pyproject_document.get("tool")
+    if not isinstance(tool, Mapping):
+        return None
+    poetry = tool.get("poetry")
+    if not isinstance(poetry, Mapping):
+        return None
+    group_table = poetry.get("group")
+    if group_table is None:
+        return {}
+    if not isinstance(group_table, Mapping):
         return None
 
-    flag_names = [name for name, _ in recipe.flags]
-    has_only = "--only" in flag_names
-    has_with = "--with" in flag_names
-    has_without = "--without" in flag_names
-    if has_without or (has_only and has_with) or (not has_only and not has_with):
-        return None
+    optionality: dict[str, bool] = {}
+    for name, spec in group_table.items():
+        if not isinstance(name, str) or not name or not isinstance(spec, Mapping):
+            return None
+        optional = spec.get("optional", False)
+        if not isinstance(optional, bool):
+            return None
+        optionality[name] = optional
+    return optionality
 
-    groups: set[str] = {"main"} if has_with else set()
+
+def _default_group_selection(
+    lock_membership: LockGroupMembership,
+    group_optionality: Mapping[str, bool] | None,
+) -> frozenset[str] | None:
+    """Poetry's own default install set — the set a bare `poetry install`,
+    `--with`, and `--without` all start from: `main` plus every group the
+    product declares NON-optional. This is the half `--only` never needs
+    (see `_parse_single_recipe_group_selection`'s docstring for why `--only`
+    is exempt): `--only` names the complete installed set outright, while
+    `--with`/`--without`/bare install all MODIFY this computed default, so
+    computing it wrong here would silently corrupt every one of those three
+    shapes.
+
+    Only groups `lock_membership.all_declared_groups` actually names are
+    considered — a group with zero resolved packages cannot change which
+    distributions are installed regardless of its optionality. Refuses
+    (returns `None`, never a guess) when `group_optionality` is `None`
+    entirely, or when ANY such group (other than the implicit, always-
+    mandatory `main`) has no known entry in it — a default set that cannot
+    be computed is not an empty set and is not `main`-only."""
+    if group_optionality is None:
+        return None
+    default = {"main"}
+    for group in lock_membership.all_declared_groups:
+        if group == "main":
+            continue
+        if group not in group_optionality:
+            return None
+        if not group_optionality[group]:
+            default.add(group)
+    return frozenset(default)
+
+
+def _parse_group_list_flags(
+    recipe: InstallRecipe, *, allowed: frozenset[str]
+) -> frozenset[str] | None:
+    """Collect every group name named across `recipe`'s flags, requiring
+    EVERY flag on the recipe to be a member of `allowed` (an unrelated,
+    unrecognised flag anywhere on the command refuses the whole recipe) and
+    every flag argument to be a non-empty, comma-separated group list with
+    no blank entries (e.g. an unresolved build-arg substitution collapsing
+    to an empty or templated string is refused, not read as an empty
+    selection)."""
+    groups: set[str] = set()
     for name, argument in recipe.flags:
-        if name not in ("--only", "--with"):
+        if name not in allowed:
             return None
         parts = [part.strip() for part in argument.split(",")]
         if not argument.strip() or any(not part for part in parts):
@@ -1340,8 +1446,87 @@ def _parse_single_recipe_group_selection(
     return frozenset(groups)
 
 
+def _parse_single_recipe_group_selection(
+    recipe: InstallRecipe,
+    *,
+    lock_membership: LockGroupMembership,
+    group_optionality: Mapping[str, bool] | None,
+) -> frozenset[str] | None:
+    """Parse ONE recipe's install command structure into the exact set of
+    dependency groups it selects, or `None` if the recipe's shape is not one
+    of the recognised forms below — never a guess.
+
+    Recognised shapes (Poetry `install`/`sync` only, today):
+
+    * `poetry {install,sync} --only <g1>[,<g2>...]` — selects EXACTLY the
+      named groups, nothing implied. `--only` needs NO optionality input at
+      all — it names the complete installed set outright rather than
+      modifying Poetry's computed default, so `group_optionality`/
+      `_default_group_selection` are never consulted for this branch. A
+      future reader who "unifies" this branch with the other three,
+      treating `--only` as `default | named` like `--with`, reintroduces
+      exactly the bug this distinction exists to prevent — `--only` never
+      includes `main` or anything else unless the argument names it.
+    * `poetry {install,sync} --with <g1>[,<g2>...]` — Poetry's computed
+      default set (see `_default_group_selection`) PLUS every named group.
+      Naming an already-non-optional (already-default) group here is a
+      documented no-op, not an error.
+    * `poetry {install,sync} --without <g1>[,<g2>...]` — Poetry's computed
+      default set MINUS every named group.
+    * a bare `poetry {install,sync}` with no group-selecting flag at all —
+      exactly Poetry's computed default set.
+
+    Refused (returns `None`) rather than guessed at: a different tool, or a
+    subcommand other than `install`/`sync`; `--only` combined with `--with`
+    or `--without` (`--only` already fully determines the selection, and
+    combining it with either is not a shape this parser resolves); `--with`
+    and `--without` both present at once (not a shape this parser
+    resolves); any other, unrecognised flag present anywhere in the
+    recipe; a blank/empty flag argument; or — for the `--with`/`--without`/
+    bare-install branches only — a `_default_group_selection` refusal (no
+    `group_optionality`, or optionality unknown for a group the lock
+    actually resolves packages into). None of these silently becomes
+    "every group" or silently narrows to "no groups" — that is the exact
+    failure direction this parser exists to forbid.
+    """
+    if recipe.tool != "poetry" or recipe.subcommand not in ("install", "sync"):
+        return None
+
+    flag_names = [name for name, _ in recipe.flags]
+    has_only = "--only" in flag_names
+    has_with = "--with" in flag_names
+    has_without = "--without" in flag_names
+
+    if has_only:
+        if has_with or has_without:
+            return None
+        return _parse_group_list_flags(recipe, allowed=frozenset({"--only"}))
+
+    if has_with and has_without:
+        return None
+
+    default = _default_group_selection(lock_membership, group_optionality)
+    if default is None:
+        return None
+
+    if not has_with and not has_without:
+        return default
+    if has_with:
+        with_groups = _parse_group_list_flags(recipe, allowed=frozenset({"--with"}))
+        if with_groups is None:
+            return None
+        return default | with_groups
+    without_groups = _parse_group_list_flags(recipe, allowed=frozenset({"--without"}))
+    if without_groups is None:
+        return None
+    return default - without_groups
+
+
 def derive_installation_group_universe(
     recipes: tuple[InstallRecipe, ...],
+    *,
+    lock_membership: LockGroupMembership,
+    group_optionality: Mapping[str, bool] | None,
 ) -> frozenset[str] | None:
     """The full set of dependency groups selected across every checked-in,
     deployed install recipe a product supplies — e.g. Sub's separate
@@ -1357,18 +1542,24 @@ def derive_installation_group_universe(
       evidence of absence, and never treated like ERP's fully-measurable
       case; or
     * ANY supplied recipe's shape is not recognised by
-      `_parse_single_recipe_group_selection`. One unparseable recipe refuses
-      the WHOLE derivation rather than silently dropping it from the union —
-      a silently dropped recipe could hide a real production installation
-      behind a shape this parser simply failed to read, and that failure
-      must never look identical to "this recipe legitimately installs
-      nothing."
+      `_parse_single_recipe_group_selection` — including a `--with`/
+      `--without`/bare-install recipe whose default set cannot be computed
+      because `group_optionality` is absent or incomplete. One unparseable
+      recipe refuses the WHOLE derivation rather than silently dropping it
+      from the union — a silently dropped recipe could hide a real
+      production installation behind a shape this parser simply failed to
+      read, and that failure must never look identical to "this recipe
+      legitimately installs nothing."
     """
     if not recipes:
         return None
     groups: set[str] = set()
     for recipe in recipes:
-        selected = _parse_single_recipe_group_selection(recipe)
+        selected = _parse_single_recipe_group_selection(
+            recipe,
+            lock_membership=lock_membership,
+            group_optionality=group_optionality,
+        )
         if selected is None:
             return None
         groups.update(selected)
@@ -1380,11 +1571,13 @@ def derive_installation_dimension(
     distribution: str,
     lock_membership: LockGroupMembership | None,
     recipes: tuple[InstallRecipe, ...],
+    group_optionality: Mapping[str, bool] | None,
 ) -> DimensionValue:
     """The one function that decides `installation` for one product x
-    distribution, combining the structured lock read with the recipe parse.
-    Never returns `NOT_APPLICABLE` — see the module docstring's
-    `installation` invariant: it is never that value for any classification.
+    distribution, combining the structured lock read, the structured
+    `pyproject.toml` group-optionality read, and the recipe parse. Never
+    returns `NOT_APPLICABLE` — see the module docstring's `installation`
+    invariant: it is never that value for any classification.
 
     `UNKNOWN` — evidence absent or unresolvable, never defaulted to `FALSE`
     or to "the full lock set" — is returned when:
@@ -1392,8 +1585,11 @@ def derive_installation_dimension(
     * `lock_membership` is `None` (no lock, or a lock `derive_lock_group_
       membership` refused — including the older-lock-format case where
       `groups` is absent entirely); or
-    * `derive_installation_group_universe(recipes)` refused (no recipe, or
-      an unparseable one); or
+    * `derive_installation_group_universe(recipes, ...)` refused — no
+      recipe; an unparseable one; or, for any recipe that needed Poetry's
+      computed default set (`--with`, `--without`, or a bare install),
+      `group_optionality` was absent or incomplete for a group the lock
+      actually resolves packages into (see `_default_group_selection`); or
     * the recipe-selected groups are not a subset of `lock_membership.
       all_declared_groups`. A recipe selecting a group the lock has no
       entries for at all is not a product with zero production
@@ -1409,7 +1605,9 @@ def derive_installation_dimension(
     all (it cannot be installed into any group it was never resolved into)."""
     if lock_membership is None:
         return DimensionValue.UNKNOWN
-    selected = derive_installation_group_universe(recipes)
+    selected = derive_installation_group_universe(
+        recipes, lock_membership=lock_membership, group_optionality=group_optionality
+    )
     if selected is None:
         return DimensionValue.UNKNOWN
     if not selected.issubset(lock_membership.all_declared_groups):
