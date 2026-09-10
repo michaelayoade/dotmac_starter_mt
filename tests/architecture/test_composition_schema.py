@@ -8,7 +8,9 @@ this session.
 
 from __future__ import annotations
 
+import ast
 import inspect
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -800,13 +802,171 @@ def test_current_schema_payload_with_all_dimensions_present_is_accepted():
 # ---------------------------------------------------------------------------
 
 
-def test_runtime_consumption_is_not_inferred_by_derive_composition_state():
-    """Structural proof, not just a behavioural one: the derivation
-    function's own source never even references `runtime_consumption`, so
-    it is impossible for that dimension's value to leak into the
-    composition state through any code path in this function."""
-    source = inspect.getsource(derive_composition_state)
-    assert "runtime_consumption" not in source
+def _step_reads_runtime_consumption_as_code(step) -> bool:
+    """True iff `step`'s AST contains a real `record.runtime_consumption`
+    attribute access — never a substring match, which would also fire on
+    the several step docstrings that legitimately EXPLAIN runtime_consumption
+    (e.g. `_step_installation_absent`'s docstring, which discusses it at
+    length without the executable code ever touching it)."""
+    tree = ast.parse(inspect.getsource(step))
+    return any(
+        isinstance(node, ast.Attribute) and node.attr == "runtime_consumption"
+        for node in ast.walk(tree)
+    )
+
+
+def _is_real_state_return_value(value: ast.expr | None) -> bool:
+    """A `return` with no value, or a bare `return None`, is not a returned
+    `CompositionState` — only a real value (e.g. `CompositionState.FULLY_COMPOSED`)
+    counts as "deciding a state"."""
+    if value is None:
+        return False
+    return not (isinstance(value, ast.Constant) and value.value is None)
+
+
+def _link_ast_parents(root: ast.AST) -> None:
+    for node in ast.walk(root):
+        for child in ast.iter_child_nodes(node):
+            child.parent = node  # type: ignore[attr-defined]
+
+
+def _references_runtime_consumption(node: ast.AST, tainted_names: set[str]) -> bool:
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Attribute) and sub.attr == "runtime_consumption":
+            return True
+        if isinstance(sub, ast.Name) and sub.id in tainted_names:
+            return True
+    return False
+
+
+def _collect_runtime_consumption_tainted_names(func_node: ast.FunctionDef) -> set[str]:
+    """One level of variable-assignment taint tracking, fixed-point over
+    chained assignments: a local name assigned from an expression that
+    itself references `runtime_consumption` (directly or via an
+    already-tainted name) becomes tainted too. Enough to catch the realistic
+    near-miss where a step reads the dimension into an intermediate
+    variable (e.g. `exposed = record.runtime_consumption is TRUE`) before
+    branching on it — a plain "is the attribute inside this exact node"
+    check would miss that indirection entirely."""
+    tainted: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(func_node):
+            if isinstance(node, ast.Assign) and _references_runtime_consumption(
+                node.value, tainted
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id not in tainted:
+                        tainted.add(target.id)
+                        changed = True
+    return tainted
+
+
+def _step_returns_a_state_derived_from_runtime_consumption(step) -> bool:
+    """True iff ANY `return <real state>` in `step` is influenced by
+    `runtime_consumption` — either directly in the returned expression, or
+    indirectly because it is nested inside an `if` (at any enclosing depth)
+    whose test reads the dimension, directly or through a tainted local
+    variable. This is the actual forbidden shape the module docstring
+    names: "forbidden to let it decide a *returned* `CompositionState`."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(step)))
+    func_node = tree.body[0]
+    assert isinstance(func_node, ast.FunctionDef)
+    _link_ast_parents(func_node)
+    tainted = _collect_runtime_consumption_tainted_names(func_node)
+
+    for node in ast.walk(func_node):
+        if not (
+            isinstance(node, ast.Return) and _is_real_state_return_value(node.value)
+        ):
+            continue
+        if _references_runtime_consumption(node.value, tainted):
+            return True
+        ancestor = getattr(node, "parent", None)
+        while ancestor is not None and ancestor is not func_node:
+            if isinstance(ancestor, ast.If) and _references_runtime_consumption(
+                ancestor.test, tainted
+            ):
+                return True
+            ancestor = getattr(ancestor, "parent", None)
+    return False
+
+
+def test_runtime_consumption_participates_only_as_a_contradiction_raise():
+    """Structural proof, over the pipeline STEPS that actually decide
+    states, not over `derive_composition_state` itself — that function is a
+    twelve-line loop over `_DERIVATION_PIPELINE` and so cannot contain the
+    string `"runtime_consumption"` under any implementation, correct or
+    broken; asserting its absence there (the previous form of this test) was
+    a tautology.
+
+    Two real properties, checked directly against the step functions' real
+    code (AST attribute access, never a docstring substring — several other
+    steps' DOCSTRINGS legitimately discuss `runtime_consumption` without
+    their code ever reading it):
+
+    1. Exactly one step (`_step_refuse_contradictions`) reads
+       `record.runtime_consumption` in code at all — a second step reading
+       it would be a NEW leak this test must catch, which asserting only
+       the dispatch loop's source could never do.
+    2. NO step returns a real `CompositionState` that is influenced by
+       `runtime_consumption` — directly in the return expression, or
+       indirectly via an enclosing `if` (through any depth of nesting, and
+       through one level of variable-assignment taint tracking). It is
+       legitimate to RAISE `DimensionalIncoherence` from it (the
+       contradiction canary in `_step_refuse_contradictions`); it is
+       forbidden to let it decide a returned state — exactly the
+       distinction the module docstring and
+       `test_runtime_consumption_varies_independently_of_the_other_three`
+       both promise. Verified against two planted near-misses this
+       function-level check catches (both direct and indirect-via-variable)
+       and, separately, that the real shipped pipeline is clean.
+    """
+    steps_referencing_it = [
+        step
+        for step in schema._DERIVATION_PIPELINE
+        if _step_reads_runtime_consumption_as_code(step)
+    ]
+    assert [step.__name__ for step in steps_referencing_it] == [
+        "_step_refuse_contradictions"
+    ], "runtime_consumption must be read in code by exactly the contradiction step"
+
+    for step in schema._DERIVATION_PIPELINE:
+        assert not _step_returns_a_state_derived_from_runtime_consumption(step), (
+            f"{step.__name__} returns a CompositionState influenced by "
+            "runtime_consumption — forbidden even via an enclosing `if` or "
+            "an intermediate variable"
+        )
+
+    # Sensitivity, PLANT half — direct: runtime_consumption drives the
+    # returned value's own if-condition.
+    class _FakeStepDirect:
+        __name__ = "_fake_step_direct"
+
+    def _fake_step_direct(record):  # synthetic probe
+        if record.runtime_consumption is DimensionValue.TRUE:
+            return CompositionState.FULLY_COMPOSED
+        return None
+
+    assert _step_returns_a_state_derived_from_runtime_consumption(_fake_step_direct)
+
+    # Sensitivity, PLANT half — indirect: the dimension is read into a local
+    # variable first, then that variable's `if` gates a real-state return.
+    def _fake_step_indirect(record):  # synthetic probe
+        exposed = record.runtime_consumption is DimensionValue.TRUE
+        if exposed:
+            return CompositionState.FULLY_COMPOSED
+        return None
+
+    assert _step_returns_a_state_derived_from_runtime_consumption(_fake_step_indirect)
+
+    # Sensitivity, NEAR-MISS half — a step that reads runtime_consumption
+    # but only ever raises from it (the real, legitimate shape) is NOT
+    # flagged.
+    assert not _step_returns_a_state_derived_from_runtime_consumption(
+        schema._step_refuse_contradictions
+    )
 
 
 def test_runtime_consumption_varies_independently_of_the_other_three():
@@ -1125,6 +1285,13 @@ def test_a_packages_directory_with_extraction_toml_present_is_not_refused(
 
 
 def test_duplicate_distribution_name_across_two_dossiers_is_refused(tmp_path: Path):
+    """Matching only the shared distribution name (`"dotmac-dup"`) would
+    pass even if the raised message named only the SECOND offending path —
+    that substring appears in both paths too, so it structurally cannot
+    catch a regression that silently dropped the first path from the
+    message (exactly the defect this test was strengthened to catch: the
+    operator getting only one of the two colliding files named). Match both
+    directory names explicitly instead."""
     (tmp_path / "dir-one").mkdir()
     (tmp_path / "dir-one" / "EXTRACTION.toml").write_text(
         'package = "dotmac-dup"\nclassification = "optional-module"\n'
@@ -1134,8 +1301,13 @@ def test_duplicate_distribution_name_across_two_dossiers_is_refused(tmp_path: Pa
         'package = "dotmac-dup"\nclassification = "optional-module"\n'
     )
 
-    with pytest.raises(CatalogueDerivationError, match="dotmac-dup"):
+    with pytest.raises(CatalogueDerivationError) as exc_info:
         derive_distribution_universe(tmp_path)
+
+    message = str(exc_info.value)
+    assert "dotmac-dup" in message
+    assert "dir-one" in message, "message must name the FIRST offending path"
+    assert "dir-two" in message, "message must name the SECOND offending path"
 
 
 def test_unrecognized_classification_fails_loudly_as_a_named_refusal(
@@ -1171,11 +1343,18 @@ def test_a_dossier_with_a_recognized_classification_is_not_refused(
 def test_stateless_contract_catalogue_is_exercised_by_a_synthetic_dossier(
     tmp_path: Path,
 ):
-    """`PackageClassification.STATELESS_CONTRACT_CATALOGUE` is declared but
-    used by zero real dossiers in this repository today (see the module
+    """`PackageClassification.STATELESS_CONTRACT_CATALOGUE` has no dossier in
+    THIS test's fixed real-tree snapshot as of this commit (see the module
     docstring) — an unexercised branch proves nothing about its own
     correctness, so this builds a synthetic dossier declaring it and proves
-    the derivation both accepts it and preserves the exact enum member."""
+    the derivation both accepts it and preserves the exact enum member.
+
+    Deliberately does NOT also assert the classification is absent from the
+    real `packages/` tree: `.github/release-contracts.json` documents this
+    as an ACTIVE, deliberately-empty lane — seven candidate catalogues await
+    a kernel grammar before any of them can adopt this classification — so a
+    legitimate real dossier landing tomorrow would fail an absence assertion
+    for a reason unrelated to what this test is actually proving."""
     (tmp_path / "dotmac-schemas").mkdir()
     (tmp_path / "dotmac-schemas" / "EXTRACTION.toml").write_text(
         'package = "dotmac-schemas"\n'
@@ -1186,13 +1365,6 @@ def test_stateless_contract_catalogue_is_exercised_by_a_synthetic_dossier(
     assert len(universe) == 1
     assert (
         universe[0].classification is PackageClassification.STATELESS_CONTRACT_CATALOGUE
-    )
-    # Confirms this classification is genuinely absent from the real tree
-    # today, which is why the branch needed a synthetic dossier at all.
-    real_universe = derive_distribution_universe(REPO_PACKAGES_ROOT)
-    real_classifications = {d.classification for d in real_universe}
-    assert (
-        PackageClassification.STATELESS_CONTRACT_CATALOGUE not in real_classifications
     )
 
 
@@ -1215,18 +1387,22 @@ def test_packages_root_that_is_not_a_directory_is_refused(tmp_path: Path):
 
 def test_universe_size_is_never_hard_coded_anywhere_in_this_module():
     """Structural sweep: no literal count of today's real distribution
-    universe appears anywhere in `composition_schema.py`'s source — the
-    number the brief measured (93) is explicitly checked absent, and so is
-    this module's own directly-measured count, so neither can silently
-    become a governing constant."""
+    universe appears anywhere in `composition_schema.py`'s source. The
+    count is re-derived HERE, from `REPO_PACKAGES_ROOT.iterdir()`, at test
+    time — never asserted as a fixed number in this test or in the module
+    under test — precisely because that count is not stable: it was 95 at
+    the time this test was last corrected, up from an earlier count that
+    predated the later addition of `dotmac-runner-transport` and
+    `dotmac-runner-transport-github-actions`, and a hard-coded number here
+    would itself become exactly the kind of check that answers without
+    being able to refuse a real change to the tree."""
     source = inspect.getsource(schema)
     real_count = len([p for p in REPO_PACKAGES_ROOT.iterdir() if p.is_dir()])
-    for forbidden_literal in ("93", str(real_count)):
-        assert forbidden_literal not in source, (
-            f"composition_schema.py's source contains the literal "
-            f"{forbidden_literal!r} — the catalogue universe's size must "
-            "never be a hard-coded constant"
-        )
+    assert str(real_count) not in source, (
+        f"composition_schema.py's source contains the literal "
+        f"{real_count!r} — the catalogue universe's size must never be a "
+        "hard-coded constant"
+    )
 
 
 def test_package_dossier_holds_only_distribution_and_classification():
