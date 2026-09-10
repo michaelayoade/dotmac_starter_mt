@@ -530,9 +530,9 @@ group-selecting flag nor a member of the closed inert set (clause 5/10 —
 this is the check that used to make every real fleet recipe unparseable,
 because ``--no-root``/``--no-interaction``/``--no-ansi`` were simply absent
 from the old recognised-shape list); or a blank flag argument. A TEMPLATED
-argument (``$VAR``, ``${VAR}``, ``${{ ... }}``, ``$(...)``/`` `...` ``
-command substitution) in a DEPENDENCY-SELECTION position is refused by
-``_is_templated_value`` before any lock lookup, so it can never be rescued
+argument -- ANY ``$`` or backtick, not an enumerated list of shapes --
+in a DEPENDENCY-SELECTION position is refused by ``_is_templated_value``
+before any lock lookup, so it can never be rescued
 merely by the downstream lock cross-check failing to find it.
 
 An earlier draft of this parser refused any command line containing a ``$``
@@ -546,7 +546,7 @@ rejected exactly where it can change the answer — the executable, the
 subcommand, and a group-selecting flag's argument — and environment
 assignment values are opaque context (clause 3).
 
-One narrower claim, stated exactly: a templated FLAG NAME (``—$FOO``)
+One narrower claim, stated exactly: a templated FLAG NAME (``--$FOO``)
 survives tokenization and is refused later as an unsupported flag, not by
 the templating check. So it is not true that no `InstallRecipe` this
 function produces can carry a templated string anywhere; it is true that

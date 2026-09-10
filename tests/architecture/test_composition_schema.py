@@ -2701,6 +2701,17 @@ _TEMPLATED_VALUES = (
     '"${{ matrix.group }}"',
     "$(echo main)",
     "`echo main`",
+    # The three below are why `_TEMPLATED_VALUE_PATTERN` is `[$`]` and not an
+    # enumeration. Under the enumerated pattern each of these parsed straight
+    # through into a group name and was refused only by the downstream lock
+    # cross-check failing to find it -- refusal by accident, the same shape as
+    # `$(echo main)` before the previous fix. Without these three literals the
+    # blunt pattern can be reverted to the enumeration and the whole suite
+    # stays green, which would make the widening an asserted improvement
+    # rather than a demonstrated one.
+    "${",
+    "$",
+    "main$",
 )
 
 
