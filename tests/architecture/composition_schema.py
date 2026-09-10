@@ -1006,7 +1006,9 @@ class CompositionRecord:
 # ---------------------------------------------------------------------------
 
 
-def composition_record_from_payload(payload: Mapping[str, object]) -> CompositionRecord:
+def composition_record_from_payload(
+    payload: Mapping[str, object], packages_root: Path
+) -> CompositionRecord:
     """Parse one raw record. Refuses outright — never upgrades, never
     partially reads, never defaults a missing dimension to anything
     (including `unknown`) — any payload that is not exactly
@@ -1019,6 +1021,29 @@ def composition_record_from_payload(payload: Mapping[str, object]) -> Compositio
     missing dimension as `unknown` and proceeding — would let exactly that
     old record through the gate wearing this schema's clothes, which is the
     one thing this function must never do.
+
+    `packages_root` is REQUIRED, not optional with a `None`/classification-
+    only fallback: this is the one real ingestion path every product record
+    travels, and Ruling 1's migration-lineage applicability must be DERIVED
+    here, from the distribution's real `ModuleManifest` (via
+    `derive_migration_lineage_applicability_from_manifest`), for every
+    `optional-module` payload — never left to the classification-only
+    default. An optional parameter would silently reinstate exactly the bug
+    Ruling 1 exists to remove the first time a caller omitted it, and the
+    omission would look like working code (every payload would simply fall
+    back to "lineage always applies," and a genuinely stateless module's
+    `not_applicable` payload would go back to being refused, or its `false`
+    payload would go back to deriving `invalid`). A required parameter means
+    a caller that has not decided what packages root to derive against
+    cannot compile a record at all.
+
+    A payload can never supply this applicability itself: only the fields
+    named in `REQUIRED_PAYLOAD_FIELDS` are ever read off `payload` below, so
+    a `migration_lineage_manifest_applies` key on the payload — however it
+    is spelled or valued — is silently never consulted. A product asserting
+    its own applicability would be a product authoring a derivation this
+    schema exists to prevent (the same principle as the `state`/
+    `fully_composed` refusal above, applied to one more derived quantity).
     """
     declared = payload.get("schema_version")
     if declared != CURRENT_SCHEMA_VERSION:
@@ -1046,14 +1071,32 @@ def composition_record_from_payload(payload: Mapping[str, object]) -> Compositio
             "never defaulted to unknown"
         )
 
+    classification = PackageClassification(payload["classification"])
+    distribution = str(payload["distribution"])
+
+    # Ruling 1: derived HERE, from the real manifest, never taken from the
+    # payload. Only meaningful for optional-module — every other
+    # classification's applicability is classification-only and this value
+    # is ignored for it (see `PackageClassification.migration_lineage_
+    # applies`), and no manifest.py exists for a platform-baseline
+    # distribution to read in the first place.
+    manifest_lineage_applicability: bool | None = None
+    if classification is PackageClassification.OPTIONAL_MODULE:
+        manifest_lineage_applicability = (
+            derive_migration_lineage_applicability_from_manifest(
+                packages_root, distribution
+            )
+        )
+
     return CompositionRecord(
         product=str(payload["product"]),
-        distribution=str(payload["distribution"]),
-        classification=PackageClassification(payload["classification"]),
+        distribution=distribution,
+        classification=classification,
         installation=DimensionValue(payload["installation"]),
         module_registration=DimensionValue(payload["module_registration"]),
         migration_lineage=DimensionValue(payload["migration_lineage"]),
         runtime_consumption=DimensionValue(payload["runtime_consumption"]),
+        migration_lineage_manifest_applies=manifest_lineage_applicability,
     )
 
 

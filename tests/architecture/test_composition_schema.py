@@ -465,7 +465,7 @@ def test_payload_carrying_a_state_field_is_refused():
         "state": "fully_composed",
     }
     with pytest.raises(IncompatibleSchemaVersion):
-        composition_record_from_payload(payload)
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
 
 
 # ---------------------------------------------------------------------------
@@ -737,7 +737,7 @@ def test_old_kernel_runtime_composition_v1_shaped_record_is_refused():
     with pytest.raises(
         IncompatibleSchemaVersion, match="kernel-runtime-composition.v1"
     ):
-        composition_record_from_payload(old_shaped_payload)
+        composition_record_from_payload(old_shaped_payload, REPO_PACKAGES_ROOT)
 
 
 def test_current_schema_version_is_v2():
@@ -765,7 +765,7 @@ def test_dimensional_composition_v1_payload_is_refused_no_adapter_no_migration()
     }
     assert schema.LEGACY_SCHEMA_VERSION_V1 != schema.CURRENT_SCHEMA_VERSION
     with pytest.raises(IncompatibleSchemaVersion, match="dimensional-composition.v1"):
-        composition_record_from_payload(v1_shaped_payload)
+        composition_record_from_payload(v1_shaped_payload, REPO_PACKAGES_ROOT)
 
 
 def test_payload_with_no_schema_version_at_all_is_refused():
@@ -779,7 +779,7 @@ def test_payload_with_no_schema_version_at_all_is_refused():
         "runtime_consumption": "false",
     }
     with pytest.raises(IncompatibleSchemaVersion):
-        composition_record_from_payload(payload)
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
 
 
 def test_current_schema_payload_missing_a_dimension_is_refused_not_defaulted():
@@ -798,7 +798,7 @@ def test_current_schema_payload_missing_a_dimension_is_refused_not_defaulted():
         # runtime_consumption deliberately omitted
     }
     with pytest.raises(IncompatibleSchemaVersion, match="runtime_consumption"):
-        composition_record_from_payload(payload)
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
 
 
 def test_current_schema_payload_with_all_dimensions_present_is_accepted():
@@ -812,9 +812,153 @@ def test_current_schema_payload_with_all_dimensions_present_is_accepted():
         "migration_lineage": "true",
         "runtime_consumption": "true",
     }
-    record = composition_record_from_payload(payload)
+    record = composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
     assert record.product == "erp"
     assert derive_composition_state(record) == CompositionState.FULLY_COMPOSED
+
+
+# ---------------------------------------------------------------------------
+# 5b. Ruling 1 through the real ingestion path — `composition_record_from_
+#     payload` must derive migration-lineage applicability itself. A prior
+#     commit (03c2629b) fixed this only for direct `CompositionRecord(...)`
+#     construction with the flag supplied by hand — a seam no product
+#     payload ever uses. Every test below goes through
+#     `composition_record_from_payload` itself, never a hand-built record,
+#     because that is precisely the gap the coordinator's correction closed.
+# ---------------------------------------------------------------------------
+
+
+def test_stateless_module_payload_with_not_applicable_lineage_is_accepted():
+    """The live case, through the real ingestion path. A
+    `dotmac-document-rendering` payload recording `migration_lineage:
+    "not_applicable"` must be ACCEPTED (not refused) and, once registered,
+    must derive `fully_composed` — the two outcomes the ruling exists to
+    restore, reached this time by `composition_record_from_payload`, not by
+    a hand-built `CompositionRecord`. Before the fix in this commit, this
+    exact payload was refused at construction (`migration_lineage applies
+    ... cannot be recorded not_applicable`), because
+    `composition_record_from_payload` never derived or passed the manifest
+    flag — it always fell back to the classification-only default."""
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "starter",
+        "distribution": "dotmac-document-rendering",
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "not_applicable",
+        "runtime_consumption": "unknown",
+    }
+    record = composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    assert record.migration_lineage is DimensionValue.NOT_APPLICABLE
+    assert derive_composition_state(record) == CompositionState.FULLY_COMPOSED
+
+
+def test_stateless_module_payload_with_false_lineage_no_longer_derives_invalid():
+    """Companion to the test above, pinning the OTHER outcome the ruling
+    eliminates: a `dotmac-document-rendering` payload that (incorrectly, by
+    the old classification-only rule) recorded `migration_lineage: "false"`
+    used to derive `invalid` once registered. Since lineage does not apply
+    to this distribution at all, `false` is now refused the same way `true`
+    would be — not_applicable is the only honest value once the manifest is
+    consulted — so this asserts the refusal, not a lingering `invalid`."""
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "starter",
+        "distribution": "dotmac-document-rendering",
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "false",
+        "runtime_consumption": "unknown",
+    }
+    with pytest.raises(ValueError, match="not_applicable"):
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+
+
+def test_stateful_module_payload_with_not_applicable_lineage_still_refused():
+    """The guard must not have been weakened into accepting anything: a
+    `dotmac-billing` payload (a real, coherent, stateful manifest —
+    `short_code`/`migration_prefix` both declared) recording
+    `migration_lineage: "not_applicable"` must still be refused. If this
+    passed, the fix would have made `not_applicable` universally legal for
+    `optional-module` instead of manifest-conditional."""
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "erp",
+        "distribution": "dotmac-billing",
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "not_applicable",
+        "runtime_consumption": "unknown",
+    }
+    with pytest.raises(ValueError, match="not_applicable"):
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+
+
+def test_payload_cannot_supply_migration_lineage_manifest_applies():
+    """A payload carrying a `migration_lineage_manifest_applies` key must
+    get the DERIVED value, never the supplied one. Proven by supplying the
+    OPPOSITE of what the real manifest derives and showing it changes
+    nothing: `dotmac-document-rendering` derives `False` (lineage does not
+    apply); the payload below claims `True`. If the supplied value were
+    honoured, `migration_lineage: "not_applicable"` would become illegal
+    (applies=True requires TRUE/FALSE, refusing not_applicable) and this
+    would raise. It does not — the derived `False` governs, exactly as if
+    the bogus key were never there."""
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "starter",
+        "distribution": "dotmac-document-rendering",
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "not_applicable",
+        "runtime_consumption": "unknown",
+        "migration_lineage_manifest_applies": True,  # opposite of derived False
+    }
+    record = composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    assert record.migration_lineage_manifest_applies is False, (
+        "the record must carry the DERIVED applicability, not the payload's "
+        "supplied value"
+    )
+    assert record.migration_lineage is DimensionValue.NOT_APPLICABLE
+    assert derive_composition_state(record) == CompositionState.FULLY_COMPOSED
+
+
+def test_payload_ingestion_propagates_a_contradictory_manifest_refusal(
+    tmp_path: Path,
+):
+    """The refusal propagates, rather than being swallowed and defaulted: a
+    payload naming a distribution whose real manifest is contradictory
+    (Ruling 1 outcome 3) must raise `ManifestDeclarationError` out of
+    `composition_record_from_payload` itself — ingestion never catches this
+    and falls back to a guessed applicability."""
+    package_dir = tmp_path / "dotmac-contradictory-ingest"
+    src_dir = package_dir / "src" / "dotmac_contradictory_ingest"
+    src_dir.mkdir(parents=True)
+    (src_dir / "manifest.py").write_text(
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        "module = ModuleManifest(\n"
+        '    code="contradictory_ingest",\n'
+        '    version="0.1.0a1",\n'
+        "    core=False,\n"
+        '    short_code="ci",\n'
+        ")\n"
+    )
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "starter",
+        "distribution": "dotmac-contradictory-ingest",
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "true",
+        "runtime_consumption": "unknown",
+    }
+    with pytest.raises(ManifestDeclarationError, match="dotmac-contradictory-ingest"):
+        composition_record_from_payload(payload, tmp_path)
 
 
 # ---------------------------------------------------------------------------
