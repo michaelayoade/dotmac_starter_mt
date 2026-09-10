@@ -1725,21 +1725,26 @@ def derive_group_optionality(
     return optionality
 
 
-#: Matches a shell/template variable reference this parser refuses to
-#: resolve rather than pass through as a literal group name: `$VAR`,
-#: `${VAR}`, `${{ ... }}` (GitHub Actions / CI template expressions),
-#: `$(...)` command substitution, or `` `...` `` backtick command
-#: substitution.
-_TEMPLATED_VALUE_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"\$\{\{.*?\}\}|\$\{[^}]*\}|\$\([^)]*\)|`[^`]*`|\$[A-Za-z_][A-Za-z0-9_]*"
-    # UNBALANCED openers too. `shlex.split` cuts `$(echo main)` into `$(echo`
-    # and `main)`, and neither fragment matches a balanced alternative above,
-    # so before this branch existed those two forms were refused only because
-    # the trailing fragment happened to hit the bare-token rule -- an accident
-    # of tokenization, one token-rule widening away from a TOLERATED
-    # substitution in a dependency-selection position.
-    r"|\$\(|`"
-)
+#: ANY ``$`` or backtick in a value this parser is about to treat as a
+#: dependency-group name. Deliberately blunt, and safe only because of WHERE
+#: it is applied: `_is_templated_value` is called on the executable, the
+#: subcommand, and group-selecting flag arguments — never on an environment
+#: assignment's value, which is opaque context (clause 3). The earlier
+#: blanket check over the WHOLE command line is what made every real fleet
+#: recipe unparseable, because those carry a credential substitution in a
+#: leading assignment.
+#:
+#: An enumerated pattern was tried first and matched only BALANCED forms
+#: (``${VAR}``, ``$(...)``, `` `...` ``). `shlex.split` cuts `$(echo main)`
+#: into `$(echo` and `main)`, so neither fragment matched and the refusal
+#: came from the bare-token rule instead — refusal by accident. Widening it
+#: to unbalanced ``$(`` and backtick openers still left ``${``, a bare
+#: ``$``, and a trailing ``main$`` parsing straight through into a group
+#: name, rescued only by the downstream lock cross-check failing to find
+#: them. Enumerating shapes kept losing to the next shape. A Poetry group
+#: name cannot legitimately contain ``$`` or a backtick, so in THIS position
+#: the blunt test cannot over-refuse.
+_TEMPLATED_VALUE_PATTERN: Final[re.Pattern[str]] = re.compile(r"[$`]")
 
 
 def _is_templated_value(value: str) -> bool:
