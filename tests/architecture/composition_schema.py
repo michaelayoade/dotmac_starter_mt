@@ -389,6 +389,22 @@ from typing import Final
 #: The one schema version this module reads. Bumped only by a deliberate,
 #: reviewed migration — never silently, and never with a translation layer
 #: bolted on for an older tag (see module docstring).
+#:
+#: CLOSED-SHAPE NOTE (dated 2026-09-10): `dimensional-composition.v2` was
+#: OPEN-shaped from its introduction until this change —
+#: `composition_record_from_payload` read only the fields it recognized and
+#: silently dropped anything else, so a payload could carry an undeclared
+#: key (an `api_key` value was the planted, measured case) and still be
+#: accepted. This change makes v2 a CLOSED shape: an unrecognized key is now
+#: refused by name. This is a deliberate TIGHTENING of the same version
+#: string, not a new `v3` — no payload that was ever honestly v2-shaped
+#: (i.e. carried only the fields this schema actually defines) is affected,
+#: and no honest producer should have been relying on an unknown key being
+#: accepted. Do not read `dimensional-composition.v2` as meaning one fixed
+#: validation behaviour across time; it means "the current, evolving
+#: definition of this schema," exactly as this note demonstrates. See
+#: `composition_record_from_payload`'s "CLOSED SHAPE" docstring section and
+#: `_KNOWN_PAYLOAD_FIELDS`.
 CURRENT_SCHEMA_VERSION: Final[str] = "dimensional-composition.v2"
 
 #: Every dimension a `dimensional-composition.v1` payload MUST declare
@@ -412,6 +428,32 @@ _DERIVED_ONLY_FIELDS: Final[tuple[str, ...]] = (
     "state",
     "fully_composed",
     "migration_lineage_manifest_applies",
+)
+
+#: Optional payload fields `dimensional-composition.v2` recognizes beyond
+#: `schema_version` and `REQUIRED_PAYLOAD_FIELDS` — currently none. This
+#: tuple exists so a future genuinely-optional field has one place to be
+#: declared; until one is added, the CLOSED payload shape is exactly
+#: `{"schema_version"} | set(REQUIRED_PAYLOAD_FIELDS)` (see
+#: `_KNOWN_PAYLOAD_FIELDS` and `composition_record_from_payload`'s unknown-
+#: key refusal below). `_DERIVED_ONLY_FIELDS` is deliberately NOT folded in
+#: here — a payload carrying one of those is refused by its own, more
+#: specific check before the unknown-key check ever runs, and stays that way
+#: whether or not this tuple ever grows.
+_KNOWN_OPTIONAL_PAYLOAD_FIELDS: Final[tuple[str, ...]] = ()
+
+#: The full set of keys a `dimensional-composition.v2` payload may carry.
+#: Anything outside this set is refused by `composition_record_from_payload`
+#: — see that function's closed-shape check. This is what makes the shape
+#: CLOSED rather than open: earlier v2 silently ignored any key it did not
+#: recognize (including, notably, an `api_key`-shaped one), which let a
+#: payload carry arbitrary undeclared content — including a credential —
+#: straight through ingestion. That silent-drop behaviour is the defect this
+#: set exists to close; see the module docstring's "Why v2 exists" section
+#: for the analogous history on the registration boundary, and note this is
+#: a SEPARATE defect from that one.
+_KNOWN_PAYLOAD_FIELDS: Final[frozenset[str]] = frozenset(
+    {"schema_version", *REQUIRED_PAYLOAD_FIELDS, *_KNOWN_OPTIONAL_PAYLOAD_FIELDS}
 )
 
 #: The literal legacy tag Academy's ``composed_distributions`` exporter used.
@@ -1116,6 +1158,18 @@ def composition_record_from_payload(
     accept an authority-shaped input while leaving a producer believing its
     value mattered. A product asserting its own applicability would be
     authoring a derivation this schema exists to prevent.
+
+    CLOSED SHAPE (tightened within v2, not a new version — see the module
+    docstring's "Schema identity" note): a payload may carry `schema_version`
+    plus exactly `REQUIRED_PAYLOAD_FIELDS`, nothing else. Any other key —
+    `api_key`, `note`, a typo'd dimension name, anything — is refused by
+    name, listing every offending key at once rather than only the first.
+    This was measured to be false before this change: a payload carrying an
+    `api_key` field alongside the eight legitimate fields was silently
+    accepted, with the extra key simply never read. A closed shape is what
+    lets this schema's evidence documents be treated as validated data
+    rather than free-form text for secret-scanning purposes; an open shape
+    cannot make that claim honestly. See `_KNOWN_PAYLOAD_FIELDS`.
     """
     declared = payload.get("schema_version")
     if declared != CURRENT_SCHEMA_VERSION:
@@ -1141,6 +1195,18 @@ def composition_record_from_payload(
             f"payload declares {CURRENT_SCHEMA_VERSION!r} but is missing "
             f"required field(s) {missing!r}; a missing dimension is refused, "
             "never defaulted to unknown"
+        )
+
+    unknown = sorted(set(payload) - _KNOWN_PAYLOAD_FIELDS)
+    if unknown:
+        raise IncompatibleSchemaVersion(
+            f"payload declares {CURRENT_SCHEMA_VERSION!r} but carries "
+            f"unrecognized field(s) {unknown!r}; {CURRENT_SCHEMA_VERSION!r} "
+            "is a closed shape — only schema_version and "
+            f"{list(REQUIRED_PAYLOAD_FIELDS)!r} are accepted, and an "
+            "unrecognized key is refused rather than silently dropped (this "
+            "is what keeps arbitrary content, including a credential, from "
+            "riding through ingestion unnoticed)"
         )
 
     distribution = str(payload["distribution"])

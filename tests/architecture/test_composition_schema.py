@@ -1064,6 +1064,85 @@ def test_payload_cannot_supply_migration_lineage_manifest_applies():
         composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
 
 
+# ---------------------------------------------------------------------------
+# 5c. Closed shape — an unrecognized payload key is refused, not silently
+#     dropped. Michael planted an `api_key` field alongside a legitimate
+#     payload and it was accepted, with the key simply never read; a
+#     product could put arbitrary content, including a credential, into a
+#     composition record and ingestion would not refuse it.
+# ---------------------------------------------------------------------------
+
+#: The exact legitimate payload every closed-shape test below either reuses
+#: unmodified (the near-miss) or extends with an offending key. Kept as one
+#: literal so the near-miss and the plants are provably the same shape apart
+#: from the extra key(s).
+_LEGITIMATE_PAYLOAD = {
+    "schema_version": schema.CURRENT_SCHEMA_VERSION,
+    "product": "erp",
+    "distribution": "dotmac-accounting",
+    "classification": "optional-module",
+    "installation": "true",
+    "module_registration": "true",
+    "migration_lineage": "true",
+    "runtime_consumption": "true",
+}
+
+
+def test_payload_with_an_unknown_field_is_refused_naming_it():
+    """The measured defect: a payload carrying every legitimate field plus
+    one unrecognized key (`api_key`, the planted credential-shaped field)
+    must be refused, and the refusal must name `api_key` specifically —
+    not just refuse the payload for some other reason."""
+    payload = {**_LEGITIMATE_PAYLOAD, "api_key": "AKIAIOSFODNN7EXAMPLE"}
+    with pytest.raises(IncompatibleSchemaVersion, match="api_key"):
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+
+
+def test_payload_with_several_unknown_fields_names_all_of_them():
+    """A checker that refuses on the first offending key and stops would
+    hide every other stray key from the caller trying to fix the payload.
+    Both `api_key` and `note` must appear in the one raised message."""
+    payload = {
+        **_LEGITIMATE_PAYLOAD,
+        "api_key": "AKIAIOSFODNN7EXAMPLE",
+        "note": "arbitrary prose",
+    }
+    with pytest.raises(IncompatibleSchemaVersion) as excinfo:
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    message = str(excinfo.value)
+    assert "api_key" in message
+    assert "note" in message
+
+
+def test_payload_with_only_the_known_fields_is_still_accepted():
+    """Near-miss: the exact legitimate payload — every known field, nothing
+    else — is not refused by the closed-shape check. Without this, a
+    checker that refuses every payload would equally satisfy the two plants
+    above."""
+    record = composition_record_from_payload(
+        dict(_LEGITIMATE_PAYLOAD), REPO_PACKAGES_ROOT
+    )
+    assert record.product == "erp"
+    assert record.distribution == "dotmac-accounting"
+
+
+def test_derived_only_field_refusal_stays_a_distinct_message_from_unknown_key():
+    """The existing derived-only refusal
+    (`migration_lineage_manifest_applies`, a real field name that simply may
+    never appear on an input payload) must keep producing ITS OWN message —
+    naming the derived/legacy-field defect — rather than being swallowed by
+    the generic unknown-key path this change adds. Two different defects
+    (authoring a derivation vs. carrying undeclared content) deserve two
+    different diagnoses."""
+    payload = {**_LEGITIMATE_PAYLOAD, "migration_lineage_manifest_applies": True}
+    with pytest.raises(IncompatibleSchemaVersion) as excinfo:
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    message = str(excinfo.value)
+    assert "migration_lineage_manifest_applies" in message
+    assert "derived/legacy field" in message
+    assert "closed shape" not in message
+
+
 def test_payload_ingestion_propagates_a_contradictory_manifest_refusal(
     tmp_path: Path,
 ):
