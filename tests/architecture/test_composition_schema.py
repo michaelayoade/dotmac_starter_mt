@@ -28,6 +28,7 @@ from __future__ import annotations
 import ast
 import inspect
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -2241,7 +2242,7 @@ def test_direct_optional_module_construction_has_no_applicability_fallback():
     It therefore refuses every optional-module record instead of preserving
     the former ``None -> lineage applies`` compatibility fallback.
     """
-    with pytest.raises(ValueError, match="composition_record_from_payload"):
+    with pytest.raises(TypeError, match="composition_record_from_payload"):
         CompositionRecord(
             product="erp",
             distribution="dotmac-example",
@@ -2266,6 +2267,23 @@ def test_direct_constructor_cannot_accept_manifest_applicability():
             runtime_consumption=UNKNOWN,
             migration_lineage_manifest_applies=True,  # type: ignore[call-arg]
         )
+
+
+def test_dataclasses_replace_cannot_reopen_the_constructor_seam():
+    """A valid parsed record cannot be cloned around the refusing constructor."""
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "erp",
+        "distribution": "dotmac-billing",
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "true",
+        "runtime_consumption": "unknown",
+    }
+    record = composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    with pytest.raises(TypeError, match="no public constructor"):
+        replace(record, product="attacker-authored")
 
 
 def test_record_validation_refuses_non_boolean_applicability_after_a_bypass():
