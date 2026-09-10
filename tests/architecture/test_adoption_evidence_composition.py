@@ -436,12 +436,139 @@ def test_an_unresolved_source_is_reported_rather_than_skipped() -> None:
     assert any("unresolved" in p for p in problems)
 
 
-def test_both_poetry_pin_spellings_are_understood() -> None:
+# ── two dependency authorities, three spellings ─────────────────────────────
+#
+# `[project].dependencies` is a LIST of PEP 508 strings; `[tool.poetry
+# .dependencies]` is a TABLE keyed by name.  The helper used to append the list
+# to a list of tables and skip every non-Mapping, so the standard, authoritative
+# spelling silently returned "not pinned" — and the caller turned that into
+# "composes a module it does not depend on" about a file that pins it.
+#
+# `test_the_pep_621_list_form_is_read` is the plant for exactly that bug: under
+# the previous implementation it returns `None`.  The controls beside it exist
+# because a checker that refused every file would satisfy the plant just as well.
+
+POETRY_TABLE = '[tool.poetry.dependencies]\n"dotmac-deployment-control" = "0.1.0a9"\n'
+PEP621_LIST = (
+    '[project]\nname = "x"\ndependencies = ["dotmac-deployment-control==0.1.0a9"]\n'
+)
+
+
+def test_the_pep_621_list_form_is_read() -> None:
+    """The defect: the authoritative spelling was the unreadable one."""
+    assert evidence.declared_dependency_version(PEP621_LIST, DISTRIBUTION) == (
+        "==0.1.0a9",
+        None,
+    )
+
+
+def test_the_poetry_table_spellings_are_still_understood() -> None:
+    """The positive control the plant above needs to mean anything."""
     inline = _fixture("pyproject.toml")
-    assert evidence.declared_dependency_version(inline, DISTRIBUTION) == PIN
-    bare = '[tool.poetry.dependencies]\n"dotmac-deployment-control" = "0.1.0a9"\n'
-    assert evidence.declared_dependency_version(bare, DISTRIBUTION) == "0.1.0a9"
-    assert evidence.declared_dependency_version(bare, "absent") is None
+    assert evidence.declared_dependency_version(inline, DISTRIBUTION) == (PIN, None)
+    assert evidence.declared_dependency_version(POETRY_TABLE, DISTRIBUTION) == (
+        "0.1.0a9",
+        None,
+    )
+
+
+def test_an_absent_distribution_is_absent_not_unreadable() -> None:
+    for source in (POETRY_TABLE, PEP621_LIST):
+        assert evidence.declared_dependency_version(source, "absent") == (None, None)
+
+
+def test_a_normalized_name_matches_across_separator_spellings() -> None:
+    """PEP 503: `dotmac_deployment_control` and `dotmac-deployment-control`
+    are one name."""
+    source = (
+        '[project]\nname = "x"\n'
+        'dependencies = ["dotmac_deployment_control == 0.1.0a9"]\n'
+    )
+    version, problem = evidence.declared_dependency_version(source, DISTRIBUTION)
+    assert problem is None
+    assert evidence.canonical_constraint(str(version)) == "==0.1.0a9"
+
+
+def test_extras_and_environment_markers_do_not_hide_the_constraint() -> None:
+    source = (
+        '[project]\nname = "x"\ndependencies = '
+        "[\"dotmac-deployment-control[cli] == 0.1.0a9 ; python_version >= '3.11'\"]\n"
+    )
+    version, problem = evidence.declared_dependency_version(source, DISTRIBUTION)
+    assert problem is None
+    assert evidence.canonical_constraint(str(version)) == "==0.1.0a9"
+
+
+def test_the_two_authorities_disagreeing_refuses_rather_than_picking_one() -> None:
+    source = (
+        '[project]\nname = "x"\ndependencies = ["dotmac-deployment-control==0.2.0"]\n'
+        '[tool.poetry.dependencies]\n"dotmac-deployment-control" = "0.1.0a9"\n'
+    )
+    version, problem = evidence.declared_dependency_version(source, DISTRIBUTION)
+    assert version is None
+    assert problem is not None and "disagree" in problem
+
+
+def test_the_two_authorities_agreeing_across_spellings_does_not_refuse() -> None:
+    """The near-miss control: `0.1.0a9` and `==0.1.0a9` are the same requirement.
+
+    Without this, the refusal above would fire on every correctly pinned file
+    that carries both tables — a check that is never satisfiable is not a check.
+    """
+    source = (
+        '[project]\nname = "x"\ndependencies = ["dotmac-deployment-control==0.1.0a9"]\n'
+        '[tool.poetry.dependencies]\n"dotmac-deployment-control" = "0.1.0a9"\n'
+    )
+    assert evidence.declared_dependency_version(source, DISTRIBUTION) == (
+        "==0.1.0a9",
+        None,
+    )
+
+
+def test_a_direct_reference_is_not_reported_as_an_absent_dependency() -> None:
+    """`@ file://…` and `path = …` pin no version — a different fact from absence."""
+    pep621 = (
+        '[project]\nname = "x"\n'
+        'dependencies = ["dotmac-deployment-control @ file:///pkgs/dc"]\n'
+    )
+    poetry = (
+        "[tool.poetry.dependencies]\n"
+        '"dotmac-deployment-control" = { path = "../dc", develop = true }\n'
+    )
+    for source in (pep621, poetry):
+        version, problem = evidence.declared_dependency_version(source, DISTRIBUTION)
+        assert version is None
+        assert problem is not None and "no version" in problem
+
+
+def test_an_unconstrained_declaration_is_not_reported_as_absent() -> None:
+    source = '[project]\nname = "x"\ndependencies = ["dotmac-deployment-control"]\n'
+    version, problem = evidence.declared_dependency_version(source, DISTRIBUTION)
+    assert version is None
+    assert problem is not None and "no version constraint" in problem
+
+
+def test_a_malformed_dependency_list_is_reported_rather_than_skipped() -> None:
+    source = '[project]\nname = "x"\ndependencies = [{ name = "dotmac" }]\n'
+    version, problem = evidence.declared_dependency_version(source, DISTRIBUTION)
+    assert version is None
+    assert problem is not None and "requirement STRINGS" in problem
+
+
+def test_a_pep_621_pin_satisfies_the_composition_pin_cross_check() -> None:
+    """End to end: the caller must stop accusing a PEP 621 consumer of drift."""
+    problems = evidence.composition_claim_problems(
+        sources=_sources(),
+        rows=_rows(),
+        pin_source=(
+            '[project]\nname = "vendor-cp"\n'
+            f'dependencies = ["{DISTRIBUTION}=={PIN}"]\n'
+        ),
+        distribution=DISTRIBUTION,
+        expected_pin=PIN,
+        where="dossier",
+    )
+    assert not [p for p in problems if "pin" in p or "depend on" in p], problems
 
 
 # ── composition is not production, and that is structural ───────────────────
