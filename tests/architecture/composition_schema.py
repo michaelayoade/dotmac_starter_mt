@@ -377,7 +377,7 @@ from __future__ import annotations
 import ast
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Final
@@ -499,7 +499,7 @@ class PackageClassification(str, Enum):
         registration applicability stays classification-only."""
         return self is PackageClassification.OPTIONAL_MODULE
 
-    def migration_lineage_applies(self, manifest_applicability: bool = False) -> bool:
+    def migration_lineage_applies(self, manifest_applicability: bool) -> bool:
         """Whether `migration_lineage` is a real (non-NOT_APPLICABLE)
         dimension for this package kind.
 
@@ -514,8 +514,6 @@ class PackageClassification(str, Enum):
         compatibility fallback chosen by a record author."""
         if self is not PackageClassification.OPTIONAL_MODULE:
             return False
-        if manifest_applicability is None:
-            return True
         return manifest_applicability
 
 
@@ -575,22 +573,64 @@ def _manifest_source_path(packages_root: Path, distribution: str) -> Path:
     convention every real manifest in this tree follows (verified directly
     against all 80 `packages/*/src/*/manifest.py` files at the time of this
     ruling: zero mismatches)."""
+    root = packages_root.resolve()
+    if packages_root.is_symlink() or not root.is_dir():
+        raise ManifestDeclarationError(f"{packages_root} is not a directory")
+    if (
+        not distribution
+        or Path(distribution).name != distribution
+        or distribution in {".", ".."}
+    ):
+        raise ManifestDeclarationError(
+            f"{distribution!r} is not a safe single distribution component"
+        )
     import_package = distribution.replace("-", "_")
-    return packages_root / distribution / "src" / import_package / "manifest.py"
+    package_dir = root / distribution
+    source_dir = package_dir / "src" / import_package
+    path = source_dir / "manifest.py"
+    if any(candidate.is_symlink() for candidate in (package_dir, source_dir, path)):
+        raise ManifestDeclarationError(
+            f"{distribution}: manifest path contains a symlink"
+        )
+    path = path.resolve()
+    if not path.is_relative_to(root):
+        raise ManifestDeclarationError(
+            f"{distribution}: manifest path escapes packages root {root}"
+        )
+    return path
 
 
-def _find_module_manifest_call(tree: ast.AST) -> ast.Call | None:
-    """The first `ModuleManifest(...)` call anywhere in the parsed module —
-    every real manifest.py assigns exactly one to a module-level `module`
-    name, but this walks the whole tree rather than assuming that shape."""
-    for node in ast.walk(tree):
+def _find_module_manifest_call(tree: ast.Module) -> ast.Call | None:
+    """Return exactly one proven module-level ``module = ModuleManifest`` call."""
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "ModuleManifest"
+    ]
+    if len(calls) != 1:
+        return None
+    candidate: ast.Call | None = None
+    for statement in tree.body:
+        value: ast.expr | None = None
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if isinstance(target, ast.Name) and target.id == "module":
+                value = statement.value
+        elif isinstance(statement, ast.AnnAssign):
+            if (
+                isinstance(statement.target, ast.Name)
+                and statement.target.id == "module"
+            ):
+                value = statement.value
         if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "ModuleManifest"
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "ModuleManifest"
         ):
-            return node
-    return None
+            candidate = value
+    return candidate if candidate is calls[0] else None
 
 
 def _is_declared_empty(value: ast.expr) -> bool:
@@ -669,8 +709,8 @@ def derive_migration_lineage_applicability_from_manifest(
     call = _find_module_manifest_call(tree)
     if call is None:
         raise ManifestDeclarationError(
-            f"{distribution}: {manifest_path} declares no ModuleManifest(...) "
-            "call — cannot derive migration-lineage applicability"
+            f"{distribution}: {manifest_path} does not declare exactly one "
+            "module-level module = ModuleManifest(...)"
         )
 
     has_short_code, has_migration_prefix = (
@@ -956,17 +996,13 @@ class CompositionRecord:
     `NOT_APPLICABLE` — every distribution is either installed, confirmed not
     installed, or unmeasured.
 
-    `migration_lineage_manifest_applies` (Ruling 1): `None` by default,
-    meaning no caller has read this distribution's `ModuleManifest` yet — in
-    that case `migration_lineage` applicability for an `optional-module`
-    distribution is the pre-ruling classification-only answer (`True`,
-    unconditional), so every construction that predates this ruling is
-    unaffected. A caller that HAS read the manifest (via
-    `derive_migration_lineage_applicability_from_manifest`) supplies its
-    derived `True`/`False` here instead, and that value — not classification
-    alone — then governs whether `migration_lineage` may be `NOT_APPLICABLE`
-    for this record. Irrelevant for every non-`optional-module`
-    classification: `migration_lineage_applies` ignores it there.
+    `migration_lineage_manifest_applies` (Ruling 1) is deliberately absent
+    from the generated ``__init__``. Optional-module records can therefore
+    only be produced by the module-private derived builder used by
+    :func:`composition_record_from_payload` after it has read the real
+    dossier and manifest. Direct construction refuses an optional-module
+    because it has no authoritative applicability fact; there is no legacy
+    ``None -> True`` fallback.
     """
 
     product: str
@@ -976,9 +1012,48 @@ class CompositionRecord:
     module_registration: DimensionValue
     migration_lineage: DimensionValue
     runtime_consumption: DimensionValue
-    migration_lineage_manifest_applies: bool | None = None
+    migration_lineage_manifest_applies: bool = field(init=False, repr=False)
+
+    @classmethod
+    def _from_derived_manifest_applicability(
+        cls,
+        *,
+        product: str,
+        distribution: str,
+        classification: PackageClassification,
+        installation: DimensionValue,
+        module_registration: DimensionValue,
+        migration_lineage: DimensionValue,
+        runtime_consumption: DimensionValue,
+        manifest_applies: bool,
+    ) -> CompositionRecord:
+        if not isinstance(manifest_applies, bool):
+            raise TypeError("manifest_applies must be a derived bool")
+        record = cls.__new__(cls)
+        for name, value in (
+            ("product", product),
+            ("distribution", distribution),
+            ("classification", classification),
+            ("installation", installation),
+            ("module_registration", module_registration),
+            ("migration_lineage", migration_lineage),
+            ("runtime_consumption", runtime_consumption),
+            ("migration_lineage_manifest_applies", manifest_applies),
+        ):
+            object.__setattr__(record, name, value)
+        record.__post_init__()
+        return record
 
     def __post_init__(self) -> None:
+        if self.classification is PackageClassification.OPTIONAL_MODULE and not hasattr(
+            self, "migration_lineage_manifest_applies"
+        ):
+            raise ValueError(
+                "optional-module records require manifest applicability derived "
+                "by composition_record_from_payload"
+            )
+        if not hasattr(self, "migration_lineage_manifest_applies"):
+            object.__setattr__(self, "migration_lineage_manifest_applies", False)
         if self.installation is DimensionValue.NOT_APPLICABLE:
             raise ValueError(
                 f"{self.product}/{self.distribution}: installation is never "
@@ -1087,8 +1162,24 @@ def composition_record_from_payload(
             "never defaulted to unknown"
         )
 
-    classification = PackageClassification(payload["classification"])
     distribution = str(payload["distribution"])
+    dossiers = {
+        dossier.distribution: dossier
+        for dossier in derive_distribution_universe(packages_root)
+    }
+    dossier = dossiers.get(distribution)
+    if dossier is None:
+        raise CatalogueDerivationError(
+            f"{distribution!r} is not declared beneath {packages_root}"
+        )
+    declared_classification = PackageClassification(payload["classification"])
+    if declared_classification is not dossier.classification:
+        raise CatalogueDerivationError(
+            f"{distribution!r} declares classification "
+            f"{declared_classification.value!r} in payload but "
+            f"{dossier.classification.value!r} in its dossier"
+        )
+    classification = dossier.classification
 
     # Ruling 1: derived HERE, from the real manifest, never taken from the
     # payload. Only meaningful for optional-module — every other
@@ -1096,7 +1187,7 @@ def composition_record_from_payload(
     # is ignored for it (see `PackageClassification.migration_lineage_
     # applies`), and no manifest.py exists for a platform-baseline
     # distribution to read in the first place.
-    manifest_lineage_applicability: bool | None = None
+    manifest_lineage_applicability = False
     if classification is PackageClassification.OPTIONAL_MODULE:
         manifest_lineage_applicability = (
             derive_migration_lineage_applicability_from_manifest(
@@ -1104,7 +1195,7 @@ def composition_record_from_payload(
             )
         )
 
-    return CompositionRecord(
+    return CompositionRecord._from_derived_manifest_applicability(
         product=str(payload["product"]),
         distribution=distribution,
         classification=classification,
@@ -1112,7 +1203,7 @@ def composition_record_from_payload(
         module_registration=DimensionValue(payload["module_registration"]),
         migration_lineage=DimensionValue(payload["migration_lineage"]),
         runtime_consumption=DimensionValue(payload["runtime_consumption"]),
-        migration_lineage_manifest_applies=manifest_lineage_applicability,
+        manifest_applies=manifest_lineage_applicability,
     )
 
 
@@ -1425,8 +1516,8 @@ def build_runtime_exposure_report(
 class CatalogueDerivationError(ValueError):
     """The `packages/` tree cannot produce one unambiguous, product-independent
     distribution universe. Raised instead of silently skipping the offending
-    directory or dossier — a missing `EXTRACTION.toml`, a duplicate
-    distribution name, or an unrecognized `classification` are refusals, not
+    directory or dossier — a missing `EXTRACTION.toml`, a package/directory
+    identity mismatch, or an unrecognized `classification` are refusals, not
     warnings."""
 
 
@@ -1466,26 +1557,37 @@ def derive_distribution_universe(
     * a `packages/<x>/` directory with no `EXTRACTION.toml` (skipped
       silently, this would understate the universe without anyone noticing);
     * a dossier with no `package` field, or an empty one;
-    * two dossiers declaring the identical distribution name;
+    * a dossier whose ``package`` differs from its owning directory name —
+      this one-to-one binding also makes duplicate distribution names
+      structurally impossible beneath a single packages root;
     * a dossier whose `classification` is absent or is not a value
       `PackageClassification` recognizes — caught and re-raised naming the
       file, so this surfaces as a named refusal rather than an unhandled
       `ValueError` deep in a loop.
     """
-    if not packages_root.is_dir():
+    root = packages_root.resolve()
+    if packages_root.is_symlink() or not root.is_dir():
         raise CatalogueDerivationError(
             f"{packages_root} is not a directory — cannot derive a "
             "distribution universe from it"
         )
 
-    # Maps distribution name -> (the EXTRACTION.toml path that FIRST declared
-    # it, its PackageDossier). The path is tracked alongside the dossier
-    # (which by design holds only `distribution`/`classification` — see
-    # PackageDossier's own docstring) purely so a duplicate-name refusal can
-    # name BOTH offending files, not just the second one.
-    dossiers: dict[str, tuple[Path, PackageDossier]] = {}
-    for package_dir in sorted(p for p in packages_root.iterdir() if p.is_dir()):
+    dossiers: list[PackageDossier] = []
+    for package_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        if package_dir.is_symlink():
+            raise CatalogueDerivationError(
+                f"{package_dir} is a symlink — refused in packages root"
+            )
+        resolved_package_dir = package_dir.resolve()
+        if not resolved_package_dir.is_relative_to(root):
+            raise CatalogueDerivationError(
+                f"{package_dir} resolves outside packages root {root}"
+            )
         toml_path = package_dir / "EXTRACTION.toml"
+        if toml_path.is_symlink():
+            raise CatalogueDerivationError(
+                f"{toml_path} is a symlink — refused in packages root"
+            )
         if not toml_path.is_file():
             raise CatalogueDerivationError(
                 f"{package_dir} has no EXTRACTION.toml — refused, not "
@@ -1495,9 +1597,14 @@ def derive_distribution_universe(
         data = tomllib.loads(toml_path.read_text())
 
         distribution = data.get("package")
-        if not distribution:
+        if not isinstance(distribution, str) or not distribution:
             raise CatalogueDerivationError(
                 f"{toml_path} declares no non-empty 'package' name"
+            )
+        if distribution != package_dir.name:
+            raise CatalogueDerivationError(
+                f"{toml_path} declares package {distribution!r}, but its "
+                f"directory is {package_dir.name!r}"
             )
 
         raw_classification = data.get("classification")
@@ -1509,16 +1616,8 @@ def derive_distribution_universe(
                 f"{raw_classification!r}"
             ) from exc
 
-        if distribution in dossiers:
-            first_toml_path, _ = dossiers[distribution]
-            raise CatalogueDerivationError(
-                f"duplicate distribution name {distribution!r}: declared by "
-                f"both {first_toml_path} and {toml_path}"
-            )
-
-        dossiers[distribution] = (
-            toml_path,
+        dossiers.append(
             PackageDossier(distribution=distribution, classification=classification),
         )
 
-    return tuple(dossier for _, dossier in dossiers.values())
+    return tuple(dossiers)

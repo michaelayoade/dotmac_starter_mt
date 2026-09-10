@@ -76,6 +76,37 @@ REPO_PACKAGES_ROOT = Path(__file__).resolve().parents[2] / "packages"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _derived_record(
+    *,
+    product: str,
+    distribution: str,
+    classification: PackageClassification,
+    installation: DimensionValue,
+    module_registration: DimensionValue,
+    migration_lineage: DimensionValue,
+    runtime_consumption: DimensionValue,
+    manifest_applies: bool = True,
+) -> CompositionRecord:
+    """Build a synthetic already-derived record for pure pipeline tests.
+
+    Product records never use this test helper; they travel through
+    ``composition_record_from_payload`` and derive the same fact from the
+    authoritative dossier and manifest. Keeping the exceptional builder
+    visibly private prevents pure state-table tests from becoming evidence
+    for the ingestion boundary.
+    """
+    return CompositionRecord._from_derived_manifest_applicability(
+        product=product,
+        distribution=distribution,
+        classification=classification,
+        installation=installation,
+        module_registration=module_registration,
+        migration_lineage=migration_lineage,
+        runtime_consumption=runtime_consumption,
+        manifest_applies=manifest_applies,
+    )
+
+
 def _optional_module_record(
     *,
     installation=TRUE,
@@ -83,7 +114,7 @@ def _optional_module_record(
     migration_lineage=TRUE,
     runtime_consumption=UNKNOWN,
 ) -> CompositionRecord:
-    return CompositionRecord(
+    return _derived_record(
         product="erp",
         distribution="dotmac-example",
         classification=PackageClassification.OPTIONAL_MODULE,
@@ -97,7 +128,7 @@ def _optional_module_record(
 def _baseline_record(
     *, classification, installation=TRUE, runtime_consumption=UNKNOWN
 ) -> CompositionRecord:
-    return CompositionRecord(
+    return _derived_record(
         product="sub",
         distribution="dotmac-kernel",
         classification=classification,
@@ -262,7 +293,7 @@ def test_missing_installation_with_runtime_evidence_is_refused_not_not_composed(
     cannot show real runtime consumption, so this is either a measurement
     error or a genuine hazard, and the schema must say so by refusing
     rather than filing it as `not_composed`."""
-    hazard = CompositionRecord(
+    hazard = _derived_record(
         product="hazard-probe",
         distribution="dotmac-example",
         classification=PackageClassification.OPTIONAL_MODULE,
@@ -427,7 +458,7 @@ def test_validate_coherence_step_refuses_a_record_that_bypassed_construction():
     object.__setattr__(broken, "module_registration", TRUE)
     object.__setattr__(broken, "migration_lineage", NA)
     object.__setattr__(broken, "runtime_consumption", UNKNOWN)
-    object.__setattr__(broken, "migration_lineage_manifest_applies", None)
+    object.__setattr__(broken, "migration_lineage_manifest_applies", False)
 
     with pytest.raises(DimensionalIncoherence):
         derive_composition_state(broken)
@@ -709,7 +740,7 @@ def test_not_applicable_is_derived_from_classification_only_never_from_a_product
     register is the `false` ("absent") case; the constructor structurally
     refuses the `not_applicable` shortcut."""
     with pytest.raises(ValueError, match="not_applicable"):
-        CompositionRecord(
+        _derived_record(
             product="academy",
             distribution="dotmac-example",
             classification=PackageClassification.OPTIONAL_MODULE,
@@ -721,7 +752,7 @@ def test_not_applicable_is_derived_from_classification_only_never_from_a_product
 
     # The honest value for "product has no mechanism, distribution requires
     # one" is FALSE (absent) — and that construction succeeds.
-    academy_absent = CompositionRecord(
+    academy_absent = _derived_record(
         product="academy",
         distribution="dotmac-example",
         classification=PackageClassification.OPTIONAL_MODULE,
@@ -753,7 +784,7 @@ def test_platform_baseline_cannot_record_false_where_not_applicable_is_required(
 
 def test_installation_can_never_be_not_applicable():
     with pytest.raises(ValueError, match="not_applicable"):
-        CompositionRecord(
+        _derived_record(
             product="erp",
             distribution="dotmac-example",
             classification=PackageClassification.OPTIONAL_MODULE,
@@ -946,6 +977,44 @@ def test_stateful_module_payload_with_not_applicable_lineage_still_refused():
         composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
 
 
+def test_payload_cannot_reclassify_a_real_stateful_module_as_a_baseline():
+    """The dossier, not the product payload, owns package classification.
+
+    Without this join, calling a stateful optional module a universal
+    facility skips manifest parsing and makes both module dimensions appear
+    legitimately inapplicable.
+    """
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "erp",
+        "distribution": "dotmac-billing",
+        "classification": "universal-facility",
+        "installation": "true",
+        "module_registration": "not_applicable",
+        "migration_lineage": "not_applicable",
+        "runtime_consumption": "unknown",
+    }
+    with pytest.raises(CatalogueDerivationError, match="optional-module"):
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+
+
+def test_payload_classification_matching_the_dossier_is_accepted():
+    """Near-miss: agreement with the authoritative dossier is not refused."""
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "erp",
+        "distribution": "dotmac-billing",
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "true",
+        "runtime_consumption": "unknown",
+    }
+    record = composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    assert record.classification is PackageClassification.OPTIONAL_MODULE
+    assert derive_composition_state(record) is CompositionState.FULLY_COMPOSED
+
+
 def test_payload_cannot_supply_migration_lineage_manifest_applies():
     """Applicability is Starter-derived and is not a payload input.
 
@@ -982,6 +1051,10 @@ def test_payload_ingestion_propagates_a_contradictory_manifest_refusal(
     package_dir = tmp_path / "dotmac-contradictory-ingest"
     src_dir = package_dir / "src" / "dotmac_contradictory_ingest"
     src_dir.mkdir(parents=True)
+    (package_dir / "EXTRACTION.toml").write_text(
+        'package = "dotmac-contradictory-ingest"\n'
+        'classification = "optional-module"\n'
+    )
     (src_dir / "manifest.py").write_text(
         "from dotmac_kernel.modules import ModuleManifest\n"
         "module = ModuleManifest(\n"
@@ -1541,30 +1614,49 @@ def test_a_packages_directory_with_extraction_toml_present_is_not_refused(
     assert universe[0].distribution == "dotmac-has-dossier"
 
 
-def test_duplicate_distribution_name_across_two_dossiers_is_refused(tmp_path: Path):
-    """Matching only the shared distribution name (`"dotmac-dup"`) would
-    pass even if the raised message named only the SECOND offending path —
-    that substring appears in both paths too, so it structurally cannot
-    catch a regression that silently dropped the first path from the
-    message (exactly the defect this test was strengthened to catch: the
-    operator getting only one of the two colliding files named). Match both
-    directory names explicitly instead."""
-    (tmp_path / "dir-one").mkdir()
-    (tmp_path / "dir-one" / "EXTRACTION.toml").write_text(
-        'package = "dotmac-dup"\nclassification = "optional-module"\n'
-    )
-    (tmp_path / "dir-two").mkdir()
-    (tmp_path / "dir-two" / "EXTRACTION.toml").write_text(
-        'package = "dotmac-dup"\nclassification = "optional-module"\n'
+def test_dossier_package_name_must_match_its_directory(tmp_path: Path):
+    """A dossier cannot redirect one package directory to another identity."""
+    package_dir = tmp_path / "dotmac-directory-name"
+    package_dir.mkdir()
+    (package_dir / "EXTRACTION.toml").write_text(
+        'package = "dotmac-different-name"\nclassification = "optional-module"\n'
     )
 
-    with pytest.raises(CatalogueDerivationError) as exc_info:
+    with pytest.raises(
+        CatalogueDerivationError, match="dotmac-different-name.*dotmac-directory-name"
+    ):
         derive_distribution_universe(tmp_path)
 
-    message = str(exc_info.value)
-    assert "dotmac-dup" in message
-    assert "dir-one" in message, "message must name the FIRST offending path"
-    assert "dir-two" in message, "message must name the SECOND offending path"
+
+def test_dossier_package_name_matching_its_directory_is_accepted(tmp_path: Path):
+    """Near-miss: the directory/name binding rejects only disagreement."""
+    package_dir = tmp_path / "dotmac-same-name"
+    package_dir.mkdir()
+    (package_dir / "EXTRACTION.toml").write_text(
+        'package = "dotmac-same-name"\nclassification = "optional-module"\n'
+    )
+
+    assert derive_distribution_universe(tmp_path) == (
+        PackageDossier(
+            distribution="dotmac-same-name",
+            classification=PackageClassification.OPTIONAL_MODULE,
+        ),
+    )
+
+
+def test_distribution_universe_refuses_a_symlinked_package_directory(tmp_path: Path):
+    """The catalogue cannot be redirected to a dossier outside its root."""
+    packages_root = tmp_path / "packages"
+    packages_root.mkdir()
+    outside = tmp_path / "outside-package"
+    outside.mkdir()
+    (outside / "EXTRACTION.toml").write_text(
+        'package = "dotmac-linked"\nclassification = "optional-module"\n'
+    )
+    (packages_root / "dotmac-linked").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(CatalogueDerivationError, match="symlink"):
+        derive_distribution_universe(packages_root)
 
 
 def test_unrecognized_classification_fails_loudly_as_a_named_refusal(
@@ -1936,6 +2028,100 @@ def test_coherent_stateful_and_stateless_manifests_are_not_refused_near_miss(
     )
 
 
+def _write_optional_module_fixture(
+    packages_root: Path, distribution: str, manifest_source: str
+) -> None:
+    package_dir = packages_root / distribution
+    source_dir = package_dir / "src" / distribution.replace("-", "_")
+    source_dir.mkdir(parents=True)
+    (package_dir / "EXTRACTION.toml").write_text(
+        f'package = "{distribution}"\nclassification = "optional-module"\n'
+    )
+    (source_dir / "manifest.py").write_text(manifest_source)
+
+
+def test_ingestion_refuses_a_decoy_manifest_call_before_the_real_export(
+    tmp_path: Path,
+):
+    """One canonical export plus any second call is ambiguous, not harmless."""
+    distribution = "dotmac-ambiguous"
+    _write_optional_module_fixture(
+        tmp_path,
+        distribution,
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        "def decoy():\n"
+        '    return ModuleManifest(code="decoy", version="0.1.0a1", core=False)\n'
+        "module = ModuleManifest(\n"
+        '    code="ambiguous", version="0.1.0a1", core=False,\n'
+        '    short_code="amb", migration_prefix="am",\n'
+        ")\n",
+    )
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "starter",
+        "distribution": distribution,
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "true",
+        "runtime_consumption": "unknown",
+    }
+    with pytest.raises(ManifestDeclarationError, match="exactly one module-level"):
+        composition_record_from_payload(payload, tmp_path)
+
+
+def test_ingestion_refuses_a_function_local_manifest_without_a_module_export(
+    tmp_path: Path,
+):
+    """A lone call in executable scope is not the exported manifest."""
+    distribution = "dotmac-function-local"
+    _write_optional_module_fixture(
+        tmp_path,
+        distribution,
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        "def build():\n"
+        "    return ModuleManifest(\n"
+        '        code="function_local", version="0.1.0a1", core=False,\n'
+        '        short_code="fnl", migration_prefix="fl",\n'
+        "    )\n",
+    )
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "starter",
+        "distribution": distribution,
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "true",
+        "runtime_consumption": "unknown",
+    }
+    with pytest.raises(ManifestDeclarationError, match="exactly one module-level"):
+        composition_record_from_payload(payload, tmp_path)
+
+
+def test_manifest_distribution_traversal_is_refused(tmp_path: Path):
+    with pytest.raises(ManifestDeclarationError, match="safe single"):
+        derive_migration_lineage_applicability_from_manifest(tmp_path, "../escape")
+
+
+def test_manifest_symlink_escape_is_refused(tmp_path: Path):
+    packages_root = tmp_path / "packages"
+    packages_root.mkdir()
+    outside = tmp_path / "outside"
+    source_dir = outside / "src" / "dotmac_escape"
+    source_dir.mkdir(parents=True)
+    (source_dir / "manifest.py").write_text(
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        'module = ModuleManifest(code="escape", version="0.1.0a1", core=False)\n'
+    )
+    (packages_root / "dotmac-escape").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ManifestDeclarationError, match="symlink"):
+        derive_migration_lineage_applicability_from_manifest(
+            packages_root, "dotmac-escape"
+        )
+
+
 def test_absent_manifest_file_is_refused_by_name(tmp_path: Path):
     """The easy outcome-3 case — no manifest.py at all — still refused by
     name rather than defaulted. Named explicitly per the brief: this is the
@@ -1953,7 +2139,7 @@ def test_a_registered_stateless_optional_module_derives_fully_composed():
     test above) must derive `FULLY_COMPOSED`, never `INVALID` — `INVALID` is
     reserved for a module that genuinely owns lineage and does not have it,
     not for a module that never had a lineage question to begin with."""
-    registered_stateless = CompositionRecord(
+    registered_stateless = _derived_record(
         product="starter",
         distribution="dotmac-document-rendering",
         classification=PackageClassification.OPTIONAL_MODULE,
@@ -1961,7 +2147,7 @@ def test_a_registered_stateless_optional_module_derives_fully_composed():
         module_registration=TRUE,
         migration_lineage=NA,
         runtime_consumption=UNKNOWN,
-        migration_lineage_manifest_applies=False,
+        manifest_applies=False,
     )
     state = derive_composition_state(registered_stateless)
     assert state == CompositionState.FULLY_COMPOSED
@@ -1972,7 +2158,7 @@ def test_an_unregistered_stateless_optional_module_derives_not_composed():
     registered, must still derive `NOT_COMPOSED` — inapplicable lineage
     does not manufacture composition on its own; registration still has to
     hold."""
-    unregistered_stateless = CompositionRecord(
+    unregistered_stateless = _derived_record(
         product="starter",
         distribution="dotmac-document-rendering",
         classification=PackageClassification.OPTIONAL_MODULE,
@@ -1980,7 +2166,7 @@ def test_an_unregistered_stateless_optional_module_derives_not_composed():
         module_registration=FALSE,
         migration_lineage=NA,
         runtime_consumption=UNKNOWN,
-        migration_lineage_manifest_applies=False,
+        manifest_applies=False,
     )
     state = derive_composition_state(unregistered_stateless)
     assert state == CompositionState.NOT_COMPOSED
@@ -1994,7 +2180,7 @@ def test_stateless_optional_module_cannot_record_lineage_true_or_false():
     dimension isn't a real question for this distribution, so any value
     other than `not_applicable` is refused."""
     with pytest.raises(ValueError, match="not_applicable"):
-        CompositionRecord(
+        _derived_record(
             product="starter",
             distribution="dotmac-document-rendering",
             classification=PackageClassification.OPTIONAL_MODULE,
@@ -2002,26 +2188,55 @@ def test_stateless_optional_module_cannot_record_lineage_true_or_false():
             module_registration=TRUE,
             migration_lineage=TRUE,
             runtime_consumption=UNKNOWN,
-            migration_lineage_manifest_applies=False,
+            manifest_applies=False,
         )
 
 
-def test_default_manifest_applicability_preserves_pre_ruling_behavior():
-    """Every construction that predates Ruling 1 (never supplies
-    `migration_lineage_manifest_applies`) must behave exactly as before:
-    `migration_lineage` still applies unconditionally for `optional-module`,
-    and `not_applicable` is still refused for it. This is the back-
-    compatibility guarantee the `None` default exists to provide."""
-    with pytest.raises(ValueError, match="not_applicable"):
+def test_direct_optional_module_construction_has_no_applicability_fallback():
+    """A direct constructor has no authoritative manifest fact to use.
+
+    It therefore refuses every optional-module record instead of preserving
+    the former ``None -> lineage applies`` compatibility fallback.
+    """
+    with pytest.raises(ValueError, match="composition_record_from_payload"):
         CompositionRecord(
             product="erp",
             distribution="dotmac-example",
             classification=PackageClassification.OPTIONAL_MODULE,
             installation=TRUE,
             module_registration=TRUE,
-            migration_lineage=NA,
+            migration_lineage=TRUE,
             runtime_consumption=UNKNOWN,
-            # migration_lineage_manifest_applies deliberately omitted (None)
+        )
+
+
+def test_direct_constructor_cannot_accept_manifest_applicability():
+    """The generated constructor has no slot for a derived authority fact."""
+    with pytest.raises(TypeError):
+        CompositionRecord(  # type: ignore[call-arg]
+            product="erp",
+            distribution="dotmac-example",
+            classification=PackageClassification.OPTIONAL_MODULE,
+            installation=TRUE,
+            module_registration=TRUE,
+            migration_lineage=TRUE,
+            runtime_consumption=UNKNOWN,
+            migration_lineage_manifest_applies=True,  # type: ignore[call-arg]
+        )
+
+
+def test_private_derived_builder_refuses_non_boolean_applicability():
+    """Even the internal handoff cannot treat a truthy value as authority."""
+    with pytest.raises(TypeError, match="derived bool"):
+        CompositionRecord._from_derived_manifest_applicability(
+            product="erp",
+            distribution="dotmac-example",
+            classification=PackageClassification.OPTIONAL_MODULE,
+            installation=TRUE,
+            module_registration=TRUE,
+            migration_lineage=TRUE,
+            runtime_consumption=UNKNOWN,
+            manifest_applies=1,  # type: ignore[arg-type]
         )
 
 
