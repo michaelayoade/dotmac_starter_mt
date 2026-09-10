@@ -768,3 +768,140 @@ def test_coverage_report_counts_stay_separate_buckets_no_single_number():
     # No summing attribute exists to collapse this back into one figure.
     assert not hasattr(report, "total")
     assert not hasattr(report, "__add__")
+
+
+# ---------------------------------------------------------------------------
+# 8. NOT_COMPOSED is a derivation, not a second copy of the evidence
+#    (Michael's ruling: no new enum member; installation retains the
+#    distinction; the collapse is intentional and must not be "fixed").
+# ---------------------------------------------------------------------------
+
+
+def test_not_composed_collapses_installation_absent_and_installed_but_unregistered():
+    """Control 1. Two records that both derive `NOT_COMPOSED` — one
+    `installation=false`, one `installation=true` with applicable
+    `module_registration`/`migration_lineage` both `false` — produce the
+    IDENTICAL state, while their `installation` values remain distinct and
+    readable on the records themselves. The state collapses what the
+    record keeps; that is the point, not a bug."""
+    confirmed_not_installed = _optional_module_record(
+        installation=FALSE, module_registration=FALSE, migration_lineage=FALSE
+    )
+    installed_but_unregistered = _optional_module_record(
+        installation=TRUE, module_registration=FALSE, migration_lineage=FALSE
+    )
+
+    state_a = derive_composition_state(confirmed_not_installed)
+    state_b = derive_composition_state(installed_but_unregistered)
+    assert state_a == state_b == CompositionState.NOT_COMPOSED
+
+    # The record's own installation dimension still distinguishes them,
+    # even though the derived state does not.
+    assert confirmed_not_installed.installation is DimensionValue.FALSE
+    assert installed_but_unregistered.installation is DimensionValue.TRUE
+    assert (
+        confirmed_not_installed.installation != installed_but_unregistered.installation
+    )
+
+
+def test_state_only_reports_cannot_answer_a_cross_dimensional_composition_question():
+    """Control 2. A real check, not a comment: builds the SAME categorized-
+    set machinery this module already ships (`build_coverage_report`,
+    `build_runtime_exposure_report`) over a small record set and shows that
+    no combination of the two REPORT OBJECTS answers "how many
+    `not_composed` distributions are also `runtime_consumption = true`" —
+    exactly the question Michael's drawn-out consequence puts at stake: an
+    installed, unregistered, RUNNING distribution reports `NOT_COMPOSED`
+    while visibly carrying `runtime_consumption = TRUE`.
+
+    Sensitivity proof (both halves required, per the standing rule that a
+    control must be shown able to refuse, not just to answer):
+
+    * PLANT — the defect this control targets is "answer the question from
+      the reports alone." Every fixed answer a report-only consumer could
+      reach from `(coverage.not_composed, runtime.exposed)` is checked
+      against the true, record-level count and shown WRONG. Removing this
+      assertion would let the test pass over a report-only path that was
+      never actually exercised for correctness — the failure mode this
+      control exists to avoid.
+    * NEAR MISS — reading the identical question directly off the original
+      records (never through a report) is shown CORRECT, proving nothing
+      is wrong with a record-level check, only a report/state-only one; a
+      control that only showed the report-only path failing, with no
+      correct alternative demonstrated, would not have proven the reports
+      insufficient so much as proven nothing was tried.
+    """
+    installed_unregistered_and_running = _optional_module_record(
+        installation=TRUE,
+        module_registration=FALSE,
+        migration_lineage=FALSE,
+        runtime_consumption=TRUE,
+    )
+    genuinely_not_installed = _optional_module_record(
+        installation=FALSE,
+        module_registration=FALSE,
+        migration_lineage=FALSE,
+        runtime_consumption=UNKNOWN,
+    )
+    fully_composed_and_running = _optional_module_record(
+        installation=TRUE,
+        module_registration=TRUE,
+        migration_lineage=TRUE,
+        runtime_consumption=TRUE,
+    )
+    records = [
+        installed_unregistered_and_running,
+        genuinely_not_installed,
+        fully_composed_and_running,
+    ]
+
+    assert (
+        derive_composition_state(installed_unregistered_and_running)
+        == CompositionState.NOT_COMPOSED
+    )
+    assert (
+        derive_composition_state(genuinely_not_installed)
+        == CompositionState.NOT_COMPOSED
+    )
+    assert (
+        derive_composition_state(fully_composed_and_running)
+        == CompositionState.FULLY_COMPOSED
+    )
+
+    coverage = build_coverage_report(records)
+    runtime = build_runtime_exposure_report(records)
+    assert coverage.not_composed == 2
+    assert coverage.fully_composed == 1
+    assert runtime.exposed == 2  # the two records genuinely running
+
+    # The true, record-level answer: only ONE of the two not_composed
+    # records is also runtime_consumption=true.
+    true_not_composed_and_running = sum(
+        1
+        for record in records
+        if derive_composition_state(record) == CompositionState.NOT_COMPOSED
+        and record.runtime_consumption is DimensionValue.TRUE
+    )
+    assert true_not_composed_and_running == 1
+
+    # PLANT: every fixed answer a report-only consumer could reach is wrong.
+    naive_min_of_the_two_counts = min(coverage.not_composed, runtime.exposed)
+    naive_runtime_exposed_total = runtime.exposed
+    assert naive_min_of_the_two_counts != true_not_composed_and_running
+    assert naive_runtime_exposed_total != true_not_composed_and_running
+
+    # Structural half of the same proof: neither report even HAS a field
+    # that could hold this answer — consistent with "no scalar total,
+    # ever" and with runtime_consumption never folding into a state.
+    assert not hasattr(coverage, "not_composed_and_runtime_exposed")
+    assert not hasattr(runtime, "not_composed_and_runtime_exposed")
+
+    # NEAR MISS: the identical question, read directly off the records
+    # (never through a report), is correct.
+    record_level_answer = sum(
+        1
+        for record in records
+        if derive_composition_state(record) == CompositionState.NOT_COMPOSED
+        and record.runtime_consumption is DimensionValue.TRUE
+    )
+    assert record_level_answer == true_not_composed_and_running == 1

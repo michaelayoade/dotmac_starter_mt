@@ -130,6 +130,46 @@ distribution reporting `installation = FALSE` alongside `runtime_consumption
 `NOT_COMPOSED` (which is what step 4 alone, without step 3 ahead of it,
 would have done — the exact defect this ordering fixes).
 
+``NOT_COMPOSED`` is a derivation, not a second copy of the evidence
+---------------------------------------------------------------------
+
+Ruled by Michael: ``NOT_COMPOSED`` deliberately covers TWO different
+situations —
+
+* confirmed not installed, with no contradictory positive evidence; and
+* installed, but the applicable ``module_registration`` and
+  ``migration_lineage`` are both proven absent.
+
+There is no ``INSTALLED_ONLY`` (or any other) state to split them apart,
+and there will not be one: adding a member for every distinction the
+dimensions already carry would duplicate dimensional evidence inside the
+derived enum, and the enum is a derivation, not a second copy of the
+evidence. The ``installation`` dimension already preserves exactly this
+distinction on the record itself — see
+``test_not_composed_collapses_installation_absent_and_installed_but_unregistered``,
+which derives the identical ``NOT_COMPOSED`` state from two records whose
+``installation`` values remain distinguishable throughout.
+
+The sharpest consequence of this: an INSTALLED distribution with
+``module_registration = FALSE``, ``migration_lineage = FALSE``, and
+``runtime_consumption = TRUE`` derives ``NOT_COMPOSED`` — the state says
+"not composed" while the record it came from is visibly, truthfully
+carrying ``runtime_consumption = TRUE``. This is INTENTIONAL, not a
+defect to fix. It exists because ``runtime_consumption`` never folds into
+the state at all (see "The derivation pipeline, in order" and
+`test_runtime_consumption_is_not_inferred_by_derive_composition_state`),
+and because ``NOT_COMPOSED`` is exactly what step 6 derives once
+`installation`, `module_registration` and `migration_lineage` are
+resolved — it was never meant to also answer "and is anything running."
+A caller that needs to know whether a ``NOT_COMPOSED`` distribution is
+nonetheless running must read ``runtime_consumption`` off the record (or
+consult :class:`RuntimeExposureReport`) directly; it can never get that
+answer from ``CompositionState`` alone, by design — see
+``test_state_only_reports_cannot_answer_a_cross_dimensional_composition_question``
+for a real, sensitivity-proven demonstration that a consumer restricted to
+the derived state (or to the categorized reports built from it) provably
+cannot answer that question, and must go back to the records.
+
 The registration boundary
 --------------------------
 
