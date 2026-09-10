@@ -81,9 +81,12 @@ def test_derivation_table_for_optional_module_is_exhaustive_and_hand_checked():
     to exactly one outcome — a `CompositionState` or a refused
     `DimensionalIncoherence`. The expected outcome is written by hand here —
     not derived from the implementation — so this is a real check, not a
-    tautology. `runtime_consumption` is held fixed at `unknown` throughout,
-    since it never participates except when `installation` is `false` (see
-    the dedicated contradiction tests below for that axis).
+    tautology. `runtime_consumption` is held fixed at `unknown` throughout —
+    that value is itself asserted rather than exercised by this table (see
+    `test_installation_absent_accepts_unknown_runtime_consumption` for that
+    exact case, reasoned about on its own); the `runtime_consumption = true`
+    contradiction axis is not exercised here at all and is covered by the
+    dedicated contradiction tests below instead.
 
     Hand-derived rule, matching the pinned pipeline order exactly:
 
@@ -232,6 +235,33 @@ def test_missing_installation_with_runtime_evidence_is_refused_not_not_composed(
     )
     with pytest.raises(DimensionalIncoherence, match="runtime_consumption"):
         derive_composition_state(hazard)
+
+
+def test_installation_absent_accepts_unknown_runtime_consumption():
+    """Named on its own, not a by-product of the 27-case table (which holds
+    `runtime_consumption` fixed at `unknown` throughout and so asserts this
+    case rather than exercising it as a choice).
+
+    `installation = false`, `module_registration = false`,
+    `migration_lineage = false`, and `runtime_consumption = unknown` reaches
+    step 4 (`_step_installation_absent`) with three MEASURED negatives and
+    one UNMEASURED dimension — not four measured negatives. Step 3 only
+    refuses a dimension reporting `true`; `runtime_consumption` is never a
+    required dimension, so step 2 does not refuse its `unknown` either. The
+    pipeline still derives `not_composed`: an unmeasured runtime signal on
+    an already-confirmed-absent installation is not itself grounds to block
+    the verdict, because `runtime_consumption` participates in composition-
+    state derivation only as a contradiction canary (step 3), never as a
+    fourth vote in the installation-absent/not-composed judgement. This is
+    a deliberate choice about what step 4 requires, not an accident of the
+    hand table holding the axis fixed."""
+    record = _optional_module_record(
+        installation=FALSE,
+        module_registration=FALSE,
+        migration_lineage=FALSE,
+        runtime_consumption=UNKNOWN,
+    )
+    assert derive_composition_state(record) == CompositionState.NOT_COMPOSED
 
 
 def test_optional_module_with_no_registration_mechanism_never_derives_not_applicable():

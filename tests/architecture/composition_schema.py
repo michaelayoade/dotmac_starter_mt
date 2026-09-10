@@ -98,8 +98,13 @@ which builds the reordered pipeline and shows the divergence directly):
    ``DimensionalIncoherence`` — a not-installed distribution with runtime
    evidence is the sharpest form of it, and is refused rather than filed as
    `NOT_COMPOSED`.
-4. **`installation = FALSE` with complete negative evidence** (step 3 has
-   already cleared every contradiction) derives `NOT_COMPOSED`.
+4. **`installation = FALSE` with no contradicting `TRUE`** (step 3 has
+   already cleared every dimension reporting `TRUE`) derives `NOT_COMPOSED`.
+   This is not the same as complete negative evidence: `runtime_consumption`
+   may still be `UNKNOWN` here (it is never a required dimension), and that
+   absence of evidence is accepted rather than treated as a fourth
+   measured negative — see `_step_installation_absent`'s docstring and
+   `test_installation_absent_accepts_unknown_runtime_consumption`.
 5. **Classification-derived `NOT_APPLICABLE`** — reached only once
    `installation` is confirmed `TRUE` and no contradiction or unknown
    blocked the pipeline. If neither `module_registration` nor
@@ -603,9 +608,22 @@ def _step_refuse_contradictions(
 
 
 def _step_installation_absent(record: CompositionRecord) -> CompositionState | None:
-    """Pipeline step 4. Reached only once step 3 has cleared every
-    contradiction, so `installation = FALSE` here always comes with
-    complete negative evidence from the other three dimensions."""
+    """Pipeline step 4. Reached only once step 3 has cleared: none of
+    `module_registration`, `migration_lineage`, or `runtime_consumption`
+    reports `TRUE`. That is NOT the same as complete negative evidence —
+    `runtime_consumption` is never a required dimension (step 2 does not
+    refuse it when `UNKNOWN`, and step 3 only refuses a `TRUE` value), so
+    it may still be `UNKNOWN` here. A record with `installation = FALSE`,
+    `module_registration = FALSE`, `migration_lineage = FALSE`, and
+    `runtime_consumption = UNKNOWN` reaches this step with three measured
+    negatives and one unmeasured dimension, and still derives
+    `NOT_COMPOSED`: an unmeasured runtime signal on an already-confirmed
+    absent installation is not itself grounds to block the verdict, because
+    `runtime_consumption` never participates in composition-state
+    derivation except as a contradiction canary (step 3) — its absence of
+    evidence here is accepted, not silently treated as a fourth negative.
+    See `test_installation_absent_accepts_unknown_runtime_consumption` for
+    this exact case, named and reasoned about on its own."""
     if record.installation is DimensionValue.FALSE:
         return CompositionState.NOT_COMPOSED
     return None
