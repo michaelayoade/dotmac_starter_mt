@@ -403,7 +403,11 @@ REQUIRED_PAYLOAD_FIELDS: Final[tuple[str, ...]] = (
 #: Field names that only ever appear on a DERIVED result, never on an input
 #: payload. A payload carrying one of these is authoring a state instead of
 #: supplying dimensions, and is refused for that reason alone.
-_DERIVED_ONLY_FIELDS: Final[tuple[str, ...]] = ("state", "fully_composed")
+_DERIVED_ONLY_FIELDS: Final[tuple[str, ...]] = (
+    "state",
+    "fully_composed",
+    "migration_lineage_manifest_applies",
+)
 
 #: The literal legacy tag Academy's ``composed_distributions`` exporter used.
 #: Named explicitly (rather than folded into "anything not current") so the
@@ -1037,13 +1041,12 @@ def composition_record_from_payload(
     a caller that has not decided what packages root to derive against
     cannot compile a record at all.
 
-    A payload can never supply this applicability itself: only the fields
-    named in `REQUIRED_PAYLOAD_FIELDS` are ever read off `payload` below, so
-    a `migration_lineage_manifest_applies` key on the payload — however it
-    is spelled or valued — is silently never consulted. A product asserting
-    its own applicability would be a product authoring a derivation this
-    schema exists to prevent (the same principle as the `state`/
-    `fully_composed` refusal above, applied to one more derived quantity).
+    A payload can never supply this applicability itself:
+    `migration_lineage_manifest_applies` is a derived-only field and is
+    refused alongside `state`/`fully_composed`. Silently ignoring it would
+    accept an authority-shaped input while leaving a producer believing its
+    value mattered. A product asserting its own applicability would be
+    authoring a derivation this schema exists to prevent.
     """
     declared = payload.get("schema_version")
     if declared != CURRENT_SCHEMA_VERSION:

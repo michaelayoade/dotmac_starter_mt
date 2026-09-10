@@ -898,15 +898,13 @@ def test_stateful_module_payload_with_not_applicable_lineage_still_refused():
 
 
 def test_payload_cannot_supply_migration_lineage_manifest_applies():
-    """A payload carrying a `migration_lineage_manifest_applies` key must
-    get the DERIVED value, never the supplied one. Proven by supplying the
-    OPPOSITE of what the real manifest derives and showing it changes
-    nothing: `dotmac-document-rendering` derives `False` (lineage does not
-    apply); the payload below claims `True`. If the supplied value were
-    honoured, `migration_lineage: "not_applicable"` would become illegal
-    (applies=True requires TRUE/FALSE, refusing not_applicable) and this
-    would raise. It does not — the derived `False` governs, exactly as if
-    the bogus key were never there."""
+    """Applicability is Starter-derived and is not a payload input.
+
+    Supplying even the value opposite to the real manifest is refused at
+    ingestion. Ignoring the field would prevent it from changing today's
+    result, but would still accept an authority-shaped input and leave the
+    producer believing it participated in the decision.
+    """
     payload = {
         "schema_version": schema.CURRENT_SCHEMA_VERSION,
         "product": "starter",
@@ -918,13 +916,10 @@ def test_payload_cannot_supply_migration_lineage_manifest_applies():
         "runtime_consumption": "unknown",
         "migration_lineage_manifest_applies": True,  # opposite of derived False
     }
-    record = composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
-    assert record.migration_lineage_manifest_applies is False, (
-        "the record must carry the DERIVED applicability, not the payload's "
-        "supplied value"
-    )
-    assert record.migration_lineage is DimensionValue.NOT_APPLICABLE
-    assert derive_composition_state(record) == CompositionState.FULLY_COMPOSED
+    with pytest.raises(
+        IncompatibleSchemaVersion, match="migration_lineage_manifest_applies"
+    ):
+        composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
 
 
 def test_payload_ingestion_propagates_a_contradictory_manifest_refusal(
