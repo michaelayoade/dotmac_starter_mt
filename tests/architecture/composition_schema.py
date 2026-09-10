@@ -168,12 +168,17 @@ would have done — the exact defect this ordering fixes).
 ``NOT_COMPOSED`` is a derivation, not a second copy of the evidence
 ---------------------------------------------------------------------
 
-Ruled by Michael: ``NOT_COMPOSED`` deliberately covers TWO different
-situations —
+Ruled by Michael: ``NOT_COMPOSED`` deliberately covers several different
+situations, not one —
 
-* confirmed not installed, with no contradictory positive evidence; and
-* installed, but the applicable ``module_registration`` and
-  ``migration_lineage`` are both proven absent.
+* confirmed not installed, with no contradictory positive evidence;
+* installed, and both applicable dimensions (``module_registration`` and
+  ``migration_lineage``) are proven absent; and
+* installed and registration APPLIES but is proven absent, while migration
+  lineage does NOT apply at all (Ruling 1: a genuinely stateless
+  ``optional-module`` manifest, e.g. ``dotmac-document-rendering``, that
+  was never registered — see ``_step_registration_lineage_table``'s
+  ``not lineage_applies`` branch).
 
 There is no ``INSTALLED_ONLY`` (or any other) state to split them apart,
 and there will not be one: adding a member for every distinction the
@@ -494,9 +499,7 @@ class PackageClassification(str, Enum):
         registration applicability stays classification-only."""
         return self is PackageClassification.OPTIONAL_MODULE
 
-    def migration_lineage_applies(
-        self, manifest_applicability: bool | None = None
-    ) -> bool:
+    def migration_lineage_applies(self, manifest_applicability: bool = False) -> bool:
         """Whether `migration_lineage` is a real (non-NOT_APPLICABLE)
         dimension for this package kind.
 
@@ -506,22 +509,9 @@ class PackageClassification(str, Enum):
         those always return `False` here regardless of
         `manifest_applicability`, exactly as before.
 
-        `optional-module` is the one classification this ruling changes: it
-        no longer returns `True` unconditionally. When
-        `manifest_applicability` is `None` — no caller has read the
-        distribution's `ModuleManifest` yet, which is every call site that
-        predates this ruling and every existing construction in this test
-        module that never supplies
-        `CompositionRecord.migration_lineage_manifest_applies` — the
-        classification-only answer is preserved (`True`), so nothing built
-        before this ruling changes behaviour. Once a caller HAS read the
-        manifest (via `derive_migration_lineage_applicability_from_manifest`
-        below) and supplies its derived True/False, that value governs
-        instead: a genuinely stateless `optional-module` manifest (no
-        `short_code`/`migration_prefix`, e.g. `dotmac-document-rendering`)
-        correctly returns `False` — lineage does not apply to it — rather
-        than the pre-Ruling-1 unconditional `True` that made
-        `not_applicable` an illegal value for such a module."""
+        `optional-module` applicability is supplied by the one authoritative
+        ingestion boundary after it reads the manifest. It is never a
+        compatibility fallback chosen by a record author."""
         if self is not PackageClassification.OPTIONAL_MODULE:
             return False
         if manifest_applicability is None:
@@ -608,10 +598,33 @@ def _is_declared_empty(value: ast.expr) -> bool:
     string/`None` constant, or an empty tuple/list/set literal. A `Name`,
     `Call`, or any other expression (e.g. `tables=TENANT_TABLES`, the shape
     every real stateful manifest in this tree actually uses) cannot be
-    statically evaluated by AST alone and is treated as declared/non-empty —
-    the conservative direction, since guessing it empty could wrongly
-    manufacture outcome 3's `tables` contradiction for a real, coherent
-    manifest."""
+    statically evaluated by AST alone and is treated as declared/non-empty.
+
+    This single conservative default — "cannot prove empty, so treat as
+    present" — has a DIFFERENT justification at each of its two call sites
+    in `derive_migration_lineage_applicability_from_manifest`, and both
+    justifications point the same direction (toward refusal over a silent
+    "does not apply"), which is why one shared function is still correct
+    even though the two callers' risks are not the same:
+
+    * For `_LINEAGE_IDENTITY_KEYWORDS` (`short_code`/`migration_prefix`):
+      guessing a `Name`-valued keyword empty could wrongly make a real,
+      coherent stateful manifest look like it declares no identity — either
+      manufacturing a spurious identity-mismatch contradiction (outcome 3),
+      or, if both looked empty, silently misclassifying a real stateful
+      module as stateless (outcome 2).
+    * For `_LINEAGE_SIGNAL_KEYWORDS` (`tables`/`platform_tables`/
+      `migration_branch`): the risk runs the OTHER way. The outcome-3
+      contradiction only fires when both identity keywords are ALREADY
+      absent, so treating a `Name`-valued `tables=TENANT_TABLES` as
+      non-empty is what CORRECTLY surfaces that contradiction rather than
+      suppressing it — guessing it empty here would silently let a module
+      that truly owns tables through as outcome 2 ("does not apply"),
+      hiding a real declaration behind an unevaluated reference. Treating
+      it as present is not a source of false contradictions at this call
+      site; it is what makes the contradiction check see a real
+      declaration at all.
+    """
     if isinstance(value, ast.Constant):
         return value.value in ("", None)
     if isinstance(value, ast.Tuple | ast.List | ast.Set):

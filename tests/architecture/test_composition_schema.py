@@ -57,6 +57,7 @@ from tests.architecture.composition_schema import (
     derive_composition_state,
     derive_distribution_universe,
     derive_migration_lineage_applicability_from_manifest,
+    measure_starter_boot_assembly_consumption,
 )
 
 TRUE = DimensionValue.TRUE
@@ -68,6 +69,11 @@ NA = DimensionValue.NOT_APPLICABLE
 #: tests measure against. Computed relative to this test file, never a
 #: hard-coded absolute path.
 REPO_PACKAGES_ROOT = Path(__file__).resolve().parents[2] / "packages"
+
+#: This repository's own root (one level up from `REPO_PACKAGES_ROOT`) — the
+#: real tree `measure_starter_boot_assembly_consumption` reads `app/main.py`,
+#: `app/assembly.py`, and the kernel's `app_factory.py` against.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _optional_module_record(
@@ -513,6 +519,49 @@ def test_module_manifest_registration_positive_control_starter_own_assembly():
     assert evidence.as_dimension_value() == DimensionValue.TRUE
 
 
+def test_measure_starter_boot_assembly_consumption_against_this_repository():
+    """The positive control above (`starter_assembly_call_site`) is a
+    hand-typed `AssemblyConsumptionTrace` — the module docstring's own
+    section on the registration boundary is explicit that this is exactly
+    as unverifiable, by construction, as the hand-typed ERP/Sub negative
+    controls: nothing stops an author from setting either boolean field to
+    whatever answer they want. What makes the STARTER control different, and
+    what the module docstring repeatedly claims (`composition_schema.py`'s
+    "The registration boundary" section: "the one input that proves it can
+    also say yes," "re-derived by executing
+    `measure_starter_boot_assembly_consumption` against this repository's
+    own tree"), is that this repository's own tree is available to re-derive
+    it FROM, by execution, rather than trust an assertion. This test is that
+    re-derivation: it actually calls
+    `measure_starter_boot_assembly_consumption` against `REPO_ROOT` — this
+    repository's real `app/main.py` importing `app.assembly`, `app/main.py`
+    calling `create_app(assembly)`, and the kernel's `app_factory.py`
+    containing `ModuleRegistry(spec.modules)` — and asserts the SAME
+    `BOOT_PATH_CONSUMED` classification the hand-typed control above claims.
+    Without this test, the module docstring's claim of re-derivation was
+    prose citing an execution that never happened."""
+    trace = measure_starter_boot_assembly_consumption(REPO_ROOT)
+    assert trace.imported_by_boot_entry_point is True
+    assert trace.consumed_by_a_real_effect is True
+    assert trace.classify() is AssemblyConsumptionKind.BOOT_PATH_CONSUMED
+
+
+def test_deleting_the_boot_entry_point_makes_the_trace_indeterminate(tmp_path: Path):
+    """Named exactly as the module docstring cites it (`composition_schema.py`
+    at the `AssemblyConsumptionTrace` docstring and at
+    `measure_starter_boot_assembly_consumption`'s own docstring) — until this
+    test, that name appeared only inside those two docstrings and nowhere
+    executable. Proves the function is a real read, not a fixed answer: a
+    tree with no `app/main.py` at all (an empty `tmp_path`, standing in for
+    "the boot entry point was deleted") must classify as `INDETERMINATE`,
+    never guessing `BOOT_PATH_CONSUMED` or `RELEASE_METADATA_ONLY` from an
+    absent file."""
+    trace = measure_starter_boot_assembly_consumption(tmp_path)
+    assert trace.imported_by_boot_entry_point is None
+    assert trace.consumed_by_a_real_effect is None
+    assert trace.classify() is AssemblyConsumptionKind.INDETERMINATE
+
+
 def test_module_manifest_tuple_not_reaching_boot_path_is_refused_erp_negative_control():
     """Negative control — ERP's `app/product_assembly.py`. Its
     `COMPOSED_MODULE_MANIFESTS` tuple passed as `modules=...` into
@@ -954,6 +1003,55 @@ def test_payload_ingestion_propagates_a_contradictory_manifest_refusal(
     }
     with pytest.raises(ManifestDeclarationError, match="dotmac-contradictory-ingest"):
         composition_record_from_payload(payload, tmp_path)
+
+
+def test_universal_facility_payload_is_accepted_and_not_applicable_through_ingestion():
+    """Zero ingestion coverage for any non-`optional-module` classification
+    let a real defect through unnoticed: every payload elsewhere in this
+    file declares `"classification": "optional-module"`, so the guard in
+    `composition_record_from_payload` that SKIPS the manifest read for
+    platform-baseline distributions (`if classification is
+    PackageClassification.OPTIONAL_MODULE`) was never exercised — invert or
+    delete it and every Academy record (`dotmac-kernel` as
+    `universal-facility`, `dotmac-ui` as `presentation-foundation`, which
+    together are Academy's entire composed set) would raise
+    `ManifestDeclarationError` (there is no `manifest.py` under
+    `packages/dotmac-kernel/` for a universal-facility distribution to
+    read), and no test would fail. This ingests a real `dotmac-kernel`
+    payload with both module dimensions `not_applicable` and asserts it is
+    ACCEPTED and derives `not_applicable`, never touching the manifest
+    reader at all."""
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "academy",
+        "distribution": "dotmac-kernel",
+        "classification": "universal-facility",
+        "installation": "true",
+        "module_registration": "not_applicable",
+        "migration_lineage": "not_applicable",
+        "runtime_consumption": "unknown",
+    }
+    record = composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    assert derive_composition_state(record) == CompositionState.NOT_APPLICABLE
+
+
+def test_presentation_foundation_payload_is_accepted_and_not_applicable():
+    """Companion to the `universal-facility` ingestion test above —
+    together `dotmac-kernel` and `dotmac-ui` are the whole of one product's
+    (Academy's) composed-distribution record, so both platform-baseline
+    classifications need direct ingestion coverage, not just one."""
+    payload = {
+        "schema_version": schema.CURRENT_SCHEMA_VERSION,
+        "product": "academy",
+        "distribution": "dotmac-ui",
+        "classification": "presentation-foundation",
+        "installation": "true",
+        "module_registration": "not_applicable",
+        "migration_lineage": "not_applicable",
+        "runtime_consumption": "unknown",
+    }
+    record = composition_record_from_payload(payload, REPO_PACKAGES_ROOT)
+    assert derive_composition_state(record) == CompositionState.NOT_APPLICABLE
 
 
 # ---------------------------------------------------------------------------
@@ -1605,29 +1703,93 @@ def test_a_real_stateful_manifest_declares_lineage_applies_by_ast():
     assert result is True
 
 
+def _docstring_constant_ids(tree: ast.AST) -> set[int]:
+    """Identity set of every string-literal AST node that IS a docstring
+    (the first statement of a module/function/class body). Used to exempt
+    legitimate documentation/prose — e.g. this module's own explanatory
+    mentions of `dotmac-document-rendering` as an EXAMPLE — from the
+    forbidden-name sweep below, while still catching a real hard-coded
+    lookup anywhere else in the module's executable code, including inside
+    a helper the narrow, single-function version of this check never read
+    (e.g. `_is_declared_empty`)."""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        is_scope_node = isinstance(
+            node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+        )
+        if is_scope_node:
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                ids.add(id(body[0].value))
+    return ids
+
+
+def _source_names_any_forbidden_string(source: str, forbidden_names) -> str | None:
+    """Returns the first forbidden name found in a non-docstring string
+    literal anywhere in `source`'s AST, or `None` if none is found. AST-
+    based, not a raw substring scan of the file text, so legitimate prose
+    is exempt (see `_docstring_constant_ids`) — only executable string
+    literals (e.g. a hard-coded lookup tuple/dict key/membership test) can
+    trip it."""
+    tree = ast.parse(textwrap.dedent(source))
+    exempt = _docstring_constant_ids(tree)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in exempt
+        ):
+            for name in forbidden_names:
+                if name in node.value:
+                    return name
+    return None
+
+
 def test_no_distribution_name_or_hard_coded_count_governs_lineage_applicability():
     """Structural proof that the derivation is keyword-structure-driven, not
-    name- or count-driven: `derive_migration_lineage_applicability_from_
-    manifest`'s own source contains no distribution name (real or
-    synthetic), and its EXECUTABLE body (its docstring's prose is exempt —
-    "Ruling 1" and "outcome 3" are cross-references, not magic numbers)
-    contains no numeric literal at all, which rules out a hard-coded count
-    of "how many stateless modules exist" the way `test_universe_size_is_
-    never_hard_coded_anywhere_in_this_module` rules it out for the catalogue
-    universe elsewhere in this module."""
-    source = inspect.getsource(derive_migration_lineage_applicability_from_manifest)
-    for forbidden_name in (
+    name- or count-driven.
+
+    The name check is widened to the WHOLE module (`inspect.getsource
+    (schema)`) — matching `test_universe_size_is_never_hard_coded_anywhere_
+    in_this_module`'s scope for the catalogue universe elsewhere in this
+    module — because the earlier, single-function version
+    (`inspect.getsource(derive_migration_lineage_applicability_from_
+    manifest)` alone) was satisfiable by a module-level
+    `_STATELESS = ("dotmac-document-rendering",)` tuple, a count constant, a
+    dict lookup, or by moving any of those into `_is_declared_empty`, which
+    the narrow scan never read.
+
+    Carries a sensitivity PLANT — the only structural test in this file that
+    previously had none: a synthetic name-driven implementation of exactly
+    that shape IS shown to be rejected by the same detector this test uses
+    on the real module, proving the detector can name its own violation
+    rather than merely never having encountered one. A near-miss (the
+    identical shape, minus the hard-coded name) is shown NOT flagged,
+    proving the detector isn't simply refusing everything."""
+    forbidden_names = (
         "document-rendering",
         "document_rendering",
         "dotmac-billing",
         "dotmac_billing",
-    ):
-        assert forbidden_name not in source, (
-            f"derive_migration_lineage_applicability_from_manifest's body "
-            f"names {forbidden_name!r} — applicability must be derived from "
-            "manifest structure, never a hard-coded distribution name"
-        )
+    )
 
+    hit = _source_names_any_forbidden_string(inspect.getsource(schema), forbidden_names)
+    assert hit is None, (
+        f"composition_schema.py's executable code contains forbidden name "
+        f"{hit!r} outside a docstring — applicability must be derived from "
+        "manifest structure, never a hard-coded distribution name"
+    )
+
+    # Numeric-literal count check stays scoped to the one function whose job
+    # is deciding applicability — a whole-module numeric-literal ban is not
+    # meaningful (the module legitimately contains many numbers, e.g.
+    # `_is_declared_empty`'s own `len(value.elts) == 0`).
+    source = inspect.getsource(derive_migration_lineage_applicability_from_manifest)
     tree = ast.parse(textwrap.dedent(source))
     func_node = tree.body[0]
     assert isinstance(func_node, ast.FunctionDef)
@@ -1646,6 +1808,31 @@ def test_no_distribution_name_or_hard_coded_count_governs_lineage_applicability(
                     f"executable body contains numeric literal {node.value!r} "
                     "— no count of stateless modules may be encoded"
                 )
+
+    # Sensitivity PLANT: a synthetic name-driven implementation of exactly
+    # the shape the widened scan above exists to catch — a module-level
+    # lookup tuple naming the real distribution — is shown to be rejected.
+    planted_violation_source = (
+        "def _fake_lineage_applicability(distribution):\n"
+        '    STATELESS_DISTRIBUTIONS = ("dotmac-document-rendering",)\n'
+        "    return distribution not in STATELESS_DISTRIBUTIONS\n"
+    )
+    planted_hit = _source_names_any_forbidden_string(
+        planted_violation_source, forbidden_names
+    )
+    assert planted_hit == "document-rendering", (
+        "the forbidden-name detector failed to catch its own named "
+        "violation — a name-driven implementation must be rejected"
+    )
+
+    # NEAR MISS half: the identical shape, minus the hard-coded name (a
+    # keyword-structure-driven check, the real shape this module ships), is
+    # not flagged — proving the detector distinguishes the two rather than
+    # refusing everything indiscriminately.
+    near_miss_source = (
+        "def _fake_lineage_applicability(has_identity):\n    return has_identity\n"
+    )
+    assert _source_names_any_forbidden_string(near_miss_source, forbidden_names) is None
 
 
 def test_manifest_with_short_code_but_no_migration_prefix_is_refused_by_name(
