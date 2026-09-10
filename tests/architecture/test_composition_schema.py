@@ -4,6 +4,23 @@ Every test proves a specific ruled property from the brief; see each
 docstring for which one. Static analysis only — no pytest execution here,
 just as the constraints require; these are written to be run by CI, not by
 this session.
+
+Non-authoritative fixtures — read this before citing anything from the ERP
+and Sub sections below as evidence about those products. The ERP call site
+(``dotmac_erp/app/product_assembly.py``) and the Sub call site
+(``dotmac_sub/app/services/inbox_channels.py:230``) that the registration-
+boundary tests below encode as literal ``RegistrationCallSite``/
+``AssemblyConsumptionTrace`` field values are a ONE-TIME, DATED manual
+reading of those two separate repositories' trees, recorded here as
+hand-typed literals. They are NOT re-derived by execution — this repository's
+own test run has no access to either ``dotmac_erp`` or ``dotmac_sub`` — and
+they are NOT evidence about ERP's or Sub's current state; they are regression
+fixtures for THIS module's own classifier logic (`classify_registration_
+call_site`), catching a regression in how this module discriminates
+"release metadata" from "boot-path consumption," nothing more. A change in
+either upstream repository can silently make these literals stale without
+this test suite ever knowing, and nothing here or in `composition_schema.py`
+may be read as a current claim about ERP's or Sub's real registration state.
 """
 
 from __future__ import annotations
@@ -26,6 +43,7 @@ from tests.architecture.composition_schema import (
     DimensionalIncoherence,
     DimensionValue,
     IncompatibleSchemaVersion,
+    ManifestDeclarationError,
     PackageClassification,
     PackageDossier,
     RegistrationCallSite,
@@ -38,6 +56,7 @@ from tests.architecture.composition_schema import (
     composition_record_from_payload,
     derive_composition_state,
     derive_distribution_universe,
+    derive_migration_lineage_applicability_from_manifest,
 )
 
 TRUE = DimensionValue.TRUE
@@ -402,6 +421,7 @@ def test_validate_coherence_step_refuses_a_record_that_bypassed_construction():
     object.__setattr__(broken, "module_registration", TRUE)
     object.__setattr__(broken, "migration_lineage", NA)
     object.__setattr__(broken, "runtime_consumption", UNKNOWN)
+    object.__setattr__(broken, "migration_lineage_manifest_applies", None)
 
     with pytest.raises(DimensionalIncoherence):
         derive_composition_state(broken)
@@ -1411,3 +1431,344 @@ def test_package_dossier_holds_only_distribution_and_classification():
     (a different owner) is where the rest of that file's meaning lives."""
     fields = set(PackageDossier.__dataclass_fields__)
     assert fields == {"distribution", "classification"}
+
+
+# ---------------------------------------------------------------------------
+# 10. Ruling 1 — migration-lineage applicability consults the validated
+#     manifest contract, alongside classification. Read by AST, never by
+#     name/comment/count.
+# ---------------------------------------------------------------------------
+
+
+def test_document_rendering_real_manifest_declares_no_lineage_by_ast():
+    """The live shape driving this ruling: `dotmac-document-rendering`
+    (classification `optional-module`) declares only `code`, `version`,
+    `core` in its real `ModuleManifest(...)` call — no `short_code`, no
+    `migration_prefix`, no `tables`, no `platform_tables`, no
+    `migration_branch`. Its own source even carries the comment
+    "Deliberately no short_code, migration prefix, tables or plane
+    declaration" — a substring search for `short_code` would match that
+    COMMENT and wrongly conclude the keyword is present; this asserts the
+    AST-derived answer is the honest one: lineage does not apply."""
+    result = derive_migration_lineage_applicability_from_manifest(
+        REPO_PACKAGES_ROOT, "dotmac-document-rendering"
+    )
+    assert result is False
+
+
+def test_a_real_stateful_manifest_declares_lineage_applies_by_ast():
+    """Near-miss/positive companion to the test above, against a real,
+    ordinary stateful `optional-module` manifest (`dotmac-billing`): both
+    `short_code` and `migration_prefix` are declared, so lineage applies."""
+    result = derive_migration_lineage_applicability_from_manifest(
+        REPO_PACKAGES_ROOT, "dotmac-billing"
+    )
+    assert result is True
+
+
+def test_no_distribution_name_or_hard_coded_count_governs_lineage_applicability():
+    """Structural proof that the derivation is keyword-structure-driven, not
+    name- or count-driven: `derive_migration_lineage_applicability_from_
+    manifest`'s own source contains no distribution name (real or
+    synthetic), and its EXECUTABLE body (its docstring's prose is exempt —
+    "Ruling 1" and "outcome 3" are cross-references, not magic numbers)
+    contains no numeric literal at all, which rules out a hard-coded count
+    of "how many stateless modules exist" the way `test_universe_size_is_
+    never_hard_coded_anywhere_in_this_module` rules it out for the catalogue
+    universe elsewhere in this module."""
+    source = inspect.getsource(derive_migration_lineage_applicability_from_manifest)
+    for forbidden_name in (
+        "document-rendering",
+        "document_rendering",
+        "dotmac-billing",
+        "dotmac_billing",
+    ):
+        assert forbidden_name not in source, (
+            f"derive_migration_lineage_applicability_from_manifest's body "
+            f"names {forbidden_name!r} — applicability must be derived from "
+            "manifest structure, never a hard-coded distribution name"
+        )
+
+    tree = ast.parse(textwrap.dedent(source))
+    func_node = tree.body[0]
+    assert isinstance(func_node, ast.FunctionDef)
+    body_without_docstring = (
+        func_node.body[1:] if ast.get_docstring(func_node) else (func_node.body)
+    )
+    for statement in body_without_docstring:
+        for node in ast.walk(statement):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, int | float)
+                and not isinstance(node.value, bool)
+            ):
+                raise AssertionError(
+                    "derive_migration_lineage_applicability_from_manifest's "
+                    f"executable body contains numeric literal {node.value!r} "
+                    "— no count of stateless modules may be encoded"
+                )
+
+
+def test_manifest_with_short_code_but_no_migration_prefix_is_refused_by_name(
+    tmp_path: Path,
+):
+    """Outcome 3, sensitivity PLANT: a manifest that parses cleanly and is
+    genuinely internally contradictory — `short_code` declared with no
+    `migration_prefix` — must be refused BY NAME
+    (`ManifestDeclarationError`), not silently resolved to either
+    applicability. This is the harder, more realistic case the brief calls
+    out: an absent/unparseable file is the easy path and the less likely
+    one to occur in practice."""
+    package_dir = tmp_path / "dotmac-half-declared"
+    src_dir = package_dir / "src" / "dotmac_half_declared"
+    src_dir.mkdir(parents=True)
+    (src_dir / "manifest.py").write_text(
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        "module = ModuleManifest(\n"
+        '    code="half_declared",\n'
+        '    version="0.1.0a1",\n'
+        "    core=False,\n"
+        '    short_code="half",\n'
+        ")\n"
+    )
+    with pytest.raises(ManifestDeclarationError, match="dotmac-half-declared"):
+        derive_migration_lineage_applicability_from_manifest(
+            tmp_path, "dotmac-half-declared"
+        )
+
+
+def test_manifest_declaring_tables_but_no_identity_is_refused_by_name(
+    tmp_path: Path,
+):
+    """Outcome 3, second PLANT: a "stateless" pair (no `short_code`, no
+    `migration_prefix`) contradicted by a declared `tables` keyword — the
+    manifest parses fine, but claims to own lineage-bearing state while
+    naming no migration identity for it. Refused by name, not defaulted."""
+    package_dir = tmp_path / "dotmac-contradictory"
+    src_dir = package_dir / "src" / "dotmac_contradictory"
+    src_dir.mkdir(parents=True)
+    (src_dir / "manifest.py").write_text(
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        "module = ModuleManifest(\n"
+        '    code="contradictory",\n'
+        '    version="0.1.0a1",\n'
+        "    core=False,\n"
+        '    tables=("some_table",),\n'
+        ")\n"
+    )
+    with pytest.raises(ManifestDeclarationError, match="dotmac-contradictory"):
+        derive_migration_lineage_applicability_from_manifest(
+            tmp_path, "dotmac-contradictory"
+        )
+
+
+def test_coherent_stateful_and_stateless_manifests_are_not_refused_near_miss(
+    tmp_path: Path,
+):
+    """Sensitivity NEAR-MISS half for both plants above: the identical
+    shapes, minus the contradiction, are accepted — proving the refusals
+    above are triggered by the contradiction specifically, not by some
+    unrelated property of the fixture (e.g. the temp directory itself, or
+    the presence of any keyword at all)."""
+    coherent_stateful = tmp_path / "dotmac-coherent-stateful"
+    src_a = coherent_stateful / "src" / "dotmac_coherent_stateful"
+    src_a.mkdir(parents=True)
+    (src_a / "manifest.py").write_text(
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        "module = ModuleManifest(\n"
+        '    code="coherent_stateful",\n'
+        '    version="0.1.0a1",\n'
+        "    core=False,\n"
+        '    short_code="coh",\n'
+        '    migration_prefix="co",\n'
+        '    tables=("some_table",),\n'
+        ")\n"
+    )
+    assert (
+        derive_migration_lineage_applicability_from_manifest(
+            tmp_path, "dotmac-coherent-stateful"
+        )
+        is True
+    )
+
+    coherent_stateless = tmp_path / "dotmac-coherent-stateless"
+    src_b = coherent_stateless / "src" / "dotmac_coherent_stateless"
+    src_b.mkdir(parents=True)
+    (src_b / "manifest.py").write_text(
+        "from dotmac_kernel.modules import ModuleManifest\n"
+        "module = ModuleManifest(\n"
+        '    code="coherent_stateless",\n'
+        '    version="0.1.0a1",\n'
+        "    core=False,\n"
+        ")\n"
+    )
+    assert (
+        derive_migration_lineage_applicability_from_manifest(
+            tmp_path, "dotmac-coherent-stateless"
+        )
+        is False
+    )
+
+
+def test_absent_manifest_file_is_refused_by_name(tmp_path: Path):
+    """The easy outcome-3 case — no manifest.py at all — still refused by
+    name rather than defaulted. Named explicitly per the brief: this is the
+    LEAST likely real-world case, not the only one exercised."""
+    with pytest.raises(ManifestDeclarationError, match="dotmac-missing"):
+        derive_migration_lineage_applicability_from_manifest(tmp_path, "dotmac-missing")
+
+
+def test_a_registered_stateless_optional_module_derives_fully_composed():
+    """Ruling 1's load-bearing consequence: `_step_registration_lineage_
+    table` must READ applicability rather than infer "lineage absent" from
+    a `False` dimension value. `dotmac-document-rendering`, registered
+    against a consumed assembly, with `migration_lineage` correctly recorded
+    `not_applicable` (its manifest declares no lineage at all — see the AST
+    test above) must derive `FULLY_COMPOSED`, never `INVALID` — `INVALID` is
+    reserved for a module that genuinely owns lineage and does not have it,
+    not for a module that never had a lineage question to begin with."""
+    registered_stateless = CompositionRecord(
+        product="starter",
+        distribution="dotmac-document-rendering",
+        classification=PackageClassification.OPTIONAL_MODULE,
+        installation=TRUE,
+        module_registration=TRUE,
+        migration_lineage=NA,
+        runtime_consumption=UNKNOWN,
+        migration_lineage_manifest_applies=False,
+    )
+    state = derive_composition_state(registered_stateless)
+    assert state == CompositionState.FULLY_COMPOSED
+
+
+def test_an_unregistered_stateless_optional_module_derives_not_composed():
+    """Companion near-miss: the identical stateless-lineage shape, but NOT
+    registered, must still derive `NOT_COMPOSED` — inapplicable lineage
+    does not manufacture composition on its own; registration still has to
+    hold."""
+    unregistered_stateless = CompositionRecord(
+        product="starter",
+        distribution="dotmac-document-rendering",
+        classification=PackageClassification.OPTIONAL_MODULE,
+        installation=TRUE,
+        module_registration=FALSE,
+        migration_lineage=NA,
+        runtime_consumption=UNKNOWN,
+        migration_lineage_manifest_applies=False,
+    )
+    state = derive_composition_state(unregistered_stateless)
+    assert state == CompositionState.NOT_COMPOSED
+
+
+def test_stateless_optional_module_cannot_record_lineage_true_or_false():
+    """`_check_applicability` must refuse the OTHER direction too once
+    `migration_lineage_manifest_applies=False`: recording `migration_lineage
+    = true` (or `false`) for a distribution whose manifest says lineage does
+    not apply is exactly as wrong as the platform-baseline case — the
+    dimension isn't a real question for this distribution, so any value
+    other than `not_applicable` is refused."""
+    with pytest.raises(ValueError, match="not_applicable"):
+        CompositionRecord(
+            product="starter",
+            distribution="dotmac-document-rendering",
+            classification=PackageClassification.OPTIONAL_MODULE,
+            installation=TRUE,
+            module_registration=TRUE,
+            migration_lineage=TRUE,
+            runtime_consumption=UNKNOWN,
+            migration_lineage_manifest_applies=False,
+        )
+
+
+def test_default_manifest_applicability_preserves_pre_ruling_behavior():
+    """Every construction that predates Ruling 1 (never supplies
+    `migration_lineage_manifest_applies`) must behave exactly as before:
+    `migration_lineage` still applies unconditionally for `optional-module`,
+    and `not_applicable` is still refused for it. This is the back-
+    compatibility guarantee the `None` default exists to provide."""
+    with pytest.raises(ValueError, match="not_applicable"):
+        CompositionRecord(
+            product="erp",
+            distribution="dotmac-example",
+            classification=PackageClassification.OPTIONAL_MODULE,
+            installation=TRUE,
+            module_registration=TRUE,
+            migration_lineage=NA,
+            runtime_consumption=UNKNOWN,
+            # migration_lineage_manifest_applies deliberately omitted (None)
+        )
+
+
+# ---------------------------------------------------------------------------
+# 11. Ruling 2 — `installation = FALSE` may not clear on an unknown. Already
+#     the shipped behaviour (verified directly above by execution against
+#     the pinned pipeline); what this section adds is the PIN — a named test
+#     asserting it is a deliberate choice, with a real sensitivity plant
+#     showing the wrong answer a naive reordering would have produced.
+# ---------------------------------------------------------------------------
+
+
+def test_installation_false_with_applicable_unknown_is_evidence_incomplete():
+    """The ruled property, stated directly: `installation = false` together
+    with an APPLICABLE `module_registration` (or `migration_lineage`) left
+    `unknown` derives `evidence_incomplete`, never `not_composed`. This is
+    already guaranteed by the shipped pipeline order (step 2, the unknown
+    refusal, runs strictly before step 4, the installation-absent
+    derivation) — this test pins it as a named, deliberate property rather
+    than a by-product nobody asserted directly."""
+    record = _optional_module_record(
+        installation=FALSE, module_registration=UNKNOWN, migration_lineage=FALSE
+    )
+    assert derive_composition_state(record) == CompositionState.EVIDENCE_INCOMPLETE
+
+    record_lineage_unknown = _optional_module_record(
+        installation=FALSE, module_registration=FALSE, migration_lineage=UNKNOWN
+    )
+    assert (
+        derive_composition_state(record_lineage_unknown)
+        == CompositionState.EVIDENCE_INCOMPLETE
+    )
+
+
+def test_reordered_pipeline_clearing_installation_false_first_gives_wrong_answer():
+    """Sensitivity proof for the Ruling 2 pin above, in the same style as
+    `test_pipeline_ordering_is_pinned_not_incidental`: build a pipeline
+    variant that moves `_step_installation_absent` (step 4) AHEAD of
+    `_step_refuse_required_unknown` (step 2) — exactly the future mistake
+    the pin exists to prevent, a reader short-circuiting on
+    `installation = false` before checking for unmeasured applicable
+    dimensions. Run the SAME record used above through it and show it
+    reaches `not_composed` — the WRONG answer, since `module_registration`
+    was never actually measured. An assertion that the shipped pipeline
+    returns `evidence_incomplete` would not be this proof; this asserts the
+    REORDERED pipeline's own wrong output."""
+    record = _optional_module_record(
+        installation=FALSE, module_registration=UNKNOWN, migration_lineage=FALSE
+    )
+
+    # Confirm the shipped pipeline's correct answer first, by execution.
+    assert derive_composition_state(record) == CompositionState.EVIDENCE_INCOMPLETE
+
+    reordered_steps = (
+        schema._step_validate_coherence,
+        schema._step_installation_absent,  # moved ahead of the unknown refusal
+        schema._step_refuse_required_unknown,
+        schema._step_refuse_contradictions,
+        schema._step_not_applicable,
+        schema._step_registration_lineage_table,
+    )
+    assert set(reordered_steps) == set(schema._DERIVATION_PIPELINE)
+    assert reordered_steps != schema._DERIVATION_PIPELINE
+
+    reordered_result = None
+    for step in reordered_steps:
+        reordered_result = step(record)
+        if reordered_result is not None:
+            break
+
+    assert reordered_result == CompositionState.NOT_COMPOSED, (
+        "the reordered pipeline wrongly clears installation=false on an "
+        "unmeasured applicable dimension instead of refusing it as "
+        "evidence_incomplete — proving the shipped order, not just its "
+        "outcome, is what the Ruling 2 pin protects"
+    )

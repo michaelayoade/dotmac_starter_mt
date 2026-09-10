@@ -310,7 +310,12 @@ present. The positive control is re-derived by executing
 own tree; the two negative controls are a one-time, dated manual reading of
 ERP's and Sub's files, recorded as literals — Starter's CI has no access to
 those repositories, so they are not, and cannot be, re-verified by execution
-from here. All three are exercised in ``test_composition_schema.py``.
+from here. All three are exercised in ``test_composition_schema.py``. Be
+precise about what the ERP and Sub literals are for: they are non-
+authoritative regression fixtures that pin THIS module's own classifier
+logic against a snapshot someone once read by hand — never product evidence
+about ERP's or Sub's current registration state, and never a re-derivation
+of it. Nothing in this module or its tests may cite them as such.
 
 The catalogue universe
 ------------------------
@@ -364,6 +369,7 @@ of a violation as a field).
 
 from __future__ import annotations
 
+import ast
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -480,14 +486,206 @@ class PackageClassification(str, Enum):
     def module_registration_applies(self) -> bool:
         """Whether `module_registration` is a real (non-NOT_APPLICABLE)
         dimension for this package kind. Derived from classification alone —
-        never from what any one product happens to do."""
+        never from what any one product happens to do. Unchanged by Ruling 1:
+        registration applicability stays classification-only."""
         return self is PackageClassification.OPTIONAL_MODULE
 
-    @property
-    def migration_lineage_applies(self) -> bool:
+    def migration_lineage_applies(
+        self, manifest_applicability: bool | None = None
+    ) -> bool:
         """Whether `migration_lineage` is a real (non-NOT_APPLICABLE)
-        dimension for this package kind. Derived from classification alone."""
-        return self is PackageClassification.OPTIONAL_MODULE
+        dimension for this package kind.
+
+        Ruling 1: classification alone still decides for every platform-
+        baseline kind (`universal-facility`, `presentation-foundation`,
+        `stateless-protocol-adapter`, `stateless-contract-catalogue`) —
+        those always return `False` here regardless of
+        `manifest_applicability`, exactly as before.
+
+        `optional-module` is the one classification this ruling changes: it
+        no longer returns `True` unconditionally. When
+        `manifest_applicability` is `None` — no caller has read the
+        distribution's `ModuleManifest` yet, which is every call site that
+        predates this ruling and every existing construction in this test
+        module that never supplies
+        `CompositionRecord.migration_lineage_manifest_applies` — the
+        classification-only answer is preserved (`True`), so nothing built
+        before this ruling changes behaviour. Once a caller HAS read the
+        manifest (via `derive_migration_lineage_applicability_from_manifest`
+        below) and supplies its derived True/False, that value governs
+        instead: a genuinely stateless `optional-module` manifest (no
+        `short_code`/`migration_prefix`, e.g. `dotmac-document-rendering`)
+        correctly returns `False` — lineage does not apply to it — rather
+        than the pre-Ruling-1 unconditional `True` that made
+        `not_applicable` an illegal value for such a module."""
+        if self is not PackageClassification.OPTIONAL_MODULE:
+            return False
+        if manifest_applicability is None:
+            return True
+        return manifest_applicability
+
+
+# ---------------------------------------------------------------------------
+# Manifest-derived migration-lineage applicability (Ruling 1).
+#
+# Read by AST — never by text scan, grep, or substring search. A substring
+# search for "short_code" matches
+# `packages/dotmac-document-rendering/src/dotmac_document_rendering/
+# manifest.py`'s own comment "Deliberately no short_code, migration prefix,
+# tables or plane declaration" and returns the opposite of the truth; this
+# module parses the `ModuleManifest(...)` call's keyword arguments instead.
+#
+# Exactly three outcomes, decided in `derive_migration_lineage_applicability_
+# from_manifest`:
+#
+# 1. `short_code` AND `migration_prefix` both declared (present, non-empty)
+#    -> lineage applies.
+# 2. Both absent, AND no `tables`, no `platform_tables`, and no
+#    `migration_branch` declared -> lineage does not apply.
+# 3. Everything else (one present without the other; a stateless pair
+#    contradicted by a declared `tables`/`platform_tables`/`migration_branch`;
+#    or a manifest that is malformed, unreadable, absent, or has no
+#    `ModuleManifest(...)` call at all) -> refused, by name
+#    (`ManifestDeclarationError`), never defaulted to either applicability.
+# ---------------------------------------------------------------------------
+
+
+class ManifestDeclarationError(ValueError):
+    """A distribution's `packages/<dist>/src/<import_pkg>/manifest.py`
+    cannot be read, or its `ModuleManifest(...)` keyword arguments are
+    internally contradictory about whether the distribution owns migration
+    lineage. Raised by name, identifying the distribution and exactly what
+    was contradictory — never silently resolved to `True` or `False`
+    (Ruling 1, outcome 3)."""
+
+
+#: The two keywords whose joint, non-empty presence is the ONLY thing that
+#: makes migration lineage apply (outcome 1).
+_LINEAGE_IDENTITY_KEYWORDS: Final[tuple[str, str]] = ("short_code", "migration_prefix")
+
+#: Keywords whose declared (non-empty) presence, alongside an absent
+#: `_LINEAGE_IDENTITY_KEYWORDS` pair, is a contradiction (outcome 3) rather
+#: than a genuinely stateless module (outcome 2) — a module cannot own
+#: tables, platform tables, or a migration branch without the identity that
+#: names its migration lineage.
+_LINEAGE_SIGNAL_KEYWORDS: Final[tuple[str, ...]] = (
+    "tables",
+    "platform_tables",
+    "migration_branch",
+)
+
+
+def _manifest_source_path(packages_root: Path, distribution: str) -> Path:
+    """`packages/<distribution>/src/<import_pkg>/manifest.py`, where
+    `<import_pkg>` is `distribution` with `-` replaced by `_` — the naming
+    convention every real manifest in this tree follows (verified directly
+    against all 80 `packages/*/src/*/manifest.py` files at the time of this
+    ruling: zero mismatches)."""
+    import_package = distribution.replace("-", "_")
+    return packages_root / distribution / "src" / import_package / "manifest.py"
+
+
+def _find_module_manifest_call(tree: ast.AST) -> ast.Call | None:
+    """The first `ModuleManifest(...)` call anywhere in the parsed module —
+    every real manifest.py assigns exactly one to a module-level `module`
+    name, but this walks the whole tree rather than assuming that shape."""
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "ModuleManifest"
+        ):
+            return node
+    return None
+
+
+def _is_declared_empty(value: ast.expr) -> bool:
+    """True only for a literal that is unambiguously empty — an empty
+    string/`None` constant, or an empty tuple/list/set literal. A `Name`,
+    `Call`, or any other expression (e.g. `tables=TENANT_TABLES`, the shape
+    every real stateful manifest in this tree actually uses) cannot be
+    statically evaluated by AST alone and is treated as declared/non-empty —
+    the conservative direction, since guessing it empty could wrongly
+    manufacture outcome 3's `tables` contradiction for a real, coherent
+    manifest."""
+    if isinstance(value, ast.Constant):
+        return value.value in ("", None)
+    if isinstance(value, ast.Tuple | ast.List | ast.Set):
+        return len(value.elts) == 0
+    return False
+
+
+def _keyword_declared_and_nonempty(call: ast.Call, name: str) -> bool:
+    for kw in call.keywords:
+        if kw.arg == name and not _is_declared_empty(kw.value):
+            return True
+    return False
+
+
+def derive_migration_lineage_applicability_from_manifest(
+    packages_root: Path, distribution: str
+) -> bool:
+    """The one function that decides Ruling 1's three outcomes for one
+    `optional-module` distribution. See the section banner above for the
+    exact rule; this docstring covers only what each refusal names.
+
+    Raises `ManifestDeclarationError`, naming `distribution` and the exact
+    contradiction, when: the manifest file does not exist; it cannot be
+    parsed as Python; it declares no `ModuleManifest(...)` call at all;
+    exactly one of `short_code`/`migration_prefix` is declared without the
+    other; or neither is declared but `tables`, `platform_tables`, or
+    `migration_branch` is."""
+    manifest_path = _manifest_source_path(packages_root, distribution)
+    if not manifest_path.is_file():
+        raise ManifestDeclarationError(
+            f"{distribution}: no manifest.py at {manifest_path} — cannot "
+            "derive migration-lineage applicability from an absent file"
+        )
+
+    try:
+        tree = ast.parse(manifest_path.read_text())
+    except SyntaxError as exc:
+        raise ManifestDeclarationError(
+            f"{distribution}: {manifest_path} could not be parsed as Python " f"— {exc}"
+        ) from exc
+
+    call = _find_module_manifest_call(tree)
+    if call is None:
+        raise ManifestDeclarationError(
+            f"{distribution}: {manifest_path} declares no ModuleManifest(...) "
+            "call — cannot derive migration-lineage applicability"
+        )
+
+    has_short_code, has_migration_prefix = (
+        _keyword_declared_and_nonempty(call, name)
+        for name in _LINEAGE_IDENTITY_KEYWORDS
+    )
+    lineage_signal_declared = any(
+        _keyword_declared_and_nonempty(call, name) for name in _LINEAGE_SIGNAL_KEYWORDS
+    )
+
+    if has_short_code and has_migration_prefix:
+        return True
+    if not has_short_code and not has_migration_prefix and not lineage_signal_declared:
+        return False
+
+    contradictions: list[str] = []
+    if has_short_code != has_migration_prefix:
+        contradictions.append(
+            f"short_code declared={has_short_code!r} but migration_prefix "
+            f"declared={has_migration_prefix!r} — both or neither is coherent"
+        )
+    if not has_short_code and not has_migration_prefix and lineage_signal_declared:
+        contradictions.append(
+            "declares neither short_code nor migration_prefix (a stateless "
+            "pair) but also declares tables, platform_tables, or "
+            "migration_branch — a module cannot own lineage-bearing state "
+            "with no identity to name that lineage"
+        )
+    raise ManifestDeclarationError(
+        f"{distribution}: {manifest_path} is contradictory about migration "
+        f"lineage — {'; '.join(contradictions)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -740,6 +938,18 @@ class CompositionRecord:
     anything OTHER than `NOT_APPLICABLE`. `installation` may never be
     `NOT_APPLICABLE` — every distribution is either installed, confirmed not
     installed, or unmeasured.
+
+    `migration_lineage_manifest_applies` (Ruling 1): `None` by default,
+    meaning no caller has read this distribution's `ModuleManifest` yet — in
+    that case `migration_lineage` applicability for an `optional-module`
+    distribution is the pre-ruling classification-only answer (`True`,
+    unconditional), so every construction that predates this ruling is
+    unaffected. A caller that HAS read the manifest (via
+    `derive_migration_lineage_applicability_from_manifest`) supplies its
+    derived `True`/`False` here instead, and that value — not classification
+    alone — then governs whether `migration_lineage` may be `NOT_APPLICABLE`
+    for this record. Irrelevant for every non-`optional-module`
+    classification: `migration_lineage_applies` ignores it there.
     """
 
     product: str
@@ -749,6 +959,7 @@ class CompositionRecord:
     module_registration: DimensionValue
     migration_lineage: DimensionValue
     runtime_consumption: DimensionValue
+    migration_lineage_manifest_applies: bool | None = None
 
     def __post_init__(self) -> None:
         if self.installation is DimensionValue.NOT_APPLICABLE:
@@ -766,7 +977,9 @@ class CompositionRecord:
         self._check_applicability(
             "migration_lineage",
             self.migration_lineage,
-            self.classification.migration_lineage_applies,
+            self.classification.migration_lineage_applies(
+                self.migration_lineage_manifest_applies
+            ),
         )
 
     def _check_applicability(
@@ -880,7 +1093,9 @@ def _step_validate_coherence(record: CompositionRecord) -> CompositionState | No
         (
             "migration_lineage",
             record.migration_lineage,
-            record.classification.migration_lineage_applies,
+            record.classification.migration_lineage_applies(
+                record.migration_lineage_manifest_applies
+            ),
         ),
     ):
         is_not_applicable = value is DimensionValue.NOT_APPLICABLE
@@ -921,7 +1136,9 @@ def _step_refuse_required_unknown(
     ):
         return CompositionState.EVIDENCE_INCOMPLETE
     if (
-        record.classification.migration_lineage_applies
+        record.classification.migration_lineage_applies(
+            record.migration_lineage_manifest_applies
+        )
         and record.migration_lineage is DimensionValue.UNKNOWN
     ):
         return CompositionState.EVIDENCE_INCOMPLETE
@@ -985,7 +1202,9 @@ def _step_not_applicable(record: CompositionRecord) -> CompositionState | None:
     classification, the composition question itself does not apply."""
     if (
         not record.classification.module_registration_applies
-        and not record.classification.migration_lineage_applies
+        and not record.classification.migration_lineage_applies(
+            record.migration_lineage_manifest_applies
+        )
     ):
         return CompositionState.NOT_APPLICABLE
     return None
@@ -995,14 +1214,44 @@ def _step_registration_lineage_table(
     record: CompositionRecord,
 ) -> CompositionState | None:
     """Pipeline step 6, the ruled table. Reached only once installation is
-    `TRUE`, at least one of registration/lineage applies, and neither
-    applicable dimension is `UNKNOWN`."""
+    `TRUE`, at least one of registration/lineage applies (step 5 already
+    handled "neither applies"), and neither applicable dimension is
+    `UNKNOWN`.
+
+    Ruling 1 consequence: once `migration_lineage` applicability can differ
+    from `module_registration` applicability WITHIN `optional-module` (a
+    genuinely stateless manifest — see
+    `derive_migration_lineage_applicability_from_manifest` — makes lineage
+    not apply while registration still does), this table must READ
+    `lineage_applies` rather than infer "lineage absent" from a `False`
+    dimension value. The former shape (`has_lineage = lineage_applies and
+    record.migration_lineage is TRUE`) collapsed "lineage does not apply"
+    and "lineage was required and measured absent" into the same `False`,
+    so a registered stateless module (`registered=True, has_lineage=False`)
+    wrongly reached `INVALID` — the state reserved for a genuine defect. A
+    distribution registered against the running assembly whose lineage does
+    not apply at all is fully composed, not invalid."""
     registration_applies = record.classification.module_registration_applies
-    lineage_applies = record.classification.migration_lineage_applies
+    lineage_applies = record.classification.migration_lineage_applies(
+        record.migration_lineage_manifest_applies
+    )
     registered = (
         registration_applies and record.module_registration is DimensionValue.TRUE
     )
-    has_lineage = lineage_applies and record.migration_lineage is DimensionValue.TRUE
+
+    if not lineage_applies:
+        # Lineage is not a real requirement for this distribution at all
+        # (enforced by construction: migration_lineage is NOT_APPLICABLE
+        # here, never TRUE/FALSE). Whether it is composed depends solely on
+        # registration — there is no "lineage only" or "invalid" reading
+        # possible when lineage was never a question to begin with.
+        return (
+            CompositionState.FULLY_COMPOSED
+            if registered
+            else CompositionState.NOT_COMPOSED
+        )
+
+    has_lineage = record.migration_lineage is DimensionValue.TRUE
 
     if registered and has_lineage:
         return CompositionState.FULLY_COMPOSED
