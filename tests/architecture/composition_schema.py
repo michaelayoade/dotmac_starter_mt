@@ -20,6 +20,41 @@ refused outright by :func:`composition_record_from_payload` — see that
 function's docstring for why defaulting a missing dimension (even to
 ``unknown``) is exactly the bug this refusal exists to prevent.
 
+Why v2 exists — the measured defect in v1's registration boundary
+-------------------------------------------------------------------
+
+v1's :func:`classify_registration_call_site` required
+``argument_kind == "ModuleManifest_tuple"`` **and** ``consumed_by_assembly``.
+The second conjunct discriminated nothing on real trees — measured directly
+against both product repositories:
+
+* ``dotmac_erp/app/product_assembly.py`` (``ERP_PRODUCT_ASSEMBLY =
+  ProductAssemblySpec(..., modules=COMPOSED_MODULE_MANIFESTS, ...)``) is
+  imported by no file under ERP's own ``app/`` — only four architecture
+  tests and ``scripts/product_manifest.py``. ERP's ``app/main.py`` builds
+  its FastAPI application with direct ``include_router`` calls and never
+  touches this spec. Its own docstring says so: "composition metadata, not
+  a second application factory."
+* ``dotmac_sub/app/services/inbox_channels.py`` says the same of itself:
+  "Nothing under `app/` imports this module at runtime yet, and that is
+  deliberate."
+
+Both are inert release/declaration metadata a v1-shaped ``consumed_by_assembly:
+bool`` would have recorded identically to a genuinely booted assembly, since
+v1 only asked whether a ``ProductAssemblySpec`` construction happened
+ANYWHERE, never whether the product's own process actually reaches it. A
+conjunct that cannot refuse is the dominant defect class this fleet
+measures: a check that answers without being able to refuse.
+
+v2 replaces it with :class:`AssemblyConsumptionTrace` — two independently
+observable facts about the product's real boot/runtime path (see "The
+registration boundary" below) — and adds the product-independent catalogue
+universe derived from every ``packages/*/EXTRACTION.toml`` (see "The
+catalogue universe" below). There is no adapter and no migration path from
+``dimensional-composition.v1``: a v1-tagged payload is refused exactly like
+every other unrecognized version, loudly naming the version it carries — see
+:func:`composition_record_from_payload`.
+
 Four dimensions, per product x distribution
 --------------------------------------------
 
@@ -173,41 +208,110 @@ cannot answer that question, and must go back to the records.
 The registration boundary
 --------------------------
 
-``module_registration`` means a real ``ModuleManifest`` registered through
-the consumed assembly. Nothing else counts, and the distinction is built
-into :func:`classify_registration_call_site` rather than left to a record
-author's judgement — it is a pure function of two independently-observable
-facts about a call site (``argument_kind`` and ``consumed_by_assembly``),
-never a free-text kind an author can pick to get the answer they want.
+``module_registration`` means a real ``ModuleManifest`` registered through an
+assembly the PRODUCT'S OWN BOOT PATH actually consumes — not that a
+``ProductAssemblySpec`` object was constructed somewhere. Nothing else
+counts, and the distinction is built into :func:`classify_registration_call_site`
+rather than left to a record author's judgement: it is a pure function of
+``argument_kind`` and an :class:`AssemblyConsumptionTrace` (itself two
+independently-observable facts — see that class's docstring), never a
+free-text kind, and never a bare boolean an author can flip to get the
+answer they want.
 
-Two real, paired call sites anchor the boundary:
+Three real, paired call sites anchor the boundary (Ruling 1: the running
+product assembly must consume the real ``ModuleManifest``; release-only
+metadata does not count):
 
-* **Positive control — ERP**, ``app/product_assembly.py`` (dotmac_erp repo):
+* **Positive control — Starter's own assembly**, ``app/assembly.py`` +
+  ``app/main.py`` (this repository): ``app/assembly.py`` builds ``assembly =
+  ProductAssemblySpec(..., modules=[*load_manifests(FEATURE_MODULES), ...],
+  ...)``. ``app/main.py`` is the actual process entry point —
+  ``from app.assembly import assembly`` then ``app = create_app(assembly)`` —
+  and ``dotmac_kernel.app_factory.create_app`` (``packages/dotmac-kernel/src/
+  dotmac_kernel/app_factory.py``) builds ``ModuleRegistry(spec.modules)`` from
+  it (module validation "happens FIRST and fails closed", per that module's
+  own docstring) before mounting anything. This traces
+  ``imported_by_boot_entry_point=True`` and ``consumed_by_a_real_effect=True``
+  — ``AssemblyConsumptionKind.BOOT_PATH_CONSUMED`` — and classifies as
+  ``MODULE_MANIFEST_REGISTERED``. The positive control is not optional
+  garnish: three passing refusals below are equally consistent with a
+  checker that refuses everything, and this is the one input that proves it
+  can also say yes.
+* **Negative control — ERP**, ``app/product_assembly.py`` (dotmac_erp repo):
   ``COMPOSED_MODULE_MANIFESTS`` is a tuple of real ``ModuleManifest`` objects
   (``accounting_module``, ``files_module``, ...) passed as
-  ``modules=COMPOSED_MODULE_MANIFESTS`` into
-  ``ProductAssemblySpec(...)`` — ``dotmac_kernel.assembly.ProductAssemblySpec``
-  whose ``modules: Sequence[AnyManifest]`` field IS "registered through the
-  consumed assembly." This classifies as ``MODULE_MANIFEST_REGISTERED``.
+  ``modules=COMPOSED_MODULE_MANIFESTS`` into ``ProductAssemblySpec(...)`` —
+  a real ``ModuleManifest_tuple``, exactly like the positive control's
+  argument kind. But ERP's ``app/main.py`` builds its FastAPI application
+  with direct ``include_router`` calls and never imports
+  ``app.product_assembly`` at all — only four architecture tests and
+  ``scripts/product_manifest.py`` do (measured directly; see "Why v2 exists"
+  above). This traces ``imported_by_boot_entry_point=False`` —
+  ``AssemblyConsumptionKind.RELEASE_METADATA_ONLY`` — and classifies as
+  ``VOCABULARY_REGISTRATION`` even though the argument kind alone looks
+  identical to the positive control. This is exactly the discrimination v1's
+  flat ``consumed_by_assembly: bool`` could not make.
 * **Negative control — Sub**, ``app/services/inbox_channels.py:230``
   (dotmac_sub repo): the module-scope statement
   ``register_channels(SUB_CHANNELS)``. ``register_channels``'s signature is
   ``register_channels(specs: list[ChannelSpec] | tuple[ChannelSpec, ...])`` —
   it registers ``ChannelSpec`` VOCABULARY into a channel registry, never a
-  ``ModuleManifest``, and it is never passed to a ``ProductAssemblySpec`` or
-  any other consumed assembly. The same module's own docstring states
-  plainly: "Nothing under `app/` imports this module at runtime yet, and
-  that is deliberate." This classifies as ``VOCABULARY_REGISTRATION`` — it
-  is NOT module registration, and it separately demonstrates why
+  ``ModuleManifest`` at all, so ``classify_registration_call_site`` refuses
+  it on ``argument_kind`` alone before the assembly-consumption trace is even
+  consulted. The same module's own docstring states plainly: "Nothing under
+  `app/` imports this module at runtime yet, and that is deliberate" — so a
+  trace of it independently reaches ``RELEASE_METADATA_ONLY`` as well. This
+  classifies as ``VOCABULARY_REGISTRATION`` and separately demonstrates why
   ``runtime_consumption`` must be its own measured dimension rather than
   something inferred from installation/registration/lineage: Sub's channel
   declaration can be installed, registered-as-vocabulary and have lineage,
   while its own author states runtime consumption is exactly, deliberately,
   absent.
 
-A negative control alone would only prove the checker refuses things; the
+An :class:`AssemblyConsumptionTrace` that cannot establish one or both facts
+(e.g. a dynamic import, or an indirection static analysis cannot resolve)
+classifies as ``AssemblyConsumptionKind.INDETERMINATE`` — a refusal, mapped
+to ``DimensionValue.UNKNOWN`` by ``RegistrationEvidence.as_dimension_value``
+even when the call site itself was ``measured=True``. This is distinct from
+``measured=False`` (nobody looked at the call site at all) — two independent
+routes to the same honest "don't know," never collapsed into a guessed
+``FALSE``.
+
+Two negative controls alone would only prove the checker refuses things; the
 positive control proves it also recognizes the real shape when it is
-present. Both are exercised in ``test_composition_schema.py``.
+present. All three are exercised in ``test_composition_schema.py`` against
+the real files named above, not synthetic stand-ins alone.
+
+The catalogue universe
+------------------------
+
+Ruling 2: every product record uses the same product-independent catalogue —
+every ``packages/*/EXTRACTION.toml`` in this repository, never a
+product-scoped subset. :func:`derive_distribution_universe` derives it by
+globbing ``packages_root`` (a plain path parameter; the function signature
+takes no product name and no product-specific behaviour branches on one) and
+reading each ``EXTRACTION.toml``'s ``package`` (distribution name) and
+``classification`` field. It refuses rather than silently tolerates:
+
+* a ``packages/<x>/`` directory with no ``EXTRACTION.toml`` — skipping it
+  would silently drop a real package from the universe;
+* a dossier with no declared ``package`` name;
+* two dossiers declaring the same distribution name;
+* a dossier whose ``classification`` is absent or not a member of
+  :class:`PackageClassification` — ``PackageClassification(...)`` raising
+  ``ValueError`` is caught and re-raised as :class:`CatalogueDerivationError`
+  naming the offending file, so it surfaces as a named refusal rather than an
+  unhandled traceback deep in a comprehension.
+
+``PackageClassification.STATELESS_CONTRACT_CATALOGUE`` is declared but used
+by zero real dossiers in this repository today — see
+``test_stateless_contract_catalogue_classification_is_exercised_by_a_synthetic_dossier``
+for the case that exercises it, since an unexercised enum branch proves
+nothing about its own correctness. The universe's SIZE is never a governing
+constant anywhere in this module or its tests: every assertion about "how
+many" re-derives the count from the glob at test time, because a
+hard-coded number is exactly the kind of check that answers without being
+able to refuse a real change to the tree.
 
 No aggregate
 ------------
@@ -225,9 +329,11 @@ of a violation as a field).
 
 from __future__ import annotations
 
+import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Final
 
 # ---------------------------------------------------------------------------
@@ -237,7 +343,7 @@ from typing import Final
 #: The one schema version this module reads. Bumped only by a deliberate,
 #: reviewed migration — never silently, and never with a translation layer
 #: bolted on for an older tag (see module docstring).
-CURRENT_SCHEMA_VERSION: Final[str] = "dimensional-composition.v1"
+CURRENT_SCHEMA_VERSION: Final[str] = "dimensional-composition.v2"
 
 #: Every dimension a `dimensional-composition.v1` payload MUST declare
 #: explicitly. There is no default for a missing one — a missing dimension
@@ -263,6 +369,15 @@ _DERIVED_ONLY_FIELDS: Final[tuple[str, ...]] = ("state", "fully_composed")
 #: refusal test can prove this exact historical shape is rejected, not just
 #: some arbitrary unrecognized string.
 LEGACY_SCHEMA_VERSION_V0: Final[str] = "kernel-runtime-composition.v1"
+
+#: v1 of THIS schema — superseded by v2's runtime-path registration evidence
+#: and the catalogue-universe derivation (see module docstring, "Why v2
+#: exists"). Named explicitly, exactly like ``LEGACY_SCHEMA_VERSION_V0`` above,
+#: so the refusal test proves this specific, once-current tag is rejected —
+#: not merely "some string that isn't current." There is no adapter and no
+#: migration path from v1: a v1 record must fail loudly, naming the version
+#: it carries, never be silently reinterpreted under v2's rules.
+LEGACY_SCHEMA_VERSION_V1: Final[str] = "dimensional-composition.v1"
 
 
 class IncompatibleSchemaVersion(ValueError):
@@ -342,7 +457,87 @@ class PackageClassification(str, Enum):
 
 # ---------------------------------------------------------------------------
 # The module-registration boundary: paired classifier, not a free-text kind
+#
+# v2 replaces the flat `consumed_by_assembly: bool` v1 shipped. That bool
+# discriminated nothing on real trees: it was identical (True, in the loose
+# "an assembly object exists" sense v1 measured it) for ERP's inert release
+# spec and for whatever v1 recorded for a genuinely booted product, because
+# v1 never asked whether the OBJECT itself reaches a running process — only
+# whether it reaches a `ProductAssemblySpec` construction anywhere, and a
+# construction that only tests and a script ever call satisfies that just as
+# well as one `app/main.py` calls. `AssemblyConsumptionTrace` below replaces
+# it with two independently observable facts about the PRODUCT'S OWN
+# boot/runtime path, not about whether an assembly-shaped object was merely
+# built somewhere.
 # ---------------------------------------------------------------------------
+
+
+class AssemblyConsumptionKind(str, Enum):
+    """What a static trace established about whether an assembly-shaped
+    object (e.g. a `ProductAssemblySpec`) is consumed by the product's real
+    boot/runtime path, as opposed to constructed only for tests, scripts, or
+    release tooling."""
+
+    #: The object is reached by the product's boot entry point AND, once
+    #: reached, fed into a call proven to use it for something real (e.g.
+    #: `ModuleRegistry(spec.modules)` inside `create_app`). The Starter
+    #: positive control.
+    BOOT_PATH_CONSUMED = "boot_path_consumed"
+    #: Everything else a trace can positively establish: the object exists,
+    #: perhaps even imported somewhere, but the boot entry point does not
+    #: transitively reach it, or reaches it without feeding it to a real
+    #: effect. The ERP positive-object/negative-consumption control.
+    RELEASE_METADATA_ONLY = "release_metadata_only"
+    #: The trace itself could not establish one or both facts (e.g. dynamic
+    #: import, re-export through an unresolvable indirection). This is a
+    #: REFUSAL to answer, never collapsed into `RELEASE_METADATA_ONLY` — see
+    #: `RegistrationEvidence.as_dimension_value`, which maps it to `UNKNOWN`
+    #: even when the call site itself was `measured=True`.
+    INDETERMINATE = "indeterminate"
+
+
+@dataclass(frozen=True)
+class AssemblyConsumptionTrace:
+    """A structural description of whether an assembly-shaped object is
+    reached by the product's real boot/runtime path. Every field is an
+    independently observable static fact about the product's import graph
+    and call graph — never a conclusion an author asserts directly. Model a
+    real trace by reading the product's actual entry point and the callee it
+    hands the object to, as the three paired controls in the module
+    docstring do; do not invent a shape that happens to produce the answer
+    wanted.
+
+    `None` on either boolean field means the trace could not establish that
+    fact (e.g. the import is dynamic, or the consuming call is behind an
+    indirection static analysis cannot resolve) — this is a refusal, and
+    `classify()` reports it as `INDETERMINATE` rather than guessing `False`.
+    """
+
+    #: The product's actual process entry point that was traced, e.g.
+    #: "app/main.py". Named explicitly so the trace states WHERE "boot"
+    #: means, rather than assuming one canonical file across every product.
+    boot_entry_point: str
+    #: Whether `boot_entry_point`, by static import-graph analysis,
+    #: transitively imports the module that defines the object under test —
+    #: as opposed to only test, script, or release-tooling modules importing
+    #: it. `None` if this could not be established.
+    imported_by_boot_entry_point: bool | None
+    #: Whether, once reached from the boot path, the object is passed into a
+    #: call whose own body is proven to use its contents for a real runtime
+    #: effect (e.g. `ModuleRegistry(spec.modules)` inside `create_app`) — as
+    #: opposed to being merely re-exported or held as an inert reference.
+    #: `None` if this could not be established.
+    consumed_by_a_real_effect: bool | None
+
+    def classify(self) -> AssemblyConsumptionKind:
+        if (
+            self.imported_by_boot_entry_point is None
+            or self.consumed_by_a_real_effect is None
+        ):
+            return AssemblyConsumptionKind.INDETERMINATE
+        if self.imported_by_boot_entry_point and self.consumed_by_a_real_effect:
+            return AssemblyConsumptionKind.BOOT_PATH_CONSUMED
+        return AssemblyConsumptionKind.RELEASE_METADATA_ONLY
 
 
 class RegistrationEvidenceKind(str, Enum):
@@ -350,14 +545,20 @@ class RegistrationEvidenceKind(str, Enum):
     produces `module_registration = TRUE` — see
     `RegistrationEvidence.as_dimension_value`."""
 
-    #: A real `ModuleManifest` bound into a consumed assembly
-    #: (`ProductAssemblySpec.modules`, or equivalent). The ERP positive
-    #: control.
+    #: A real `ModuleManifest` bound into an assembly that is itself
+    #: consumed by the product's boot path (`AssemblyConsumptionKind.
+    #: BOOT_PATH_CONSUMED`). The Starter positive control.
     MODULE_MANIFEST_REGISTERED = "module_manifest_registered"
-    #: Vocabulary registered into an unrelated registry (e.g. a channel
-    #: registry) — never a `ModuleManifest`, never consumed by an assembly.
-    #: The Sub negative control.
+    #: Either the argument is not `ModuleManifest` values at all (the Sub
+    #: negative control), or it is, but the assembly it is bound into is
+    #: only release metadata (`AssemblyConsumptionKind.RELEASE_METADATA_ONLY`
+    #: — the ERP negative control).
     VOCABULARY_REGISTRATION = "vocabulary_registration"
+    #: The argument is `ModuleManifest` values, but the trace of whether the
+    #: assembly they are bound into reaches the boot path was itself
+    #: `AssemblyConsumptionKind.INDETERMINATE` — a refusal to answer, never
+    #: collapsed into either of the above.
+    INDETERMINATE_ASSEMBLY_CONSUMPTION = "indeterminate_assembly_consumption"
 
 
 @dataclass(frozen=True)
@@ -365,7 +566,7 @@ class RegistrationCallSite:
     """A structural description of one call site that registers something.
     Every field is an independently-observable fact about the call site —
     never a conclusion the test author asserts directly. Model a real call
-    site by reading it, as the two paired controls in the module docstring
+    site by reading it, as the three paired controls in the module docstring
     do; do not invent a shape that happens to produce the answer wanted."""
 
     #: The name of the thing being called, e.g. "ProductAssemblySpec" or
@@ -374,30 +575,41 @@ class RegistrationCallSite:
     #: What kind of object is actually passed, e.g. "ModuleManifest_tuple"
     #: or "ChannelSpec_tuple". Not a boolean — the actual declared kind.
     argument_kind: str
-    #: Whether the values reach a `ProductAssemblySpec` (or equivalent
-    #: consumed assembly) rather than terminating in an unrelated registry.
-    consumed_by_assembly: bool
+    #: Whether the assembly-shaped object the values are bound into is
+    #: itself consumed by the product's boot/runtime path — see
+    #: `AssemblyConsumptionTrace`. This is what v2 replaces the flat
+    #: `consumed_by_assembly: bool` with (see the section banner above).
+    assembly_consumption: AssemblyConsumptionTrace
 
 
 def classify_registration_call_site(
     site: RegistrationCallSite,
 ) -> RegistrationEvidenceKind:
     """The one function allowed to decide `MODULE_MANIFEST_REGISTERED` vs
-    `VOCABULARY_REGISTRATION`. Both facts must hold: the argument must
-    actually be `ModuleManifest` values, AND those values must be consumed
-    by an assembly — a module-scope call that merely LOOKS like
-    registration (any callee name, any side effect) is never enough on its
-    own."""
-    if site.argument_kind == "ModuleManifest_tuple" and site.consumed_by_assembly:
+    `VOCABULARY_REGISTRATION` vs `INDETERMINATE_ASSEMBLY_CONSUMPTION`. Two
+    facts must hold for a positive result: the argument must actually be
+    `ModuleManifest` values, AND the assembly they are bound into must trace
+    as `BOOT_PATH_CONSUMED` — a module-scope call that merely LOOKS like
+    registration (any callee name, any side effect, or an assembly object
+    that only tests/scripts ever construct) is never enough on its own."""
+    if site.argument_kind != "ModuleManifest_tuple":
+        return RegistrationEvidenceKind.VOCABULARY_REGISTRATION
+    kind = site.assembly_consumption.classify()
+    if kind is AssemblyConsumptionKind.BOOT_PATH_CONSUMED:
         return RegistrationEvidenceKind.MODULE_MANIFEST_REGISTERED
+    if kind is AssemblyConsumptionKind.INDETERMINATE:
+        return RegistrationEvidenceKind.INDETERMINATE_ASSEMBLY_CONSUMPTION
     return RegistrationEvidenceKind.VOCABULARY_REGISTRATION
 
 
 @dataclass(frozen=True)
 class RegistrationEvidence:
     """One measurement of `module_registration` for one product x
-    distribution. `measured=False` means nobody looked — the honest answer
-    is `UNKNOWN`, never a guess in either direction."""
+    distribution. `measured=False` means nobody looked at the call site at
+    all — the honest answer is `UNKNOWN`, never a guess in either direction.
+    A call site that WAS looked at (`measured=True`) but whose assembly-
+    consumption trace was itself `INDETERMINATE` is a second, independent
+    route to `UNKNOWN` — see `as_dimension_value`."""
 
     kind: RegistrationEvidenceKind
     measured: bool
@@ -407,6 +619,8 @@ class RegistrationEvidence:
             return DimensionValue.UNKNOWN
         if self.kind is RegistrationEvidenceKind.MODULE_MANIFEST_REGISTERED:
             return DimensionValue.TRUE
+        if self.kind is RegistrationEvidenceKind.INDETERMINATE_ASSEMBLY_CONSUMPTION:
+            return DimensionValue.UNKNOWN
         return DimensionValue.FALSE
 
 
@@ -795,3 +1009,106 @@ def build_runtime_exposure_report(
             1 for r in records if r.runtime_consumption is DimensionValue.UNKNOWN
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# The catalogue universe — product-independent, derived from every
+# packages/*/EXTRACTION.toml (Ruling 2). See the module docstring's "The
+# catalogue universe" section for the refusal cases and why the size is
+# never a governing constant.
+# ---------------------------------------------------------------------------
+
+
+class CatalogueDerivationError(ValueError):
+    """The `packages/` tree cannot produce one unambiguous, product-independent
+    distribution universe. Raised instead of silently skipping the offending
+    directory or dossier — a missing `EXTRACTION.toml`, a duplicate
+    distribution name, or an unrecognized `classification` are refusals, not
+    warnings."""
+
+
+@dataclass(frozen=True)
+class PackageDossier:
+    """One `packages/<distribution>/EXTRACTION.toml`, reduced to exactly what
+    this module needs: the distribution's name and its declared package
+    classification. Nothing else in that TOML file is this module's
+    concern — ownership, contract text, and adoption evidence belong to
+    `adoption_evidence.py`, a different owner."""
+
+    distribution: str
+    classification: PackageClassification
+
+
+def derive_distribution_universe(
+    packages_root: Path,
+) -> tuple[PackageDossier, ...]:
+    """Derive the fleet's product-independent distribution catalogue from
+    every `packages/*/EXTRACTION.toml` under `packages_root`.
+
+    Takes only a filesystem path — no product name, and no branch anywhere
+    in this function's body inspects or depends on which product is asking.
+    The same universe is what every product's composition records are
+    checked against (Ruling 2).
+
+    Glob-derived, so the count this function returns is never a constant
+    that governs behaviour here or in any test — a test that wants to know
+    "how many" re-derives it from `packages_root.iterdir()` itself, at test
+    time, rather than asserting a literal count that a real change to the
+    tree would silently leave stale.
+
+    Refuses, in each case naming the offending path in the raised
+    `CatalogueDerivationError`:
+
+    * `packages_root` itself does not exist or is not a directory;
+    * a `packages/<x>/` directory with no `EXTRACTION.toml` (skipped
+      silently, this would understate the universe without anyone noticing);
+    * a dossier with no `package` field, or an empty one;
+    * two dossiers declaring the identical distribution name;
+    * a dossier whose `classification` is absent or is not a value
+      `PackageClassification` recognizes — caught and re-raised naming the
+      file, so this surfaces as a named refusal rather than an unhandled
+      `ValueError` deep in a loop.
+    """
+    if not packages_root.is_dir():
+        raise CatalogueDerivationError(
+            f"{packages_root} is not a directory — cannot derive a "
+            "distribution universe from it"
+        )
+
+    dossiers: dict[str, PackageDossier] = {}
+    for package_dir in sorted(p for p in packages_root.iterdir() if p.is_dir()):
+        toml_path = package_dir / "EXTRACTION.toml"
+        if not toml_path.is_file():
+            raise CatalogueDerivationError(
+                f"{package_dir} has no EXTRACTION.toml — refused, not "
+                "silently skipped"
+            )
+
+        data = tomllib.loads(toml_path.read_text())
+
+        distribution = data.get("package")
+        if not distribution:
+            raise CatalogueDerivationError(
+                f"{toml_path} declares no non-empty 'package' name"
+            )
+
+        raw_classification = data.get("classification")
+        try:
+            classification = PackageClassification(raw_classification)
+        except ValueError as exc:
+            raise CatalogueDerivationError(
+                f"{toml_path} declares unrecognized classification "
+                f"{raw_classification!r}"
+            ) from exc
+
+        if distribution in dossiers:
+            raise CatalogueDerivationError(
+                f"duplicate distribution name {distribution!r}: declared by "
+                f"both {dossiers[distribution]!r} and {toml_path}"
+            )
+
+        dossiers[distribution] = PackageDossier(
+            distribution=distribution, classification=classification
+        )
+
+    return tuple(dossiers.values())

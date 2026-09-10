@@ -9,11 +9,15 @@ this session.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
 
 from tests.architecture import composition_schema as schema
 from tests.architecture.composition_schema import (
+    AssemblyConsumptionKind,
+    AssemblyConsumptionTrace,
+    CatalogueDerivationError,
     CompositionCoverageReport,
     CompositionRecord,
     CompositionState,
@@ -21,6 +25,7 @@ from tests.architecture.composition_schema import (
     DimensionValue,
     IncompatibleSchemaVersion,
     PackageClassification,
+    PackageDossier,
     RegistrationCallSite,
     RegistrationEvidence,
     RegistrationEvidenceKind,
@@ -30,12 +35,18 @@ from tests.architecture.composition_schema import (
     classify_registration_call_site,
     composition_record_from_payload,
     derive_composition_state,
+    derive_distribution_universe,
 )
 
 TRUE = DimensionValue.TRUE
 FALSE = DimensionValue.FALSE
 UNKNOWN = DimensionValue.UNKNOWN
 NA = DimensionValue.NOT_APPLICABLE
+
+#: This repository's own `packages/` directory — the real tree the catalogue
+#: tests measure against. Computed relative to this test file, never a
+#: hard-coded absolute path.
+REPO_PACKAGES_ROOT = Path(__file__).resolve().parents[2] / "packages"
 
 
 def _optional_module_record(
@@ -436,19 +447,98 @@ def test_payload_carrying_a_state_field_is_refused():
 
 
 # ---------------------------------------------------------------------------
-# 3. The registration boundary — paired controls.
+# 3. The registration boundary — three real, paired controls (v2).
+#
+# v1 required `argument_kind == "ModuleManifest_tuple"` and a flat
+# `consumed_by_assembly: bool`. Measured directly against both real
+# repositories, that bool was identical for ERP's inert release spec and for
+# a genuinely booted assembly — it never asked whether the PRODUCT'S OWN
+# BOOT PATH reaches the object, only whether a `ProductAssemblySpec` was
+# constructed anywhere. v2's `AssemblyConsumptionTrace` replaces it with two
+# independently observable facts about the boot path itself.
 # ---------------------------------------------------------------------------
 
 
+def test_module_manifest_registration_positive_control_starter_own_assembly():
+    """Positive control — Starter's own `app/assembly.py` + `app/main.py`
+    (this repository, read directly, not a synthetic stand-in). `app/main.py`
+    is the real process entry point: `from app.assembly import assembly` then
+    `app = create_app(assembly)`. `dotmac_kernel.app_factory.create_app`
+    builds `ModuleRegistry(spec.modules)` from it before mounting anything
+    (`packages/dotmac-kernel/src/dotmac_kernel/app_factory.py`), so this
+    traces `imported_by_boot_entry_point=True` and
+    `consumed_by_a_real_effect=True` — the ONLY input among the three
+    controls that must classify as module registration. Without this
+    control, the two negative controls below would be equally consistent
+    with a checker that refuses everything."""
+    starter_assembly_call_site = RegistrationCallSite(
+        callee="ProductAssemblySpec",
+        argument_kind="ModuleManifest_tuple",
+        assembly_consumption=AssemblyConsumptionTrace(
+            boot_entry_point="app/main.py",
+            imported_by_boot_entry_point=True,
+            consumed_by_a_real_effect=True,
+        ),
+    )
+    kind = classify_registration_call_site(starter_assembly_call_site)
+    assert kind is RegistrationEvidenceKind.MODULE_MANIFEST_REGISTERED
+    assert (
+        starter_assembly_call_site.assembly_consumption.classify()
+        is AssemblyConsumptionKind.BOOT_PATH_CONSUMED
+    )
+
+    evidence = RegistrationEvidence(kind=kind, measured=True)
+    assert evidence.as_dimension_value() == DimensionValue.TRUE
+
+
+def test_module_manifest_tuple_not_reaching_boot_path_is_refused_erp_negative_control():
+    """Negative control — ERP's `app/product_assembly.py`. Its
+    `COMPOSED_MODULE_MANIFESTS` tuple passed as `modules=...` into
+    `ProductAssemblySpec(...)` is a real `ModuleManifest_tuple` — the
+    identical argument kind the positive control above uses. What differs,
+    measured directly, is that ERP's `app/main.py` never imports
+    `app.product_assembly` at all; only four architecture tests and
+    `scripts/product_manifest.py` do. This is exactly the case v1's flat
+    `consumed_by_assembly: bool` could not discriminate from the positive
+    control — see the module docstring's "Why v2 exists"."""
+    erp_assembly_call_site = RegistrationCallSite(
+        callee="ProductAssemblySpec",
+        argument_kind="ModuleManifest_tuple",
+        assembly_consumption=AssemblyConsumptionTrace(
+            boot_entry_point="app/main.py",
+            imported_by_boot_entry_point=False,
+            consumed_by_a_real_effect=False,
+        ),
+    )
+    kind = classify_registration_call_site(erp_assembly_call_site)
+    assert kind is RegistrationEvidenceKind.VOCABULARY_REGISTRATION
+    assert (
+        erp_assembly_call_site.assembly_consumption.classify()
+        is AssemblyConsumptionKind.RELEASE_METADATA_ONLY
+    )
+
+    evidence = RegistrationEvidence(kind=kind, measured=True)
+    assert evidence.as_dimension_value() == DimensionValue.FALSE
+
+
 def test_vocabulary_registration_negative_control_sub_channels():
-    """Sub's `app/services/inbox_channels.py:230` —
+    """Negative control — Sub's `app/services/inbox_channels.py:230` —
     `register_channels(SUB_CHANNELS)` — registers `ChannelSpec` vocabulary
-    into a channel registry, never a `ModuleManifest`, and is never consumed
-    by an assembly. It must NOT classify as module registration."""
+    into a channel registry, never a `ModuleManifest` at all, so this is
+    refused on `argument_kind` alone before any assembly-consumption trace
+    is consulted. The module's own docstring independently confirms it is
+    unreachable from `app/` at runtime too ("Nothing under `app/` imports
+    this module at runtime yet, and that is deliberate"), so the trace is
+    recorded as `RELEASE_METADATA_ONLY` for completeness even though the
+    argument-kind check alone already decides this case."""
     sub_channels_call_site = RegistrationCallSite(
         callee="register_channels",
         argument_kind="ChannelSpec_tuple",
-        consumed_by_assembly=False,
+        assembly_consumption=AssemblyConsumptionTrace(
+            boot_entry_point="app/main.py",
+            imported_by_boot_entry_point=False,
+            consumed_by_a_real_effect=False,
+        ),
     )
     kind = classify_registration_call_site(sub_channels_call_site)
     assert kind is RegistrationEvidenceKind.VOCABULARY_REGISTRATION
@@ -457,41 +547,56 @@ def test_vocabulary_registration_negative_control_sub_channels():
     assert evidence.as_dimension_value() == DimensionValue.FALSE
 
 
-def test_module_manifest_registration_positive_control_erp_product_assembly():
-    """ERP's `app/product_assembly.py` — `COMPOSED_MODULE_MANIFESTS` (a tuple
-    of real `ModuleManifest` objects: accounting_module, files_module, ...)
-    passed as `modules=COMPOSED_MODULE_MANIFESTS` into `ProductAssemblySpec`
-    (`dotmac_kernel.assembly.ProductAssemblySpec`, whose `modules:
-    Sequence[AnyManifest]` field is exactly "registered through the consumed
-    assembly"). This MUST classify as module registration — the paired
-    positive control that proves the checker recognizes the real shape, not
-    only that it refuses the wrong one."""
-    erp_assembly_call_site = RegistrationCallSite(
-        callee="ProductAssemblySpec",
+def test_a_module_manifest_tuple_reached_by_boot_but_not_consumed_still_refuses():
+    """Near-miss, both facts required: even a real `ModuleManifest_tuple`
+    that IS imported by the boot entry point does not count as registration
+    if it is never fed into a call proven to use it for a real effect (e.g.
+    a dead import, or a value only re-exported, never passed to
+    `create_app`/`ModuleRegistry`). Reachability alone is not enough — this
+    is the sensitivity proof that both `AssemblyConsumptionTrace` fields are
+    load-bearing, not just `imported_by_boot_entry_point`."""
+    imported_but_unused = RegistrationCallSite(
+        callee="a_dead_import",
         argument_kind="ModuleManifest_tuple",
-        consumed_by_assembly=True,
-    )
-    kind = classify_registration_call_site(erp_assembly_call_site)
-    assert kind is RegistrationEvidenceKind.MODULE_MANIFEST_REGISTERED
-
-    evidence = RegistrationEvidence(kind=kind, measured=True)
-    assert evidence.as_dimension_value() == DimensionValue.TRUE
-
-
-def test_a_module_manifest_tuple_not_consumed_by_an_assembly_still_refuses():
-    """Near-miss: even real `ModuleManifest` objects do not count as
-    registration if they are never bound into a consumed assembly (e.g. a
-    tuple built for a test fixture and never passed anywhere) — both facts
-    must hold, not just the argument kind."""
-    unused_manifests = RegistrationCallSite(
-        callee="a_test_fixture",
-        argument_kind="ModuleManifest_tuple",
-        consumed_by_assembly=False,
+        assembly_consumption=AssemblyConsumptionTrace(
+            boot_entry_point="app/main.py",
+            imported_by_boot_entry_point=True,
+            consumed_by_a_real_effect=False,
+        ),
     )
     assert (
-        classify_registration_call_site(unused_manifests)
+        classify_registration_call_site(imported_but_unused)
         is RegistrationEvidenceKind.VOCABULARY_REGISTRATION
     )
+
+
+def test_indeterminate_assembly_consumption_is_a_refusal_not_a_guessed_false():
+    """The evidence shape must be able to say "I could not establish this" —
+    a `AssemblyConsumptionTrace` that cannot resolve one or both facts (e.g.
+    a dynamic import) classifies as `INDETERMINATE`, and
+    `classify_registration_call_site` reports that distinctly as
+    `INDETERMINATE_ASSEMBLY_CONSUMPTION`, which resolves to `UNKNOWN` even
+    though the call site itself WAS looked at (`measured=True`) — a second,
+    independent route to `UNKNOWN` beyond `measured=False`, proving the
+    refusal is never silently collapsed into a guessed `FALSE`."""
+    unresolvable_import = RegistrationCallSite(
+        callee="some_dynamic_indirection",
+        argument_kind="ModuleManifest_tuple",
+        assembly_consumption=AssemblyConsumptionTrace(
+            boot_entry_point="app/main.py",
+            imported_by_boot_entry_point=None,
+            consumed_by_a_real_effect=True,
+        ),
+    )
+    assert (
+        unresolvable_import.assembly_consumption.classify()
+        is AssemblyConsumptionKind.INDETERMINATE
+    )
+    kind = classify_registration_call_site(unresolvable_import)
+    assert kind is RegistrationEvidenceKind.INDETERMINATE_ASSEMBLY_CONSUMPTION
+
+    evidence = RegistrationEvidence(kind=kind, measured=True)
+    assert evidence.as_dimension_value() == DimensionValue.UNKNOWN
 
 
 def test_unmeasured_registration_is_unknown_regardless_of_kind():
@@ -611,6 +716,34 @@ def test_old_kernel_runtime_composition_v1_shaped_record_is_refused():
         IncompatibleSchemaVersion, match="kernel-runtime-composition.v1"
     ):
         composition_record_from_payload(old_shaped_payload)
+
+
+def test_current_schema_version_is_v2():
+    """Pins the bump itself as an artifact, not just its consequences."""
+    assert schema.CURRENT_SCHEMA_VERSION == "dimensional-composition.v2"
+
+
+def test_dimensional_composition_v1_payload_is_refused_no_adapter_no_migration():
+    """v2's own defining case: a `dimensional-composition.v1`-tagged
+    payload — the schema's OWN prior version, not an unrelated legacy tag —
+    is refused exactly like every other unrecognized version. There is no
+    adapter and no migration path: the payload below is otherwise perfectly
+    well-formed under the v1 shape (every v1 `REQUIRED_PAYLOAD_FIELDS`
+    present with valid values) and must still be refused solely because of
+    its declared version, loudly naming that version."""
+    v1_shaped_payload = {
+        "schema_version": schema.LEGACY_SCHEMA_VERSION_V1,
+        "product": "erp",
+        "distribution": "dotmac-accounting",
+        "classification": "optional-module",
+        "installation": "true",
+        "module_registration": "true",
+        "migration_lineage": "true",
+        "runtime_consumption": "true",
+    }
+    assert schema.LEGACY_SCHEMA_VERSION_V1 != schema.CURRENT_SCHEMA_VERSION
+    with pytest.raises(IncompatibleSchemaVersion, match="dimensional-composition.v1"):
+        composition_record_from_payload(v1_shaped_payload)
 
 
 def test_payload_with_no_schema_version_at_all_is_refused():
@@ -905,3 +1038,200 @@ def test_state_only_reports_cannot_answer_a_cross_dimensional_composition_questi
         and record.runtime_consumption is DimensionValue.TRUE
     )
     assert record_level_answer == true_not_composed_and_running == 1
+
+
+# ---------------------------------------------------------------------------
+# 9. The catalogue universe — product-independent, derived from every
+#    packages/*/EXTRACTION.toml (Ruling 2).
+# ---------------------------------------------------------------------------
+
+
+def test_derive_distribution_universe_matches_the_real_packages_tree():
+    """Runs against THIS repository's real `packages/` directory, not a
+    synthetic stand-in. The expected count and name set are re-derived from
+    `packages_root.iterdir()` directly in this test — never a literal
+    number — so the assertion tracks a real change to the tree instead of
+    going stale the moment a package is added or removed."""
+    universe = derive_distribution_universe(REPO_PACKAGES_ROOT)
+
+    real_directories = [p for p in REPO_PACKAGES_ROOT.iterdir() if p.is_dir()]
+    assert len(universe) == len(real_directories)
+
+    derived_names = {dossier.distribution for dossier in universe}
+    real_names = {p.name for p in real_directories}
+    assert derived_names == real_names
+
+    # Every real distribution directory has a real EXTRACTION.toml — the
+    # "no directory silently skipped" property, checked positively here
+    # rather than only via the refusal test below.
+    for directory in real_directories:
+        assert (directory / "EXTRACTION.toml").is_file()
+
+    # No duplicate distribution names in the derived universe.
+    assert len(derived_names) == len(universe)
+
+
+def test_derive_distribution_universe_takes_no_product_name():
+    """Structural proof of product-independence (Ruling 2): the function's
+    own signature accepts only a filesystem path, never a product
+    identifier — so there is nowhere in its call contract for a product
+    name to enter and no way for it to govern a product-scoped subset."""
+    parameters = list(inspect.signature(derive_distribution_universe).parameters)
+    assert parameters == ["packages_root"]
+    # No named product may appear in the function's body — the docstring's
+    # generic word "product" (as in "product-independent") is fine and is
+    # deliberately not checked here; a literal product NAME would be the
+    # actual violation of Ruling 2.
+    source = inspect.getsource(derive_distribution_universe)
+    for forbidden_product_name in ("starter", "dotmac_erp", "dotmac_sub", "academy"):
+        assert forbidden_product_name not in source.lower(), (
+            f"derive_distribution_universe's body references "
+            f"{forbidden_product_name!r} — it must not branch on which "
+            "product is asking"
+        )
+
+
+def test_a_packages_directory_with_no_extraction_toml_is_refused_not_skipped(
+    tmp_path: Path,
+):
+    """Sensitivity proof, PLANT half: a real package directory silently
+    missing its dossier must be refused, not quietly excluded from the
+    universe (which would understate it without anyone noticing)."""
+    (tmp_path / "dotmac-has-dossier").mkdir()
+    (tmp_path / "dotmac-has-dossier" / "EXTRACTION.toml").write_text(
+        'package = "dotmac-has-dossier"\nclassification = "optional-module"\n'
+    )
+    (tmp_path / "dotmac-missing-dossier").mkdir()  # no EXTRACTION.toml
+
+    with pytest.raises(CatalogueDerivationError, match="dotmac-missing-dossier"):
+        derive_distribution_universe(tmp_path)
+
+
+def test_a_packages_directory_with_extraction_toml_present_is_not_refused(
+    tmp_path: Path,
+):
+    """Sensitivity proof, NEAR-MISS half: the identical tree, minus the
+    missing dossier, is accepted — proving the refusal above is triggered by
+    the missing file specifically, not by some unrelated property of the
+    fixture."""
+    (tmp_path / "dotmac-has-dossier").mkdir()
+    (tmp_path / "dotmac-has-dossier" / "EXTRACTION.toml").write_text(
+        'package = "dotmac-has-dossier"\nclassification = "optional-module"\n'
+    )
+
+    universe = derive_distribution_universe(tmp_path)
+    assert len(universe) == 1
+    assert universe[0].distribution == "dotmac-has-dossier"
+
+
+def test_duplicate_distribution_name_across_two_dossiers_is_refused(tmp_path: Path):
+    (tmp_path / "dir-one").mkdir()
+    (tmp_path / "dir-one" / "EXTRACTION.toml").write_text(
+        'package = "dotmac-dup"\nclassification = "optional-module"\n'
+    )
+    (tmp_path / "dir-two").mkdir()
+    (tmp_path / "dir-two" / "EXTRACTION.toml").write_text(
+        'package = "dotmac-dup"\nclassification = "optional-module"\n'
+    )
+
+    with pytest.raises(CatalogueDerivationError, match="dotmac-dup"):
+        derive_distribution_universe(tmp_path)
+
+
+def test_unrecognized_classification_fails_loudly_as_a_named_refusal(
+    tmp_path: Path,
+):
+    """A dossier's `classification` that `PackageClassification(...)` does
+    not recognize must surface as a named `CatalogueDerivationError` (this
+    module's own refusal type), not an unhandled `ValueError` from deep
+    inside the enum constructor."""
+    (tmp_path / "dotmac-bad").mkdir()
+    (tmp_path / "dotmac-bad" / "EXTRACTION.toml").write_text(
+        'package = "dotmac-bad"\nclassification = "not-a-real-classification"\n'
+    )
+
+    with pytest.raises(CatalogueDerivationError, match="not-a-real-classification"):
+        derive_distribution_universe(tmp_path)
+
+
+def test_a_dossier_with_a_recognized_classification_is_not_refused(
+    tmp_path: Path,
+):
+    """Sensitivity near-miss for the classification refusal above: the
+    identical shape with a REAL classification value succeeds."""
+    (tmp_path / "dotmac-good").mkdir()
+    (tmp_path / "dotmac-good" / "EXTRACTION.toml").write_text(
+        'package = "dotmac-good"\nclassification = "optional-module"\n'
+    )
+
+    universe = derive_distribution_universe(tmp_path)
+    assert universe[0].classification is PackageClassification.OPTIONAL_MODULE
+
+
+def test_stateless_contract_catalogue_is_exercised_by_a_synthetic_dossier(
+    tmp_path: Path,
+):
+    """`PackageClassification.STATELESS_CONTRACT_CATALOGUE` is declared but
+    used by zero real dossiers in this repository today (see the module
+    docstring) — an unexercised branch proves nothing about its own
+    correctness, so this builds a synthetic dossier declaring it and proves
+    the derivation both accepts it and preserves the exact enum member."""
+    (tmp_path / "dotmac-schemas").mkdir()
+    (tmp_path / "dotmac-schemas" / "EXTRACTION.toml").write_text(
+        'package = "dotmac-schemas"\n'
+        'classification = "stateless-contract-catalogue"\n'
+    )
+
+    universe = derive_distribution_universe(tmp_path)
+    assert len(universe) == 1
+    assert (
+        universe[0].classification is PackageClassification.STATELESS_CONTRACT_CATALOGUE
+    )
+    # Confirms this classification is genuinely absent from the real tree
+    # today, which is why the branch needed a synthetic dossier at all.
+    real_universe = derive_distribution_universe(REPO_PACKAGES_ROOT)
+    real_classifications = {d.classification for d in real_universe}
+    assert (
+        PackageClassification.STATELESS_CONTRACT_CATALOGUE not in real_classifications
+    )
+
+
+def test_a_dossier_with_no_package_name_is_refused(tmp_path: Path):
+    (tmp_path / "dotmac-nameless").mkdir()
+    (tmp_path / "dotmac-nameless" / "EXTRACTION.toml").write_text(
+        'classification = "optional-module"\n'
+    )
+
+    with pytest.raises(CatalogueDerivationError):
+        derive_distribution_universe(tmp_path)
+
+
+def test_packages_root_that_is_not_a_directory_is_refused(tmp_path: Path):
+    not_a_directory = tmp_path / "does-not-exist"
+
+    with pytest.raises(CatalogueDerivationError):
+        derive_distribution_universe(not_a_directory)
+
+
+def test_universe_size_is_never_hard_coded_anywhere_in_this_module():
+    """Structural sweep: no literal count of today's real distribution
+    universe appears anywhere in `composition_schema.py`'s source — the
+    number the brief measured (93) is explicitly checked absent, and so is
+    this module's own directly-measured count, so neither can silently
+    become a governing constant."""
+    source = inspect.getsource(schema)
+    real_count = len([p for p in REPO_PACKAGES_ROOT.iterdir() if p.is_dir()])
+    for forbidden_literal in ("93", str(real_count)):
+        assert forbidden_literal not in source, (
+            f"composition_schema.py's source contains the literal "
+            f"{forbidden_literal!r} — the catalogue universe's size must "
+            "never be a hard-coded constant"
+        )
+
+
+def test_package_dossier_holds_only_distribution_and_classification():
+    """`PackageDossier` is deliberately narrow — this module needs nothing
+    else from an `EXTRACTION.toml` dossier, and `adoption_evidence.py`
+    (a different owner) is where the rest of that file's meaning lives."""
+    fields = set(PackageDossier.__dataclass_fields__)
+    assert fields == {"distribution", "classification"}
