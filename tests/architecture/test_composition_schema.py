@@ -3002,7 +3002,7 @@ def test_item10_flag_outside_the_closed_inert_set_yields_unknown():
     a group-selecting flag, not in `_INERT_FLAGS`) refuses the whole
     recipe, never a partial set."""
     recipe = parse_install_command(
-        "poetry install --only main --no-dev", source="unsupported-flag"
+        "poetry install --only main --no-dev", source="UnsupportedFlagMarker:3"
     )
     result = _universe((recipe,))
     assert result is None
@@ -3187,13 +3187,25 @@ def test_item11_each_templated_form_is_refused_identically_at_the_parser():
     `parse_install_command` itself, before an `InstallRecipe` is ever
     constructed — never carried through as though it were a real group
     name."""
+    # The source marker is deliberately distinctive. A prior version passed
+    # `source="templated"`, and every parser message is f"{source}: ...", so
+    # `assert "templated" in message` was satisfied by the test's own label.
+    # It therefore could not see that `$(echo main)` and `` `echo main` ``
+    # never reached the templating check at all: shlex cuts them into `$(echo`
+    # and `main)`, neither of which matched a BALANCED alternative, so they
+    # were refused only because the trailing fragment hit the bare-token rule.
+    # That is refusal by accident of tokenization, one token-rule widening
+    # away from a TOLERATED substitution in a group-selecting position.
     for templated_value in _TEMPLATED_VALUES:
         command_line = f"poetry install --only {templated_value}"
         with pytest.raises(InstallRecipeParseError) as excinfo:
-            parse_install_command(command_line, source="templated")
-        assert "templated" in str(excinfo.value).lower(), (
-            templated_value,
-            str(excinfo.value),
+            parse_install_command(command_line, source="TemplateMarker:11")
+        message = str(excinfo.value)
+        assert "templated value" in message, (templated_value, message)
+        assert "dependency-selection" in message, (templated_value, message)
+        assert "unexpected bare token" not in message, (
+            f"{templated_value!r} is refused by tokenization, not by the "
+            f"templating check: {message}"
         )
 
 

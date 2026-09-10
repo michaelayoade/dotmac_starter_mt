@@ -531,15 +531,26 @@ this is the check that used to make every real fleet recipe unparseable,
 because ``--no-root``/``--no-interaction``/``--no-ansi`` were simply absent
 from the old recognised-shape list); or a blank flag argument. A TEMPLATED
 argument (``$VAR``, ``${VAR}``, ``${{ ... }}``, ``$(...)``/`` `...` ``
-command substitution) never even reaches this function — see
-:func:`parse_install_command`, which refuses any command line containing a
-``$`` or a backtick BEFORE tokenizing it at all, so every templated shape
-is refused the same way, in the same place, and a templated value can never
-be accidentally rescued only by the downstream lock cross-check failing to
-find it. (``_is_templated_value`` below still guards this function too, as
-defense in depth for the one remaining path that can populate
-``recipe.flags`` — but by construction no `InstallRecipe` produced by
-`parse_install_command` can ever carry one.) Also refused — for the
+command substitution) in a DEPENDENCY-SELECTION position is refused by
+``_is_templated_value`` before any lock lookup, so it can never be rescued
+merely by the downstream lock cross-check failing to find it.
+
+An earlier draft of this parser refused any command line containing a ``$``
+or a backtick before tokenizing at all. That rule is GONE, and this
+paragraph described it for one revision after it was removed. It had to go:
+the fleet's real recipes carry a credential command substitution in a
+leading environment assignment, whose value cannot influence which
+dependency groups install, so refusing on it refused every real recipe over
+evidence that is not evidence for this question. Substitution is now
+rejected exactly where it can change the answer — the executable, the
+subcommand, and a group-selecting flag's argument — and environment
+assignment values are opaque context (clause 3).
+
+One narrower claim, stated exactly: a templated FLAG NAME (``—$FOO``)
+survives tokenization and is refused later as an unsupported flag, not by
+the templating check. So it is not true that no `InstallRecipe` this
+function produces can carry a templated string anywhere; it is true that
+none can carry one in a position that decides group selection. Also refused — for the
 ``--with``/``--without``/bare-install branches only — a
 `_default_group_selection` failure. None of these silently becomes "every
 group" or silently narrows to "no groups" — that is the exact failure
@@ -1721,6 +1732,13 @@ def derive_group_optionality(
 #: substitution.
 _TEMPLATED_VALUE_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"\$\{\{.*?\}\}|\$\{[^}]*\}|\$\([^)]*\)|`[^`]*`|\$[A-Za-z_][A-Za-z0-9_]*"
+    # UNBALANCED openers too. `shlex.split` cuts `$(echo main)` into `$(echo`
+    # and `main)`, and neither fragment matches a balanced alternative above,
+    # so before this branch existed those two forms were refused only because
+    # the trailing fragment happened to hit the bare-token rule -- an accident
+    # of tokenization, one token-rule widening away from a TOLERATED
+    # substitution in a dependency-selection position.
+    r"|\$\(|`"
 )
 
 
