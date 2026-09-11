@@ -1,0 +1,9 @@
+name: Verify composition compatibility
+description: Execute the exact reviewed gate and propagate its compatibility verdict
+
+runs:
+  using: composite
+  steps:
+    - name: Verify trusted sources and execute the compatibility gate
+      shell: bash
+      run: python -I "$GITHUB_ACTION_PATH/run_gate.py"
