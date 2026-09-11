@@ -1,16 +1,11 @@
 name: Verify composition contract sources
 description: Refuse helper bytes that differ from the product-bound contract revision
 
-inputs:
-  repository-path:
-    description: Full-history dotmac_starter_mt checkout to verify
-    required: true
-
 runs:
   using: composite
   steps:
     - name: Compare semantic helpers with the immutable contract
       shell: bash
-      run: >-
-        python "$GITHUB_ACTION_PATH/verify.py"
-        --repository "${{ inputs.repository-path }}"
+      env:
+        VERIFIED_REPOSITORY: ${{ github.workspace }}
+      run: python "$GITHUB_ACTION_PATH/verify.py" --repository "$VERIFIED_REPOSITORY"

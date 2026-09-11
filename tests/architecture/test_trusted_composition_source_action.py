@@ -50,9 +50,13 @@ def test_action_owns_a_closed_nonempty_trust_anchor() -> None:
         module.find_source_drift(ROOT, paths=())
 
     action = yaml.safe_load((ACTION / "action.yml").read_text())
-    command = action["runs"]["steps"][0]["run"]
+    assert "inputs" not in action
+    step = action["runs"]["steps"][0]
+    command = step["run"]
     assert "--revision" not in command
     assert "--repository" in command
+    assert step["env"] == {"VERIFIED_REPOSITORY": "${{ github.workspace }}"}
+    assert "${{" not in command
 
 
 def test_action_detects_current_drift_against_one_git_coordinate(
