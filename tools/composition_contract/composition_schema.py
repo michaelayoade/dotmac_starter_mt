@@ -2534,8 +2534,8 @@ def find_install_recipe_construction_call_sites(source_code: str) -> tuple[str, 
     AST match — `Name`/`Attribute` nodes whose written name is exactly
     `InstallRecipe`, `_construct_install_recipe`, or `object.__new__`
     applied to a literal `InstallRecipe` argument. It does NOT resolve
-    imports or aliases: `from tests.architecture.composition_schema import
-    InstallRecipe as IR` followed by `IR(...)` is NOT caught, and neither
+    imports or aliases: `from tools.composition_contract.composition_schema
+    import InstallRecipe as IR` followed by `IR(...)` is NOT caught, and neither
     is construction via `getattr(module, "InstallRecipe")(...)` or any
     other indirection. This is a structural lint for the direct, literal
     forms actually written in THIS module's own source — not a full

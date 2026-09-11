@@ -33,8 +33,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.architecture import composition_schema as schema
-from tests.architecture.composition_schema import (
+from tools.composition_contract import composition_schema as schema
+from tools.composition_contract.composition_schema import (
     AssemblyConsumptionKind,
     AssemblyConsumptionTrace,
     CatalogueDerivationError,
