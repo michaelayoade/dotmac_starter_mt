@@ -14,11 +14,15 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         COMPOSITION_PRODUCT: ${{ inputs.product }}
+        COMPOSITION_WORKSPACE: ${{ github.workspace }}
+        COMPOSITION_ACTION_REPOSITORY: ${{ github.action_repository }}
+        COMPOSITION_ACTION_REF: ${{ github.action_ref }}
+        COMPOSITION_CALLER_REPOSITORY: ${{ github.repository }}
       run: >-
         python3
         "$GITHUB_ACTION_PATH/../../../tools/composition_contract/check_product_observations.py"
         --product "$COMPOSITION_PRODUCT"
-        --workspace "$GITHUB_WORKSPACE"
-        --action-repository "$GITHUB_ACTION_REPOSITORY"
-        --action-ref "$GITHUB_ACTION_REF"
-        --caller-repository "$GITHUB_REPOSITORY"
+        --workspace "$COMPOSITION_WORKSPACE"
+        --action-repository "$COMPOSITION_ACTION_REPOSITORY"
+        --action-ref "$COMPOSITION_ACTION_REF"
+        --caller-repository "$COMPOSITION_CALLER_REPOSITORY"

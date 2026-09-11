@@ -40,10 +40,16 @@ def test_action_resolves_cli_from_action_path_and_workspace() -> None:
         "$GITHUB_ACTION_PATH/../../../tools/composition_contract/"
         "check_product_observations.py"
     ) in command
-    assert step["env"] == {"COMPOSITION_PRODUCT": "${{ inputs.product }}"}
+    assert step["env"] == {
+        "COMPOSITION_PRODUCT": "${{ inputs.product }}",
+        "COMPOSITION_WORKSPACE": "${{ github.workspace }}",
+        "COMPOSITION_ACTION_REPOSITORY": "${{ github.action_repository }}",
+        "COMPOSITION_ACTION_REF": "${{ github.action_ref }}",
+        "COMPOSITION_CALLER_REPOSITORY": "${{ github.repository }}",
+    }
     assert "${{ inputs.product }}" not in command
     assert '--product "$COMPOSITION_PRODUCT"' in command
-    assert '--workspace "$GITHUB_WORKSPACE"' in command
+    assert '--workspace "$COMPOSITION_WORKSPACE"' in command
     assert "record-path" not in command
 
 
@@ -51,9 +57,14 @@ def test_action_passes_identity_and_has_no_external_or_mutable_uses() -> None:
     document = _action()
     command = _run_step()["run"]
 
-    assert '--action-repository "$GITHUB_ACTION_REPOSITORY"' in command
-    assert '--action-ref "$GITHUB_ACTION_REF"' in command
-    assert '--caller-repository "$GITHUB_REPOSITORY"' in command
+    assert '--action-repository "$COMPOSITION_ACTION_REPOSITORY"' in command
+    assert '--action-ref "$COMPOSITION_ACTION_REF"' in command
+    assert '--caller-repository "$COMPOSITION_CALLER_REPOSITORY"' in command
+    for action_context_without_an_automatic_shell_variable in (
+        "$GITHUB_ACTION_REPOSITORY",
+        "$GITHUB_ACTION_REF",
+    ):
+        assert action_context_without_an_automatic_shell_variable not in command
     assert "token" not in document
     assert "secret" not in document
     assert "uses" not in document
@@ -78,10 +89,10 @@ def test_untrusted_product_input_is_one_shell_argument(tmp_path: Path) -> None:
         "CAPTURED_ARGUMENTS": str(captured),
         "COMPOSITION_PRODUCT": malicious,
         "GITHUB_ACTION_PATH": str(ACTION.parent),
-        "GITHUB_WORKSPACE": str(tmp_path),
-        "GITHUB_ACTION_REPOSITORY": "michaelayoade/dotmac_starter_mt",
-        "GITHUB_ACTION_REF": "a" * 40,
-        "GITHUB_REPOSITORY": "michaelayoade/dotmac_academy_app",
+        "COMPOSITION_WORKSPACE": str(tmp_path),
+        "COMPOSITION_ACTION_REPOSITORY": "michaelayoade/dotmac_starter_mt",
+        "COMPOSITION_ACTION_REF": "a" * 40,
+        "COMPOSITION_CALLER_REPOSITORY": "michaelayoade/dotmac_academy_app",
     }
 
     result = subprocess.run(  # noqa: S603 - checked-in Bash action command
