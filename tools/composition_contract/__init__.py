@@ -7,6 +7,7 @@ observations from immutable product Git objects.
 """
 
 from tools.composition_contract.observations import (
+    CANONICAL_RECORD_PATH,
     CONTRACT_REPOSITORY,
     OBSERVATION_SCHEMA_VERSION,
     ObservationAcquisitionError,
@@ -19,25 +20,44 @@ from tools.composition_contract.observations import (
     VerifiedObservation,
     VerifiedObservationEnvelope,
     WholeFileLocator,
+    build_product_checkout_document,
+    checkout_head_revision,
     extract_observation,
+    read_checkout_json_document,
     read_regular_git_blob,
     verify_observation_envelope,
+    verify_product_checkout_envelope,
+)
+from tools.composition_contract.specs import (
+    ACADEMY_OBSERVATION_SPEC,
+    ERP_OBSERVATION_SPEC,
+    PRODUCT_OBSERVATION_SPECS,
+    SUB_OBSERVATION_SPEC,
 )
 
 __all__ = [
+    "ACADEMY_OBSERVATION_SPEC",
+    "CANONICAL_RECORD_PATH",
     "CONTRACT_REPOSITORY",
+    "ERP_OBSERVATION_SPEC",
     "OBSERVATION_SCHEMA_VERSION",
     "ObservationAcquisitionError",
     "ObservationClaim",
     "ObservationRefusal",
     "ObservationSpec",
     "PoetryInstallCommandLocator",
+    "PRODUCT_OBSERVATION_SPECS",
     "ProductObservationSpec",
     "PythonAssignmentKeywordLocator",
+    "SUB_OBSERVATION_SPEC",
     "VerifiedObservation",
     "VerifiedObservationEnvelope",
     "WholeFileLocator",
+    "build_product_checkout_document",
+    "checkout_head_revision",
     "extract_observation",
+    "read_checkout_json_document",
     "read_regular_git_blob",
     "verify_observation_envelope",
+    "verify_product_checkout_envelope",
 ]

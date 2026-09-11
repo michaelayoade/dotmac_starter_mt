@@ -4,12 +4,14 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from tools.composition_contract.observations import (
+    CANONICAL_RECORD_PATH,
     CONTRACT_REPOSITORY,
     OBSERVATION_SCHEMA_VERSION,
     ObservationAcquisitionError,
@@ -19,8 +21,15 @@ from tools.composition_contract.observations import (
     ProductObservationSpec,
     PythonAssignmentKeywordLocator,
     WholeFileLocator,
+    build_product_checkout_document,
     extract_observation,
+    read_checkout_json_document,
     verify_observation_envelope,
+    verify_product_checkout_envelope,
+)
+from tools.composition_contract.specs import (
+    ERP_OBSERVATION_SPEC,
+    PRODUCT_OBSERVATION_SPECS,
 )
 
 CONTRACT_REVISION = "a" * 40
@@ -229,6 +238,160 @@ def test_contract_revision_is_fixed_but_need_not_equal_starter_head(
     contract["commit"] = "b" * 40
     with pytest.raises(ObservationRefusal, match="loaded contract"):
         _verify(document, spec, repo, revision)
+
+
+def test_checkout_builder_emits_only_rederived_coordinates_and_digests(
+    product_repository: tuple[Path, str],
+) -> None:
+    repo, revision = product_repository
+    spec = _spec()
+
+    document = build_product_checkout_document(
+        spec=spec,
+        product_clone=repo,
+        contract_revision=CONTRACT_REVISION,
+    )
+    verified = verify_product_checkout_envelope(
+        document,
+        spec=spec,
+        product_clone=repo,
+        trusted_contract_revision=CONTRACT_REVISION,
+    )
+
+    assert verified.product_revision == revision
+    assert "REGISTRY_PASSWORD" not in json.dumps(document)
+    assert set(document) == {
+        "schema_version",
+        "repository",
+        "product_id",
+        "subject",
+        "contract_revision",
+        "observations",
+    }
+
+
+def test_checkout_json_reader_refuses_duplicate_fields_and_symlinks(
+    product_repository: tuple[Path, str],
+) -> None:
+    repo, _ = product_repository
+    _write(
+        repo,
+        "docs/kernel-runtime-composition.json",
+        '{"schema_version":"one","schema_version":"two"}\n',
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "add duplicate record")
+
+    with pytest.raises(ObservationRefusal, match="duplicated"):
+        read_checkout_json_document(repo)
+
+    (repo / "docs/kernel-runtime-composition.json").unlink()
+    (repo / "docs/kernel-runtime-composition.json").symlink_to("../target.json")
+    _write(repo, "docs/target.json", "{}\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "replace record with symlink")
+
+    with pytest.raises(ObservationRefusal, match="not a regular file"):
+        read_checkout_json_document(repo)
+
+
+def test_product_specs_fix_identity_subject_and_observation_coordinates() -> None:
+    assert set(PRODUCT_OBSERVATION_SPECS) == {"academy", "erp", "sub"}
+    assert {
+        key: (spec.repository, spec.product_id, spec.subject)
+        for key, spec in PRODUCT_OBSERVATION_SPECS.items()
+    } == {
+        "academy": (
+            "dotmac_academy_app",
+            "dotmac-academy",
+            "academy-kernel-successor-composition",
+        ),
+        "erp": (
+            "dotmac_erp",
+            "dotmac-erp",
+            "erp-kernel-successor-composition",
+        ),
+        "sub": (
+            "dotmac_sub",
+            "dotmac-sub",
+            "sub-kernel-successor-composition",
+        ),
+    }
+    for spec in PRODUCT_OBSERVATION_SPECS.values():
+        assert {item.observation_id for item in spec.observations} >= {
+            "dependency-manifest",
+            "dependency-lock",
+            "production-install",
+            "product-assembly-source",
+            "module-registration",
+            "boot-entry-point",
+            "migration-config",
+        }
+
+
+def test_public_cli_verifies_a_real_candidate_checkout(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "composition@example.invalid")
+    _git(tmp_path, "config", "user.name", "Composition Test")
+    contents = {
+        "pyproject.toml": "[tool.poetry]\nname='dotmac_erp'\n",
+        "poetry.lock": "package = []\n",
+        "Dockerfile": "RUN poetry install --only main --no-root --no-ansi\n",
+        "app/product_assembly.py": (
+            "ERP_PRODUCT_ASSEMBLY = ProductAssemblySpec(\n"
+            "    name='dotmac-erp', modules=COMPOSED_MODULE_MANIFESTS\n"
+            ")\n"
+        ),
+        "app/main.py": "app = object()\n",
+        "alembic.ini": "[alembic]\n",
+        "app/migration_bindings.py": "MIGRATION_BINDINGS = ()\n",
+    }
+    for path, content in contents.items():
+        _write(tmp_path, path, content)
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "add product sources")
+    document = build_product_checkout_document(
+        spec=ERP_OBSERVATION_SPEC,
+        product_clone=tmp_path,
+        contract_revision=CONTRACT_REVISION,
+    )
+    _write(
+        tmp_path,
+        CANONICAL_RECORD_PATH,
+        json.dumps(document, indent=2) + "\n",
+    )
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "add product observations")
+
+    cli = (
+        Path(__file__).resolve().parents[2]
+        / "tools"
+        / "composition_contract"
+        / "check_product_observations.py"
+    )
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and test CLI
+        [
+            sys.executable,
+            str(cli),
+            "--product",
+            "erp",
+            "--workspace",
+            str(tmp_path),
+            "--action-repository",
+            "michaelayoade/dotmac_starter_mt",
+            "--action-ref",
+            CONTRACT_REVISION,
+            "--caller-repository",
+            "michaelayoade/dotmac_erp",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "product=dotmac-erp" in result.stdout
+    assert "observations=8" in result.stdout
 
 
 def test_source_changed_while_record_stayed_fixed_is_refused(

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import re
 import shlex
 import subprocess
@@ -25,6 +26,7 @@ from typing import Final, TypeAlias
 
 OBSERVATION_SCHEMA_VERSION: Final = "dimensional-composition.v3"
 CONTRACT_REPOSITORY: Final = "dotmac_starter_mt"
+CANONICAL_RECORD_PATH: Final = "docs/kernel-runtime-composition.json"
 _COMMIT: Final = re.compile(r"^[0-9a-f]{40}$")
 _SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER: Final = re.compile(r"^[a-z][a-z0-9_.-]*$")
@@ -218,6 +220,47 @@ class VerifiedObservationEnvelope:
     contract_revision: str
     product_revision: str
     observations: tuple[VerifiedObservation, ...]
+
+
+def build_product_checkout_document(
+    *,
+    spec: ProductObservationSpec,
+    product_clone: Path,
+    contract_revision: str,
+) -> dict[str, object]:
+    """Derive a deterministic digest-only v3 document from exact Git HEAD."""
+
+    if not _COMMIT.fullmatch(contract_revision):
+        raise ObservationRefusal("contract revision is not an immutable commit")
+    product_revision = checkout_head_revision(product_clone)
+    rows: list[dict[str, str]] = []
+    for observation_spec in spec.observations:
+        source = read_regular_git_blob(
+            product_clone,
+            product_revision,
+            observation_spec,
+        )
+        extracted = extract_observation(observation_spec, source)
+        rows.append(
+            {
+                "id": observation_spec.observation_id,
+                "source_path": observation_spec.source_path,
+                "source_blob_sha256": hashlib.sha256(source).hexdigest(),
+                "selector": observation_spec.selector,
+                "extract_sha256": hashlib.sha256(extracted).hexdigest(),
+            }
+        )
+    return {
+        "schema_version": OBSERVATION_SCHEMA_VERSION,
+        "repository": spec.repository,
+        "product_id": spec.product_id,
+        "subject": spec.subject,
+        "contract_revision": {
+            "repository": CONTRACT_REPOSITORY,
+            "commit": contract_revision,
+        },
+        "observations": rows,
+    }
 
 
 def _git(
@@ -566,23 +609,13 @@ def _parse_contract_revision(payload: object, trusted_revision: str) -> str:
     return commit
 
 
-def verify_observation_envelope(
+def _parse_envelope_claims(
     document: Mapping[str, object],
     *,
     spec: ProductObservationSpec,
-    product_clone: Path,
-    product_revision: str,
     trusted_contract_revision: str,
-    protected_main_ref: str = "origin/main",
-) -> VerifiedObservationEnvelope:
-    """Verify one product envelope against immutable Git blobs.
-
-    The caller must load ``spec`` from ``trusted_contract_revision``; the
-    catalogue universe is therefore the one at the record's contract commit,
-    not whatever happens to be checked out as Starter HEAD. All payload
-    coordinates are rejected before the first Git operation. Fetch/checkout
-    failure is an acquisition error, not an intentional unbound state.
-    """
+) -> tuple[str, tuple[ObservationClaim, ...]]:
+    """Parse every caller-authored value before any Git operation."""
 
     document_keys = set(document)
     if not all(isinstance(key, str) for key in document_keys):
@@ -635,14 +668,18 @@ def verify_observation_envelope(
             f"missing={sorted(expected_ids - set(by_id))!r}, "
             f"unknown={sorted(set(by_id) - expected_ids)!r}"
         )
-    claims = tuple(
+    return contract_revision, tuple(
         _parse_claim(by_id[item.observation_id], item) for item in spec.observations
     )
 
-    # Caller-authored coordinates are all rejected before the first Git call.
-    _require_protected_main_ancestor(
-        product_clone, product_revision, protected_main_ref
-    )
+
+def _verify_claims_at_revision(
+    *,
+    spec: ProductObservationSpec,
+    claims: tuple[ObservationClaim, ...],
+    product_clone: Path,
+    product_revision: str,
+) -> tuple[VerifiedObservation, ...]:
     verified: list[VerifiedObservation] = []
     for observation_spec, claim in zip(spec.observations, claims, strict=True):
         source_bytes = read_regular_git_blob(
@@ -661,6 +698,134 @@ def verify_observation_envelope(
                 "disagrees with Git"
             )
         verified.append(VerifiedObservation(claim=claim, extracted=extracted))
+    return tuple(verified)
+
+
+def checkout_head_revision(product_clone: Path) -> str:
+    try:
+        revision = _git(product_clone, ("rev-parse", "--verify", "HEAD^{commit}"))
+        decoded = revision.stdout.decode("ascii").strip()
+    except UnicodeDecodeError as exc:
+        raise ObservationAcquisitionError("git returned a non-ASCII HEAD") from exc
+    if not _COMMIT.fullmatch(decoded):
+        raise ObservationAcquisitionError(
+            f"git returned a non-immutable HEAD coordinate: {decoded!r}"
+        )
+    return decoded
+
+
+def read_checkout_json_document(
+    product_clone: Path,
+    *,
+    record_path: str = CANONICAL_RECORD_PATH,
+) -> Mapping[str, object]:
+    """Read one strict JSON object from a fixed regular blob at Git HEAD."""
+
+    _validate_relative_source_path(record_path)
+    record_spec = ObservationSpec(
+        "composition-observation-envelope",
+        record_path,
+        WholeFileLocator(),
+        max_source_bytes=1024 * 1024,
+    )
+    content = read_regular_git_blob(
+        product_clone,
+        checkout_head_revision(product_clone),
+        record_spec,
+    )
+
+    def refuse_duplicate_keys(
+        pairs: list[tuple[str, object]],
+    ) -> dict[str, object]:
+        parsed: dict[str, object] = {}
+        for key, value in pairs:
+            if key in parsed:
+                raise ObservationRefusal(f"JSON field {key!r} is duplicated")
+            parsed[key] = value
+        return parsed
+
+    try:
+        document = json.loads(content, object_pairs_hook=refuse_duplicate_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ObservationRefusal(
+            f"{record_path!r} is not a strict UTF-8 JSON document"
+        ) from exc
+    if not isinstance(document, Mapping):
+        raise ObservationRefusal("observation envelope root must be an object")
+    return document
+
+
+def verify_product_checkout_envelope(
+    document: Mapping[str, object],
+    *,
+    spec: ProductObservationSpec,
+    product_clone: Path,
+    trusted_contract_revision: str,
+) -> VerifiedObservationEnvelope:
+    """Verify product-authored claims against the checkout's exact Git HEAD.
+
+    Product CI legitimately runs on a pull-request merge commit that is not a
+    protected-main ancestor yet. It proves that the record and cited sources
+    agree in that exact candidate tree; the central all-of gate separately
+    enforces protected-main ancestry before accepting a product revision.
+    """
+
+    contract_revision, claims = _parse_envelope_claims(
+        document,
+        spec=spec,
+        trusted_contract_revision=trusted_contract_revision,
+    )
+    product_revision = checkout_head_revision(product_clone)
+    verified = _verify_claims_at_revision(
+        spec=spec,
+        claims=claims,
+        product_clone=product_clone,
+        product_revision=product_revision,
+    )
+    return VerifiedObservationEnvelope(
+        repository=spec.repository,
+        product_id=spec.product_id,
+        subject=spec.subject,
+        contract_revision=contract_revision,
+        product_revision=product_revision,
+        observations=verified,
+    )
+
+
+def verify_observation_envelope(
+    document: Mapping[str, object],
+    *,
+    spec: ProductObservationSpec,
+    product_clone: Path,
+    product_revision: str,
+    trusted_contract_revision: str,
+    protected_main_ref: str = "origin/main",
+) -> VerifiedObservationEnvelope:
+    """Verify one product envelope against immutable protected-main Git blobs.
+
+    The caller must load ``spec`` from ``trusted_contract_revision``; the
+    catalogue universe is therefore the one at the record's contract commit,
+    not whatever happens to be checked out as Starter HEAD. All payload
+    coordinates are rejected before the first Git operation. Fetch/checkout
+    failure is an acquisition error, not an intentional unbound state.
+    """
+
+    contract_revision, claims = _parse_envelope_claims(
+        document,
+        spec=spec,
+        trusted_contract_revision=trusted_contract_revision,
+    )
+
+    # Caller-authored coordinates are all rejected before the first Git call.
+    _require_protected_main_ancestor(
+        product_clone, product_revision, protected_main_ref
+    )
+    verified = _verify_claims_at_revision(
+        spec=spec,
+        claims=claims,
+        product_clone=product_clone,
+        product_revision=product_revision,
+    )
 
     return VerifiedObservationEnvelope(
         repository=spec.repository,
@@ -668,5 +833,5 @@ def verify_observation_envelope(
         subject=spec.subject,
         contract_revision=contract_revision,
         product_revision=product_revision,
-        observations=tuple(verified),
+        observations=verified,
     )
