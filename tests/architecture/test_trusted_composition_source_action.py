@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import py_compile
 import subprocess
 import sys
 from pathlib import Path
@@ -80,10 +81,11 @@ def test_byte_pins_refuse_a_changed_gate_or_binding(tmp_path: Path) -> None:
     path.write_bytes(b"trusted")
     expected = hashlib.sha256(b"trusted").hexdigest()
 
-    runner._require_sha256(path, expected, label="candidate")
+    trusted = path.read_bytes()
+    runner._require_sha256(trusted, expected, label="candidate")
     path.write_bytes(b"changed")
     with pytest.raises(runner.TrustedRunnerError, match="not the pinned candidate"):
-        runner._require_sha256(path, expected, label="candidate")
+        runner._require_sha256(path.read_bytes(), expected, label="candidate")
 
 
 def test_runner_refuses_any_binding_other_than_the_three_pinned_revisions(
@@ -99,12 +101,12 @@ def test_runner_refuses_any_binding_other_than_the_three_pinned_revisions(
         },
     }
     path.write_text(json.dumps(document))
-    runner._require_exact_bindings(path)
+    runner._require_exact_bindings(path.read_bytes())
 
     document["bindings"]["erp"]["revision"] = "a" * 40
     path.write_text(json.dumps(document))
     with pytest.raises(runner.TrustedRunnerError, match="bindings changed"):
-        runner._require_exact_bindings(path)
+        runner._require_exact_bindings(path.read_bytes())
 
 
 def test_explicit_loader_never_executes_candidate_package_initializers(
@@ -120,14 +122,47 @@ def test_explicit_loader_never_executes_candidate_package_initializers(
     (contract / "__init__.py").write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('contract')\n"
     )
+    helper_sources = {
+        f"tools/composition_contract/{filename}": b"VALUE = 1\n"
+        for _, filename in runner._HELPER_MODULES
+    }
     for _, filename in runner._HELPER_MODULES:
-        (contract / filename).write_text("VALUE = 1\n")
-    (contract / "compatibility_gate.py").write_text("VALUE = 2\n")
+        (contract / filename).write_text("raise RuntimeError('reopened helper')\n")
+    gate_path = contract / "compatibility_gate.py"
+    gate_path.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('source')\n"
+    )
+    (contract / "__pycache__").mkdir()
+    py_compile.compile(
+        str(gate_path),
+        cfile=str(contract / "__pycache__" / "compatibility_gate.pyc"),
+        doraise=True,
+    )
 
-    loaded = runner._load_verified_gate(tmp_path)
+    loaded = runner._load_verified_gate(
+        tmp_path,
+        helper_sources=helper_sources,
+        gate_source=b"VALUE = 2\n",
+    )
 
     assert loaded.VALUE == 2
     assert not marker.exists()
+
+
+def test_single_open_reader_refuses_symlinks_and_returns_captured_bytes(
+    tmp_path: Path,
+) -> None:
+    runner = _module("run_gate")
+    target = tmp_path / "target"
+    target.write_bytes(b"first")
+    captured = runner._read_regular_file(target, label="target")
+    target.write_bytes(b"second")
+    assert captured == b"first"
+
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    with pytest.raises(runner.TrustedRunnerAcquisitionError, match="unreadable"):
+        runner._read_regular_file(link, label="link")
 
 
 def test_action_detects_current_drift_against_one_git_coordinate(

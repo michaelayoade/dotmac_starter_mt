@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
+import stat
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -45,14 +45,55 @@ class TrustedRunnerError(RuntimeError):
     """The pinned runner could not establish or execute its exact inputs."""
 
 
-def _load_file_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise TrustedRunnerError(f"cannot create a loader for {path}")
-    module = importlib.util.module_from_spec(spec)
+class TrustedRunnerAcquisitionError(RuntimeError):
+    """A required local artifact could not be captured safely."""
+
+
+def _read_regular_file(
+    path: Path, *, label: str, limit: int = 2 * 1024 * 1024
+) -> bytes:
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if no_follow is None:
+        raise TrustedRunnerAcquisitionError("this runner requires O_NOFOLLOW")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | no_follow)
+    except OSError as exc:
+        raise TrustedRunnerAcquisitionError(f"{label} is unreadable: {exc}") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise TrustedRunnerAcquisitionError(f"{label} is not a regular file")
+        if metadata.st_size > limit:
+            raise TrustedRunnerAcquisitionError(
+                f"{label} exceeds the {limit}-byte bound"
+            )
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            chunk = os.read(descriptor, min(64 * 1024, limit + 1 - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > limit:
+                raise TrustedRunnerAcquisitionError(
+                    f"{label} exceeds the {limit}-byte bound"
+                )
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+def _load_source_module(name: str, source: bytes, *, filename: str) -> ModuleType:
+    """Compile the captured source buffer; never consult a path or pyc cache."""
+
+    module = ModuleType(name)
+    module.__file__ = filename
+    module.__package__ = name.rpartition(".")[0]
     sys.modules[name] = module
     try:
-        spec.loader.exec_module(module)
+        code = compile(source, filename, "exec", dont_inherit=True)
+        exec(code, module.__dict__)  # noqa: S102 - source buffer is SHA-pinned
     except Exception:
         sys.modules.pop(name, None)
         raise
@@ -62,26 +103,28 @@ def _load_file_module(name: str, path: Path) -> ModuleType:
 def _load_verifier() -> ModuleType:
     """Load the sibling verifier by path, never via PYTHONPATH resolution."""
 
-    return _load_file_module(
-        "_trusted_composition_source_verifier", ACTION_ROOT / "verify.py"
+    path = ACTION_ROOT / "verify.py"
+    return _load_source_module(
+        "_trusted_composition_source_verifier",
+        _read_regular_file(path, label="pinned verifier"),
+        filename=str(path),
     )
 
 
 def _workspace() -> Path:
     raw = os.environ.get("GITHUB_WORKSPACE")
     if not raw:
-        raise TrustedRunnerError("GITHUB_WORKSPACE is unset")
+        raise TrustedRunnerAcquisitionError("GITHUB_WORKSPACE is unset")
     workspace = Path(raw).resolve()
     if not workspace.is_dir():
-        raise TrustedRunnerError(f"GITHUB_WORKSPACE is not a directory: {workspace}")
+        raise TrustedRunnerAcquisitionError(
+            f"GITHUB_WORKSPACE is not a directory: {workspace}"
+        )
     return workspace
 
 
-def _require_sha256(path: Path, expected: str, *, label: str) -> None:
-    try:
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError as exc:
-        raise TrustedRunnerError(f"{label} is unreadable: {exc}") from exc
+def _require_sha256(content: bytes, expected: str, *, label: str) -> None:
+    actual = hashlib.sha256(content).hexdigest()
     if actual != expected:
         raise TrustedRunnerError(
             f"{label} bytes are not the pinned candidate: expected {expected}, "
@@ -89,7 +132,7 @@ def _require_sha256(path: Path, expected: str, *, label: str) -> None:
         )
 
 
-def _strict_json(path: Path) -> Mapping[str, object]:
+def _strict_json(content: bytes) -> Mapping[str, object]:
     def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
         result: dict[str, object] = {}
         for key, value in items:
@@ -99,16 +142,16 @@ def _strict_json(path: Path) -> Mapping[str, object]:
         return result
 
     try:
-        value = json.loads(path.read_bytes(), object_pairs_hook=pairs)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        value = json.loads(content, object_pairs_hook=pairs)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise TrustedRunnerError(f"bindings are not strict UTF-8 JSON: {exc}") from exc
     if not isinstance(value, Mapping):
         raise TrustedRunnerError("bindings root is not an object")
     return value
 
 
-def _require_exact_bindings(path: Path) -> None:
-    document = _strict_json(path)
+def _require_exact_bindings(content: bytes) -> None:
+    document = _strict_json(content)
     if set(document) != {"schema", "bindings"}:
         raise TrustedRunnerError("bindings have an unexpected top-level shape")
     if document["schema"] != "kernel-composition-compatibility-bindings.v3":
@@ -136,7 +179,12 @@ def _safe_package(name: str, path: Path) -> None:
     sys.modules[name] = package
 
 
-def _load_verified_gate(workspace: Path) -> ModuleType:
+def _load_verified_gate(
+    workspace: Path,
+    *,
+    helper_sources: Mapping[str, bytes],
+    gate_source: bytes,
+) -> ModuleType:
     """Load only pinned files; candidate package initializers never execute."""
 
     tools_root = workspace / "tools"
@@ -144,9 +192,16 @@ def _load_verified_gate(workspace: Path) -> ModuleType:
     _safe_package("tools", tools_root)
     _safe_package("tools.composition_contract", contract_root)
     for name, filename in _HELPER_MODULES:
-        _load_file_module(name, contract_root / filename)
-    return _load_file_module(
-        "tools.composition_contract.compatibility_gate", workspace / GATE_PATH
+        relative = f"tools/composition_contract/{filename}"
+        _load_source_module(
+            name,
+            helper_sources[relative],
+            filename=str(contract_root / filename),
+        )
+    return _load_source_module(
+        "tools.composition_contract.compatibility_gate",
+        gate_source,
+        filename=str(workspace / GATE_PATH),
     )
 
 
@@ -183,33 +238,51 @@ def _require_expected_result(result: Any) -> None:
 
 
 def main() -> int:
+    verifier: ModuleType | None = None
+    gate: ModuleType | None = None
     try:
         workspace = _workspace()
         verifier = _load_verifier()
-        drift = verifier.find_source_drift(workspace)
-        if drift:
-            raise TrustedRunnerError(
-                "contract helper bytes differ from "
-                f"{TRUSTED_CONTRACT_REVISION}: {list(drift)!r}"
-            )
+        helper_sources = verifier.read_verified_sources(workspace)
         gate_path = workspace / GATE_PATH
         bindings_path = workspace / BINDINGS_PATH
-        _require_sha256(gate_path, GATE_SHA256, label="compatibility gate")
-        _require_sha256(bindings_path, BINDINGS_SHA256, label="bindings")
-        _require_exact_bindings(bindings_path)
-        gate = _load_verified_gate(workspace)
+        gate_source = _read_regular_file(gate_path, label="compatibility gate")
+        bindings_source = _read_regular_file(bindings_path, label="bindings")
+        _require_sha256(gate_source, GATE_SHA256, label="compatibility gate")
+        _require_sha256(bindings_source, BINDINGS_SHA256, label="bindings")
+        _require_exact_bindings(bindings_source)
+        gate = _load_verified_gate(
+            workspace,
+            helper_sources=helper_sources,
+            gate_source=gate_source,
+        )
         clones = {
             "academy": workspace / ".compat-gate-clones/dotmac_academy_app",
             "erp": workspace / ".compat-gate-clones/dotmac_erp",
             "sub": workspace / ".compat-gate-clones/dotmac_sub",
         }
+        bindings = {
+            product: gate.ProductBinding(product, revision)
+            for product, revision in EXPECTED_REVISIONS.items()
+        }
         result = gate.evaluate_gate(
-            gate.load_bindings(bindings_path),
+            bindings,
             clones=clones,
             repository_root=workspace,
         )
         _require_expected_result(result)
+    except TrustedRunnerAcquisitionError as exc:
+        print(f"TRUSTED COMPATIBILITY ACQUISITION FAILED: {exc}")
+        return 2
     except Exception as exc:
+        if verifier is not None and isinstance(
+            exc, verifier.TrustedSourceAcquisitionError
+        ):
+            print(f"TRUSTED COMPATIBILITY ACQUISITION FAILED: {exc}")
+            return 2
+        if gate is not None and isinstance(exc, gate.GateAcquisitionError):
+            print(f"TRUSTED COMPATIBILITY ACQUISITION FAILED: {exc}")
+            return 2
         print(f"TRUSTED COMPATIBILITY REFUSED: {exc}")
         return 1
     print(result.explain())

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import os
+import stat
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 
 TRUSTED_CONTRACT_REVISION: Final = "8b4b6d4b42e650c47fe4c04a679a5ccb51c4b2cd"
@@ -18,6 +21,45 @@ TRUSTED_SEMANTIC_PATHS: Final = (
 
 class TrustedSourceAcquisitionError(RuntimeError):
     """The pinned Git object or current source could not be read."""
+
+
+class TrustedSourceDriftError(ValueError):
+    """Current helper bytes differ from the pinned Git object."""
+
+
+def read_regular_file(path: Path, *, label: str, limit: int = 2 * 1024 * 1024) -> bytes:
+    """Read one non-symlink regular file once through an already-open fd."""
+
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if no_follow is None:
+        raise TrustedSourceAcquisitionError("this runner requires O_NOFOLLOW")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | no_follow)
+    except OSError as exc:
+        raise TrustedSourceAcquisitionError(f"{label} is unreadable: {exc}") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise TrustedSourceAcquisitionError(f"{label} is not a regular file")
+        if metadata.st_size > limit:
+            raise TrustedSourceAcquisitionError(
+                f"{label} exceeds the {limit}-byte bound"
+            )
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            chunk = os.read(descriptor, min(64 * 1024, limit + 1 - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > limit:
+                raise TrustedSourceAcquisitionError(
+                    f"{label} exceeds the {limit}-byte bound"
+                )
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
 
 
 def _git_show(repository: Path, revision: str, path: str) -> bytes:
@@ -51,14 +93,33 @@ def find_source_drift(
     drift: list[str] = []
     for relative in TRUSTED_SEMANTIC_PATHS:
         try:
-            current = (repository / relative).read_bytes()
-        except OSError as exc:
-            raise TrustedSourceAcquisitionError(
-                f"current source {relative!r} is unreadable: {exc}"
-            ) from exc
+            current = read_regular_file(
+                repository / relative,
+                label=f"current source {relative!r}",
+            )
+        except TrustedSourceAcquisitionError:
+            raise
         if current != _git_show(repository, revision, relative):
             drift.append(relative)
     return tuple(drift)
+
+
+def read_verified_sources(repository: Path) -> MappingProxyType[str, bytes]:
+    """Capture each helper once and return only bytes equal to the Git object."""
+
+    captured: dict[str, bytes] = {}
+    for relative in TRUSTED_SEMANTIC_PATHS:
+        current = read_regular_file(
+            repository / relative,
+            label=f"current source {relative!r}",
+        )
+        if current != _git_show(repository, TRUSTED_CONTRACT_REVISION, relative):
+            raise TrustedSourceDriftError(
+                f"current helper {relative!r} differs from "
+                f"{TRUSTED_CONTRACT_REVISION}"
+            )
+        captured[relative] = current
+    return MappingProxyType(captured)
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
