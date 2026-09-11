@@ -56,6 +56,7 @@ from tests.architecture.composition_schema import (
     RuntimeExposureReport,
     build_coverage_report,
     build_runtime_exposure_report,
+    classify_modules_sequence_argument,
     classify_registration_call_site,
     composition_record_from_payload,
     composition_records_from_envelope,
@@ -69,6 +70,7 @@ from tests.architecture.composition_schema import (
     explain_recipe_selection_refusal,
     find_install_recipe_construction_call_sites,
     measure_starter_boot_assembly_consumption,
+    measure_starter_module_registration_argument_kind,
     parse_install_command,
 )
 
@@ -628,6 +630,154 @@ def test_an_empty_assembly_file_cannot_satisfy_the_positive_control(tmp_path: Pa
     assert trace.classify() is AssemblyConsumptionKind.INDETERMINATE
 
 
+def _write_factory(tmp_path: Path) -> None:
+    """A real `create_app(spec)` containing `ModuleRegistry(spec.modules)` —
+    the shape `_module_registry_consumes_spec_modules` looks for, wrapped in
+    an actual `FunctionDef` (unlike the bare-text factory stub the empty-
+    assembly test above uses, which never reaches this far)."""
+    factory_dir = tmp_path / "packages" / "dotmac-kernel" / "src" / "dotmac_kernel"
+    factory_dir.mkdir(parents=True)
+    (factory_dir / "app_factory.py").write_text(
+        "def create_app(spec):\n"
+        "    registry = ModuleRegistry(spec.modules)\n"
+        "    return registry\n"
+    )
+
+
+def test_annotated_construction_still_measures_as_boot_path_consumed(
+    tmp_path: Path,
+):
+    """Sensitivity proof for the substring-where-structure-was-required
+    repair (module docstring: "Two measured defects, repaired"). The OLD
+    substring check required the literal text `"assembly = ProductAssemblySpec("`
+    and would have silently misread `assembly: Final = ProductAssemblySpec(`
+    as `imported_by_boot_entry_point=False` — an honest annotation on the
+    real construction line flipping the positive control to `INDETERMINATE`
+    with no error. Confirmed directly against the pre-repair
+    `measure_starter_boot_assembly_consumption`, which measures this same
+    tree as `AssemblyConsumptionKind.INDETERMINATE`. The AST-based
+    replacement reads the `ast.AnnAssign` node correctly and still measures
+    `BOOT_PATH_CONSUMED`."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "main.py").write_text(
+        "from app.assembly import assembly\napp = create_app(assembly)\n"
+    )
+    (app_dir / "assembly.py").write_text(
+        "from typing import Final\n"
+        "from dotmac_kernel.assembly import ProductAssemblySpec\n\n"
+        'assembly: Final = ProductAssemblySpec(\n    name="dotmac_starter_mt",\n)\n'
+    )
+    _write_factory(tmp_path)
+
+    trace = measure_starter_boot_assembly_consumption(tmp_path)
+    assert trace.imported_by_boot_entry_point is True
+    assert trace.consumed_by_a_real_effect is True
+    assert trace.classify() is AssemblyConsumptionKind.BOOT_PATH_CONSUMED
+
+
+def test_aliased_import_and_renamed_local_binding_still_measures_correctly(
+    tmp_path: Path,
+):
+    """A second sensitivity proof for the same repair, this time for the
+    "any rename" half of the defect: `from app.assembly import assembly as
+    boot_assembly` then `create_app(boot_assembly)`. The OLD substring check
+    for `"create_app(assembly)"` does not match `"create_app(boot_assembly)"`
+    at all — confirmed directly against the pre-repair function, which
+    measures this tree as `AssemblyConsumptionKind.INDETERMINATE` even
+    though `imported_by_boot_entry_point` reads `True` (the import substring
+    incidentally still matches, since it is a PREFIX of the aliased text —
+    the two checks fail independently and for different reasons). The
+    AST-based replacement resolves the real local binding
+    (`import_result`'s bound name) and correctly follows it into the
+    `create_app` call, measuring `BOOT_PATH_CONSUMED`."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "main.py").write_text(
+        "from app.assembly import assembly as boot_assembly\n"
+        "app = create_app(boot_assembly)\n"
+    )
+    (app_dir / "assembly.py").write_text(
+        "from dotmac_kernel.assembly import ProductAssemblySpec\n\n"
+        'assembly = ProductAssemblySpec(\n    name="dotmac_starter_mt",\n)\n'
+    )
+    _write_factory(tmp_path)
+
+    trace = measure_starter_boot_assembly_consumption(tmp_path)
+    assert trace.imported_by_boot_entry_point is True
+    assert trace.consumed_by_a_real_effect is True
+    assert trace.classify() is AssemblyConsumptionKind.BOOT_PATH_CONSUMED
+
+
+def test_constructed_but_never_passed_to_the_factory_is_release_metadata_only(
+    tmp_path: Path,
+):
+    """A real, decided negative — not a refusal: `app/main.py` imports
+    `assembly` but never hands it to `create_app` at all (e.g. only prints
+    it). This is provably `consumed_by_a_real_effect=False`, established by
+    a real whole-tree AST search finding no such call — never
+    `None`/`INDETERMINATE`, since absence-after-a-complete-search is a
+    decided fact, not an unresolved one."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "main.py").write_text(
+        "from app.assembly import assembly\nprint(assembly)\n"
+    )
+    (app_dir / "assembly.py").write_text(
+        "from dotmac_kernel.assembly import ProductAssemblySpec\n\n"
+        'assembly = ProductAssemblySpec(\n    name="dotmac_starter_mt",\n)\n'
+    )
+    _write_factory(tmp_path)
+
+    trace = measure_starter_boot_assembly_consumption(tmp_path)
+    assert trace.imported_by_boot_entry_point is True
+    assert trace.consumed_by_a_real_effect is False
+    assert trace.classify() is AssemblyConsumptionKind.RELEASE_METADATA_ONLY
+
+
+def test_unparseable_boot_entry_point_is_indeterminate_not_a_guessed_false(
+    tmp_path: Path,
+):
+    """A syntactically broken `app/main.py` must raise the refusal
+    (`INDETERMINATE`), never guess `False` for either fact — the module
+    docstring's explicit requirement for the AST-based replacement."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "main.py").write_text("def broken(:\n")
+    (app_dir / "assembly.py").write_text("assembly = 1\n")
+
+    trace = measure_starter_boot_assembly_consumption(tmp_path)
+    assert trace.imported_by_boot_entry_point is None
+    assert trace.consumed_by_a_real_effect is None
+    assert trace.classify() is AssemblyConsumptionKind.INDETERMINATE
+
+
+def test_measure_starter_module_registration_argument_kind_against_this_repository():
+    """The other half of the Starter positive control, re-derived by
+    execution against THIS repository's real `app/assembly.py`. Its real
+    `modules=` argument is a LIST — `[*load_manifests(FEATURE_MODULES),
+    dotmac_template_studio.module, dotmac_ticketing.module]` — which the
+    pre-repair tuple-only `argument_kind != "ModuleManifest_tuple"` check
+    would have classified as vocabulary registration for the exact shape
+    the reference assembly actually has (confirmed directly: feeding this
+    module's own honestly-labelled `"ModuleManifest_sequence"` kind through
+    the pre-repair `classify_registration_call_site` yields
+    `VOCABULARY_REGISTRATION`, not `MODULE_MANIFEST_REGISTERED`). The
+    structural sequence classifier reads it correctly."""
+    kind = measure_starter_module_registration_argument_kind(REPO_ROOT)
+    assert kind == "ModuleManifest_sequence"
+
+    site = RegistrationCallSite(
+        callee="ProductAssemblySpec",
+        argument_kind=kind,
+        assembly_consumption=measure_starter_boot_assembly_consumption(REPO_ROOT),
+    )
+    assert (
+        classify_registration_call_site(site)
+        is RegistrationEvidenceKind.MODULE_MANIFEST_REGISTERED
+    )
+
+
 def test_module_manifest_tuple_not_reaching_boot_path_is_refused_erp_negative_control():
     """Negative control — ERP's `app/product_assembly.py`. Its
     `COMPOSED_MODULE_MANIFESTS` tuple passed as `modules=...` into
@@ -682,6 +832,102 @@ def test_vocabulary_registration_negative_control_sub_channels():
 
     evidence = RegistrationEvidence(kind=kind, measured=True)
     assert evidence.as_dimension_value() == DimensionValue.FALSE
+
+
+def _module_ast_node(expression_source: str) -> ast.expr:
+    """Parse a single expression (e.g. the value bound to a `modules=`
+    keyword argument) and return its AST node — the real shape
+    `classify_modules_sequence_argument` reads, never a hand-picked label."""
+    return ast.parse(expression_source, mode="eval").body
+
+
+def test_list_shaped_modules_argument_with_attribute_elements_classifies_registered():
+    """The plant that fails today (module docstring: "Two measured defects,
+    repaired"): Starter's own real `app/assembly.py:133` shape —
+    `modules=[*load_manifests(FEATURE_MODULES), dotmac_template_studio.module,
+    dotmac_ticketing.module]` — a LIST containing a starred call and two
+    `<package>.module` attribute accesses. Confirmed directly: the pre-repair
+    tuple-only check (`argument_kind != "ModuleManifest_tuple"`) classifies
+    this shape's honest label as `VOCABULARY_REGISTRATION` (see
+    `test_measure_starter_module_registration_argument_kind_against_this_repository`'s
+    docstring for the literal comparison against the pre-repair function).
+    The structural classifier recognises every element and returns
+    `"ModuleManifest_sequence"`, which `classify_registration_call_site` now
+    accepts."""
+    node = _module_ast_node(
+        "[*load_manifests(FEATURE_MODULES), dotmac_template_studio.module, "
+        "dotmac_ticketing.module]"
+    )
+    assert classify_modules_sequence_argument(node) == "ModuleManifest_sequence"
+
+    site = RegistrationCallSite(
+        callee="ProductAssemblySpec",
+        argument_kind=classify_modules_sequence_argument(node),
+        assembly_consumption=AssemblyConsumptionTrace(
+            boot_entry_point="app/main.py",
+            imported_by_boot_entry_point=True,
+            consumed_by_a_real_effect=True,
+        ),
+    )
+    assert (
+        classify_registration_call_site(site)
+        is RegistrationEvidenceKind.MODULE_MANIFEST_REGISTERED
+    )
+
+
+def test_tuple_shaped_modules_argument_still_classifies_registered_no_regression():
+    """A tuple-shaped `modules=(...)` — the shape the pre-repair check
+    already handled — must still classify as registered after widening to
+    list/starred/attribute handling; this is the no-regression half of the
+    defect-2 proof."""
+    node = _module_ast_node("(dotmac_template_studio.module, dotmac_ticketing.module)")
+    assert classify_modules_sequence_argument(node) == "ModuleManifest_sequence"
+
+
+def test_starred_manifest_element_is_a_modelled_shape():
+    """A bare starred call, `[*load_manifests(FEATURE_MODULES)]`, is one of
+    the three modelled element shapes on its own — not merely tolerated
+    alongside attribute elements."""
+    node = _module_ast_node("[*load_manifests(FEATURE_MODULES)]")
+    assert classify_modules_sequence_argument(node) == "ModuleManifest_sequence"
+
+
+def test_unmodelled_element_shape_refuses_rather_than_returning_vocabulary():
+    """The distinct-outcome proof the ruling requires: an element shape this
+    module does not model (a bare, non-starred call bound directly into the
+    list, `some_factory()`) must REFUSE — `INDETERMINATE_ARGUMENT_SHAPE` —
+    never silently collapse into `VOCABULARY_REGISTRATION`. "I don't
+    recognise this shape" and "this is not a registration" are different
+    facts."""
+    node = _module_ast_node("[dotmac_template_studio.module, some_factory()]")
+    kind = classify_modules_sequence_argument(node)
+    assert kind == schema.INDETERMINATE_ARGUMENT_KIND
+
+    site = RegistrationCallSite(
+        callee="ProductAssemblySpec",
+        argument_kind=kind,
+        assembly_consumption=AssemblyConsumptionTrace(
+            boot_entry_point="app/main.py",
+            imported_by_boot_entry_point=True,
+            consumed_by_a_real_effect=True,
+        ),
+    )
+    result = classify_registration_call_site(site)
+    assert result is RegistrationEvidenceKind.INDETERMINATE_ARGUMENT_SHAPE
+    assert result is not RegistrationEvidenceKind.VOCABULARY_REGISTRATION
+
+    evidence = RegistrationEvidence(kind=result, measured=True)
+    assert evidence.as_dimension_value() == DimensionValue.UNKNOWN
+
+
+def test_register_channels_style_vocabulary_argument_still_classifies_as_vocabulary():
+    """Sub's real call site, `register_channels(SUB_CHANNELS)`, passes a bare
+    `ast.Name` — not a list/tuple literal at all — so the structural
+    classifier never even looks inside it for manifest-shaped elements; it
+    is `"vocabulary"` immediately. Widening element handling for the
+    registered-manifest case must not widen this negative control."""
+    node = _module_ast_node("SUB_CHANNELS")
+    assert classify_modules_sequence_argument(node) == "vocabulary"
 
 
 def test_a_module_manifest_tuple_reached_by_boot_but_not_consumed_still_refuses():

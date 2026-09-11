@@ -224,10 +224,51 @@ built into :func:`classify_registration_call_site` as a pure function of
 see that class's docstring) rather than a single free-text kind a record
 author picks directly.
 
-Be plain about what this buys and what it does not. :class:`AssemblyConsumptionTrace`
-is a REPORTING schema for a measurement performed elsewhere — it is not a
-verifier, and nothing in this module walks an AST or an import graph to
-populate its two boolean fields on its own. An author can set either field
+Two measured defects, repaired
+'''''''''''''''''''''''''''''
+
+**Substring where structure was required.**
+:func:`measure_starter_boot_assembly_consumption` used to decide the
+Starter positive control — the ONE input that proves the
+checker can say yes, not just refuse — by four literal substring matches
+over real file text. A type annotation on the construction line
+(``assembly: Final = ProductAssemblySpec(``), any formatter reflow, or an
+aliased import (``from app.assembly import assembly as boot_assembly`` then
+``create_app(boot_assembly)``) flips that positive control to
+``RELEASE_METADATA_ONLY``/``INDETERMINATE`` with no error — the single input
+that proves this checker is not a blanket refusal would stop proving it,
+quietly. It now decides all four facts (the import, the construction, the
+argument passed to the app factory, and the factory's own consuming call) by
+real ``ast.ImportFrom``/``ast.Call``/``ast.Attribute`` analysis — tolerant of
+an annotation, of reflow, and of the imported name being aliased — and
+raises to ``INDETERMINATE`` (never a guessed ``False``) on unparseable
+source. See :func:`measure_starter_boot_assembly_consumption`.
+
+**Tuple-only registration classification.** :func:`classify_registration_call_site`
+used to require the literal ``argument_kind == "ModuleManifest_tuple"``.
+Starter's OWN real ``app/assembly.py:133`` is ``modules=[*load_manifests(
+FEATURE_MODULES), dotmac_template_studio.module, dotmac_ticketing.module]``
+— a LIST, not a tuple — so a product honestly reporting that real shape was
+silently classified as vocabulary registration. Real structural sequence
+handling now recognises an ``ast.List``/``ast.Tuple`` whose elements are a
+bare ``ast.Name``, an ``ast.Attribute`` of the form ``<package>.module``, or
+an ``ast.Starred`` wrapping an ``ast.Call`` — see
+:func:`classify_modules_sequence_argument`. An element shape none of those
+three cover REFUSES (``INDETERMINATE_ARGUMENT_SHAPE``) rather than silently
+downgrading to ``VOCABULARY_REGISTRATION`` — "I don't recognise this shape"
+and "this is not a registration" are different facts, and collapsing them
+was exactly how the tuple-only version got Sub's real vocabulary call site
+right for the wrong reason.
+
+Be plain about what this buys and what it does not.
+:class:`AssemblyConsumptionTrace` is a REPORTING schema for a measurement
+performed elsewhere. Other than :func:`measure_starter_boot_assembly_consumption`'s
+and :func:`measure_starter_module_registration_argument_kind`'s real AST
+reads of THIS repository's own tree (the paragraphs above), nothing in this
+module walks an AST or an import graph to populate a trace on its own. An
+author can still set either field of a hand-typed
+:class:`AssemblyConsumptionTrace` (or a hand-typed ``argument_kind``, for a
+call site not re-derived through :func:`classify_modules_sequence_argument`)
 to whatever value produces the answer they want, exactly as easily as the
 flat ``consumed_by_assembly: bool`` v1 shipped could be set. What v2 changes
 is the SHAPE of the claim, not who is able to lie about it: v1's single bool
@@ -235,7 +276,8 @@ could not even express "reached the boot path but never actually consumed,"
 so no honest record of that real case (ERP's) was possible under it; v2's
 two facts can express it, and — for THIS repository's own tree only — a
 reader can independently RE-DERIVE them from source rather than trust an
-assertion, via :func:`measure_starter_boot_assembly_consumption` below.
+assertion, via :func:`measure_starter_boot_assembly_consumption` and
+:func:`measure_starter_module_registration_argument_kind` below.
 Correctness for the two cross-repository controls still rests on whoever
 populated the trace having actually read the named files, the same
 discipline any hand-authored architecture test requires; Starter's own CI
@@ -248,21 +290,31 @@ metadata does not count):
 
 * **Positive control — Starter's own assembly**, ``app/assembly.py`` +
   ``app/main.py`` (this repository). This is the one control this module
-  RE-DERIVES from disk rather than asserts:
+  RE-DERIVES from disk rather than asserts, in two parts:
   :func:`measure_starter_boot_assembly_consumption` reads THIS repository's
   actual ``app/main.py``, ``app/assembly.py``, and
   ``packages/dotmac-kernel/src/dotmac_kernel/app_factory.py`` and returns an
-  ``AssemblyConsumptionTrace`` built from what those files actually say —
-  ``imported_by_boot_entry_point=True`` because ``app/main.py`` contains
-  ``from app.assembly import assembly``, and ``consumed_by_a_real_effect=True``
-  because it also contains ``create_app(assembly)`` and the kernel's
-  ``app_factory.py`` contains ``ModuleRegistry(spec.modules)`` (module
-  validation "happens FIRST and fails closed", per that module's own
-  docstring, before mounting anything). This traces
-  ``AssemblyConsumptionKind.BOOT_PATH_CONSUMED`` and classifies as
+  ``AssemblyConsumptionTrace`` built by real AST/import-flow analysis of
+  those files (never a substring match — see "Two measured defects,
+  repaired" above) — ``imported_by_boot_entry_point=True`` because
+  ``app/main.py`` contains a real ``ast.ImportFrom`` of ``assembly`` from
+  ``app.assembly``, and ``consumed_by_a_real_effect=True`` because it also
+  passes that name into a real ``create_app(...)`` call and the kernel's
+  ``app_factory.py`` contains a real ``ModuleRegistry(spec.modules)`` call
+  inside ``create_app``'s own body (module validation "happens FIRST and
+  fails closed", per that module's own docstring, before mounting
+  anything). This traces ``AssemblyConsumptionKind.BOOT_PATH_CONSUMED``.
+  Separately, :func:`measure_starter_module_registration_argument_kind`
+  reads the SAME ``app/assembly.py`` and structurally classifies the
+  ``modules=`` argument bound into ``assembly = ProductAssemblySpec(...)`` —
+  Starter's real shape is a LIST, ``modules=[*load_manifests(FEATURE_MODULES),
+  dotmac_template_studio.module, dotmac_ticketing.module]``, every element of
+  which :func:`classify_modules_sequence_argument` recognises (a starred
+  call, and two ``<package>.module`` attribute accesses), so it returns
+  ``"ModuleManifest_sequence"``. Combined, these classify as
   ``MODULE_MANIFEST_REGISTERED``.
   ``test_deleting_the_boot_entry_point_makes_the_trace_indeterminate`` proves
-  this is a real read, not a fixed answer: pointed at a tree with no
+  the first is a real read, not a fixed answer: pointed at a tree with no
   ``app/main.py``, the same function returns an ``INDETERMINATE`` trace
   instead. The positive control is not optional garnish: two passing
   refusals below are equally consistent with a checker that refuses
@@ -1181,24 +1233,142 @@ class AssemblyConsumptionTrace:
         return AssemblyConsumptionKind.RELEASE_METADATA_ONLY
 
 
+def _find_import_from(
+    tree: ast.Module, module_name: str, imported_name: str
+) -> tuple[ast.ImportFrom, str] | None:
+    """Return the real `ast.ImportFrom` node importing `imported_name` from
+    `module_name` (anywhere in the tree, tolerant of the import being
+    conditional), plus the LOCAL name it binds — `alias.asname` if the
+    import aliases it (`import X as Y`), otherwise `imported_name` itself.
+    `None` if no such import exists. A real AST node, never a substring."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == module_name:
+            for alias in node.names:
+                if alias.name == imported_name:
+                    return node, (alias.asname or alias.name)
+    return None
+
+
+def _find_top_level_assignment_call(
+    tree: ast.Module, target_name: str, callee_name: str
+) -> ast.Call | None:
+    """Return the module-level `target_name = callee_name(...)` call —
+    tolerant of a type annotation (`target_name: Final = callee_name(...)`,
+    an `ast.AnnAssign`) and of arbitrary formatter reflow, since both read
+    identically once parsed to an AST. Only considers module-scope
+    statements (`tree.body`), mirroring `_find_module_manifest_call`'s own
+    discipline: a construction nested inside a function or conditional is
+    not a module-level declaration."""
+    for statement in tree.body:
+        value: ast.expr | None = None
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if isinstance(target, ast.Name) and target.id == target_name:
+                value = statement.value
+        elif isinstance(statement, ast.AnnAssign):
+            if (
+                isinstance(statement.target, ast.Name)
+                and statement.target.id == target_name
+            ):
+                value = statement.value
+        if isinstance(value, ast.Call):
+            func = value.func
+            name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if name == callee_name:
+                return value
+    return None
+
+
+def _find_call_with_name_argument(
+    tree: ast.Module, callee_name: str, arg_name: str
+) -> ast.Call | None:
+    """Return a real `ast.Call` to `callee_name` that passes `arg_name`
+    (positionally or by keyword) as one of its arguments — a real `ast.Name`
+    argument node, never a substring. Used to prove the boot entry point
+    actually hands the constructed object to the app factory."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.id
+            if isinstance(func, ast.Name)
+            else func.attr
+            if isinstance(func, ast.Attribute)
+            else None
+        )
+        if name != callee_name:
+            continue
+        for arg in node.args:
+            if isinstance(arg, ast.Name) and arg.id == arg_name:
+                return node
+        for keyword in node.keywords:
+            if isinstance(keyword.value, ast.Name) and keyword.value.id == arg_name:
+                return node
+    return None
+
+
+def _module_registry_consumes_spec_modules(tree: ast.Module) -> bool | None:
+    """Whether `create_app`'s own body contains a real `ModuleRegistry(<param>
+    .modules)` call — an `ast.Call` to `ModuleRegistry` whose argument is an
+    `ast.Attribute` (`.modules`) off `create_app`'s OWN first parameter,
+    resolved by its real name rather than assumed to be `spec` (tolerant of
+    the parameter being renamed). Returns `False` if `create_app` is found
+    but no such call is inside it; `None` if `create_app` itself cannot be
+    located at all (the file's shape could not be established)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "create_app":
+            if not node.args.args:
+                return False
+            param_name = node.args.args[0].arg
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Name)
+                    and inner.func.id == "ModuleRegistry"
+                    and inner.args
+                    and isinstance(inner.args[0], ast.Attribute)
+                    and isinstance(inner.args[0].value, ast.Name)
+                    and inner.args[0].value.id == param_name
+                    and inner.args[0].attr == "modules"
+                ):
+                    return True
+            return False
+    return None
+
+
 def measure_starter_boot_assembly_consumption(
     repo_root: Path,
 ) -> AssemblyConsumptionTrace:
     """The one control this module RE-DERIVES from disk rather than asserts.
     Reads `repo_root`'s own `app/main.py`, `app/assembly.py`, and
     `packages/dotmac-kernel/src/dotmac_kernel/app_factory.py` and builds an
-    `AssemblyConsumptionTrace` from what their source text actually
-    contains — plain substring matching over real files, NOT a full AST or
-    import-graph walker (see the module docstring's honesty note on what
-    `AssemblyConsumptionTrace` does and does not guarantee).
+    `AssemblyConsumptionTrace` from real AST / import-flow analysis of those
+    files — never a substring match (see the module docstring's "The
+    registration boundary" for why a substring positive control is exactly
+    the defect class this fleet measures, and why it was repaired here
+    specifically): `imported_by_boot_entry_point` is decided by a real
+    `ast.ImportFrom` node plus a real top-level `assembly = ProductAssemblySpec
+    (...)` call (tolerant of a type annotation, formatter reflow, or the
+    imported name being aliased); `consumed_by_a_real_effect` is decided by
+    a real `ast.Call` passing that same (possibly aliased) name into
+    `create_app`, and by a real `ModuleRegistry(<param>.modules)` call found
+    inside `create_app`'s own body in the kernel's `app_factory.py`.
 
     Scoped to `repo_root` — this repository's own tree — because this
     repository's own CI can open its own files; it cannot open another
     repository's files, which is why the ERP and Sub controls in the module
     docstring are NOT produced by a function like this one. Returns an
     `INDETERMINATE`-classifying trace (both booleans `None`) if either
-    `app/main.py` or `app/assembly.py` is missing, rather than guessing —
-    see `test_deleting_the_boot_entry_point_makes_the_trace_indeterminate`.
+    `app/main.py` or `app/assembly.py` is missing OR does not parse as
+    Python — a refusal, never a guessed `False` — see
+    `test_deleting_the_boot_entry_point_makes_the_trace_indeterminate`.
     """
     boot_entry_point = "app/main.py"
     main_path = repo_root / "app" / "main.py"
@@ -1212,23 +1382,44 @@ def measure_starter_boot_assembly_consumption(
         / "app_factory.py"
     )
 
-    if not main_path.is_file() or not assembly_path.is_file():
-        return AssemblyConsumptionTrace(
-            boot_entry_point=boot_entry_point,
-            imported_by_boot_entry_point=None,
-            consumed_by_a_real_effect=None,
-        )
-
-    main_source = main_path.read_text()
-    assembly_source = assembly_path.read_text()
-    imported = (
-        "from app.assembly import assembly" in main_source
-        and "assembly = ProductAssemblySpec(" in assembly_source
+    indeterminate = AssemblyConsumptionTrace(
+        boot_entry_point=boot_entry_point,
+        imported_by_boot_entry_point=None,
+        consumed_by_a_real_effect=None,
     )
 
+    if not main_path.is_file() or not assembly_path.is_file():
+        return indeterminate
+
+    try:
+        main_tree = ast.parse(main_path.read_text())
+        assembly_tree = ast.parse(assembly_path.read_text())
+    except SyntaxError:
+        return indeterminate
+
+    import_result = _find_import_from(main_tree, "app.assembly", "assembly")
+    construction_call = _find_top_level_assignment_call(
+        assembly_tree, "assembly", "ProductAssemblySpec"
+    )
+    imported = import_result is not None and construction_call is not None
+
     consumed: bool | None = None
-    if imported and "create_app(assembly)" in main_source and factory_path.is_file():
-        consumed = "ModuleRegistry(spec.modules)" in factory_path.read_text()
+    if imported:
+        assert import_result is not None  # narrows for the type checker
+        _, bound_name = import_result
+        passed_call = _find_call_with_name_argument(main_tree, "create_app", bound_name)
+        if passed_call is None:
+            # Provably never reaches the app factory at all — a decided
+            # `False`, not an unresolved `None`: the search covered the
+            # WHOLE tree, so absence here is a real negative fact.
+            consumed = False
+        elif factory_path.is_file():
+            try:
+                factory_tree = ast.parse(factory_path.read_text())
+            except SyntaxError:
+                consumed = None
+            else:
+                consumed = _module_registry_consumes_spec_modules(factory_tree)
 
     return AssemblyConsumptionTrace(
         boot_entry_point=boot_entry_point,
@@ -1256,6 +1447,32 @@ class RegistrationEvidenceKind(str, Enum):
     #: `AssemblyConsumptionKind.INDETERMINATE` — a refusal to answer, never
     #: collapsed into either of the above.
     INDETERMINATE_ASSEMBLY_CONSUMPTION = "indeterminate_assembly_consumption"
+    #: The `modules=`-shaped argument IS an `ast.List`/`ast.Tuple`, but at
+    #: least one element's shape is not one this module models (see
+    #: `classify_modules_sequence_argument`) — a refusal, never collapsed
+    #: into `VOCABULARY_REGISTRATION`. "I don't recognise this shape" and
+    #: "this is not a registration" are different facts; this member exists
+    #: so they are never answered the same way.
+    INDETERMINATE_ARGUMENT_SHAPE = "indeterminate_argument_shape"
+
+
+#: Sentinel `argument_kind` value meaning "this IS a `modules=`-shaped
+#: `ast.List`/`ast.Tuple`, but at least one element's shape is not modelled"
+#: — see `classify_modules_sequence_argument`. Distinct from every positive
+#: (`_MODULE_MANIFEST_ARGUMENT_KINDS`) and every other negative value: this
+#: one routes to `INDETERMINATE_ARGUMENT_SHAPE`, never to
+#: `VOCABULARY_REGISTRATION`.
+INDETERMINATE_ARGUMENT_KIND: Final[str] = "indeterminate_argument_shape"
+
+#: The `argument_kind` values that mean "this is really `ModuleManifest`
+#: values" — both container shapes the fleet's real assemblies use. A tuple
+#: (`"ModuleManifest_tuple"`, the pre-existing label, kept for backward
+#: compatibility with hand-authored call sites) and a list/starred/attribute
+#: mix (`"ModuleManifest_sequence"`, what `classify_modules_sequence_argument`
+#: emits — see that function for exactly which element shapes qualify).
+_MODULE_MANIFEST_ARGUMENT_KINDS: Final[frozenset[str]] = frozenset(
+    {"ModuleManifest_tuple", "ModuleManifest_sequence"}
+)
 
 
 @dataclass(frozen=True)
@@ -1269,8 +1486,14 @@ class RegistrationCallSite:
     #: The name of the thing being called, e.g. "ProductAssemblySpec" or
     #: "register_channels".
     callee: str
-    #: What kind of object is actually passed, e.g. "ModuleManifest_tuple"
-    #: or "ChannelSpec_tuple". Not a boolean — the actual declared kind.
+    #: What kind of object is actually passed. One of the recognised
+    #: `_MODULE_MANIFEST_ARGUMENT_KINDS` (real `ModuleManifest` values —
+    #: `"ModuleManifest_tuple"` or `"ModuleManifest_sequence"`,
+    #: see `classify_modules_sequence_argument`), the sentinel
+    #: `INDETERMINATE_ARGUMENT_KIND` (a `modules=`-shaped sequence with an
+    #: unmodelled element — a refusal), or anything else (e.g.
+    #: `"ChannelSpec_tuple"`) meaning "not `ModuleManifest` values at all."
+    #: Not a boolean — the actual declared kind.
     argument_kind: str
     #: Whether the assembly-shaped object the values are bound into is
     #: itself consumed by the product's boot/runtime path — see
@@ -1279,17 +1502,108 @@ class RegistrationCallSite:
     assembly_consumption: AssemblyConsumptionTrace
 
 
+def classify_modules_sequence_argument(node: ast.expr) -> str:
+    """Structurally classify the AST node bound to a `modules=` keyword
+    argument (e.g. the value of `ProductAssemblySpec(modules=..., ...)`).
+    Real `ast.List`/`ast.Tuple` handling, covering the shapes real
+    assemblies in this fleet actually use — never a bare tuple-only check:
+
+    * `ast.Name` — a locally bound manifest (e.g. an imported `module`
+      object referenced directly).
+    * `ast.Attribute` of the exact form `<package>.module` — the convention
+      every real `packages/*/src/*/manifest.py` in this tree follows (see
+      `_find_module_manifest_call`'s `module = ModuleManifest(...)` target
+      name): referenced from an assembly as `dotmac_ticketing.module`.
+    * `ast.Starred` wrapping an `ast.Call` — e.g. `*load_manifests(...)`, a
+      helper call whose result is spread into the sequence.
+
+    Returns `"ModuleManifest_sequence"` when the node is a non-empty
+    `ast.List`/`ast.Tuple` and EVERY element matches one of those three
+    shapes — this is Starter's own real `app/assembly.py:133`
+    (`modules=[*load_manifests(FEATURE_MODULES), dotmac_template_studio
+    .module, dotmac_ticketing.module]`), which a tuple-only check silently
+    misclassified as vocabulary.
+
+    Returns `INDETERMINATE_ARGUMENT_KIND` when the node IS a list/tuple but
+    at least one element's shape is not one of the three above (e.g. a bare
+    `ast.Call` that is not starred, or a literal constant) — a refusal, not
+    a guess: "I don't recognise this shape" is a different fact from "this
+    is not a registration," and collapsing them was exactly Sub's negative
+    control getting the right answer for the wrong reason (see the module
+    docstring's "The registration boundary").
+
+    Returns `"vocabulary"` for anything that is not a list/tuple literal at
+    all (e.g. `register_channels(SUB_CHANNELS)` — a bare `ast.Name`, not a
+    sequence literal this function can look inside) or an EMPTY list/tuple
+    (nothing to register is not evidence of an unmodelled shape)."""
+    if not isinstance(node, ast.List | ast.Tuple):
+        return "vocabulary"
+    if not node.elts:
+        return "vocabulary"
+    for element in node.elts:
+        if isinstance(element, ast.Name):
+            continue
+        if isinstance(element, ast.Attribute) and element.attr == "module":
+            continue
+        if isinstance(element, ast.Starred) and isinstance(element.value, ast.Call):
+            continue
+        return INDETERMINATE_ARGUMENT_KIND
+    return "ModuleManifest_sequence"
+
+
+def measure_starter_module_registration_argument_kind(repo_root: Path) -> str | None:
+    """Re-derive, by real AST analysis of THIS repository's own
+    `app/assembly.py`, the structural kind of the `modules=` argument bound
+    into `assembly = ProductAssemblySpec(...)` — the other half of the
+    Starter positive control alongside `measure_starter_boot_assembly_
+    consumption`. Returns `None` (a refusal, never a guess) if `app/
+    assembly.py` is missing, does not parse, or the `assembly =
+    ProductAssemblySpec(...)` construction or its `modules=` keyword cannot
+    be found — otherwise the same string `classify_modules_sequence_
+    argument` would return for that node."""
+    assembly_path = repo_root / "app" / "assembly.py"
+    if not assembly_path.is_file():
+        return None
+    try:
+        assembly_tree = ast.parse(assembly_path.read_text())
+    except SyntaxError:
+        return None
+    construction_call = _find_top_level_assignment_call(
+        assembly_tree, "assembly", "ProductAssemblySpec"
+    )
+    if construction_call is None:
+        return None
+    modules_argument: ast.expr | None = None
+    for keyword in construction_call.keywords:
+        if keyword.arg == "modules":
+            modules_argument = keyword.value
+            break
+    if modules_argument is None:
+        return None
+    return classify_modules_sequence_argument(modules_argument)
+
+
 def classify_registration_call_site(
     site: RegistrationCallSite,
 ) -> RegistrationEvidenceKind:
     """The one function allowed to decide `MODULE_MANIFEST_REGISTERED` vs
-    `VOCABULARY_REGISTRATION` vs `INDETERMINATE_ASSEMBLY_CONSUMPTION`. Two
-    facts must hold for a positive result: the argument must actually be
-    `ModuleManifest` values, AND the assembly they are bound into must trace
-    as `BOOT_PATH_CONSUMED` — a module-scope call that merely LOOKS like
-    registration (any callee name, any side effect, or an assembly object
-    that only tests/scripts ever construct) is never enough on its own."""
-    if site.argument_kind != "ModuleManifest_tuple":
+    `VOCABULARY_REGISTRATION` vs `INDETERMINATE_ASSEMBLY_CONSUMPTION` vs
+    `INDETERMINATE_ARGUMENT_SHAPE`. Two facts must hold for a positive
+    result: the argument must actually be `ModuleManifest` values (one of
+    `_MODULE_MANIFEST_ARGUMENT_KINDS` — real structural sequence handling,
+    see `classify_modules_sequence_argument`, covering tuples, lists,
+    starred manifests, and `<package>.module` attribute accesses), AND the
+    assembly they are bound into must trace as `BOOT_PATH_CONSUMED` — a
+    module-scope call that merely LOOKS like registration (any callee name,
+    any side effect, or an assembly object that only tests/scripts ever
+    construct) is never enough on its own. An `argument_kind` that IS a
+    `modules=`-shaped sequence but contains an unmodelled element
+    (`INDETERMINATE_ARGUMENT_KIND`) is refused outright, before the
+    assembly-consumption trace is even consulted — it is never silently
+    downgraded to `VOCABULARY_REGISTRATION`."""
+    if site.argument_kind == INDETERMINATE_ARGUMENT_KIND:
+        return RegistrationEvidenceKind.INDETERMINATE_ARGUMENT_SHAPE
+    if site.argument_kind not in _MODULE_MANIFEST_ARGUMENT_KINDS:
         return RegistrationEvidenceKind.VOCABULARY_REGISTRATION
     kind = site.assembly_consumption.classify()
     if kind is AssemblyConsumptionKind.BOOT_PATH_CONSUMED:
@@ -1305,8 +1619,8 @@ class RegistrationEvidence:
     distribution. `measured=False` means nobody looked at the call site at
     all — the honest answer is `UNKNOWN`, never a guess in either direction.
     A call site that WAS looked at (`measured=True`) but whose assembly-
-    consumption trace was itself `INDETERMINATE` is a second, independent
-    route to `UNKNOWN` — see `as_dimension_value`."""
+    consumption trace, or whose argument shape, was itself indeterminate is
+    a second, independent route to `UNKNOWN` — see `as_dimension_value`."""
 
     kind: RegistrationEvidenceKind
     measured: bool
@@ -1316,7 +1630,10 @@ class RegistrationEvidence:
             return DimensionValue.UNKNOWN
         if self.kind is RegistrationEvidenceKind.MODULE_MANIFEST_REGISTERED:
             return DimensionValue.TRUE
-        if self.kind is RegistrationEvidenceKind.INDETERMINATE_ASSEMBLY_CONSUMPTION:
+        if self.kind in (
+            RegistrationEvidenceKind.INDETERMINATE_ASSEMBLY_CONSUMPTION,
+            RegistrationEvidenceKind.INDETERMINATE_ARGUMENT_SHAPE,
+        ):
             return DimensionValue.UNKNOWN
         return DimensionValue.FALSE
 
