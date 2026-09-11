@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -20,9 +21,11 @@ TRUSTED_PATHS = (
 )
 
 
-def _module() -> ModuleType:
+def _module(name: str = "verify") -> ModuleType:
+    if str(ACTION) not in sys.path:
+        sys.path.insert(0, str(ACTION))
     spec = importlib.util.spec_from_file_location(
-        "trusted_source_action", ACTION / "verify.py"
+        f"trusted_source_action_{name}", ACTION / f"{name}.py"
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -53,10 +56,15 @@ def test_action_owns_a_closed_nonempty_trust_anchor() -> None:
     assert "inputs" not in action
     step = action["runs"]["steps"][0]
     command = step["run"]
-    assert "--revision" not in command
-    assert "--repository" in command
-    assert step["env"] == {"VERIFIED_REPOSITORY": "${{ github.workspace }}"}
+    assert command == 'python "$GITHUB_ACTION_PATH/run_gate.py"'
     assert "${{" not in command
+
+    runner = _module("run_gate")
+    assert runner.EXPECTED_STATUS == {
+        "academy": "satisfied",
+        "erp": "deferred_runtime_debt",
+        "sub": "satisfied",
+    }
 
 
 def test_action_detects_current_drift_against_one_git_coordinate(

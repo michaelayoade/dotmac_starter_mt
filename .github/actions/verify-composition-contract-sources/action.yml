@@ -4,8 +4,6 @@ description: Refuse helper bytes that differ from the product-bound contract rev
 runs:
   using: composite
   steps:
-    - name: Compare semantic helpers with the immutable contract
+    - name: Verify trusted sources and execute the compatibility gate
       shell: bash
-      env:
-        VERIFIED_REPOSITORY: ${{ github.workspace }}
-      run: python "$GITHUB_ACTION_PATH/verify.py" --repository "$VERIFIED_REPOSITORY"
+      run: python "$GITHUB_ACTION_PATH/run_gate.py"
