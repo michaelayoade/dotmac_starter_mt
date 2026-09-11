@@ -1790,7 +1790,7 @@ def _reached_deferred_debt(
     return tuple(result)
 
 
-def evaluate_product(
+def _evaluate_product(
     *,
     binding: ProductBinding,
     clone: Path,
@@ -1883,7 +1883,7 @@ def evaluate_gate(
     debt = _load_debt(repository_root)
     with _trusted_catalogue(repository_root) as catalogue:  # type: _TrustedCatalogue
         evaluations = tuple(
-            evaluate_product(
+            _evaluate_product(
                 binding=bindings[product],
                 clone=clones[product],
                 repository_root=repository_root,
@@ -1908,6 +1908,5 @@ __all__ = [
     "TRUSTED_CONTRACT_REVISION",
     "clone_paths_from_environment",
     "evaluate_gate",
-    "evaluate_product",
     "load_bindings",
 ]
