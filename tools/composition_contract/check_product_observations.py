@@ -18,8 +18,7 @@ from tools.composition_contract.observations import (  # noqa: E402
     CANONICAL_RECORD_PATH,
     ObservationAcquisitionError,
     ObservationRefusal,
-    read_checkout_json_document,
-    verify_product_checkout_envelope,
+    load_and_verify_product_checkout_envelope,
 )
 from tools.composition_contract.specs import PRODUCT_OBSERVATION_SPECS  # noqa: E402
 
@@ -59,15 +58,11 @@ def main() -> int:
         )
     if arguments.record_path != CANONICAL_RECORD_PATH:
         raise ObservationRefusal(f"record path is fixed at {CANONICAL_RECORD_PATH!r}")
-    document = read_checkout_json_document(
-        arguments.workspace,
-        record_path=CANONICAL_RECORD_PATH,
-    )
-    verified = verify_product_checkout_envelope(
-        document,
+    verified = load_and_verify_product_checkout_envelope(
         spec=spec,
         product_clone=arguments.workspace,
         trusted_contract_revision=arguments.action_ref,
+        record_path=CANONICAL_RECORD_PATH,
     )
     print(
         "composition observations verified: "

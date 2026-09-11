@@ -10,6 +10,7 @@ from tools.composition_contract.observations import (
     PoetryInstallCommandLocator,
     ProductObservationSpec,
     PythonAssignmentKeywordLocator,
+    PythonStringAssignmentLocator,
     WholeFileLocator,
 )
 
@@ -38,6 +39,11 @@ ERP_OBSERVATION_SPEC: Final = ProductObservationSpec(
         ),
         _whole("product-assembly-source", "app/product_assembly.py"),
         ObservationSpec(
+            "product-identity",
+            "app/product_assembly.py",
+            PythonStringAssignmentLocator("PRODUCT_CODE"),
+        ),
+        ObservationSpec(
             "module-registration",
             "app/product_assembly.py",
             PythonAssignmentKeywordLocator(
@@ -63,6 +69,11 @@ SUB_OBSERVATION_SPEC: Final = ProductObservationSpec(
             PoetryInstallCommandLocator("dockerfile"),
         ),
         _whole("product-assembly-source", "app/composition.py"),
+        ObservationSpec(
+            "product-identity",
+            "app/composition.py",
+            PythonStringAssignmentLocator("PRODUCT_NAME"),
+        ),
         ObservationSpec(
             "module-registration",
             "app/composition.py",
@@ -93,6 +104,11 @@ ACADEMY_OBSERVATION_SPEC: Final = ProductObservationSpec(
             PoetryInstallCommandLocator("shell"),
         ),
         _whole("product-assembly-source", "app/assembly.py"),
+        ObservationSpec(
+            "product-identity",
+            "app/assembly.py",
+            PythonStringAssignmentLocator("PRODUCT_ID"),
+        ),
         ObservationSpec(
             "module-registration",
             "app/assembly.py",

@@ -12,10 +12,12 @@ runs:
     - name: Verify composition observation record
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        COMPOSITION_PRODUCT: ${{ inputs.product }}
       run: >-
         python3
         "$GITHUB_ACTION_PATH/../../../tools/composition_contract/check_product_observations.py"
-        --product "${{ inputs.product }}"
+        --product "$COMPOSITION_PRODUCT"
         --workspace "$GITHUB_WORKSPACE"
         --action-repository "$GITHUB_ACTION_REPOSITORY"
         --action-ref "$GITHUB_ACTION_REF"

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.composition_contract import observations as observation_contract
 from tools.composition_contract.observations import (
     CANONICAL_RECORD_PATH,
     CONTRACT_REPOSITORY,
@@ -20,9 +21,11 @@ from tools.composition_contract.observations import (
     PoetryInstallCommandLocator,
     ProductObservationSpec,
     PythonAssignmentKeywordLocator,
+    PythonStringAssignmentLocator,
     WholeFileLocator,
     build_product_checkout_document,
     extract_observation,
+    load_and_verify_product_checkout_envelope,
     read_checkout_json_document,
     verify_observation_envelope,
     verify_product_checkout_envelope,
@@ -68,6 +71,7 @@ def product_repository(tmp_path: Path) -> tuple[Path, str]:
         tmp_path,
         "app/product_assembly.py",
         "from dotmac_kernel.assembly import ProductAssemblySpec\n"
+        "PRODUCT_CODE = 'dotmac-erp'\n"
         "COMPOSED_MODULE_MANIFESTS = (accounting_module, files_module)\n"
         "ERP_PRODUCT_ASSEMBLY = ProductAssemblySpec(\n"
         "    name='dotmac-erp',\n"
@@ -87,6 +91,11 @@ def _spec(*observations: ObservationSpec) -> ProductObservationSpec:
         subject="erp-kernel-successor-composition",
         observations=observations
         or (
+            ObservationSpec(
+                "product-identity",
+                "app/product_assembly.py",
+                PythonStringAssignmentLocator("PRODUCT_CODE"),
+            ),
             ObservationSpec(
                 "production-install",
                 "Dockerfile",
@@ -157,12 +166,13 @@ def test_real_git_blobs_and_both_structural_extractors_verify(
     assert verified.product_id == "dotmac-erp"
     assert verified.contract_revision == CONTRACT_REVISION
     assert verified.product_revision == revision
-    assert verified.observations[0].extracted == (
+    by_id = {item.claim.observation_id: item for item in verified.observations}
+    assert by_id["production-install"].extracted == (
         b"RUN --mount=type=secret,id=registry \\\n"
         b'    REGISTRY_PASSWORD="$(cat /run/secrets/registry)" \\\n'
         b"    poetry install --only main --no-root --no-ansi"
     )
-    assert verified.observations[1].extracted == b"COMPOSED_MODULE_MANIFESTS"
+    assert by_id["module-registration"].extracted == b"COMPOSED_MODULE_MANIFESTS"
 
 
 def test_record_contains_digests_but_never_selected_source_text(
@@ -174,7 +184,7 @@ def test_record_contains_digests_but_never_selected_source_text(
     assert "REGISTRY_PASSWORD" not in encoded
     assert "cat /run/secrets" not in encoded
     assert "COMPOSED_MODULE_MANIFESTS" not in encoded
-    assert encoded.count("extract_sha256") == 2
+    assert encoded.count("extract_sha256") == 3
 
 
 def test_v3_refuses_a_source_text_field_and_verified_repr_hides_extracted_bytes(
@@ -270,6 +280,74 @@ def test_checkout_builder_emits_only_rederived_coordinates_and_digests(
     }
 
 
+def test_checked_in_product_identity_must_equal_starter_fixed_identity(
+    product_repository: tuple[Path, str],
+) -> None:
+    repo, _ = product_repository
+    assembly = repo / "app/product_assembly.py"
+    assembly.write_text(
+        assembly.read_text().replace("dotmac-erp", "dotmac-erp-other"),
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "drift product identity")
+    spec = _spec()
+    document = build_product_checkout_document(
+        spec=spec,
+        product_clone=repo,
+        contract_revision=CONTRACT_REVISION,
+    )
+
+    with pytest.raises(ObservationRefusal, match="product identity source declares"):
+        verify_product_checkout_envelope(
+            document,
+            spec=spec,
+            product_clone=repo,
+            trusted_contract_revision=CONTRACT_REVISION,
+        )
+
+
+def test_action_path_resolves_head_once_for_record_and_sources(
+    product_repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, _ = product_repository
+    spec = _spec()
+    document = build_product_checkout_document(
+        spec=spec,
+        product_clone=repo,
+        contract_revision=CONTRACT_REVISION,
+    )
+    _write(repo, CANONICAL_RECORD_PATH, json.dumps(document) + "\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "add verified record")
+    pinned_revision = _git(repo, "rev-parse", "HEAD")
+    calls = 0
+
+    def resolve_once_then_move_head(product_clone: Path) -> str:
+        nonlocal calls
+        calls += 1
+        assert product_clone == repo
+        _write(repo, "Dockerfile", "RUN poetry install --only dev\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "move head during verification")
+        return pinned_revision
+
+    monkeypatch.setattr(
+        observation_contract,
+        "checkout_head_revision",
+        resolve_once_then_move_head,
+    )
+
+    verified = load_and_verify_product_checkout_envelope(
+        spec=spec,
+        product_clone=repo,
+        trusted_contract_revision=CONTRACT_REVISION,
+    )
+
+    assert calls == 1
+    assert verified.product_revision == pinned_revision
+
+
 def test_checkout_json_reader_refuses_duplicate_fields_and_symlinks(
     product_repository: tuple[Path, str],
 ) -> None:
@@ -319,6 +397,7 @@ def test_product_specs_fix_identity_subject_and_observation_coordinates() -> Non
     }
     for spec in PRODUCT_OBSERVATION_SPECS.values():
         assert {item.observation_id for item in spec.observations} >= {
+            "product-identity",
             "dependency-manifest",
             "dependency-lock",
             "production-install",
@@ -338,6 +417,7 @@ def test_public_cli_verifies_a_real_candidate_checkout(tmp_path: Path) -> None:
         "poetry.lock": "package = []\n",
         "Dockerfile": "RUN poetry install --only main --no-root --no-ansi\n",
         "app/product_assembly.py": (
+            "PRODUCT_CODE = 'dotmac-erp'\n"
             "ERP_PRODUCT_ASSEMBLY = ProductAssemblySpec(\n"
             "    name='dotmac-erp', modules=COMPOSED_MODULE_MANIFESTS\n"
             ")\n"
@@ -391,7 +471,46 @@ def test_public_cli_verifies_a_real_candidate_checkout(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "product=dotmac-erp" in result.stdout
-    assert "observations=8" in result.stdout
+    assert "observations=9" in result.stdout
+
+
+def test_public_cli_reports_git_launch_failure_as_acquisition_exit_two(
+    product_repository: tuple[Path, str], tmp_path: Path
+) -> None:
+    repo, _ = product_repository
+    cli = (
+        Path(__file__).resolve().parents[2]
+        / "tools"
+        / "composition_contract"
+        / "check_product_observations.py"
+    )
+    environment = {**os.environ, "PATH": str(tmp_path / "no-executables")}
+
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and test CLI
+        [
+            sys.executable,
+            str(cli),
+            "--product",
+            "erp",
+            "--workspace",
+            str(repo),
+            "--action-repository",
+            "michaelayoade/dotmac_starter_mt",
+            "--action-ref",
+            CONTRACT_REVISION,
+            "--caller-repository",
+            "michaelayoade/dotmac_erp",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 2
+    assert "acquisition failure" in result.stderr
+    assert "could not launch git" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_source_changed_while_record_stayed_fixed_is_refused(
@@ -536,7 +655,12 @@ def test_ambiguous_python_locator_refuses(
     )
 
     with pytest.raises(ObservationRefusal, match="extracted 2 value"):
-        extract_observation(spec.observations[1], path.read_bytes())
+        registration = next(
+            item
+            for item in spec.observations
+            if item.observation_id == "module-registration"
+        )
+        extract_observation(registration, path.read_bytes())
 
 
 def test_shell_locator_ignores_version_probes_but_selects_the_install() -> None:

@@ -94,6 +94,24 @@ class PythonAssignmentKeywordLocator:
 
 
 @dataclass(frozen=True)
+class PythonStringAssignmentLocator:
+    """Select the literal value of one named module-level string assignment."""
+
+    assignment_target: str
+
+    def __post_init__(self) -> None:
+        if not self.assignment_target.isidentifier():
+            raise ValueError(
+                "Python string assignment target is invalid: "
+                f"{self.assignment_target!r}"
+            )
+
+    @property
+    def selector(self) -> str:
+        return f"python-string-assignment.v1/{self.assignment_target}"
+
+
+@dataclass(frozen=True)
 class PoetryInstallCommandLocator:
     """Select one complete logical Poetry install/sync instruction."""
 
@@ -112,7 +130,10 @@ class PoetryInstallCommandLocator:
 
 
 ObservationLocator: TypeAlias = (  # noqa: UP040 - product floor includes Python 3.11
-    WholeFileLocator | PythonAssignmentKeywordLocator | PoetryInstallCommandLocator
+    WholeFileLocator
+    | PythonAssignmentKeywordLocator
+    | PythonStringAssignmentLocator
+    | PoetryInstallCommandLocator
 )
 
 
@@ -148,6 +169,7 @@ class ObservationSpec:
             self.locator,
             WholeFileLocator
             | PythonAssignmentKeywordLocator
+            | PythonStringAssignmentLocator
             | PoetryInstallCommandLocator,
         ):
             raise TypeError(
@@ -269,11 +291,17 @@ def _git(
     *,
     accepted_returncodes: frozenset[int] = frozenset({0}),
 ) -> subprocess.CompletedProcess[bytes]:
-    result = subprocess.run(  # noqa: S603 - fixed git executable, argv only
-        ["git", "-C", str(clone), *arguments],  # noqa: S607
-        check=False,
-        capture_output=True,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed git executable, argv only
+            ["git", "-C", str(clone), *arguments],  # noqa: S607
+            check=False,
+            capture_output=True,
+        )
+    except OSError as exc:
+        raise ObservationAcquisitionError(
+            f"could not launch git for {arguments[0] if arguments else '<missing>'}: "
+            f"{exc}"
+        ) from exc
     if result.returncode not in accepted_returncodes:
         diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
         raise ObservationAcquisitionError(
@@ -401,6 +429,39 @@ def _extract_python_keyword(
     if len(values) != 1:
         raise ObservationRefusal(
             f"Python selector extracted {len(values)} value(s); expected exactly one"
+        )
+    return values[0].encode("utf-8")
+
+
+def _extract_python_string_assignment(
+    source: str, locator: PythonStringAssignmentLocator
+) -> bytes:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        raise ObservationRefusal(
+            "fixed Python observation source does not parse"
+        ) from exc
+    values: list[str] = []
+    for statement in tree.body:
+        target: ast.expr | None = None
+        value: ast.expr | None = None
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target, value = statement.targets[0], statement.value
+        elif isinstance(statement, ast.AnnAssign):
+            target, value = statement.target, statement.value
+        if not (
+            isinstance(target, ast.Name)
+            and target.id == locator.assignment_target
+            and isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+        ):
+            continue
+        values.append(value.value)
+    if len(values) != 1:
+        raise ObservationRefusal(
+            f"Python string selector extracted {len(values)} value(s); "
+            "expected exactly one"
         )
     return values[0].encode("utf-8")
 
@@ -535,6 +596,8 @@ def extract_observation(spec: ObservationSpec, source_bytes: bytes) -> bytes:
         return source_bytes
     if isinstance(spec.locator, PythonAssignmentKeywordLocator):
         return _extract_python_keyword(source, spec.locator)
+    if isinstance(spec.locator, PythonStringAssignmentLocator):
+        return _extract_python_string_assignment(source, spec.locator)
     return _extract_poetry_command(source, spec.locator)
 
 
@@ -698,6 +761,25 @@ def _verify_claims_at_revision(
                 "disagrees with Git"
             )
         verified.append(VerifiedObservation(claim=claim, extracted=extracted))
+    identity = next(
+        (
+            item.extracted
+            for item in verified
+            if item.claim.observation_id == "product-identity"
+        ),
+        None,
+    )
+    if identity is None:
+        return tuple(verified)
+    try:
+        decoded_identity = identity.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ObservationRefusal("product identity is not UTF-8") from exc
+    if decoded_identity != spec.product_id:
+        raise ObservationRefusal(
+            f"product identity source declares {decoded_identity!r}; "
+            f"Starter fixes it at {spec.product_id!r}"
+        )
     return tuple(verified)
 
 
@@ -718,8 +800,14 @@ def read_checkout_json_document(
     product_clone: Path,
     *,
     record_path: str = CANONICAL_RECORD_PATH,
+    product_revision: str | None = None,
 ) -> Mapping[str, object]:
-    """Read one strict JSON object from a fixed regular blob at Git HEAD."""
+    """Read one strict JSON object from a fixed regular Git blob.
+
+    ``product_revision`` lets the action bind record and observations to the
+    single immutable HEAD it resolved. Omitting it is convenient for callers
+    that only need to inspect the record itself.
+    """
 
     _validate_relative_source_path(record_path)
     record_spec = ObservationSpec(
@@ -730,7 +818,7 @@ def read_checkout_json_document(
     )
     content = read_regular_git_blob(
         product_clone,
-        checkout_head_revision(product_clone),
+        product_revision or checkout_head_revision(product_clone),
         record_spec,
     )
 
@@ -776,6 +864,42 @@ def verify_product_checkout_envelope(
         trusted_contract_revision=trusted_contract_revision,
     )
     product_revision = checkout_head_revision(product_clone)
+    verified = _verify_claims_at_revision(
+        spec=spec,
+        claims=claims,
+        product_clone=product_clone,
+        product_revision=product_revision,
+    )
+    return VerifiedObservationEnvelope(
+        repository=spec.repository,
+        product_id=spec.product_id,
+        subject=spec.subject,
+        contract_revision=contract_revision,
+        product_revision=product_revision,
+        observations=verified,
+    )
+
+
+def load_and_verify_product_checkout_envelope(
+    *,
+    spec: ProductObservationSpec,
+    product_clone: Path,
+    trusted_contract_revision: str,
+    record_path: str = CANONICAL_RECORD_PATH,
+) -> VerifiedObservationEnvelope:
+    """Resolve HEAD once, then verify its record and sources at that object."""
+
+    product_revision = checkout_head_revision(product_clone)
+    document = read_checkout_json_document(
+        product_clone,
+        record_path=record_path,
+        product_revision=product_revision,
+    )
+    contract_revision, claims = _parse_envelope_claims(
+        document,
+        spec=spec,
+        trusted_contract_revision=trusted_contract_revision,
+    )
     verified = _verify_claims_at_revision(
         spec=spec,
         claims=claims,
