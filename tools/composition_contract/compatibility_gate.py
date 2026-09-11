@@ -62,8 +62,11 @@ from tools.composition_contract.observations import (
     verify_observation_envelope,
 )
 from tools.composition_contract.specs import PRODUCT_OBSERVATION_SPECS
+from tools.composition_contract.verify_trusted_sources import (
+    TRUSTED_CONTRACT_REVISION,
+    TRUSTED_SEMANTIC_PATHS,
+)
 
-TRUSTED_CONTRACT_REVISION: Final = "8b4b6d4b42e650c47fe4c04a679a5ccb51c4b2cd"
 BINDINGS_SCHEMA: Final = "kernel-composition-compatibility-bindings.v3"
 PRODUCTS: Final = tuple(PRODUCT_OBSERVATION_SPECS)
 IMMUTABLE_COMMIT: Final = re.compile(r"^[0-9a-f]{40}$")
@@ -75,11 +78,6 @@ DEFAULT_BINDINGS_PATH: Final = (
 )
 DEFERRED_DEBT_RECORD_PATH: Final = (
     "tests/architecture/conflict_savepoint_package_backlog_baseline.json"
-)
-TRUSTED_SEMANTIC_PATHS: Final = (
-    "tools/composition_contract/composition_schema.py",
-    "tools/composition_contract/observations.py",
-    "tools/composition_contract/specs.py",
 )
 
 
@@ -353,11 +351,11 @@ def _git_show(repository: Path, revision: str, path: str) -> bytes:
 
 
 def _require_trusted_contract_sources(repository_root: Path) -> None:
-    """Refuse when executing helpers differ from the pinned contract.
+    """Defence in depth for on-disk drift after the pre-import CI check.
 
-    Product observations name ``TRUSTED_CONTRACT_REVISION``. Loading current
-    working-tree helper modules while deriving the catalogue from that revision
-    would let one evaluation combine two contracts without saying so.
+    The dedicated CI step runs ``verify_trusted_sources.py`` before these
+    helpers import. This later check catches ordinary changes between that step
+    and evaluation; it does not claim to establish which bytes already ran.
     """
 
     for relative in TRUSTED_SEMANTIC_PATHS:
@@ -371,7 +369,7 @@ def _require_trusted_contract_sources(repository_root: Path) -> None:
         trusted = _git_show(repository_root, TRUSTED_CONTRACT_REVISION, relative)
         if current != trusted:
             raise GateConfigurationError(
-                f"{relative}: executing bytes differ from trusted contract "
+                f"{relative}: current bytes differ from trusted contract "
                 f"revision {TRUSTED_CONTRACT_REVISION}"
             )
 
@@ -628,6 +626,77 @@ def _possible_import_strings(
         if mapping:
             return mapping
     return None
+
+
+def _mapping_lookup_key_strings(
+    tree: ast.AST, lookup_name: str
+) -> frozenset[str] | None:
+    """Resolve the literal keys of a mapping consumed through ``get(name)``."""
+
+    mappings: dict[str, ast.Dict] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Dict)
+        ):
+            mappings[node.targets[0].id] = node.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Dict)
+        ):
+            mappings[node.target.id] = node.value
+    values: set[str] = set()
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Name)
+            and node.args
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == lookup_name
+        ):
+            continue
+        mapping = mappings.get(node.func.value.id)
+        if mapping is None:
+            continue
+        if not all(
+            isinstance(key, ast.Constant) and isinstance(key.value, str) and key.value
+            for key in mapping.keys
+        ):
+            return None
+        values.update(
+            key.value
+            for key in mapping.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        )
+    return frozenset(values) if values else None
+
+
+def _name_is_unshadowed(tree: ast.AST, name: str) -> bool:
+    """Prove a builtin name has no binding anywhere in the measured module."""
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and node.id == name
+            and isinstance(node.ctx, ast.Store | ast.Del)
+        ):
+            return False
+        if isinstance(node, ast.arg) and node.arg == name:
+            return False
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            if node.name == name:
+                return False
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                if bound == name:
+                    return False
+    return True
 
 
 def _table_driven_import_strings(
@@ -1153,6 +1222,7 @@ def _visit_imports(
                         "structurally resolvable"
                     )
                 package_values: frozenset[str] | None = None
+                fromlist_values: set[str] = set()
                 if name == "__import__":
                     level_expression = _call_argument(
                         node,
@@ -1174,7 +1244,54 @@ def _visit_imports(
                             f"{current_module}: __import__ level is not a "
                             "structurally resolved non-negative integer"
                         )
+                    fromlist_expression = _call_argument(
+                        node,
+                        position=3,
+                        keyword="fromlist",
+                        current_module=current_module,
+                    )
+                    if fromlist_expression is not None:
+                        if not isinstance(fromlist_expression, ast.Tuple | ast.List):
+                            raise GateDerivationError(
+                                f"{current_module}: __import__ fromlist is not a "
+                                "bounded literal name sequence"
+                            )
+                        for item in fromlist_expression.elts:
+                            item_values = _possible_import_strings(
+                                item,
+                                current_module=current_module,
+                                assignments=assignments,
+                                dictionary_values=dictionary_values,
+                            )
+                            if item_values is None and isinstance(item, ast.Name):
+                                item_values = _mapping_lookup_key_strings(tree, item.id)
+                            if not item_values or any(
+                                not value or value == "*" for value in item_values
+                            ):
+                                raise GateDerivationError(
+                                    f"{current_module}: __import__ fromlist is not "
+                                    "a bounded literal name sequence"
+                                )
+                            fromlist_values.update(item_values)
                     if level:
+                        globals_expression = _call_argument(
+                            node,
+                            position=1,
+                            keyword="globals",
+                            current_module=current_module,
+                        )
+                        if not (
+                            isinstance(globals_expression, ast.Call)
+                            and isinstance(globals_expression.func, ast.Name)
+                            and globals_expression.func.id == "globals"
+                            and not globals_expression.args
+                            and not globals_expression.keywords
+                            and _name_is_unshadowed(tree, "globals")
+                        ):
+                            raise GateDerivationError(
+                                f"{current_module}: relative __import__ globals do "
+                                "not prove the current module package"
+                            )
                         package = (
                             current_module
                             if is_package
@@ -1219,6 +1336,15 @@ def _visit_imports(
                 )
                 for target in targets:
                     enqueue(target)
+                    for imported_name in fromlist_values:
+                        candidate = f"{target}.{imported_name}"
+                        if (
+                            target not in index
+                            and target not in in_memory_sources
+                            or candidate in index
+                            or candidate in in_memory_sources
+                        ):
+                            enqueue(candidate)
             if name == "autodiscover_tasks":
                 values = _call_argument(
                     node,
