@@ -215,6 +215,18 @@ class ProductObservationSpec:
             raise ValueError("a product observation spec may not be empty")
         if len(ids) != len(set(ids)):
             raise ValueError("a product observation spec has duplicate observation ids")
+        identity_specs = [
+            item
+            for item in self.observations
+            if item.observation_id == "product-identity"
+        ]
+        if len(identity_specs) != 1 or not isinstance(
+            identity_specs[0].locator, PythonStringAssignmentLocator
+        ):
+            raise ValueError(
+                "a product observation spec must declare exactly one "
+                "'product-identity' Python string assignment"
+            )
 
 
 @dataclass(frozen=True)
@@ -762,15 +774,10 @@ def _verify_claims_at_revision(
             )
         verified.append(VerifiedObservation(claim=claim, extracted=extracted))
     identity = next(
-        (
-            item.extracted
-            for item in verified
-            if item.claim.observation_id == "product-identity"
-        ),
-        None,
+        item.extracted
+        for item in verified
+        if item.claim.observation_id == "product-identity"
     )
-    if identity is None:
-        return tuple(verified)
     try:
         decoded_identity = identity.decode("utf-8")
     except UnicodeDecodeError as exc:

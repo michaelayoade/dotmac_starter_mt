@@ -84,31 +84,34 @@ def product_repository(tmp_path: Path) -> tuple[Path, str]:
     return tmp_path, _git(tmp_path, "rev-parse", "HEAD")
 
 
+def _identity_observation() -> ObservationSpec:
+    return ObservationSpec(
+        "product-identity",
+        "app/product_assembly.py",
+        PythonStringAssignmentLocator("PRODUCT_CODE"),
+    )
+
+
 def _spec(*observations: ObservationSpec) -> ProductObservationSpec:
+    selected = observations or (
+        ObservationSpec(
+            "production-install",
+            "Dockerfile",
+            PoetryInstallCommandLocator("dockerfile"),
+        ),
+        ObservationSpec(
+            "module-registration",
+            "app/product_assembly.py",
+            PythonAssignmentKeywordLocator(
+                "ERP_PRODUCT_ASSEMBLY", "ProductAssemblySpec", "modules"
+            ),
+        ),
+    )
     return ProductObservationSpec(
         repository="dotmac_erp",
         product_id="dotmac-erp",
         subject="erp-kernel-successor-composition",
-        observations=observations
-        or (
-            ObservationSpec(
-                "product-identity",
-                "app/product_assembly.py",
-                PythonStringAssignmentLocator("PRODUCT_CODE"),
-            ),
-            ObservationSpec(
-                "production-install",
-                "Dockerfile",
-                PoetryInstallCommandLocator("dockerfile"),
-            ),
-            ObservationSpec(
-                "module-registration",
-                "app/product_assembly.py",
-                PythonAssignmentKeywordLocator(
-                    "ERP_PRODUCT_ASSEMBLY", "ProductAssemblySpec", "modules"
-                ),
-            ),
-        ),
+        observations=(_identity_observation(), *selected),
     )
 
 
@@ -407,6 +410,16 @@ def test_product_specs_fix_identity_subject_and_observation_coordinates() -> Non
             "migration-config",
         }
 
+    with pytest.raises(ValueError, match="product-identity"):
+        ProductObservationSpec(
+            repository="dotmac_erp",
+            product_id="fake-product",
+            subject="subject",
+            observations=(
+                ObservationSpec("dependency", "pyproject.toml", WholeFileLocator()),
+            ),
+        )
+
 
 def test_public_cli_verifies_a_real_candidate_checkout(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q")
@@ -580,8 +593,9 @@ def test_a_symlink_git_object_is_refused_without_following_it(tmp_path: Path) ->
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "config", "user.email", "composition@example.invalid")
     _git(tmp_path, "config", "user.name", "Composition Test")
+    _write(tmp_path, "app/product_assembly.py", "PRODUCT_CODE = 'dotmac-erp'\n")
     os.symlink("/etc/passwd", tmp_path / "evidence")
-    _git(tmp_path, "add", "evidence")
+    _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-qm", "symlink plant")
     _git(tmp_path, "branch", "-M", "main")
     revision = _git(tmp_path, "rev-parse", "HEAD")
@@ -597,13 +611,14 @@ def test_a_symlink_git_object_is_refused_without_following_it(tmp_path: Path) ->
             "commit": CONTRACT_REVISION,
         },
         "observations": [
+            _claim(tmp_path, _identity_observation()),
             {
                 "id": "source",
                 "source_path": "evidence",
                 "source_blob_sha256": "0" * 64,
                 "selector": observation.selector,
                 "extract_sha256": "0" * 64,
-            }
+            },
         ],
     }
 
@@ -630,13 +645,14 @@ def test_oversized_blob_refuses_before_content_is_read(
             "commit": CONTRACT_REVISION,
         },
         "observations": [
+            _claim(repo, _identity_observation()),
             {
                 "id": "small-source",
                 "source_path": "Dockerfile",
                 "source_blob_sha256": hashlib.sha256(source).hexdigest(),
                 "selector": observation.selector,
                 "extract_sha256": hashlib.sha256(source).hexdigest(),
-            }
+            },
         ],
     }
 
@@ -713,13 +729,14 @@ def test_missing_source_blob_is_evidence_refusal(
             "commit": CONTRACT_REVISION,
         },
         "observations": [
+            _claim(repo, _identity_observation()),
             {
                 "id": "missing",
                 "source_path": "absent.py",
                 "source_blob_sha256": "0" * 64,
                 "selector": observation.selector,
                 "extract_sha256": "0" * 64,
-            }
+            },
         ],
     }
 
