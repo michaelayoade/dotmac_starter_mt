@@ -1,0 +1,68 @@
+name: Kernel composition compatibility
+
+# This workflow is the trust boundary for Slice 4.  A caller invokes the
+# reviewed workflow by immutable commit at job level, so none of the caller's
+# steps, PATH changes, Git wrappers or environment setup run before the
+# compatibility verifier.  The composite action below is likewise pinned to
+# the protected-main commit that introduced its reviewed bytes.
+#
+# The product repositories are public.  This job needs no token beyond the
+# read-only token GitHub supplies to check out the calling Starter revision,
+# and every checkout disables credential persistence before any candidate
+# source is evaluated.
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: Kernel composition compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the evaluated Starter revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out Academy observations
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: michaelayoade/dotmac_academy_app
+          ref: ca1f9058a6483fe52207556fa2d17c56b1e237c7
+          path: .compat-gate-clones/dotmac_academy_app
+          # The reader proves this revision is an ancestor of origin/main.
+          # A shallow checkout cannot distinguish missing history from a
+          # genuine non-ancestor refusal.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out ERP observations
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: michaelayoade/dotmac_erp
+          ref: dca695a7d59179fe65577ba4e72a709ff0b32cde
+          path: .compat-gate-clones/dotmac_erp
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out Sub observations
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: michaelayoade/dotmac_sub
+          ref: 272a897b778899b110c5790fcaf43bbb54efe27c
+          path: .compat-gate-clones/dotmac_sub
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up the contract's Python floor
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Derive and verify all three products
+        uses: michaelayoade/dotmac_starter_mt/.github/actions/verify-composition-contract-sources@03ad710eaaa85b52069d3c5854a7184e2b0411d9
