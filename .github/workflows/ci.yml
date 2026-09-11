@@ -215,11 +215,12 @@ jobs:
       - run: poetry install
       - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term
 
-  # Slice 4's compatibility gate (tests/architecture/compatibility_gate.py).
-  # `test_real_coordinates_report_compatibility_with_no_adoption_fraction`
+  # Slice 4's compatibility gate
+  # (`tools/composition_contract/compatibility_gate.py`).
+  # `test_real_coordinates_verify_evidence_and_preserve_runtime_debt`
   # needs a local clone of each of the three products' PUBLIC repositories
-  # to verify ancestry (`git merge-base --is-ancestor`) and read the typed
-  # readiness record `git show` returns — without this job the assertion
+  # to verify ancestry (`git merge-base --is-ancestor`) and read the v3
+  # observation record `git show` returns — without this job the assertion
   # has no `COMPAT_GATE_CLONE_*` in any environment that exists and used to
   # skip everywhere, which is absence-of-signal read as a positive signal,
   # the exact defect this gate exists to refuse (see the module docstring,
@@ -230,6 +231,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The observation records bind the contract revision whose package
+          # dossiers and manifests define the catalogue.  The gate reads
+          # those exact Git objects; a shallow Starter checkout cannot prove
+          # the contract it is evaluating.
+          fetch-depth: 0
       # Each product checkout: a FIXED path (so COMPAT_GATE_CLONE_* below
       # can name it deterministically), fetch-depth 0 (ancestry verification
       # needs full history -- `git merge-base --is-ancestor` against a
