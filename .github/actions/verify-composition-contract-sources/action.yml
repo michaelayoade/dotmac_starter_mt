@@ -1,5 +1,5 @@
-name: Verify composition contract sources
-description: Refuse helper bytes that differ from the product-bound contract revision
+name: Verify composition compatibility
+description: Execute the exact reviewed gate and propagate its compatibility verdict
 
 runs:
   using: composite

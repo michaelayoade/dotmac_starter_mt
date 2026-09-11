@@ -1,4 +1,4 @@
-"""Verify and execute one exact compatibility gate without candidate imports."""
+"""Verify and execute one exact gate, propagating incompatibility as failure."""
 
 from __future__ import annotations
 
@@ -237,6 +237,12 @@ def _require_expected_result(result: Any) -> None:
         raise TrustedRunnerError("compatibility evaluation must not claim adoption")
 
 
+def _compatibility_exit_code(result: Any) -> int:
+    """A proved incompatibility is a red gate, even when it is the expected fact."""
+
+    return 0 if result.compatibility_satisfied else 1
+
+
 def main() -> int:
     verifier: ModuleType | None = None
     gate: ModuleType | None = None
@@ -286,7 +292,7 @@ def main() -> int:
         print(f"TRUSTED COMPATIBILITY REFUSED: {exc}")
         return 1
     print(result.explain())
-    return 0
+    return _compatibility_exit_code(result)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ import py_compile
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml  # type: ignore[import-untyped]
@@ -86,6 +86,19 @@ def test_byte_pins_refuse_a_changed_gate_or_binding(tmp_path: Path) -> None:
     path.write_bytes(b"changed")
     with pytest.raises(runner.TrustedRunnerError, match="not the pinned candidate"):
         runner._require_sha256(path.read_bytes(), expected, label="candidate")
+
+
+def test_verified_incompatibility_is_a_failing_process_verdict() -> None:
+    runner = _module("run_gate")
+
+    assert (
+        runner._compatibility_exit_code(SimpleNamespace(compatibility_satisfied=False))
+        == 1
+    )
+    assert (
+        runner._compatibility_exit_code(SimpleNamespace(compatibility_satisfied=True))
+        == 0
+    )
 
 
 def test_runner_refuses_any_binding_other_than_the_three_pinned_revisions(
