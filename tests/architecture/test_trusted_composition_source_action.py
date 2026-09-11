@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +58,7 @@ def test_action_owns_a_closed_nonempty_trust_anchor() -> None:
     assert "inputs" not in action
     step = action["runs"]["steps"][0]
     command = step["run"]
-    assert command == 'python "$GITHUB_ACTION_PATH/run_gate.py"'
+    assert command == 'python -I "$GITHUB_ACTION_PATH/run_gate.py"'
     assert "${{" not in command
 
     runner = _module("run_gate")
@@ -65,6 +67,67 @@ def test_action_owns_a_closed_nonempty_trust_anchor() -> None:
         "erp": "deferred_runtime_debt",
         "sub": "satisfied",
     }
+    assert runner.EXPECTED_REVISIONS == {
+        "academy": "ca1f9058a6483fe52207556fa2d17c56b1e237c7",
+        "erp": "dca695a7d59179fe65577ba4e72a709ff0b32cde",
+        "sub": "272a897b778899b110c5790fcaf43bbb54efe27c",
+    }
+
+
+def test_byte_pins_refuse_a_changed_gate_or_binding(tmp_path: Path) -> None:
+    runner = _module("run_gate")
+    path = tmp_path / "candidate"
+    path.write_bytes(b"trusted")
+    expected = hashlib.sha256(b"trusted").hexdigest()
+
+    runner._require_sha256(path, expected, label="candidate")
+    path.write_bytes(b"changed")
+    with pytest.raises(runner.TrustedRunnerError, match="not the pinned candidate"):
+        runner._require_sha256(path, expected, label="candidate")
+
+
+def test_runner_refuses_any_binding_other_than_the_three_pinned_revisions(
+    tmp_path: Path,
+) -> None:
+    runner = _module("run_gate")
+    path = tmp_path / "bindings.json"
+    document = {
+        "schema": "kernel-composition-compatibility-bindings.v3",
+        "bindings": {
+            product: {"revision": revision}
+            for product, revision in runner.EXPECTED_REVISIONS.items()
+        },
+    }
+    path.write_text(json.dumps(document))
+    runner._require_exact_bindings(path)
+
+    document["bindings"]["erp"]["revision"] = "a" * 40
+    path.write_text(json.dumps(document))
+    with pytest.raises(runner.TrustedRunnerError, match="bindings changed"):
+        runner._require_exact_bindings(path)
+
+
+def test_explicit_loader_never_executes_candidate_package_initializers(
+    tmp_path: Path,
+) -> None:
+    runner = _module("run_gate")
+    contract = tmp_path / "tools" / "composition_contract"
+    contract.mkdir(parents=True)
+    marker = tmp_path / "initializer-ran"
+    (tmp_path / "tools" / "__init__.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('tools')\n"
+    )
+    (contract / "__init__.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('contract')\n"
+    )
+    for _, filename in runner._HELPER_MODULES:
+        (contract / filename).write_text("VALUE = 1\n")
+    (contract / "compatibility_gate.py").write_text("VALUE = 2\n")
+
+    loaded = runner._load_verified_gate(tmp_path)
+
+    assert loaded.VALUE == 2
+    assert not marker.exists()
 
 
 def test_action_detects_current_drift_against_one_git_coordinate(

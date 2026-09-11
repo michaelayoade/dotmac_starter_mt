@@ -6,4 +6,4 @@ runs:
   steps:
     - name: Verify trusted sources and execute the compatibility gate
       shell: bash
-      run: python "$GITHUB_ACTION_PATH/run_gate.py"
+      run: python -I "$GITHUB_ACTION_PATH/run_gate.py"
