@@ -1,0 +1,24 @@
+name: Verify composition observations
+description: Verify a public product's digest-bound composition observations
+
+inputs:
+  product:
+    description: Product identifier to verify
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Verify composition observation record
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        COMPOSITION_PRODUCT: ${{ inputs.product }}
+      run: >-
+        python3
+        "$GITHUB_ACTION_PATH/../../../tools/composition_contract/check_product_observations.py"
+        --product "$COMPOSITION_PRODUCT"
+        --workspace "$GITHUB_WORKSPACE"
+        --action-repository "$GITHUB_ACTION_REPOSITORY"
+        --action-ref "$GITHUB_ACTION_REF"
+        --caller-repository "$GITHUB_REPOSITORY"
