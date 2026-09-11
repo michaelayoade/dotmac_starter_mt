@@ -1,7 +1,43 @@
-"""The `dimensional-composition` contract — relocated out of `tests/architecture/`
-(which is a test collection, not a library) so it can be consumed by another
-repository's CI without vendoring. See `composition_schema.py` for the
-contract itself; this repository's own architecture tests
-(`tests/architecture/test_composition_schema.py`) import it from here, on
-the same footing any future consumer would.
+"""The central ``dimensional-composition`` contract.
+
+``composition_schema.py`` holds the v2 derivation primitives relocated from a
+test collection. ``observations.py`` is the breaking v3 acquisition boundary:
+products do not import or vendor it; Starter independently re-derives fixed
+observations from immutable product Git objects.
 """
+
+from tools.composition_contract.observations import (
+    CONTRACT_REPOSITORY,
+    OBSERVATION_SCHEMA_VERSION,
+    ObservationAcquisitionError,
+    ObservationClaim,
+    ObservationRefusal,
+    ObservationSpec,
+    PoetryInstallCommandLocator,
+    ProductObservationSpec,
+    PythonAssignmentKeywordLocator,
+    VerifiedObservation,
+    VerifiedObservationEnvelope,
+    WholeFileLocator,
+    extract_observation,
+    read_regular_git_blob,
+    verify_observation_envelope,
+)
+
+__all__ = [
+    "CONTRACT_REPOSITORY",
+    "OBSERVATION_SCHEMA_VERSION",
+    "ObservationAcquisitionError",
+    "ObservationClaim",
+    "ObservationRefusal",
+    "ObservationSpec",
+    "PoetryInstallCommandLocator",
+    "ProductObservationSpec",
+    "PythonAssignmentKeywordLocator",
+    "VerifiedObservation",
+    "VerifiedObservationEnvelope",
+    "WholeFileLocator",
+    "extract_observation",
+    "read_regular_git_blob",
+    "verify_observation_envelope",
+]

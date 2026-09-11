@@ -301,8 +301,9 @@ assertion, via :func:`measure_starter_boot_assembly_consumption` and
 Correctness for the two cross-repository controls still rests on whoever
 populated the trace having actually read the named files, the same
 discipline any hand-authored architecture test requires; Starter's own CI
-cannot open another repository's files, and this module says so rather than
-claiming to have verified them.
+does not acquire another repository's files through this v2 API, and this
+module says so rather than claiming to have verified them. The v3 acquisition
+boundary described under F2 below adds that missing independent read.
 
 Three real, paired call sites anchor the boundary (Ruling 1: the running
 product assembly must consume the real ``ModuleManifest``; release-only
@@ -340,14 +341,15 @@ metadata does not count):
   refusals below are equally consistent with a checker that refuses
   everything, and this is the one input that proves it can also say yes.
 * **Negative control — ERP**, ``app/product_assembly.py`` (dotmac_erp repo,
-  a SEPARATE repository Starter's own CI cannot open). ``COMPOSED_MODULE_MANIFESTS``
-  is passed as ``modules=COMPOSED_MODULE_MANIFESTS`` into
+  a SEPARATE repository this v2 function does not acquire).
+  ``COMPOSED_MODULE_MANIFESTS`` is passed as
+  ``modules=COMPOSED_MODULE_MANIFESTS`` into
   ``ProductAssemblySpec(...)`` — a bare ``Name`` argument. Ruling F3 requires
   this to be TRACED, not hand-labelled: ``classify_modules_sequence_argument``
   is structurally capable of resolving it (a module-scope ``Name`` bound to a
   tuple of manifest values, exactly like the positive control's list) —
   **when it is given the tree that actually defines the binding**. Starter's
-  own CI cannot open ERP's file to supply that tree, so the honest,
+  v2 caller does not supply ERP's file tree here, so the honest,
   UNRESOLVED result in THIS repository's own measurement is
   ``argument_kind = INDETERMINATE_ARGUMENT_KIND``, classifying as
   ``INDETERMINATE_ARGUMENT_SHAPE`` — never a hand-asserted positive dressed
@@ -400,9 +402,11 @@ positive control proves it also recognizes the real shape when it is
 present. The positive control is re-derived by executing
 :func:`measure_starter_boot_assembly_consumption` against this repository's
 own tree; the two negative controls are a one-time, dated manual reading of
-ERP's and Sub's files, recorded as literals — Starter's CI has no access to
-those repositories, so they are not, and cannot be, re-verified by execution
-from here. All three are exercised in ``test_composition_schema.py``. Be
+ERP's and Sub's files, recorded as literals — this v2 function gives CI no
+acquisition path for those repositories, so they are not re-verified by
+execution here. The public repositories can be acquired by the bounded v3
+Git-object reader; that is a separate contract. All three v2 controls are
+exercised in ``test_composition_schema.py``. Be
 precise about what the ERP and Sub literals are for: they are non-
 authoritative regression fixtures that pin THIS module's own classifier
 logic against a snapshot someone once read by hand — never product evidence
@@ -422,24 +426,17 @@ the distribution never reached the deployed image. Reading ``installation``
 as "resolved in the lock" let that product record ``installation: true``
 for a distribution its production image never actually contained.
 
-DELIBERATE SCOPE NOTE (F2): an earlier draft of this section, and of this
-module's own tests, cited specific external paths and line numbers —
-``ERP Dockerfile:50``, ``Sub Dockerfile:40``, and similar — as though they
-were live, current facts. They cannot be: this repository's own CI has no
-access to ``dotmac_erp``'s or ``dotmac_sub``'s checked-out trees, so a
-citation like that is an unverifiable claim the moment it is written, and
-it WILL rot silently — this module's own ``Starter Dockerfile:63`` citation
-had already gone stale (the real line moved to ``:68``) before that fact
-was even caught. Michael's ruling: remove cross-repository path/line
-assertions from this module entirely, since CI cannot read those trees to
-keep them honest. Each product's own validator owns citing and testing its
-own real recipe file; nothing in THIS module asserts a fact about a
-repository it cannot open. Where this module needs a REAL recipe to test
-against, it reads its own, actual, live ``Dockerfile`` from disk at test
-time (see ``test_composition_schema.py``, which locates the instruction by
-CONTENT rather than a hand-copied line number) — everything else is an
-explicitly SYNTHETIC example, modelled on real shapes but never presented
-as a citation of any specific external file.
+DELIBERATE SCOPE NOTE (F2): an earlier draft cited bare external paths and
+line numbers as though they were live facts. A bare citation is unverifiable
+and rots silently, so it remains forbidden. The v3 observation contract in
+``tools.composition_contract.observations`` narrows that prohibition: a
+cross-repository path is admissible only when Starter fixes the path and
+selector, the product record binds an immutable contract revision plus the
+source-blob and selected-byte SHA-256 digests, and the central gate fetches
+the protected-main product revision and re-derives both digests from the Git
+objects. The payload cannot select the path, and a path without that revision
+and digest proof is still refused. This v2 module's synthetic examples remain
+synthetic; they are not promoted into evidence by the v3 amendment.
 
 The ruling, stated plainly:
 
@@ -1436,10 +1433,10 @@ def measure_starter_boot_assembly_consumption(
     call sitting dead inside a function nobody invokes, and never an import
     guarded by `if TYPE_CHECKING:`, which never executes at runtime.
 
-    Scoped to `repo_root` — this repository's own tree — because this
-    repository's own CI can open its own files; it cannot open another
-    repository's files, which is why the ERP and Sub controls in the module
-    docstring are NOT produced by a function like this one. Returns an
+    Scoped to `repo_root` — the tree supplied to this function. This v2 API
+    receives only Starter's own tree, which is why its ERP and Sub controls
+    are NOT produced by a function like this one. The v3 bounded acquisition
+    API supplies immutable public product trees separately. Returns an
     `INDETERMINATE`-classifying trace (both booleans `None`) if either
     `app/main.py` or `app/assembly.py` is missing OR does not parse as
     Python — a refusal, never a guessed `False` — see
@@ -1926,11 +1923,10 @@ class InstallRecipe:
     `parse_install_command`'s own docstring for the two-stage grammar that
     makes both true). See the module docstring's "What a recipe is, and the
     one way to get one" section for why this is load-bearing rather than
-    incidental. Per F2, no docstring in this module cites a specific
-    external repository's file/line as a verified fact — this repository's
-    own CI cannot read another repository's tree to keep such a citation
-    honest; the worked example below is REPRESENTATIVE of a real production
-    shape, not a claim about any particular file.
+    incidental. Per F2, no bare external file/line is a verified fact; v3
+    admits one only with an immutable revision and independently re-derived
+    source and extract digests. The worked example below is REPRESENTATIVE of
+    a real production shape, not a claim about any particular file.
 
     Worked example — every token, nothing dropped:
 
