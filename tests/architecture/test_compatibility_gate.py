@@ -8,12 +8,14 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from tools.composition_contract import compatibility_gate as gate
 from tools.composition_contract.composition_schema import (
     CompositionCoverageReport,
+    DimensionValue,
     RuntimeExposureReport,
 )
 
@@ -199,6 +201,125 @@ def load(value):
         gate._walk_import_graph(repository=repo, index=index, roots=("app.main",))
 
 
+@pytest.mark.parametrize(
+    ("application_import", "package_import"),
+    [
+        ('importlib.import_module(name="dotmac_files.service")', ""),
+        ('importlib.util.find_spec(name="dotmac_files.service")', ""),
+        ('__import__(name="dotmac_files.service")', ""),
+        (
+            'importlib.import_module(name="dotmac_files")',
+            'importlib.import_module(name=".service", package="dotmac_files")',
+        ),
+        (
+            'importlib.import_module(name="dotmac_files")',
+            '__import__(name="service", globals=globals(), level=1)',
+        ),
+    ],
+)
+def test_keyword_and_relative_dynamic_imports_reach_trusted_deferred_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    application_import: str,
+    package_import: str,
+) -> None:
+    debt_path = "tests/architecture/conflict_savepoint_package_backlog_baseline.json"
+    source_path = "packages/dotmac-files/src/dotmac_files/service.py"
+    repo = _repo(
+        tmp_path,
+        {
+            "app/__init__.py": "",
+            "app/main.py": f"import importlib\n{application_import}\n",
+            "packages/dotmac-files/src/dotmac_files/__init__.py": (
+                f"import importlib\n{package_import}\n"
+            ),
+            source_path: ("from dotmac_kernel.db import conflict_savepoint\n"),
+            debt_path: json.dumps({"total": 1, "files": {source_path: 1}}),
+        },
+    )
+    revision = _git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(gate, "TRUSTED_CONTRACT_REVISION", revision)
+    product_index = gate._git_python_index(repo, revision, "app")
+    product_reach = gate._walk_import_graph(
+        repository=repo,
+        index=product_index,
+        roots=("app.main",),
+    )
+    runtime_consumed = any(
+        name == "dotmac_files" or name.startswith("dotmac_files.")
+        for name in product_reach.external_modules
+    )
+    record = SimpleNamespace(
+        distribution="dotmac-files",
+        runtime_consumption=(
+            DimensionValue.TRUE if runtime_consumed else DimensionValue.FALSE
+        ),
+    )
+    catalogue = gate._TrustedCatalogue(
+        tmp_path / "materialized-packages",
+        {"dotmac-files": "dotmac_files"},
+    )
+
+    reached = gate._reached_deferred_debt(
+        repository_root=repo,
+        records=(record,),  # type: ignore[arg-type]
+        product_external_modules=product_reach.external_modules,
+        catalogue=catalogue,
+        debt=gate._load_debt(repo),
+    )
+
+    assert runtime_consumed
+    assert reached == (gate.DeferredDebtReach("dotmac-files", source_path, 1),)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import_module(package="dotmac_files")',
+        'import_module("dotmac_files", name="dotmac_other")',
+        'import_module(name=".service")',
+        'import_module(name=".service", package=unknown_package)',
+    ],
+)
+def test_dynamic_import_argument_ambiguity_or_missing_provenance_refuses(
+    tmp_path: Path, source: str
+) -> None:
+    repo = _repo(
+        tmp_path,
+        {
+            "app/__init__.py": "",
+            "app/main.py": f"from importlib import import_module\n{source}\n",
+        },
+    )
+    index = gate._git_python_index(repo, "HEAD", "app")
+
+    with pytest.raises(gate.GateDerivationError):
+        gate._walk_import_graph(repository=repo, index=index, roots=("app.main",))
+
+
+def test_autodiscover_keyword_arguments_are_consumed_as_import_edges(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(
+        tmp_path,
+        {
+            "app/__init__.py": "",
+            "app/main.py": (
+                "from celery import Celery\n"
+                "celery_app = Celery()\n"
+                "celery_app.autodiscover_tasks("
+                'packages=["dotmac_jobs"], related_name="worker_tasks")\n'
+            ),
+        },
+    )
+    index = gate._git_python_index(repo, "HEAD", "app")
+
+    reached = gate._walk_import_graph(repository=repo, index=index, roots=("app.main",))
+
+    assert "dotmac_jobs" in reached.external_modules
+    assert "dotmac_jobs.worker_tasks" in reached.external_modules
+
+
 def test_lazy_import_helpers_follow_consumed_tables_not_unrelated_literals() -> None:
     table_tree = ast.parse(
         """
@@ -302,22 +423,52 @@ version_locations = dotmac_files.migrations:versions product.migrations:versions
     }
 
 
-def test_deferred_debt_loader_is_two_directional_and_nonempty(tmp_path: Path) -> None:
-    debt = tmp_path / "debt.json"
-    debt.write_text(
-        json.dumps(
-            {
-                "total": 2,
-                "files": {"packages/dotmac-x/src/dotmac_x/service.py": 1},
-            }
-        )
+def test_deferred_debt_uses_one_trusted_coordinate_and_refuses_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    debt_path = "tests/architecture/conflict_savepoint_package_backlog_baseline.json"
+    source_path = "packages/dotmac-x/src/dotmac_x/service.py"
+    repo = _repo(
+        tmp_path,
+        {
+            source_path: "from dotmac_kernel.db import conflict_savepoint\n",
+            debt_path: json.dumps({"total": 1, "files": {source_path: 1}}),
+        },
     )
-    with pytest.raises(gate.GateConfigurationError, match="total disagrees"):
-        gate._load_debt(debt)
+    revision = _git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(gate, "TRUSTED_CONTRACT_REVISION", revision)
 
-    debt.write_text(json.dumps({"total": 0, "files": {}}))
-    with pytest.raises(gate.GateConfigurationError, match="must be non-empty"):
-        gate._load_debt(debt)
+    # Mutable checkout bytes cannot erase debt committed at the trusted object.
+    (repo / debt_path).write_text(json.dumps({"total": 0, "files": {}}))
+    assert gate._load_debt(repo) == {source_path: 1}
+
+    # A trusted record and its trusted source must still agree in both directions.
+    (repo / debt_path).write_text(json.dumps({"total": 2, "files": {source_path: 2}}))
+    _git(repo, "add", debt_path)
+    _git(repo, "commit", "-q", "-m", "plant mismatched trusted debt")
+    monkeypatch.setattr(
+        gate, "TRUSTED_CONTRACT_REVISION", _git(repo, "rev-parse", "HEAD")
+    )
+    with pytest.raises(gate.GateConfigurationError, match="disagrees with trusted"):
+        gate._load_debt(repo)
+
+
+def test_gate_refuses_semantic_helpers_that_drift_from_the_trusted_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(
+        tmp_path,
+        {relative: f"# {relative}\n" for relative in gate.TRUSTED_SEMANTIC_PATHS},
+    )
+    revision = _git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(gate, "TRUSTED_CONTRACT_REVISION", revision)
+
+    gate._require_trusted_contract_sources(repo)
+    changed = repo / gate.TRUSTED_SEMANTIC_PATHS[0]
+    changed.write_text("# changed semantics\n")
+
+    with pytest.raises(gate.GateConfigurationError, match="executing bytes differ"):
+        gate._require_trusted_contract_sources(repo)
 
 
 def test_gate_source_has_no_v1_adapter_or_product_authored_verdict_input() -> None:

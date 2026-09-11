@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import configparser
+import importlib.util
 import json
 import os
 import re
@@ -72,11 +73,13 @@ _HERE: Final = Path(__file__).resolve().parents[2]
 DEFAULT_BINDINGS_PATH: Final = (
     _HERE / "tests" / "architecture" / "compatibility_gate_bindings.json"
 )
-DEFAULT_DEBT_PATH: Final = (
-    _HERE
-    / "tests"
-    / "architecture"
-    / "conflict_savepoint_package_backlog_baseline.json"
+DEFERRED_DEBT_RECORD_PATH: Final = (
+    "tests/architecture/conflict_savepoint_package_backlog_baseline.json"
+)
+TRUSTED_SEMANTIC_PATHS: Final = (
+    "tools/composition_contract/composition_schema.py",
+    "tools/composition_contract/observations.py",
+    "tools/composition_contract/specs.py",
 )
 
 
@@ -347,6 +350,30 @@ def _git_blob(repository: Path, object_id: str, *, source: str) -> bytes:
 
 def _git_show(repository: Path, revision: str, path: str) -> bytes:
     return _git_bytes(repository, ("show", f"{revision}:{path}"))
+
+
+def _require_trusted_contract_sources(repository_root: Path) -> None:
+    """Refuse when executing helpers differ from the pinned contract.
+
+    Product observations name ``TRUSTED_CONTRACT_REVISION``. Loading current
+    working-tree helper modules while deriving the catalogue from that revision
+    would let one evaluation combine two contracts without saying so.
+    """
+
+    for relative in TRUSTED_SEMANTIC_PATHS:
+        path = repository_root / relative
+        try:
+            current = path.read_bytes()
+        except OSError as exc:
+            raise GateAcquisitionError(
+                f"trusted contract source {relative!r} is unreadable: {exc}"
+            ) from exc
+        trusted = _git_show(repository_root, TRUSTED_CONTRACT_REVISION, relative)
+        if current != trusted:
+            raise GateConfigurationError(
+                f"{relative}: executing bytes differ from trusted contract "
+                f"revision {TRUSTED_CONTRACT_REVISION}"
+            )
 
 
 @dataclass(frozen=True)
@@ -979,6 +1006,68 @@ class _ImportReachability:
     external_modules: frozenset[str]
 
 
+def _call_argument(
+    node: ast.Call,
+    *,
+    position: int,
+    keyword: str,
+    current_module: str,
+) -> ast.expr | None:
+    """Return one call argument without collapsing absent and ambiguous input."""
+
+    keyword_values = [item.value for item in node.keywords if item.arg == keyword]
+    if any(item.arg is None for item in node.keywords):
+        raise GateDerivationError(
+            f"{current_module}: dynamic import arguments expanded with ** are "
+            "not structurally resolvable"
+        )
+    positional = node.args[position] if position < len(node.args) else None
+    if len(keyword_values) > 1 or (positional is not None and keyword_values):
+        raise GateDerivationError(
+            f"{current_module}: dynamic import argument {keyword!r} is ambiguous"
+        )
+    if keyword_values:
+        return keyword_values[0]
+    return positional
+
+
+def _resolve_relative_dynamic_names(
+    *,
+    names: frozenset[str],
+    packages: frozenset[str] | None,
+    importer: str,
+    current_module: str,
+) -> frozenset[str]:
+    """Apply importlib's package semantics or refuse an unresolved relative name."""
+
+    resolved: set[str] = set()
+    for name in names:
+        if not name:
+            raise GateDerivationError(
+                f"{current_module}: dynamic import target is empty"
+            )
+        if not name.startswith("."):
+            resolved.add(name)
+            continue
+        if importer not in {"import_module", "find_spec", "__import__"} or not packages:
+            raise GateDerivationError(
+                f"{current_module}: relative {importer} target has no structurally "
+                "resolved package"
+            )
+        for package in packages:
+            if not package or package.startswith("."):
+                raise GateDerivationError(
+                    f"{current_module}: dynamic import package is not absolute"
+                )
+            try:
+                resolved.add(importlib.util.resolve_name(name, package))
+            except (ImportError, ValueError) as exc:
+                raise GateDerivationError(
+                    f"{current_module}: relative {importer} target escapes package"
+                ) from exc
+    return frozenset(resolved)
+
+
 def _visit_imports(
     *,
     tree: ast.AST,
@@ -1023,24 +1112,38 @@ def _visit_imports(
                 name = node.func.id
             elif isinstance(node.func, ast.Attribute):
                 name = node.func.attr
-            if name in {"import_module", "__import__", "find_spec"} and node.args:
+            if name in {"import_module", "__import__", "find_spec"}:
+                target_expression = _call_argument(
+                    node,
+                    position=0,
+                    keyword="name",
+                    current_module=current_module,
+                )
+                if target_expression is None:
+                    raise GateDerivationError(
+                        f"{current_module}: dynamic import target is absent"
+                    )
                 targets = _possible_import_strings(
-                    node.args[0],
+                    target_expression,
                     current_module=current_module,
                     assignments=assignments,
                     dictionary_values=dictionary_values,
                 )
-                if targets is None and isinstance(node.args[0], ast.Name):
-                    targets = _table_driven_import_strings(tree, node.args[0].id)
-                if targets is None and isinstance(node.args[0], ast.Name):
-                    targets = _forwarded_literal_table_strings(tree, node.args[0].id)
-                if targets is None and isinstance(node.args[0], ast.Name):
-                    targets = _mapping_tuple_import_strings(tree, node.args[0].id)
-                if targets is None and isinstance(node.args[0], ast.Name):
-                    targets = _split_forwarded_import_strings(tree, node.args[0].id)
-                if targets is None and isinstance(node.args[0], ast.Name):
+                if targets is None and isinstance(target_expression, ast.Name):
+                    targets = _table_driven_import_strings(tree, target_expression.id)
+                if targets is None and isinstance(target_expression, ast.Name):
+                    targets = _forwarded_literal_table_strings(
+                        tree, target_expression.id
+                    )
+                if targets is None and isinstance(target_expression, ast.Name):
+                    targets = _mapping_tuple_import_strings(tree, target_expression.id)
+                if targets is None and isinstance(target_expression, ast.Name):
+                    targets = _split_forwarded_import_strings(
+                        tree, target_expression.id
+                    )
+                if targets is None and isinstance(target_expression, ast.Name):
                     targets = _guarded_namespace_import_strings(
-                        tree, node.args[0].id, index
+                        tree, target_expression.id, index
                     )
                 if targets is None and name == "find_spec":
                     targets = _runtime_manifest_import_strings(tree)
@@ -1049,17 +1152,110 @@ def _visit_imports(
                         f"{current_module}: dynamic import target is not "
                         "structurally resolvable"
                     )
+                package_values: frozenset[str] | None = None
+                if name == "__import__":
+                    level_expression = _call_argument(
+                        node,
+                        position=4,
+                        keyword="level",
+                        current_module=current_module,
+                    )
+                    if level_expression is None:
+                        level = 0
+                    elif (
+                        isinstance(level_expression, ast.Constant)
+                        and isinstance(level_expression.value, int)
+                        and not isinstance(level_expression.value, bool)
+                        and level_expression.value >= 0
+                    ):
+                        level = level_expression.value
+                    else:
+                        raise GateDerivationError(
+                            f"{current_module}: __import__ level is not a "
+                            "structurally resolved non-negative integer"
+                        )
+                    if level:
+                        package = (
+                            current_module
+                            if is_package
+                            else current_module.rpartition(".")[0]
+                        )
+                        if not package or any(
+                            target.startswith(".") for target in targets
+                        ):
+                            raise GateDerivationError(
+                                f"{current_module}: relative __import__ target has "
+                                "no unambiguous package"
+                            )
+                        targets = frozenset(
+                            f"{'.' * level}{target}" for target in targets
+                        )
+                        package_values = frozenset({package})
+                if any(target.startswith(".") for target in targets):
+                    if name != "__import__":
+                        package_expression = _call_argument(
+                            node,
+                            position=1,
+                            keyword="package",
+                            current_module=current_module,
+                        )
+                        if package_expression is not None:
+                            package_values = _possible_import_strings(
+                                package_expression,
+                                current_module=current_module,
+                                assignments=assignments,
+                                dictionary_values=dictionary_values,
+                            )
+                            if package_values is None:
+                                raise GateDerivationError(
+                                    f"{current_module}: dynamic import package is not "
+                                    "structurally resolvable"
+                                )
+                targets = _resolve_relative_dynamic_names(
+                    names=targets,
+                    packages=package_values,
+                    importer=name,
+                    current_module=current_module,
+                )
                 for target in targets:
                     enqueue(target)
-            if name == "autodiscover_tasks" and node.args:
-                values = node.args[0]
+            if name == "autodiscover_tasks":
+                values = _call_argument(
+                    node,
+                    position=0,
+                    keyword="packages",
+                    current_module=current_module,
+                )
+                if values is None:
+                    raise GateDerivationError(
+                        f"{current_module}: autodiscover packages are absent"
+                    )
+                related_expression = _call_argument(
+                    node,
+                    position=1,
+                    keyword="related_name",
+                    current_module=current_module,
+                )
+                if related_expression is None:
+                    related_name: str | None = "tasks"
+                elif isinstance(related_expression, ast.Constant) and (
+                    isinstance(related_expression.value, str)
+                    or related_expression.value is None
+                ):
+                    related_name = related_expression.value
+                else:
+                    raise GateDerivationError(
+                        f"{current_module}: autodiscover related_name is not "
+                        "structurally resolvable"
+                    )
                 if isinstance(values, ast.List | ast.Tuple):
                     for item in values.elts:
                         if isinstance(item, ast.Constant) and isinstance(
                             item.value, str
                         ):
                             enqueue(item.value)
-                            enqueue(f"{item.value}.tasks")
+                            if related_name:
+                                enqueue(f"{item.value}.{related_name}")
                         else:
                             raise GateDerivationError(
                                 f"{current_module}: autodiscover target is not "
@@ -1455,8 +1651,67 @@ def _derive_records(
     return tuple(rows), reachability
 
 
-def _load_debt(path: Path) -> Mapping[str, int]:
-    document = _strict_json(path.read_bytes(), source=str(path))
+def _deferred_import_sites(source: bytes, *, path: str) -> int:
+    try:
+        tree = ast.parse(source.decode("utf-8"), filename=path)
+    except (UnicodeDecodeError, SyntaxError) as exc:
+        raise GateConfigurationError(
+            f"trusted deferred-import source does not parse: {path}"
+        ) from exc
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "dotmac_kernel.db"
+        and any(alias.name == "conflict_savepoint" for alias in node.names)
+    )
+
+
+def _derive_deferred_import_debt(repository_root: Path) -> Mapping[str, int]:
+    raw = _git_bytes(
+        repository_root,
+        (
+            "grep",
+            "-l",
+            "-z",
+            "--fixed-strings",
+            "dotmac_kernel.db",
+            TRUSTED_CONTRACT_REVISION,
+            "--",
+            "packages",
+        ),
+        accepted=frozenset({0, 1}),
+    )
+    derived: dict[str, int] = {}
+    prefix = f"{TRUSTED_CONTRACT_REVISION}:".encode()
+    for entry in (item for item in raw.split(b"\0") if item):
+        try:
+            if not entry.startswith(prefix):
+                raise ValueError
+            path = entry.removeprefix(prefix).decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise GateAcquisitionError(
+                "git grep returned malformed deferred-debt metadata"
+            ) from exc
+        if not path.endswith(".py"):
+            continue
+        count = _deferred_import_sites(
+            _git_show(repository_root, TRUSTED_CONTRACT_REVISION, path), path=path
+        )
+        if count:
+            derived[path] = count
+    return MappingProxyType(derived)
+
+
+def _load_debt(repository_root: Path) -> Mapping[str, int]:
+    document = _strict_json(
+        _git_show(
+            repository_root,
+            TRUSTED_CONTRACT_REVISION,
+            DEFERRED_DEBT_RECORD_PATH,
+        ),
+        source=f"{TRUSTED_CONTRACT_REVISION}:{DEFERRED_DEBT_RECORD_PATH}",
+    )
     files = document.get("files")
     total = document.get("total")
     if not isinstance(files, Mapping) or not files:
@@ -1473,6 +1728,17 @@ def _load_debt(path: Path) -> Mapping[str, int]:
         parsed[source_path] = count
     if total != sum(parsed.values()):
         raise GateConfigurationError("deferred-import debt total disagrees with files")
+    derived = _derive_deferred_import_debt(repository_root)
+    if parsed != derived:
+        differences = [
+            f"{path}: recorded {parsed.get(path, 0)}, derived {derived.get(path, 0)}"
+            for path in sorted(set(parsed) | set(derived))
+            if parsed.get(path, 0) != derived.get(path, 0)
+        ]
+        raise GateConfigurationError(
+            "deferred-import debt disagrees with trusted source blobs:\n"
+            + "\n".join(differences)
+        )
     return MappingProxyType(parsed)
 
 
@@ -1482,9 +1748,8 @@ def _reached_deferred_debt(
     records: Sequence[CompositionRecord],
     product_external_modules: frozenset[str],
     catalogue: _TrustedCatalogue,
-    debt_path: Path,
+    debt: Mapping[str, int],
 ) -> tuple[DeferredDebtReach, ...]:
-    debt = _load_debt(debt_path)
     runtime_distributions = {
         record.distribution
         for record in records
@@ -1531,7 +1796,7 @@ def evaluate_product(
     clone: Path,
     repository_root: Path,
     catalogue: _TrustedCatalogue,
-    debt_path: Path = DEFAULT_DEBT_PATH,
+    debt_inventory: Mapping[str, int],
 ) -> ProductEvaluation:
     spec = PRODUCT_OBSERVATION_SPECS[binding.product]
     try:
@@ -1557,7 +1822,7 @@ def evaluate_product(
             records=records,
             product_external_modules=reachability.external_modules,
             catalogue=catalogue,
-            debt_path=debt_path,
+            debt=debt_inventory,
         )
     except ObservationAcquisitionError as exc:
         raise GateAcquisitionError(f"{binding.product}: {exc}") from exc
@@ -1609,12 +1874,13 @@ def evaluate_gate(
     *,
     clones: Mapping[str, Path],
     repository_root: Path = _HERE,
-    debt_path: Path = DEFAULT_DEBT_PATH,
 ) -> GateResult:
     if set(bindings) != set(PRODUCTS):
         raise GateConfigurationError(f"gate requires exactly {list(PRODUCTS)!r}")
     if set(clones) != set(PRODUCTS):
         raise GateAcquisitionError(f"clone map requires exactly {list(PRODUCTS)!r}")
+    _require_trusted_contract_sources(repository_root)
+    debt = _load_debt(repository_root)
     with _trusted_catalogue(repository_root) as catalogue:  # type: _TrustedCatalogue
         evaluations = tuple(
             evaluate_product(
@@ -1622,7 +1888,7 @@ def evaluate_gate(
                 clone=clones[product],
                 repository_root=repository_root,
                 catalogue=catalogue,
-                debt_path=debt_path,
+                debt_inventory=debt,
             )
             for product in PRODUCTS
         )
