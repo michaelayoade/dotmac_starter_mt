@@ -2,13 +2,13 @@
   "schema": "kernel-composition-compatibility-bindings.v3",
   "bindings": {
     "academy": {
-      "revision": "a10a995163a4350c578abad7905e7da791d47891"
+      "revision": "ca1f9058a6483fe52207556fa2d17c56b1e237c7"
     },
     "erp": {
-      "revision": "34041c718be3c555cfa1f77ba1dd29697da36b7b"
+      "revision": "dca695a7d59179fe65577ba4e72a709ff0b32cde"
     },
     "sub": {
-      "revision": "0553186b60f045ee350b5fe412a4b82231f71363"
+      "revision": "272a897b778899b110c5790fcaf43bbb54efe27c"
     }
   }
 }

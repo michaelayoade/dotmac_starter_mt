@@ -62,12 +62,14 @@ from tools.composition_contract.observations import (
     verify_observation_envelope,
 )
 from tools.composition_contract.specs import PRODUCT_OBSERVATION_SPECS
-from tools.composition_contract.verify_trusted_sources import (
-    TRUSTED_CONTRACT_REVISION,
-    TRUSTED_SEMANTIC_PATHS,
-)
 
 BINDINGS_SCHEMA: Final = "kernel-composition-compatibility-bindings.v3"
+TRUSTED_CONTRACT_REVISION: Final = "8b4b6d4b42e650c47fe4c04a679a5ccb51c4b2cd"
+TRUSTED_SEMANTIC_PATHS: Final = (
+    "tools/composition_contract/composition_schema.py",
+    "tools/composition_contract/observations.py",
+    "tools/composition_contract/specs.py",
+)
 PRODUCTS: Final = tuple(PRODUCT_OBSERVATION_SPECS)
 IMMUTABLE_COMMIT: Final = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_COMPONENT: Final = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -351,11 +353,11 @@ def _git_show(repository: Path, revision: str, path: str) -> bytes:
 
 
 def _require_trusted_contract_sources(repository_root: Path) -> None:
-    """Defence in depth for on-disk drift after the pre-import CI check.
+    """Refuse working-tree helper bytes that differ from the bound contract.
 
-    The dedicated CI step runs ``verify_trusted_sources.py`` before these
-    helpers import. This later check catches ordinary changes between that step
-    and evaluation; it does not claim to establish which bytes already ran.
+    The pinned compatibility runner verifies these files before importing this
+    module.  This second check catches drift between that verification and the
+    evaluation; it is deliberately not described as the pre-import authority.
     """
 
     for relative in TRUSTED_SEMANTIC_PATHS:
@@ -697,6 +699,24 @@ def _name_is_unshadowed(tree: ast.AST, name: str) -> bool:
                 if bound == name:
                     return False
     return True
+
+
+def _dynamic_import_aliases(tree: ast.AST) -> Mapping[str, str]:
+    """Map proven aliases of the three supported import APIs to their owner."""
+
+    owners = {
+        "builtins": frozenset({"__import__"}),
+        "importlib": frozenset({"import_module"}),
+        "importlib.util": frozenset({"find_spec"}),
+    }
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module not in owners:
+            continue
+        for alias in node.names:
+            if alias.name in owners[node.module]:
+                aliases[alias.asname or alias.name] = alias.name
+    return MappingProxyType(aliases)
 
 
 def _table_driven_import_strings(
@@ -1148,6 +1168,8 @@ def _visit_imports(
     in_memory_sources: Mapping[str, bytes],
     enqueue: Callable[[str], None],
 ) -> None:
+    importer_aliases = _dynamic_import_aliases(tree)
+
     class Visitor(ast.NodeVisitor):
         def visit_If(self, node: ast.If) -> None:
             if _is_type_checking_test(node.test):
@@ -1178,7 +1200,7 @@ def _visit_imports(
         def visit_Call(self, node: ast.Call) -> None:
             name = None
             if isinstance(node.func, ast.Name):
-                name = node.func.id
+                name = importer_aliases.get(node.func.id, node.func.id)
             elif isinstance(node.func, ast.Attribute):
                 name = node.func.attr
             if name in {"import_module", "__import__", "find_spec"}:

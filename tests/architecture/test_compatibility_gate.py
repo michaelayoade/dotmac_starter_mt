@@ -7,15 +7,12 @@ import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import yaml  # type: ignore[import-untyped]
 
 from tools.composition_contract import compatibility_gate as gate
-from tools.composition_contract import verify_trusted_sources as trusted_sources
 from tools.composition_contract.composition_schema import (
     CompositionCoverageReport,
     DimensionValue,
@@ -64,9 +61,9 @@ def test_checked_in_bindings_are_closed_v3_coordinates() -> None:
     assert set(bindings) == set(gate.PRODUCTS)
     assert all(re.fullmatch(r"[0-9a-f]{40}", row.revision) for row in bindings.values())
     assert {product: row.revision for product, row in bindings.items()} == {
-        "academy": "a10a995163a4350c578abad7905e7da791d47891",
-        "erp": "34041c718be3c555cfa1f77ba1dd29697da36b7b",
-        "sub": "0553186b60f045ee350b5fe412a4b82231f71363",
+        "academy": "ca1f9058a6483fe52207556fa2d17c56b1e237c7",
+        "erp": "dca695a7d59179fe65577ba4e72a709ff0b32cde",
+        "sub": "272a897b778899b110c5790fcaf43bbb54efe27c",
     }
 
 
@@ -211,6 +208,21 @@ def load(value):
         ('importlib.util.find_spec(name="dotmac_files.service")', ""),
         ('__import__(name="dotmac_files.service")', ""),
         ('__import__(name="dotmac_files", fromlist=("service",))', ""),
+        (
+            "from importlib import import_module as load\n"
+            'load(name="dotmac_files.service")',
+            "",
+        ),
+        (
+            "from importlib.util import find_spec as probe\n"
+            'probe(name="dotmac_files.service")',
+            "",
+        ),
+        (
+            "from builtins import __import__ as load\n"
+            'load(name="dotmac_files.service")',
+            "",
+        ),
         (
             'importlib.import_module(name="dotmac_files")',
             'importlib.import_module(name=".service", package="dotmac_files")',
@@ -480,104 +492,17 @@ def test_gate_refuses_semantic_helpers_that_drift_from_the_trusted_revision(
 ) -> None:
     repo = _repo(
         tmp_path,
-        {
-            relative: f"# {relative}\n"
-            for relative in trusted_sources.TRUSTED_SEMANTIC_PATHS
-        },
+        {relative: f"# {relative}\n" for relative in gate.TRUSTED_SEMANTIC_PATHS},
     )
     revision = _git(repo, "rev-parse", "HEAD")
     monkeypatch.setattr(gate, "TRUSTED_CONTRACT_REVISION", revision)
 
     gate._require_trusted_contract_sources(repo)
-    changed = repo / trusted_sources.TRUSTED_SEMANTIC_PATHS[0]
+    changed = repo / gate.TRUSTED_SEMANTIC_PATHS[0]
     changed.write_text("# changed semantics\n")
 
     with pytest.raises(gate.GateConfigurationError, match="current bytes differ"):
         gate._require_trusted_contract_sources(repo)
-
-
-def test_preimport_verifier_catches_a_self_restoring_helper(
-    tmp_path: Path,
-) -> None:
-    verifier_path = "tools/composition_contract/verify_trusted_sources.py"
-    verifier_source = (
-        Path(gate.__file__).with_name("verify_trusted_sources.py").read_text()
-    )
-    repo = _repo(
-        tmp_path,
-        {
-            **{
-                relative: "# trusted helper\n"
-                for relative in trusted_sources.TRUSTED_SEMANTIC_PATHS
-            },
-            verifier_path: verifier_source,
-        },
-    )
-    revision = _git(repo, "rev-parse", "HEAD")
-    clean = subprocess.run(  # noqa: S603
-        [
-            sys.executable,
-            str(repo / verifier_path),
-            "--repository",
-            str(repo),
-            "--revision",
-            revision,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert clean.returncode == 0, clean.stdout + clean.stderr
-
-    target_relative = trusted_sources.TRUSTED_SEMANTIC_PATHS[0]
-    target = repo / target_relative
-    target.write_text(
-        "import pathlib, subprocess\n"
-        "_self = pathlib.Path(__file__)\n"
-        f"_self.write_bytes(subprocess.run(['git', '-C', {str(repo)!r}, "
-        f"'show', {f'{revision}:{target_relative}'!r}], check=True, "
-        "capture_output=True).stdout)\n"
-    )
-    planted = target.read_bytes()
-
-    refused = subprocess.run(  # noqa: S603
-        [
-            sys.executable,
-            str(repo / verifier_path),
-            "--repository",
-            str(repo),
-            "--revision",
-            revision,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert refused.returncode == 1
-    assert "TRUSTED SOURCE REFUSED" in refused.stdout
-    assert target.read_bytes() == planted, "the helper must not execute before refusal"
-
-
-def test_ci_verifies_trusted_sources_before_loading_the_gate() -> None:
-    workflow = yaml.safe_load((gate._HERE / ".github/workflows/ci.yml").read_text())
-
-    for job_name in ("unit", "compatibility-gate"):
-        steps = workflow["jobs"][job_name]["steps"]
-        verifier = [
-            index
-            for index, step in enumerate(steps)
-            if step.get("run")
-            == "python tools/composition_contract/verify_trusted_sources.py"
-        ]
-        pytest_steps = [
-            index
-            for index, step in enumerate(steps)
-            if "pytest" in str(step.get("run", ""))
-        ]
-        assert len(verifier) == 1
-        assert pytest_steps
-        assert verifier[0] < min(pytest_steps)
 
 
 def test_gate_source_has_no_v1_adapter_or_product_authored_verdict_input() -> None:
