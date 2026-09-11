@@ -92,13 +92,10 @@ def find_source_drift(
         raise ValueError("the protected helper set is closed")
     drift: list[str] = []
     for relative in TRUSTED_SEMANTIC_PATHS:
-        try:
-            current = read_regular_file(
-                repository / relative,
-                label=f"current source {relative!r}",
-            )
-        except TrustedSourceAcquisitionError:
-            raise
+        current = read_regular_file(
+            repository / relative,
+            label=f"current source {relative!r}",
+        )
         if current != _git_show(repository, revision, relative):
             drift.append(relative)
     return tuple(drift)
