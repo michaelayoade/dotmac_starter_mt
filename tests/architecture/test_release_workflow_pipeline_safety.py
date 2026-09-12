@@ -25,10 +25,13 @@ CANONICAL_SHELL = "bash --noprofile --norc -eo pipefail {0}"
 # failure rule. They are forbidden in workflow run source; this is a closed
 # textual policy, not a claim that the patterns parse arbitrary Bash. Nested
 # shells and option weakening are position-independent. Source/dot and eval
-# need command-token positions so ordinary paths and words remain usable.
+# need command-token positions so ordinary paths and words remain usable. A
+# command/builtin wrapper may carry flags or ``--``; those are consumed before
+# checking its target (so ``command -v source`` is deliberately conservative).
 _COMMAND_TOKEN_PREFIX = (
     r"(?:^|[;\n]|&&|\|\||\||[({])\s*"
-    r"(?:(?:if|then|do|else|elif|!|command|builtin)\s+)*"
+    r"(?:(?:if|then|do|else|elif|!)\s+)*"
+    r"(?:(?:command|builtin)(?:\s+(?:--|-[A-Za-z]+))*\s+)?"
 )
 _BANNED_RUN_SOURCE = {
     "nested bash/sh -c": re.compile(r"(?:\S*/)?(?:bash|sh)\b[^\n]*\s-c\b"),
@@ -189,7 +192,11 @@ def test_guard_refuses_wrapped_dynamic_boundaries_but_not_command_v() -> None:
     for source in (
         "command eval 'false | tee'",
         "builtin eval 'false | tee'",
+        "command -p eval 'false | tee'",
+        "command -- eval 'false | tee'",
         "command . x",
+        "command -p source x",
+        "builtin -- source x",
     ):
         document = {
             "defaults": {"run": {"shell": CANONICAL_SHELL}},
@@ -213,6 +220,8 @@ def test_guard_recognizes_source_dot_as_command_tokens_only() -> None:
         'source "$SCRIPT"',
         'command . "$SCRIPT"',
         'command source "$SCRIPT"',
+        'command -p source "$SCRIPT"',
+        'builtin -- source "$SCRIPT"',
         'if source "$SCRIPT"; then true; fi',
         'true && . "$SCRIPT"',
         '( command source "$SCRIPT" )',
