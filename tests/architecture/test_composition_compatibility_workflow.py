@@ -16,7 +16,7 @@ SETUP_PYTHON = "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"
 TRUSTED_ACTION = (
     "michaelayoade/dotmac_starter_mt/.github/actions/"
     "verify-composition-contract-sources@"
-    "03ad710eaaa85b52069d3c5854a7184e2b0411d9"
+    "38eafe533332685c3df3f2d85fac10196d3e4431"
 )
 PRODUCTS = {
     "michaelayoade/dotmac_academy_app": (
