@@ -65,7 +65,12 @@ FLOOR_PYTHON="${FLOOR_PYTHON:-python3}"
 
 # The modules under proof, as "package_dir:import_name". Each is checked
 # against ITS OWN declared floor — see "Why the pair is derived" above.
-MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files}"
+# Entries are "package_dir:import_name" or
+# "package_dir:import_name:extra.module[,extra.module...]". The optional third
+# field names modules BEYOND the manifest that consume the declared floor --
+# see the fourth refusal family in `probe` below. Omit it and the probe is
+# manifest-only, exactly as before.
+MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service}"
 
 # Overrides for a one-off investigation. Left unset in CI: a hand-set pair is
 # a claim about a module that the module itself can contradict, which is the
@@ -149,18 +154,38 @@ build_kernel_wheel() {
 #
 # The third is why this list is not just "ImportError too": a kernel could
 # publish the constant and not the registration, and that must still refuse.
+#
+# A FOURTH family sets a floor without touching the manifest at all: a module
+# whose own source imports a kernel MODULE that the release does not ship. The
+# three above are all manifest-level, so a manifest-only probe cannot see this
+# one -- it reports OK below the floor and then cannot tell "the floor is too
+# high" from "this probe proves nothing". `dotmac-files` is exactly this shape:
+# its service imports `dotmac_kernel.transactions.conflict_savepoint`, first
+# published in a98, while its manifest loads happily under a97.
+#
+# So an entry may DECLARE the modules that consume its floor, and the probe
+# imports them after the manifest. Declared rather than derived from the wheel
+# contents, because importing every shipped module would change what the other
+# entries prove as a side effect of fixing this one.
+#
+# A declared module that does not EXIST in the package is a broken probe, not a
+# refusal. `ModuleNotFoundError` is an `ImportError`, so a typo would otherwise
+# read as a refusal under BOTH kernels and manufacture a floor nothing proved.
+# Presence is therefore checked with `find_spec` before the import is attempted,
+# and absence is reported as BROKEN.
 probe() {
-  local wheel="$1" package_dir="$2" import_name="$3" venv="$4"
+  local wheel="$1" package_dir="$2" import_name="$3" venv="$4" extra="${5:-}"
   "${FLOOR_PYTHON}" -m venv "${venv}"
   "${venv}/bin/pip" install --quiet --upgrade pip
   "${venv}/bin/pip" install --quiet "${wheel}"
   "${venv}/bin/pip" install --quiet --no-deps "${repo_root}/${package_dir}"
   "${venv}/bin/pip" install --quiet "sqlalchemy>=2.0,<3"
-  "${venv}/bin/python" - "$import_name" <<'PY'
+  "${venv}/bin/python" - "$import_name" "$extra" <<'PY'
 import importlib
 import sys
 
 name = sys.argv[1]
+extra = [part for part in sys.argv[2].split(",") if part]
 refusals: tuple[type[BaseException], ...] = (TypeError, ImportError, AttributeError)
 try:
     from dotmac_kernel.prerequisites import PrerequisiteError
@@ -179,15 +204,50 @@ except Exception as exc:  # noqa: BLE001 - reported, never swallowed
     print(f"UNEXPECTED {type(exc).__name__}: {exc}")
 else:
     import dotmac_kernel
+    import importlib.util
 
-    print(f"OK kernel {dotmac_kernel.__version__} manifest {module.module.version}")
+    outcome = f"OK kernel {dotmac_kernel.__version__} manifest {module.module.version}"
+    for consumer in extra:
+        # Presence first: a declared module that is not in the package at all
+        # means the DECLARATION is wrong, and must never read as a refusal.
+        # `find_spec` imports the PARENT package to locate a submodule, so it
+        # can refuse for the very reason under test; that is classified here
+        # exactly as the import below would be, and only a None spec is BROKEN.
+        try:
+            located = importlib.util.find_spec(consumer) is not None
+        except refusals as exc:
+            outcome = f"REFUSED {type(exc).__name__}: {exc}"
+            break
+        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+            outcome = f"UNEXPECTED {type(exc).__name__}: {exc}"
+            break
+        if not located:
+            outcome = f"BROKEN declared consumer {consumer} is not in this package"
+            break
+        try:
+            importlib.import_module(consumer)
+        except refusals as exc:
+            outcome = f"REFUSED {type(exc).__name__}: {exc}"
+            break
+        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+            outcome = f"UNEXPECTED {type(exc).__name__}: {exc}"
+            break
+    print(outcome)
 PY
 }
 
 status=0
 for entry in ${MODULES}; do
-  package_dir="${entry%%:*}"
-  import_name="${entry##*:}"
+  # Three fields, the third optional. `${entry##*:}` would return the CONSUMER
+  # list as the import name the moment a third field exists, so the entry is
+  # split positionally rather than by "everything after the last colon".
+  IFS=':' read -r package_dir import_name extra_consumers <<<"${entry}"
+  extra_consumers="${extra_consumers:-}"
+  if [[ -z "${package_dir}" || -z "${import_name}" ]]; then
+    echo "!! malformed MODULES entry ${entry@Q} — want package_dir:import_name[:consumer,...]" >&2
+    status=1
+    continue
+  fi
   declared="$(
     "${FLOOR_PYTHON}" - "${repo_root}/${package_dir}/pyproject.toml" <<'PY'
 import sys, tomllib
@@ -239,7 +299,7 @@ PY
   echo "    below ${below_version} (${below_wheel##*/}) — previous PUBLISHED release"
 
   echo "    at the floor (${floor_version}) — must IMPORT"
-  result="$(probe "${floor_wheel}" "${package_dir}" "${import_name}" "${workdir}/venv-floor-${import_name}")"
+  result="$(probe "${floor_wheel}" "${package_dir}" "${import_name}" "${workdir}/venv-floor-${import_name}" "${extra_consumers}")"
   echo "    ${result}"
   if [[ "${result}" != OK* ]]; then
     echo "!! the declared floor cannot load the manifest — the floor is wrong" >&2
@@ -247,7 +307,7 @@ PY
   fi
 
   echo "    below the floor (${below_version}) — must FAIL"
-  result="$(probe "${below_wheel}" "${package_dir}" "${import_name}" "${workdir}/venv-below-${import_name}")"
+  result="$(probe "${below_wheel}" "${package_dir}" "${import_name}" "${workdir}/venv-below-${import_name}" "${extra_consumers}")"
   echo "    ${result}"
   if [[ "${result}" != REFUSED* ]]; then
     echo "!! the previous published kernel loaded this manifest, so the floor" >&2
