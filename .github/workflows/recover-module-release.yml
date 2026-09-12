@@ -189,6 +189,7 @@ jobs:
       - name: Gate on the release allowlist
         id: target
         run: |
+          set -euo pipefail
           python scripts/release_module.py resolve \
             "${{ inputs.module }}" --version "${{ inputs.version }}" \
             | tee -a "${GITHUB_OUTPUT}"

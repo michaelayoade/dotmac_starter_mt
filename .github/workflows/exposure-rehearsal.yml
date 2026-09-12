@@ -147,6 +147,7 @@ jobs:
       - name: Resolve the recorded candidate
         id: candidate
         run: |
+          set -euo pipefail
           python scripts/release_facility.py resolve-candidate \
             "${{ inputs.facility }}" --version "${{ inputs.candidate_version }}" \
             | tee -a "${GITHUB_OUTPUT}"

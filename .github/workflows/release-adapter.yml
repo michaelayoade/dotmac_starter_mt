@@ -112,6 +112,7 @@ jobs:
       - name: Resolve the allowlisted adapter
         id: resolve
         run: |
+          set -euo pipefail
           python scripts/release_adapter.py resolve \
             "${{ inputs.adapter }}" --version "${{ inputs.version }}" \
             | tee -a "${GITHUB_OUTPUT}"
@@ -209,7 +210,8 @@ jobs:
           IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/${{ inputs.adapter }}/
         run: |
           for i in $(seq 1 30); do
-            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
+            if INDEX_PAGE="$(curl -sf "$IDX")" \
+              && grep -q "${{ inputs.version }}" <<<"${INDEX_PAGE}"; then
               echo "available on the Forgejo index"; exit 0
             fi
             echo "not yet on the Forgejo index (attempt $i)…"; sleep 10

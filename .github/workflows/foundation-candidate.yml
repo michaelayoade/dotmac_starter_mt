@@ -155,6 +155,7 @@ jobs:
       - name: Resolve the allowlisted facility
         id: resolve
         run: |
+          set -euo pipefail
           python scripts/release_facility.py resolve \
             "${{ inputs.facility }}" --version "${{ inputs.version }}" \
             | tee -a "${GITHUB_OUTPUT}"
