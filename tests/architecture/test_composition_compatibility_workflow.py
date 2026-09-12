@@ -16,8 +16,9 @@ SETUP_PYTHON = "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"
 TRUSTED_ACTION = (
     "michaelayoade/dotmac_starter_mt/.github/actions/"
     "verify-composition-contract-sources@"
-    "38eafe533332685c3df3f2d85fac10196d3e4431"
+    "4fcdfff74c6d8098e5ebe9a4b1c63aa1140d4756"
 )
+PYTHON_VERSIONS = "3.12\n3.11"
 PRODUCTS = {
     "michaelayoade/dotmac_academy_app": (
         "ca1f9058a6483fe52207556fa2d17c56b1e237c7",
@@ -67,6 +68,16 @@ def _findings(document: dict[str, Any]) -> list[str]:
     uses = [step.get("uses") for step in steps if isinstance(step, dict)]
     if uses != [CHECKOUT, CHECKOUT, CHECKOUT, CHECKOUT, SETUP_PYTHON, TRUSTED_ACTION]:
         findings.append("action order or immutable pins changed")
+
+    setup_steps = [
+        step
+        for step in steps
+        if isinstance(step, dict) and step.get("uses") == SETUP_PYTHON
+    ]
+    if len(setup_steps) != 1 or setup_steps[0].get("with") != {
+        "python-version": PYTHON_VERSIONS
+    }:
+        findings.append("trusted host and product interpreter floors changed")
 
     checkout_steps = [
         step
@@ -151,3 +162,18 @@ def test_guard_refuses_a_tagged_verifier_or_missing_product_checkout() -> None:
     missing_product = copy.deepcopy(document)
     del missing_product["jobs"]["compatibility"]["steps"][2]
     assert "four checkouts" in " ".join(_findings(missing_product))
+
+
+def test_guard_refuses_missing_product_floor_or_a_non_3_11_host() -> None:
+    document = _document()
+    missing_academy_floor = copy.deepcopy(document)
+    missing_academy_floor["jobs"]["compatibility"]["steps"][-2]["with"][
+        "python-version"
+    ] = "3.11"
+    assert "interpreter floors changed" in " ".join(_findings(missing_academy_floor))
+
+    wrong_host = copy.deepcopy(document)
+    wrong_host["jobs"]["compatibility"]["steps"][-2]["with"]["python-version"] = (
+        "3.11\n3.12"
+    )
+    assert "interpreter floors changed" in " ".join(_findings(wrong_host))
