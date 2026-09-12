@@ -177,118 +177,73 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
         assert "not an allowlisted module" not in result.stderr, result.stderr
 
 
-def test_files_refuses_a_published_version_against_a_development_marker() -> None:
-    """`0.1.0a3` is published and tagged; repairing the recorded
-    `conflict_savepoint` debt moved this package's importable source, so the
-    tree now declares `0.1.0a3+dev`. Dispatching the published number against
-    that tree must REFUSE (non-zero exit) rather than infer a version, and the
-    refusal's stderr must contain both version strings verbatim.
-
-    Neither version is written as a literal here. The declared value is read
-    from the package, and the published value is that declaration with its
-    PEP 440 local segment removed -- so this test cannot drift from the tree
-    the way the hardcoded `0.1.0a3` it replaced did (that literal is what
-    turned red when the marker landed).
-
-    The premise is asserted rather than assumed: when a successor is
-    allocated and the local segment disappears, this test fails with an
-    instruction instead of silently passing or silently skipping. A skipped
-    test here would be absence of signal read as a positive signal.
-    """
-    declared = tomllib.loads(
+def _files_declared_version() -> str:
+    return tomllib.loads(
         (PROJECT_ROOT / "packages/dotmac-files/pyproject.toml").read_text(
             encoding="utf-8"
         )
     )["tool"]["poetry"]["version"]
-    assert "+" in declared, (
-        f"dotmac-files now declares {declared!r}, which carries no local "
-        "segment, so this test's premise is gone. Replace it with the "
-        "positive resolution case for the allocated version."
-    )
-    published = declared.split("+", 1)[0]
-
-    result = _resolve("dotmac-files", version=published)
-
-    assert result.returncode != 0, (
-        f"resolving {published!r} against a tree declaring {declared!r} "
-        f"succeeded; it would have produced a release tag for a version no "
-        f"index accepts. stdout: {result.stdout}"
-    )
-    assert published in result.stderr, result.stderr
-    assert declared in result.stderr, result.stderr
 
 
-def test_files_local_segment_refuses_with_no_version_dispatched() -> None:
-    """Path 1: no `--version` at all is the allowlist sweep's own path into
-    `resolve`. `dotmac-files` currently declares a PEP 440 local version
-    segment (`+dev`); that value must never reach tag construction, because a
-    `+local` version cannot be uploaded to any index and a tag built from it
-    would name a release nothing can ever serve.
+def test_files_resolves_cleanly_now_that_a_successor_is_allocated() -> None:
+    """`0.1.0a3+dev` deliberately allocated nothing while the recorded
+    `conflict_savepoint` repair changed this package's importable source. A
+    successor (`0.1.0a4`) has now been allocated, so `dotmac-files` must
+    resolve exactly like any other allowlisted module with no local segment:
+    both with no `--version` dispatched (the allowlist sweep's own path into
+    `resolve`) and with the exact declared value dispatched (the equality
+    check `cmd_resolve` runs before the local-segment check ever fires).
 
-    The premise is asserted, not assumed: once a real successor is allocated
-    and the local segment disappears, this test must fail loudly rather than
-    silently pass, naming the positive-resolution case as the replacement.
+    The version is never hardcoded here -- it is read from the package's own
+    `pyproject.toml` -- so this test tracks whatever is currently allocated
+    rather than pinning `0.1.0a4` as a literal.
     """
-    declared = tomllib.loads(
-        (PROJECT_ROOT / "packages/dotmac-files/pyproject.toml").read_text(
-            encoding="utf-8"
+    declared = _files_declared_version()
+    assert "+" not in declared, (
+        f"dotmac-files declares {declared!r}, which still carries a local "
+        "version segment -- the allocation this test exercises has not "
+        "landed, or was reverted."
+    )
+
+    for dispatched_version in (None, declared):
+        result = _resolve("dotmac-files", version=dispatched_version or "")
+        assert result.returncode == 0, result.stderr
+        emitted = dict(
+            line.split("=", 1) for line in result.stdout.strip().splitlines()
         )
-    )["tool"]["poetry"]["version"]
-    assert "+" in declared, (
-        f"dotmac-files now declares {declared!r}, which carries no local "
-        "segment, so this test's premise is gone. Replace it with the "
-        "positive resolution case for the allocated version."
-    )
-
-    result = _resolve("dotmac-files")
-
-    assert result.returncode != 0, (
-        f"resolving with no --version against a tree declaring {declared!r} "
-        f"succeeded; it would have emitted a tag for a version no index "
-        f"accepts. stdout: {result.stdout}"
-    )
-    assert declared in result.stderr, result.stderr
-    # Not `"+" in stderr`: the declared version is already asserted present and
-    # contains one, so that would restate a fact rather than check the reason.
-    assert "local version segment" in result.stderr, result.stderr
-    assert "not an allowlisted module" not in result.stderr, result.stderr
+        assert emitted["version"] == declared
+        assert emitted["tag"] == f"{emitted['tag_prefix']}{declared}"
+        assert "+" not in emitted["tag"], emitted["tag"]
 
 
-def test_files_local_segment_refuses_even_when_the_dispatched_version_matches() -> None:
-    """Path 2: dispatching the EXACT declared value (including its `+dev`
-    local segment) passes the existing dispatched-vs-declared equality check,
-    so a resolver that stopped there would still emit a tag for a version no
-    index can serve. This must be refused for the LOCAL-SEGMENT reason, not
-    misdiagnosed as a version mismatch -- the two refusals must never be
-    confused, so this test asserts the mismatch phrase's ABSENCE as well as
-    the local-segment refusal's presence.
-
-    The premise is asserted, not assumed, exactly as in the sibling tests
-    above.
+def test_files_dispatch_mismatch_is_diagnosed_as_a_mismatch_not_a_local_segment() -> (
+    None
+):
+    """Dispatching a version that does not match the declared one must be
+    refused with the version-mismatch diagnostic, not confused with the
+    (now-resolved) local-segment refusal -- the two refusals must never be
+    confused, in either direction. The mismatched value is derived from the
+    declared one (never a hardcoded literal) so this test tracks whatever
+    version is currently allocated.
     """
-    declared = tomllib.loads(
-        (PROJECT_ROOT / "packages/dotmac-files/pyproject.toml").read_text(
-            encoding="utf-8"
-        )
-    )["tool"]["poetry"]["version"]
-    assert "+" in declared, (
-        f"dotmac-files now declares {declared!r}, which carries no local "
-        "segment, so this test's premise is gone. Replace it with the "
-        "positive resolution case for the allocated version."
+    declared = _files_declared_version()
+    assert "+" not in declared, (
+        f"dotmac-files declares {declared!r}, which still carries a local "
+        "version segment -- this test's premise about the mismatch "
+        "diagnostic assumes a clean declared version."
     )
+    mismatched = f"{declared}.not-the-declared-version"
 
-    result = _resolve("dotmac-files", version=declared)
+    result = _resolve("dotmac-files", version=mismatched)
 
     assert result.returncode != 0, (
-        f"resolving --version {declared!r} (the exact declared value) "
-        f"succeeded; it would have emitted a tag for a version no index "
-        f"accepts. stdout: {result.stdout}"
+        f"resolving --version {mismatched!r} against a tree declaring "
+        f"{declared!r} succeeded: {result.stdout}"
     )
+    assert mismatched in result.stderr, result.stderr
     assert declared in result.stderr, result.stderr
-    assert "!= package version" not in result.stderr, (
-        "the exact-match dispatch was refused for a version-mismatch reason, "
-        f"not the local-segment reason: {result.stderr}"
-    )
+    assert "!= package version" in result.stderr, result.stderr
+    assert "local version segment" not in result.stderr, result.stderr
 
 
 def test_an_allowlisted_module_without_a_local_segment_still_resolves() -> None:
