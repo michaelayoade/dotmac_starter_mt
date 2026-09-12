@@ -65,4 +65,4 @@ jobs:
           python-version: "3.11"
 
       - name: Derive and verify all three products
-        uses: michaelayoade/dotmac_starter_mt/.github/actions/verify-composition-contract-sources@03ad710eaaa85b52069d3c5854a7184e2b0411d9
+        uses: michaelayoade/dotmac_starter_mt/.github/actions/verify-composition-contract-sources@38eafe533332685c3df3f2d85fac10196d3e4431
