@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -13,10 +16,13 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/composition-compatibility.yml"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_PYTHON = "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"
+TRUSTED_RUNNER_REVISION = "4fcdfff74c6d8098e5ebe9a4b1c63aa1140d4756"
+TRUSTED_GATE_SHA256 = "17e0cb944518309dc68636cda697c2f50b762e0a30cf87cd427a29cb9f1eee45"
+TRUSTED_RUNNER_PATH = ".github/actions/verify-composition-contract-sources/run_gate.py"
 TRUSTED_ACTION = (
     "michaelayoade/dotmac_starter_mt/.github/actions/"
     "verify-composition-contract-sources@"
-    "4fcdfff74c6d8098e5ebe9a4b1c63aa1140d4756"
+    f"{TRUSTED_RUNNER_REVISION}"
 )
 PYTHON_VERSIONS = "3.12\n3.11"
 PRODUCTS = {
@@ -40,6 +46,33 @@ def _document() -> dict[str, Any]:
     value = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     assert isinstance(value, dict)
     return value
+
+
+def _trusted_runner_source() -> str:
+    git = shutil.which("git")
+    assert git is not None
+    result = subprocess.run(  # noqa: S603
+        [git, "show", f"{TRUSTED_RUNNER_REVISION}:{TRUSTED_RUNNER_PATH}"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def _assigned_string(source: str, name: str) -> str | None:
+    for node in ast.parse(source).body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            return node.value.value
+    return None
 
 
 def _findings(document: dict[str, Any]) -> list[str]:
@@ -128,6 +161,27 @@ def _findings(document: dict[str, Any]) -> list[str]:
 
 def test_reusable_workflow_is_one_fresh_closed_job() -> None:
     assert _findings(_document()) == []
+
+
+def test_trusted_action_is_the_reviewed_runner_successor() -> None:
+    assert SHA.fullmatch(TRUSTED_RUNNER_REVISION)
+    assert TRUSTED_ACTION.endswith(f"@{TRUSTED_RUNNER_REVISION}")
+    assert (
+        _assigned_string(_trusted_runner_source(), "GATE_SHA256") == TRUSTED_GATE_SHA256
+    )
+
+
+def test_guard_refuses_when_its_action_constant_lags_the_workflow(
+    monkeypatch,
+) -> None:
+    old_action = TRUSTED_ACTION.rsplit("@", 1)[0] + (
+        "@38eafe533332685c3df3f2d85fac10196d3e4431"
+    )
+    monkeypatch.setattr(
+        "tests.architecture.test_composition_compatibility_workflow.TRUSTED_ACTION",
+        old_action,
+    )
+    assert "action order or immutable pins changed" in _findings(_document())
 
 
 def test_guard_refuses_candidate_shell_and_moving_product_refs() -> None:
