@@ -1014,14 +1014,17 @@
     "dotmac-files": {
       "$comment": [
         "mod_files is allocated in a54; a56 is the first published kernel with",
-        "the prerequisite contract consumed by fi_0001. a3 raises the operative",
-        "floor to a61 because the manifest declares supported_plane_sets and",
-        "fi_0002 consumes selected_module_planes. Capability outranks allocation."
+        "the prerequisite contract consumed by fi_0001, and a61 raised the floor",
+        "again because the manifest declares supported_plane_sets and fi_0002",
+        "consumes selected_module_planes. a3's successor raises it to a98: the",
+        "service imports dotmac_kernel.transactions.conflict_savepoint, absent",
+        "from every kernel published before a98. Capability outranks allocation,",
+        "and this field records only the highest capability actually consumed."
       ],
       "package_dir": "packages/dotmac-files",
       "import_name": "dotmac_files",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a61",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_files",
       "tag_prefix": "dotmac-files-v",
       "wheel_contents": {

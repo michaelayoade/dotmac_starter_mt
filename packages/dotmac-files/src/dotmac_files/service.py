@@ -6,8 +6,13 @@ authorized object target, and record deletion or reconciliation outcomes.  The
 required kernel ``Scope`` selects one of two structurally separate tables;
 there is no nullable tenant and no sentinel value.
 
-No function commits or rolls back. ``dotmac_kernel.db`` remains the one
-transaction authority.
+No function commits or rolls back, and this module constructs no engine or
+session factory: the caller owns the outer transaction and passes its own
+``Session``. Conflict isolation comes from the engine-free
+``dotmac_kernel.transactions``, imported at module scope precisely because that
+surface does not build the kernel reference assembly's database runtime -- which
+is the whole reason it exists, and why this import no longer has to be deferred
+into the function body.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from datetime import datetime
 from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
+from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -38,8 +44,6 @@ StoredFileRecord = TenantStoredFile | PlatformStoredFile
 
 def stage_file(db: Session, *, prepared: PreparedFile) -> StoredFileRecord:
     """Idempotently stage metadata in the caller's existing transaction."""
-    from dotmac_kernel.transactions import conflict_savepoint
-
     existing = _find_prepared(db, prepared=prepared)
     if existing is not None:
         return _require_same_prepared(existing, prepared=prepared)
