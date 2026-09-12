@@ -16,7 +16,7 @@ ACTION_ROOT: Final = Path(__file__).resolve().parent
 TRUSTED_CONTRACT_REVISION: Final = "8b4b6d4b42e650c47fe4c04a679a5ccb51c4b2cd"
 GATE_PATH: Final = "tools/composition_contract/compatibility_gate.py"
 BINDINGS_PATH: Final = "tests/architecture/compatibility_gate_bindings.json"
-GATE_SHA256: Final = "959ea522a1420fcd8eff418a89942c3abbd3168f4eb0bf40186b07262478ad73"
+GATE_SHA256: Final = "17e0cb944518309dc68636cda697c2f50b762e0a30cf87cd427a29cb9f1eee45"
 BINDINGS_SHA256: Final = (
     "8467df2722106276159b97b7d2c4f4a9c86b25f9a9f8461e453911b5ff01e23e"
 )
