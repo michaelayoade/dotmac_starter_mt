@@ -1,4 +1,7 @@
 name: Verify and tag an existing kernel release
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # This workflow is the sole post-publication decision owner. `verify` has only
 # read authority and proves retained bytes == registry bytes plus an artifact-

@@ -1,4 +1,7 @@
 name: Verify module composition
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # The SECOND verification level. `release-module.yml` proves each module
 # installs and registers ALONE; this proves the published set composes — both

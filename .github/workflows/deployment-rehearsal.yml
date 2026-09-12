@@ -13,6 +13,9 @@
 # released. That is why it records nothing itself and writes no file: the run's
 # own conclusion, bound to `head_sha` by GitHub, is the evidence.
 name: Deployment rehearsal
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 on:
   workflow_dispatch:

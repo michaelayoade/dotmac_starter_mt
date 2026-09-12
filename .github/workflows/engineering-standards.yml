@@ -1,4 +1,7 @@
 name: Engineering standards
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 on:
   push:

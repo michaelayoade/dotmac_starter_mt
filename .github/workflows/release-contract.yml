@@ -1,4 +1,7 @@
 name: Release capability contract catalogue
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # Publish ONE product-owned STATELESS CONTRACT CATALOGUE to the PRIVATE Forgejo
 # index at registry.dotmac.io. The same security sequence as

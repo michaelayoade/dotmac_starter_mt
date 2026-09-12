@@ -1,4 +1,7 @@
 name: Deployment render check
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # ADR 0014's second half, executed on every pull request.
 #

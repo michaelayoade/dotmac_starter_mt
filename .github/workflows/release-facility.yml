@@ -1,4 +1,7 @@
 name: Release facility
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # Publish ONE universal facility to the PRIVATE Forgejo index at
 # registry.dotmac.io. The same security sequence as `release-kernel.yml`,

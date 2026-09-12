@@ -1,4 +1,7 @@
 name: Kernel composition compatibility
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # This workflow is the trust boundary for Slice 4.  A caller invokes the
 # reviewed workflow by immutable commit at job level, so none of the caller's

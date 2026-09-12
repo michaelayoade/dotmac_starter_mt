@@ -1,4 +1,7 @@
 name: Release ui
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # Publish `dotmac-ui` to the PRIVATE Forgejo index at registry.dotmac.io, on the
 # same terms as `release-kernel.yml` (R0, ratified 2026-07-30): protected

@@ -1,4 +1,7 @@
 name: Recover module release
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # Recover a module release whose `publish` succeeded and whose `verify` then
 # FAILED, leaving an artifact on the private index with no tag.

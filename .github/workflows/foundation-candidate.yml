@@ -40,6 +40,9 @@
 # the runner-hardening lane is closing does not arise here.
 
 name: Foundation candidate artifact
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 on:
   workflow_dispatch:

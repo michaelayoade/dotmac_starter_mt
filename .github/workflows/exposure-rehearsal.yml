@@ -20,6 +20,9 @@
 # Every input is required and none has a default. A rehearsal missing one is
 # not a partial rehearsal, it is a different activity.
 name: Exposure rehearsal (Lane 3)
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 on:
   workflow_dispatch:

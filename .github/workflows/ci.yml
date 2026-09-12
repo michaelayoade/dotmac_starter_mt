@@ -1,4 +1,8 @@
 name: CI
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
+
 on:
   push:
     branches: [main]
@@ -447,7 +451,7 @@ jobs:
       # value never reaches a rendered asset, which is what `secrets_guard`
       # enforces.
       - name: The rendered compose file parses on the engine CI runs
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
           compose="deploy/rendered/docker-compose.yml"
