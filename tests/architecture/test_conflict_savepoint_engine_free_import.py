@@ -24,11 +24,15 @@ predecessor PR, #678) closes Starter's eager-import chain — it is NOT a
 fleet-wide migration of every package's `conflict_savepoint` import, and a
 steady or shrinking package-backlog total must not be read as one.** Each
 package's own migration is tracked instead as a two-directional ratchet
-against `conflict_savepoint_package_backlog_baseline.json`, with one
-retirement condition for every entry: migrate a package's imports when that
-distribution next takes a legitimate version transition anyway, so the fix
-is paid for out of a version bump already happening rather than costing its
-own standalone `+dev` marker and publication-ledger row.
+against `conflict_savepoint_package_backlog_baseline.json`. Its retirement
+condition follows the distribution's declared publication state: a package
+already published at its declared version must first allocate a successor or enter
+the complete PEP 440 local-development state; a tagless declared-unpublished
+package can take the repair without inventing another version transition; and
+a real successor already in flight may carry the repair only as part of the
+same coherent release. That prevents an import-only repair from silently
+changing bytes that a published version already names, without inventing a
+standalone `+dev` marker or publication-ledger row for a tagless package.
 
 `dotmac_kernel.transactions` (`__all__ = ["conflict_savepoint"]`, re-exporting
 from the internal `dotmac_kernel._transactions`) is the engine-free public
@@ -52,6 +56,20 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = (
     Path(__file__).parent / "conflict_savepoint_package_backlog_baseline.json"
+)
+
+# These phrases occur in two independently useful artifacts: this module's
+# scope/retirement prose and the generated baseline a reader may inspect on
+# its own. Keep the assertion below anchored here rather than letting the
+# generator's text validate only itself.
+RETIREMENT_DOCTRINE_ANCHORS = (
+    "already published at its declared version must first allocate a successor "
+    "or enter "
+    "the complete PEP 440 local-development state",
+    "tagless declared-unpublished package can take the repair without inventing "
+    "another version transition",
+    "a real successor already in flight may carry the repair only as part of the "
+    "same coherent release",
 )
 
 #: The one file allowed to import `conflict_savepoint` from
@@ -161,10 +179,12 @@ def test_package_backlog_matches_the_frozen_ratchet() -> None:
         "baseline.json):\n"
         + "\n".join(f"  {line}" for line in problems)
         + "\n\nA package migrates its own imports to "
-        "dotmac_kernel.transactions.conflict_savepoint when it next takes a "
-        "legitimate version transition, then lowers this baseline in that "
-        "same change. Regenerate with generate_package_backlog_baseline() "
-        "in this module."
+        "dotmac_kernel.transactions.conflict_savepoint when its cutover "
+        "requires it, then lowers this baseline in that same change. A "
+        "published package must allocate a successor or enter the complete "
+        "local-development state; a tagless declared-unpublished package "
+        "needs no invented version transition. Regenerate with "
+        "generate_package_backlog_baseline() in this module."
     )
 
 
@@ -209,14 +229,18 @@ def test_dotmac_files_carries_no_conflict_savepoint_backlog() -> None:
 
 
 def test_package_backlog_baseline_states_the_narrowed_scope() -> None:
-    """A reader of the baseline file alone (not this module) must not
-    mistake the ratchet for a completed migration — the brief's explicit
-    requirement. Pin the load-bearing phrases inside the baseline's own
-    `_comment`."""
+    """The generated baseline and independently authored module prose must
+    state the same retirement doctrine; checking only the generator would let
+    a misleading baseline pass by agreeing with itself."""
     comment = str(load_package_backlog_baseline()["_comment"])
+    prose = " ".join((__doc__ or "").split())
     assert "does not migrate it" in comment
     assert "not fleet-wide" in comment
-    assert "takes a legitimate version transition" in comment
+    for anchor in RETIREMENT_DOCTRINE_ANCHORS:
+        assert anchor in prose, f"module prose lost retirement doctrine: {anchor!r}"
+        assert (
+            anchor in comment
+        ), f"generated baseline lost retirement doctrine: {anchor!r}"
 
 
 def generate_package_backlog_baseline() -> None:
@@ -235,13 +259,17 @@ def generate_package_backlog_baseline() -> None:
             "#678 does not migrate it. #678 closes Starter's eager-import "
             "chain, not fleet-wide package debt -- do not read a shrinking or "
             "steady total here as a completed migration. Retirement "
-            "condition, one rule for every entry: migrate a package's "
-            "imports (to dotmac_kernel.transactions.conflict_savepoint) the "
-            "next time that distribution takes a legitimate version "
-            "transition anyway, so this costs zero standalone +dev markers "
-            "or ledger rows. Two-directional ratchet: fails if a file's "
-            "count rises OR falls without this baseline being regenerated in "
-            "the same change. Regenerate with "
+            "condition: migrate a package's imports to "
+            "dotmac_kernel.transactions.conflict_savepoint when its cutover "
+            "requires it. A package already published at its declared "
+            "version must first allocate a successor or enter the complete "
+            "PEP 440 local-development state; a tagless declared-unpublished "
+            "package can take the repair without inventing another version "
+            "transition; a real successor already in flight may carry the "
+            "repair only as part of the same coherent release. "
+            "Two-directional ratchet: fails if a file's count rises OR falls "
+            "without this baseline being regenerated in the same change. "
+            "Regenerate with "
             "generate_package_backlog_baseline() in this module; do not "
             "hand-edit."
         ),

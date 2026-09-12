@@ -1203,7 +1203,7 @@ def ensure_tax_authority(
             authority_level_code=authority_level_code,
         )
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -1275,7 +1275,7 @@ def ensure_tax_jurisdiction(
             subdivision_code=subdivision_code,
         )
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -1366,7 +1366,7 @@ def ensure_tax_code(
             normalized_description=normalized_description,
         )
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -1499,7 +1499,7 @@ def ensure_tax_rule(
             db, tenant_id=tenant_id, row=existing, command=command
         )
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -1671,7 +1671,7 @@ def ensure_tax_subject_classification(
             identity="version",
         )
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

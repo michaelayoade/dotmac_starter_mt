@@ -1,6 +1,6 @@
 {
-  "_comment": "Frozen backlog of conflict_savepoint imports still reaching the eager dotmac_kernel.db module, package by package, site by site. #678 closes the eager-import chain app/assembly.py's load_manifests(FEATURE_MODULES) actually reaches -- the five app/features/*/service.py imports. FEATURE_MODULES names zero dotmac_ packages, so this backlog is NOT part of that chain and #678 does not migrate it. #678 closes Starter's eager-import chain, not fleet-wide package debt -- do not read a shrinking or steady total here as a completed migration. Retirement condition, one rule for every entry: migrate a package's imports (to dotmac_kernel.transactions.conflict_savepoint) the next time that distribution takes a legitimate version transition anyway, so this costs zero standalone +dev markers or ledger rows. Two-directional ratchet: fails if a file's count rises OR falls without this baseline being regenerated in the same change. Regenerate with generate_package_backlog_baseline() in this module; do not hand-edit.",
-  "total": 116,
+  "_comment": "Frozen backlog of conflict_savepoint imports still reaching the eager dotmac_kernel.db module, package by package, site by site. #678 closes the eager-import chain app/assembly.py's load_manifests(FEATURE_MODULES) actually reaches -- the five app/features/*/service.py imports. FEATURE_MODULES names zero dotmac_ packages, so this backlog is NOT part of that chain and #678 does not migrate it. #678 closes Starter's eager-import chain, not fleet-wide package debt -- do not read a shrinking or steady total here as a completed migration. Retirement condition: migrate a package's imports to dotmac_kernel.transactions.conflict_savepoint when its cutover requires it. A package already published at its declared version must first allocate a successor or enter the complete PEP 440 local-development state; a tagless declared-unpublished package can take the repair without inventing another version transition; a real successor already in flight may carry the repair only as part of the same coherent release. Two-directional ratchet: fails if a file's count rises OR falls without this baseline being regenerated in the same change. Regenerate with generate_package_backlog_baseline() in this module; do not hand-edit.",
+  "total": 111,
   "files": {
     "packages/dotmac-accounting/src/dotmac_accounting/service.py": 1,
     "packages/dotmac-analytics/src/dotmac_analytics/service.py": 2,
@@ -39,7 +39,6 @@
     "packages/dotmac-service-catalog/src/dotmac_service_catalog/service.py": 3,
     "packages/dotmac-sites/src/dotmac_sites/service.py": 2,
     "packages/dotmac-surveys/src/dotmac_surveys/service.py": 4,
-    "packages/dotmac-tax/src/dotmac_tax/service.py": 5,
     "packages/dotmac-web-analytics/src/dotmac_web_analytics/service.py": 3,
     "packages/dotmac-workflow-runtime/src/dotmac_workflow_runtime/service.py": 1
   }

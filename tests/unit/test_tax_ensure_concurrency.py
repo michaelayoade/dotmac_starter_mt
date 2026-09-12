@@ -36,17 +36,11 @@ SERVICE_PATH = ROOT / "packages/dotmac-tax/src/dotmac_tax/service.py"
 NGN = Currency("NGN", 2)
 NOW = datetime(2026, 8, 26, 12, tzinfo=UTC)
 
-#: `conflict_savepoint`'s two live import sources during the migration: the
-#: deprecated, eager `dotmac_kernel.db` re-export (dotmac-tax's current
-#: source, tracked in the package backlog ratchet) and the engine-free public
-#: owner, `dotmac_kernel.transactions`. This guard recognises the SANCTIONED
-#: mechanism by its call shape (a `conflict_savepoint(...)` context manager
-#: around the mutation), not by which of the two it happens to be imported
-#: from — so migrating dotmac-tax's import source does not silently break
-#: this guard's detection.
-CONFLICT_SAVEPOINT_SOURCE_MODULES = frozenset(
-    {"dotmac_kernel.db", "dotmac_kernel.transactions"}
-)
+#: The one sanctioned public owner of `conflict_savepoint`. Keeping this exact
+#: makes the concurrency canary refuse a regression to the deprecated, eager
+#: `dotmac_kernel.db` compatibility re-export instead of accepting both sides
+#: of the migration indefinitely.
+CONFLICT_SAVEPOINT_SOURCE_MODULE = "dotmac_kernel.transactions"
 
 
 class _NestedSavepoint(AbstractContextManager[None]):
@@ -535,7 +529,7 @@ def test_all_ensure_mutations_are_inside_lazy_conflict_savepoints() -> None:
             node
             for node in function.body
             if isinstance(node, ast.ImportFrom)
-            and node.module in CONFLICT_SAVEPOINT_SOURCE_MODULES
+            and node.module == CONFLICT_SAVEPOINT_SOURCE_MODULE
             and any(alias.name == "conflict_savepoint" for alias in node.names)
         ]
         assert len(lazy_imports) == 1
