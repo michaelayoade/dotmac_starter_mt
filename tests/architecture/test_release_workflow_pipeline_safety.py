@@ -22,16 +22,22 @@ WORKFLOW_DIR = ROOT / ".github" / "workflows"
 CANONICAL_SHELL = "bash --noprofile --norc -eo pipefail {0}"
 
 # These constructs create another evaluation boundary or revoke the runner's
-# failure rule.  They are forbidden in workflow run source; this is a closed
-# policy, not a claim that the patterns parse Bash.
+# failure rule. They are forbidden in workflow run source; this is a closed
+# textual policy, not a claim that the patterns parse arbitrary Bash. It covers
+# direct and command/builtin-wrapped forms at command-list or group boundaries.
 _BANNED_RUN_SOURCE = {
     "nested bash/sh -c": re.compile(
         r"(?:^|[;\n]\s*)(?:\S*/)?(?:bash|sh)\b[^\n]*\s-c\b"
     ),
     "shell heredoc": re.compile(r"(?:^|[;\n]\s*)(?:\S*/)?(?:bash|sh)\b[^\n]*<<"),
-    "eval": re.compile(r"(?:^|[;\n]\s*)eval\b"),
-    "source/dot": re.compile(r"(?:^|[;\n]\s*)(?:source|\.)\s+"),
-    "pipefail disable": re.compile(r"\bset\s+\+o\s+pipefail\b"),
+    "eval": re.compile(r"(?:^|[;{}\n]\s*)(?:(?:command|builtin)\s+)?eval\b"),
+    "source/dot": re.compile(
+        r"(?:^|[;{}\n]\s*)(?:(?:command|builtin)\s+)?(?:source|\.)\s+"
+    ),
+    "option weakening": re.compile(
+        r"(?:^|[;{}\n]\s*)(?:(?:command|builtin)\s+)?set\s+\+"
+        r"(?:[A-Za-z]*e[A-Za-z]*|o\s+\S+)"
+    ),
 }
 
 
@@ -111,7 +117,7 @@ def test_guard_refuses_opaque_shell_boundaries() -> None:
         "shell heredoc": "bash <<'SCRIPT'\nfalse | tee\nSCRIPT",
         "eval": "eval 'false | tee'",
         "source/dot": ". scripts/setup.sh",
-        "pipefail disable": "set +o pipefail",
+        "option weakening": "set +o pipefail",
     }.items():
         document = {
             "defaults": {"run": {"shell": CANONICAL_SHELL}},
@@ -120,6 +126,46 @@ def test_guard_refuses_opaque_shell_boundaries() -> None:
         assert _workflow_violations(Path("planted.yml"), document) == [
             f"planted.yml:check: forbidden {name} in run source"
         ]
+
+
+def test_guard_refuses_wrapped_and_combined_option_weakening() -> None:
+    for source in (
+        "set +e",
+        "set +eu",
+        "command set +o pipefail",
+        "builtin set +o pipefail",
+        'opt=pipefail; set +o "$opt"',
+        "f() { set +o pipefail; }",
+    ):
+        document = {
+            "defaults": {"run": {"shell": CANONICAL_SHELL}},
+            "jobs": {"check": {"steps": [{"run": source}]}},
+        }
+        assert _workflow_violations(Path("planted.yml"), document) == [
+            "planted.yml:check: forbidden option weakening in run source"
+        ]
+
+
+def test_guard_refuses_wrapped_dynamic_boundaries_but_not_command_v() -> None:
+    for source in (
+        "command eval 'false | tee'",
+        "builtin eval 'false | tee'",
+        "command . x",
+    ):
+        document = {
+            "defaults": {"run": {"shell": CANONICAL_SHELL}},
+            "jobs": {"check": {"steps": [{"run": source}]}},
+        }
+        assert _workflow_violations(Path("planted.yml"), document) == [
+            "planted.yml:check: forbidden "
+            f"{'source/dot' if source.endswith('x') else 'eval'} in run source"
+        ]
+
+    command_v = {
+        "defaults": {"run": {"shell": CANONICAL_SHELL}},
+        "jobs": {"check": {"steps": [{"run": "command -v docker >/dev/null"}]}},
+    }
+    assert _workflow_violations(Path("planted.yml"), command_v) == []
 
 
 def test_canonical_shell_propagates_resolver_failure_through_tee(
