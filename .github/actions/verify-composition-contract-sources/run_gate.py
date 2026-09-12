@@ -237,6 +237,13 @@ def _require_expected_result(result: Any) -> None:
         raise TrustedRunnerError("compatibility evaluation must not claim adoption")
 
 
+def _report_and_require_expected_result(result: Any) -> None:
+    """Preserve the product findings before enforcing the closed expectation."""
+
+    print(result.explain())
+    _require_expected_result(result)
+
+
 def _compatibility_exit_code(result: Any) -> int:
     """A proved incompatibility is a red gate, even when it is the expected fact."""
 
@@ -276,7 +283,7 @@ def main() -> int:
             clones=clones,
             repository_root=workspace,
         )
-        _require_expected_result(result)
+        _report_and_require_expected_result(result)
     except TrustedRunnerAcquisitionError as exc:
         print(f"TRUSTED COMPATIBILITY ACQUISITION FAILED: {exc}")
         return 2
@@ -291,7 +298,6 @@ def main() -> int:
             return 2
         print(f"TRUSTED COMPATIBILITY REFUSED: {exc}")
         return 1
-    print(result.explain())
     return _compatibility_exit_code(result)
 
 

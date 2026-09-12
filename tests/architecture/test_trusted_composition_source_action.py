@@ -101,6 +101,78 @@ def test_verified_incompatibility_is_a_failing_process_verdict() -> None:
     )
 
 
+def test_evidence_refusal_preserves_the_product_diagnosis_before_raising(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runner = _module("run_gate")
+    diagnosis = (
+        "COMPATIBILITY REFUSED: 1 of 3 product evaluation(s) refused\n"
+        "COMPATIBILITY SATISFIED: academy @ academy-revision; no findings\n"
+        "COMPATIBILITY REFUSED (evidence_refused): erp @ erp-revision; "
+        "erp: observation 'install-recipe' extract digest differs\n"
+        "COMPATIBILITY SATISFIED: sub @ sub-revision; no findings\n"
+        "ADOPTION NOT EVALUATED"
+    )
+    result = SimpleNamespace(
+        evaluations=(
+            SimpleNamespace(product="academy"),
+            SimpleNamespace(product="erp"),
+            SimpleNamespace(product="sub"),
+        ),
+        evidence_verified=False,
+        explain=lambda: diagnosis,
+    )
+
+    with pytest.raises(
+        runner.TrustedRunnerError,
+        match="gate did not verify all three product records",
+    ):
+        runner._report_and_require_expected_result(result)
+
+    assert capsys.readouterr().out == f"{diagnosis}\n"
+
+
+def test_expected_result_is_reported_exactly_once(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runner = _module("run_gate")
+    exposure = SimpleNamespace(unknown=0)
+    evaluations = (
+        SimpleNamespace(
+            product="academy",
+            compatibility_status="satisfied",
+            deferred_debt=(),
+            runtime_exposure=exposure,
+        ),
+        SimpleNamespace(
+            product="erp",
+            compatibility_status="deferred_runtime_debt",
+            deferred_debt=tuple(
+                SimpleNamespace(source_path=path, sites=sites)
+                for path, sites in runner.EXPECTED_ERP_DEBT
+            ),
+            runtime_exposure=exposure,
+        ),
+        SimpleNamespace(
+            product="sub",
+            compatibility_status="satisfied",
+            deferred_debt=(),
+            runtime_exposure=exposure,
+        ),
+    )
+    result = SimpleNamespace(
+        evaluations=evaluations,
+        evidence_verified=True,
+        compatibility_satisfied=False,
+        adoption_status="not_evaluated",
+        explain=lambda: "expected product detail",
+    )
+
+    runner._report_and_require_expected_result(result)
+
+    assert capsys.readouterr().out == "expected product detail\n"
+
+
 def test_runner_refuses_any_binding_other_than_the_three_pinned_revisions(
     tmp_path: Path,
 ) -> None:
