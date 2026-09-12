@@ -808,6 +808,11 @@ def _write_foreign_request(
                     continue
                 try:
                     written = os.write(input_fd, payload[offset:])
+                except BlockingIOError:
+                    # Readiness can be consumed between select() and write().
+                    # Stay inside the same deadline rather than converting a
+                    # retryable EAGAIN into an acquisition refusal.
+                    continue
                 except (BrokenPipeError, OSError) as exc:
                     raise GateAcquisitionError(
                         f"{executable}: foreign-source request stream failed: {exc}"

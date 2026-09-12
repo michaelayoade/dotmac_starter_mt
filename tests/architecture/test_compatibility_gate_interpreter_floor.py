@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -705,3 +706,37 @@ def test_child_blocked_before_read_cannot_deadlock_a_large_request(
         monkeypatch.setattr(gate, "_FOREIGN_CLEANUP_TIMEOUT_SECONDS", 0.05)
         gate._stop_foreign_process(process)
     assert process.poll() is not None
+
+
+def test_nonblocking_write_readiness_race_retries_within_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.readline()"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd="/",
+    )
+    real_write = os.write
+    calls = 0
+
+    def write_after_one_race(fd: int, data: bytes) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise BlockingIOError
+        return real_write(fd, data)
+
+    monkeypatch.setattr(gate.os, "write", write_after_one_race)
+    try:
+        assert (
+            gate._write_foreign_request(
+                process, b'{"request":true}', executable=sys.executable, timeout=2
+            )
+            == b""
+        )
+        assert calls >= 2
+    finally:
+        gate._stop_foreign_process(process)
+    assert process.poll() == 0
