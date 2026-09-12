@@ -682,6 +682,7 @@ def _read_foreign_response(
     *,
     executable: str,
     timeout: float = _FOREIGN_REQUEST_TIMEOUT_SECONDS,
+    initial_stderr: bytes = b"",
 ) -> tuple[bytes, int | None, bytes]:
     """Read one bounded line while concurrently draining child stderr."""
 
@@ -690,7 +691,12 @@ def _read_foreign_response(
             f"{executable}: foreign-source process has no response streams"
         )
     stdout = bytearray()
-    stderr = bytearray()
+    stderr = bytearray(initial_stderr)
+    if len(stderr) > _FOREIGN_STDERR_BYTE_LIMIT:
+        raise GateAcquisitionError(
+            f"{executable}: foreign-source stderr exceeds "
+            f"{_FOREIGN_STDERR_BYTE_LIMIT} bytes"
+        )
     deadline = time.monotonic() + timeout
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ, "stdout")
@@ -744,6 +750,81 @@ def _read_foreign_response(
                 return bytes(stdout), process.poll(), bytes(stderr)
     finally:
         selector.close()
+
+
+def _write_foreign_request(
+    process: subprocess.Popen[bytes],
+    request: bytes,
+    *,
+    executable: str,
+    timeout: float = _FOREIGN_REQUEST_TIMEOUT_SECONDS,
+) -> bytes:
+    """Write one request without blocking and drain concurrent stderr."""
+
+    if process.stdin is None or process.stderr is None:
+        raise GateAcquisitionError(
+            f"{executable}: foreign-source process has no request streams"
+        )
+    payload = request + b"\n"
+    offset = 0
+    stderr = bytearray()
+    deadline = time.monotonic() + timeout
+    selector = selectors.DefaultSelector()
+    input_fd = process.stdin.fileno()
+    was_blocking = os.get_blocking(input_fd)
+    os.set_blocking(input_fd, False)
+    selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    try:
+        while offset < len(payload):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                diagnostic = bytes(stderr).decode("utf-8", errors="replace").strip()
+                suffix = f": {diagnostic}" if diagnostic else ""
+                raise GateAcquisitionError(
+                    f"{executable}: foreign-source request write timed out after "
+                    f"{timeout:g} seconds{suffix}"
+                )
+            events = selector.select(remaining)
+            if not events:
+                continue
+            for key, _events in events:
+                if key.data == "stderr":
+                    try:
+                        chunk = os.read(key.fileobj.fileno(), 65_536)
+                    except OSError as exc:
+                        raise GateAcquisitionError(
+                            f"{executable}: foreign-source stderr stream failed: {exc}"
+                        ) from exc
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    stderr.extend(chunk)
+                    if len(stderr) > _FOREIGN_STDERR_BYTE_LIMIT:
+                        raise GateAcquisitionError(
+                            f"{executable}: foreign-source stderr exceeds "
+                            f"{_FOREIGN_STDERR_BYTE_LIMIT} bytes"
+                        )
+                    continue
+                try:
+                    written = os.write(input_fd, payload[offset:])
+                except (BrokenPipeError, OSError) as exc:
+                    raise GateAcquisitionError(
+                        f"{executable}: foreign-source request stream failed: {exc}"
+                    ) from exc
+                if written <= 0:
+                    raise GateAcquisitionError(
+                        f"{executable}: foreign-source request stream closed"
+                    )
+                offset += written
+        return bytes(stderr)
+    finally:
+        selector.close()
+        if not process.stdin.closed:
+            try:
+                os.set_blocking(input_fd, was_blocking)
+            except OSError:
+                pass
 
 
 @contextmanager
@@ -845,10 +926,11 @@ def _imports_under_interpreter(
                 f"{executable}: foreign-source process has no protocol streams"
             )
         try:
-            process.stdin.write(encoded_request + b"\n")
-            process.stdin.flush()
+            initial_stderr = _write_foreign_request(
+                process, encoded_request, executable=executable
+            )
             response_bytes, returncode, error_bytes = _read_foreign_response(
-                process, executable=executable
+                process, executable=executable, initial_stderr=initial_stderr
             )
         except (BrokenPipeError, OSError) as exc:
             raise GateAcquisitionError(

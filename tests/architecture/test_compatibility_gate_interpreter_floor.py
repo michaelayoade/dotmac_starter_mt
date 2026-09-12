@@ -631,6 +631,30 @@ def test_persistent_reader_drains_stderr_while_waiting_for_stdout() -> None:
     assert process.poll() is not None
 
 
+def test_persistent_reader_drains_and_bounds_pipe_filling_stderr() -> None:
+    process = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys,time; "
+            "sys.stderr.buffer.write(b'x' * 100000); sys.stderr.flush(); "
+            "sys.stdout.buffer.write(b'{\\\"ok\\\":true}\\n'); sys.stdout.flush(); "
+            "time.sleep(60)",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd="/",
+    )
+    try:
+        with pytest.raises(gate.GateAcquisitionError, match="stderr exceeds"):
+            gate._read_foreign_response(process, executable=sys.executable, timeout=2)
+    finally:
+        gate._stop_foreign_process(process)
+    assert process.poll() is not None
+
+
 def test_blocked_child_times_out_and_cleanup_escalates_to_kill(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -657,3 +681,27 @@ def test_blocked_child_times_out_and_cleanup_escalates_to_kill(
     gate._stop_foreign_process(process)
     assert process.poll() is not None
     assert time.monotonic() - started < 1
+
+
+def test_child_blocked_before_read_cannot_deadlock_a_large_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd="/",
+    )
+    try:
+        with pytest.raises(gate.GateAcquisitionError, match="write timed out"):
+            gate._write_foreign_request(
+                process,
+                b"x" * 1_000_000,
+                executable=sys.executable,
+                timeout=0.05,
+            )
+    finally:
+        monkeypatch.setattr(gate, "_FOREIGN_CLEANUP_TIMEOUT_SECONDS", 0.05)
+        gate._stop_foreign_process(process)
+    assert process.poll() is not None
