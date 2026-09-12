@@ -165,6 +165,26 @@ no declared production target.
 """
 
 [[entrypoint]]
+name = "workflow:composition-compatibility"
+family = "workflow"
+path = ".github/workflows/composition-compatibility.yml"
+trigger = "workflow_call (the compatibility candidate pins it by commit)"
+credential = "none"
+disposition = "non_production_executor"
+targets = ["github-hosted-runner"]
+premise = """
+Slice 4's trust boundary. A caller invokes it at JOB level by immutable commit,
+so none of the caller's steps, PATH changes, Git wrappers or environment setup
+run before the verifier. It checks out this revision plus the three public
+product revisions by immutable commit, sets up Python, and runs the SHA-pinned
+composition verifier inside the ephemeral GitHub runner. No user-provisioned
+repository secret is used: the only token is the read-only GITHUB_TOKEN
+(contents: read), and every checkout sets persist-credentials: false before any
+candidate source is evaluated. Checked: it names no declared production target
+and reaches no host.
+"""
+
+[[entrypoint]]
 name = "workflow:deployment-adopter"
 family = "workflow"
 path = ".github/workflows/deployment-adopter.yml"
