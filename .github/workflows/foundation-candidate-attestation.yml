@@ -75,6 +75,9 @@
 # than silently producing an unsigned or falsely-signed envelope.
 
 name: Foundation candidate attestation
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 on:
   workflow_dispatch:
@@ -141,6 +144,7 @@ jobs:
       - name: Resolve the committed candidate receipt
         id: candidate
         run: |
+          set -euo pipefail
           python scripts/release_facility.py resolve-candidate \
             "${{ inputs.facility }}" --version "${{ inputs.version }}" \
             | tee -a "${GITHUB_OUTPUT}"

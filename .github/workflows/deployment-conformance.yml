@@ -1,4 +1,7 @@
 name: Deployment conformance
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # The reusable cross-repository gate. Every product that adopts
 # `dotmac-deployment-foundation` calls THIS workflow, pinned by immutable
@@ -151,7 +154,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Refuse a non-exact foundation pin
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
           version='${{ inputs.foundation-version }}'
@@ -170,7 +173,7 @@ jobs:
       # ("Where the package comes from") for the full reasoning; this step is
       # the one place that reasoning is executed rather than merely stated.
       - name: Install the pinned foundation from the private Forgejo index
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         env:
           FORGEJO_READ_TOKEN: ${{ secrets.FORGEJO_READ_TOKEN }}
         run: |
@@ -180,7 +183,7 @@ jobs:
             "dotmac-deployment-foundation==${{ inputs.foundation-version }}"
 
       - name: Validate the descriptor
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: dotmac-deploy -f '${{ inputs.descriptor }}' validate
 
       # The parse succeeding is necessary, not sufficient. `check_all` runs
@@ -192,7 +195,7 @@ jobs:
       # specifically so every finding is reported together, in one review
       # cycle rather than five.
       - name: Run the descriptor conformance checks
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         env:
           DESCRIPTOR: ${{ inputs.descriptor }}
           REQUIRE_REAL_DIGESTS: ${{ inputs.require-real-digests }}
@@ -231,7 +234,7 @@ jobs:
           PY
 
       - name: The rendered assets match the descriptor
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
           args=(-f '${{ inputs.descriptor }}' render --check -o '${{ inputs.rendered-dir }}')
@@ -262,7 +265,7 @@ jobs:
       # in a rendered asset (that is what `secrets_guard` enforces), and these
       # are literally the string "conformance-placeholder".
       - name: The rendered compose file is valid to a real engine
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
           compose='${{ inputs.rendered-dir }}/docker-compose.yml'
@@ -283,15 +286,15 @@ jobs:
         # Not a gate — a reviewer artefact. The plan draws the boundary between
         # the steps that mutate nothing and the steps that can change the world,
         # which is the one fact somebody authorising a run needs first.
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: dotmac-deploy -f '${{ inputs.descriptor }}' plan
 
       - name: Show the gates that run before any mutation
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: dotmac-deploy -f '${{ inputs.descriptor }}' preflight
 
       - name: Show the backup policy and what verification means
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: dotmac-deploy -f '${{ inputs.descriptor }}' backup
 
   image:
@@ -312,7 +315,7 @@ jobs:
       # the file header ("Where the package comes from") for the full
       # reasoning.
       - name: Install the pinned foundation from the private Forgejo index
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         env:
           FORGEJO_READ_TOKEN: ${{ secrets.FORGEJO_READ_TOKEN }}
         run: |
@@ -321,7 +324,7 @@ jobs:
             "dotmac-deployment-foundation==${{ inputs.foundation-version }}"
 
       - name: Audit the image the descriptor pins
-        shell: bash
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
           reference="$(python - <<'PY'

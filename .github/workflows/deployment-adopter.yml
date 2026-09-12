@@ -1,4 +1,7 @@
 name: Deployment conformance (reference adopter)
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # The Starter runs the SAME gate it publishes. That is not symmetry for its own
 # sake: a reusable workflow its own repository does not execute is a workflow

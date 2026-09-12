@@ -1,4 +1,7 @@
 name: Release kernel
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 # This workflow owns BUILD and PUBLISH only. It cannot tag, open a release
 # record, or call the independent verifier. Publication proves that the upload
