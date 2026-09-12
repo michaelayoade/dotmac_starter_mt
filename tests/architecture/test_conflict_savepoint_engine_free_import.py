@@ -178,6 +178,36 @@ def test_package_backlog_baseline_total_agrees_with_its_entries() -> None:
     )
 
 
+def test_dotmac_files_carries_no_conflict_savepoint_backlog() -> None:
+    """`dotmac-files` repaired its one recorded backlog site
+    (`fix/files-engine-free-conflict-savepoint`): the package must have zero
+    remaining `from dotmac_kernel.db import conflict_savepoint` sites, and the
+    frozen baseline must no longer carry a `dotmac_files` entry.
+
+    Stated explicitly for this one package, rather than relying only on the
+    generic two-directional ratchet above: that ratchet passes as long as the
+    live scan agrees with the baseline for every package it currently lists,
+    which would equally pass if this package's row and its site had both
+    simply never been touched. This test pins the actual, named outcome for
+    `dotmac-files` regardless of what any other package's backlog looks like.
+    """
+    live = find_forbidden_imports(PROJECT_ROOT / "packages" / "dotmac-files")
+    assert not live, (
+        "dotmac-files still imports conflict_savepoint from the eager "
+        f"dotmac_kernel.db module: {live}"
+    )
+    baseline_files = load_package_backlog_baseline()["files"]
+    stale = [
+        path
+        for path in baseline_files
+        if "dotmac_files" in path or "dotmac-files" in path
+    ]
+    assert not stale, (
+        "the frozen backlog baseline still carries a dotmac-files entry "
+        f"after its one site was migrated to dotmac_kernel.transactions: {stale}"
+    )
+
+
 def test_package_backlog_baseline_states_the_narrowed_scope() -> None:
     """A reader of the baseline file alone (not this module) must not
     mistake the ratchet for a completed migration — the brief's explicit

@@ -1,6 +1,6 @@
 {
   "_comment": "Frozen backlog of conflict_savepoint imports still reaching the eager dotmac_kernel.db module, package by package, site by site. #678 closes the eager-import chain app/assembly.py's load_manifests(FEATURE_MODULES) actually reaches -- the five app/features/*/service.py imports. FEATURE_MODULES names zero dotmac_ packages, so this backlog is NOT part of that chain and #678 does not migrate it. #678 closes Starter's eager-import chain, not fleet-wide package debt -- do not read a shrinking or steady total here as a completed migration. Retirement condition, one rule for every entry: migrate a package's imports (to dotmac_kernel.transactions.conflict_savepoint) the next time that distribution takes a legitimate version transition anyway, so this costs zero standalone +dev markers or ledger rows. Two-directional ratchet: fails if a file's count rises OR falls without this baseline being regenerated in the same change. Regenerate with generate_package_backlog_baseline() in this module; do not hand-edit.",
-  "total": 117,
+  "total": 116,
   "files": {
     "packages/dotmac-accounting/src/dotmac_accounting/service.py": 1,
     "packages/dotmac-analytics/src/dotmac_analytics/service.py": 2,
@@ -11,7 +11,6 @@
     "packages/dotmac-deployment-control/src/dotmac_deployment_control/service.py": 1,
     "packages/dotmac-expenses/src/dotmac_expenses/service.py": 1,
     "packages/dotmac-fiber-plant/src/dotmac_fiber_plant/service.py": 7,
-    "packages/dotmac-files/src/dotmac_files/service.py": 1,
     "packages/dotmac-finance/src/dotmac_finance/service.py": 1,
     "packages/dotmac-forms/src/dotmac_forms/service.py": 1,
     "packages/dotmac-inbox/src/dotmac_inbox/history.py": 4,

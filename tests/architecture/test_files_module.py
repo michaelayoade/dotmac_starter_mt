@@ -278,6 +278,11 @@ def test_package_has_no_web_or_domain_dependencies() -> None:
 
 def test_public_package_import_needs_no_database_configuration() -> None:
     """Provider/validation contracts are usable before an assembly installs DB."""
+    import tomllib
+
+    declared = tomllib.loads(
+        (REPO_ROOT / "packages/dotmac-files/pyproject.toml").read_text(encoding="utf-8")
+    )["tool"]["poetry"]["version"]
     env = os.environ.copy()
     env.pop("DATABASE_URL", None)
     env.pop("PLATFORM_DATABASE_URL", None)
@@ -294,7 +299,7 @@ def test_public_package_import_needs_no_database_configuration() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "0.1.0a3"
+    assert result.stdout.strip() == declared
 
 
 def test_lineage_passes_the_composed_migration_gate() -> None:

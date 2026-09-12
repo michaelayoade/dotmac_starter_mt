@@ -38,9 +38,7 @@ StoredFileRecord = TenantStoredFile | PlatformStoredFile
 
 def stage_file(db: Session, *, prepared: PreparedFile) -> StoredFileRecord:
     """Idempotently stage metadata in the caller's existing transaction."""
-    # Lazy by design. Importing `dotmac_kernel.db` constructs the configured
-    # engines; pure file/provider contracts remain importable without a DB URL.
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     existing = _find_prepared(db, prepared=prepared)
     if existing is not None:

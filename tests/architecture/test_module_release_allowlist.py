@@ -121,16 +121,45 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
         assert emitted["tag"].startswith(emitted["tag_prefix"])
 
 
-def test_files_is_release_allowlisted_with_its_schema_allocation() -> None:
-    result = _resolve("dotmac-files", version="0.1.0a3")
-    assert result.returncode == 0, result.stderr
-    emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
-    # `mod_files` is allocated in a54; a56 added its prerequisite contract,
-    # and a3 now consumes ADR-0028's explicit selection surface from a61.
-    # The highest capability actually imported sets the floor.
-    assert emitted["kernel_floor"] == "0.1.0a61"
-    assert emitted["db_schema"] == "mod_files"
-    assert emitted["tag"] == "dotmac-files-v0.1.0a3"
+def test_files_refuses_a_published_version_against_a_development_marker() -> None:
+    """`0.1.0a3` is published and tagged; repairing the recorded
+    `conflict_savepoint` debt moved this package's importable source, so the
+    tree now declares `0.1.0a3+dev`. Dispatching the published number against
+    that tree must REFUSE rather than infer a version, and the diagnostic must
+    name BOTH so a reader can tell which one to fix.
+
+    Neither version is written as a literal here. The declared value is read
+    from the package, and the published value is that declaration with its
+    PEP 440 local segment removed -- so this test cannot drift from the tree
+    the way the hardcoded `0.1.0a3` it replaced did (that literal is what
+    turned red when the marker landed).
+
+    The premise is asserted rather than assumed: when a successor is
+    allocated and the local segment disappears, this test fails with an
+    instruction instead of silently passing or silently skipping. A skipped
+    test here would be absence of signal read as a positive signal.
+    """
+    declared = tomllib.loads(
+        (PROJECT_ROOT / "packages/dotmac-files/pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )["tool"]["poetry"]["version"]
+    assert "+" in declared, (
+        f"dotmac-files now declares {declared!r}, which carries no local "
+        "segment, so this test's premise is gone. Replace it with the "
+        "positive resolution case for the allocated version."
+    )
+    published = declared.split("+", 1)[0]
+
+    result = _resolve("dotmac-files", version=published)
+
+    assert result.returncode != 0, (
+        f"resolving {published!r} against a tree declaring {declared!r} "
+        f"succeeded; it would have produced a release tag for a version no "
+        f"index accepts. stdout: {result.stdout}"
+    )
+    assert published in result.stderr, result.stderr
+    assert declared in result.stderr, result.stderr
 
 
 def test_imports_is_release_allowlisted_for_the_erp_first_adopter() -> None:
