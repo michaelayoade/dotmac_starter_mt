@@ -46,7 +46,7 @@ from dotmac_files.service import (
     stage_file,
 )
 
-__version__ = "0.1.0a3+dev"
+__version__ = "0.1.0a4"
 
 __all__ = [
     "FileError",

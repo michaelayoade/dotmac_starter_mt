@@ -1,5 +1,19 @@
 # Changelog — dotmac-files
 
+## 0.1.0a4 — allocated, not yet published
+
+Names the engine-free `conflict_savepoint` repair's changed importable source
+as a version distinct from a3, so one released version does not name two
+importable surfaces. Publication and its oracle-backed release record follow
+in a separate protected change.
+
+### Changed
+
+- `service.py` now imports `conflict_savepoint` from `dotmac_kernel.transactions`
+  instead of `dotmac_kernel.db`.
+- Kernel floor raised to `>=0.1.0a98`, the release that carries
+  `dotmac_kernel.transactions.conflict_savepoint`.
+
 ## 0.1.0a3 — 2026-08-18
 
 Makes the released dual-plane lineage explicitly tenant-selectable for the
