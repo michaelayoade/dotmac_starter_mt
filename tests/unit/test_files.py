@@ -444,6 +444,62 @@ def test_staging_the_same_prepared_file_is_idempotent_and_conflicts_on_drift(
         stage_file(db, prepared=prepared)
 
 
+def test_a_storage_key_collision_raises_without_discarding_the_outer_transaction(
+    db: Session,
+) -> None:
+    """Exercises `conflict_savepoint` reached through its new engine-free
+    import (`dotmac_kernel.transactions`, not `dotmac_kernel.db`) on the real
+    `stage_file` IntegrityError path -- distinct from the idempotency test
+    above, which never reaches that path: there, `_find_prepared`'s id lookup
+    finds the existing row first and `_require_same_prepared` raises before
+    `conflict_savepoint` is ever entered.
+
+    Here two prepared files carry DIFFERENT ids (so `_find_prepared`'s id
+    lookup misses both times) but the same tenant, provider and storage key,
+    which collides on the DB-level `uq_stored_files_tenant_provider_key`
+    unique constraint instead -- a genuine `IntegrityError` raised inside
+    `conflict_savepoint`'s `with db.begin_nested()` block.
+
+    `conflict_savepoint` isolates that failure to a SAVEPOINT rather than the
+    caller's outer transaction (see its docstring in
+    `dotmac_kernel/_transactions.py`). If the import instead reached a
+    variant that called a bare `db.rollback()`, the outer transaction --
+    including `first`, staged earlier in this same session -- would be
+    discarded too. Asserting `first` is still visible and the session is
+    still mid-transaction after the collision proves the SAVEPOINT held.
+    """
+    scope = TenantScope(uuid4())
+    provider = MemoryProvider()
+    first_prepared = prepare_upload(
+        provider,
+        scope=scope,
+        policy=_policy(),
+        original_filename="first.pdf",
+        declared_media_type="application/pdf",
+        chunks=(b"%PDF-1.7\nfirst",),
+    )
+    first = stage_file(db, prepared=first_prepared)
+
+    second_prepared = prepare_upload(
+        provider,
+        scope=scope,
+        policy=_policy(),
+        original_filename="second.pdf",
+        declared_media_type="application/pdf",
+        chunks=(b"%PDF-1.7\nsecond",),
+    )
+    assert second_prepared.id != first_prepared.id
+    colliding = replace(second_prepared, storage_key=first_prepared.storage_key)
+
+    with pytest.raises(
+        PreparedFileConflict, match="conflicts outside its declared scope"
+    ):
+        stage_file(db, prepared=colliding)
+
+    assert db.in_transaction()
+    assert db.get(type(first), first.id) is not None
+
+
 def test_orphan_reaper_deletes_only_old_unreferenced_keys_in_the_tenant_prefix(
     db: Session,
 ) -> None:
