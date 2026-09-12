@@ -232,7 +232,7 @@ jobs:
   # here; the pytest-level skip is not evidence of anything and must never be
   # read as one.
   compatibility-gate:
-    uses: michaelayoade/dotmac_starter_mt/.github/workflows/composition-compatibility.yml@0f4137d639089b359de25f1c44acd79e832af17c
+    uses: michaelayoade/dotmac_starter_mt/.github/workflows/composition-compatibility.yml@883c0928c3fe75397b59cc3f72c427bb9f3b27aa
 
   integration:
     runs-on: ubuntu-latest
