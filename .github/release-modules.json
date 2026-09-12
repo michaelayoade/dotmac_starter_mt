@@ -1021,7 +1021,7 @@
       "package_dir": "packages/dotmac-files",
       "import_name": "dotmac_files",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a61",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_files",
       "tag_prefix": "dotmac-files-v",
       "wheel_contents": {

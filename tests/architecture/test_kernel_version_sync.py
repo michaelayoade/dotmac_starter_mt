@@ -95,7 +95,7 @@ def test_the_version_is_a_pep440_release_prerelease_or_development_marker() -> N
 # the marketing cohort, and referrals and reseller management are ALLOCATED in
 # a84 — never published, so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather
 # than here — and the consolidated ERP/Backoffice/general allocation follows
-# in a85. People and Tax moved to CAPABILITY_RAISED_FLOORS when their repaired
+# in a85. Files, People and Tax moved to CAPABILITY_RAISED_FLOORS when their
 # exact-replay writes adopted a98's public engine-free transaction surface;
 # their allocations remain recorded there.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
@@ -194,6 +194,17 @@ CAPABILITY_RAISED_FLOORS = {
     # transaction surface first published in a98. An earlier kernel has the
     # allocation but not that supported seam, so the consumed capability now
     # outranks the allocation while a71 remains the provenance coordinate.
+    # Files has been raised three times and the table records only the highest:
+    # mod_files was ALLOCATED in a54, a56 made fi_0001's prerequisite
+    # declarations installable, a61 carried ADR-0028's `supported_plane_sets`
+    # and `selected_module_planes`, and repairing its recorded engine-free debt
+    # now makes it import `dotmac_kernel.transactions.conflict_savepoint`,
+    # first published in a98. a54 stays as the allocation coordinate because
+    # that is what this tuple's second element means -- the namespace release,
+    # not the previous floor. Shipping a3's successor at a61 would declare a
+    # floor the wheel cannot satisfy: a consumer resolving kernel a61-a97
+    # passes the constraint and then fails at the import.
+    "dotmac-files": ("0.1.0a98", "0.1.0a54"),
     "dotmac-people": ("0.1.0a98", "0.1.0a71"),
     # Tax's a4 exact-replay ensures import the same public engine-free
     # transaction surface. Its namespace was allocated in a85, but tagged
@@ -225,10 +236,6 @@ CAPABILITY_RAISED_FLOORS = {
     # these moved out of LEDGER_ALLOCATION_RELEASES rather than keeping their
     # allocation floors.
     "dotmac-application-directory": ("0.1.0a56", "0.1.0a46"),
-    # a56 made fi_0001's prerequisite declarations installable; a61 is now the
-    # operative floor because a3 declares supported_plane_sets and fi_0002
-    # consumes selected_module_planes.
-    "dotmac-files": ("0.1.0a61", "0.1.0a54"),
     "dotmac-imports": ("0.1.0a56", "0.1.0a55"),
     # a56 raised this one first (the prerequisite contract). a97 raises it
     # again: 0.2.0a4 declares a `WebSurfaceContribution` at module contract
@@ -559,7 +566,34 @@ def _first_published_kernel_tag_containing(path: str) -> str:
     pytest.fail(f"no visible published kernel tag contains {path}")
 
 
-@pytest.mark.parametrize("distribution", ("dotmac-people", "dotmac-tax"))
+def _distributions_consuming_the_transaction_surface() -> tuple[str, ...]:
+    """Derive the consumers; never restate them.
+
+    A hand-kept tuple here is how `dotmac-files` came to ship a stale a61
+    floor while importing a98's surface: the import was repaired, the floor
+    was not raised, and no list named it. Scanning the packages means a
+    distribution is covered the moment it adopts the surface, without anyone
+    remembering to add a row. `dotmac-kernel` is excluded because it OWNS
+    `transactions.py` rather than consuming it across a version boundary.
+    """
+    consumers = {
+        package.name
+        for package in PACKAGES.iterdir()
+        if package.is_dir()
+        and package.name != "dotmac-kernel"
+        and (package / "src").is_dir()
+        and any(
+            "dotmac_kernel.transactions" in source.read_text(encoding="utf-8")
+            for source in (package / "src").rglob("*.py")
+        )
+    }
+    assert consumers, "no package consumes the engine-free transaction surface"
+    return tuple(sorted(consumers))
+
+
+@pytest.mark.parametrize(
+    "distribution", _distributions_consuming_the_transaction_surface()
+)
 def test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
     distribution: str,
 ) -> None:
