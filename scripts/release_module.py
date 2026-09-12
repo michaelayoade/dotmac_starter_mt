@@ -280,6 +280,18 @@ def cmd_resolve(args: argparse.Namespace) -> None:
             "one of them."
         )
 
+    declared_version = manifest["version"]
+    if "+" in declared_version:
+        published_form = declared_version.split("+", 1)[0]
+        raise ReleaseRefused(
+            f"{args.distribution}: declared version {declared_version!r} carries a "
+            "local version segment ('+'), which no package index can publish. "
+            f"Allocate a real successor version; the publishable form would be "
+            f"{published_form!r}, but editing the declared version to drop the "
+            "local segment is a reviewed pyproject change, not something this "
+            "resolver may infer."
+        )
+
     floor = manifest["dependencies"].get("dotmac-kernel")
     expected = f">={entry['kernel_floor']}"
     if floor != expected:
