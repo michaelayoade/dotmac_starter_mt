@@ -109,9 +109,55 @@ def test_an_unallowlisted_package_cannot_be_resolved() -> None:
 
 
 def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
-    """Specificity for the test above: it must refuse because the name is not
-    listed, not because `resolve` refuses everything."""
-    for distribution in _allowlist():
+    """Specificity for the impostor test above: it must refuse because the
+    name is not listed, not because `resolve` refuses everything.
+
+    The allowlist is not uniform: some entries declare a PEP 440 local
+    version segment (`+dev` today) and must be refused for THAT reason, never
+    for their name being unlisted -- that distinction is what keeps this test
+    a non-vacuity control for the impostor test above rather than something a
+    resolver that refuses every input could pass. So the allowlist is
+    partitioned by a DERIVED predicate (each distribution's own declared
+    version, read from its own pyproject.toml) rather than asserted to behave
+    one way for all of it:
+
+    - No local segment: `resolve` must succeed and emit well-formed facts,
+      including a tag containing no `+` -- a real release coordinate never
+      carries one.
+    - Local segment: `resolve` must refuse, the refusal must name the
+      local-segment reason, and it must NOT contain "not an allowlisted
+      module" -- that phrase is the impostor test's signature, and seeing it
+      here would mean this partition is failing for the wrong reason.
+
+    Both partitions must be non-empty. An empty clean partition means nothing
+    here proves `resolve` can succeed at all, and the impostor test silently
+    loses its control. An empty local-segment partition means the guard has
+    no live subject in this sweep.
+    """
+    clean: list[str] = []
+    local_segment: list[str] = []
+    for distribution, entry in _allowlist().items():
+        declared = tomllib.loads(
+            (PROJECT_ROOT / entry["package_dir"] / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+        )["tool"]["poetry"]["version"]
+        (local_segment if "+" in declared else clean).append(distribution)
+
+    assert clean, (
+        "no allowlisted distribution declares a version without a local "
+        "segment -- this sweep can no longer prove that `resolve` succeeds "
+        "on anything, so the impostor test above has lost its non-vacuity "
+        "control"
+    )
+    assert local_segment, (
+        "no allowlisted distribution currently declares a local version "
+        "segment -- the local-segment refusal has no live subject in this "
+        "sweep; that is fine on its own but should be noted, not silently "
+        "passed over"
+    )
+
+    for distribution in clean:
         result = _resolve(distribution)
         assert result.returncode == 0, result.stderr
         emitted = dict(
@@ -119,14 +165,24 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
         )
         assert emitted["package_dir"].startswith("packages/")
         assert emitted["tag"].startswith(emitted["tag_prefix"])
+        assert "+" not in emitted["tag"], emitted["tag"]
+
+    for distribution in local_segment:
+        result = _resolve(distribution)
+        assert result.returncode != 0, (
+            f"{distribution} declares a local version segment but resolved "
+            f"successfully: {result.stdout}"
+        )
+        assert "local version segment" in result.stderr, result.stderr
+        assert "not an allowlisted module" not in result.stderr, result.stderr
 
 
 def test_files_refuses_a_published_version_against_a_development_marker() -> None:
     """`0.1.0a3` is published and tagged; repairing the recorded
     `conflict_savepoint` debt moved this package's importable source, so the
     tree now declares `0.1.0a3+dev`. Dispatching the published number against
-    that tree must REFUSE rather than infer a version, and the diagnostic must
-    name BOTH so a reader can tell which one to fix.
+    that tree must REFUSE (non-zero exit) rather than infer a version, and the
+    refusal's stderr must contain both version strings verbatim.
 
     Neither version is written as a literal here. The declared value is read
     from the package, and the published value is that declaration with its
@@ -160,6 +216,112 @@ def test_files_refuses_a_published_version_against_a_development_marker() -> Non
     )
     assert published in result.stderr, result.stderr
     assert declared in result.stderr, result.stderr
+
+
+def test_files_local_segment_refuses_with_no_version_dispatched() -> None:
+    """Path 1: no `--version` at all is the allowlist sweep's own path into
+    `resolve`. `dotmac-files` currently declares a PEP 440 local version
+    segment (`+dev`); that value must never reach tag construction, because a
+    `+local` version cannot be uploaded to any index and a tag built from it
+    would name a release nothing can ever serve.
+
+    The premise is asserted, not assumed: once a real successor is allocated
+    and the local segment disappears, this test must fail loudly rather than
+    silently pass, naming the positive-resolution case as the replacement.
+    """
+    declared = tomllib.loads(
+        (PROJECT_ROOT / "packages/dotmac-files/pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )["tool"]["poetry"]["version"]
+    assert "+" in declared, (
+        f"dotmac-files now declares {declared!r}, which carries no local "
+        "segment, so this test's premise is gone. Replace it with the "
+        "positive resolution case for the allocated version."
+    )
+
+    result = _resolve("dotmac-files")
+
+    assert result.returncode != 0, (
+        f"resolving with no --version against a tree declaring {declared!r} "
+        f"succeeded; it would have emitted a tag for a version no index "
+        f"accepts. stdout: {result.stdout}"
+    )
+    assert declared in result.stderr, result.stderr
+    # Not `"+" in stderr`: the declared version is already asserted present and
+    # contains one, so that would restate a fact rather than check the reason.
+    assert "local version segment" in result.stderr, result.stderr
+    assert "not an allowlisted module" not in result.stderr, result.stderr
+
+
+def test_files_local_segment_refuses_even_when_the_dispatched_version_matches() -> None:
+    """Path 2: dispatching the EXACT declared value (including its `+dev`
+    local segment) passes the existing dispatched-vs-declared equality check,
+    so a resolver that stopped there would still emit a tag for a version no
+    index can serve. This must be refused for the LOCAL-SEGMENT reason, not
+    misdiagnosed as a version mismatch -- the two refusals must never be
+    confused, so this test asserts the mismatch phrase's ABSENCE as well as
+    the local-segment refusal's presence.
+
+    The premise is asserted, not assumed, exactly as in the sibling tests
+    above.
+    """
+    declared = tomllib.loads(
+        (PROJECT_ROOT / "packages/dotmac-files/pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )["tool"]["poetry"]["version"]
+    assert "+" in declared, (
+        f"dotmac-files now declares {declared!r}, which carries no local "
+        "segment, so this test's premise is gone. Replace it with the "
+        "positive resolution case for the allocated version."
+    )
+
+    result = _resolve("dotmac-files", version=declared)
+
+    assert result.returncode != 0, (
+        f"resolving --version {declared!r} (the exact declared value) "
+        f"succeeded; it would have emitted a tag for a version no index "
+        f"accepts. stdout: {result.stdout}"
+    )
+    assert declared in result.stderr, result.stderr
+    assert "!= package version" not in result.stderr, (
+        "the exact-match dispatch was refused for a version-mismatch reason, "
+        f"not the local-segment reason: {result.stderr}"
+    )
+
+
+def test_an_allowlisted_module_without_a_local_segment_still_resolves() -> None:
+    """POSITIVE CONTROL. Without this, a resolver that refused every
+    resolution (not just local-segment ones) would still pass every test
+    above -- this is the non-vacuity half.
+
+    The distribution is DERIVED, not hardcoded: the first allowlist entry
+    whose declared pyproject version carries no PEP 440 local segment.
+    """
+    candidate = None
+    for distribution, entry in sorted(_allowlist().items()):
+        declared = tomllib.loads(
+            (PROJECT_ROOT / entry["package_dir"] / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+        )["tool"]["poetry"]["version"]
+        if "+" not in declared:
+            candidate = (distribution, declared)
+            break
+    assert candidate is not None, (
+        "every allowlisted distribution declares a local version segment -- "
+        "there is no distribution left to prove the resolver still resolves "
+        "a normal version"
+    )
+    distribution, declared = candidate
+
+    result = _resolve(distribution)
+
+    assert result.returncode == 0, result.stderr
+    emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
+    assert emitted["version"] == declared
+    assert emitted["tag"] == f"{emitted['tag_prefix']}{declared}"
 
 
 def test_imports_is_release_allowlisted_for_the_erp_first_adopter() -> None:
