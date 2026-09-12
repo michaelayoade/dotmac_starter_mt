@@ -11,16 +11,27 @@ Compatibility and adoption are deliberately different outputs.  Incomplete
 evidence, an incoherent dimensional record, or reached deferred-import debt
 refuses compatibility.  Composition states are reported for inspection but
 do not become an adoption verdict; adoption remains ``not_evaluated``.
+
+Each product's own source is parsed under an interpreter selected from that
+product's own bound revision's checked-in Python requirement (PEP 621
+``project.requires-python`` or Poetry's ``tool.poetry.dependencies.python``)
+-- never from this gate's own host interpreter and never from the product's
+evidence record.  Parsing and every AST-dependent import derivation happen in
+one short-lived subprocess of the selected trusted interpreter.  Only closed
+JSON reachability facts cross back to the host: this module PARSES and WALKS
+foreign product source, but it never IMPORTS or EXECUTES it.
 """
 
 from __future__ import annotations
 
 import ast
+import base64
 import configparser
 import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import tomllib
@@ -93,6 +104,494 @@ class GateAcquisitionError(RuntimeError):
 
 class GateDerivationError(ValueError):
     """Verified source bytes cannot support one unambiguous derivation."""
+
+
+class _ForeignSyntaxError(Exception):
+    """The selected trusted interpreter could not parse the given source."""
+
+
+# The trusted interpreter floors this gate may select, ascending.  A product
+# declares a range against these; the gate never parses a product under any
+# other interpreter, and never under its own (potentially newer) host
+# interpreter merely because that happens to be what is running the gate.
+TRUSTED_INTERPRETERS: Final = (
+    ("python3.11", (3, 11)),
+    ("python3.12", (3, 12)),
+    ("python3.13", (3, 13)),
+)
+
+_SUPPORTED_VERSION_OPERATORS: Final = frozenset({">=", "<=", "==", "!=", ">", "<"})
+_VERSION_CLAUSE: Final = re.compile(r"^(>=|<=|==|!=|>|<)\s*(\d+(?:\.\d+){0,2})$")
+
+
+@dataclass(frozen=True)
+class _VersionClause:
+    operator: str
+    version: tuple[int, int, int]
+
+
+def _normalize_version(parts: tuple[int, ...]) -> tuple[int, int, int]:
+    padded = (*parts, 0, 0)
+    return (padded[0], padded[1], padded[2])
+
+
+def _parse_python_specifier(raw: str, *, source: str) -> tuple[_VersionClause, ...]:
+    """Parse a comma-separated PEP 440 comparison specifier.
+
+    Only the plain comparison operators are supported.  Caret/tilde ranges,
+    compatible-release (``~=``), wildcards, and any other requirement syntax
+    are refused rather than guessed at.
+    """
+
+    clauses: list[_VersionClause] = []
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            raise GateDerivationError(f"{source}: empty version clause in {raw!r}")
+        match = _VERSION_CLAUSE.fullmatch(piece)
+        if match is None or match.group(1) not in _SUPPORTED_VERSION_OPERATORS:
+            raise GateDerivationError(
+                f"{source}: unsupported python requirement syntax {piece!r}"
+            )
+        operator, version_text = match.groups()
+        version = _normalize_version(
+            tuple(int(part) for part in version_text.split("."))
+        )
+        clauses.append(_VersionClause(operator, version))
+    if not clauses:
+        raise GateDerivationError(f"{source}: python requirement is empty")
+    return tuple(sorted(clauses, key=lambda clause: (clause.operator, clause.version)))
+
+
+def _pep621_requires_python(pyproject: Mapping[str, object]) -> str | None:
+    project = pyproject.get("project")
+    if not isinstance(project, Mapping):
+        return None
+    value = project.get("requires-python")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise GateDerivationError("project.requires-python must be a string")
+    return value
+
+
+def _poetry_python_constraint(pyproject: Mapping[str, object]) -> str | None:
+    tool = pyproject.get("tool")
+    if not isinstance(tool, Mapping):
+        return None
+    poetry = tool.get("poetry")
+    if not isinstance(poetry, Mapping):
+        return None
+    dependencies = poetry.get("dependencies")
+    if not isinstance(dependencies, Mapping):
+        return None
+    value = dependencies.get("python")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise GateDerivationError("tool.poetry.dependencies.python must be a string")
+    return value
+
+
+def _declared_python_requirement(
+    pyproject: Mapping[str, object], *, product: str
+) -> tuple[_VersionClause, ...]:
+    """Accept exactly one declaration surface, or two that agree.
+
+    A single surface (PEP 621 alone, or Poetry alone) is accepted outright.
+    Both present must parse to the same canonical clause set; disagreement
+    refuses.  Neither present refuses -- a missing requirement is not a
+    default.
+    """
+
+    pep621 = _pep621_requires_python(pyproject)
+    poetry = _poetry_python_constraint(pyproject)
+    if pep621 is None and poetry is None:
+        raise GateDerivationError(
+            f"{product}: no python requirement is declared (neither "
+            "project.requires-python nor tool.poetry.dependencies.python)"
+        )
+    pep621_clauses = (
+        _parse_python_specifier(pep621, source=f"{product}: project.requires-python")
+        if pep621 is not None
+        else None
+    )
+    poetry_clauses = (
+        _parse_python_specifier(
+            poetry, source=f"{product}: tool.poetry.dependencies.python"
+        )
+        if poetry is not None
+        else None
+    )
+    if (
+        pep621_clauses is not None
+        and poetry_clauses is not None
+        and pep621_clauses != poetry_clauses
+    ):
+        raise GateDerivationError(
+            f"{product}: project.requires-python ({pep621!r}) disagrees with "
+            f"tool.poetry.dependencies.python ({poetry!r})"
+        )
+    return pep621_clauses if pep621_clauses is not None else poetry_clauses  # type: ignore[return-value]
+
+
+def _clause_satisfied(clause: _VersionClause, candidate: tuple[int, int, int]) -> bool:
+    if clause.operator == ">=":
+        return candidate >= clause.version
+    if clause.operator == "<=":
+        return candidate <= clause.version
+    if clause.operator == "==":
+        return candidate == clause.version
+    if clause.operator == "!=":
+        return candidate != clause.version
+    if clause.operator == ">":
+        return candidate > clause.version
+    return candidate < clause.version  # "<"
+
+
+def _select_interpreter(
+    clauses: tuple[_VersionClause, ...], *, product: str
+) -> tuple[str, tuple[int, int]]:
+    """Select the LOWEST trusted interpreter that satisfies every clause.
+
+    Lowest, not merely compatible, is load-bearing: it is what detects a
+    product using syntax newer than the floor it declares.
+    """
+
+    for name, version in TRUSTED_INTERPRETERS:
+        candidate = _normalize_version(version)
+        if all(_clause_satisfied(clause, candidate) for clause in clauses):
+            return name, version
+    raise GateDerivationError(
+        f"{product}: no trusted interpreter "
+        f"({', '.join(name for name, _ in TRUSTED_INTERPRETERS)}) satisfies "
+        "the declared python requirement"
+    )
+
+
+def _require_interpreter_available(name: str) -> str:
+    """Resolve a selected interpreter's executable, or refuse acquisition.
+
+    An unavailable selected interpreter is an acquisition/infrastructure
+    failure, distinct from a product evidence refusal: it says nothing about
+    whether the product's source is valid, only that this host cannot check.
+    """
+
+    executable = shutil.which(name)
+    if executable is None:
+        raise GateAcquisitionError(
+            f"selected interpreter {name!r} is not available on this host"
+        )
+    return executable
+
+
+_FOREIGN_IMPORT_PROTOCOL: Final = "foreign-import-analysis.v1"
+_FOREIGN_IMPORT_LIMIT: Final = 10_000
+_FOREIGN_RESPONSE_BYTE_LIMIT: Final = 1_000_000
+_FOREIGN_REQUEST_KEYS: Final = frozenset(
+    {
+        "schema_version",
+        "product",
+        "revision",
+        "interpreter",
+        "module",
+        "path",
+        "is_package",
+        "available_modules",
+        "source_base64",
+    }
+)
+_FOREIGN_RESPONSE_KEYS: Final = frozenset(
+    {
+        "schema_version",
+        "status",
+        "product",
+        "revision",
+        "interpreter",
+        "module",
+        "path",
+        "imports",
+        "error",
+    }
+)
+
+# The selected interpreter loads these already hash-verified gate bytes, parses
+# the foreign source with its own grammar, performs every AST-dependent import
+# derivation there, and returns JSON facts.  It never returns an AST: Python's
+# AST classes are version-specific (3.12 adds TypeAlias/TypeVar), so bridging a
+# tree back into a 3.11 host would impose the host's AST vocabulary as an
+# unauthorized ceiling on a product that correctly declares a 3.12 floor.
+_CHILD_ANALYZE_SOURCE: Final = r"""
+import base64
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+def reject_duplicates(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+try:
+    gate_path = Path(sys.argv[1]).resolve()
+    sys.path.insert(0, str(gate_path.parents[2]))
+    spec = importlib.util.spec_from_file_location("_trusted_gate_child", gate_path)
+    if spec is None or spec.loader is None:
+        raise ValueError("trusted gate module could not be loaded")
+    gate = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = gate
+    spec.loader.exec_module(gate)
+    for raw_request in sys.stdin.buffer:
+        request = json.loads(
+            raw_request.decode("utf-8"),
+            object_pairs_hook=reject_duplicates,
+        )
+        expected = {
+            "schema_version", "product", "revision", "interpreter", "module",
+            "path", "is_package", "available_modules", "source_base64",
+        }
+        if not isinstance(request, dict) or set(request) != expected:
+            raise ValueError("request does not have the closed protocol shape")
+        source = base64.b64decode(request["source_base64"], validate=True)
+        available = request["available_modules"]
+        if (
+            request["schema_version"] != "foreign-import-analysis.v1"
+            or not isinstance(request["is_package"], bool)
+            or not isinstance(available, list)
+            or available != sorted(set(available))
+            or any(not isinstance(item, str) for item in available)
+        ):
+            raise ValueError("request values do not satisfy the closed protocol")
+        try:
+            imports = gate._import_edges_from_source(
+                source,
+                current_module=request["module"],
+                is_package=request["is_package"],
+                available_modules=frozenset(available),
+            )
+            status = "ok"
+            error = None
+        except (UnicodeDecodeError, SyntaxError) as exc:
+            imports = frozenset()
+            status = "syntax_error"
+            error = str(exc)
+        except gate.GateDerivationError as exc:
+            imports = frozenset()
+            status = "derivation_error"
+            error = str(exc)
+        if len(imports) > 10000:
+            raise ValueError("derived import set exceeds the protocol limit")
+        response = {
+            "schema_version": request["schema_version"],
+            "status": status,
+            "product": request["product"],
+            "revision": request["revision"],
+            "interpreter": request["interpreter"],
+            "module": request["module"],
+            "path": request["path"],
+            "imports": sorted(imports),
+            "error": error,
+        }
+        encoded = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
+        if len(encoded) > 1000000:
+            raise ValueError("response exceeds the protocol byte limit")
+        sys.stdout.buffer.write(encoded + b"\n")
+        sys.stdout.buffer.flush()
+except Exception as exc:
+    sys.stderr.write(f"foreign import protocol refused: {exc}")
+    sys.exit(4)
+"""
+
+
+def _json_object_without_duplicate_keys(pairs: list[tuple[str, object]]) -> object:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+@contextmanager
+def _foreign_import_process(
+    executable: str,
+) -> Iterator[subprocess.Popen[bytes]]:
+    """Keep one selected interpreter alive for one product import graph."""
+
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            [
+                executable,
+                "-I",
+                "-c",
+                _CHILD_ANALYZE_SOURCE,
+                str(Path(__file__).resolve()),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=tempfile.gettempdir(),
+        )
+    except OSError as exc:
+        raise GateAcquisitionError(
+            f"could not launch {executable!r} to analyze foreign source: {exc}"
+        ) from exc
+    try:
+        yield process
+    finally:
+        if process.stdin is not None:
+            process.stdin.close()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            process.wait(timeout=5)
+
+
+def _imports_under_interpreter(
+    source: bytes,
+    *,
+    executable: str,
+    product: str,
+    revision: str,
+    interpreter: str,
+    module: str,
+    path: str,
+    is_package: bool,
+    available_modules: frozenset[str],
+    process: subprocess.Popen[bytes] | None = None,
+) -> frozenset[str]:
+    """Return import edges derived wholly under the selected interpreter.
+
+    The transport is a closed JSON fact record, never a pickled AST.  The
+    parent validates identity echoes, exact keys, ordering, uniqueness and
+    bounds before accepting an edge.  Foreign source is parsed and walked but
+    never imported or executed.
+    """
+
+    request = {
+        "schema_version": _FOREIGN_IMPORT_PROTOCOL,
+        "product": product,
+        "revision": revision,
+        "interpreter": interpreter,
+        "module": module,
+        "path": path,
+        "is_package": is_package,
+        "available_modules": sorted(available_modules),
+        "source_base64": base64.b64encode(source).decode("ascii"),
+    }
+    encoded_request = json.dumps(
+        request, sort_keys=True, separators=(",", ":")
+    ).encode()
+    if process is None:
+        try:
+            result = subprocess.run(  # noqa: S603
+                [
+                    executable,
+                    "-I",
+                    "-c",
+                    _CHILD_ANALYZE_SOURCE,
+                    str(Path(__file__).resolve()),
+                ],
+                input=encoded_request,
+                capture_output=True,
+                check=False,
+                cwd=tempfile.gettempdir(),
+            )
+        except OSError as exc:
+            raise GateAcquisitionError(
+                f"could not launch {executable!r} to analyze foreign source: {exc}"
+            ) from exc
+        response_bytes = result.stdout
+        returncode = result.returncode
+        error_bytes = result.stderr
+    else:
+        if process.stdin is None or process.stdout is None:
+            raise GateAcquisitionError(
+                f"{executable}: foreign-source process has no protocol streams"
+            )
+        try:
+            process.stdin.write(encoded_request + b"\n")
+            process.stdin.flush()
+            response_bytes = process.stdout.readline(_FOREIGN_RESPONSE_BYTE_LIMIT + 2)
+        except (BrokenPipeError, OSError) as exc:
+            raise GateAcquisitionError(
+                f"{executable}: foreign-source protocol stream failed: {exc}"
+            ) from exc
+        returncode = process.poll()
+        error_bytes = (
+            process.stderr.read()
+            if returncode is not None and process.stderr is not None
+            else b""
+        )
+    if returncode not in {None, 0} or not response_bytes:
+        raise GateAcquisitionError(
+            f"{executable}: foreign-source analysis subprocess exited "
+            f"{returncode}: {error_bytes.decode('utf-8', errors='replace').strip()}"
+        )
+    if len(response_bytes) > _FOREIGN_RESPONSE_BYTE_LIMIT:
+        raise GateAcquisitionError(
+            f"{executable}: foreign-source response exceeds "
+            f"{_FOREIGN_RESPONSE_BYTE_LIMIT} bytes"
+        )
+    try:
+        response = json.loads(
+            response_bytes.decode("utf-8"),
+            object_pairs_hook=_json_object_without_duplicate_keys,
+        )
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise GateAcquisitionError(
+            f"{executable}: foreign-source response is not strict JSON: {exc}"
+        ) from exc
+    if not isinstance(response, dict) or set(response) != _FOREIGN_RESPONSE_KEYS:
+        raise GateAcquisitionError(
+            f"{executable}: foreign-source response does not have the closed shape"
+        )
+    for key in (
+        "schema_version",
+        "product",
+        "revision",
+        "interpreter",
+        "module",
+        "path",
+    ):
+        if response[key] != request[key]:
+            raise GateAcquisitionError(
+                f"{executable}: foreign-source response changed identity field {key}"
+            )
+    status = response["status"]
+    error = response["error"]
+    imports = response["imports"]
+    if (
+        not isinstance(imports, list)
+        or imports != sorted(set(imports))
+        or len(imports) > _FOREIGN_IMPORT_LIMIT
+        or any(not isinstance(item, str) or not item for item in imports)
+    ):
+        raise GateAcquisitionError(
+            f"{executable}: foreign-source response carries invalid import facts"
+        )
+    if status == "ok":
+        if error is not None:
+            raise GateAcquisitionError(
+                f"{executable}: successful foreign-source response carries an error"
+            )
+        return frozenset(imports)
+    if not isinstance(error, str) or not error:
+        raise GateAcquisitionError(
+            f"{executable}: refused foreign-source response has no diagnostic"
+        )
+    if status == "syntax_error":
+        raise _ForeignSyntaxError(error)
+    if status == "derivation_error":
+        raise GateDerivationError(error)
+    raise GateAcquisitionError(
+        f"{executable}: foreign-source response has unknown status {status!r}"
+    )
 
 
 @dataclass(frozen=True)
@@ -1419,13 +1918,145 @@ def _visit_imports(
     Visitor().visit(tree)
 
 
+def _import_edges_from_source(
+    source_bytes: bytes,
+    *,
+    current_module: str,
+    is_package: bool,
+    available_modules: frozenset[str],
+) -> frozenset[str]:
+    """Parse one module and derive its import edges without executing it.
+
+    This is the complete AST-dependent unit run by the selected product
+    interpreter.  Its output is plain module-name facts, so no version-specific
+    AST object crosses the subprocess boundary.
+    """
+
+    source = source_bytes.decode("utf-8")
+    tree = ast.parse(source)
+    assignments: dict[str, list[ast.expr]] = {}
+    dictionary_values: dict[str, frozenset[str]] = {}
+    literal_tables: dict[str, tuple[str, ...]] = {}
+    for candidate in ast.walk(tree):
+        target: ast.expr | None = None
+        value: ast.expr | None = None
+        if isinstance(candidate, ast.Assign) and len(candidate.targets) == 1:
+            target, value = candidate.targets[0], candidate.value
+        elif isinstance(candidate, ast.AnnAssign):
+            target, value = candidate.target, candidate.value
+        if not isinstance(target, ast.Name) or value is None:
+            continue
+        assignments.setdefault(target.id, []).append(value)
+        if isinstance(value, ast.List | ast.Tuple | ast.Set) and all(
+            isinstance(item, ast.Constant) and isinstance(item.value, str)
+            for item in value.elts
+        ):
+            literal_tables[target.id] = tuple(
+                item.value
+                for item in value.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            )
+        if isinstance(value, ast.Dict):
+            values = {
+                item.value
+                for item in value.values
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            }
+            if (
+                all(
+                    isinstance(item, ast.Constant) and isinstance(item.value, str)
+                    for item in value.values
+                )
+                and values
+            ):
+                dictionary_values[target.id] = frozenset(values)
+    for candidate in ast.walk(tree):
+        if (
+            isinstance(candidate, ast.Compare)
+            and isinstance(candidate.left, ast.Name)
+            and len(candidate.ops) == 1
+            and isinstance(candidate.ops[0], ast.In)
+            and len(candidate.comparators) == 1
+            and isinstance(candidate.comparators[0], ast.Name)
+        ):
+            for literal in literal_tables.get(candidate.comparators[0].id, ()):
+                assignments.setdefault(candidate.left.id, []).append(
+                    ast.Constant(value=literal)
+                )
+    functions = [
+        item
+        for item in ast.walk(tree)
+        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]
+    calls = [item for item in ast.walk(tree) if isinstance(item, ast.Call)]
+    for function in functions:
+        parameters = (*function.args.posonlyargs, *function.args.args)
+        for call in calls:
+            called_name = (
+                call.func.id
+                if isinstance(call.func, ast.Name)
+                else call.func.attr
+                if isinstance(call.func, ast.Attribute)
+                else None
+            )
+            if called_name != function.name:
+                continue
+            for position, parameter in enumerate(parameters):
+                call_position = position
+                if (
+                    isinstance(call.func, ast.Attribute)
+                    and parameters
+                    and parameters[0].arg in {"self", "cls"}
+                ):
+                    call_position -= 1
+                if call_position < 0 or call_position >= len(call.args):
+                    continue
+                argument = call.args[call_position]
+                if isinstance(argument, ast.Constant) and isinstance(
+                    argument.value, str
+                ):
+                    assignments.setdefault(parameter.arg, []).append(argument)
+                    continue
+                if not isinstance(argument, ast.Name):
+                    continue
+                for literal in literal_tables.get(argument.id, ()):
+                    assignments.setdefault(parameter.arg, []).append(
+                        ast.Constant(value=literal)
+                    )
+    frozen_assignments = {name: tuple(values) for name, values in assignments.items()}
+    edges: set[str] = set()
+    available_index = {name: None for name in available_modules}
+    _visit_imports(
+        tree=tree,
+        current_module=current_module,
+        is_package=is_package,
+        assignments=frozen_assignments,
+        dictionary_values=dictionary_values,
+        index=available_index,  # type: ignore[arg-type]
+        in_memory_sources=MappingProxyType({}),
+        enqueue=edges.add,
+    )
+    return frozenset(edges)
+
+
 def _walk_import_graph(
     *,
     repository: Path,
     index: Mapping[str, _GitPythonFile],
     roots: Sequence[str],
     in_memory_sources: Mapping[str, bytes] = MappingProxyType({}),
+    discover_imports: (
+        Callable[[bytes, str, bool, str, frozenset[str]], frozenset[str]] | None
+    ) = None,
 ) -> _ImportReachability:
+    """Walk the import graph, parsing each reachable module exactly once.
+
+    ``discover_imports`` is an injection point for interpreter-floor-correct
+    parsing and AST walking (see ``_product_runtime_reachability``). Its
+    default preserves this function's host interpreter for trusted,
+    Starter-owned sources such as the deferred-import-debt catalogue.
+    """
+
     queue = deque(dict.fromkeys(roots))
     visited: set[str] = set()
     external: set[str] = set()
@@ -1449,124 +2080,35 @@ def _walk_import_graph(
             source_bytes = _git_blob(
                 repository, source_item.object_id, source=source_item.path
             )
+        is_package = source_item is not None and source_item.path.endswith(
+            "/__init__.py"
+        )
+        path_label = source_item.path if source_item is not None else module
+        available_modules = frozenset((*index, *in_memory_sources))
         try:
-            source = source_bytes.decode("utf-8")
-            tree = ast.parse(source)
+            imports = (
+                discover_imports(
+                    source_bytes,
+                    module,
+                    is_package,
+                    path_label,
+                    available_modules,
+                )
+                if discover_imports is not None
+                else _import_edges_from_source(
+                    source_bytes,
+                    current_module=module,
+                    is_package=is_package,
+                    available_modules=available_modules,
+                )
+            )
         except (UnicodeDecodeError, SyntaxError) as exc:
             raise GateDerivationError(
                 f"{module}: reachable source does not parse"
             ) from exc
         visited.add(module)
-        is_package = source_item is not None and source_item.path.endswith(
-            "/__init__.py"
-        )
-        assignments: dict[str, list[ast.expr]] = {}
-        dictionary_values: dict[str, frozenset[str]] = {}
-        literal_tables: dict[str, tuple[str, ...]] = {}
-        for candidate in ast.walk(tree):
-            target: ast.expr | None = None
-            value: ast.expr | None = None
-            if isinstance(candidate, ast.Assign) and len(candidate.targets) == 1:
-                target, value = candidate.targets[0], candidate.value
-            elif isinstance(candidate, ast.AnnAssign):
-                target, value = candidate.target, candidate.value
-            if not isinstance(target, ast.Name) or value is None:
-                continue
-            assignments.setdefault(target.id, []).append(value)
-            if isinstance(value, ast.List | ast.Tuple | ast.Set) and all(
-                isinstance(item, ast.Constant) and isinstance(item.value, str)
-                for item in value.elts
-            ):
-                literal_tables[target.id] = tuple(
-                    item.value
-                    for item in value.elts
-                    if isinstance(item, ast.Constant) and isinstance(item.value, str)
-                )
-            if isinstance(value, ast.Dict):
-                values = {
-                    item.value
-                    for item in value.values
-                    if isinstance(item, ast.Constant) and isinstance(item.value, str)
-                }
-                if (
-                    all(
-                        isinstance(item, ast.Constant) and isinstance(item.value, str)
-                        for item in value.values
-                    )
-                    and values
-                ):
-                    dictionary_values[target.id] = frozenset(values)
-        for candidate in ast.walk(tree):
-            if (
-                isinstance(candidate, ast.Compare)
-                and isinstance(candidate.left, ast.Name)
-                and len(candidate.ops) == 1
-                and isinstance(candidate.ops[0], ast.In)
-                and len(candidate.comparators) == 1
-                and isinstance(candidate.comparators[0], ast.Name)
-            ):
-                for literal in literal_tables.get(candidate.comparators[0].id, ()):
-                    assignments.setdefault(candidate.left.id, []).append(
-                        ast.Constant(value=literal)
-                    )
-        functions = [
-            item
-            for item in ast.walk(tree)
-            if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
-        ]
-        calls = [item for item in ast.walk(tree) if isinstance(item, ast.Call)]
-        for function in functions:
-            parameters = (*function.args.posonlyargs, *function.args.args)
-            for call in calls:
-                called_name = (
-                    call.func.id
-                    if isinstance(call.func, ast.Name)
-                    else call.func.attr
-                    if isinstance(call.func, ast.Attribute)
-                    else None
-                )
-                if called_name != function.name:
-                    continue
-                for position, parameter in enumerate(parameters):
-                    call_position = position
-                    if (
-                        isinstance(call.func, ast.Attribute)
-                        and parameters
-                        and parameters[0].arg
-                        in {
-                            "self",
-                            "cls",
-                        }
-                    ):
-                        call_position -= 1
-                    if call_position < 0 or call_position >= len(call.args):
-                        continue
-                    argument = call.args[call_position]
-                    if isinstance(argument, ast.Constant) and isinstance(
-                        argument.value, str
-                    ):
-                        assignments.setdefault(parameter.arg, []).append(argument)
-                        continue
-                    if not isinstance(argument, ast.Name):
-                        continue
-                    for literal in literal_tables.get(argument.id, ()):
-                        assignments.setdefault(parameter.arg, []).append(
-                            ast.Constant(value=literal)
-                        )
-        frozen_assignments = {
-            name: tuple(values) for name, values in assignments.items()
-        }
-
-        _visit_imports(
-            tree=tree,
-            current_module=module,
-            is_package=is_package,
-            assignments=frozen_assignments,
-            dictionary_values=dictionary_values,
-            index=index,
-            in_memory_sources=in_memory_sources,
-            enqueue=enqueue,
-        )
+        for imported_module in imports:
+            enqueue(imported_module)
 
     return _ImportReachability(frozenset(visited), frozenset(external))
 
@@ -1693,19 +2235,55 @@ def _product_runtime_reachability(
     clone: Path,
     revision: str,
     observations: Mapping[str, bytes],
+    pyproject: Mapping[str, object],
 ) -> _ImportReachability:
     spec = _DERIVATION_SPECS[product]
+    clauses = _declared_python_requirement(pyproject, product=product)
+    interpreter_name, interpreter_version = _select_interpreter(
+        clauses, product=product
+    )
+    executable = _require_interpreter_available(interpreter_name)
+    floor = ".".join(str(part) for part in interpreter_version)
     index = dict(_git_python_index(clone, revision, "app"))
     extra_sources = {
         module: observations[observation_id]
         for module, observation_id in spec.extra_source_modules.items()
     }
-    return _walk_import_graph(
-        repository=clone,
-        index=MappingProxyType(index),
-        roots=spec.runtime_roots,
-        in_memory_sources=MappingProxyType(extra_sources),
-    )
+
+    def discover_imports(
+        source: bytes,
+        module: str,
+        is_package: bool,
+        path: str,
+        available_modules: frozenset[str],
+    ) -> frozenset[str]:
+        try:
+            return _imports_under_interpreter(
+                source,
+                executable=executable,
+                product=product,
+                revision=revision,
+                interpreter=interpreter_name,
+                module=module,
+                path=path,
+                is_package=is_package,
+                available_modules=available_modules,
+                process=process,
+            )
+        except _ForeignSyntaxError as exc:
+            raise GateDerivationError(
+                f"{product}: {path}: source does not parse under interpreter "
+                f"{interpreter_name} (selected for declared floor {floor}): {exc}"
+            ) from exc
+
+    with _foreign_import_process(executable) as process:
+        return _walk_import_graph(
+            repository=clone,
+            index=MappingProxyType(index),
+            roots=spec.runtime_roots,
+            in_memory_sources=MappingProxyType(extra_sources),
+            discover_imports=discover_imports,
+        )
 
 
 def _derive_records(
@@ -1735,6 +2313,7 @@ def _derive_records(
         clone=clone,
         revision=envelope.product_revision,
         observations=observations,
+        pyproject=pyproject,
     )
     derivation_spec = _DERIVATION_SPECS[product]
     assembly_reached = derivation_spec.assembly_module in reachability.visited
