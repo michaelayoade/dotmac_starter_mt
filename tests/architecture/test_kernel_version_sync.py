@@ -189,11 +189,6 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
-    # a71 allocated mod_people and remained a1's effective floor. a2 imports
-    # `dotmac_kernel.transactions.conflict_savepoint`, the public engine-free
-    # transaction surface first published in a98. An earlier kernel has the
-    # allocation but not that supported seam, so the consumed capability now
-    # outranks the allocation while a71 remains the provenance coordinate.
     # Files has been raised three times and the table records only the highest:
     # mod_files was ALLOCATED in a54, a56 made fi_0001's prerequisite
     # declarations installable, a61 carried ADR-0028's `supported_plane_sets`
@@ -205,6 +200,11 @@ CAPABILITY_RAISED_FLOORS = {
     # floor the wheel cannot satisfy: a consumer resolving kernel a61-a97
     # passes the constraint and then fails at the import.
     "dotmac-files": ("0.1.0a98", "0.1.0a54"),
+    # a71 allocated mod_people and remained a1's effective floor. a2 imports
+    # `dotmac_kernel.transactions.conflict_savepoint`, the public engine-free
+    # transaction surface first published in a98. An earlier kernel has the
+    # allocation but not that supported seam, so the consumed capability now
+    # outranks the allocation while a71 remains the provenance coordinate.
     "dotmac-people": ("0.1.0a98", "0.1.0a71"),
     # Tax's a4 exact-replay ensures import the same public engine-free
     # transaction surface. Its namespace was allocated in a85, but tagged
@@ -566,6 +566,21 @@ def _first_published_kernel_tag_containing(path: str) -> str:
     pytest.fail(f"no visible published kernel tag contains {path}")
 
 
+def _mentions_the_transaction_surface(source: Path) -> bool:
+    """Both spellings reach the same module, so both must be detected.
+
+    `import dotmac_kernel.transactions` and `from dotmac_kernel import
+    transactions` bind the identical module; only the first contains the
+    dotted literal. Matching one spelling would let a consumer adopt the
+    surface through the other and keep a stale floor -- the very defect this
+    derivation exists to catch, reintroduced through a narrower detector.
+    """
+    text = source.read_text(encoding="utf-8")
+    return "dotmac_kernel.transactions" in text or (
+        "from dotmac_kernel import" in text and "transactions" in text
+    )
+
+
 def _distributions_consuming_the_transaction_surface() -> tuple[str, ...]:
     """Derive the consumers; never restate them.
 
@@ -583,7 +598,7 @@ def _distributions_consuming_the_transaction_surface() -> tuple[str, ...]:
         and package.name != "dotmac-kernel"
         and (package / "src").is_dir()
         and any(
-            "dotmac_kernel.transactions" in source.read_text(encoding="utf-8")
+            _mentions_the_transaction_surface(source)
             for source in (package / "src").rglob("*.py")
         )
     }
