@@ -3060,12 +3060,13 @@
       "$comment": [
         "Tenant tax policy, classifications, ordered components and computed evidence.",
         "Product-first from ERP; pricing and posting consequences stay with their owners.",
-        "Kernel a85 allocates mod_tax / tx / tax."
+        "Kernel a85 allocates mod_tax / tx / tax; a98 first publishes the",
+        "engine-free transaction surface now consumed by Tax's exact-replay ensures."
       ],
       "package_dir": "packages/dotmac-tax",
       "import_name": "dotmac_tax",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a85",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_tax",
       "tag_prefix": "dotmac-tax-v",
       "wheel_contents": {

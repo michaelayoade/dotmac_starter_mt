@@ -24,10 +24,12 @@ together — which is the failure this test exists to catch.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import itertools
 import json
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -93,8 +95,9 @@ def test_the_version_is_a_pep440_release_prerelease_or_development_marker() -> N
 # the marketing cohort, and referrals and reseller management are ALLOCATED in
 # a84 — never published, so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather
 # than here — and the consolidated ERP/Backoffice/general allocation follows
-# in a85. People moved to CAPABILITY_RAISED_FLOORS when a2 adopted a98's public
-# engine-free transaction surface; its a71 allocation remains recorded there.
+# in a85. People and Tax moved to CAPABILITY_RAISED_FLOORS when their repaired
+# exact-replay writes adopted a98's public engine-free transaction surface;
+# their allocations remain recorded there.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # The commerce cohort: kernel a89 added BILLING/COLLECTIONS/ORDERS/
     # SUBSCRIPTIONS to MIGRATION_OWNER_LEDGER, and Billing and Collections
@@ -122,7 +125,6 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-projects": "0.1.0a85",
     "dotmac-records": "0.1.0a85",
     "dotmac-surveys": "0.1.0a85",
-    "dotmac-tax": "0.1.0a85",
     "dotmac-work-orders": "0.1.0a85",
     "dotmac-workflow-runtime": "0.1.0a88",
     # The ISP essential-domain cohort (ADR-0058) and the four customer-journey
@@ -193,6 +195,11 @@ CAPABILITY_RAISED_FLOORS = {
     # allocation but not that supported seam, so the consumed capability now
     # outranks the allocation while a71 remains the provenance coordinate.
     "dotmac-people": ("0.1.0a98", "0.1.0a71"),
+    # Tax's a4 exact-replay ensures import the same public engine-free
+    # transaction surface. Its namespace was allocated in a85, but tagged
+    # kernel releases before a98 do not contain `dotmac_kernel.transactions`,
+    # so allocation cannot remain the installable floor.
+    "dotmac-tax": ("0.1.0a98", "0.1.0a85"),
     # Allocated with the rest of the commerce cohort in a89, but guarded writes
     # consume the manifest-owned `charge_models` and `obligation_sources`
     # declarations that land in a94. The highest consumed capability wins, so
@@ -520,6 +527,63 @@ def _kernel_tag_serials() -> set[int]:
         "a hole, not a pass"
     )
     return serials
+
+
+def _first_published_kernel_tag_containing(path: str) -> str:
+    """Derive a public-surface floor from immutable released source.
+
+    A changelog claim or a copied version literal cannot establish when an
+    import became installable. The tag object is the published artifact: ask
+    each visible kernel release whether it actually contains the required
+    path, then return the earliest one that does.
+    """
+    for serial in sorted(_kernel_tag_serials()):
+        tag = f"dotmac-kernel-v0.1.0a{serial}"
+        try:
+            result = subprocess.run(  # noqa: S603 — fixed git argv, no shell
+                ["git", "cat-file", "-e", f"{tag}:{path}"],  # noqa: S607
+                cwd=PACKAGES.parent,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            pytest.fail(f"cannot inspect published kernel tag {tag}: {exc}")
+        assert result.returncode in {
+            0,
+            1,
+            128,
+        }, f"git could not inspect {tag}:{path}: {result.stderr.strip()}"
+        if result.returncode == 0:
+            return f"0.1.0a{serial}"
+    pytest.fail(f"no visible published kernel tag contains {path}")
+
+
+@pytest.mark.parametrize("distribution", ("dotmac-people", "dotmac-tax"))
+def test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
+    distribution: str,
+) -> None:
+    """The a98 floor is derived from tags, not repeated as an assertion.
+
+    Both distributions actually import the public surface, and their declared
+    capability-raised floor must be the earliest published tag containing its
+    implementation. This fails if an earlier tag gains the file, the floor is
+    needlessly raised, or a source repair loses the import while retaining its
+    compatibility cost.
+    """
+    package_dir = PACKAGES / distribution
+    imports_surface = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "dotmac_kernel.transactions"
+        and any(alias.name == "conflict_savepoint" for alias in node.names)
+        for source in package_dir.rglob("*.py")
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+    )
+    assert imports_surface, f"{distribution} no longer consumes the transaction surface"
+    floor, _allocation = CAPABILITY_RAISED_FLOORS[distribution]
+    assert floor == _first_published_kernel_tag_containing(
+        "packages/dotmac-kernel/src/dotmac_kernel/transactions.py"
+    ), f"{distribution} must floor at the first published transaction-surface tag"
 
 
 @pytest.mark.parametrize(
