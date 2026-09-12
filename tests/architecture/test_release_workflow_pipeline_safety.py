@@ -10,7 +10,8 @@ commands.
 The lightweight lexer recognises executable unquoted ``|`` and ``|&``, shell
 comments, quotes, and command substitutions.  Nested Bash/sh interpreters are
 a separate closed boundary: pipeline-bearing ``-c`` or heredoc bodies require
-their own ``-o pipefail`` and may not disable it.  Dynamic ``eval`` is refused.
+their own ``-o pipefail`` and may not disable it.  Indirect ``-c`` source and
+dynamic ``eval`` are refused rather than interpreted.
 """
 
 from __future__ import annotations
@@ -299,7 +300,11 @@ def _child_shell(command: str) -> tuple[bool, str | None]:
 
 def _child_issues(command: str) -> list[str]:
     hardened, child = _child_shell(command)
-    if child is None or not _contains_outer_pipeline(child):
+    if child is None:
+        return []
+    if re.fullmatch(r"\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]+\}|\$\(.*\)|`.*`", child):
+        return [f"dynamic nested shell command is unsupported: {command}"]
+    if not _contains_outer_pipeline(child):
         return []
     if not hardened:
         return [f"nested shell pipeline without child pipefail: {command}"]
@@ -451,6 +456,19 @@ def test_guard_accepts_hardened_child_and_rejects_its_later_disable() -> None:
     assert _unsafe_pipelines(disabled) == [
         "pipefail disable is forbidden: set +o pipefail"
     ]
+
+
+def test_guard_refuses_indirect_nested_shell_source() -> None:
+    for child in ('"$SCRIPT"', '"${SCRIPT}"', "\"$(printf 'false | tee')\""):
+        script = f"SCRIPT='false | tee'; bash -c {child}\n"
+        assert _unsafe_pipelines(script) == [
+            f"dynamic nested shell command is unsupported: bash -c {child}"
+        ]
+
+
+def test_guard_keeps_literal_child_source_with_ordinary_data_expansion() -> None:
+    script = "bash -o pipefail -c 'false | tee -a \"$VAR\"'\n"
+    assert _unsafe_pipelines(script) == []
 
 
 def test_guard_refuses_pipeline_heredoc_without_a_hardened_child() -> None:
