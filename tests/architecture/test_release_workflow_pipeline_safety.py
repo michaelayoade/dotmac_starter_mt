@@ -86,12 +86,15 @@ def _tokens(line: str) -> list[str]:
 
 def _pipefail_setting(line: str) -> bool | None:
     tokens = _tokens(line)
-    for index, token in enumerate(tokens):
-        if token != "set":
-            continue
-        following = tokens[index + 1 :]
-        if "pipefail" in following:
-            return "+o" not in following[: following.index("pipefail")]
+    prefixes = {"{", "}", "then", "do", "else", "elif", "if", "!", "("}
+    command_index = 0
+    while command_index < len(tokens) and tokens[command_index] in prefixes:
+        command_index += 1
+    if command_index >= len(tokens) or tokens[command_index] != "set":
+        return None
+    following = tokens[command_index + 1 :]
+    if "pipefail" in following:
+        return "+o" not in following[: following.index("pipefail")]
     return None
 
 
@@ -172,7 +175,7 @@ def _pipeline_operators(line: str) -> list[int]:
 
 
 def _top_level_commands(line: str) -> list[str]:
-    """Split a logical shell line at executable top-level semicolons."""
+    """Split a logical shell line at executable ``;``, ``&&``, ``||``, and ``&``."""
     commands: list[str] = []
     start = 0
     quote: str | None = None
@@ -201,6 +204,13 @@ def _top_level_commands(line: str) -> list[str]:
             if end is not None:
                 index = end
         elif char == ";":
+            commands.append(line[start:index])
+            start = index + 1
+        elif line.startswith("&&", index) or line.startswith("||", index):
+            commands.append(line[start:index])
+            index += 1
+            start = index + 1
+        elif char == "&" and (index == 0 or line[index - 1] != "|"):
             commands.append(line[start:index])
             start = index + 1
         index += 1
@@ -401,6 +411,30 @@ def test_guard_detects_a_failed_producer_hidden_by_tee() -> None:
 def test_guard_accepts_a_tee_pipeline_only_after_pipefail() -> None:
     script = 'set -euo pipefail\nresolver "$input" | tee -a "$GITHUB_OUTPUT"\n'
     assert _unsafe_pipelines(script) == []
+
+
+def test_guard_tracks_pipefail_in_command_order_across_and_lists() -> None:
+    unsafe_first = 'false | tee -a "$GITHUB_OUTPUT" && set -o pipefail\n'
+    safe_first = 'set -o pipefail && false | tee -a "$GITHUB_OUTPUT"\n'
+    assert _unsafe_pipelines(unsafe_first) == [
+        'pipeline without preceding pipefail: false | tee -a "$GITHUB_OUTPUT"'
+    ]
+    assert _unsafe_pipelines(safe_first) == []
+
+
+def test_guard_does_not_treat_a_set_argument_as_the_set_builtin() -> None:
+    script = 'echo set -o pipefail; false | tee -a "$GITHUB_OUTPUT"\n'
+    assert _unsafe_pipelines(script) == [
+        'pipeline without preceding pipefail: false | tee -a "$GITHUB_OUTPUT"'
+    ]
+
+
+def test_guard_does_not_treat_pipeline_data_as_the_set_builtin() -> None:
+    script = 'printf "%s" set -o pipefail | tee -a "$GITHUB_OUTPUT"\n'
+    assert _unsafe_pipelines(script) == [
+        "pipeline without preceding pipefail: "
+        'printf "%s" set -o pipefail | tee -a "$GITHUB_OUTPUT"'
+    ]
 
 
 def test_guard_detects_a_non_tee_pipeline_without_pipefail() -> None:
