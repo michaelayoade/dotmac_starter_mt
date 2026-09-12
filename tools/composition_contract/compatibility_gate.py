@@ -31,9 +31,11 @@ import importlib.util
 import json
 import os
 import re
+import selectors
 import shutil
 import subprocess
 import tempfile
+import time
 import tomllib
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -130,6 +132,26 @@ class _VersionClause:
     version: tuple[int, int, int]
 
 
+@dataclass(frozen=True)
+class _VersionDomain:
+    """Canonical meaning of the supported comparison-only specifier subset."""
+
+    lower: tuple[int, int, int] | None
+    lower_inclusive: bool
+    upper: tuple[int, int, int] | None
+    upper_inclusive: bool
+    excluded: frozenset[tuple[int, int, int]]
+    exact: tuple[int, int, int] | None = None
+    empty: bool = False
+
+
+@dataclass(frozen=True)
+class _SelectedInterpreter:
+    name: str
+    executable: str
+    version: tuple[int, int, int]
+
+
 def _normalize_version(parts: tuple[int, ...]) -> tuple[int, int, int]:
     padded = (*parts, 0, 0)
     return (padded[0], padded[1], padded[2])
@@ -161,6 +183,94 @@ def _parse_python_specifier(raw: str, *, source: str) -> tuple[_VersionClause, .
     if not clauses:
         raise GateDerivationError(f"{source}: python requirement is empty")
     return tuple(sorted(clauses, key=lambda clause: (clause.operator, clause.version)))
+
+
+def _canonical_version_domain(
+    clauses: tuple[_VersionClause, ...],
+) -> _VersionDomain:
+    """Reduce comparison clauses to an interval, exclusions, or one point.
+
+    Agreement is semantic, not textual: duplicate and redundant clauses do
+    not make two checked-in requirement surfaces disagree.
+    """
+
+    lower: tuple[int, int, int] | None = None
+    lower_inclusive = True
+    upper: tuple[int, int, int] | None = None
+    upper_inclusive = True
+    exact_values: set[tuple[int, int, int]] = set()
+    excluded: set[tuple[int, int, int]] = set()
+    for clause in clauses:
+        version = clause.version
+        if clause.operator == "==":
+            exact_values.add(version)
+        elif clause.operator == "!=":
+            excluded.add(version)
+        elif clause.operator in {">", ">="}:
+            inclusive = clause.operator == ">="
+            if lower is None or version > lower:
+                lower, lower_inclusive = version, inclusive
+            elif version == lower:
+                lower_inclusive = lower_inclusive and inclusive
+        else:
+            inclusive = clause.operator == "<="
+            if upper is None or version < upper:
+                upper, upper_inclusive = version, inclusive
+            elif version == upper:
+                upper_inclusive = upper_inclusive and inclusive
+
+    if len(exact_values) > 1:
+        return _VersionDomain(None, True, None, True, frozenset(), empty=True)
+    if exact_values:
+        exact = next(iter(exact_values))
+        other_clauses = tuple(clause for clause in clauses if clause.operator != "==")
+        if exact in excluded or not all(
+            _clause_satisfied(clause, exact) for clause in other_clauses
+        ):
+            return _VersionDomain(None, True, None, True, frozenset(), empty=True)
+        return _VersionDomain(exact, True, exact, True, frozenset(), exact=exact)
+
+    # Interpreter versions are concrete ``sys.version_info[:3]`` triples.
+    # Normalize exclusive bounds when the adjacent triple is representable so
+    # spellings such as ``>3.12`` and ``>=3.12.1`` have one meaning here.
+    if lower is not None and not lower_inclusive:
+        lower = (lower[0], lower[1], lower[2] + 1)
+        lower_inclusive = True
+    if upper is not None and not upper_inclusive and upper[2] > 0:
+        upper = (upper[0], upper[1], upper[2] - 1)
+        upper_inclusive = True
+
+    if lower is not None and upper is not None:
+        if lower > upper or (
+            lower == upper and not (lower_inclusive and upper_inclusive)
+        ):
+            return _VersionDomain(None, True, None, True, frozenset(), empty=True)
+        if lower == upper and lower in excluded:
+            return _VersionDomain(None, True, None, True, frozenset(), empty=True)
+        if lower[:2] == upper[:2] and lower_inclusive and upper_inclusive:
+            candidates = upper[2] - lower[2] + 1
+            exclusions = sum(lower <= version <= upper for version in excluded)
+            if exclusions == candidates:
+                return _VersionDomain(None, True, None, True, frozenset(), empty=True)
+
+    def inside(version: tuple[int, int, int]) -> bool:
+        if lower is not None and (
+            version < lower or (version == lower and not lower_inclusive)
+        ):
+            return False
+        if upper is not None and (
+            version > upper or (version == upper and not upper_inclusive)
+        ):
+            return False
+        return True
+
+    return _VersionDomain(
+        lower,
+        lower_inclusive,
+        upper,
+        upper_inclusive,
+        frozenset(version for version in excluded if inside(version)),
+    )
 
 
 def _pep621_requires_python(pyproject: Mapping[str, object]) -> str | None:
@@ -199,7 +309,7 @@ def _declared_python_requirement(
     """Accept exactly one declaration surface, or two that agree.
 
     A single surface (PEP 621 alone, or Poetry alone) is accepted outright.
-    Both present must parse to the same canonical clause set; disagreement
+    Both present must describe the same canonical version domain; disagreement
     refuses.  Neither present refuses -- a missing requirement is not a
     default.
     """
@@ -226,13 +336,20 @@ def _declared_python_requirement(
     if (
         pep621_clauses is not None
         and poetry_clauses is not None
-        and pep621_clauses != poetry_clauses
+        and _canonical_version_domain(pep621_clauses)
+        != _canonical_version_domain(poetry_clauses)
     ):
         raise GateDerivationError(
             f"{product}: project.requires-python ({pep621!r}) disagrees with "
             f"tool.poetry.dependencies.python ({poetry!r})"
         )
-    return pep621_clauses if pep621_clauses is not None else poetry_clauses  # type: ignore[return-value]
+    selected = pep621_clauses if pep621_clauses is not None else poetry_clauses
+    assert selected is not None
+    if _canonical_version_domain(selected).empty:
+        raise GateDerivationError(
+            f"{product}: declared python requirement has no satisfying version"
+        )
+    return selected
 
 
 def _clause_satisfied(clause: _VersionClause, candidate: tuple[int, int, int]) -> bool:
@@ -249,24 +366,127 @@ def _clause_satisfied(clause: _VersionClause, candidate: tuple[int, int, int]) -
     return candidate < clause.version  # "<"
 
 
+def _minor_can_satisfy(
+    clauses: tuple[_VersionClause, ...], minor: tuple[int, int]
+) -> bool:
+    """Whether some patch release in ``minor`` can satisfy the requirement."""
+
+    domain = _canonical_version_domain(clauses)
+    if domain.empty:
+        return False
+    start = (minor[0], minor[1], 0)
+    next_minor = (minor[0], minor[1] + 1, 0)
+    if domain.exact is not None:
+        return start <= domain.exact < next_minor
+    lower = domain.lower
+    upper = domain.upper
+    if upper is not None and (
+        upper < start or (upper == start and not domain.upper_inclusive)
+    ):
+        return False
+    if lower is not None and lower >= next_minor:
+        return False
+    first_patch = 0
+    if lower is not None and lower[:2] == minor:
+        first_patch = lower[2] + (not domain.lower_inclusive)
+    last_patch: int | None = None
+    if upper is not None and upper[:2] == minor:
+        last_patch = upper[2] - (not domain.upper_inclusive)
+        if last_patch < first_patch:
+            return False
+    if last_patch is not None:
+        available = last_patch - first_patch + 1
+        excluded = sum(
+            version[:2] == minor and first_patch <= version[2] <= last_patch
+            for version in domain.excluded
+        )
+        if excluded == available:
+            return False
+    # A finite exclusion set cannot consume an unbounded patch line.
+    return True
+
+
+def _probe_interpreter_version(executable: str, *, name: str) -> tuple[int, int, int]:
+    """Read the executable's real version; its filename is not evidence."""
+
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                executable,
+                "-I",
+                "-c",
+                "import json,sys; print(json.dumps(list(sys.version_info[:3])))",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+            cwd=tempfile.gettempdir(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GateAcquisitionError(
+            f"could not interrogate selected interpreter {name!r}: {exc}"
+        ) from exc
+    if result.returncode != 0:
+        raise GateAcquisitionError(
+            f"selected interpreter {name!r} could not report its version: "
+            f"{result.stderr.strip()}"
+        )
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise GateAcquisitionError(
+            f"selected interpreter {name!r} reported a non-JSON version"
+        ) from exc
+    if (
+        not isinstance(value, list)
+        or len(value) != 3
+        or any(not isinstance(part, int) or isinstance(part, bool) for part in value)
+    ):
+        raise GateAcquisitionError(
+            f"selected interpreter {name!r} reported an invalid version"
+        )
+    return (value[0], value[1], value[2])
+
+
 def _select_interpreter(
     clauses: tuple[_VersionClause, ...], *, product: str
-) -> tuple[str, tuple[int, int]]:
-    """Select the LOWEST trusted interpreter that satisfies every clause.
+) -> _SelectedInterpreter:
+    """Select and verify the LOWEST trusted interpreter floor.
 
     Lowest, not merely compatible, is load-bearing: it is what detects a
     product using syntax newer than the floor it declares.
     """
 
-    for name, version in TRUSTED_INTERPRETERS:
-        candidate = _normalize_version(version)
-        if all(_clause_satisfied(clause, candidate) for clause in clauses):
-            return name, version
-    raise GateDerivationError(
-        f"{product}: no trusted interpreter "
-        f"({', '.join(name for name, _ in TRUSTED_INTERPRETERS)}) satisfies "
-        "the declared python requirement"
+    selected = next(
+        (
+            (name, minor)
+            for name, minor in TRUSTED_INTERPRETERS
+            if _minor_can_satisfy(clauses, minor)
+        ),
+        None,
     )
+    if selected is None:
+        raise GateDerivationError(
+            f"{product}: no trusted interpreter "
+            f"({', '.join(name for name, _ in TRUSTED_INTERPRETERS)}) satisfies "
+            "the declared python requirement"
+        )
+    name, minor = selected
+    executable = _require_interpreter_available(name)
+    actual = _probe_interpreter_version(executable, name=name)
+    if actual[:2] != minor:
+        raise GateAcquisitionError(
+            f"selected interpreter {name!r} resolved to Python "
+            f"{actual[0]}.{actual[1]}.{actual[2]}, expected {minor[0]}.{minor[1]}.x"
+        )
+    if not all(_clause_satisfied(clause, actual) for clause in clauses):
+        raise GateAcquisitionError(
+            f"selected interpreter {name!r} is Python "
+            f"{actual[0]}.{actual[1]}.{actual[2]}, which does not satisfy "
+            f"{product}'s declared python requirement"
+        )
+    return _SelectedInterpreter(name, executable, actual)
 
 
 def _require_interpreter_available(name: str) -> str:
@@ -288,6 +508,9 @@ def _require_interpreter_available(name: str) -> str:
 _FOREIGN_IMPORT_PROTOCOL: Final = "foreign-import-analysis.v1"
 _FOREIGN_IMPORT_LIMIT: Final = 10_000
 _FOREIGN_RESPONSE_BYTE_LIMIT: Final = 1_000_000
+_FOREIGN_STDERR_BYTE_LIMIT: Final = 65_536
+_FOREIGN_REQUEST_TIMEOUT_SECONDS: Final = 10.0
+_FOREIGN_CLEANUP_TIMEOUT_SECONDS: Final = 1.0
 _FOREIGN_REQUEST_KEYS: Final = frozenset(
     {
         "schema_version",
@@ -416,6 +639,113 @@ def _json_object_without_duplicate_keys(pairs: list[tuple[str, object]]) -> obje
     return result
 
 
+def _stop_foreign_process(process: subprocess.Popen[bytes]) -> None:
+    """Close protocol streams and escalate wait -> terminate -> kill."""
+
+    if process.stdin is not None and not process.stdin.closed:
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+    if process.poll() is None:
+        try:
+            process.wait(timeout=_FOREIGN_CLEANUP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=_FOREIGN_CLEANUP_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                try:
+                    process.wait(timeout=_FOREIGN_CLEANUP_TIMEOUT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    # A platform process API that cannot reap after SIGKILL is
+                    # already outside what this gate can repair.  Preserve the
+                    # original acquisition/derivation error, if any.
+                    pass
+    for stream in (process.stdout, process.stderr):
+        if stream is not None and not stream.closed:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def _read_foreign_response(
+    process: subprocess.Popen[bytes],
+    *,
+    executable: str,
+    timeout: float = _FOREIGN_REQUEST_TIMEOUT_SECONDS,
+) -> tuple[bytes, int | None, bytes]:
+    """Read one bounded line while concurrently draining child stderr."""
+
+    if process.stdout is None or process.stderr is None:
+        raise GateAcquisitionError(
+            f"{executable}: foreign-source process has no response streams"
+        )
+    stdout = bytearray()
+    stderr = bytearray()
+    deadline = time.monotonic() + timeout
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                diagnostic = bytes(stderr).decode("utf-8", errors="replace").strip()
+                suffix = f": {diagnostic}" if diagnostic else ""
+                raise GateAcquisitionError(
+                    f"{executable}: foreign-source analysis timed out after "
+                    f"{timeout:g} seconds{suffix}"
+                )
+            events = selector.select(remaining)
+            if not events:
+                continue
+            for key, _events in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 65_536)
+                except OSError as exc:
+                    raise GateAcquisitionError(
+                        f"{executable}: foreign-source response stream failed: {exc}"
+                    ) from exc
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                if key.data == "stderr":
+                    stderr.extend(chunk)
+                    if len(stderr) > _FOREIGN_STDERR_BYTE_LIMIT:
+                        raise GateAcquisitionError(
+                            f"{executable}: foreign-source stderr exceeds "
+                            f"{_FOREIGN_STDERR_BYTE_LIMIT} bytes"
+                        )
+                    continue
+                stdout.extend(chunk)
+                if len(stdout) > _FOREIGN_RESPONSE_BYTE_LIMIT + 1:
+                    raise GateAcquisitionError(
+                        f"{executable}: foreign-source response exceeds "
+                        f"{_FOREIGN_RESPONSE_BYTE_LIMIT} bytes"
+                    )
+                if b"\n" in stdout:
+                    response, remainder = bytes(stdout).split(b"\n", 1)
+                    if remainder:
+                        raise GateAcquisitionError(
+                            f"{executable}: foreign-source process emitted "
+                            "more than one response"
+                        )
+                    return response, process.poll(), bytes(stderr)
+            if not selector.get_map():
+                return bytes(stdout), process.poll(), bytes(stderr)
+    finally:
+        selector.close()
+
+
 @contextmanager
 def _foreign_import_process(
     executable: str,
@@ -443,13 +773,7 @@ def _foreign_import_process(
     try:
         yield process
     finally:
-        if process.stdin is not None:
-            process.stdin.close()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.terminate()
-            process.wait(timeout=5)
+        _stop_foreign_process(process)
 
 
 def _imports_under_interpreter(
@@ -501,7 +825,13 @@ def _imports_under_interpreter(
                 capture_output=True,
                 check=False,
                 cwd=tempfile.gettempdir(),
+                timeout=_FOREIGN_REQUEST_TIMEOUT_SECONDS,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise GateAcquisitionError(
+                f"{executable}: foreign-source analysis timed out after "
+                f"{_FOREIGN_REQUEST_TIMEOUT_SECONDS:g} seconds"
+            ) from exc
         except OSError as exc:
             raise GateAcquisitionError(
                 f"could not launch {executable!r} to analyze foreign source: {exc}"
@@ -517,17 +847,13 @@ def _imports_under_interpreter(
         try:
             process.stdin.write(encoded_request + b"\n")
             process.stdin.flush()
-            response_bytes = process.stdout.readline(_FOREIGN_RESPONSE_BYTE_LIMIT + 2)
+            response_bytes, returncode, error_bytes = _read_foreign_response(
+                process, executable=executable
+            )
         except (BrokenPipeError, OSError) as exc:
             raise GateAcquisitionError(
                 f"{executable}: foreign-source protocol stream failed: {exc}"
             ) from exc
-        returncode = process.poll()
-        error_bytes = (
-            process.stderr.read()
-            if returncode is not None and process.stderr is not None
-            else b""
-        )
     if returncode not in {None, 0} or not response_bytes:
         raise GateAcquisitionError(
             f"{executable}: foreign-source analysis subprocess exited "
@@ -2239,11 +2565,10 @@ def _product_runtime_reachability(
 ) -> _ImportReachability:
     spec = _DERIVATION_SPECS[product]
     clauses = _declared_python_requirement(pyproject, product=product)
-    interpreter_name, interpreter_version = _select_interpreter(
-        clauses, product=product
-    )
-    executable = _require_interpreter_available(interpreter_name)
-    floor = ".".join(str(part) for part in interpreter_version)
+    selected = _select_interpreter(clauses, product=product)
+    interpreter_name = selected.name
+    executable = selected.executable
+    floor = ".".join(str(part) for part in selected.version)
     index = dict(_git_python_index(clone, revision, "app"))
     extra_sources = {
         module: observations[observation_id]

@@ -26,6 +26,9 @@ import base64
 import json
 import shutil
 import subprocess
+import sys
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -103,12 +106,47 @@ def test_both_surfaces_present_and_agreeing_is_accepted() -> None:
     assert clauses == _clauses(">=3.12,<3.14")
 
 
+@pytest.mark.parametrize(
+    ("pep621", "poetry"),
+    [
+        (">=3.12,>=3.12", ">=3.12"),
+        (">=3.12,<3.13", ">=3.12,<3.13,!=3.11"),
+        (">3.12,<3.13", ">=3.12.1,<3.13"),
+    ],
+)
+def test_both_surfaces_accept_semantically_equivalent_spellings(
+    pep621: str, poetry: str
+) -> None:
+    pyproject = {
+        "project": {"requires-python": pep621},
+        "tool": {"poetry": {"dependencies": {"python": poetry}}},
+    }
+    assert gate._declared_python_requirement(pyproject, product="academy") == _clauses(
+        pep621
+    )
+
+
 # --- Plant 3: a missing requirement refuses --------------------------------
 
 
 def test_missing_requirement_refuses() -> None:
     with pytest.raises(gate.GateDerivationError, match="no python requirement"):
         gate._declared_python_requirement({}, product="academy")
+
+
+def test_unsatisfiable_requirement_refuses_even_when_both_surfaces_agree() -> None:
+    pyproject = {
+        "project": {"requires-python": ">=3.12,<3.12"},
+        "tool": {"poetry": {"dependencies": {"python": ">=3.12,<3.12"}}},
+    }
+    with pytest.raises(gate.GateDerivationError, match="no satisfying version"):
+        gate._declared_python_requirement(pyproject, product="academy")
+
+
+def test_exclusions_covering_a_finite_range_make_it_unsatisfiable() -> None:
+    pyproject = {"project": {"requires-python": ">=3.12,<=3.12.1,!=3.12,!=3.12.1"}}
+    with pytest.raises(gate.GateDerivationError, match="no satisfying version"):
+        gate._declared_python_requirement(pyproject, product="academy")
 
 
 # --- Plant 4: unsupported requirement syntax refuses rather than guesses --
@@ -131,16 +169,74 @@ def test_unsupported_requirement_syntax_refuses(raw: str) -> None:
 # --- Selection: lowest trusted interpreter satisfying the declared range --
 
 
-def test_selection_picks_the_lowest_satisfying_floor_for_the_three_real_products() -> (
-    None
-):
+def _fake_interpreter_versions(
+    monkeypatch: pytest.MonkeyPatch,
+    versions: dict[str, tuple[int, int, int]] | None = None,
+) -> None:
+    actual = versions or {
+        "python3.11": (3, 11, 9),
+        "python3.12": (3, 12, 11),
+        "python3.13": (3, 13, 7),
+    }
+    monkeypatch.setattr(
+        gate, "_require_interpreter_available", lambda name: f"/trusted/{name}"
+    )
+    monkeypatch.setattr(
+        gate,
+        "_probe_interpreter_version",
+        lambda _executable, *, name: actual[name],
+    )
+
+
+def test_selection_picks_the_lowest_satisfying_floor_for_the_three_real_products(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_interpreter_versions(monkeypatch)
     erp = gate._select_interpreter(_clauses(">=3.11,<3.13"), product="erp")
     sub = gate._select_interpreter(_clauses(">=3.11,<3.13"), product="sub")
     academy = gate._select_interpreter(_clauses(">=3.12,<3.14"), product="academy")
 
-    assert erp == ("python3.11", (3, 11))
-    assert sub == ("python3.11", (3, 11))
-    assert academy == ("python3.12", (3, 12))
+    assert (erp.name, erp.version) == ("python3.11", (3, 11, 9))
+    assert (sub.name, sub.version) == ("python3.11", (3, 11, 9))
+    assert (academy.name, academy.version) == ("python3.12", (3, 12, 11))
+
+
+def test_selection_uses_the_executable_patch_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_interpreter_versions(monkeypatch)
+    selected = gate._select_interpreter(_clauses(">=3.12.1,<3.13"), product="academy")
+    assert selected.version == (3, 12, 11)
+
+
+def test_selection_refuses_when_the_floor_executable_patch_is_too_old(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_interpreter_versions(
+        monkeypatch,
+        versions={
+            "python3.11": (3, 11, 9),
+            "python3.12": (3, 12, 11),
+            "python3.13": (3, 13, 7),
+        },
+    )
+    with pytest.raises(gate.GateAcquisitionError, match="does not satisfy"):
+        gate._select_interpreter(_clauses(">=3.12.12,<3.13"), product="academy")
+
+
+def test_selection_refuses_a_path_shadowing_version_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_interpreter_versions(
+        monkeypatch,
+        versions={
+            "python3.11": (3, 11, 9),
+            "python3.12": (3, 13, 7),
+            "python3.13": (3, 13, 7),
+        },
+    )
+    with pytest.raises(gate.GateAcquisitionError, match="expected 3.12.x"):
+        gate._select_interpreter(_clauses(">=3.12,<3.14"), product="academy")
 
 
 def test_selection_refuses_when_no_trusted_interpreter_satisfies() -> None:
@@ -166,6 +262,20 @@ def test_available_selected_interpreter_resolves_to_an_executable(
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
 
     assert gate._require_interpreter_available("python3.12") == "/usr/bin/python3.12"
+
+
+def test_real_interpreter_version_probe_reads_the_executable_not_its_name() -> None:
+    executable = shutil.which("python3.12")
+    if executable is None:
+        pytest.skip("python3.12 is not available")
+    result = gate._probe_interpreter_version(executable, name="python3.12")
+    probe = subprocess.run(  # noqa: S603
+        [executable, "-I", "-c", "import sys; print(*sys.version_info[:3])"],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    assert result == tuple(int(part) for part in probe.stdout.split())
 
 
 # --- Plant 6: Academy's real PEP 701 case ----------------------------------
@@ -338,3 +448,212 @@ def test_the_same_pep696_source_parses_fine_once_selected_for_its_real_3_13_floo
         available_modules=frozenset({"app.main"}),
     )
     assert imports == frozenset()
+
+
+# --- Persistent-child protocol failure and lifecycle controls -------------
+
+
+def _successful_protocol_response(request: dict[str, object]) -> dict[str, object]:
+    return {
+        "schema_version": request["schema_version"],
+        "status": "ok",
+        "product": request["product"],
+        "revision": request["revision"],
+        "interpreter": request["interpreter"],
+        "module": request["module"],
+        "path": request["path"],
+        "imports": ["dotmac_files"],
+        "error": None,
+    }
+
+
+def _one_shot_imports(monkeypatch: pytest.MonkeyPatch, response_factory) -> None:
+    def fake_run(_args, *, input, **_kwargs):
+        request = json.loads(input)
+        return SimpleNamespace(
+            stdout=response_factory(request), returncode=0, stderr=b""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    gate._imports_under_interpreter(
+        b"import dotmac_files\n",
+        executable="python3.12",
+        product="academy",
+        revision="a" * 40,
+        interpreter="python3.12",
+        module="app.main",
+        path="app/main.py",
+        is_package=False,
+        available_modules=frozenset({"app.main"}),
+    )
+
+
+def test_protocol_refuses_duplicate_response_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def response(request):
+        valid = json.dumps(_successful_protocol_response(request)).encode()
+        return valid.replace(
+            b'{"schema_version":',
+            b'{"schema_version":"duplicate","schema_version":',
+            1,
+        )
+
+    with pytest.raises(gate.GateAcquisitionError, match="duplicate JSON key"):
+        _one_shot_imports(monkeypatch, response)
+
+
+def test_protocol_refuses_a_changed_identity_echo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def response(request):
+        payload = _successful_protocol_response(request)
+        payload["revision"] = "b" * 40
+        return json.dumps(payload).encode()
+
+    with pytest.raises(gate.GateAcquisitionError, match="changed identity"):
+        _one_shot_imports(monkeypatch, response)
+
+
+@pytest.mark.parametrize(
+    "imports",
+    [
+        ["dotmac_tax", "dotmac_files"],
+        ["dotmac_files", "dotmac_files"],
+        [""],
+    ],
+)
+def test_protocol_refuses_unsorted_duplicate_or_empty_import_facts(
+    monkeypatch: pytest.MonkeyPatch, imports: list[str]
+) -> None:
+    def response(request):
+        payload = _successful_protocol_response(request)
+        payload["imports"] = imports
+        return json.dumps(payload).encode()
+
+    with pytest.raises(gate.GateAcquisitionError, match="invalid import facts"):
+        _one_shot_imports(monkeypatch, response)
+
+
+def test_protocol_refuses_an_overlimit_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(gate.GateAcquisitionError, match="response exceeds"):
+        _one_shot_imports(
+            monkeypatch,
+            lambda _request: b"x" * (gate._FOREIGN_RESPONSE_BYTE_LIMIT + 1),
+        )
+
+
+def test_protocol_refuses_an_overlimit_import_fact_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def response(request):
+        payload = _successful_protocol_response(request)
+        payload["imports"] = [
+            f"module_{index:05d}" for index in range(gate._FOREIGN_IMPORT_LIMIT + 1)
+        ]
+        return json.dumps(payload).encode()
+
+    with pytest.raises(gate.GateAcquisitionError, match="invalid import facts"):
+        _one_shot_imports(monkeypatch, response)
+
+
+def test_protocol_reports_a_child_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout=b"", returncode=4, stderr=b"child refused"
+        ),
+    )
+    with pytest.raises(gate.GateAcquisitionError, match="child refused"):
+        gate._imports_under_interpreter(
+            b"pass\n",
+            executable="python3.12",
+            product="academy",
+            revision="a" * 40,
+            interpreter="python3.12",
+            module="app.main",
+            path="app/main.py",
+            is_package=False,
+            available_modules=frozenset({"app.main"}),
+        )
+
+
+def test_one_shot_protocol_has_a_hard_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("python3.12", 10)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    with pytest.raises(gate.GateAcquisitionError, match="analysis timed out"):
+        gate._imports_under_interpreter(
+            b"pass\n",
+            executable="python3.12",
+            product="academy",
+            revision="a" * 40,
+            interpreter="python3.12",
+            module="app.main",
+            path="app/main.py",
+            is_package=False,
+            available_modules=frozenset({"app.main"}),
+        )
+
+
+def test_persistent_reader_drains_stderr_while_waiting_for_stdout() -> None:
+    process = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys,time; "
+            "sys.stderr.buffer.write(b'x' * 50000); sys.stderr.flush(); "
+            "sys.stdout.buffer.write(b'{\\\"ok\\\":true}\\n'); sys.stdout.flush(); "
+            "time.sleep(60)",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd="/",
+    )
+    try:
+        response, _returncode, stderr = gate._read_foreign_response(
+            process, executable=sys.executable, timeout=2
+        )
+        assert json.loads(response) == {"ok": True}
+        assert stderr == b"x" * 50000
+    finally:
+        gate._stop_foreign_process(process)
+    assert process.poll() is not None
+
+
+def test_blocked_child_times_out_and_cleanup_escalates_to_kill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if not hasattr(__import__("signal"), "SIGTERM"):
+        pytest.skip("requires POSIX process signals")
+    process = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "time.sleep(60)",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd="/",
+    )
+    time.sleep(0.1)
+    with pytest.raises(gate.GateAcquisitionError, match="timed out"):
+        gate._read_foreign_response(process, executable=sys.executable, timeout=0.05)
+    monkeypatch.setattr(gate, "_FOREIGN_CLEANUP_TIMEOUT_SECONDS", 0.05)
+    started = time.monotonic()
+    gate._stop_foreign_process(process)
+    assert process.poll() is not None
+    assert time.monotonic() - started < 1
