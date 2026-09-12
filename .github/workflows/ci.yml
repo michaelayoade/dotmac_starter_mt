@@ -215,70 +215,24 @@ jobs:
       - run: poetry install
       - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term
 
-  # Slice 4's compatibility gate
-  # (`tools/composition_contract/compatibility_gate.py`).
-  # `test_real_coordinates_verify_evidence_and_preserve_runtime_debt`
-  # needs a local clone of each of the three products' PUBLIC repositories
-  # to verify ancestry (`git merge-base --is-ancestor`) and read the v3
-  # observation record `git show` returns — without this job the assertion
-  # has no `COMPAT_GATE_CLONE_*` in any environment that exists and used to
-  # skip everywhere, which is absence-of-signal read as a positive signal,
-  # the exact defect this gate exists to refuse (see the module docstring,
-  # "CI access this runner requires"). All four repositories (this one plus
-  # the three below) are public: no credential, secret, or GitHub App is
-  # referenced or needed.
+  # Slice 4's compatibility gate runs through Starter's own trusted reusable
+  # workflow, pinned to the protected-main commit that introduced its
+  # reviewed bytes.  Calling it at JOB level is the trust boundary: none of
+  # this candidate branch's steps, PATH changes, Git wrappers or environment
+  # setup run before the verifier.  The workflow owns its four immutable
+  # checkouts (this revision plus the three public product revisions at the
+  # exact commits the runner pins), its Python floor, and the SHA-pinned
+  # runner action -- so nothing here may add a step, and an inline `run:`
+  # cannot reach the gate.  The products are public: no credential, secret or
+  # GitHub App is referenced or needed.
+  #
+  # NOTE: `tests/architecture/test_compatibility_gate.py`'s real-coordinate
+  # assertion SKIPS when COMPAT_GATE_CLONE_* is unset, so it now skips inside
+  # the `unit` job.  That is intentional only because the authority moved
+  # here; the pytest-level skip is not evidence of anything and must never be
+  # read as one.
   compatibility-gate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The observation records bind the contract revision whose package
-          # dossiers and manifests define the catalogue.  The gate reads
-          # those exact Git objects; a shallow Starter checkout cannot prove
-          # the contract it is evaluating.
-          fetch-depth: 0
-      # Each product checkout: a FIXED path (so COMPAT_GATE_CLONE_* below
-      # can name it deterministically), fetch-depth 0 (ancestry verification
-      # needs full history -- `git merge-base --is-ancestor` against a
-      # shallow clone silently misreports), and persist-credentials false --
-      # this job never pushes to, or authenticates against, any of them.
-      - name: Check out dotmac_academy_app
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: michaelayoade/dotmac_academy_app
-          path: .compat-gate-clones/dotmac_academy_app
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check out dotmac_erp
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: michaelayoade/dotmac_erp
-          path: .compat-gate-clones/dotmac_erp
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check out dotmac_sub
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: michaelayoade/dotmac_sub
-          path: .compat-gate-clones/dotmac_sub
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - uses: ./.github/actions/setup-poetry
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
-      - run: '[ -d .venv ] || python -m venv .venv'
-      - run: poetry install
-      - name: Run the compatibility gate against the real product checkouts
-        env:
-          COMPAT_GATE_CLONE_DOTMAC_ACADEMY_APP: ${{ github.workspace }}/.compat-gate-clones/dotmac_academy_app
-          COMPAT_GATE_CLONE_DOTMAC_ERP: ${{ github.workspace }}/.compat-gate-clones/dotmac_erp
-          COMPAT_GATE_CLONE_DOTMAC_SUB: ${{ github.workspace }}/.compat-gate-clones/dotmac_sub
-        run: poetry run pytest tests/architecture/test_compatibility_gate.py -q
+    uses: michaelayoade/dotmac_starter_mt/.github/workflows/composition-compatibility.yml@23c16d1f8998559c96ef307d9d901ceec9101732
 
   integration:
     runs-on: ubuntu-latest
