@@ -192,6 +192,25 @@ def wheel_files(wheel_path: Path) -> dict[str, bytes]:
                 # Refuse only the type bits a zip entry can meaningfully
                 # carry that are NEVER a plain static file: a symlink or a
                 # device/FIFO/socket special file.
+                #
+                # Stated premise about the WRITER, not just the reader: this
+                # assumes external_attr's upper 16 bits are either 0 or a
+                # real Unix `st_mode` with an intact S_IFMT nibble -- true
+                # for CPython's own zipfile (writestr's permission-only
+                # default) and for poetry-core 2.4.0's
+                # normalize_file_permissions, which starts from the real
+                # os.stat().st_mode and only masks the low permission bits,
+                # leaving S_IFMT alone, so a genuine static file carries
+                # S_IFREG. This is the toolchain that actually builds this
+                # wheel (release-kernel.yml is Linux-only; CPython's
+                # zipfile/os.stat always synthesise proper S_IFMT even on
+                # Windows), so there is no live risk today. The assumption
+                # is UNVERIFIED for a future non-CPython zip writer that
+                # might place raw DOS attributes (which carry no S_IFMT
+                # semantics at all) in the upper 16 bits instead -- such a
+                # writer could misclassify a member here. Revisit this
+                # comment, not the predicate, if the release toolchain ever
+                # changes writers.
                 mode = member.external_attr >> 16
                 if (
                     stat.S_ISLNK(mode)
