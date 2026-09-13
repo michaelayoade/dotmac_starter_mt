@@ -76,6 +76,15 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
+## 0.1.0a18 — unreleased
+
+Allocation only — no source change. a17 is published (tag
+`dotmac-integration-v0.1.0a17`), and the durable provisioning-runtime work
+that motivates a18 has not landed yet: allocating the version number ahead of
+that source divergence is what keeps the published-version guard honest the
+moment it does. See `docs/inventories/declared-publication-baseline.json` for
+the recorded declared-unpublished state.
+
 ## 0.1.0a17 — unreleased
 
 ### The product descriptor now carries the product's payload contract
