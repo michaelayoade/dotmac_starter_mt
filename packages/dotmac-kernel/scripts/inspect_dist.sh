@@ -9,7 +9,9 @@
 #      `testing` extra — no stray runtime dep (uvicorn/psycopg/python-multipart).
 #   4. Package data ships: templates/, static/ (incl. static/fonts/ and the
 #      COMPILED static/css/main.css — REQUIRED for a published web kernel),
-#      migrations/. check-wheel-contents flags empties/dupes.
+#      migrations/. The post-build source static tree must equal the wheel and
+#      sdist byte-for-byte in both directions. check-wheel-contents flags
+#      empties/dupes.
 #   5. Every .py under src/dotmac_kernel/ is IN the wheel and the sdist, and
 #      nothing extra is: the artifact's importable module set equals the
 #      source's. Metadata, dep and package-data checks all pass on a wheel
@@ -35,7 +37,10 @@ PY="${INSPECT_PYTHON:-python3}"
 # different checkout by the directory it happens to run in.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KERNEL_SRC="${SCRIPT_DIR}/../src/dotmac_kernel"
+REPOSITORY_ROOT="${SCRIPT_DIR}/../../.."
+STATIC_PROVENANCE="${SCRIPT_DIR}/verify_static_artifact.py"
 [ -d "$KERNEL_SRC" ] || { echo "no kernel source at $KERNEL_SRC" >&2; exit 1; }
+[ -f "$STATIC_PROVENANCE" ] || { echo "no static provenance gate at $STATIC_PROVENANCE" >&2; exit 1; }
 
 echo "==> [1/6] Install inspection tooling"
 "$PY" -m pip install --quiet twine check-wheel-contents pkginfo
@@ -92,6 +97,11 @@ if "dotmac_kernel/py.typed" not in names:
     sys.exit("FAIL: dotmac_kernel/py.typed missing — the kernel's typed contracts would be invisible to consumers")
 print("    templates/, static/ (+fonts +compiled main.css), migrations/, py.typed all present")
 PY
+"$PY" "$STATIC_PROVENANCE" \
+  --source "$KERNEL_SRC/static" \
+  --repository-root "$REPOSITORY_ROOT" \
+  --wheel "$WHEEL" \
+  --sdist "$SDIST"
 # check-wheel-contents catches empty dirs / stray top-level / duplicate paths.
 # One warning is KNOWN-ACCEPTABLE and ignored deliberately:
 #   W004 — Alembic version files (dotmac_kernel/migrations/versions/2026….py)
