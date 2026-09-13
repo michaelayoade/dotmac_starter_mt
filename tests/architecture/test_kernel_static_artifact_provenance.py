@@ -478,19 +478,37 @@ def test_a_failing_static_provenance_gate_fails_inspect_dist_sh(tmp_path: Path) 
     assert "PASS" not in result.stdout
 
 
-@pytest.mark.parametrize("mutation", ("suffixed_with_or_true", "commented_out"))
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "suffixed_with_or_true",
+        "commented_out",
+        "errexit_disabled_before_the_call",
+        "moved_into_a_dead_branch",
+    ),
+)
 def test_a_swallowed_static_provenance_gate_is_caught_by_the_harness_above(
     tmp_path: Path, mutation: str
 ) -> None:
-    """Sensitivity proof for the test above. Plants the exact suppression
-    an adversarial review found could slip past a text-slice harness: `||
-    true` appended immediately after the real invocation's closing line,
-    and the whole invocation `#`-commented out with its text left intact.
+    """Sensitivity proof for the test above, covering four DIFFERENT
+    suppression mechanisms so that catching one is not mistaken for
+    catching the class:
 
-    Both plants must make THE SAME harness report success
+    - `suffixed_with_or_true`: `|| true` appended right after the real
+      invocation's closing line (a suffix on the invocation line itself).
+    - `commented_out`: the whole invocation `#`-commented out with its text
+      left intact (removes the line from execution entirely).
+    - `errexit_disabled_before_the_call`: a bare `set +e` inserted
+      immediately before the invocation (disables `errexit` for the rest
+      of the script; the line itself is untouched and uncommented).
+    - `moved_into_a_dead_branch`: the invocation wrapped in
+      `if false; then ... fi` (the line is untouched, uncommented, and
+      unsuffixed -- it is simply unreachable).
+
+    All four plants must make THE SAME harness report success
     (`returncode == 0`) here -- which is exactly what would turn
     `test_a_failing_static_provenance_gate_fails_inspect_dist_sh` red if
-    either mutation ever landed in the real file, since that test hardcodes
+    any of them ever landed in the real file, since that test hardcodes
     `returncode != 0` against this identical, unmutated script.
     """
     real_script = INSPECTOR.read_text(encoding="utf-8")
@@ -505,10 +523,22 @@ def test_a_swallowed_static_provenance_gate_is_caught_by_the_harness_above(
         mutated = (
             real_script[:invocation_end] + " || true" + real_script[invocation_end:]
         )
-    else:
+    elif mutation == "commented_out":
         commented = "\n".join(f"# {line}" for line in invocation.splitlines())
         mutated = (
             real_script[:invocation_start] + commented + real_script[invocation_end:]
+        )
+    elif mutation == "errexit_disabled_before_the_call":
+        mutated = (
+            real_script[:invocation_start] + "set +e\n" + real_script[invocation_start:]
+        )
+    else:
+        mutated = (
+            real_script[:invocation_start]
+            + "if false; then\n"
+            + invocation
+            + "\nfi\n"
+            + real_script[invocation_end:]
         )
 
     result = _run_inspect_dist(mutated, tmp_path)
