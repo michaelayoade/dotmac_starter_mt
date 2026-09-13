@@ -1,0 +1,14 @@
+{
+  "schema": "kernel-composition-compatibility-bindings.v3",
+  "bindings": {
+    "academy": {
+      "revision": "ca1f9058a6483fe52207556fa2d17c56b1e237c7"
+    },
+    "erp": {
+      "revision": "dca695a7d59179fe65577ba4e72a709ff0b32cde"
+    },
+    "sub": {
+      "revision": "272a897b778899b110c5790fcaf43bbb54efe27c"
+    }
+  }
+}
