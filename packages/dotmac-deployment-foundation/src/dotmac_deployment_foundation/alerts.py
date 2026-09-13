@@ -558,14 +558,14 @@ COMMON_ALERTS: Final[tuple[Alert, ...]] = (
         code="FDN_HOST_CPU_SATURATION",
         severity=_TICKET,
         expression=(
-            '1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (host) '
+            '1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (instance) '
             "> {{host_cpu_saturation_pct}}"
         ),
         for_seconds=900,  # 15m
         owner="foundation",
         protects="host capacity headroom",
         runbook="#host-cpu-saturation",
-        dedup_by=("host",),
+        dedup_by=("instance",),
         recovery="ratio below threshold for 15m",
         placeholders=("host_cpu_saturation_pct",),
         producer="node_exporter",
