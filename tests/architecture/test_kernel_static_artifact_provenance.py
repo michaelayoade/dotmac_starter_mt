@@ -331,67 +331,178 @@ def test_wheel_static_links_are_refused(tmp_path: Path, mode: int) -> None:
         _verify(checker, source, wheel, sdist)
 
 
-def test_release_build_orders_full_css_build_before_artifact_inspection() -> None:
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert workflow.count("npm ci && npm run css:build") == 1
-    assert workflow.count("poetry build") == 1
-    assert workflow.count("packages/dotmac-kernel/scripts/inspect_dist.sh") == 1
-    assert workflow.index("npm ci && npm run css:build") < workflow.index(
-        "poetry build"
-    )
-    assert workflow.index("poetry build") < workflow.index(
-        "packages/dotmac-kernel/scripts/inspect_dist.sh"
-    )
-    inspector = INSPECTOR.read_text(encoding="utf-8")
-    assert 'STATIC_PROVENANCE="${SCRIPT_DIR}/verify_static_artifact.py"' in inspector
-    assert '--source "$KERNEL_SRC/static"' in inspector
-    assert '--repository-root "$REPOSITORY_ROOT"' in inspector
-    assert '--wheel "$WHEEL"' in inspector
-    assert '--sdist "$SDIST"' in inspector
-
-
-def test_a_failing_static_provenance_gate_fails_inspect_dist_sh(tmp_path: Path) -> None:
-    """Runs the VERBATIM `$PY "$STATIC_PROVENANCE" ...` invocation extracted
-    from `inspect_dist.sh` under `set -euo pipefail`, with a stub verifier
-    that exits non-zero standing in for a real refusal, and asserts the
-    surrounding script's exit status is non-zero.
-
-    The string/ordering checks above would still pass if that invocation
-    were wrapped in `|| true` or moved into a dead branch -- this proves the
-    exit status actually propagates. Hermetic: no network, no real build, no
-    npm; the stub verifier is a two-line Python script.
+def _active_line_index(lines: list[str], needle: str, *, label: str) -> int:
+    """The line number of the sole line containing `needle` that is NOT
+    commented out (ignoring leading whitespace before `#`). A substring
+    check alone (`needle in text`) is satisfied whether the line is live or
+    `#`-commented into inertness; this refuses to treat the two as the
+    same and fails loudly if `needle` is duplicated or entirely absent.
     """
-    inspector = INSPECTOR.read_text(encoding="utf-8")
-    start_marker = '"$PY" "$STATIC_PROVENANCE" \\'
-    end_marker = '--sdist "$SDIST"'
-    start = inspector.index(start_marker)
-    end = inspector.index(end_marker, start) + len(end_marker)
-    invocation = inspector[start:end]
+    matches = [
+        index
+        for index, line in enumerate(lines)
+        if needle in line and not line.strip().startswith("#")
+    ]
+    assert len(matches) == 1, (
+        f"{label}: expected exactly one ACTIVE (non-commented) line "
+        f"containing {needle!r}, found {len(matches)}"
+    )
+    return matches[0]
 
-    stub_verifier = tmp_path / "stub_verifier.py"
-    stub_verifier.write_text(
+
+def test_release_build_orders_full_css_build_before_artifact_inspection() -> None:
+    workflow_lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    css_build_line = _active_line_index(
+        workflow_lines, "npm ci && npm run css:build", label="workflow"
+    )
+    poetry_build_line = _active_line_index(
+        workflow_lines, "poetry build", label="workflow"
+    )
+    inspect_line = _active_line_index(
+        workflow_lines,
+        "packages/dotmac-kernel/scripts/inspect_dist.sh",
+        label="workflow",
+    )
+    assert css_build_line < poetry_build_line < inspect_line
+
+    inspector_lines = INSPECTOR.read_text(encoding="utf-8").splitlines()
+    _active_line_index(
+        inspector_lines,
+        'STATIC_PROVENANCE="${SCRIPT_DIR}/verify_static_artifact.py"',
+        label="inspect_dist.sh",
+    )
+    _active_line_index(
+        inspector_lines, '--source "$KERNEL_SRC/static"', label="inspect_dist.sh"
+    )
+    _active_line_index(
+        inspector_lines,
+        '--repository-root "$REPOSITORY_ROOT"',
+        label="inspect_dist.sh",
+    )
+    _active_line_index(inspector_lines, '--wheel "$WHEEL"', label="inspect_dist.sh")
+    _active_line_index(inspector_lines, '--sdist "$SDIST"', label="inspect_dist.sh")
+
+
+def _run_inspect_dist(
+    script_text: str, tmp_path: Path
+) -> subprocess.CompletedProcess[str]:
+    """Materialise `script_text` as `inspect_dist.sh` at the SAME relative
+    layout the real file lives at (`<root>/packages/dotmac-kernel/scripts/`
+    next to `<root>/packages/dotmac-kernel/src/dotmac_kernel/`), and run it
+    for real.
+
+    The stub verifier is placed exactly where the script's OWN
+    `SCRIPT_DIR`/`BASH_SOURCE`-based resolution computes `STATIC_PROVENANCE`
+    to be -- nothing about that resolution logic is copied or re-derived,
+    only the two things that must be hermetic (the interpreter, via the
+    script's existing `INSPECT_PYTHON` override, and the verifier it
+    resolves) are substituted. This runs `script_text` byte-for-byte,
+    unlike a reconstructed snippet, so it catches suppression ANYWHERE in
+    the file: `|| true` on the invocation line, a `set +e` before it, the
+    call moved into a dead branch, or the call commented out.
+    """
+    scripts_dir = tmp_path / "packages" / "dotmac-kernel" / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (tmp_path / "packages" / "dotmac-kernel" / "src" / "dotmac_kernel").mkdir(
+        parents=True
+    )
+
+    inspect_dist = scripts_dir / "inspect_dist.sh"
+    inspect_dist.write_text(script_text)
+    inspect_dist.chmod(0o755)
+
+    # The stub verifier: an unconditional refusal, standing in for a real
+    # one. It is placed at the exact path inspect_dist.sh computes for
+    # STATIC_PROVENANCE, not passed in as an argument or env var.
+    (scripts_dir / "verify_static_artifact.py").write_text(
         "import sys\nsys.exit('STATIC ARTIFACT REFUSED: stub refusal')\n"
     )
 
-    harness = tmp_path / "harness.sh"
-    harness.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
-        f'PY="{sys.executable}"\n'
-        f'STATIC_PROVENANCE="{stub_verifier}"\n'
-        'KERNEL_SRC="/nonexistent/src"\n'
-        'REPOSITORY_ROOT="/nonexistent/repo"\n'
-        'WHEEL="/nonexistent/wheel.whl"\n'
-        'SDIST="/nonexistent/sdist.tar.gz"\n'
-        f"{invocation}\n"
-        'echo "UNREACHABLE: exit status did not propagate"\n'
+    # inspect_dist.sh already exposes PY="${INSPECT_PYTHON:-python3}" as an
+    # override seam. The stub dispatcher no-ops every network-requiring
+    # tooling step (pip/twine/check-wheel-contents, and the inline heredoc
+    # checks) and delegates ONLY the static-provenance script invocation to
+    # a real interpreter, so that call's exit status is genuine.
+    stub_python = tmp_path / "stub_python.py"
+    stub_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        f"REAL_PYTHON = {sys.executable!r}\n"
+        "args = sys.argv[1:]\n"
+        "if not args:\n"
+        "    sys.exit(0)\n"
+        "if args[0] == '-m':\n"
+        "    sys.exit(0)\n"
+        "if args[0] == '-':\n"
+        "    sys.stdin.read()\n"
+        "    sys.exit(0)\n"
+        "os.execv(REAL_PYTHON, [REAL_PYTHON, *args])\n"
     )
+    stub_python.chmod(0o755)
 
-    result = subprocess.run(  # noqa: S603 - fixed bash command, no shell, hermetic harness
-        ("bash", str(harness)),
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "dotmac_kernel-0.1.0a100-py3-none-any.whl").write_bytes(b"")
+    (dist_dir / "dotmac_kernel-0.1.0a100.tar.gz").write_bytes(b"")
+
+    env = dict(os.environ)
+    env["INSPECT_PYTHON"] = str(stub_python)
+
+    return subprocess.run(  # noqa: S603 - fixed args, hermetic stub interpreter
+        ("bash", str(inspect_dist), str(dist_dir)),
         capture_output=True,
         text=True,
+        env=env,
         check=False,
     )
+
+
+def test_a_failing_static_provenance_gate_fails_inspect_dist_sh(tmp_path: Path) -> None:
+    """Hermetic: no network, no real build, no npm -- every step other than
+    the static-provenance invocation is stubbed to a no-op, and that
+    invocation runs a two-line stub verifier instead of a real wheel/sdist
+    comparison. See `test_a_swallowed_static_provenance_gate_is_caught_...`
+    below for the sensitivity proof that this harness actually catches
+    suppression, rather than merely running successfully.
+    """
+    real_script = INSPECTOR.read_text(encoding="utf-8")
+    result = _run_inspect_dist(real_script, tmp_path)
     assert result.returncode != 0
-    assert "UNREACHABLE" not in result.stdout
+    assert "PASS" not in result.stdout
+
+
+@pytest.mark.parametrize("mutation", ("suffixed_with_or_true", "commented_out"))
+def test_a_swallowed_static_provenance_gate_is_caught_by_the_harness_above(
+    tmp_path: Path, mutation: str
+) -> None:
+    """Sensitivity proof for the test above. Plants the exact suppression
+    an adversarial review found could slip past a text-slice harness: `||
+    true` appended immediately after the real invocation's closing line,
+    and the whole invocation `#`-commented out with its text left intact.
+
+    Both plants must make THE SAME harness report success
+    (`returncode == 0`) here -- which is exactly what would turn
+    `test_a_failing_static_provenance_gate_fails_inspect_dist_sh` red if
+    either mutation ever landed in the real file, since that test hardcodes
+    `returncode != 0` against this identical, unmutated script.
+    """
+    real_script = INSPECTOR.read_text(encoding="utf-8")
+    invocation_start = real_script.index('"$PY" "$STATIC_PROVENANCE" \\')
+    closing_line = '--sdist "$SDIST"'
+    invocation_end = real_script.index(closing_line, invocation_start) + len(
+        closing_line
+    )
+    invocation = real_script[invocation_start:invocation_end]
+
+    if mutation == "suffixed_with_or_true":
+        mutated = (
+            real_script[:invocation_end] + " || true" + real_script[invocation_end:]
+        )
+    else:
+        commented = "\n".join(f"# {line}" for line in invocation.splitlines())
+        mutated = (
+            real_script[:invocation_start] + commented + real_script[invocation_end:]
+        )
+
+    result = _run_inspect_dist(mutated, tmp_path)
+    assert result.returncode == 0
