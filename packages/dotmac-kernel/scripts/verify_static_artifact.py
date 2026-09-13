@@ -57,6 +57,22 @@ def source_files(static_root: Path) -> dict[str, bytes]:
             )
         if not path.is_file():
             continue
+        try:
+            nlink = path.stat().st_nlink
+        except OSError as error:
+            raise StaticArtifactRefusal(
+                f"cannot stat source static file {path}: {error}"
+            ) from error
+        if nlink > 1:
+            # A hard link is a second directory entry for the same inode:
+            # st_nlink rises above 1 for every name pointing at it, there is
+            # no separate "this is a link" bit to inspect (unlike a
+            # symlink), and the bytes read back are identical to the
+            # original -- exactly what the byte comparison cannot catch.
+            raise StaticArtifactRefusal(
+                f"source static tree contains a hard-linked file "
+                f"(nlink={nlink}): {path}"
+            )
         relative = path.relative_to(static_root).as_posix()
         try:
             files[relative] = path.read_bytes()

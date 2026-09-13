@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
 import stat
 import tarfile
 import zipfile
@@ -181,6 +182,37 @@ def test_sdist_static_links_are_refused(
     diagnostic = "non-regular" if relative else "static root is not a directory"
     with pytest.raises(checker.StaticArtifactRefusal, match=diagnostic):
         _verify(checker, source, wheel, sdist)
+
+
+def test_source_static_hard_links_are_refused(tmp_path: Path) -> None:
+    checker = _checker()
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    original = static_root / "css" / "main.css"
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"compiled css\n")
+    linked = static_root / "css" / "alias.css"
+    # A hard link is a second directory entry for the SAME inode: st_nlink
+    # rises above 1 for BOTH names, there is no separate "this one is the
+    # link" bit to inspect, and the bytes read back are identical to the
+    # original -- exactly the shape the byte comparison alone cannot catch.
+    os.link(original, linked)
+    with pytest.raises(checker.StaticArtifactRefusal, match="hard-linked"):
+        checker.source_files(static_root)
+
+
+def test_source_static_ordinary_file_still_passes(tmp_path: Path) -> None:
+    # Positive control: an ordinary, non-hard-linked file must still pass,
+    # proving the check above triggers on link count rather than on any
+    # file under the static root.
+    checker = _checker()
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    original = static_root / "css" / "main.css"
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"compiled css\n")
+    files = checker.source_files(static_root)
+    assert files == {"css/main.css": b"compiled css\n"}
 
 
 @pytest.mark.parametrize("mode", (stat.S_IFLNK, stat.S_IFSOCK))
