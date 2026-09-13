@@ -12,9 +12,11 @@ contracts and durably stores a validated normalized result in `ig_0013`, and
 adds durable polling attempt/failure/backoff evidence with a bounded keyset
 selection in `ig_0014`.
 
-`0.1.0a17` is declared and unreleased. It adds authenticated product-port
-descriptor v3, which carries the owning domain's exact payload contract or
-dated grace separately from the product wire, persisted by `ig_0015`.
+`0.1.0a17` is RELEASED — tagged `dotmac-integration-v0.1.0a17` on 2026-08-27,
+peeling to `2cab76b442e6cc6c8ed81a409d943ba250351c3d`. It adds authenticated
+product-port descriptor v3, which carries the owning domain's exact payload
+contract or dated grace separately from the product wire, persisted by
+`ig_0015`.
 
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
@@ -58,9 +60,13 @@ This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
 misdescribes what is installable is how a consumer comes to pin something that
 does not exist, or something it should not. It has since been wrong in the other
-direction three times: a2, a3 and then a12 were each tagged while this preamble
-still called them unreleased — a12 for long enough that it told readers to pin
-a11 while `dotmac_integrator` was already composing a12. The table of tags and
+direction four times: a2, a3, a12 and now a17 were each tagged while this
+preamble still called them unreleased — a12 for long enough that it told readers
+to pin a11 while `dotmac_integrator` was already composing a12, and a17 for long
+enough that an allocation change for a18 had to correct it. Four recurrences of
+one defect is a counting problem, not an attention problem: nothing fails when
+this preamble disagrees with the tag namespace, so it drifts every time and is
+found by a human reading it. The table of tags and
 commits above is what a reader should trust, because `git ls-remote --tags`
 checks it.
 
@@ -85,7 +91,7 @@ that source divergence is what keeps the published-version guard honest the
 moment it does. See `docs/inventories/declared-publication-baseline.json` for
 the recorded declared-unpublished state.
 
-## 0.1.0a17 — unreleased
+## 0.1.0a17 — 2026-08-27 — RELEASED
 
 ### The product descriptor now carries the product's payload contract
 
