@@ -310,8 +310,15 @@ def test_source_static_ordinary_file_still_passes(tmp_path: Path) -> None:
     assert files == {"css/main.css": b"compiled css\n"}
 
 
-@pytest.mark.parametrize("mode", (stat.S_IFLNK, stat.S_IFSOCK))
+@pytest.mark.parametrize(
+    "mode",
+    (stat.S_IFLNK, stat.S_IFSOCK, stat.S_IFCHR, stat.S_IFBLK, stat.S_IFIFO),
+)
 def test_wheel_static_links_are_refused(tmp_path: Path, mode: int) -> None:
+    # All FIVE POSIX non-regular types the predicate checks are exercised
+    # here, not just a subset: the five S_IS* calls are structurally
+    # identical one-line checks, exactly the shape a copy-paste error in
+    # any one of them would survive undetected.
     checker = _checker()
     source, wheel, sdist = _artifacts(tmp_path)
     source_files = checker.source_files(source)
