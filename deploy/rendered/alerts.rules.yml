@@ -82,7 +82,7 @@ groups:
           protects: "OOM-kill prevention"
           dedup_by: "container"
       - alert: "FDN_HOST_CPU_SATURATION"
-        expr: "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) by (host) > 0.90"
+        expr: "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) by (instance) > 0.90"
         for: "900s"
         labels:
           severity: "ticket"
@@ -93,7 +93,7 @@ groups:
           runbook: "#host-cpu-saturation"
           recovery: "ratio below threshold for 15m"
           protects: "host capacity headroom"
-          dedup_by: "host"
+          dedup_by: "instance"
       - alert: "FDN_HOST_MEMORY_SATURATION"
         expr: "1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.90"
         for: "600s"

@@ -179,6 +179,16 @@ def test_every_alert_code_is_unique() -> None:
     assert len(set(codes)) == len(codes)
 
 
+def test_host_cpu_saturation_groups_by_instance_not_host() -> None:
+    """node_exporter's node_cpu_seconds_total carries no `host` label — only
+    Prometheus's standard `instance` label. Grouping `by (host)` collapses
+    every host into one fleet-wide series; `by (instance)` is per-host."""
+    alert = next(a for a in COMMON_ALERTS if a.code == "FDN_HOST_CPU_SATURATION")
+    assert "by (instance)" in alert.expression
+    assert "by (host)" not in alert.expression
+    assert alert.dedup_by == ("instance",)
+
+
 @pytest.mark.parametrize("alert", COMMON_ALERTS, ids=lambda alert: alert.code)
 def test_every_foundation_alert_is_well_formed(alert: Alert) -> None:
     assert alert.code.startswith("FDN_")
