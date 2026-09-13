@@ -164,8 +164,24 @@ def wheel_files(wheel_path: Path) -> dict[str, bytes]:
                 # stored bytes are byte-identical to a legitimate file — the
                 # byte comparison below would never catch that; only the
                 # mode bit can. Mirrors the sdist non-regular-member refusal.
+                #
+                # Many legitimate zip writers (including the stdlib's own
+                # ZipFile.writestr default) set external_attr to PERMISSION
+                # bits only (e.g. 0o600 << 16) with no S_IFMT type bits at
+                # all, so S_ISREG on that mode is False even though the
+                # member is an ordinary file. Checking "not regular" would
+                # therefore false-positive on that common, harmless shape.
+                # Refuse only the type bits a zip entry can meaningfully
+                # carry that are NEVER a plain static file: a symlink or a
+                # device/FIFO/socket special file.
                 mode = member.external_attr >> 16
-                if mode and not stat.S_ISREG(mode) and not stat.S_ISDIR(mode):
+                if (
+                    stat.S_ISLNK(mode)
+                    or stat.S_ISCHR(mode)
+                    or stat.S_ISBLK(mode)
+                    or stat.S_ISFIFO(mode)
+                    or stat.S_ISSOCK(mode)
+                ):
                     raise StaticArtifactRefusal(
                         f"{wheel_path} contains non-regular static member "
                         f"{relative!r}"
