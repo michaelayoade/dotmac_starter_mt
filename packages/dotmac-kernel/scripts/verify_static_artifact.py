@@ -69,9 +69,27 @@ def source_files(static_root: Path) -> dict[str, bytes]:
             # no separate "this is a link" bit to inspect (unlike a
             # symlink), and the bytes read back are identical to the
             # original -- exactly what the byte comparison cannot catch.
+            #
+            # nlink > 1 has two distinct causes and this refusal cannot
+            # tell them apart on its own: (a) an adversarial or accidental
+            # alias smuggled into the reviewed tree, the reason this check
+            # exists; or (b) an ENVIRONMENTAL artifact of how the build
+            # tree was materialised -- a content-addressable store,
+            # `cp -al`, `rsync --link-dest`, or some cache-restore paths
+            # all hard-link by design. No evidence yet establishes that
+            # this repository's actual release runner produces a
+            # single-link tree; that premise is stated here, not assumed.
+            # Name both possibilities so a maintainer meeting this refusal
+            # can tell in seconds which one to check, rather than only
+            # hearing the security-sounding half.
             raise StaticArtifactRefusal(
                 f"source static tree contains a hard-linked file "
-                f"(nlink={nlink}): {path}"
+                f"(nlink={nlink}): {path} -- this is either an unreviewed "
+                "alias smuggled into the built tree, or an environmental "
+                "artifact of how the tree was materialised (e.g. a "
+                "content-addressable store, `cp -al`, `rsync --link-dest`, "
+                "or a cache-restore step that hard-links); check how this "
+                "build tree was produced before assuming the former"
             )
         relative = path.relative_to(static_root).as_posix()
         try:
