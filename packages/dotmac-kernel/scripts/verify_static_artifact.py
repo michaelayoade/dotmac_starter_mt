@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import stat
 import subprocess
 import sys
 import tarfile
@@ -140,6 +141,19 @@ def wheel_files(wheel_path: Path) -> dict[str, bytes]:
                 relative = _safe_relative_name(
                     member.filename.removeprefix(WHEEL_PREFIX), subject=str(wheel_path)
                 )
+                # A zip member's Unix mode lives in the UPPER 16 bits of
+                # external_attr (the lower 16 bits are DOS attributes). A zip
+                # symlink is not required to store its target path as its
+                # content, so a member can carry S_IFLNK here while its
+                # stored bytes are byte-identical to a legitimate file — the
+                # byte comparison below would never catch that; only the
+                # mode bit can. Mirrors the sdist non-regular-member refusal.
+                mode = member.external_attr >> 16
+                if mode and not stat.S_ISREG(mode) and not stat.S_ISDIR(mode):
+                    raise StaticArtifactRefusal(
+                        f"{wheel_path} contains non-regular static member "
+                        f"{relative!r}"
+                    )
                 if relative in files:
                     raise StaticArtifactRefusal(
                         f"{wheel_path} contains duplicate static member {relative!r}"

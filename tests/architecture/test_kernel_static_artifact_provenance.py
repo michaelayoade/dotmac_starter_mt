@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import stat
 import tarfile
 import zipfile
 from collections.abc import Mapping
@@ -179,6 +180,27 @@ def test_sdist_static_links_are_refused(
         archive.addfile(link)
     diagnostic = "non-regular" if relative else "static root is not a directory"
     with pytest.raises(checker.StaticArtifactRefusal, match=diagnostic):
+        _verify(checker, source, wheel, sdist)
+
+
+@pytest.mark.parametrize("mode", (stat.S_IFLNK, stat.S_IFSOCK))
+def test_wheel_static_links_are_refused(tmp_path: Path, mode: int) -> None:
+    checker = _checker()
+    source, wheel, sdist = _artifacts(tmp_path)
+    source_files = checker.source_files(source)
+    legit_content = source_files["css/main.css"]
+    with zipfile.ZipFile(wheel, mode="w") as archive:
+        for name, content in source_files.items():
+            archive.writestr(f"dotmac_kernel/static/{name}", content)
+        # The stored CONTENT below is byte-identical to a real file
+        # (css/main.css) -- only the mode bit in the upper 16 bits of
+        # external_attr says "materialise this as a non-regular member".
+        # A test that instead used mismatched content would pass for the
+        # wrong reason: the byte comparison would already catch that.
+        link_info = zipfile.ZipInfo("dotmac_kernel/static/css/alias.css")
+        link_info.external_attr = (mode | 0o777) << 16
+        archive.writestr(link_info, legit_content)
+    with pytest.raises(checker.StaticArtifactRefusal, match="non-regular"):
         _verify(checker, source, wheel, sdist)
 
 
