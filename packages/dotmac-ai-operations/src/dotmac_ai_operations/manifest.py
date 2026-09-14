@@ -10,7 +10,7 @@ from dotmac_ai_operations.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="ai_operations",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="aiops",
     migration_prefix="ao",

@@ -187,7 +187,9 @@
           "dotmac_ai_operations/py.typed",
           "dotmac_ai_operations/manifest.py",
           "dotmac_ai_operations/migrations/__init__.py",
-          "dotmac_ai_operations/migrations/versions/ao_0001_ai_operations.py"
+          "dotmac_ai_operations/migrations/versions/ao_0001_ai_operations.py",
+          "dotmac_ai_operations/migrations/versions/ao_0002_insight_evidence_binding.py",
+          "dotmac_ai_operations/migrations/versions/ao_0003_ack_attribution.py"
         ],
         "forbidden_prefixes": [
           "app/",

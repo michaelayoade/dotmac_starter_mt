@@ -324,6 +324,43 @@ def cmd_resolve(args: argparse.Namespace) -> None:
     print(f"tag={entry['tag_prefix']}{manifest['version']}")
 
 
+def migration_extent_problems(entry: dict) -> list[str]:
+    """DERIVE the migration-lineage extent from the source tree; do not trust
+    the hand-maintained `required` list alone to have kept up with it
+    (AGENTS.md's "DERIVE the extent, never declare it"). Enumerating one
+    migration proves that FILE ships; it proves nothing about a LATER
+    file added to `migrations/versions/` and never added to
+    `wheel_contents.required` — that omission would ship a wheel missing
+    the migration silently, with every enumerated-path check green, which
+    is the exact defect this closes.
+
+    A standalone, independently testable function so ONE sensitivity
+    proof (a planted unlisted migration is named; the conforming
+    repository state is silent) backs BOTH consumers that would otherwise
+    duplicate this calculation: `cmd_inspect` below (the release-time
+    gate) and `tests/architecture/test_module_release_allowlist.py`'s
+    PR-time architecture test.
+    """
+    if entry["db_schema"] is None:
+        return []
+    versions_dir = (
+        entry["package_path"] / "src" / entry["import_name"] / "migrations" / "versions"
+    )
+    on_disk = {
+        f"{entry['import_name']}/migrations/versions/{path.name}"
+        for path in versions_dir.glob("*.py")
+        if path.name != "__init__.py"
+    }
+    undeclared = sorted(on_disk - set(entry["wheel_contents"]["required"]))
+    if not undeclared:
+        return []
+    return [
+        "migration file(s) exist on disk but are not enumerated in "
+        "wheel_contents.required — a future migration omitted from "
+        f"the wheel would pass this check undetected: {undeclared}"
+    ]
+
+
 def cmd_inspect(args: argparse.Namespace) -> None:
     """Wheel-content policy. What must ship, what must never, what may be required."""
     entry = resolve(args.distribution)
@@ -350,6 +387,13 @@ def cmd_inspect(args: argparse.Namespace) -> None:
     for required in policy["required"]:
         if required not in names:
             problems.append(f"missing from the wheel: {required}")
+
+    # The loop above only proves every ENUMERATED path shipped — it says
+    # nothing about a migration file that exists on disk and was never
+    # added to `required` at all. `migration_extent_problems` derives
+    # that extent from the source tree instead of trusting the
+    # hand-maintained list alone; see its own docstring.
+    problems.extend(migration_extent_problems(entry))
 
     # Nothing from the assembly, the test suite, or the repo's tooling.
     for name in names:
