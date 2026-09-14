@@ -27,6 +27,51 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 
+def _sqlite_aiops_migration_engine():
+    """A narrow SQLite harness with the migration's schema name attached."""
+    engine = create_engine(
+        "sqlite://",
+        poolclass=sa.pool.StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    with engine.begin() as conn:
+        conn.exec_driver_sql("ATTACH DATABASE ':memory:' AS mod_aiops")
+    return engine
+
+
+def _legacy_ai_insights_table() -> sa.Table:
+    metadata = sa.MetaData()
+    return sa.Table(
+        "ai_insights",
+        metadata,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("tenant_id", sa.Uuid(), nullable=False),
+        sa.Column("operation_id", sa.Uuid(), nullable=False),
+        sa.Column("insight_key", sa.String(200), nullable=False),
+        sa.Column("insight_type", sa.String(120), nullable=False),
+        sa.Column("advisory_value", sa.Text(), nullable=False),
+        sa.Column("confidence", sa.Float()),
+        sa.Column("source_output_digest", sa.String(64), nullable=False),
+        sa.Column("status", sa.String(24), nullable=False),
+        sa.Column("acknowledged_by_ref", sa.String(200)),
+        sa.Column("acknowledged_at", sa.DateTime(timezone=True)),
+        sa.Column("action_evidence_ref", sa.String(240)),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        schema="mod_aiops",
+    )
+
+
 @pytest.fixture
 def db() -> Session:
     engine = create_engine(
@@ -196,11 +241,12 @@ def test_ao_0002_expands_ai_insights_and_legacy_typed_evidence_coexist() -> None
     AND TYPES only — deliberately NOT the current ORM metadata, which
     already declares the expanded columns and would prove nothing about
     the migration itself. This fixture is narrower than the real
-    `ao_0001`-published table: it omits the schema qualifier, foreign key
-    constraints, unique constraints and row-level security the real
-    migration also creates, and its ``operation_id`` values are orphaned
-    (no matching `ai_operations` row) in a way the real schema's foreign
-    key would reject. What it proves is exactly the additive-column and
+    `ao_0001`-published table: an attached SQLite database preserves the
+    ``mod_aiops`` spelling but cannot prove PostgreSQL schema semantics; the
+    fixture omits foreign key constraints, unique constraints and row-level
+    security the real migration also creates, and its ``operation_id`` values
+    are orphaned (no matching `ai_operations` row) in a way the real schema's
+    foreign key would reject. What it proves is exactly the additive-column and
     mixed-row-precedence behaviour below — not full schema fidelity to
     `ao_0001`.
 
@@ -242,10 +288,7 @@ def test_ao_0002_expands_ai_insights_and_legacy_typed_evidence_coexist() -> None
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
 
-    engine = create_engine(
-        "sqlite:///:memory:",
-        execution_options={"schema_translate_map": {"mod_aiops": None}},
-    )
+    engine = _sqlite_aiops_migration_engine()
 
     # Every OTHER tenant table is unaffected by this migration; build them
     # from the current ORM metadata exactly like the `db` fixture does.
@@ -253,39 +296,11 @@ def test_ao_0002_expands_ai_insights_and_legacy_typed_evidence_coexist() -> None
     Base.metadata.create_all(engine, tables=[Tenant.__table__, *other_tables])
 
     # `ai_insights`, deliberately NOT from current ORM metadata: `ao_0001`'s
-    # column names and types, built independently (without its schema,
-    # FKs, unique constraints or RLS — see the docstring) so the migration
+    # column names and types, built independently in the attached schema
+    # (without FKs, unique constraints or RLS — see the docstring) so the migration
     # under test is the only thing that can add the new columns.
-    legacy_metadata = sa.MetaData()
-    legacy_ai_insights = sa.Table(
-        "ai_insights",
-        legacy_metadata,
-        sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("tenant_id", sa.Uuid(), nullable=False),
-        sa.Column("operation_id", sa.Uuid(), nullable=False),
-        sa.Column("insight_key", sa.String(200), nullable=False),
-        sa.Column("insight_type", sa.String(120), nullable=False),
-        sa.Column("advisory_value", sa.Text(), nullable=False),
-        sa.Column("confidence", sa.Float()),
-        sa.Column("source_output_digest", sa.String(64), nullable=False),
-        sa.Column("status", sa.String(24), nullable=False),
-        sa.Column("acknowledged_by_ref", sa.String(200)),
-        sa.Column("acknowledged_at", sa.DateTime(timezone=True)),
-        sa.Column("action_evidence_ref", sa.String(240)),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-    )
-    legacy_metadata.create_all(engine)
+    legacy_ai_insights = _legacy_ai_insights_table()
+    legacy_ai_insights.metadata.create_all(engine)
 
     tenant_id = uuid4()
     operation_id = uuid4()
@@ -449,7 +464,8 @@ def test_ao_0003_shadows_attribution_against_current_and_legacy_writers() -> Non
     ``ao_0003_ack_attribution.upgrade()``/``downgrade()``,
     exercised through Alembic's ambient ``op`` proxy — not reimplemented.
     Same narrower-fixture caveat as the ``ao_0002`` coexistence test above:
-    this omits schema/FKs/uniques/RLS and proves the additive-column and
+    the attachment preserves the schema spelling, not PostgreSQL schema
+    semantics; this omits FKs/uniques/RLS and proves the additive-column and
     precedence behaviour, not full schema fidelity to ``ao_0001``.
 
     TWO SQLite-SPECIFIC REPRESENTATION MISMATCHES were found and fixed
@@ -584,43 +600,12 @@ def test_ao_0003_shadows_attribution_against_current_and_legacy_writers() -> Non
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
 
-    engine = create_engine(
-        "sqlite:///:memory:",
-        execution_options={"schema_translate_map": {"mod_aiops": None}},
-    )
+    engine = _sqlite_aiops_migration_engine()
     other_tables = [m.__table__ for m in TENANT_MODELS if m is not AIInsight]
     Base.metadata.create_all(engine, tables=[Tenant.__table__, *other_tables])
 
-    legacy_metadata = sa.MetaData()
-    legacy_ai_insights = sa.Table(
-        "ai_insights",
-        legacy_metadata,
-        sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("tenant_id", sa.Uuid(), nullable=False),
-        sa.Column("operation_id", sa.Uuid(), nullable=False),
-        sa.Column("insight_key", sa.String(200), nullable=False),
-        sa.Column("insight_type", sa.String(120), nullable=False),
-        sa.Column("advisory_value", sa.Text(), nullable=False),
-        sa.Column("confidence", sa.Float()),
-        sa.Column("source_output_digest", sa.String(64), nullable=False),
-        sa.Column("status", sa.String(24), nullable=False),
-        sa.Column("acknowledged_by_ref", sa.String(200)),
-        sa.Column("acknowledged_at", sa.DateTime(timezone=True)),
-        sa.Column("action_evidence_ref", sa.String(240)),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-    )
-    legacy_metadata.create_all(engine)
+    legacy_ai_insights = _legacy_ai_insights_table()
+    legacy_ai_insights.metadata.create_all(engine)
 
     tenant_id = uuid4()
     operation_id = uuid4()
@@ -747,7 +732,7 @@ def test_ao_0003_shadows_attribution_against_current_and_legacy_writers() -> Non
     with engine.begin() as conn:
         conn.execute(
             sa.text(
-                "UPDATE ai_insights SET acknowledged_by_ref = :actor, "
+                "UPDATE mod_aiops.ai_insights SET acknowledged_by_ref = :actor, "
                 "acknowledged_at = :at, action_evidence_ref = :locator "
                 "WHERE id = :id"
             ).bindparams(
@@ -859,7 +844,10 @@ def test_ao_0003_shadows_attribution_against_current_and_legacy_writers() -> Non
             ao_0003.downgrade()
         conn.commit()
 
-    columns = {c["name"] for c in sa.inspect(engine).get_columns("ai_insights")}
+    columns = {
+        c["name"]
+        for c in sa.inspect(engine).get_columns("ai_insights", schema="mod_aiops")
+    }
     assert "attribution_actor_namespace" not in columns
     assert "attribution_actor_type" not in columns
     assert "attribution_actor_ref" not in columns
