@@ -1220,6 +1220,8 @@
           "dotmac_inbox/manifest.py",
           "dotmac_inbox/migrations/__init__.py",
           "dotmac_inbox/migrations/versions/ib_0001_conversations.py",
+          "dotmac_inbox/migrations/versions/ib_0002_supplied_identity.py",
+          "dotmac_inbox/migrations/versions/ib_0003_transport_refs.py",
           "dotmac_inbox/models.py",
           "dotmac_inbox/service.py",
           "dotmac_inbox/threading.py"
@@ -3080,6 +3082,7 @@
           "dotmac_tax/migrations/__init__.py",
           "dotmac_tax/migrations/versions/tx_0001_tax.py",
           "dotmac_tax/migrations/versions/tx_0002_multi_tax.py",
+          "dotmac_tax/migrations/versions/tx_0003_result_fingerprint.py",
           "dotmac_tax/models.py",
           "dotmac_tax/service.py"
         ],
