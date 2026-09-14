@@ -1801,7 +1801,7 @@ def test_acknowledge_insight_reports_canonicalization_overflow_as_ai_operation_r
         )
 
 
-def test_acknowledge_insight_refuses_non_datetime_acknowledged_at_as_ai_operation_refused(
+def test_acknowledge_insight_refuses_non_datetime_timestamp(
     db: Session,
 ) -> None:
     """A non-`datetime` `acknowledged_at` (here `None`) must be reported

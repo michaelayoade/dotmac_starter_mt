@@ -428,7 +428,10 @@ _EVENT_TIMEOUT = _STATEMENT_TIMEOUT_SECONDS  # thread-signal waits, own bounds b
 _FUTURE_TIMEOUT = _STATEMENT_TIMEOUT_SECONDS * 2  # 120.0
 
 assert (
-    0 < _LOCK_POLL_DEADLINE < _LOCK_TIMEOUT_SECONDS < _STATEMENT_TIMEOUT_SECONDS
+    0
+    < _LOCK_POLL_DEADLINE
+    < _LOCK_TIMEOUT_SECONDS
+    < _STATEMENT_TIMEOUT_SECONDS
     < _FUTURE_TIMEOUT
 ), (
     "timeout ordering invariant violated: poll deadline < lock_timeout < "
