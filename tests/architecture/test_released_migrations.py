@@ -6939,7 +6939,18 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-support-access": frozenset(),
     "dotmac-remote-access": frozenset(),
     "dotmac-compliance-reporting": frozenset(),
-    "dotmac-ai-operations": frozenset(),
+    # `ao_0002` expands `ai_insights` with a typed evidence binding
+    # (additive columns only, legacy `action_evidence_ref` untouched).
+    # `ao_0003` gives acknowledgement attribution the identical shadowing
+    # treatment (additive columns only, legacy `acknowledged_by_ref`/
+    # `acknowledged_at` untouched). Still editable: no released tag
+    # carries either yet.
+    "dotmac-ai-operations": frozenset(
+        {
+            "ao_0002_insight_evidence_binding.py",
+            "ao_0003_ack_attribution.py",
+        }
+    ),
     "dotmac-payments": frozenset(),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the

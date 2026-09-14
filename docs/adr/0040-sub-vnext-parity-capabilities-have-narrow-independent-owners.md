@@ -78,6 +78,44 @@ second fact still informs provenance; the first is superseded by Michael's
 2026-08-20 explicit boundary above. This is an amendment, not rewritten
 history.
 
+## Dated amendment on AI Operations scope
+
+Date: 2026-09-13. Decision owner: Michael.
+
+A prior implementation attempt gave `dotmac-ai-operations` workflow-decision
+authority — an `AIWorkflowOutcome`/`AIWorkflowDecision`-style next-step type
+covering ask-question/wait/invoke-capability/hand-off/etc. — plus an
+independent process-local capability declaration registry. Both are rejected.
+That attempt was discarded entirely and never committed.
+
+The first proposal creates a second orchestration authority beside the
+consuming product's own. The second competes with canonical domain capability
+declarations. `dotmac_sub/docs/designs/AI_SOT.md` names `ai.intake` as the
+conversational classification owner: it may run a bounded classifier call, a
+composition call and clarification sessions, but versioned policies that opt
+into the composable conversation engine still leave "routing, queueing and
+assignment with Team Inbox." `dotmac_sub/tests/architecture/test_ai_boundaries.py`
+enforces exactly one inbound orchestration adapter
+(`test_customer_intake_has_one_non_email_inbound_adapter_and_no_side_effect_port`)
+and zero side-effecting calls from the AI-owning module. Together these are
+the evidence for the invariant this correction preserves: one product-owned
+orchestration path, zero AI-side consequences — not that Sub's design is
+single-shot only; it explicitly isn't.
+
+Corrected boundary: `dotmac-ai-operations` is a stateless provider-neutral
+advisory invocation, immutable execution-observation evidence and advisory
+insights. The consuming product's own orchestration owner (for example, Sub's
+`ai.intake`) owns session, routing/orchestration policy, workflow next-step
+and every consequence — this package expresses no workflow node, routing
+decision, wait deadline or tool loop. This is distinct from this package's
+own execution-admission policy (`AIPolicy`/`AIPolicyVersion`, which governs
+which operation kinds this package's own operation/attempt lifecycle allows,
+and is unaffected by this amendment). Canonical capability declarations —
+schema, permission, approval and idempotency — remain domain-owned; this
+package carries only an opaque exposure reference to one. Integrator
+connector plugins own provider identity, credentials, APIs, wire mappings and
+I/O.
+
 ## Planes and first consumers
 
 - Tenant plane: Referrals, Reseller Management, AI Operations, Remote Access,

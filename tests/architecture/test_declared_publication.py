@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -35,6 +36,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = PROJECT_ROOT / "scripts" / "declared_publication_sweep.py"
 LEDGER = PROJECT_ROOT / "docs" / "inventories" / "declared-publication-baseline.json"
+BARE_LABEL_EVASIONS = ("grandfathered", "tbd", "n/a", "see above")
 
 
 def _sweep():
@@ -47,6 +49,16 @@ def _sweep():
 
 def _ledger() -> dict[str, dict]:
     return json.loads(LEDGER.read_text(encoding="utf-8"))["unpublished"]
+
+
+def _bare_label_evasions(reason: str) -> tuple[str, ...]:
+    """Placeholder labels present as tokens, never across identifier edges."""
+
+    return tuple(
+        evasion
+        for evasion in BARE_LABEL_EVASIONS
+        if re.search(rf"(?<!\w){re.escape(evasion)}(?!\w)", reason, re.IGNORECASE)
+    )
 
 
 def _state_mismatches(
@@ -162,8 +174,23 @@ def test_no_ledger_entry_is_a_bare_label() -> None:
     for distribution, entry in _ledger().items():
         reason = entry["reason"]
         assert len(reason.split()) >= 20, f"{distribution}: a reason, not a label"
-        for evasion in ("grandfathered", "tbd", "n/a", "see above"):
-            assert evasion not in reason.lower(), f"{distribution}: {evasion!r}"
+        evasions = _bare_label_evasions(reason)
+        assert not evasions, f"{distribution}: bare label(s) {evasions!r}"
+
+
+@pytest.mark.parametrize("evasion", BARE_LABEL_EVASIONS)
+def test_the_bare_label_detector_refuses_each_placeholder(evasion: str) -> None:
+    """Sensitivity: every prohibited label remains detectable on its own."""
+
+    assert _bare_label_evasions(f"Reason deferred as {evasion} pending ownership.") == (
+        evasion,
+    )
+
+
+def test_the_bare_label_detector_does_not_cross_identifier_slashes() -> None:
+    """A slash inside a type list cannot manufacture the token ``n/a``."""
+
+    assert _bare_label_evasions("AIActionDecision/AIExecutionObservation") == ()
 
 
 def test_the_integration_example_is_in_exactly_one_state() -> None:

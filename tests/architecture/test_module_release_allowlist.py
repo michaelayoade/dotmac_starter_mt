@@ -603,6 +603,103 @@ def test_required_wheel_contents_exist_in_the_source_tree(
         assert (src / required).is_file(), required
 
 
+@pytest.mark.parametrize(
+    "distribution",
+    sorted(d for d, e in _allowlist().items() if e["db_schema"] is not None),
+)
+def test_every_migration_on_disk_is_enumerated_in_wheel_contents_required(
+    distribution: str,
+) -> None:
+    """Runs the REAL repository at PR time, before a release is ever
+    dispatched, calling the SAME `release_module.migration_extent_
+    problems` that `cmd_inspect` calls at release-inspect time — one
+    calculation, not two duplicated ones (a prior version of this test
+    reimplemented the derivation inline, which is exactly the
+    two-copies-can-drift shape `migration_extent_problems` exists to
+    close). See `test_migration_extent_problems_*` below for the
+    plant/near-miss sensitivity proof that this shared function actually
+    fires on an unlisted migration and stays silent on a conforming one —
+    this test only proves the CURRENT repository conforms, which is a
+    necessary but not sufficient check on its own.
+    """
+    allow_entry = _allowlist()[distribution]
+    entry = {**allow_entry, "package_path": PROJECT_ROOT / allow_entry["package_dir"]}
+    problems = _release_module_script().migration_extent_problems(entry)
+    assert not problems, f"{distribution}: {problems}"
+
+
+def test_migration_extent_problems_names_a_planted_unlisted_migration(
+    tmp_path: Path,
+) -> None:
+    """PLANT: an unlisted migration file exists on disk. Sensitivity proof
+    for `migration_extent_problems` (AGENTS.md's guard-sensitivity rule)
+    — the guard must NAME the planted defect, not merely fail to error.
+    """
+    package_path = tmp_path / "dotmac-planted"
+    versions_dir = package_path / "src" / "dotmac_planted" / "migrations" / "versions"
+    versions_dir.mkdir(parents=True)
+    (versions_dir / "__init__.py").write_text("")
+    (versions_dir / "pl_0001_first.py").write_text("")
+    (versions_dir / "pl_0002_unlisted.py").write_text("")
+    entry = {
+        "package_path": package_path,
+        "import_name": "dotmac_planted",
+        "db_schema": "mod_planted",
+        "wheel_contents": {
+            "required": ["dotmac_planted/migrations/versions/pl_0001_first.py"],
+        },
+    }
+    problems = _release_module_script().migration_extent_problems(entry)
+    assert len(problems) == 1
+    assert "pl_0002_unlisted.py" in problems[0]
+    assert "pl_0001_first.py" not in problems[0]
+
+
+def test_migration_extent_problems_is_silent_on_the_conforming_near_miss(
+    tmp_path: Path,
+) -> None:
+    """NEAR MISS: the identical fixture as the planted-defect test above,
+    except `pl_0002_unlisted.py` is ALSO listed in `required` — proving
+    the guard does not fire on a conforming tree merely because it
+    resembles the planted one (a guard that always fires would pass the
+    defect-detection half of the sensitivity proof for the wrong reason).
+    """
+    package_path = tmp_path / "dotmac-planted"
+    versions_dir = package_path / "src" / "dotmac_planted" / "migrations" / "versions"
+    versions_dir.mkdir(parents=True)
+    (versions_dir / "__init__.py").write_text("")
+    (versions_dir / "pl_0001_first.py").write_text("")
+    (versions_dir / "pl_0002_unlisted.py").write_text("")
+    entry = {
+        "package_path": package_path,
+        "import_name": "dotmac_planted",
+        "db_schema": "mod_planted",
+        "wheel_contents": {
+            "required": [
+                "dotmac_planted/migrations/versions/pl_0001_first.py",
+                "dotmac_planted/migrations/versions/pl_0002_unlisted.py",
+            ],
+        },
+    }
+    assert _release_module_script().migration_extent_problems(entry) == []
+
+
+def test_migration_extent_problems_is_silent_for_a_stateless_module(
+    tmp_path: Path,
+) -> None:
+    """A stateless module (`db_schema` is `None`) has no migration lineage
+    at all — the guard must not walk a `migrations/versions` directory
+    that a stateless module has no reason to have, and must not raise
+    (e.g. `FileNotFoundError`) merely because it does not exist."""
+    entry = {
+        "package_path": tmp_path / "dotmac-stateless-planted",
+        "import_name": "dotmac_stateless_planted",
+        "db_schema": None,
+        "wheel_contents": {"required": []},
+    }
+    assert _release_module_script().migration_extent_problems(entry) == []
+
+
 @pytest.mark.parametrize("distribution", sorted(_allowlist()))
 def test_the_declared_schema_matches_the_module_manifest(distribution: str) -> None:
     """`db_schema` is asserted at registry-verification time. If the allowlist
