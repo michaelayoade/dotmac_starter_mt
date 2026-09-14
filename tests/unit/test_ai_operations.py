@@ -236,7 +236,8 @@ def test_attempt_observations_are_immutable_and_insights_remain_advisory(
 
 
 def test_ao_0002_expands_ai_insights_and_legacy_typed_evidence_coexist() -> None:
-    """Runs the REAL ``ao_0002_insight_evidence_binding.upgrade()`` against
+    """Runs the REAL ``ao_0002_insight_evidence_binding.upgrade()`` followed
+    by the REAL ``ao_0003_ack_attribution.upgrade()`` against
     a hand-built ``ai_insights`` table carrying `ao_0001`'s COLUMN NAMES
     AND TYPES only — deliberately NOT the current ORM metadata, which
     already declares the expanded columns and would prove nothing about
@@ -273,7 +274,9 @@ def test_ao_0002_expands_ai_insights_and_legacy_typed_evidence_coexist() -> None
     FRESH session with no shared identity map, so the assertions can only
     pass if the values actually round-tripped through storage.
 
-    This fails if ``ao_0002`` ever renamed or dropped
+    The second migration is setup for the current writer only; this test's
+    behavioural assertions remain about ao_0002's additive evidence columns
+    and mixed-row precedence. This fails if ``ao_0002`` ever renamed or dropped
     ``action_evidence_ref`` (the raw INSERT names that column directly,
     independent of the current ORM model, and the ORM reload maps the
     same physical column — a rename desyncs the two and breaks the
@@ -283,6 +286,9 @@ def test_ao_0002_expands_ai_insights_and_legacy_typed_evidence_coexist() -> None
     """
     from dotmac_ai_operations.migrations.versions import (
         ao_0002_insight_evidence_binding as ao_0002,
+    )
+    from dotmac_ai_operations.migrations.versions import (
+        ao_0003_ack_attribution as ao_0003,
     )
 
     from alembic.operations import Operations
@@ -322,6 +328,11 @@ def test_ao_0002_expands_ai_insights_and_legacy_typed_evidence_coexist() -> None
         migration_context = MigrationContext.configure(conn)
         with Operations.context(migration_context):
             ao_0002.upgrade()
+            # The fixture starts at ao_0001. Bring it through the real ao_0003
+            # migration before using the current writer, whose model includes
+            # both migrations' columns. The assertions remain focused on the
+            # evidence columns and precedence introduced by ao_0002.
+            ao_0003.upgrade()
         conn.commit()
 
     # A raw INSERT naming `action_evidence_ref` directly: what a
