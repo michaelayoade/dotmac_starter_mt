@@ -215,6 +215,59 @@ which point step 2's enumeration and step 4's rehash had already read the
 file at that (possibly nested) path. The check now runs first, while
 `plan_by_filename` is built, so a rejected name is refused before this
 function ever reads a byte named by it.
+
+## `create_bundle_manifest` accepted an archive its own extractor would refuse
+
+An accepted manifest must not describe an archive `extract_verified_bundle`
+rejects — the constructor is a producer whose output is a trust boundary,
+and its closure claim was false wherever it stayed silent on a shape
+`_extract_zip_members` enforces. Two confirmed gaps, closed here:
+
+1. The archive-closure check computed `set(archive.namelist())` directly.
+   `zipfile` keeps only the LAST entry for a repeated member name, and
+   `set()` silently collapses the duplicate before this function ever sees
+   it — so an archive with two `pkg_a-1.0.whl` entries produced an ACCEPTED
+   manifest, while `_extract_zip_members`'s own `len(names) !=
+   len(set(names))` check refuses the same archive outright. Fixed by
+   checking the RAW `namelist()` for a duplicate first, mirroring
+   `_extract_zip_members`'s own check, before any set-collapsing occurs.
+2. `expected_by_filename` accepted any non-empty string as
+   `ExpectedArtifact.filename`, including one containing `/`, `\\`, `..`,
+   or an absolute path, and wrote it straight into `members[filename]` —
+   `build_local_index` refuses exactly those shapes. Fixed by validating
+   the filename's shape BEFORE any acquired bytes are read, mirroring the
+   check `build_local_index` already applies to the identical plan
+   filename, and applying the same before-any-read ordering that
+   function's own nested-filename fix established.
+
+The same review asked whether every OTHER extraction-time admissibility
+rule was similarly open. Two more were: two plan filenames differing only
+by case (`Foo.whl` / `foo.whl`) built two distinct, non-duplicate manifest
+members that `_extract_zip_members`'s `seen_lower` check refuses at
+extraction; and a plan naming more artifacts than `MAX_MEMBER_COUNT`, an
+acquired file over `MAX_MEMBER_BYTES`, or an acquired total over
+`MAX_TOTAL_UNCOMPRESSED_BYTES` produced a manifest describing an archive
+`_extract_zip_members`'s own caps refuse. This function now refuses all
+three at construction, using the exact same thresholds and comparisons.
+Two further caps are ALSO enforced against the archive itself, using the
+same `ZipInfo` this function already reads to verify size and content: a
+member whose `external_attr` declares it a symlink (refused regardless of
+what its declared content bytes are, the same as extraction), and a member
+whose compression ratio exceeds `MAX_COMPRESSION_RATIO` (the same
+zip-bomb guard extraction applies, using the same `file_size /
+compress_size` comparison).
+
+Not enforced here, deliberately: an archive member using an absolute path,
+containing a `..` segment, or aliasing another member's resolved target.
+All three are moot at this function's boundary rather than merely
+unchecked — the archive<->members closure above already requires
+`archive_names == set(members)` (a bijection on exact member-name
+strings), and every name in `members` is now a validated bare filename (no
+separators, not absolute, not `.`/`..`); an archive member using any of
+those shapes can never equal a bare filename, so it necessarily falls into
+the existing "archive contains an extra member the plan does not name"
+refusal. Adding a second, redundant check for the same three shapes would
+not close any additional gap.
 """
 
 from __future__ import annotations
@@ -803,11 +856,29 @@ def create_bundle_manifest(
         )
 
     expected_by_filename: dict[str, ExpectedArtifact] = {}
+    seen_lower_filenames: dict[str, str] = {}
     for artifact in expected.artifacts:
         if not isinstance(artifact.filename, str) or not artifact.filename:
             raise BundleVerificationError(
                 "expected artifact filename must be a non-empty string, "
                 f"got {artifact.filename!r}"
+            )
+        # Validate the filename's SHAPE here, before it is ever used to read
+        # an acquired file's bytes (below) or open an archive member by that
+        # name (further below) — a rejected name must never reach a read.
+        # Mirrors the bare-filename check `build_local_index` applies to the
+        # identical plan filename, applied here first for the identical
+        # reason that function's own nested-filename fix established.
+        if (
+            "/" in artifact.filename
+            or "\\" in artifact.filename
+            or artifact.filename in (".", "..")
+            or Path(artifact.filename).is_absolute()
+        ):
+            raise BundleVerificationError(
+                f"expected artifact filename {artifact.filename!r} is not a "
+                "safe bare filename (no path separators, not absolute, not "
+                "'.' or '..')"
             )
         if not isinstance(artifact.package_normalised_name, str) or not (
             artifact.package_normalised_name
@@ -822,7 +893,23 @@ def create_bundle_manifest(
                 f"expected artifact set names {artifact.filename!r} twice; "
                 "duplicate entries are refused"
             )
+        lowered_filename = artifact.filename.lower()
+        if lowered_filename in seen_lower_filenames:
+            raise BundleVerificationError(
+                f"expected artifacts {seen_lower_filenames[lowered_filename]!r} "
+                f"and {artifact.filename!r} collide case-insensitively; the "
+                "archive extractor refuses this pairing even though the "
+                "names differ"
+            )
+        seen_lower_filenames[lowered_filename] = artifact.filename
         expected_by_filename[artifact.filename] = artifact
+
+    if len(expected_by_filename) > MAX_MEMBER_COUNT:
+        raise BundleVerificationError(
+            f"the plan names {len(expected_by_filename)} artifacts, "
+            f"exceeding the {MAX_MEMBER_COUNT}-member cap the archive "
+            "extractor enforces"
+        )
 
     expected_names = set(expected_by_filename)
     acquired_names = set(acquired_files)
@@ -839,6 +926,7 @@ def create_bundle_manifest(
         )
 
     members: dict[str, dict[str, Any]] = {}
+    total_acquired_size = 0
     for filename, artifact in sorted(expected_by_filename.items()):
         path = acquired_files[filename]
         try:
@@ -856,6 +944,19 @@ def create_bundle_manifest(
             )
         if actual_size <= 0:
             raise BundleVerificationError(f"{filename!r} is empty on disk")
+        if actual_size > MAX_MEMBER_BYTES:
+            raise BundleVerificationError(
+                f"{filename!r} is {actual_size} bytes, exceeding the "
+                f"{MAX_MEMBER_BYTES}-byte per-member cap the archive "
+                "extractor enforces"
+            )
+        total_acquired_size += actual_size
+        if total_acquired_size > MAX_TOTAL_UNCOMPRESSED_BYTES:
+            raise BundleVerificationError(
+                "the acquired files' aggregate size exceeds the "
+                f"{MAX_TOTAL_UNCOMPRESSED_BYTES}-byte cap the archive "
+                "extractor enforces"
+            )
         members[filename] = {
             "sha256": actual_sha256,
             "size": actual_size,
@@ -872,7 +973,16 @@ def create_bundle_manifest(
 
     try:
         with zipfile.ZipFile(archive_path) as archive:
-            archive_names = set(archive.namelist())
+            archive_namelist = archive.namelist()
+            if len(archive_namelist) != len(set(archive_namelist)):
+                raise BundleVerificationError(
+                    f"archive {archive_path} contains a duplicate member "
+                    "name; zipfile keeps only the last entry for a "
+                    "repeated name, so set(archive.namelist()) would "
+                    "silently collapse it and this manifest would claim "
+                    "closure over a member the extractor refuses outright"
+                )
+            archive_names = set(archive_namelist)
             missing_from_archive = set(members) - archive_names
             if missing_from_archive:
                 raise BundleVerificationError(
@@ -891,12 +1001,29 @@ def create_bundle_manifest(
                 )
             for filename, record in members.items():
                 info = archive.getinfo(filename)
+                mode = info.external_attr >> 16
+                if stat.S_ISLNK(mode):
+                    raise BundleVerificationError(
+                        f"archive member {filename!r} is a symlink; the "
+                        "extractor refuses a symlink member regardless of "
+                        "what its declared content bytes are"
+                    )
                 if info.file_size != record["size"]:
                     raise BundleVerificationError(
                         f"archive member {filename!r} declares size "
                         f"{info.file_size}, but the acquired file on disk "
                         f"was {record['size']} bytes"
                     )
+                if info.compress_size > 0:
+                    ratio = info.file_size / info.compress_size
+                    if ratio > MAX_COMPRESSION_RATIO:
+                        raise BundleVerificationError(
+                            f"archive member {filename!r} has a compression "
+                            f"ratio of {ratio:.1f}, exceeding the "
+                            f"{MAX_COMPRESSION_RATIO}x cap the archive "
+                            "extractor enforces; refusing as a suspected "
+                            "zip bomb"
+                        )
                 member_sha256 = sha256_hex(archive.read(filename))
                 if member_sha256 != record["sha256"]:
                     raise BundleVerificationError(

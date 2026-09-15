@@ -86,6 +86,27 @@ tampered-after-planning acquired file proving the constructor computes
 rather than accepts a hash, a tampered archive member proving the same
 for the archive side, and the two non-finite-value plants for the
 input-domain gate (`package_normalised_name`, `plan_digest`).
+
+## `create_bundle_manifest`: the accepted-manifest-describes-a-rejected-archive sweep
+
+An independent review found two confirmed gaps in `create_bundle_manifest`
+(the module docstring's "`create_bundle_manifest` accepted an archive its
+own extractor would refuse" documents each in detail) and Michael's ruling
+asked for a sweep against every other extraction/publication admissibility
+rule. The tests below are that sweep's evidence: a duplicate raw archive
+member name (confirmed accepted before this fix, by direct execution — the
+gap this module's own docstring measures), an expected filename containing
+a path separator, one that is `..`, and one that is absolute (all three
+refused BEFORE any acquired bytes are read — proven the same way the
+`build_local_index` nested-filename fix proved its own ordering), two
+expected filenames colliding only by case, more artifacts than
+`MAX_MEMBER_COUNT`, an acquired file over `MAX_MEMBER_BYTES`, an acquired
+total over `MAX_TOTAL_UNCOMPRESSED_BYTES`, a symlink archive member, and an
+archive compression-ratio bomb. The existing
+`test_create_bundle_manifest_accepts_a_clean_multi_file_plan` above is the
+shared mandatory accept-direction control for this whole group too —
+without it, a constructor that refused every input would pass every test
+below for the wrong reason.
 """
 
 from __future__ import annotations
@@ -2108,6 +2129,357 @@ def test_create_bundle_manifest_refuses_a_non_finite_plan_digest(tmp_path: Path)
     ):
         create_bundle_manifest(
             expected=tampered,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+# ── canonical bundle manifest: the extractor-admissibility sweep ──────────
+
+
+def test_create_bundle_manifest_refuses_a_duplicate_archive_member_name(
+    tmp_path: Path,
+):
+    """CONFIRMED-BY-EXECUTION GAP 1: the archive contains two entries named
+    `a.whl` with IDENTICAL, individually-correct content. Before this fix,
+    the closure check computed `set(archive.namelist())` directly — Python's
+    `zipfile` keeps only the LAST entry for a repeated name, and `set()`
+    silently collapses the duplicate before this function ever inspects the
+    raw list, so this exact archive produced an ACCEPTED manifest even
+    though `_extract_zip_members`'s own `len(names) != len(set(names))`
+    check refuses the same archive outright at extraction.
+
+    DESIGNED BREAK CONDITION: removing the raw `len(archive_namelist) !=
+    len(set(archive_namelist))` check (or moving it after `archive_names =
+    set(...)` is computed) defeats this test — `missing_from_archive` and
+    `extra_in_archive` would both come back empty (the set has exactly one
+    `a.whl`, matching `members`), `archive.getinfo("a.whl")` would resolve
+    to the last-written entry, its size and content would match the
+    (identical) acquired file, and `create_bundle_manifest` would return a
+    manifest exactly as the brief's own measured execution showed.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("a.whl", b"AAAA")
+        zf.writestr("a.whl", b"AAAA")
+
+    with pytest.raises(BundleVerificationError, match="duplicate member"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_a_path_separator_filename_before_reading(
+    tmp_path: Path,
+):
+    """CONFIRMED GAP 2, ordering proof. `nested/evil.whl` is a shape this
+    function must refuse, and the plan's recorded hash matches what was
+    ORIGINALLY written to `acquired/nested/evil.whl` — but the bytes on
+    disk are then corrupted, deliberately, AFTER `_cbm_scenario` wrote them.
+    If filename-shape validation ran only where the pre-fix code checked
+    nothing at all (never), this function would instead read the corrupted
+    bytes and fail with the "was acquired with digest ... but the plan
+    expects" hash-mismatch message. Asserting the filename-refusal message
+    instead proves the shape check runs BEFORE the read, the same ordering
+    `build_local_index`'s own nested-filename fix proved.
+
+    DESIGNED BREAK CONDITION: removing the `"/" in artifact.filename` check
+    (or any of its siblings) from the `expected_by_filename` loop defeats
+    this test — the function would then reach the acquired-bytes read for
+    `nested/evil.whl`, hash the corrupted content, and raise the digest-
+    mismatch message instead of the filename refusal asserted here.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"nested/evil.whl": b"AAAA"}}
+    )
+    (tmp_path / "acquired" / "nested" / "evil.whl").write_bytes(
+        b"CORRUPTED-AFTER-WRITE"
+    )
+
+    with pytest.raises(BundleVerificationError, match="not a safe bare filename"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_a_traversal_filename_before_reading_bytes(
+    tmp_path: Path,
+):
+    """CONFIRMED GAP 2, second shape: an expected filename of exactly `..`.
+    `acquired_files["..".join(())]`... is deliberately never given a real
+    file on disk — `..` resolved against any acquired directory is
+    dangerous to write to at all, so this plant proves ordering the other
+    way: if the filename-shape check did not run first, this function
+    would next reach `path.read_bytes()` for a path that does not exist and
+    raise `"cannot read acquired file"`, a DIFFERENT `BundleVerificationError`
+    message than the filename refusal asserted here.
+
+    DESIGNED BREAK CONDITION: removing the `artifact.filename in (".", "..")`
+    check defeats this test — the error observed would change from the
+    filename refusal to the read-failure message, proving the check (not
+    some other refusal) is what this test exercises.
+    """
+
+    expected = ExpectedArtifactSet(
+        plan_digest=PLAN_DIGEST,
+        artifacts=(
+            ExpectedArtifact(
+                package_normalised_name="aaa-pkg",
+                filename="..",
+                sha256=sha256_hex(b"AAAA"),
+            ),
+        ),
+    )
+    acquired_files = {"..": tmp_path / "does-not-exist.whl"}
+    archive_path = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive_path, "w"):
+        pass
+    run = dict(_VALID_MANIFEST_RUN)
+
+    with pytest.raises(BundleVerificationError, match="not a safe bare filename"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_an_absolute_filename_before_reading_bytes(
+    tmp_path: Path,
+):
+    """CONFIRMED GAP 2, third shape: an expected filename that is an
+    absolute path. `escape_target` is a real path under `tmp_path`, but
+    deliberately never written to disk: `Path.__truediv__` REPLACES the
+    left side entirely when the right operand is absolute (the same note
+    `build_local_index`'s own filename-join comment makes), so an
+    un-shape-checked absolute filename would let a caller's acquired-files
+    mapping name an arbitrary absolute path directly, rather than one
+    confined under an `acquired_dir`.
+
+    DESIGNED BREAK CONDITION: removing the `Path(artifact.filename)
+    .is_absolute()` check defeats this test — the function would next
+    attempt `escape_target.read_bytes()`, which does not exist, and raise
+    `"cannot read acquired file"` instead of the filename refusal asserted
+    here; `escape_target` staying un-created also proves no read was even
+    attempted.
+    """
+
+    escape_target = tmp_path / "escaped-evil.whl"
+    expected = ExpectedArtifactSet(
+        plan_digest=PLAN_DIGEST,
+        artifacts=(
+            ExpectedArtifact(
+                package_normalised_name="aaa-pkg",
+                filename=str(escape_target),
+                sha256=sha256_hex(b"AAAA"),
+            ),
+        ),
+    )
+    acquired_files = {str(escape_target): escape_target}
+    archive_path = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive_path, "w"):
+        pass
+    run = dict(_VALID_MANIFEST_RUN)
+
+    with pytest.raises(BundleVerificationError, match="not a safe bare filename"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+    assert not escape_target.exists()
+
+
+def test_create_bundle_manifest_refuses_case_colliding_expected_filenames(
+    tmp_path: Path,
+):
+    """SWEEP PLANT: `A.whl` and `a.whl` are two DIFFERENT, individually
+    valid, non-duplicate expected filenames (the exact-string duplicate
+    check does not fire) that a fully self-consistent plan/acquired/archive
+    triple names. `_extract_zip_members`'s own `seen_lower` check refuses
+    exactly this pairing at extraction — this function must refuse it too,
+    rather than emit a manifest the extractor cannot honour.
+
+    Near-miss control: `test_create_bundle_manifest_accepts_a_clean_multi_
+    file_plan` above builds two DIFFERENT-case-insensitive filenames
+    (`a.whl`, `b.whl`) and accepts them — proving this check fires on the
+    case collision specifically, not on "more than one file".
+
+    DESIGNED BREAK CONDITION: removing the `seen_lower_filenames` check (or
+    its `lowered_filename in seen_lower_filenames` comparison) defeats this
+    test — both filenames would be added to `expected_by_filename`
+    (they are not exact-string duplicates) and the manifest would be built
+    successfully.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path,
+        {"aaa-pkg": {"A.whl": b"AAAA"}, "bbb-pkg": {"a.whl": b"aaaa"}},
+    )
+
+    with pytest.raises(BundleVerificationError, match="collide case-insensitively"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_more_artifacts_than_the_member_count_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """SWEEP PLANT: a plan naming more artifacts than `MAX_MEMBER_COUNT`
+    describes an archive `_extract_zip_members`'s own `len(infos) >
+    MAX_MEMBER_COUNT` check refuses, independent of any individual member's
+    size or content.
+
+    DESIGNED BREAK CONDITION: removing the `len(expected_by_filename) >
+    MAX_MEMBER_COUNT` check defeats this test — all five small,
+    individually-valid, mutually-agreeing artifacts would build a manifest
+    successfully.
+    """
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE, "MAX_MEMBER_COUNT", 3)
+    members = {f"f{i}.whl": b"X" for i in range(5)}
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": members}
+    )
+
+    with pytest.raises(BundleVerificationError, match="member cap"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_an_oversized_acquired_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """SWEEP PLANT: an acquired file whose real size exceeds
+    `MAX_MEMBER_BYTES` describes an archive member `_extract_zip_members`'s
+    own `declared_size > MAX_MEMBER_BYTES` check refuses.
+
+    DESIGNED BREAK CONDITION: removing the `actual_size > MAX_MEMBER_BYTES`
+    check defeats this test — the 6-byte file would build a manifest
+    successfully despite the (monkeypatched) 3-byte cap.
+    """
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE, "MAX_MEMBER_BYTES", 3)
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"big.whl": b"AAAAAA"}}
+    )
+
+    with pytest.raises(BundleVerificationError, match="per-member cap"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_an_aggregate_acquired_size_over_the_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """SWEEP PLANT: two individually-small acquired files whose SUM exceeds
+    `MAX_TOTAL_UNCOMPRESSED_BYTES` describe an archive
+    `_extract_zip_members`'s own running `total_declared_size >
+    MAX_TOTAL_UNCOMPRESSED_BYTES` check refuses, even though each member is
+    legal on its own.
+
+    DESIGNED BREAK CONDITION: removing the running `total_acquired_size >
+    MAX_TOTAL_UNCOMPRESSED_BYTES` check defeats this test — both 4-byte
+    files (8 bytes together) would build a manifest successfully despite
+    the (monkeypatched) 5-byte aggregate cap.
+    """
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE, "MAX_TOTAL_UNCOMPRESSED_BYTES", 5)
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA", "b.whl": b"BBBB"}}
+    )
+
+    with pytest.raises(BundleVerificationError, match="aggregate"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_a_symlink_archive_member(tmp_path: Path):
+    """SWEEP PLANT: the archive member is declared a symlink via its
+    `external_attr`, regardless of its stored content bytes.
+    `_extract_zip_members`'s own `stat.S_ISLNK(mode)` check refuses a
+    symlink member unconditionally — this function must refuse it too,
+    rather than let matching declared bytes buy it acceptance.
+
+    DESIGNED BREAK CONDITION: removing the `stat.S_ISLNK(mode)` check (built
+    from `info.external_attr >> 16`) defeats this test — the member's size
+    and content already agree with the acquired file, so the existing size
+    and hash checks alone would let it through.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"link": b"target"}}
+    )
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        info = zipfile.ZipInfo("link")
+        info.external_attr = 0o120777 << 16
+        zf.writestr(info, "target")
+
+    with pytest.raises(BundleVerificationError, match="symlink"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_an_archive_compression_ratio_bomb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """SWEEP PLANT: an archive member whose declared uncompressed size,
+    divided by its compressed size, exceeds `MAX_COMPRESSION_RATIO`, even
+    though its declared/actual size is legal on its own.
+    `_extract_zip_members`'s own `ratio > MAX_COMPRESSION_RATIO` check
+    refuses exactly this as a suspected zip bomb — this function must
+    refuse it too, using the same `file_size / compress_size` comparison
+    against the same archive bytes it already reads to verify content.
+
+    DESIGNED BREAK CONDITION: removing the `ratio > MAX_COMPRESSION_RATIO`
+    check (or the `info.compress_size > 0` guard around it) defeats this
+    test — the highly-compressible payload's declared size and content hash
+    both already agree with the acquired file, so the existing checks alone
+    would let it through.
+    """
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE, "MAX_COMPRESSION_RATIO", 2)
+    payload = b"A" * 100_000
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"bomb.whl": payload}}
+    )
+
+    with pytest.raises(BundleVerificationError, match="compression ratio"):
+        create_bundle_manifest(
+            expected=expected,
             acquired_files=acquired_files,
             archive_path=archive_path,
             run=run,
