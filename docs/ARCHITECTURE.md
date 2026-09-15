@@ -3417,6 +3417,54 @@ ADR-0069), and DEVICE/SERVICE credentials — `AccessCredential` and
 
 ## Deploy
 
+### GitHub Actions bundle observation ownership
+
+`scripts/bundle_github_observation.py` is Starter's owner for observing and
+binding a trusted GitHub Actions run, artifact, and workflow identity through
+the fixed-origin transport. The SHA-pinned
+`.github/actions/verified-dependency-bundle` action executes Starter's own
+`scripts/run_bundle_action.py` through `GITHUB_ACTION_PATH`, never an executable
+from the caller checkout. Its policy inputs (repository ID/name, workflow path,
+and exact artifact names) must be set by the protected producer/consumer
+workflow, not copied from a candidate's claims. REST identities are evidence;
+a manifest `environment_name` remains descriptive and unverified because these
+endpoints do not prove environment protection. The observed artifact digest and
+byte size are compared to the downloaded ZIP before any byte claim is earned.
+`scripts/bundle_artifact_download.py` owns that bounded, no-overwrite byte
+handoff: it observes first, streams the artifact ZIP from the fixed GitHub API
+path, and returns only after both observed values match and the linked output
+inode matches the verified, fsynced file descriptor. The action creates an owned
+mode-0700 child under runner temp for the handoff. A caller workflow must run
+the verification in a fresh job BEFORE checkout or execution of candidate code
+(so no candidate-started same-UID process can race it), and abandon that child
+on publication refusal; neither the downloader nor the action can prove job
+placement or concurrency from a pathname.
+
+The approved envelope is two GitHub artifacts from one protected producer run.
+First upload the archive artifact containing exactly `bundle.zip`; only after
+the upload action returns its positive `artifact-id` may `construct` write the
+canonical `bundle-manifest.json` sidecar and upload it as a separate artifact.
+The sidecar's `run.artifact_id` and name bind the **archive**, not the sidecar.
+`verify-and-index` independently observes and hashes both outer artifact ZIPs,
+requires the same producing run/repository/head SHA/workflow, reads the exact
+sidecar member, binds its run record to the archive observation, verifies the
+inner archive and extracted members, and builds a local index with no registry
+fetch. GitHub's artifact-read token is passed only by environment, never argv;
+it is not a Forgejo registry credential.
+
+The action's `expected-file` is an exact JSON v1 document with keys
+`schema_version: 1`, `plan_digest` (64 lowercase hex), and nonempty `artifacts`
+records carrying only `package_normalised_name`, `filename`, and `sha256`.
+Starter validates and reconciles that document but **does not derive or prove
+its product-policy provenance**. ERP/Workspace must compute it from their own
+immutable candidate dependency state and pass the trusted producer coordinates
+through reviewed, source-bound workflows. The action returns `manifest-path`
+after construction and `index-root` after verification, both under runner temp.
+No producer/consumer workflow calls this action yet, no package install or
+offline-only installer gate exists, and the protected environment, source-bound
+ruleset, broad-secret removal, and rotation remain separate work. ERP still
+executes its original verifier; this action is not a cutover receipt.
+
 `docker-compose.yml` (prod) requires a published `APP_IMAGE`, no bind
 mounts, resource limits (`APP_MEM_LIMIT`, `APP_PIDS_LIMIT`), and a
 container healthcheck against `/health`. `docker-compose.dev.yml` is an

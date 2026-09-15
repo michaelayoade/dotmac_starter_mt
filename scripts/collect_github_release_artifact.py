@@ -7,12 +7,11 @@ import io
 import json
 import os
 import re
-import urllib.error
-import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from github_actions_transport import OPENER, GitHubRedirect, get_json, url_for_path
 from release_artifact_verification import canonical_kernel_filenames
 
 API = "https://api.github.com"
@@ -21,39 +20,12 @@ CANONICAL_WORKFLOW_PATH = ".github/workflows/release-kernel.yml"
 CANONICAL_ARTIFACT_NAME = "dotmac-kernel-dist"
 
 
-class GitHubRedirect(urllib.request.HTTPRedirectHandler):
-    """Allow signed HTTPS downloads without forwarding the GitHub token."""
-
-    def redirect_request(self, request, fp, code, message, headers, new_url):
-        parsed = urllib.parse.urlsplit(new_url)
-        if parsed.scheme != "https" or parsed.username or parsed.password:
-            raise urllib.error.HTTPError(new_url, code, "unsafe redirect", headers, fp)
-        redirected = super().redirect_request(
-            request, fp, code, message, headers, new_url
-        )
-        if redirected is not None and parsed.netloc != "api.github.com":
-            redirected.remove_header("Authorization")
-        return redirected
-
-
-OPENER = urllib.request.build_opener(GitHubRedirect())
-
-
-def get_json(path: str, token: str) -> dict[str, object]:
-    request = urllib.request.Request(  # noqa: S310 -- API is a fixed HTTPS origin.
-        API + path,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-        },
-    )
-    with OPENER.open(request, timeout=30) as response:
-        return json.load(response)
+__all__ = ["GitHubRedirect", "get_json"]
 
 
 def get_bytes(path: str, token: str) -> bytes:
     request = urllib.request.Request(  # noqa: S310 -- API is a fixed HTTPS origin.
-        API + path,
+        url_for_path(path),
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
