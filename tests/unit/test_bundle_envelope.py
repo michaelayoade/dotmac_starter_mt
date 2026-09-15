@@ -25,12 +25,27 @@ naming `_refuse_malformed_manifest_run` or
 `_refuse_malformed_bundle_manifest_shape` directly (both are exercised only
 indirectly there, through `extract_verified_bundle`, which this slice does
 not port); the refusal tests for those two functions below are new.
+
+## Slice 1a-iii: safe extraction
+
+Every test below naming `extract_verified_bundle` is ported from the same
+ERP file at the same pinned commit — the 20 tests are the accumulated
+adversarial evidence for the one sanctioned extraction entry point:
+duplicate members, absolute paths, `..` traversal, symlinks, case
+collisions, oversize members, unlisted members, manifest-declared members
+absent from the archive, compression-ratio bombs, and atomicity on both the
+accept and refuse paths. `test_a_clean_bundle_extracts_and_publishes_atomically`
+is the mandatory accept-direction control: without it, a verifier that
+refuses every archive would pass all nineteen refusal tests for the wrong
+reason.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -64,6 +79,10 @@ _refuse_malformed_bundle_manifest_shape = (
     BUNDLE_ENVELOPE._refuse_malformed_bundle_manifest_shape
 )
 MANIFEST_SCHEMA_VERSION = BUNDLE_ENVELOPE.MANIFEST_SCHEMA_VERSION
+ExtractionError = BUNDLE_ENVELOPE.ExtractionError
+extract_verified_bundle = BUNDLE_ENVELOPE.extract_verified_bundle
+_extract_zip_members = BUNDLE_ENVELOPE._extract_zip_members
+_is_within = BUNDLE_ENVELOPE._is_within
 
 
 def test_canonical_json_bytes_sorts_keys():
@@ -421,3 +440,534 @@ def test_refuse_malformed_bundle_manifest_shape_refuses_a_wrong_schema_version()
 
     with pytest.raises(BundleVerificationError, match="schema_version"):
         _refuse_malformed_bundle_manifest_shape(manifest)
+
+
+# ── extraction: exception hierarchy ─────────────────────────────────────
+
+
+def test_extraction_error_is_a_bundle_envelope_error():
+    """`ExtractionError` is a subclass of the generic `BundleEnvelopeError`
+    root, per Michael's ruling — not of ERP's `DependencyBundleError`.
+
+    Breaks if `ExtractionError` is re-parented under some other class (in
+    particular an ERP-imported `DependencyBundleError`, the re-export
+    design this module's docstring rules out): `issubclass` would then
+    fail.
+    """
+
+    assert issubclass(ExtractionError, BundleEnvelopeError)
+
+
+# ── extraction: fixtures ─────────────────────────────────────────────────
+
+
+def _make_zip(
+    tmp_path: Path, members: dict[str, bytes], *, name: str = "bundle.zip"
+) -> Path:
+    path = tmp_path / name
+    with zipfile.ZipFile(path, "w") as archive:
+        for member_name, data in members.items():
+            archive.writestr(member_name, data)
+    return path
+
+
+#: A FULLY shape-valid `run` record — `extract_verified_bundle` checks every
+#: one of these fields itself via `_refuse_malformed_bundle_manifest_shape`,
+#: so every manifest fixture below must carry a complete one, not an empty
+#: placeholder `{}`.
+_VALID_MANIFEST_RUN: dict = {
+    "repository_full_name": "michaelayoade/dotmac_erp",
+    "repository_id": 1141216651,
+    "workflow_path": ".github/workflows/dependency-bundle-produce.yml",
+    "run_id": 111,
+    "run_attempt": 1,
+    "trusted_workflow_sha": "a" * 40,
+    "artifact_id": 222,
+    "artifact_name": "erp-dependency-bundle-x",
+    "artifact_run_id": 111,
+    "environment_name": "forgejo-registry-read-main",
+}
+
+
+def _manifest_for(members: dict[str, bytes]) -> dict:
+    return {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "plan_digest": "a" * 64,
+        "archive_sha256": "b" * 64,
+        "members": {
+            name: {
+                "sha256": sha256_hex(data),
+                "size": len(data),
+                "package": "dotmac-kernel",
+            }
+            for name, data in members.items()
+        },
+        "run": dict(_VALID_MANIFEST_RUN),
+    }
+
+
+def _mutate(manifest: dict, mutation) -> dict:
+    mutated = json.loads(json.dumps(manifest))
+    mutation(mutated)
+    return mutated
+
+
+# ── extraction: only entry point ─────────────────────────────────────────
+
+
+def test_extract_verified_bundle_is_the_only_public_entry_point():
+    """`extract_verified_bundle` is the only sanctioned entry point;
+    `_extract_zip_members` exists but stays private, and no other
+    extraction function exists under a different name.
+
+    Breaks if a differently-named public wrapper (e.g. `safe_extract_zip`)
+    is (re)introduced, or if `_extract_zip_members`/`extract_verified_bundle`
+    are renamed or removed.
+    """
+
+    assert not hasattr(BUNDLE_ENVELOPE, "safe_extract_zip")
+    assert hasattr(BUNDLE_ENVELOPE, "_extract_zip_members")
+    assert hasattr(BUNDLE_ENVELOPE, "extract_verified_bundle")
+
+
+# ── extraction: the accept-direction control ─────────────────────────────
+
+
+def test_a_clean_bundle_extracts_and_publishes_atomically(tmp_path: Path):
+    """THE MANDATORY ACCEPT-DIRECTION CONTROL: a well-formed archive and a
+    manifest that genuinely describes it extracts successfully and its
+    bytes land on disk under `dest_dir`.
+
+    Breaks if `extract_verified_bundle` (or anything it calls) is changed
+    to refuse every archive unconditionally, or if the returned member
+    list / the extracted bytes stop matching what was actually written —
+    a verifier that raises for every input passes all nineteen refusal
+    tests below for the wrong reason without this test.
+    """
+
+    members = {"a.whl": b"AAAA", "b.whl": b"BBBBBB"}
+    archive = _make_zip(tmp_path, members)
+    dest = tmp_path / "out"
+
+    extracted = extract_verified_bundle(archive, dest, _manifest_for(members))
+
+    assert sorted(extracted) == ["a.whl", "b.whl"]
+    assert (dest / "a.whl").read_bytes() == b"AAAA"
+
+
+# ── extraction: destination and filesystem refusals ──────────────────────
+
+
+def test_extraction_refuses_a_pre_existing_destination(tmp_path: Path):
+    """`dest_dir` already existing is refused before any extraction work
+    begins — this function materialises a fresh tree, never merges into
+    or overwrites one.
+
+    Breaks if the `dest_dir.exists()` guard at the top of
+    `extract_verified_bundle` is dropped, which would let extraction
+    proceed and attempt to publish over (or into) an existing directory.
+    """
+
+    members = {"a.whl": b"AAAA"}
+    archive = _make_zip(tmp_path, members)
+    dest = tmp_path / "out"
+    dest.mkdir()
+
+    with pytest.raises(ExtractionError, match="already exists"):
+        extract_verified_bundle(archive, dest, _manifest_for(members))
+
+
+def test_extraction_refuses_when_its_parent_directory_cannot_be_created(
+    tmp_path: Path,
+):
+    """Parent-directory creation (`dest_dir.parent.mkdir(...)`) is
+    translated into `ExtractionError`, not left as a raw `OSError`.
+
+    Breaks if the try/except wrapping `dest_dir.parent.mkdir(...)` is
+    removed: a `NotADirectoryError` (from a path component that is
+    actually a file, as constructed below) would then propagate
+    uncaught, and `pytest.raises(ExtractionError)` would not catch it.
+    """
+
+    members = {"a.whl": b"AAAA"}
+    archive = _make_zip(tmp_path, members)
+    blocking_file = tmp_path / "not-a-directory"
+    blocking_file.write_bytes(b"this is a file, not a directory")
+    dest = blocking_file / "nested" / "out"
+
+    with pytest.raises(ExtractionError, match="cannot create parent directory"):
+        extract_verified_bundle(archive, dest, _manifest_for(members))
+
+
+def test_extraction_refuses_when_the_staging_directory_cannot_be_created(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`tempfile.mkdtemp` failing (no space, no permission, a directory
+    raced away) is translated into `ExtractionError`, not left as a raw
+    `OSError`. `dest_dir.parent` genuinely exists here — unlike the test
+    above, this isolates the `mkdtemp` call site from the parent-creation
+    one.
+
+    Breaks if the try/except around the `tempfile.mkdtemp(...)` call is
+    removed: the simulated `OSError` below would then propagate uncaught.
+    """
+
+    members = {"a.whl": b"AAAA"}
+    archive = _make_zip(tmp_path, members)
+    dest = tmp_path / "out"
+
+    def _raise(*args, **kwargs):
+        raise OSError("simulated: cannot create staging directory")
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE.tempfile, "mkdtemp", _raise)
+
+    with pytest.raises(ExtractionError, match="cannot create a staging directory"):
+        extract_verified_bundle(archive, dest, _manifest_for(members))
+
+
+# ── extraction: manifest shape sensitivity proof ──────────────────────────
+
+
+@pytest.mark.parametrize(
+    "reason,mutation",
+    [
+        (
+            "wrong schema_version",
+            lambda m: m.__setitem__("schema_version", MANIFEST_SCHEMA_VERSION - 1),
+        ),
+        (
+            "missing schema_version",
+            lambda m: m.__delitem__("schema_version"),
+        ),
+        (
+            "non-hex plan_digest",
+            lambda m: m.__setitem__("plan_digest", "not-hex"),
+        ),
+        (
+            "missing plan_digest",
+            lambda m: m.__delitem__("plan_digest"),
+        ),
+        (
+            "non-hex archive_sha256",
+            lambda m: m.__setitem__("archive_sha256", "not-hex"),
+        ),
+        (
+            "run is not a dict",
+            lambda m: m.__setitem__("run", "not-a-dict"),
+        ),
+        (
+            "run missing a required field",
+            lambda m: m["run"].__delitem__("run_id"),
+        ),
+        (
+            "run has a negative coordinate",
+            lambda m: m["run"].__setitem__("run_id", -1),
+        ),
+        (
+            "run has the null trusted_workflow_sha",
+            lambda m: m["run"].__setitem__("trusted_workflow_sha", "0" * 40),
+        ),
+        (
+            "a member is missing its package field",
+            lambda m: m["members"]["a.whl"].__delitem__("package"),
+        ),
+    ],
+)
+def test_extract_verified_bundle_refuses_every_malformed_manifest_field(
+    tmp_path: Path, reason: str, mutation
+):
+    """Sensitivity proof: `extract_verified_bundle` shape-checks
+    `schema_version`, `plan_digest`, `archive_sha256`, `run`, and each
+    member's own `package` field — not just `members` — BEFORE any
+    extraction work begins. Plants a defect in each field, one at a time,
+    holding everything else fixed at a fully valid manifest; the near-miss
+    half (the same shape, unmutated, still succeeds) is
+    `test_a_clean_bundle_extracts_and_publishes_atomically`.
+
+    Breaks if `_refuse_malformed_bundle_manifest_shape` (or the `run`/
+    `members`-level checks it delegates to) stops checking the mutated
+    field, or if `extract_verified_bundle` stops calling it before
+    extraction — either would let the malformed manifest through, or
+    would leave a partial `out` directory on disk.
+    """
+
+    members = {"a.whl": b"AAAA"}
+    archive = _make_zip(tmp_path, members)
+    manifest = _mutate(_manifest_for(members), mutation)
+
+    with pytest.raises(BundleVerificationError):
+        extract_verified_bundle(archive, tmp_path / "out", manifest)
+    assert not (tmp_path / "out").exists(), reason
+
+
+# ── extraction: atomicity on failure ──────────────────────────────────────
+
+
+def test_extraction_is_atomic_on_failure_nothing_is_published(tmp_path: Path):
+    """A hash mismatch on one member refuses the WHOLE extraction — no
+    partial `dest_dir`, and no stray staging directory left behind beside
+    it.
+
+    Breaks if the `except BaseException: shutil.rmtree(staging_dir, ...);
+    raise` cleanup around `_extract_zip_members`/`verify_member_hashes` in
+    `extract_verified_bundle` is dropped, which would leave the staging
+    directory (or worse, a partially-published `dest_dir`) on disk after
+    the raise.
+    """
+
+    archive = _make_zip(tmp_path, {"good.whl": b"GOOD", "bad.whl": b"BAD"})
+    bad_manifest = _manifest_for({"good.whl": b"GOOD", "bad.whl": b"BAD"})
+    bad_manifest["members"]["bad.whl"]["sha256"] = sha256_hex(b"WRONG")
+    dest = tmp_path / "out"
+
+    with pytest.raises(BundleVerificationError, match="hash mismatch"):
+        extract_verified_bundle(archive, dest, bad_manifest)
+
+    assert not dest.exists()
+    assert list(tmp_path.iterdir()) == [
+        p for p in tmp_path.iterdir() if p.name == archive.name
+    ]
+
+
+# ── extraction: member-safety refusals ─────────────────────────────────────
+
+
+def test_a_duplicate_member_name_is_refused(tmp_path: Path):
+    """A ZIP with two entries sharing the exact same member name is
+    refused rather than silently keeping the last one written.
+
+    Breaks if the `len(names) != len(set(names))` duplicate check is
+    dropped.
+    """
+
+    archive = tmp_path / "dup.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("a.whl", b"AAAA")
+        zf.writestr("a.whl", b"BBBB")
+
+    with pytest.raises(ExtractionError, match="duplicate"):
+        extract_verified_bundle(
+            archive, tmp_path / "out", _manifest_for({"a.whl": b"AAAA"})
+        )
+
+
+def test_an_absolute_path_member_is_refused(tmp_path: Path):
+    """A member name that is an absolute path (e.g. `/etc/passwd`) is
+    refused.
+
+    Breaks if the `name.startswith("/")`/`Path(name).is_absolute()` check
+    is dropped, which would let a member attempt to write outside the
+    staging directory via an absolute target.
+    """
+
+    archive = _make_zip(tmp_path, {"/etc/passwd": b"x"})
+
+    with pytest.raises(ExtractionError, match="absolute path"):
+        extract_verified_bundle(
+            archive, tmp_path / "out", _manifest_for({"/etc/passwd": b"x"})
+        )
+
+
+def test_a_traversal_member_is_refused(tmp_path: Path):
+    """A member name containing a `..` path segment is refused.
+
+    Breaks if the `".." in Path(name).parts` check is dropped, which
+    would let a member escape the staging directory via a relative
+    traversal segment.
+    """
+
+    archive = _make_zip(tmp_path, {"../evil": b"x"})
+
+    with pytest.raises(ExtractionError, match="traversal"):
+        extract_verified_bundle(
+            archive, tmp_path / "out", _manifest_for({"../evil": b"x"})
+        )
+
+
+def test_a_symlink_member_is_refused(tmp_path: Path):
+    """A ZIP member whose external attributes declare it a symlink is
+    refused, regardless of what its declared content bytes are.
+
+    Breaks if the `stat.S_ISLNK(mode)` check (derived from
+    `info.external_attr >> 16`) is dropped, which would let a symlink
+    member be written as a regular file containing its link target text,
+    or interpreted as a real symlink by a later consumer.
+    """
+
+    archive_path = tmp_path / "link.zip"
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        info = zipfile.ZipInfo("link")
+        info.external_attr = 0o120777 << 16
+        zf.writestr(info, "target")
+
+    with pytest.raises(ExtractionError, match="symlink"):
+        extract_verified_bundle(
+            archive_path, tmp_path / "out", _manifest_for({"link": b"target"})
+        )
+
+
+def test_case_colliding_members_are_refused(tmp_path: Path):
+    """Two members differing only in case (`A.whl` vs `a.whl`) are
+    refused — a case-insensitive filesystem would silently collapse them
+    into one file, disagreeing with what the manifest verified.
+
+    Breaks if the `seen_lower` case-insensitive collision check is
+    dropped.
+    """
+
+    archive = _make_zip(tmp_path, {"A.whl": b"A", "a.whl": b"a"})
+
+    with pytest.raises(ExtractionError, match="collide case-insensitively"):
+        extract_verified_bundle(
+            archive, tmp_path / "out", _manifest_for({"A.whl": b"A", "a.whl": b"a"})
+        )
+
+
+def test_resolved_target_aliasing_is_refused(tmp_path: Path):
+    """`a.whl` and `./a.whl` are different literal member names but
+    resolve to the SAME filesystem target under `staging_dir` — refused
+    rather than letting the second silently overwrite the first.
+
+    Breaks if the `seen_resolved` resolved-path collision check is
+    dropped.
+    """
+
+    archive_path = tmp_path / "alias.zip"
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr("a.whl", "AAAA")
+        zf.writestr("./a.whl", "BBBB")
+    manifest = _manifest_for({"a.whl": b"AAAA", "./a.whl": b"BBBB"})
+
+    with pytest.raises(ExtractionError, match="SAME target path"):
+        extract_verified_bundle(archive_path, tmp_path / "out", manifest)
+
+
+def test_an_oversized_member_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A member whose declared size exceeds `MAX_MEMBER_BYTES` is refused
+    before any bytes are extracted.
+
+    Breaks if the `declared_size > MAX_MEMBER_BYTES` check is dropped.
+    """
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE, "MAX_MEMBER_BYTES", 3)
+    archive = _make_zip(tmp_path, {"big.whl": b"AAAAAA"})
+
+    with pytest.raises(ExtractionError, match="cap"):
+        extract_verified_bundle(
+            archive, tmp_path / "out", _manifest_for({"big.whl": b"AAAAAA"})
+        )
+
+
+def test_an_unlisted_member_is_refused(tmp_path: Path):
+    """An archive member whose name the verified manifest does not
+    mention is refused, even alongside other members that ARE listed.
+
+    Breaks if the `name not in expected_members` check is dropped, which
+    would let an archive smuggle in extra, unverified content.
+    """
+
+    archive = _make_zip(tmp_path, {"a.whl": b"AAAA", "sneaky.sh": b"#!/bin/sh\n"})
+
+    with pytest.raises(ExtractionError, match="not named in the verified"):
+        extract_verified_bundle(
+            archive, tmp_path / "out", _manifest_for({"a.whl": b"AAAA"})
+        )
+
+
+def test_a_manifest_expected_member_missing_from_the_archive_is_refused(
+    tmp_path: Path,
+):
+    """A member the manifest declares but the archive does not actually
+    contain is refused, rather than silently extracting only the members
+    that happen to be present.
+
+    Breaks if the `for expected_name in expected_members: if expected_name
+    not in names` completeness check is dropped.
+    """
+
+    archive = _make_zip(tmp_path, {"a.whl": b"AAAA"})
+    manifest = _manifest_for({"a.whl": b"AAAA"})
+    manifest["members"]["missing.whl"] = {
+        "sha256": "c" * 64,
+        "size": 10,
+        "package": "dotmac-kernel",
+    }
+
+    with pytest.raises(ExtractionError, match="does not contain"):
+        extract_verified_bundle(archive, tmp_path / "out", manifest)
+
+
+def test_a_corrupted_archive_is_refused_not_a_raw_badzipfile(tmp_path: Path):
+    """Bytes that are not a valid ZIP archive at all are refused as
+    `ExtractionError`, not left as a raw `zipfile.BadZipFile`.
+
+    Breaks if the try/except wrapping `zipfile.ZipFile(archive_path)` is
+    dropped, which would let `BadZipFile` propagate uncaught.
+    """
+
+    archive = tmp_path / "corrupt.zip"
+    archive.write_bytes(b"this is not a zip file at all")
+    manifest = _manifest_for({"a.whl": b"AAAA"})
+
+    with pytest.raises(ExtractionError, match="cannot open"):
+        extract_verified_bundle(archive, tmp_path / "out", manifest)
+
+
+def test_the_aggregate_member_count_cap_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """More than `MAX_MEMBER_COUNT` members in one archive is refused,
+    independent of any single member's own size.
+
+    Breaks if the `len(infos) > MAX_MEMBER_COUNT` check is dropped.
+    """
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE, "MAX_MEMBER_COUNT", 3)
+    members = {f"f{i}.whl": b"X" for i in range(5)}
+    archive = _make_zip(tmp_path, members)
+
+    with pytest.raises(ExtractionError, match="member cap"):
+        extract_verified_bundle(archive, tmp_path / "out", _manifest_for(members))
+
+
+def test_the_aggregate_total_size_cap_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The sum of every member's declared size exceeding
+    `MAX_TOTAL_UNCOMPRESSED_BYTES` is refused, even though each individual
+    member is small and legal on its own.
+
+    Breaks if the running `total_declared_size > MAX_TOTAL_UNCOMPRESSED_BYTES`
+    check is dropped.
+    """
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE, "MAX_TOTAL_UNCOMPRESSED_BYTES", 5)
+    members = {"a.whl": b"AAAA", "b.whl": b"BBBB"}
+    archive = _make_zip(tmp_path, members)
+
+    with pytest.raises(ExtractionError, match="aggregate"):
+        extract_verified_bundle(archive, tmp_path / "out", _manifest_for(members))
+
+
+def test_the_compression_ratio_cap_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A member whose declared uncompressed size divided by its compressed
+    size exceeds `MAX_COMPRESSION_RATIO` is refused as a suspected zip
+    bomb, even though its declared size alone is under every other cap.
+
+    Breaks if the `ratio > MAX_COMPRESSION_RATIO` check (or the
+    `info.compress_size > 0` guard around it) is dropped.
+    """
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE, "MAX_COMPRESSION_RATIO", 2)
+    payload = b"A" * 100_000
+    archive_path = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("bomb.whl", payload)
+    manifest = _manifest_for({"bomb.whl": payload})
+
+    with pytest.raises(ExtractionError, match="compression ratio"):
+        extract_verified_bundle(archive_path, tmp_path / "out", manifest)

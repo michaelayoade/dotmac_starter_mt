@@ -66,16 +66,32 @@ specifically NOT the chosen design: it would make one exception name mean
 two different, independently-evolving contracts depending on which module
 imported it first.
 
-`ExtractionError` (ZIP extraction, still unported) will join beneath
-`BundleEnvelopeError` in a later slice. It is not ported yet, so it is not
-declared here.
+## Slice 1a-iii: safe extraction
+
+`extract_verified_bundle` (the only sanctioned extraction entry point),
+`_extract_zip_members`, `_is_within`, `ExtractionError`, and the extraction
+size/count/ratio caps (`MAX_MEMBER_BYTES`, `MAX_MEMBER_COUNT`,
+`MAX_TOTAL_UNCOMPRESSED_BYTES`, `MAX_COMPRESSION_RATIO`) are ported VERBATIM
+in behaviour from the same ERP file at the same pinned commit. Per Michael's
+ruling, `ExtractionError` joins beneath THIS module's `BundleEnvelopeError`
+root — not beneath ERP's `DependencyBundleError`, and not re-exported; see
+"Two roots, deliberately not one" above, which already named this as the
+plan. This slice ports extraction exactly as ERP wrote it: a fresh, exclusive
+staging directory, per-member and aggregate safety checks, then a single
+atomic rename into `dest_dir`. It does not port the offline index or the
+manifest constructor — deliberately not anticipated here either.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
+import stat
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -103,14 +119,20 @@ class BundleEnvelopeError(Exception):
     above or below it. ERP keeps its own `DependencyBundleError` root for
     its product-policy refusals; a consumer catches both roots rather than
     this module re-exporting its errors under ERP's class, or ERP's errors
-    being folded into this one. `BundleVerificationError` is the first
-    subclass; `ExtractionError` joins beneath this root in a later slice,
-    once extraction is actually ported."""
+    being folded into this one. `BundleVerificationError` and
+    `ExtractionError` are both direct subclasses."""
 
 
 class BundleVerificationError(BundleEnvelopeError):
     """A bundle, its run metadata, or its archive digest failed
     verification against an already-supplied expected value."""
+
+
+class ExtractionError(BundleEnvelopeError):
+    """A ZIP archive member is unsafe to extract, or extraction produced
+    bytes that disagree with the verified manifest. Sits beneath THIS
+    module's `BundleEnvelopeError` root, not ERP's `DependencyBundleError`
+    — see the module docstring's "Two roots, deliberately not one"."""
 
 
 #: The bundle manifest's own schema version (see ERP's `create_bundle_manifest`,
@@ -258,3 +280,303 @@ def _refuse_malformed_bundle_manifest_shape(bundle_manifest: dict[str, Any]) -> 
             "bundle manifest archive_sha256 must be a 64-hex sha256 string"
         )
     _refuse_malformed_manifest_run(bundle_manifest.get("run"))
+
+
+# ── safe, private, atomic extraction ───────────────────────────────────
+
+#: Per-member size cap during safe extraction — generous for a wheel/sdist
+#: bundle, but bounded, so a crafted "small on disk, huge when read" member
+#: cannot exhaust the extraction host. Checked against BOTH the ZIP's
+#: declared size and the actual bytes read (the latter is the zip-bomb
+#: guard: a lying declared size does not buy more).
+MAX_MEMBER_BYTES = 200 * 1024 * 1024
+
+#: Aggregate caps, independent of the per-member cap above: a bundle with
+#: many small, individually-legal members can still exhaust the extraction
+#: host on count or total size, and a highly-compressed member can pass the
+#: per-member declared-size check while unpacking to something absurd
+#: relative to what was actually transferred.
+MAX_MEMBER_COUNT = 512
+MAX_TOTAL_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+MAX_COMPRESSION_RATIO = 100
+
+
+def _is_within(base: Path, target: Path) -> bool:
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return False
+    return True
+
+
+def _extract_zip_members(
+    archive_path: Path, staging_dir: Path, expected_members: dict[str, int]
+) -> list[str]:
+    """Extract `archive_path` into `staging_dir`, refusing anything the
+    verified bundle manifest did not name.
+
+    PRIVATE: this writes into a caller-supplied staging directory and
+    performs no publication step and no cleanup of its own — callers MUST
+    go through `extract_verified_bundle`, which stages, verifies, and
+    publishes atomically, and which cleans up a failed staging directory.
+    Nothing outside this module should extract a ZIP without going through
+    that verified path.
+
+    `expected_members` is the exact `{member_name: declared_uncompressed_size}`
+    mapping taken from the already-verified bundle manifest — never derived
+    from the archive itself. Refuses: a duplicate member name, an absolute
+    path, a `..` traversal segment, a symlink, a member whose RESOLVED
+    target collides with another member's (e.g. `a.whl` and `./a.whl`), a
+    member whose name is not in `expected_members`, an `expected_members`
+    entry the archive does not contain, a size mismatch against the
+    declared/verified size, a member over `MAX_MEMBER_BYTES`, more than
+    `MAX_MEMBER_COUNT` members, more than `MAX_TOTAL_UNCOMPRESSED_BYTES` in
+    aggregate, a member whose compression ratio exceeds
+    `MAX_COMPRESSION_RATIO`, and — during extraction, independent of the
+    declared size — any member whose actual bytes exceed the declared size
+    (the zip-bomb guard: a lying declared size does not buy more).
+    """
+
+    staging_dir = staging_dir.resolve()
+    try:
+        staging_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ExtractionError(
+            f"cannot create staging directory {staging_dir}: {exc}"
+        ) from exc
+    extracted: list[str] = []
+    try:
+        archive = zipfile.ZipFile(archive_path)
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise ExtractionError(
+            f"cannot open {archive_path} as a ZIP archive: {exc}"
+        ) from exc
+    with archive:
+        infos = archive.infolist()
+        if len(infos) > MAX_MEMBER_COUNT:
+            raise ExtractionError(
+                f"archive contains {len(infos)} members, exceeding the "
+                f"{MAX_MEMBER_COUNT}-member cap"
+            )
+        names = [info.filename for info in infos]
+        if len(names) != len(set(names)):
+            raise ExtractionError("archive contains a duplicate member name")
+
+        seen_lower: dict[str, str] = {}
+        seen_resolved: dict[Path, str] = {}
+        total_declared_size = 0
+        for info in infos:
+            name = info.filename
+            if name not in expected_members:
+                raise ExtractionError(
+                    f"archive member {name!r} is not named in the verified "
+                    "bundle manifest"
+                )
+            lowered = name.lower()
+            if lowered in seen_lower and seen_lower[lowered] != name:
+                raise ExtractionError(
+                    f"archive members {seen_lower[lowered]!r} and {name!r} "
+                    "collide case-insensitively"
+                )
+            seen_lower[lowered] = name
+
+            if (
+                name.startswith("/")
+                or name.startswith("\\")
+                or Path(name).is_absolute()
+            ):
+                raise ExtractionError(f"archive member {name!r} uses an absolute path")
+            if ".." in Path(name).parts:
+                raise ExtractionError(
+                    f"archive member {name!r} contains a path-traversal segment"
+                )
+            resolved_target = (staging_dir / name).resolve()
+            if not _is_within(staging_dir, resolved_target):
+                raise ExtractionError(
+                    f"archive member {name!r} resolves outside the "
+                    "destination directory"
+                )
+            if resolved_target in seen_resolved:
+                raise ExtractionError(
+                    f"archive members {seen_resolved[resolved_target]!r} and "
+                    f"{name!r} resolve to the SAME target path "
+                    f"({resolved_target}); a platform-separator or "
+                    "relative-segment alias is refused"
+                )
+            seen_resolved[resolved_target] = name
+
+            mode = info.external_attr >> 16
+            if stat.S_ISLNK(mode):
+                raise ExtractionError(f"archive member {name!r} is a symlink")
+
+            declared_size = info.file_size
+            if declared_size != expected_members[name]:
+                raise ExtractionError(
+                    f"archive member {name!r} declares size {declared_size}, "
+                    f"the verified manifest expects {expected_members[name]}"
+                )
+            if declared_size > MAX_MEMBER_BYTES:
+                raise ExtractionError(
+                    f"archive member {name!r} declares {declared_size} bytes, "
+                    f"exceeding the {MAX_MEMBER_BYTES}-byte per-member cap"
+                )
+            if info.compress_size > 0:
+                ratio = declared_size / info.compress_size
+                if ratio > MAX_COMPRESSION_RATIO:
+                    raise ExtractionError(
+                        f"archive member {name!r} has a compression ratio of "
+                        f"{ratio:.1f}, exceeding the {MAX_COMPRESSION_RATIO}x "
+                        "cap; refusing as a suspected zip bomb"
+                    )
+            total_declared_size += declared_size
+            if total_declared_size > MAX_TOTAL_UNCOMPRESSED_BYTES:
+                raise ExtractionError(
+                    "archive's aggregate declared uncompressed size exceeds "
+                    f"the {MAX_TOTAL_UNCOMPRESSED_BYTES}-byte cap"
+                )
+
+        for expected_name in expected_members:
+            if expected_name not in names:
+                raise ExtractionError(
+                    f"the verified bundle manifest expects member "
+                    f"{expected_name!r}, which the archive does not contain"
+                )
+
+        running_total = 0
+        for info in infos:
+            target = staging_dir / info.filename
+            written = 0
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as source, open(target, "wb") as sink:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        running_total += len(chunk)
+                        if written > MAX_MEMBER_BYTES:
+                            raise ExtractionError(
+                                f"archive member {info.filename!r} exceeded the "
+                                f"{MAX_MEMBER_BYTES}-byte cap while extracting "
+                                "(declared size cannot be trusted; this is the "
+                                "zip-bomb guard)"
+                            )
+                        if running_total > MAX_TOTAL_UNCOMPRESSED_BYTES:
+                            raise ExtractionError(
+                                "aggregate extracted bytes exceeded "
+                                f"{MAX_TOTAL_UNCOMPRESSED_BYTES}; refusing (zip-"
+                                "bomb guard)"
+                            )
+                        sink.write(chunk)
+            except (zipfile.BadZipFile, OSError) as exc:
+                raise ExtractionError(
+                    f"cannot extract archive member {info.filename!r}: {exc}"
+                ) from exc
+            if written != info.file_size:
+                raise ExtractionError(
+                    f"archive member {info.filename!r} extracted "
+                    f"{written} bytes but declared {info.file_size}"
+                )
+            extracted.append(info.filename)
+    return extracted
+
+
+def extract_verified_bundle(
+    archive_path: Path, dest_dir: Path, bundle_manifest: dict[str, Any]
+) -> list[str]:
+    """The ONLY sanctioned way to extract a bundle archive.
+
+    Extracts into a FRESH, EXCLUSIVE staging directory (never `dest_dir`
+    directly), verifies every member's size (via `_extract_zip_members`)
+    and content hash (via `verify_member_hashes`) THERE, and only then
+    publishes the complete, verified tree to `dest_dir` with a single atomic
+    rename. `dest_dir` must not already exist — this function materialises a
+    fresh tree, it does not merge into or overwrite one. On ANY failure —
+    an unsafe member, a hash mismatch, or an unexpected error — the staging
+    directory is removed and NOTHING is written to `dest_dir`; a caller
+    never observes a partially-extracted destination.
+
+    STATED, NARROW RACE (not claimed to be closed): existence is checked
+    both here and again immediately before the final rename, but there is
+    no portable, dependency-free "rename unless the destination exists"
+    primitive for a directory target in the Python standard library
+    (POSIX `renameat2(..., RENAME_NOREPLACE)` is Linux-only and is not
+    exposed by `os`). A concurrent process that creates an EMPTY `dest_dir`
+    in the narrow window between the second check and `os.rename` would
+    have it silently replaced, because POSIX `rename(2)` replacing an
+    empty directory target is not an OS-level error. This function is
+    atomic against sequential failure (a caller never sees a partial
+    result); it is not a mutual-exclusion primitive against a concurrent,
+    uncooperating writer targeting the SAME `dest_dir` — that is expected
+    not to happen (each destination is expected to be named for its own
+    bundle identity), and external locking is the caller's responsibility
+    if it might.
+    """
+
+    if dest_dir.exists():
+        raise ExtractionError(
+            f"destination {dest_dir} already exists; extract_verified_bundle "
+            "materialises a fresh tree and refuses to merge into or "
+            "overwrite one"
+        )
+    _refuse_malformed_bundle_manifest_shape(bundle_manifest)
+    members = bundle_manifest.get("members")
+    if not isinstance(members, dict) or not members:
+        raise BundleVerificationError("bundle manifest carries no members to extract")
+    expected_sizes: dict[str, int] = {}
+    expected_hashes: dict[str, str] = {}
+    for name, record in members.items():
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("size"), int)
+            or isinstance(record.get("size"), bool)
+            or record["size"] <= 0
+            or not isinstance(record.get("sha256"), str)
+            or not _SHA256_HEX.match(record["sha256"])
+            or not isinstance(record.get("package"), str)
+            or not record.get("package")
+        ):
+            raise BundleVerificationError(
+                f"bundle manifest member {name!r} is malformed: {record!r}"
+            )
+        expected_sizes[name] = record["size"]
+        expected_hashes[name] = record["sha256"]
+
+    try:
+        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ExtractionError(
+            f"cannot create parent directory for {dest_dir}: {exc}"
+        ) from exc
+    try:
+        staging_dir = Path(
+            tempfile.mkdtemp(
+                prefix=f".{dest_dir.name}.staging.", dir=str(dest_dir.parent)
+            )
+        )
+    except OSError as exc:
+        raise ExtractionError(
+            f"cannot create a staging directory beside {dest_dir}: {exc}"
+        ) from exc
+    try:
+        extracted = _extract_zip_members(archive_path, staging_dir, expected_sizes)
+        verify_member_hashes(staging_dir, expected_hashes)
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+    if dest_dir.exists():
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise ExtractionError(
+            f"destination {dest_dir} was created concurrently while staging; "
+            "refusing to publish over it"
+        )
+    try:
+        os.rename(staging_dir, dest_dir)
+    except OSError as exc:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise ExtractionError(
+            f"cannot publish extracted bundle to {dest_dir}: {exc}"
+        ) from exc
+    return extracted
