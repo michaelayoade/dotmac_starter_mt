@@ -85,9 +85,15 @@ def test_positive_observe_before_stream(monkeypatch, tmp_path: Path) -> None:
     assert list(tmp_path.glob(".artifact-*")) == []
 
 
-@pytest.mark.parametrize("digest", ["sha256:" + "0" * 64, "bad"])
+@pytest.mark.parametrize(
+    ("digest", "message", "opened"),
+    [
+        ("sha256:" + "0" * 64, "downloaded artifact digest differs", True),
+        ("bad", "observed artifact digest", False),
+    ],
+)
 def test_digest_mismatch_leaves_no_destination(
-    monkeypatch, tmp_path: Path, digest: str
+    monkeypatch, tmp_path: Path, digest: str, message: str, opened: bool
 ) -> None:
     tmp_path.chmod(0o700)
     body = b"zip bytes"
@@ -95,13 +101,18 @@ def test_digest_mismatch_leaves_no_destination(
     monkeypatch.setattr(
         download.bundle_github_observation, "observe", lambda *a: observed
     )
-    monkeypatch.setattr(
-        download.github_actions_transport.OPENER, "open", lambda *a: Response(body)
-    )
-    with pytest.raises(ValueError):
+    calls: list[object] = []
+
+    def open_request(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Response(body)
+
+    monkeypatch.setattr(download.github_actions_transport.OPENER, "open", open_request)
+    with pytest.raises(ValueError, match=message):
         download.acquire_observed_artifact(
             POLICY, 1, 2, "placeholder", tmp_path / "artifact.zip"
         )
+    assert bool(calls) is opened
     assert not (tmp_path / "artifact.zip").exists()
     assert list(tmp_path.glob(".artifact-*")) == []
 

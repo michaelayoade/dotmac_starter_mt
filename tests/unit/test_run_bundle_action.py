@@ -319,7 +319,7 @@ def test_verify_refuses_a_sidecar_observed_from_a_different_run(
         sidecar_artifact_id="3",
         run_id="11",
     )
-    with pytest.raises(runner.SidecarError, match="observations disagree"):
+    with pytest.raises(ValueError, match="observations disagree"):
         runner._verify(args, runner.load_expected(plan))
 
 
