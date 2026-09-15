@@ -184,6 +184,37 @@ fields are already closed the same way by the existing, UNMODIFIED
 `_refuse_malformed_manifest_run`, whose `isinstance(value, int)` checks
 already exclude every float, non-finite or not — reused here, not
 re-implemented.
+
+## `build_local_index`'s disk enumeration asked what a symlink resolves to
+
+`build_local_index`'s reconciliation step 2 used to enumerate
+`extracted_dir` with `Path.is_file()`, which FOLLOWS a symlink — it answers
+"what does this resolve to", not "what is this entry". A live symlink
+replacing an expected member, pointing OUTSIDE `extracted_dir` at bytes
+that happen to match the plan's expected hash, enumerated identically to
+the real file it replaced: plan<->manifest closure, manifest<->disk
+closure, and even the step-4 rehash all passed unchanged (the rehash reads
+through the link too), and this function went on to copy bytes read from
+outside the verified tree. A DANGLING symlink failed the opposite way:
+`is_file()` returns `False` for it, so it was silently OMITTED from the
+enumerated set rather than refused — invisible to the "extra file" side of
+the same closure check, not merely unverified.
+
+The fix enumerates with `Path.lstat()` (never follows a link) and
+`stat.S_ISREG`/`stat.S_ISDIR` on the result: a directory is skipped as
+structure, and anything that is neither a directory nor a regular file — a
+symlink, dangling or not — is refused BY NAME. This is the same class of
+defect already fixed elsewhere in this fleet: a disk-state predicate asked
+what a path resolves to, when the predicate needed to resolve through
+nothing at all.
+
+A second, independent fix in the same function: the plan filename's shape
+(no path separator, not absolute, not `.`/`..`) used to be validated only
+in step 5, immediately before it was joined onto a staging directory — by
+which point step 2's enumeration and step 4's rehash had already read the
+file at that (possibly nested) path. The check now runs first, while
+`plan_by_filename` is built, so a rejected name is refused before this
+function ever reads a byte named by it.
 """
 
 from __future__ import annotations
@@ -1013,6 +1044,24 @@ def build_local_index(
     # ── reconciliation step 1 & 3a: the plan itself, duplicates refused ──
     plan_by_filename: dict[str, ExpectedArtifact] = {}
     for artifact in expected.artifacts:
+        # Validate the filename's SHAPE here, before this name is ever used
+        # to enumerate `extracted_dir` (step 2), to rehash a file (step 4),
+        # or to derive a staging path (step 5) — a rejected name must never
+        # reach a read. This is the same bare-filename check step 5 applies
+        # when it joins `pkg_dir / filename`; it is applied HERE first so
+        # that check never has the chance to run after a read has already
+        # happened.
+        if (
+            not artifact.filename
+            or "/" in artifact.filename
+            or "\\" in artifact.filename
+            or artifact.filename in (".", "..")
+            or Path(artifact.filename).is_absolute()
+        ):
+            raise BundleVerificationError(
+                f"filename {artifact.filename!r} is not a safe bare filename "
+                "(no path separators, not absolute, not '.' or '..')"
+            )
         if artifact.filename in plan_by_filename:
             raise BundleVerificationError(
                 f"expected artifact set names {artifact.filename!r} twice; "
@@ -1063,12 +1112,40 @@ def build_local_index(
             )
 
     # ── reconciliation step 2: manifest <-> extracted files, both directions
+    #
+    # `Path.is_file()` FOLLOWS a symlink — it asks what the link resolves
+    # to, not what the entry itself is. That makes it the wrong predicate
+    # here: a live symlink pointing OUTSIDE `extracted_dir`, to bytes that
+    # happen to match the expected hash, would enumerate identically to the
+    # real file it replaced (plan<->manifest closure, manifest<->disk
+    # closure, and the step-4 rehash all pass unchanged, because the rehash
+    # reads THROUGH the link too), and this function would then copy bytes
+    # from outside the verified tree. A DANGLING symlink is worse in the
+    # other direction: `is_file()` returns `False` for it, so it would be
+    # silently OMITTED from `extracted_names` rather than refused — a hole
+    # in a set this function trusts for BOTH directions of closure, not an
+    # entry the "extra file" check below ever gets a chance to see.
+    #
+    # `Path.lstat()` never follows a symlink, so `stat.S_ISREG` on its mode
+    # tells us what the entry itself is, not what it points to. A directory
+    # is skipped as structure; anything that is neither a directory nor a
+    # regular file — a symlink, dangling or not, a fifo, a device node —
+    # is refused BY NAME here, rather than silently filtered out of the set
+    # or transparently resolved through.
+    extracted_names: set[str] = set()
     try:
-        extracted_names = {
-            p.relative_to(extracted_dir).as_posix()
-            for p in extracted_dir.rglob("*")
-            if p.is_file()
-        }
+        for entry in extracted_dir.rglob("*"):
+            relative_name = entry.relative_to(extracted_dir).as_posix()
+            mode = entry.lstat().st_mode
+            if stat.S_ISDIR(mode):
+                continue
+            if not stat.S_ISREG(mode):
+                raise BundleVerificationError(
+                    f"extracted entry {relative_name!r} is not a regular "
+                    "file (refusing a symlink or other special file by "
+                    "name, rather than silently omitting or following it)"
+                )
+            extracted_names.add(relative_name)
     except OSError as exc:
         raise BundleVerificationError(
             f"cannot list extracted directory {extracted_dir}: {exc}"

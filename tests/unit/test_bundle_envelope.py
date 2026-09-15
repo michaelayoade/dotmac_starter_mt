@@ -92,6 +92,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import urllib.parse
 import zipfile
@@ -1303,6 +1304,117 @@ def test_build_local_index_refuses_a_file_tampered_after_extraction(tmp_path: Pa
     assert not (tmp_path / "index").exists()
 
 
+# ── local PEP 503 index: symlink and nested-filename boundary plants ─────
+
+
+def test_build_local_index_refuses_a_symlink_to_matching_bytes_outside_the_tree(
+    tmp_path: Path,
+):
+    """THE ENUMERATION SENSITIVITY PROOF (live-link direction).
+
+    An expected member is not a regular file at all: it is a symlink whose
+    target lives OUTSIDE `extracted_dir` entirely, and whose target bytes
+    are byte-IDENTICAL to what the plan expects. Before this fix,
+    `Path.is_file()` followed the link, so reconciliation step 2's
+    enumeration saw a normal file named `a.whl`; the plan<->manifest
+    closure (step 1) never touches the filesystem at all so it was
+    unaffected either way; and step 4's rehash read `source_path
+    .read_bytes()`, which ALSO follows the link and got the same matching
+    bytes — every check this function performs would have passed, and
+    `build_local_index` would have gone on to copy bytes read from outside
+    the verified tree.
+
+    Breaks if the enumeration in reconciliation step 2 goes back to
+    `Path.is_file()` (or any other predicate that resolves through a
+    symlink) instead of `Path.lstat()` + `stat.S_ISREG`.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    outside_dir = tmp_path / "outside_the_verified_tree"
+    outside_dir.mkdir()
+    outside_target = outside_dir / "not_actually_a.whl"
+    outside_target.write_bytes(b"AAAA")  # identical bytes to the plan's expectation
+    (extracted / "a.whl").unlink()
+    os.symlink(outside_target, extracted / "a.whl")
+
+    # Prove the pre-fix claim directly: the rehash step, taken alone, agrees
+    # with the plan — because `read_bytes()` follows the symlink too. If
+    # enumeration did not refuse the link by kind, nothing downstream in
+    # this function would ever catch it.
+    assert sha256_hex((extracted / "a.whl").read_bytes()) == sha256_hex(b"AAAA")
+
+    with pytest.raises(BundleVerificationError, match="not a regular file"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+    assert not (tmp_path / "index").exists()
+
+
+def test_build_local_index_refuses_a_dangling_symlink_not_named_by_the_plan(
+    tmp_path: Path,
+):
+    """THE ENUMERATION SENSITIVITY PROOF (dangling-link direction).
+
+    A SECOND, unexpected entry sits in `extracted_dir` alongside the
+    genuine, correctly-named `a.whl`: a dangling symlink the plan and the
+    manifest never named. Before this fix, `Path.is_file()` returns
+    `False` for a dangling symlink, so it was silently OMITTED from
+    `extracted_names` rather than counted — which means the "extracted
+    directory contains an entry the manifest does not name" check never
+    saw it at all, not merely failed to flag it. `build_local_index` would
+    have published successfully with the rogue link still sitting in the
+    tree.
+
+    Breaks if enumeration goes back to a predicate that omits an entry it
+    cannot resolve, instead of refusing every non-regular, non-directory
+    entry by name regardless of whether its target exists.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    os.symlink(extracted / "does_not_exist.whl", extracted / "sneaky_dangling.whl")
+
+    with pytest.raises(BundleVerificationError, match="not a regular file"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+    assert not (tmp_path / "index").exists()
+
+
+def test_build_local_index_refuses_a_nested_filename_before_reading_its_bytes(
+    tmp_path: Path,
+):
+    """THE VALIDATE-BEFORE-READ SENSITIVITY PROOF.
+
+    The plan names `nested/evil.whl` (a shape `build_local_index` must
+    refuse as an unsafe filename), and the plan's recorded hash matches
+    what was ORIGINALLY written to disk — but the file's bytes are then
+    corrupted, deliberately, AFTER `_bli_scenario` wrote them. If filename
+    validation ran only where it used to (step 5, immediately before
+    joining onto the staging directory), this function would first reach
+    step 2's enumeration and step 4's rehash, read the corrupted bytes at
+    `extracted/nested/evil.whl`, and fail with the step-4 tamper message
+    ("changed after verification") — never reaching the bare-filename
+    refusal at all. Validating the filename's shape FIRST, while
+    `plan_by_filename` is built, means this function refuses the name
+    before it is ever used to read a file — proven here by asserting the
+    error is the bare-filename refusal, not the tamper refusal a read
+    would have produced.
+
+    Breaks if the bare-filename shape check moves back to (or is only
+    present in) reconciliation step 5, after step 2/step 4 have already
+    read the file.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"nested/evil.whl": b"AAAA"}}
+    )
+    (extracted / "nested" / "evil.whl").write_bytes(b"CORRUPTED-AFTER-WRITE")
+
+    with pytest.raises(BundleVerificationError, match="not a safe bare filename"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+    assert not (tmp_path / "index").exists()
+
+
 # ── local PEP 503 index: ported from ERP, adapted to the new signature ───
 
 
@@ -1376,10 +1488,15 @@ def test_build_local_index_refuses_a_filename_containing_a_path_separator(
 ):
     """Ported/adapted from ERP's `test_build_local_index_refuses_a_
     filename_containing_a_path_separator`: a plan filename containing `/`
-    is refused before it is ever joined onto `pkg_dir`.
+    is refused before it is ever joined onto `pkg_dir`. Refused earlier
+    still, now: the same bare-filename shape check runs while
+    `plan_by_filename` is built, before enumeration or the rehash ever
+    reads anything named by it (see
+    `test_build_local_index_refuses_a_nested_filename_before_reading_its_bytes`
+    for the test that pins that ordering specifically).
 
-    Breaks if the filename-safety check (`"/" in filename` etc.) inside
-    the staging loop is dropped.
+    Breaks if the filename-safety check (`"/" in filename` etc.) is
+    dropped.
     """
 
     expected, manifest, extracted = _bli_scenario(
