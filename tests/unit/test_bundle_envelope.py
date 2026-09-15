@@ -38,6 +38,38 @@ accept and refuse paths. `test_a_clean_bundle_extracts_and_publishes_atomically`
 is the mandatory accept-direction control: without it, a verifier that
 refuses every archive would pass all nineteen refusal tests for the wrong
 reason.
+
+## Slice 1a-iv: the local PEP 503 index — NOT a verbatim port
+
+`build_local_index`'s new signature (`ExpectedArtifactSet`, the verified
+manifest, the extracted directory — never a caller-assembled package map)
+is a deliberate interface change, not a port; see the module docstring's
+"Slice 1a-iv" for the gap this closes. Of ERP's 17 tests naming
+`build_local_index` (`tests/architecture/test_dependency_bundle.py` at the
+same pinned commit), the ones below whose property survives the interface
+change are ADAPTED to the new signature (destination pre-existence,
+malformed/overlong/unnormalised package names, unsafe filenames, HTML/URL
+escaping in anchors, staging-phase `OSError` translation). One
+(`test_build_local_index_is_atomic_on_failure_nothing_is_published`) is
+DROPPED in its original shape: its scenario was a caller-supplied
+`source_path` that does not exist, which the new signature cannot express
+— every file this function copies now comes from `extracted_dir`, whose
+membership is itself proven by reconciliation step 2 before any staging
+begins. Its atomicity property is instead re-proven against the failure
+mode that still exists under the new signature: an `OSError` raised
+mid-staging (`test_build_local_index_is_atomic_on_failure_during_staging`).
+The non-string-package-key test is adapted, not dropped: `ExpectedArtifact`
+is a dataclass with no runtime type enforcement, so a non-string
+`package_normalised_name` can still reach `_normalise_pep503_name`, which
+now carries its own `isinstance` guard precisely so that case is translated
+rather than raising a raw `TypeError`.
+
+New reconciliation plants (Michael's required set): a clean multi-package
+accept-direction control, missing artifact, extra artifact, wrong package
+association, wrong hash, duplicate entry, and — the property step 4 exists
+to prove — a file tampered with AFTER extraction but before
+`build_local_index` runs, which only the rehash (never the manifest's
+recorded digest) can catch.
 """
 
 from __future__ import annotations
@@ -45,6 +77,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import urllib.parse
 import zipfile
 from pathlib import Path
 
@@ -83,6 +116,10 @@ ExtractionError = BUNDLE_ENVELOPE.ExtractionError
 extract_verified_bundle = BUNDLE_ENVELOPE.extract_verified_bundle
 _extract_zip_members = BUNDLE_ENVELOPE._extract_zip_members
 _is_within = BUNDLE_ENVELOPE._is_within
+ExpectedArtifact = BUNDLE_ENVELOPE.ExpectedArtifact
+ExpectedArtifactSet = BUNDLE_ENVELOPE.ExpectedArtifactSet
+build_local_index = BUNDLE_ENVELOPE.build_local_index
+_normalise_pep503_name = BUNDLE_ENVELOPE._normalise_pep503_name
 
 
 def test_canonical_json_bytes_sorts_keys():
@@ -971,3 +1008,615 @@ def test_the_compression_ratio_cap_is_enforced(
 
     with pytest.raises(ExtractionError, match="compression ratio"):
         extract_verified_bundle(archive_path, tmp_path / "out", manifest)
+
+
+# ── local PEP 503 index: fixtures ─────────────────────────────────────────
+
+PLAN_DIGEST = "d" * 64
+
+
+def _bli_scenario(
+    tmp_path: Path, plan_digest: str, files_by_package: dict[str, dict[str, bytes]]
+) -> tuple:
+    """Builds a fully self-consistent `(ExpectedArtifactSet, bundle_manifest,
+    extracted_dir)` triple: every file is actually written under a fresh
+    `extracted` directory, and both the plan and the manifest agree on its
+    package, filename, and (correct) sha256. Individual tests mutate one of
+    the three returned values to plant exactly one disagreement."""
+
+    extracted = tmp_path / "extracted"
+    extracted.mkdir(exist_ok=True)
+    artifacts = []
+    members: dict = {}
+    for pkg, files in files_by_package.items():
+        for filename, data in files.items():
+            target = extracted / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            digest = sha256_hex(data)
+            artifacts.append(
+                ExpectedArtifact(
+                    package_normalised_name=pkg, filename=filename, sha256=digest
+                )
+            )
+            members[filename] = {"sha256": digest, "size": len(data), "package": pkg}
+    expected = ExpectedArtifactSet(plan_digest=plan_digest, artifacts=tuple(artifacts))
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "plan_digest": plan_digest,
+        "archive_sha256": "b" * 64,
+        "members": members,
+        "run": dict(_VALID_MANIFEST_RUN),
+    }
+    return expected, manifest, extracted
+
+
+# ── local PEP 503 index: the mandatory accept-direction control ──────────
+
+
+def test_build_local_index_accepts_a_clean_multi_package_plan(tmp_path: Path):
+    """MANDATORY ACCEPT-DIRECTION CONTROL: a plan, a manifest, and an
+    extracted directory that all genuinely agree, across TWO packages,
+    publishes successfully. Every other `build_local_index` test below
+    asserts a refusal; without this one, an implementation that refused
+    every reconciliation unconditionally would pass all of them for the
+    wrong reason.
+
+    Breaks if any reconciliation step is tightened into an unconditional
+    refusal, or if the package map `build_local_index` builds itself stops
+    grouping correctly-agreeing artifacts by package.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path,
+        PLAN_DIGEST,
+        {"aaa-pkg": {"a.whl": b"AAAA"}, "bbb-pkg": {"b.whl": b"BBBBBB"}},
+    )
+    index_root = tmp_path / "index"
+
+    build_local_index(index_root, expected, manifest, extracted)
+
+    assert (index_root / "simple" / "aaa-pkg" / "a.whl").read_bytes() == b"AAAA"
+    assert (index_root / "simple" / "bbb-pkg" / "b.whl").read_bytes() == b"BBBBBB"
+    root_html = (index_root / "simple" / "index.html").read_text(encoding="utf-8")
+    assert "aaa-pkg" in root_html
+    assert "bbb-pkg" in root_html
+
+
+# ── local PEP 503 index: destination and plan-shape refusals ─────────────
+
+
+def test_build_local_index_refuses_a_pre_existing_destination(tmp_path: Path):
+    """Ported from ERP's `test_build_local_index_refuses_a_pre_existing_
+    destination`: `index_root` already existing is refused before any of
+    the plan/manifest arguments are ever examined.
+
+    Breaks if the `index_root.exists()` guard at the top of
+    `build_local_index` is dropped.
+    """
+
+    index_root = tmp_path / "index"
+    index_root.mkdir()
+    expected = ExpectedArtifactSet(plan_digest=PLAN_DIGEST, artifacts=())
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "plan_digest": PLAN_DIGEST,
+        "archive_sha256": "b" * 64,
+        "members": {},
+        "run": dict(_VALID_MANIFEST_RUN),
+    }
+
+    with pytest.raises(BundleVerificationError, match="already exists"):
+        build_local_index(index_root, expected, manifest, tmp_path / "extracted")
+
+
+def test_build_local_index_refuses_an_empty_plan(tmp_path: Path):
+    """New plant: an `ExpectedArtifactSet` naming no artifacts is refused
+    rather than silently publishing an empty index.
+
+    Breaks if the `not expected.artifacts` guard is dropped.
+    """
+
+    expected = ExpectedArtifactSet(plan_digest=PLAN_DIGEST, artifacts=())
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "plan_digest": PLAN_DIGEST,
+        "archive_sha256": "b" * 64,
+        "members": {},
+        "run": dict(_VALID_MANIFEST_RUN),
+    }
+
+    with pytest.raises(BundleVerificationError, match="no artifacts"):
+        build_local_index(
+            tmp_path / "index", expected, manifest, tmp_path / "extracted"
+        )
+
+
+def test_build_local_index_refuses_a_manifest_bound_to_a_different_plan(
+    tmp_path: Path,
+):
+    """New plant: the manifest's own `plan_digest` disagreeing with
+    `expected.plan_digest` is refused — a manifest produced for a
+    different plan must never be published under this plan's index.
+
+    Breaks if the `bundle_manifest.get("plan_digest") != expected.plan_digest`
+    check is dropped.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    manifest["plan_digest"] = "e" * 64
+
+    with pytest.raises(BundleVerificationError, match="plan_digest"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+# ── local PEP 503 index: the required reconciliation plants ──────────────
+
+
+def test_build_local_index_refuses_a_missing_artifact(tmp_path: Path):
+    """DESIGNED BREAK CONDITION: the plan names `a.whl` as expected, but
+    the manifest is missing it — refused in the "expected but absent"
+    direction of the plan<->manifest reconciliation. A second, unrelated
+    artifact (`b.whl`) is kept in both the plan and the manifest so the
+    manifest's `members` dict stays non-empty; an empty manifest would be
+    refused earlier, by the unrelated "carries no members" guard, for the
+    wrong reason.
+
+    Breaks if the `missing_from_manifest` check is dropped.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path,
+        PLAN_DIGEST,
+        {"aaa-pkg": {"a.whl": b"AAAA"}, "bbb-pkg": {"b.whl": b"BBBBBB"}},
+    )
+    del manifest["members"]["a.whl"]
+
+    with pytest.raises(BundleVerificationError, match="does not contain"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+def test_build_local_index_refuses_an_extra_artifact(tmp_path: Path):
+    """DESIGNED BREAK CONDITION: the manifest (and the extracted directory)
+    carry a file the plan never named — refused in the "present but
+    unexpected" direction of the plan<->manifest reconciliation.
+
+    Breaks if the `extra_in_manifest` check is dropped.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    (extracted / "sneaky.whl").write_bytes(b"SNEAK")
+    manifest["members"]["sneaky.whl"] = {
+        "sha256": sha256_hex(b"SNEAK"),
+        "size": 5,
+        "package": "aaa-pkg",
+    }
+
+    with pytest.raises(BundleVerificationError, match="does not expect"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+def test_build_local_index_refuses_a_wrong_package_association(tmp_path: Path):
+    """DESIGNED BREAK CONDITION: the RIGHT filename, but the manifest
+    associates it with a DIFFERENT package than the plan expects.
+
+    Breaks if the per-filename `manifest_package != artifact.package_
+    normalised_name` comparison is dropped.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    manifest["members"]["a.whl"]["package"] = "bbb-pkg"
+
+    with pytest.raises(BundleVerificationError, match="is associated with package"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+def test_build_local_index_refuses_a_wrong_hash_between_plan_and_manifest(
+    tmp_path: Path,
+):
+    """DESIGNED BREAK CONDITION: the manifest's recorded sha256 for `a.whl`
+    disagrees with the plan's expected sha256, even though both name the
+    same file and package.
+
+    Breaks if the per-filename `manifest_sha256 != artifact.sha256`
+    comparison is dropped.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    manifest["members"]["a.whl"]["sha256"] = sha256_hex(b"DIFFERENT")
+
+    with pytest.raises(
+        BundleVerificationError, match="disagreeing with the plan's expected"
+    ):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+def test_build_local_index_refuses_a_duplicate_plan_entry(tmp_path: Path):
+    """DESIGNED BREAK CONDITION: the plan names `a.whl` twice. Refused
+    outright rather than silently deduplicated — an ambiguous plan must
+    never be treated as though it agreed with itself.
+
+    Breaks if the `artifact.filename in plan_by_filename` duplicate check
+    is dropped.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    duplicated = ExpectedArtifactSet(
+        plan_digest=PLAN_DIGEST, artifacts=expected.artifacts + expected.artifacts
+    )
+
+    with pytest.raises(BundleVerificationError, match="twice"):
+        build_local_index(tmp_path / "index", duplicated, manifest, extracted)
+
+
+def test_build_local_index_refuses_a_file_tampered_after_extraction(tmp_path: Path):
+    """THE STEP-4 SENSITIVITY PROOF. The plan and the manifest agree
+    exactly — both name `a.whl`'s ORIGINAL sha256. Only the bytes actually
+    on disk changed, after extraction was verified, before
+    `build_local_index` ran. Reconciliation steps 1-3 alone see no
+    disagreement at all (the manifest's recorded hash never changed); only
+    the rehash-against-current-bytes in step 4 reads what is actually on
+    disk RIGHT NOW and catches this.
+
+    Breaks if the rehash-and-compare loop is removed, or replaced with a
+    comparison against the manifest's or the plan's already-recorded
+    digest instead of `source_path.read_bytes()` computed fresh: the
+    tampered file would then publish successfully under a digest that no
+    longer describes its own bytes — exactly the gap the module docstring
+    says ERP's original `build_local_index` left open.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    (extracted / "a.whl").write_bytes(b"TAMPERED")
+
+    with pytest.raises(BundleVerificationError, match="changed after verification"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+    assert not (tmp_path / "index").exists()
+
+
+# ── local PEP 503 index: ported from ERP, adapted to the new signature ───
+
+
+def test_build_local_index_refuses_an_unnormalised_package_name(tmp_path: Path):
+    """Ported/adapted from ERP's `test_build_local_index_refuses_an_
+    unnormalised_package_key`: `expected.artifacts[*].package_normalised_
+    name` must already be PEP-503-normalised — `build_local_index` refuses
+    to normalise it silently on the caller's behalf.
+
+    Breaks if the `canonical_name != artifact.package_normalised_name`
+    check is dropped.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"Dotmac_Kernel": {"wheel.whl": b"wheel bytes"}}
+    )
+
+    with pytest.raises(BundleVerificationError, match="not PEP-503-normalised"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+    assert not (tmp_path / "index").exists()
+
+
+def test_build_local_index_refuses_an_invalid_pep503_name_rather_than_crashing(
+    tmp_path: Path,
+):
+    """Ported/adapted from ERP's `test_build_local_index_refuses_an_
+    invalid_pep503_key_rather_than_crashing`: a name that only NORMALISES
+    to something invalid (an edge separator, `-dotmac-kernel-`) is refused
+    with `BundleVerificationError`, not the raw `ValueError`
+    `_normalise_pep503_name` raises.
+
+    Breaks if `_normalise_pep503_name`'s edge-separator check is dropped,
+    or if `build_local_index` stops translating its `ValueError`.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"-dotmac-kernel-": {"wheel.whl": b"wheel bytes"}}
+    )
+
+    with pytest.raises(BundleVerificationError, match="not a valid PEP 503 name"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+def test_build_local_index_refuses_a_package_name_that_is_a_filesystem_path(
+    tmp_path: Path,
+):
+    """Ported/adapted from ERP's `test_build_local_index_refuses_a_
+    package_key_that_is_a_filesystem_path`: a package name containing a
+    path separator is refused by `_normalise_pep503_name`'s charset check
+    before it ever reaches `Path.__truediv__` — an absolute right-hand
+    operand would otherwise REPLACE the left side entirely and escape the
+    staging directory.
+
+    Breaks if the input-charset check in `_normalise_pep503_name` is
+    dropped.
+    """
+
+    escape_target = tmp_path / "escaped"
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {str(escape_target): {"wheel.whl": b"wheel bytes"}}
+    )
+
+    with pytest.raises(BundleVerificationError, match="not a valid PEP 503 name"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+    assert not escape_target.exists()
+    assert not (tmp_path / "index").exists()
+
+
+def test_build_local_index_refuses_a_filename_containing_a_path_separator(
+    tmp_path: Path,
+):
+    """Ported/adapted from ERP's `test_build_local_index_refuses_a_
+    filename_containing_a_path_separator`: a plan filename containing `/`
+    is refused before it is ever joined onto `pkg_dir`.
+
+    Breaks if the filename-safety check (`"/" in filename` etc.) inside
+    the staging loop is dropped.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"evil/isolated.whl": b"wheel bytes"}}
+    )
+
+    with pytest.raises(BundleVerificationError, match="not a safe bare filename"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+def test_build_local_index_escapes_html_metacharacters_in_anchors(tmp_path: Path):
+    """Ported/adapted from ERP's `test_build_local_index_escapes_html_
+    metacharacters_in_anchors`: a filename carrying `<`, `>`, `&`, `"`
+    (but no `/`, which is refused outright by the separator check above)
+    must not inject markup into the resolver-facing package index page.
+
+    Breaks if `html.escape` is dropped from the anchor-text/href
+    construction.
+    """
+
+    filename = 'inject"><script>alert(1)<script>.whl'
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {filename: b"wheel bytes"}}
+    )
+
+    build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+    html_text = (tmp_path / "index" / "simple" / "aaa-pkg" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "<script>" not in html_text
+    assert "&lt;script&gt;" in html_text
+
+
+def test_build_local_index_url_encodes_a_hash_character_in_the_href(tmp_path: Path):
+    """Ported/adapted from ERP's `test_build_local_index_url_encodes_a_
+    hash_character_in_the_href`: `html.escape` does not touch `#`, so a
+    filename like `pkg#x.whl` must be URL-quoted before it reaches the
+    href, or a resolver following the link would request `pkg`, not the
+    staged file.
+
+    Breaks if the href goes back to being built from bare
+    `html.escape(filename, ...)` instead of
+    `urllib.parse.quote(filename, safe="")`.
+    """
+
+    filename = "pkg#x.whl"
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {filename: b"wheel bytes"}}
+    )
+
+    build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+    html_text = (tmp_path / "index" / "simple" / "aaa-pkg" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    href_path_segment = html_text.split('href="', 1)[1].split("#sha256=", 1)[0]
+    assert href_path_segment == urllib.parse.quote(filename, safe="")
+    assert (tmp_path / "index" / "simple" / "aaa-pkg" / filename).is_file()
+
+
+def test_build_local_index_url_encodes_a_literal_percent_in_the_href(tmp_path: Path):
+    """Ported/adapted from ERP's `test_build_local_index_url_encodes_a_
+    literal_percent_in_the_href`: a filename that already looks
+    percent-encoded must have its own `%` re-encoded (`%` -> `%25`), or a
+    client decoding the href once would read the embedded sequence back as
+    a literal traversal spelling.
+
+    Breaks if the filename is not quoted before reaching the href.
+    """
+
+    filename = "%2e%2e-not-actually-traversal.whl"
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {filename: b"wheel bytes"}}
+    )
+
+    build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+    html_text = (tmp_path / "index" / "simple" / "aaa-pkg" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "%252e%252e" in html_text
+    assert f'href="{filename}' not in html_text
+
+
+def test_build_local_index_refuses_an_overlong_charset_valid_package_name(
+    tmp_path: Path,
+):
+    """Ported/adapted from ERP's `test_build_local_index_refuses_an_
+    overlong_charset_valid_package_name`: a name built entirely from
+    characters `_normalise_pep503_name` permits, but too long for the
+    filesystem to accept as one path component, is never rejected by the
+    charset/shape checks — only the filesystem itself refuses it, with a
+    raw `OSError` (`ENAMETOOLONG`), which must be translated.
+
+    Breaks if the `try/except OSError` around `pkg_dir.mkdir(...)` is
+    dropped.
+    """
+
+    overlong_name = "a" * 4096
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {overlong_name: {"wheel.whl": b"wheel bytes"}}
+    )
+
+    with pytest.raises(
+        BundleVerificationError, match="cannot create package directory"
+    ):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+    assert not (tmp_path / "index").exists()
+
+
+def test_build_local_index_refuses_when_its_parent_directory_cannot_be_created(
+    tmp_path: Path,
+):
+    """Ported/adapted from ERP's `test_build_local_index_refuses_when_its_
+    parent_directory_cannot_be_created`: `index_root.parent.mkdir(...)`
+    failing (here, a path component that is actually a file) is
+    translated into `BundleVerificationError`, not left as a raw
+    `OSError`.
+
+    Breaks if the try/except wrapping `index_root.parent.mkdir(...)` is
+    removed.
+    """
+
+    blocking_file = tmp_path / "not-a-directory"
+    blocking_file.write_bytes(b"this is a file, not a directory")
+    index_root = blocking_file / "nested" / "index"
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"wheel.whl": b"wheel bytes"}}
+    )
+
+    with pytest.raises(BundleVerificationError, match="cannot create parent directory"):
+        build_local_index(index_root, expected, manifest, extracted)
+
+
+def test_build_local_index_is_atomic_on_failure_during_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Adapted from ERP's `test_build_local_index_is_atomic_on_failure_
+    nothing_is_published` AND `test_build_local_index_refuses_when_a_
+    package_index_cannot_be_written`. ERP's original scenario for the
+    first (a caller-supplied `source_path` that does not exist) cannot be
+    expressed under the new signature at all: every file this function
+    copies now comes from `extracted_dir`, whose membership is already
+    proven, in both directions, by reconciliation step 2 before any
+    staging work begins — there is no longer a way to reach the staging
+    loop with a source file that is missing. This test re-proves the same
+    atomicity property against the failure mode that DOES still exist
+    under the new signature: an `OSError` raised mid-staging, after the
+    first of two packages has already been written into the staging
+    directory.
+
+    Breaks if the `except BaseException: shutil.rmtree(staging_root, ...);
+    raise` cleanup around the staging loop is dropped, which would leave a
+    partially-staged directory (or worse, a partially-published
+    `index_root`) on disk after the raise.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path,
+        PLAN_DIGEST,
+        {"aaa-pkg": {"a.whl": b"AAAA"}, "bbb-pkg": {"b.whl": b"BBBBBB"}},
+    )
+    real_write_text = BUNDLE_ENVELOPE.Path.write_text
+
+    def _maybe_raise(self, *args, **kwargs):
+        if self.parent.name == "bbb-pkg":
+            raise OSError("simulated: cannot write package index")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE.Path, "write_text", _maybe_raise)
+    index_root = tmp_path / "index"
+
+    with pytest.raises(BundleVerificationError, match="cannot write package index"):
+        build_local_index(index_root, expected, manifest, extracted)
+
+    assert not index_root.exists()
+    leftover = [p.name for p in tmp_path.iterdir() if p.name != "extracted"]
+    assert leftover == []
+
+
+def test_build_local_index_refuses_when_the_staged_root_cannot_be_listed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Ported/adapted from ERP's `test_build_local_index_refuses_when_the_
+    staged_root_cannot_be_listed`: listing the staged index root (to build
+    the top-level `index.html`) is translated into
+    `BundleVerificationError`, not left as a raw `OSError`.
+
+    Breaks if the try/except wrapping `root_dir.iterdir()` is removed.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"wheel.whl": b"wheel bytes"}}
+    )
+    real_iterdir = BUNDLE_ENVELOPE.Path.iterdir
+
+    def _maybe_raise(self):
+        if self.name == "simple":
+            raise OSError("simulated: cannot list staged index root")
+        return real_iterdir(self)
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE.Path, "iterdir", _maybe_raise)
+
+    with pytest.raises(BundleVerificationError, match="cannot list staged index root"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+def test_build_local_index_refuses_when_the_root_index_cannot_be_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Ported/adapted from ERP's `test_build_local_index_refuses_when_the_
+    root_index_cannot_be_written`: writing the top-level `index.html` (the
+    LAST write of the staging phase) is translated into
+    `BundleVerificationError`, not left as a raw `OSError`.
+
+    Breaks if the try/except wrapping the root-level
+    `(root_dir / "index.html").write_text(...)` call is removed.
+    """
+
+    expected, manifest, extracted = _bli_scenario(
+        tmp_path, PLAN_DIGEST, {"aaa-pkg": {"wheel.whl": b"wheel bytes"}}
+    )
+    real_write_text = BUNDLE_ENVELOPE.Path.write_text
+
+    def _maybe_raise(self, *args, **kwargs):
+        if self.parent.name == "simple":
+            raise OSError("simulated: cannot write root index")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(BUNDLE_ENVELOPE.Path, "write_text", _maybe_raise)
+
+    with pytest.raises(BundleVerificationError, match="cannot write root index"):
+        build_local_index(tmp_path / "index", expected, manifest, extracted)
+
+
+def test_normalise_pep503_name_refuses_a_non_string_input_without_crashing():
+    """Adapted from ERP's `test_build_local_index_refuses_a_non_string_
+    package_key`. Under the new signature, a non-string
+    `package_normalised_name` cannot reach this check through
+    `build_local_index` itself without first disagreeing with the
+    manifest's (always-string) `package` field — caught earlier as a
+    wrong-package-association refusal, since `build_local_index` no
+    longer accepts a raw caller-assembled dict whose keys could be
+    anything. The property this test protects — a non-string input is
+    translated to `ValueError`, never left as a raw `TypeError` — still
+    lives entirely inside `_normalise_pep503_name`, so it is exercised
+    directly, the same way this file already tests
+    `_refuse_malformed_manifest_run` directly.
+
+    Breaks if the `isinstance(name, str)` guard is dropped:
+    `re.Pattern.match` raises a raw `TypeError` on a non-str/bytes-like
+    object, which `pytest.raises(ValueError)` below does not catch.
+    """
+
+    with pytest.raises(ValueError, match="not a valid distribution name"):
+        _normalise_pep503_name(123)  # type: ignore[arg-type]

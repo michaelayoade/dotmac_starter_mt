@@ -80,18 +80,63 @@ plan. This slice ports extraction exactly as ERP wrote it: a fresh, exclusive
 staging directory, per-member and aggregate safety checks, then a single
 atomic rename into `dest_dir`. It does not port the offline index or the
 manifest constructor — deliberately not anticipated here either.
+
+## Slice 1a-iv: the local PEP 503 index — NOT a verbatim port
+
+`build_local_index` is deliberately NOT ported unchanged from ERP. ERP's
+version takes a caller-ASSEMBLED `packages: dict[str, list[tuple[str, str,
+Path]]]` mapping and, by its own docstring's admission, "does not itself
+trust the hash; it only copies bytes and records the hash fragment PEP 503
+uses for its own integrity check." That was safe only because nothing in
+ERP called it in production. Moving this into a shared consumer surface
+creates that first caller, so the deferral expires here.
+
+This slice's `build_local_index` instead takes a typed `ExpectedArtifactSet`
+(the TRUSTED plan — package/filename/sha256 triples a PRODUCT derives from
+an immutable candidate snapshot; this module never computes that plan
+itself), the already-verified bundle manifest, and the directory the
+archive was extracted into. Before publishing anything it reconciles PLAN
+against MANIFEST (both directions), MANIFEST against the files actually on
+disk (both directions), refuses a duplicate or empty plan, and — the part
+the old signature could not do at all — RE-HASHES every file it is about to
+copy against the plan's own expected digest, rather than trusting the
+manifest's recorded hash or any earlier verification pass. Only after all
+of that does it build the PEP 503 package map itself; a caller no longer
+assembles one.
+
+**A typed value is not provenance.** `ExpectedArtifactSet` being a
+dataclass with named fields does not make its contents trustworthy — the
+type system cannot stop a caller constructing one from candidate-supplied
+data and handing it to this function as though it were the product's own
+plan. What makes an `ExpectedArtifactSet` trustworthy is entirely how the
+calling PRODUCT code obtained it (from an immutable candidate snapshot,
+never from anything a candidate submitted directly); this module receives
+the set and reconciles against it, and never derives one itself.
+
+Errors here raise `BundleVerificationError`, this module's own root — never
+ERP's `ManifestError` or `DependencyBundleError`, which are product-policy
+classes and are not ported (see "Two roots, deliberately not one" above).
+`_normalise_pep503_name` is ported behaviour-verbatim from ERP's
+`scripts/dependency_normalisation.py` `normalise_name` — the validating
+form (charset-checked input, edge-separator refused in the normalised
+output) — not the total, never-raising `normalise_name_for_identity` form;
+that module is not otherwise ported here, since nothing else in this slice
+needs repository-URL normalisation or identity-only comparison.
 """
 
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
 import shutil
 import stat
 import tempfile
+import urllib.parse
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -580,3 +625,396 @@ def extract_verified_bundle(
             f"cannot publish extracted bundle to {dest_dir}: {exc}"
         ) from exc
     return extracted
+
+
+# ── local PEP 503 materialisation ──────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ExpectedArtifact:
+    """One file the TRUSTED plan says must be published — the reference
+    shape is ERP's `PlannedArtifact`. See the module docstring's "A typed
+    value is not provenance": being a dataclass does not make an instance
+    trustworthy. Trust comes from how the calling PRODUCT derived it (an
+    immutable candidate snapshot), never from this type existing."""
+
+    package_normalised_name: str
+    filename: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ExpectedArtifactSet:
+    """The plan `build_local_index` reconciles every published artifact
+    against. `plan_digest` is compared against the verified manifest's OWN
+    recorded `plan_digest`, so a manifest produced for a different plan can
+    never be published under this one's index. Same warning as
+    `ExpectedArtifact`: well-typed is not trusted — this module never
+    derives an `ExpectedArtifactSet` itself, only receives and reconciles
+    against one a trusted caller already built."""
+
+    plan_digest: str
+    artifacts: tuple[ExpectedArtifact, ...]
+
+
+_PEP503_NAME_RUNS = re.compile(r"[-_.]+")
+
+#: The only characters a distribution name may ever contain (PEP 503 /
+#: packaging's name grammar). Checked on the INPUT, before normalisation —
+#: this is what makes a path separator, or any other unexpected character,
+#: a refusal rather than a value that normalises to itself and is silently
+#: trusted as "already valid".
+_PEP503_VALID_NAME_CHARACTERS = re.compile(r"\A[A-Za-z0-9._-]+\Z")
+
+
+def _normalise_pep503_name(name: str) -> str:
+    """PEP 503 normalisation, ported behaviour-verbatim from ERP's
+    `scripts/dependency_normalisation.py` `normalise_name` (the validating
+    form): runs of `-`, `_`, `.` collapse to one `-`, lower-cased. Raises
+    `ValueError` if `name` contains any character outside `[A-Za-z0-9._-]`,
+    or if the normalised result starts or ends with `-` — no valid
+    distribution name can start or end with a separator, and PEP 503
+    normalisation does not strip one."""
+
+    if not isinstance(name, str) or not _PEP503_VALID_NAME_CHARACTERS.match(name):
+        raise ValueError(
+            f"{name!r} is not a valid distribution name; only ASCII "
+            "letters, digits, '.', '_', and '-' are permitted"
+        )
+    normalised = _PEP503_NAME_RUNS.sub("-", name).lower()
+    if normalised.startswith("-") or normalised.endswith("-"):
+        raise ValueError(
+            f"{name!r} normalises to {normalised!r}, which starts or ends "
+            "with a separator; PEP 503 normalisation does not strip this, "
+            "and no valid distribution name can start or end with one"
+        )
+    return normalised
+
+
+def build_local_index(
+    index_root: Path,
+    expected: ExpectedArtifactSet,
+    bundle_manifest: dict[str, Any],
+    extracted_dir: Path,
+) -> None:
+    """Materialise a local PEP 503 "simple" index under `index_root/simple`,
+    atomically — the ONLY sanctioned way to publish one.
+
+    See the module docstring's "Slice 1a-iv" for why this is NOT a verbatim
+    port of ERP's `build_local_index`: this version never accepts a
+    caller-assembled package map. It instead reconciles three independently
+    obtained inputs before copying a single byte:
+
+    1. PLAN (`expected`) against MANIFEST (`bundle_manifest["members"]`),
+       in both directions — every artifact the plan names must appear in
+       the manifest with the same package and the same hash, and the
+       manifest must name nothing the plan does not expect.
+    2. MANIFEST against the files actually present under `extracted_dir`,
+       in both directions — every member the manifest names must exist on
+       disk, and no extra file may be present.
+    3. Duplicates and emptiness — a plan naming one filename twice is
+       refused outright, and an empty plan or an empty manifest is refused
+       rather than silently publishing nothing.
+    4. Every file about to be copied is RE-HASHED from its current bytes on
+       disk and compared against the PLAN's own expected digest — never
+       the manifest's recorded digest, and never a hash trusted from an
+       earlier verification pass. This is what catches a file modified
+       AFTER extraction but before this function runs; steps 1-3 alone
+       cannot, because the manifest's recorded hash does not change when
+       the file on disk does.
+
+    Only after all four steps pass does this function build the PEP 503
+    package map itself, grouping by `expected`'s own
+    `package_normalised_name`. Publication then follows the exact same
+    atomic shape as `extract_verified_bundle`: a fresh, exclusive staging
+    directory, then a single atomic rename. `index_root` must not already
+    exist — this function materialises a fresh tree, it never merges into
+    or overwrites one.
+
+    Every refusal here raises `BundleVerificationError`, this module's own
+    root — never ERP's `ManifestError` or `DependencyBundleError`.
+
+    STATED, NARROW RACE (not claimed to be closed) — identical to
+    `extract_verified_bundle`'s: existence is checked both here and again
+    immediately before the final rename, with no portable, dependency-free
+    "rename unless the destination exists" primitive for a directory target
+    in the Python standard library.
+    """
+
+    if index_root.exists():
+        raise BundleVerificationError(
+            f"destination {index_root} already exists; build_local_index "
+            "materialises a fresh tree and refuses to merge into or "
+            "overwrite one"
+        )
+
+    if not expected.artifacts:
+        raise BundleVerificationError(
+            "expected artifact set names no artifacts; refusing to "
+            "publish an empty index"
+        )
+
+    _refuse_malformed_bundle_manifest_shape(bundle_manifest)
+    if bundle_manifest.get("plan_digest") != expected.plan_digest:
+        raise BundleVerificationError(
+            f"bundle manifest plan_digest {bundle_manifest.get('plan_digest')!r} "
+            "disagrees with the expected artifact set's plan_digest "
+            f"{expected.plan_digest!r}"
+        )
+    members = bundle_manifest.get("members")
+    if not isinstance(members, dict) or not members:
+        raise BundleVerificationError("bundle manifest carries no members to publish")
+
+    # ── reconciliation step 1 & 3a: the plan itself, duplicates refused ──
+    plan_by_filename: dict[str, ExpectedArtifact] = {}
+    for artifact in expected.artifacts:
+        if artifact.filename in plan_by_filename:
+            raise BundleVerificationError(
+                f"expected artifact set names {artifact.filename!r} twice; "
+                "duplicate entries are refused"
+            )
+        plan_by_filename[artifact.filename] = artifact
+
+    manifest_by_filename: dict[str, tuple[str, str]] = {}
+    for name, record in members.items():
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("sha256"), str)
+            or not _SHA256_HEX.match(record["sha256"])
+            or not isinstance(record.get("package"), str)
+            or not record.get("package")
+        ):
+            raise BundleVerificationError(
+                f"bundle manifest member {name!r} is malformed: {record!r}"
+            )
+        manifest_by_filename[name] = (record["package"], record["sha256"])
+
+    # ── reconciliation step 1: plan <-> manifest, both directions ────────
+    missing_from_manifest = set(plan_by_filename) - set(manifest_by_filename)
+    if missing_from_manifest:
+        raise BundleVerificationError(
+            f"the plan expects {sorted(missing_from_manifest)}, which the "
+            "verified manifest does not contain"
+        )
+    extra_in_manifest = set(manifest_by_filename) - set(plan_by_filename)
+    if extra_in_manifest:
+        raise BundleVerificationError(
+            f"the verified manifest names {sorted(extra_in_manifest)}, "
+            "which the plan does not expect"
+        )
+    for filename, artifact in plan_by_filename.items():
+        manifest_package, manifest_sha256 = manifest_by_filename[filename]
+        if manifest_package != artifact.package_normalised_name:
+            raise BundleVerificationError(
+                f"{filename!r} is associated with package {manifest_package!r} "
+                "in the verified manifest, but the plan expects package "
+                f"{artifact.package_normalised_name!r}"
+            )
+        if manifest_sha256 != artifact.sha256:
+            raise BundleVerificationError(
+                f"{filename!r} carries sha256 {manifest_sha256} in the "
+                "verified manifest, disagreeing with the plan's expected "
+                f"sha256 {artifact.sha256}"
+            )
+
+    # ── reconciliation step 2: manifest <-> extracted files, both directions
+    try:
+        extracted_names = {
+            p.relative_to(extracted_dir).as_posix()
+            for p in extracted_dir.rglob("*")
+            if p.is_file()
+        }
+    except OSError as exc:
+        raise BundleVerificationError(
+            f"cannot list extracted directory {extracted_dir}: {exc}"
+        ) from exc
+    manifest_names = set(manifest_by_filename)
+    missing_on_disk = manifest_names - extracted_names
+    if missing_on_disk:
+        raise BundleVerificationError(
+            f"the verified manifest expects {sorted(missing_on_disk)}, "
+            "which the extracted directory does not contain"
+        )
+    extra_on_disk = extracted_names - manifest_names
+    if extra_on_disk:
+        raise BundleVerificationError(
+            f"the extracted directory contains {sorted(extra_on_disk)}, "
+            "which the verified manifest does not name"
+        )
+
+    # ── reconciliation step 4: rehash every file about to be copied ──────
+    # Never trust a recorded hash — not the manifest's, and not one
+    # verified at an earlier point in time. This is the only step that can
+    # catch a file modified on disk after extraction was verified.
+    for filename, artifact in plan_by_filename.items():
+        source_path = extracted_dir / filename
+        try:
+            actual_sha256 = sha256_hex(source_path.read_bytes())
+        except OSError as exc:
+            raise BundleVerificationError(
+                f"cannot read extracted file {filename!r} to publish: {exc}"
+            ) from exc
+        if actual_sha256 != artifact.sha256:
+            raise BundleVerificationError(
+                f"extracted file {filename!r} hashes to {actual_sha256} on "
+                "disk right now, disagreeing with the plan's expected "
+                f"sha256 {artifact.sha256}; refusing to publish a file "
+                "that changed after verification"
+            )
+
+    # ── step 5: build the PEP 503 package map ourselves ──────────────────
+    packages: dict[str, list[tuple[str, str, Path]]] = {}
+    for filename, artifact in sorted(plan_by_filename.items()):
+        try:
+            canonical_name = _normalise_pep503_name(artifact.package_normalised_name)
+        except ValueError as exc:
+            raise BundleVerificationError(
+                "expected artifact package name "
+                f"{artifact.package_normalised_name!r} is not a valid PEP "
+                f"503 name: {exc}"
+            ) from exc
+        if canonical_name != artifact.package_normalised_name:
+            raise BundleVerificationError(
+                "expected artifact package name "
+                f"{artifact.package_normalised_name!r} is not "
+                "PEP-503-normalised"
+            )
+        packages.setdefault(canonical_name, []).append(
+            (filename, artifact.sha256, extracted_dir / filename)
+        )
+
+    # ── stage and publish, atomically — same shape as extract_verified_bundle
+    try:
+        index_root.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise BundleVerificationError(
+            f"cannot create parent directory for {index_root}: {exc}"
+        ) from exc
+    try:
+        staging_root = Path(
+            tempfile.mkdtemp(
+                prefix=f".{index_root.name}.staging.", dir=str(index_root.parent)
+            )
+        )
+    except OSError as exc:
+        raise BundleVerificationError(
+            f"cannot create a staging directory beside {index_root}: {exc}"
+        ) from exc
+
+    try:
+        root_dir = staging_root / "simple"
+        try:
+            root_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise BundleVerificationError(
+                f"cannot create index root {root_dir}: {exc}"
+            ) from exc
+        for canonical_name, files in packages.items():
+            pkg_dir = root_dir / canonical_name
+            resolved_pkg_dir = pkg_dir.resolve()
+            if not _is_within(root_dir.resolve(), resolved_pkg_dir):
+                raise BundleVerificationError(
+                    f"package {canonical_name!r} resolves outside the index directory"
+                )
+            try:
+                pkg_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                # A charset-valid but overlong name (every character
+                # permitted by `_normalise_pep503_name`, but the whole
+                # string longer than the filesystem's per-component limit)
+                # is never rejected by the checks above — only the
+                # filesystem itself refuses it, with `OSError`
+                # (`ENAMETOOLONG`), which must be translated here rather
+                # than left to escape this function raw.
+                raise BundleVerificationError(
+                    f"cannot create package directory for {canonical_name!r}: {exc}"
+                ) from exc
+            anchors = []
+            for filename, digest_hex, source_path in sorted(files, key=lambda t: t[0]):
+                # A plan filename must be a bare filename: no path
+                # separator, not absolute, not `.`/`..`. Without this,
+                # `pkg_dir / filename` can write outside `pkg_dir` —
+                # `Path.__truediv__` REPLACES the left side entirely when
+                # the right side is absolute.
+                if (
+                    not filename
+                    or "/" in filename
+                    or "\\" in filename
+                    or filename in (".", "..")
+                    or Path(filename).is_absolute()
+                ):
+                    raise BundleVerificationError(
+                        f"filename {filename!r} is not a safe bare filename "
+                        "(no path separators, not absolute, not '.' or '..')"
+                    )
+                try:
+                    (pkg_dir / filename).write_bytes(source_path.read_bytes())
+                except OSError as exc:
+                    raise BundleVerificationError(
+                        f"cannot stage {filename!r}: {exc}"
+                    ) from exc
+                # `html.escape` and URL-quoting solve two DIFFERENT
+                # problems: one stops a filename from breaking out of the
+                # HTML attribute/text context, the other stops it from
+                # being reinterpreted as part of the URL's own grammar once
+                # a resolver requests the href. Applied URL-quote first,
+                # HTML-escape second; the anchor TEXT is HTML-escaped only.
+                href_filename = html.escape(
+                    urllib.parse.quote(filename, safe=""), quote=True
+                )
+                safe_filename_text = html.escape(filename, quote=True)
+                safe_digest = html.escape(digest_hex, quote=True)
+                anchors.append(
+                    f'<a href="{href_filename}#sha256={safe_digest}">'
+                    f"{safe_filename_text}</a><br/>"
+                )
+            try:
+                (pkg_dir / "index.html").write_text(
+                    "<!DOCTYPE html><html><body>\n"
+                    + "\n".join(anchors)
+                    + "\n</body></html>\n",
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                raise BundleVerificationError(
+                    f"cannot write package index for {canonical_name!r}: {exc}"
+                ) from exc
+        try:
+            package_names = sorted(p.name for p in root_dir.iterdir() if p.is_dir())
+        except OSError as exc:
+            raise BundleVerificationError(
+                f"cannot list staged index root {root_dir}: {exc}"
+            ) from exc
+        root_anchors = [
+            f'<a href="{html.escape(name, quote=True)}/">'
+            f"{html.escape(name, quote=True)}</a><br/>"
+            for name in package_names
+        ]
+        try:
+            (root_dir / "index.html").write_text(
+                "<!DOCTYPE html><html><body>\n"
+                + "\n".join(root_anchors)
+                + "\n</body></html>\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            raise BundleVerificationError(
+                f"cannot write root index at {root_dir}: {exc}"
+            ) from exc
+    except BaseException:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
+
+    if index_root.exists():
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise BundleVerificationError(
+            f"destination {index_root} was created concurrently while "
+            "staging; refusing to publish over it"
+        )
+    try:
+        os.rename(staging_root, index_root)
+    except OSError as exc:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise BundleVerificationError(
+            f"cannot publish staged index to {index_root}: {exc}"
+        ) from exc
