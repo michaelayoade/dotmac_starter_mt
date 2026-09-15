@@ -12,6 +12,19 @@ plan and bundle digest depending on its exact byte output. Each test below
 proves exactly ONE property, asserting exact bytes (never a property of the
 output), so a regression names which property broke. Each docstring states
 the implementation change that would make the test fail.
+
+## Slice 1a-ii: archive and member hash verification
+
+`test_archive_digest_matches`, `test_archive_digest_mismatch_is_refused`,
+`test_member_hash_verification_refuses_a_mismatch`, and
+`test_member_hash_verification_refuses_a_missing_file` are ported from
+`dotmac_erp` `tests/architecture/test_dependency_bundle.py` at the same
+pinned commit as the module docstring — the accumulated adversarial
+evidence travels with the code, not just its behaviour. ERP has no test
+naming `_refuse_malformed_manifest_run` or
+`_refuse_malformed_bundle_manifest_shape` directly (both are exercised only
+indirectly there, through `extract_verified_bundle`, which this slice does
+not port); the refusal tests for those two functions below are new.
 """
 
 from __future__ import annotations
@@ -19,6 +32,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = PROJECT_ROOT / "scripts"
@@ -40,6 +55,14 @@ def _load_bundle_envelope():
 BUNDLE_ENVELOPE = _load_bundle_envelope()
 canonical_json_bytes = BUNDLE_ENVELOPE.canonical_json_bytes
 sha256_hex = BUNDLE_ENVELOPE.sha256_hex
+BundleVerificationError = BUNDLE_ENVELOPE.BundleVerificationError
+verify_archive_digest = BUNDLE_ENVELOPE.verify_archive_digest
+verify_member_hashes = BUNDLE_ENVELOPE.verify_member_hashes
+_refuse_malformed_manifest_run = BUNDLE_ENVELOPE._refuse_malformed_manifest_run
+_refuse_malformed_bundle_manifest_shape = (
+    BUNDLE_ENVELOPE._refuse_malformed_bundle_manifest_shape
+)
+MANIFEST_SCHEMA_VERSION = BUNDLE_ENVELOPE.MANIFEST_SCHEMA_VERSION
 
 
 def test_canonical_json_bytes_sorts_keys():
@@ -135,3 +158,214 @@ def test_sha256_hex_known_answer():
         sha256_hex(b"")
         == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     )
+
+
+# ── archive digest ────────────────────────────────────────────────────
+
+
+def test_archive_digest_matches(tmp_path: Path):
+    """The accept-direction control for the refusal test below: a verifier
+    that refuses every archive (or always raises) would pass every
+    refusal test in this module for the wrong reason. This is the only
+    test proving `verify_archive_digest` actually accepts a correct
+    digest and returns it.
+
+    Breaks if `verify_archive_digest` is changed to always raise, to
+    return a value other than the computed digest, or to compare against
+    the wrong bytes.
+    """
+
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"hello world")
+    expected = sha256_hex(b"hello world")
+
+    assert verify_archive_digest(archive, expected) == expected
+
+
+def test_archive_digest_mismatch_is_refused(tmp_path: Path):
+    """A digest that does not match the archive's actual bytes is refused.
+
+    Breaks if the comparison is dropped, inverted, or short-circuited
+    (e.g. `digest != expected_sha256` replaced by a check that never
+    fires), which would let `verify_archive_digest` return a wrong
+    digest as though it matched.
+    """
+
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"hello world")
+
+    with pytest.raises(BundleVerificationError, match="digest mismatch"):
+        verify_archive_digest(archive, "0" * 64)
+
+
+# ── member hashes ─────────────────────────────────────────────────────
+
+
+def test_member_hash_verification_refuses_a_mismatch(tmp_path: Path):
+    """An extracted file whose content hash disagrees with the expected
+    per-member hash is refused.
+
+    Breaks if the per-member digest comparison is dropped or inverted,
+    which would let a file with the wrong content pass as verified.
+    """
+
+    dest = tmp_path / "out"
+    dest.mkdir()
+    (dest / "a.whl").write_bytes(b"AAAA")
+
+    with pytest.raises(BundleVerificationError, match="hash mismatch"):
+        verify_member_hashes(dest, {"a.whl": sha256_hex(b"different")})
+
+
+def test_member_hash_verification_refuses_a_missing_file(tmp_path: Path):
+    """An expected member absent from disk is refused rather than silently
+    skipped.
+
+    Breaks if the `path.is_file()` existence check is dropped, which
+    would make `path.read_bytes()` raise an unrelated, uncaught `OSError`
+    instead of this function's own `BundleVerificationError` naming the
+    missing member.
+    """
+
+    dest = tmp_path / "out"
+    dest.mkdir()
+
+    with pytest.raises(BundleVerificationError, match="missing"):
+        verify_member_hashes(dest, {"a.whl": sha256_hex(b"AAAA")})
+
+
+# ── manifest run shape ────────────────────────────────────────────────
+
+
+def test_refuse_malformed_manifest_run_accepts_a_well_formed_run():
+    """The accept-direction control for the refusal tests below: a check
+    that refuses every `run` dict would pass every refusal test for the
+    wrong reason.
+
+    Breaks if `_refuse_malformed_manifest_run` is changed to raise
+    unconditionally, or to check a field this well-formed fixture does
+    not satisfy.
+    """
+
+    run = {
+        "repository_id": 1,
+        "run_id": 2,
+        "run_attempt": 1,
+        "artifact_id": 3,
+        "artifact_run_id": 4,
+        "repository_full_name": "dotmac/erp",
+        "workflow_path": ".github/workflows/build.yml",
+        "artifact_name": "bundle",
+        "environment_name": "production",
+        "trusted_workflow_sha": "a" * 40,
+    }
+
+    _refuse_malformed_manifest_run(run)
+
+
+def test_refuse_malformed_manifest_run_refuses_the_null_sha():
+    """`trusted_workflow_sha` equal to the all-zero null SHA is refused even
+    though it matches the 40-hex commit-SHA shape.
+
+    Breaks if the `trusted_sha == _NULL_SHA` check is dropped, leaving
+    only the regex match — the null SHA is exactly 40 hex characters and
+    would otherwise pass.
+    """
+
+    run = {
+        "repository_id": 1,
+        "run_id": 2,
+        "run_attempt": 1,
+        "artifact_id": 3,
+        "artifact_run_id": 4,
+        "repository_full_name": "dotmac/erp",
+        "workflow_path": ".github/workflows/build.yml",
+        "artifact_name": "bundle",
+        "environment_name": "production",
+        "trusted_workflow_sha": "0" * 40,
+    }
+
+    with pytest.raises(BundleVerificationError, match="null SHA"):
+        _refuse_malformed_manifest_run(run)
+
+
+def test_refuse_malformed_manifest_run_refuses_a_boolean_for_a_positive_int_field():
+    """A `bool` value for a positive-int field is refused, even though
+    `isinstance(True, int)` is `True` in Python.
+
+    Breaks if the `isinstance(value, bool)` exclusion is dropped from the
+    int-field check, which would let `run_id: True` silently pass as the
+    integer `1`.
+    """
+
+    run = {
+        "repository_id": 1,
+        "run_id": True,
+        "run_attempt": 1,
+        "artifact_id": 3,
+        "artifact_run_id": 4,
+        "repository_full_name": "dotmac/erp",
+        "workflow_path": ".github/workflows/build.yml",
+        "artifact_name": "bundle",
+        "environment_name": "production",
+        "trusted_workflow_sha": "a" * 40,
+    }
+
+    with pytest.raises(BundleVerificationError, match=r"run\.run_id"):
+        _refuse_malformed_manifest_run(run)
+
+
+# ── bundle manifest shape ─────────────────────────────────────────────
+
+
+def test_refuse_malformed_bundle_manifest_shape_accepts_a_well_formed_manifest():
+    """The accept-direction control for the refusal test below: a check
+    that refuses every manifest would pass the refusal test for the
+    wrong reason.
+
+    Breaks if `_refuse_malformed_bundle_manifest_shape` is changed to
+    raise unconditionally, or to check a field this well-formed fixture
+    does not satisfy.
+    """
+
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "plan_digest": "a" * 64,
+        "archive_sha256": "b" * 64,
+        "run": {
+            "repository_id": 1,
+            "run_id": 2,
+            "run_attempt": 1,
+            "artifact_id": 3,
+            "artifact_run_id": 4,
+            "repository_full_name": "dotmac/erp",
+            "workflow_path": ".github/workflows/build.yml",
+            "artifact_name": "bundle",
+            "environment_name": "production",
+            "trusted_workflow_sha": "c" * 40,
+        },
+    }
+
+    _refuse_malformed_bundle_manifest_shape(manifest)
+
+
+def test_refuse_malformed_bundle_manifest_shape_refuses_a_wrong_schema_version():
+    """A `schema_version` other than the recognised `MANIFEST_SCHEMA_VERSION`
+    is refused before `plan_digest`, `archive_sha256`, or `run` are ever
+    examined.
+
+    Breaks if the `schema_version != MANIFEST_SCHEMA_VERSION` check is
+    dropped or loosened (e.g. to accept any int), which would let a
+    manifest produced under an incompatible future schema be treated as
+    this one.
+    """
+
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION + 1,
+        "plan_digest": "a" * 64,
+        "archive_sha256": "b" * 64,
+        "run": {},
+    }
+
+    with pytest.raises(BundleVerificationError, match="schema_version"):
+        _refuse_malformed_bundle_manifest_shape(manifest)

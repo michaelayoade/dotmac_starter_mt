@@ -38,12 +38,33 @@ function uses `ensure_ascii=False` and no trailing newline — it is a
 different canonicalization for a different contract, not an earlier version
 of this one. Do not unify them; they encode different, independently
 load-bearing byte layouts.
+
+## Slice 1a-ii: archive and member hash verification
+
+`verify_archive_digest`, `verify_member_hashes`,
+`_refuse_malformed_manifest_run`, and `_refuse_malformed_bundle_manifest_shape`
+are ported VERBATIM in behaviour from the same ERP file at the same pinned
+commit. They verify bytes already on disk against an already-supplied
+expected digest/hash/shape — no filesystem traversal beyond a single
+`read_bytes()`, no ZIP handling, no extraction, no offline index, no
+constructor. Those stay out of scope for later slices, deliberately not
+anticipated here. `BundleVerificationError` is the one exception these
+functions raise; ERP defines it as a subclass of a module-wide
+`DependencyBundleError` base alongside sibling `ManifestError`,
+`PolicyError`, and `ExtractionError` classes for concerns (policy loading,
+ZIP extraction) this slice does not port. Carrying that unused base and its
+unrelated siblings here would misstate what this file does, so
+`BundleVerificationError` is ported as a direct `Exception` subclass instead
+— the same public name and the same behaviour for everything this slice
+raises, without implying a sibling hierarchy that does not exist yet.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 
@@ -62,3 +83,155 @@ def sha256_hex(data: bytes) -> str:
     """The sha256 hex digest of `data`."""
 
     return hashlib.sha256(data).hexdigest()
+
+
+class BundleVerificationError(Exception):
+    """A bundle, its run metadata, or its archive digest failed
+    verification against an already-supplied expected value."""
+
+
+#: The bundle manifest's own schema version (see ERP's `create_bundle_manifest`,
+#: not ported here — this slice only checks that a manifest DECLARES the
+#: version this module recognises).
+MANIFEST_SCHEMA_VERSION = 2
+
+_SHA256_HEX = re.compile(r"\A[0-9a-f]{64}\Z")
+
+_COMMIT_SHA = re.compile(r"\A[0-9a-f]{40}\Z")
+
+_NULL_SHA = "0" * 40
+
+_MANIFEST_RUN_POSITIVE_INT_FIELDS = (
+    "repository_id",
+    "run_id",
+    "run_attempt",
+    "artifact_id",
+    "artifact_run_id",
+)
+_MANIFEST_RUN_NONEMPTY_STRING_FIELDS = (
+    "repository_full_name",
+    "workflow_path",
+    "artifact_name",
+    "environment_name",
+)
+
+
+def verify_archive_digest(archive_path: Path, expected_sha256: str) -> str:
+    """Verify the OUTER archive's own bytes, before it is ever opened as a
+    ZIP. `expected_sha256` must already be a verified value (e.g. bound to
+    the artifact's GitHub-reported digest) — this function does not fetch
+    or trust anything else."""
+
+    if not isinstance(expected_sha256, str) or not _SHA256_HEX.match(expected_sha256):
+        raise BundleVerificationError(
+            "expected archive digest must be a 64-hex sha256 string"
+        )
+    try:
+        data = archive_path.read_bytes()
+    except OSError as exc:
+        raise BundleVerificationError(
+            f"cannot read archive {archive_path}: {exc}"
+        ) from exc
+    digest = sha256_hex(data)
+    if digest != expected_sha256:
+        raise BundleVerificationError(
+            f"archive digest mismatch: expected {expected_sha256}, got {digest}"
+        )
+    return digest
+
+
+def verify_member_hashes(dest_dir: Path, expected_hashes: dict[str, str]) -> None:
+    """Verify every extracted file's content hash against the verified
+    bundle manifest's per-member hash. Independent of extraction's size
+    checks — this is the content proof, not the shape proof."""
+
+    for name, expected_hex in expected_hashes.items():
+        if not isinstance(expected_hex, str) or not _SHA256_HEX.match(expected_hex):
+            raise BundleVerificationError(
+                f"expected hash for {name!r} is not a 64-hex sha256 string"
+            )
+        path = dest_dir / name
+        if not path.is_file():
+            raise BundleVerificationError(
+                f"expected extracted member {name!r} is missing on disk"
+            )
+        try:
+            digest = sha256_hex(path.read_bytes())
+        except OSError as exc:
+            raise BundleVerificationError(
+                f"cannot read extracted member {name!r}: {exc}"
+            ) from exc
+        if digest != expected_hex:
+            raise BundleVerificationError(
+                f"extracted member {name!r} hash mismatch: expected "
+                f"{expected_hex}, got {digest}"
+            )
+
+
+def _refuse_malformed_manifest_run(run: Any) -> None:
+    """Shape-validates a bundle manifest's OWN `run` dict — untrusted data
+    read straight off disk/network, never an already-provenanced
+    `RunMetadata`. This function never constructs a `RunMetadata` and
+    never implies verification happened; it only refuses a `run` record
+    too malformed to even be a candidate for later cross-checking (see
+    ERP's `bind_bundle_to_candidate`, which separately cross-checks a
+    VERIFIED `RunMetadata`'s `run_id`/`artifact_id` against this same
+    dict — not ported here)."""
+
+    if not isinstance(run, dict):
+        raise BundleVerificationError("bundle manifest run must be a dict")
+    for field_name in _MANIFEST_RUN_POSITIVE_INT_FIELDS:
+        value = run.get(field_name)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise BundleVerificationError(
+                f"bundle manifest run.{field_name} must be a positive "
+                f"integer, got {value!r}"
+            )
+    for field_name in _MANIFEST_RUN_NONEMPTY_STRING_FIELDS:
+        value = run.get(field_name)
+        if not isinstance(value, str) or not value:
+            raise BundleVerificationError(
+                f"bundle manifest run.{field_name} must be a non-empty string"
+            )
+    trusted_sha = run.get("trusted_workflow_sha")
+    if (
+        not isinstance(trusted_sha, str)
+        or trusted_sha == _NULL_SHA
+        or not _COMMIT_SHA.match(trusted_sha)
+    ):
+        raise BundleVerificationError(
+            "bundle manifest run.trusted_workflow_sha must be a 40-hex "
+            "commit SHA, and not the all-zero null SHA"
+        )
+
+
+def _refuse_malformed_bundle_manifest_shape(bundle_manifest: dict[str, Any]) -> None:
+    """The manifest-wide shape check ERP's `extract_verified_bundle` used to
+    skip entirely: it read ONLY `members`, silently ignoring
+    `schema_version`, `plan_digest`, `archive_sha256`, `run`, and each
+    member's own `package` field — so a manifest malformed in any of
+    those ways would still extract successfully, and the trust
+    document's "fully shape-checked" claim was false for this function.
+    Every field this function checks is refused BEFORE any extraction
+    work begins, not discovered later by whichever downstream caller
+    happens to read it (ERP's `bind_bundle_to_candidate` reads `run` too,
+    but only after extraction has already published a tree — not ported
+    here)."""
+
+    schema_version = bundle_manifest.get("schema_version")
+    if schema_version != MANIFEST_SCHEMA_VERSION:
+        raise BundleVerificationError(
+            f"bundle manifest schema_version must be {MANIFEST_SCHEMA_VERSION}, "
+            f"got {schema_version!r}"
+        )
+    plan_digest = bundle_manifest.get("plan_digest")
+    if not isinstance(plan_digest, str) or not _SHA256_HEX.match(plan_digest):
+        raise BundleVerificationError(
+            "bundle manifest plan_digest must be a 64-hex sha256 string"
+        )
+    archive_sha256 = bundle_manifest.get("archive_sha256")
+    if not isinstance(archive_sha256, str) or not _SHA256_HEX.match(archive_sha256):
+        raise BundleVerificationError(
+            "bundle manifest archive_sha256 must be a 64-hex sha256 string"
+        )
+    _refuse_malformed_manifest_run(bundle_manifest.get("run"))
