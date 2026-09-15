@@ -122,6 +122,68 @@ form (charset-checked input, edge-separator refused in the normalised
 output) — not the total, never-raising `normalise_name_for_identity` form;
 that module is not otherwise ported here, since nothing else in this slice
 needs repository-URL normalisation or identity-only comparison.
+
+## Slice 1a-v: the canonical envelope constructor
+
+`create_bundle_manifest` is the producer-side counterpart to
+`extract_verified_bundle`/`build_local_index`, and — per Michael's ruling —
+it is deliberately NOT a verbatim port of ERP's `create_bundle_manifest`
+(`scripts/dependency_bundle.py` at the same pinned commit). ERP's version
+takes a `DependencySurface` and computes the plan digest itself from
+`pyproject.toml`/`poetry.lock`; that half is ERP PRODUCT POLICY and does
+not move. This module's version instead takes an already-established
+`ExpectedArtifactSet` — the same typed plan `build_local_index` already
+reconciles against, reused rather than re-invented — plus the files a
+caller actually acquired, the archive those files were packed into, and
+already-shaped run metadata. It never computes a plan; it only PROVES the
+acquired files and the archive agree with the plan it was handed, and
+computes every recorded binding (member size, member hash, archive digest)
+from real bytes on disk.
+
+Closure is three-way and BOTH directions on each edge: every artifact the
+plan expects must have been acquired, and every acquired file must be
+named by the plan (plan <-> acquired); every acquired file's bytes must
+actually be present in the archive under its exact planned name with a
+matching size and content digest, and the archive must contain nothing
+the plan does not expect (acquired <-> archive contents). This is a
+deliberate strengthening over ERP's original, which only checked the
+acquired-into-archive direction — the archive-has-an-extra-member
+direction is new here because a manifest that claims closure narrower
+than what the archive actually contains is exactly the gap "the archive
+contains exactly those members" (this slice's own requirement) rules out.
+
+Errors here raise `BundleVerificationError`, this module's own root, same
+as every other function in this file.
+
+### The input-domain gate: `json.dumps` permits NaN/Infinity by default
+
+`canonical_json_bytes` is ported VERBATIM (see "Byte-for-byte
+compatibility is the whole point" above) and stays that way — changing
+`json.dumps`'s `allow_nan` behaviour would change valid digest bytes two
+repositories must agree on, which is exactly the kind of change that
+docstring forbids. Python's default `json.dumps` happily serializes
+`float("nan")`/`float("inf")` as the bare tokens `NaN`/`Infinity`, which
+are not strict JSON — so the gate has to sit somewhere else.
+
+Chosen gate: refuse a non-finite (or any non-string) value at the
+CONSTRUCTOR'S boundary, before it is ever placed into the manifest this
+function builds, rather than a generic recursive "walk the emitted
+document and call `math.isfinite`" scan after the fact. This works because
+every leaf value `create_bundle_manifest` writes into the manifest is
+either computed by this function itself from real bytes (`sha256_hex`
+output, `len(data)` — both always str/int, never a float) or copied from a
+caller-supplied value: `ExpectedArtifactSet.plan_digest` and
+`ExpectedArtifact.package_normalised_name` are the only two such values
+(`ExpectedArtifact.filename` and `.sha256` are read but never copied
+verbatim into a value position — `filename` becomes a dict KEY, and a
+mismatched `.sha256` is refused before anything is written). Both of those
+two values are required to be non-empty strings before this function uses
+them for anything, which makes a float — finite or not — structurally
+unreachable in the emitted manifest through this path. `run`'s numeric
+fields are already closed the same way by the existing, UNMODIFIED
+`_refuse_malformed_manifest_run`, whose `isinstance(value, int)` checks
+already exclude every float, non-finite or not — reused here, not
+re-implemented.
 """
 
 from __future__ import annotations
@@ -136,6 +198,7 @@ import stat
 import tempfile
 import urllib.parse
 import zipfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -655,6 +718,188 @@ class ExpectedArtifactSet:
 
     plan_digest: str
     artifacts: tuple[ExpectedArtifact, ...]
+
+
+# ── canonical bundle manifest ──────────────────────────────────────────
+
+
+def create_bundle_manifest(
+    *,
+    expected: ExpectedArtifactSet,
+    acquired_files: Mapping[str, Path],
+    archive_path: Path,
+    run: Mapping[str, Any],
+    schema_version: int = MANIFEST_SCHEMA_VERSION,
+) -> dict[str, Any]:
+    """Build the canonical bundle manifest by COMPUTING every binding from
+    `expected` and the ACTUAL FILES/archive on disk — never accepting a
+    member size, a member hash, or the archive digest as an
+    independently-reported scalar. See the module docstring's "Slice 1a-v"
+    for why this takes an already-established `ExpectedArtifactSet` rather
+    than computing a plan itself (that half is product policy and does not
+    move here), and its "input-domain gate" subsection for why every value
+    copied verbatim from `expected` is required to be a non-empty string
+    before it is used for anything.
+
+    `acquired_files` maps each expected filename to the real path a caller
+    downloaded it to; this function reads and hashes every one of those
+    files itself. `archive_path` is likewise the real outer archive file:
+    `archive_sha256` is computed from its own bytes here, and the archive
+    is opened as a ZIP to prove — member by member — that it actually
+    contains every acquired file under its exact expected name, with the
+    exact size and content digest just computed from the real file on
+    disk, and NOTHING ELSE: an archive member the plan does not expect is
+    refused exactly as an acquired file the plan does not expect is, so a
+    manifest can never claim closure either broader or narrower than what
+    is actually on disk and in the archive.
+    """
+
+    if schema_version != MANIFEST_SCHEMA_VERSION:
+        raise BundleVerificationError(
+            f"schema_version must be {MANIFEST_SCHEMA_VERSION}, got {schema_version!r}"
+        )
+    if not isinstance(expected.plan_digest, str) or not _SHA256_HEX.match(
+        expected.plan_digest
+    ):
+        raise BundleVerificationError(
+            "expected artifact set plan_digest must be a 64-hex sha256 "
+            f"string, got {expected.plan_digest!r}"
+        )
+    if not expected.artifacts:
+        raise BundleVerificationError(
+            "expected artifact set names no artifacts; refusing to "
+            "construct a manifest for an empty plan"
+        )
+
+    expected_by_filename: dict[str, ExpectedArtifact] = {}
+    for artifact in expected.artifacts:
+        if not isinstance(artifact.filename, str) or not artifact.filename:
+            raise BundleVerificationError(
+                "expected artifact filename must be a non-empty string, "
+                f"got {artifact.filename!r}"
+            )
+        if not isinstance(artifact.package_normalised_name, str) or not (
+            artifact.package_normalised_name
+        ):
+            raise BundleVerificationError(
+                f"expected artifact {artifact.filename!r} "
+                "package_normalised_name must be a non-empty string, got "
+                f"{artifact.package_normalised_name!r}"
+            )
+        if artifact.filename in expected_by_filename:
+            raise BundleVerificationError(
+                f"expected artifact set names {artifact.filename!r} twice; "
+                "duplicate entries are refused"
+            )
+        expected_by_filename[artifact.filename] = artifact
+
+    expected_names = set(expected_by_filename)
+    acquired_names = set(acquired_files)
+    missing = expected_names - acquired_names
+    if missing:
+        raise BundleVerificationError(
+            f"the plan expects {sorted(missing)}, which were not acquired"
+        )
+    extra = acquired_names - expected_names
+    if extra:
+        raise BundleVerificationError(
+            f"{sorted(extra)} were acquired but the plan does not expect "
+            "them; every acquired file must be accounted for by the plan"
+        )
+
+    members: dict[str, dict[str, Any]] = {}
+    for filename, artifact in sorted(expected_by_filename.items()):
+        path = acquired_files[filename]
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise BundleVerificationError(
+                f"cannot read acquired file {filename!r} at {path}: {exc}"
+            ) from exc
+        actual_sha256 = sha256_hex(data)
+        actual_size = len(data)
+        if actual_sha256 != artifact.sha256:
+            raise BundleVerificationError(
+                f"{filename!r} was acquired with digest {actual_sha256}, "
+                f"but the plan expects {artifact.sha256}"
+            )
+        if actual_size <= 0:
+            raise BundleVerificationError(f"{filename!r} is empty on disk")
+        members[filename] = {
+            "sha256": actual_sha256,
+            "size": actual_size,
+            "package": artifact.package_normalised_name,
+        }
+
+    try:
+        archive_bytes = archive_path.read_bytes()
+    except OSError as exc:
+        raise BundleVerificationError(
+            f"cannot read archive {archive_path}: {exc}"
+        ) from exc
+    archive_sha256 = sha256_hex(archive_bytes)
+
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            archive_names = set(archive.namelist())
+            missing_from_archive = set(members) - archive_names
+            if missing_from_archive:
+                raise BundleVerificationError(
+                    f"archive {archive_path} does not contain acquired "
+                    f"member(s) {sorted(missing_from_archive)}; a bundle "
+                    "manifest must not claim closure over a file the "
+                    "archive lacks"
+                )
+            extra_in_archive = archive_names - set(members)
+            if extra_in_archive:
+                raise BundleVerificationError(
+                    f"archive {archive_path} contains "
+                    f"{sorted(extra_in_archive)}, which the plan does not "
+                    "name; a bundle manifest must not claim closure "
+                    "narrower than the archive's actual contents"
+                )
+            for filename, record in members.items():
+                info = archive.getinfo(filename)
+                if info.file_size != record["size"]:
+                    raise BundleVerificationError(
+                        f"archive member {filename!r} declares size "
+                        f"{info.file_size}, but the acquired file on disk "
+                        f"was {record['size']} bytes"
+                    )
+                member_sha256 = sha256_hex(archive.read(filename))
+                if member_sha256 != record["sha256"]:
+                    raise BundleVerificationError(
+                        f"archive member {filename!r} content digest "
+                        f"{member_sha256} does not match the acquired "
+                        f"file's digest {record['sha256']}"
+                    )
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise BundleVerificationError(
+            f"cannot open {archive_path} as a ZIP archive to verify it "
+            f"contains the acquired files: {exc}"
+        ) from exc
+
+    _refuse_malformed_manifest_run(run)
+    manifest: dict[str, Any] = {
+        "schema_version": schema_version,
+        "plan_digest": expected.plan_digest,
+        "archive_sha256": archive_sha256,
+        "members": members,
+        "run": {
+            "repository_full_name": run["repository_full_name"],
+            "repository_id": run["repository_id"],
+            "workflow_path": run["workflow_path"],
+            "run_id": run["run_id"],
+            "run_attempt": run["run_attempt"],
+            "trusted_workflow_sha": run["trusted_workflow_sha"],
+            "artifact_id": run["artifact_id"],
+            "artifact_name": run["artifact_name"],
+            "artifact_run_id": run["artifact_run_id"],
+            "environment_name": run["environment_name"],
+        },
+    }
+    _refuse_malformed_bundle_manifest_shape(manifest)
+    return manifest
 
 
 _PEP503_NAME_RUNS = re.compile(r"[-_.]+")

@@ -70,6 +70,22 @@ association, wrong hash, duplicate entry, and — the property step 4 exists
 to prove — a file tampered with AFTER extraction but before
 `build_local_index` runs, which only the rehash (never the manifest's
 recorded digest) can catch.
+
+## Slice 1a-v: the canonical envelope constructor
+
+`create_bundle_manifest` has no ERP test to port from directly usable
+as-is: ERP's own `tests/architecture/test_dependency_bundle.py` exercises
+its `create_bundle_manifest` through a `DependencySurface`, which this
+module's version never accepts (see the module docstring's "Slice 1a-v").
+Every test below is new, built against Michael's required set: the
+mandatory clean-construction accept-direction control, a manifest ->
+`_refuse_malformed_bundle_manifest_shape` round-trip, the four closure
+refusals (expected-not-acquired, acquired-not-expected,
+archive-has-an-unlisted-member, archive-missing-a-declared-member), a
+tampered-after-planning acquired file proving the constructor computes
+rather than accepts a hash, a tampered archive member proving the same
+for the archive side, and the two non-finite-value plants for the
+input-domain gate (`package_normalised_name`, `plan_digest`).
 """
 
 from __future__ import annotations
@@ -120,6 +136,7 @@ ExpectedArtifact = BUNDLE_ENVELOPE.ExpectedArtifact
 ExpectedArtifactSet = BUNDLE_ENVELOPE.ExpectedArtifactSet
 build_local_index = BUNDLE_ENVELOPE.build_local_index
 _normalise_pep503_name = BUNDLE_ENVELOPE._normalise_pep503_name
+create_bundle_manifest = BUNDLE_ENVELOPE.create_bundle_manifest
 
 
 def test_canonical_json_bytes_sorts_keys():
@@ -1620,3 +1637,361 @@ def test_normalise_pep503_name_refuses_a_non_string_input_without_crashing():
 
     with pytest.raises(ValueError, match="not a valid distribution name"):
         _normalise_pep503_name(123)  # type: ignore[arg-type]
+
+
+# ── canonical bundle manifest: fixtures ───────────────────────────────────
+
+
+def _cbm_scenario(
+    tmp_path: Path, files_by_package: dict[str, dict[str, bytes]]
+) -> tuple:
+    """Builds a fully self-consistent `(ExpectedArtifactSet, acquired_files,
+    archive_path, run)` quadruple: every file is actually written under a
+    fresh `acquired` directory AND packed into a real ZIP at `archive_path`,
+    and the plan agrees with both on package, filename, and (correct)
+    sha256. Individual tests mutate one of the four returned values, or the
+    archive/acquired files on disk, to plant exactly one disagreement —
+    the same shape as `_bli_scenario` above, for the producer side instead
+    of the consumer side."""
+
+    acquired_dir = tmp_path / "acquired"
+    acquired_dir.mkdir(exist_ok=True)
+    artifacts = []
+    archive_members: dict[str, bytes] = {}
+    acquired_files: dict[str, Path] = {}
+    for pkg, files in files_by_package.items():
+        for filename, data in files.items():
+            path = acquired_dir / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            digest = sha256_hex(data)
+            artifacts.append(
+                ExpectedArtifact(
+                    package_normalised_name=pkg, filename=filename, sha256=digest
+                )
+            )
+            acquired_files[filename] = path
+            archive_members[filename] = data
+    expected = ExpectedArtifactSet(plan_digest=PLAN_DIGEST, artifacts=tuple(artifacts))
+    archive_path = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, data in archive_members.items():
+            zf.writestr(filename, data)
+    run = dict(_VALID_MANIFEST_RUN)
+    return expected, acquired_files, archive_path, run
+
+
+# ── canonical bundle manifest: the mandatory accept-direction control ─────
+
+
+def test_create_bundle_manifest_accepts_a_clean_multi_file_plan(tmp_path: Path):
+    """MANDATORY ACCEPT-DIRECTION CONTROL: a plan, acquired files, and an
+    archive that all genuinely agree, across TWO packages, produces a
+    manifest whose every field matches the real bytes on disk. Every other
+    `create_bundle_manifest` test below asserts a refusal; without this
+    one, an implementation that refused every input unconditionally would
+    pass all of them for the wrong reason.
+
+    Breaks if any reconciliation step is tightened into an unconditional
+    refusal, or if a computed field (size, sha256, archive_sha256) stops
+    matching the real bytes.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path,
+        {"aaa-pkg": {"a.whl": b"AAAA"}, "bbb-pkg": {"b.whl": b"BBBBBB"}},
+    )
+
+    manifest = create_bundle_manifest(
+        expected=expected,
+        acquired_files=acquired_files,
+        archive_path=archive_path,
+        run=run,
+    )
+
+    assert manifest["schema_version"] == MANIFEST_SCHEMA_VERSION
+    assert manifest["plan_digest"] == PLAN_DIGEST
+    assert manifest["archive_sha256"] == sha256_hex(archive_path.read_bytes())
+    assert manifest["members"]["a.whl"] == {
+        "sha256": sha256_hex(b"AAAA"),
+        "size": 4,
+        "package": "aaa-pkg",
+    }
+    assert manifest["members"]["b.whl"] == {
+        "sha256": sha256_hex(b"BBBBBB"),
+        "size": 6,
+        "package": "bbb-pkg",
+    }
+    assert manifest["run"]["repository_full_name"] == run["repository_full_name"]
+
+
+def test_create_bundle_manifest_output_satisfies_the_shape_check(tmp_path: Path):
+    """Round-trip: this function's own output must be exactly what
+    `_refuse_malformed_bundle_manifest_shape` — the shape check the
+    verifier side already relies on — accepts. `create_bundle_manifest`
+    calls this same check internally before returning, so this test also
+    guards against that internal call being removed.
+
+    Breaks if `create_bundle_manifest` ever omits `schema_version`,
+    `plan_digest`, `archive_sha256`, or `run`, or emits one in a shape
+    `_refuse_malformed_bundle_manifest_shape` refuses (e.g. a `run` block
+    missing a required field).
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+
+    manifest = create_bundle_manifest(
+        expected=expected,
+        acquired_files=acquired_files,
+        archive_path=archive_path,
+        run=run,
+    )
+
+    _refuse_malformed_bundle_manifest_shape(manifest)  # must not raise
+
+
+# ── canonical bundle manifest: three-way closure refusals ─────────────────
+
+
+def test_create_bundle_manifest_refuses_an_expected_artifact_not_acquired(
+    tmp_path: Path,
+):
+    """Plan <-> acquired closure, direction one: the plan expects `a.whl`,
+    but it was never acquired.
+
+    Breaks if the `missing = expected_names - acquired_names` check is
+    dropped.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    del acquired_files["a.whl"]
+
+    with pytest.raises(BundleVerificationError, match="were not acquired"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_an_acquired_file_not_expected(
+    tmp_path: Path,
+):
+    """Plan <-> acquired closure, direction two: a file was acquired that
+    the plan never named.
+
+    Breaks if the `extra = acquired_names - expected_names` check is
+    dropped.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    extra_path = archive_path.parent / "acquired" / "extra.whl"
+    extra_path.write_bytes(b"EXTRA")
+    acquired_files["extra.whl"] = extra_path
+
+    with pytest.raises(BundleVerificationError, match="does not expect them"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_when_the_archive_has_an_unlisted_member(
+    tmp_path: Path,
+):
+    """Acquired <-> archive closure, direction one: plan and acquired files
+    agree with each other, but the archive contains one member neither of
+    them names. A manifest must never claim closure NARROWER than what the
+    archive actually contains.
+
+    Breaks if the `extra_in_archive = archive_names - set(members)` check
+    is dropped.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    with zipfile.ZipFile(archive_path, "a") as zf:
+        zf.writestr("sneaky.whl", b"SNEAKY")
+
+    with pytest.raises(BundleVerificationError, match="which the plan does not name"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_when_the_archive_is_missing_a_member(
+    tmp_path: Path,
+):
+    """Acquired <-> archive closure, direction two: the plan and the
+    acquired files both name `extra.whl`, but the archive was built
+    without it.
+
+    Breaks if the `missing_from_archive = set(members) - archive_names`
+    check is dropped.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA", "extra.whl": b"BBBB"}}
+    )
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("a.whl", b"AAAA")
+
+    with pytest.raises(BundleVerificationError, match="does not contain"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+# ── canonical bundle manifest: compute, never accept ───────────────────────
+
+
+def test_create_bundle_manifest_refuses_when_acquired_bytes_disagree_with_the_plan(
+    tmp_path: Path,
+):
+    """Proves the constructor COMPUTES the member hash from the real
+    acquired bytes rather than accepting the plan's declared `sha256` on
+    faith: the file on disk is tampered with AFTER the plan was built, so
+    its real digest no longer matches `ExpectedArtifact.sha256`.
+
+    Breaks if `actual_sha256` stops being computed via
+    `sha256_hex(path.read_bytes())`, or if the comparison against
+    `artifact.sha256` is dropped — either change would let a caller-
+    declared hash reach the manifest without ever being checked against
+    the real bytes.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    (archive_path.parent / "acquired" / "a.whl").write_bytes(b"TAMPERED-AFTER-PLANNING")
+
+    with pytest.raises(BundleVerificationError, match="but the plan expects"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_when_the_archive_member_disagrees(
+    tmp_path: Path,
+):
+    """Proves the same computed-not-accepted property for the ARCHIVE side:
+    the acquired file on disk is genuinely correct, but the archive was
+    (re)built with different bytes under the same member name. The
+    manifest must not be produced on the strength of the acquired file's
+    hash alone — the archive's own content is independently re-hashed too.
+
+    Breaks if the `member_sha256 = sha256_hex(archive.read(filename))`
+    comparison against `record["sha256"]` is dropped.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    # Same length as the acquired b"AAAA" (4 bytes) so the SIZE check
+    # agrees and only the content-digest check can catch the disagreement
+    # — a differently-sized payload would be caught by the size check
+    # first and prove nothing about the digest comparison.
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("a.whl", b"ZZZZ")
+
+    with pytest.raises(BundleVerificationError, match="content digest"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+# ── canonical bundle manifest: the input-domain gate ───────────────────────
+
+
+def test_create_bundle_manifest_refuses_a_non_finite_package_name(tmp_path: Path):
+    """Michael's required input-domain gate. `json.dumps` (inside the
+    UNMODIFIED `canonical_json_bytes`) permits `NaN`/`Infinity` by default,
+    which are not strict JSON — so this constructor refuses a non-string
+    `package_normalised_name` at its own boundary, before the value is
+    ever placed into a member record, rather than changing the serializer.
+
+    Breaks if the `isinstance(artifact.package_normalised_name, str)`
+    guard is dropped: `float("nan")` would then reach
+    `members[filename]["package"]`, and the unmodified
+    `canonical_json_bytes` would silently emit the literal `NaN` token.
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    tampered = ExpectedArtifactSet(
+        plan_digest=expected.plan_digest,
+        artifacts=(
+            ExpectedArtifact(
+                package_normalised_name=float("nan"),  # type: ignore[arg-type]
+                filename="a.whl",
+                sha256=expected.artifacts[0].sha256,
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        BundleVerificationError, match="package_normalised_name must be a non-empty"
+    ):
+        create_bundle_manifest(
+            expected=tampered,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_a_non_finite_plan_digest(tmp_path: Path):
+    """The second reachable channel for the same gate: `plan_digest` is
+    copied verbatim from `ExpectedArtifactSet` into the manifest, so it is
+    checked for the same `_SHA256_HEX` shape every other digest in this
+    module is, before it is used for anything.
+
+    Breaks if the `plan_digest` shape check at the top of
+    `create_bundle_manifest` is dropped: `float("inf")` would then reach
+    `manifest["plan_digest"]` directly (the internal
+    `_refuse_malformed_bundle_manifest_shape` call would still catch it
+    before `return`, but only because that check is ALSO duplicated there
+    — this test targets the constructor's OWN boundary check, not that
+    safety net).
+    """
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"aaa-pkg": {"a.whl": b"AAAA"}}
+    )
+    tampered = ExpectedArtifactSet(
+        plan_digest=float("inf"),  # type: ignore[arg-type]
+        artifacts=expected.artifacts,
+    )
+
+    with pytest.raises(
+        BundleVerificationError, match="plan_digest must be a 64-hex sha256 string"
+    ):
+        create_bundle_manifest(
+            expected=tampered,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
