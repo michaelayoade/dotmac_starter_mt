@@ -13,6 +13,16 @@ proves exactly ONE property, asserting exact bytes (never a property of the
 output), so a regression names which property broke. Each docstring states
 the implementation change that would make the test fail.
 
+**Acceptance owner.** `AGENTS.md` § "Validation before any commit" requires
+tests to run on Git-hosted CI and makes that CI the merge-acceptance owner.
+Hosted PR CI evaluates the synthetic merge result for the pushed head SHA and
+its base revision, not an isolated head checkout; required contexts must be
+terminal green for that result and rerun if either revision changes.
+As a historical fact of this branch, no suite has run before its first push;
+that fact is not a standing acceptance rule. Local pinned Ruff/static checks
+are permitted by `AGENTS.md`, but they are not test evidence and cannot
+substitute for the hosted CI run.
+
 ## Slice 1a-ii: archive and member hash verification
 
 `test_archive_digest_matches`, `test_archive_digest_mismatch_is_refused`,
@@ -71,6 +81,36 @@ to prove — a file tampered with AFTER extraction but before
 `build_local_index` runs, which only the rehash (never the manifest's
 recorded digest) can catch.
 
+`test_build_local_index_refuses_a_dotdot_filename` is also adapted from
+ERP's `test_build_local_index_refuses_a_dotdot_filename`: the old
+caller-assembled package-map input becomes an `ExpectedArtifactSet`,
+manifest, and extracted directory, and the test asserts the early
+safe-bare-name refusal plus no published index. It is not dropped or
+silently replaced by the existing nested-filename test. Its earlier
+absence from this file was an OVERSIGHT, not a deliberate drop: an
+independent parity review found the `filename in (".", "..")` clause
+present at THREE separate sites in `bundle_envelope.py`
+(`create_bundle_manifest`'s plan-ingress loop, `build_local_index`'s own
+plan-ingress loop, and a third, later, defensive re-check inside
+`build_local_index`'s staging loop that the code's own comment states is
+unreachable end-to-end unless the plan-ingress validation is bypassed)
+with zero tests planting it anywhere — the first two sites could lose
+that clause and this suite would stay green. This entry closes the gap
+for `build_local_index`'s plan-ingress site;
+`test_build_local_index_refuses_a_single_dot_filename` (the `"."`
+sibling of the same clause, same site) closes the immediate `"."`
+neighbour; `create_bundle_manifest`'s own plan-ingress site already had
+`test_create_bundle_manifest_refuses_a_traversal_filename_before_reading_bytes`
+(Slice 1a-v, pre-existing) planting `".."` there. The third,
+defensive-only site remains untested by design — it is unreachable
+through any public call this suite can construct without first bypassing
+the plan-ingress check the other two tests already prove. The only
+remaining INTENTIONALLY dropped ERP case is
+`test_build_local_index_is_atomic_on_failure_nothing_is_published`, whose
+missing caller-supplied `source_path` cannot be represented by Starter's
+extracted-directory interface; its atomicity property is covered by the
+mid-staging `OSError` adaptation named above.
+
 ## Slice 1a-v: the canonical envelope constructor
 
 `create_bundle_manifest` has no ERP test to port from directly usable
@@ -85,7 +125,13 @@ archive-has-an-unlisted-member, archive-missing-a-declared-member), a
 tampered-after-planning acquired file proving the constructor computes
 rather than accepts a hash, a tampered archive member proving the same
 for the archive side, and the two non-finite-value plants for the
-input-domain gate (`package_normalised_name`, `plan_digest`).
+input-domain gate (`package_normalised_name`, `plan_digest`), and two
+package-name refusals before acquired-byte reads that cover both
+branches of the constructor's own `package_normalised_name` check: a
+non-canonical (already-valid-but-not-normalised) name
+(`test_create_bundle_manifest_refuses_an_unnormalised_package_name`) and
+a name `_normalise_pep503_name` cannot normalise at all
+(`test_create_bundle_manifest_refuses_an_invalid_pep503_package_name`).
 
 ## `create_bundle_manifest`: the accepted-manifest-describes-a-rejected-archive sweep
 
@@ -1528,6 +1574,125 @@ def test_build_local_index_refuses_a_filename_containing_a_path_separator(
         build_local_index(tmp_path / "index", expected, manifest, extracted)
 
 
+def test_build_local_index_refuses_a_dotdot_filename(tmp_path: Path):
+    """Adapted from ERP's `test_build_local_index_refuses_a_dotdot_filename`:
+    the `ExpectedArtifactSet` plan rejects the exact traversal filename at
+    ingress, before manifest reconciliation or any extracted-directory read,
+    and publishes no index."""
+
+    expected = ExpectedArtifactSet(
+        plan_digest=PLAN_DIGEST,
+        artifacts=(
+            ExpectedArtifact(
+                package_normalised_name="aaa-pkg",
+                filename="..",
+                sha256=sha256_hex(b"wheel bytes"),
+            ),
+        ),
+    )
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "plan_digest": PLAN_DIGEST,
+        "archive_sha256": "b" * 64,
+        "members": {
+            "..": {
+                "sha256": sha256_hex(b"wheel bytes"),
+                "size": len(b"wheel bytes"),
+                "package": "aaa-pkg",
+            }
+        },
+        "run": dict(_VALID_MANIFEST_RUN),
+    }
+    extracted = tmp_path / "extracted"
+    extracted.mkdir()
+    index_root = tmp_path / "index"
+
+    with pytest.raises(BundleVerificationError, match="not a safe bare filename"):
+        build_local_index(index_root, expected, manifest, extracted)
+    assert not index_root.exists()
+
+
+def test_build_local_index_refuses_a_single_dot_filename(tmp_path: Path):
+    """Companion to `test_build_local_index_refuses_a_dotdot_filename`
+    above: the same `filename in (".", "..")` clause also refuses the
+    current-directory shape, not just parent-traversal. Plants `"."`
+    specifically so a fix that only special-cased `".."` (e.g. checking
+    `filename.startswith("..")` instead of the exact-membership test)
+    would still fail this test.
+
+    Breaks if `"."` is dropped from the `(".", "..")` tuple."""
+
+    expected = ExpectedArtifactSet(
+        plan_digest=PLAN_DIGEST,
+        artifacts=(
+            ExpectedArtifact(
+                package_normalised_name="aaa-pkg",
+                filename=".",
+                sha256=sha256_hex(b"wheel bytes"),
+            ),
+        ),
+    )
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "plan_digest": PLAN_DIGEST,
+        "archive_sha256": "b" * 64,
+        "members": {
+            ".": {
+                "sha256": sha256_hex(b"wheel bytes"),
+                "size": len(b"wheel bytes"),
+                "package": "aaa-pkg",
+            }
+        },
+        "run": dict(_VALID_MANIFEST_RUN),
+    }
+    extracted = tmp_path / "extracted"
+    extracted.mkdir()
+    index_root = tmp_path / "index"
+
+    with pytest.raises(BundleVerificationError, match="not a safe bare filename"):
+        build_local_index(index_root, expected, manifest, extracted)
+    assert not index_root.exists()
+
+
+def test_build_local_index_refuses_a_truthy_non_string_filename(tmp_path: Path):
+    """A direct public call with a truthy non-string filename is refused
+    as a typed validation error before containment checks can raise `TypeError`.
+
+    Breaks if the filename type check is moved after the path-shape tests.
+    """
+
+    expected = ExpectedArtifactSet(
+        plan_digest=PLAN_DIGEST,
+        artifacts=(
+            ExpectedArtifact(
+                package_normalised_name="aaa-pkg",
+                filename=123,  # type: ignore[arg-type]
+                sha256=sha256_hex(b"wheel bytes"),
+            ),
+        ),
+    )
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "plan_digest": PLAN_DIGEST,
+        "archive_sha256": "b" * 64,
+        "members": {
+            "123": {
+                "sha256": sha256_hex(b"wheel bytes"),
+                "size": len(b"wheel bytes"),
+                "package": "aaa-pkg",
+            }
+        },
+        "run": dict(_VALID_MANIFEST_RUN),
+    }
+    extracted = tmp_path / "extracted"
+    extracted.mkdir()
+    index_root = tmp_path / "index"
+
+    with pytest.raises(BundleVerificationError, match="non-empty string"):
+        build_local_index(index_root, expected, manifest, extracted)
+    assert not index_root.exists()
+
+
 def test_build_local_index_escapes_html_metacharacters_in_anchors(tmp_path: Path):
     """Ported/adapted from ERP's `test_build_local_index_escapes_html_
     metacharacters_in_anchors`: a filename carrying `<`, `>`, `&`, `"`
@@ -1861,6 +2026,60 @@ def test_create_bundle_manifest_accepts_a_clean_multi_file_plan(tmp_path: Path):
         "package": "bbb-pkg",
     }
     assert manifest["run"]["repository_full_name"] == run["repository_full_name"]
+
+
+def test_create_bundle_manifest_refuses_an_unnormalised_package_name(
+    tmp_path: Path,
+):
+    """The constructor refuses a non-canonical package name before reading
+    acquired bytes, matching the package-name contract enforced by the local
+    index consumer. The acquired path is deliberately missing, so moving
+    this check after the read changes the refusal to `cannot read acquired
+    file` and breaks the specific assertion below."""
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"Dotmac_Kernel": {"a.whl": b"AAAA"}}
+    )
+    acquired_files["a.whl"] = tmp_path / "missing-a.whl"
+
+    with pytest.raises(BundleVerificationError, match="not PEP-503-normalised"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
+
+
+def test_create_bundle_manifest_refuses_an_invalid_pep503_package_name(
+    tmp_path: Path,
+):
+    """Companion to `test_create_bundle_manifest_refuses_an_unnormalised_
+    package_name` above: that test exercises the MISMATCH branch of the
+    new `package_normalised_name` check (`canonical_package_name !=
+    artifact.package_normalised_name`, "is not PEP-503-normalised"); this
+    test exercises the other branch — a name that `_normalise_pep503_name`
+    cannot normalise at all and raises `ValueError` for (an edge
+    separator, `-dotmac-kernel-`), which must be translated into
+    `BundleVerificationError` ("is not a valid PEP 503 name") rather than
+    escaping raw, and must be refused before any acquired bytes are read.
+
+    Breaks if the `try/except ValueError` wrapping `_normalise_pep503_name`
+    in `create_bundle_manifest` is dropped, or if that check moves after
+    the acquired-file read."""
+
+    expected, acquired_files, archive_path, run = _cbm_scenario(
+        tmp_path, {"-dotmac-kernel-": {"a.whl": b"AAAA"}}
+    )
+    acquired_files["a.whl"] = tmp_path / "missing-a.whl"
+
+    with pytest.raises(BundleVerificationError, match="not a valid PEP 503 name"):
+        create_bundle_manifest(
+            expected=expected,
+            acquired_files=acquired_files,
+            archive_path=archive_path,
+            run=run,
+        )
 
 
 def test_create_bundle_manifest_output_satisfies_the_shape_check(tmp_path: Path):

@@ -113,15 +113,17 @@ calling PRODUCT code obtained it (from an immutable candidate snapshot,
 never from anything a candidate submitted directly); this module receives
 the set and reconciles against it, and never derives one itself.
 
-Errors here raise `BundleVerificationError`, this module's own root — never
-ERP's `ManifestError` or `DependencyBundleError`, which are product-policy
-classes and are not ported (see "Two roots, deliberately not one" above).
-`_normalise_pep503_name` is ported behaviour-verbatim from ERP's
+Errors here raise `BundleVerificationError`, beneath this module's
+`BundleEnvelopeError` root — never ERP's `ManifestError` or
+`DependencyBundleError`, which are product-policy classes and are not
+ported (see "Two roots, deliberately not one" above).
+`_normalise_pep503_name` ports the validating behaviour from ERP's
 `scripts/dependency_normalisation.py` `normalise_name` — the validating
 form (charset-checked input, edge-separator refused in the normalised
-output) — not the total, never-raising `normalise_name_for_identity` form;
-that module is not otherwise ported here, since nothing else in this slice
-needs repository-URL normalisation or identity-only comparison.
+output), with Starter's additional `isinstance(name, str)` refusal — not
+the total, never-raising `normalise_name_for_identity` form; that module
+is not otherwise ported here, since nothing else in this slice needs
+repository-URL normalisation or identity-only comparison.
 
 ## Slice 1a-v: the canonical envelope constructor
 
@@ -152,8 +154,8 @@ direction is new here because a manifest that claims closure narrower
 than what the archive actually contains is exactly the gap "the archive
 contains exactly those members" (this slice's own requirement) rules out.
 
-Errors here raise `BundleVerificationError`, this module's own root, same
-as every other function in this file.
+Errors here raise `BundleVerificationError`, beneath this module's
+`BundleEnvelopeError` root, same as every other function in this file.
 
 ### The input-domain gate: `json.dumps` permits NaN/Infinity by default
 
@@ -888,6 +890,21 @@ def create_bundle_manifest(
                 "package_normalised_name must be a non-empty string, got "
                 f"{artifact.package_normalised_name!r}"
             )
+        try:
+            canonical_package_name = _normalise_pep503_name(
+                artifact.package_normalised_name
+            )
+        except ValueError as exc:
+            raise BundleVerificationError(
+                f"expected artifact {artifact.filename!r} package_normalised_name "
+                f"is not a valid PEP 503 name: {exc}"
+            ) from exc
+        if canonical_package_name != artifact.package_normalised_name:
+            raise BundleVerificationError(
+                f"expected artifact {artifact.filename!r} package_normalised_name "
+                f"is not PEP-503-normalised: "
+                f"{artifact.package_normalised_name!r}"
+            )
         if artifact.filename in expected_by_filename:
             raise BundleVerificationError(
                 f"expected artifact set names {artifact.filename!r} twice; "
@@ -1071,13 +1088,14 @@ _PEP503_VALID_NAME_CHARACTERS = re.compile(r"\A[A-Za-z0-9._-]+\Z")
 
 
 def _normalise_pep503_name(name: str) -> str:
-    """PEP 503 normalisation, ported behaviour-verbatim from ERP's
+    """PEP 503 normalisation, porting ERP's validating behaviour with
+    Starter's additional non-string refusal, from
     `scripts/dependency_normalisation.py` `normalise_name` (the validating
     form): runs of `-`, `_`, `.` collapse to one `-`, lower-cased. Raises
-    `ValueError` if `name` contains any character outside `[A-Za-z0-9._-]`,
-    or if the normalised result starts or ends with `-` — no valid
-    distribution name can start or end with a separator, and PEP 503
-    normalisation does not strip one."""
+    `ValueError` if `name` is not a string, contains any character outside
+    `[A-Za-z0-9._-]`, or if the normalised result starts or ends with `-`
+    — no valid distribution name can start or end with a separator, and
+    PEP 503 normalisation does not strip one."""
 
     if not isinstance(name, str) or not _PEP503_VALID_NAME_CHARACTERS.match(name):
         raise ValueError(
@@ -1178,9 +1196,13 @@ def build_local_index(
         # when it joins `pkg_dir / filename`; it is applied HERE first so
         # that check never has the chance to run after a read has already
         # happened.
+        if not isinstance(artifact.filename, str) or not artifact.filename:
+            raise BundleVerificationError(
+                "expected artifact filename must be a non-empty string, "
+                f"got {artifact.filename!r}"
+            )
         if (
-            not artifact.filename
-            or "/" in artifact.filename
+            "/" in artifact.filename
             or "\\" in artifact.filename
             or artifact.filename in (".", "..")
             or Path(artifact.filename).is_absolute()
@@ -1384,7 +1406,11 @@ def build_local_index(
                 # separator, not absolute, not `.`/`..`. Without this,
                 # `pkg_dir / filename` can write outside `pkg_dir` —
                 # `Path.__truediv__` REPLACES the left side entirely when
-                # the right side is absolute.
+                # the right side is absolute. Normal calls have already
+                # passed the identical check while building
+                # `plan_by_filename`; this second check is a defensive
+                # invariant guard and is unreachable end-to-end unless that
+                # earlier plan-ingress validation is bypassed.
                 if (
                     not filename
                     or "/" in filename

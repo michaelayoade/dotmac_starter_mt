@@ -1756,19 +1756,20 @@ default in production are added to `validate_settings`'s prod-fatal list.
 
 ## Validation before any commit
 
-**Test host — hard rule.** Never run test commands or install test/development
-dependencies on the local workstation. Run every focused, unit, architecture,
-integration, migration, browser, and full-suite test on the **dedicated test
-server, 85.190.246.211**, in a fresh isolated writable Git worktree pinned to
-the exact branch commit under test; a shared checkout is not test evidence.
-Use only disposable test databases and tear them down after the run. Local work
-is limited to read-only inspection, editing, formatting, and static checks that
-do not execute tests or install dependencies. Git-hosted CI remains the merge
-acceptance owner.
+**Tests-only-on-Git-hosted-CI — hard rule.** Do not run test commands or
+install test/development dependencies on the local workstation or any named
+test host. Before the first push, local work is limited to read-only
+inspection, editing, formatting, and pinned static checks (for example the
+repository's pinned Ruff binary); static checks are not test evidence. Hosted
+PR CI tests the synthetic merge result for the pushed head SHA and its base
+revision, and Git-hosted CI is the merge-acceptance owner. Every named
+required context for that head/base result must be terminal green; rerun the
+checks if either the head or base changes. Do not merge with partial or failed
+required checks.
 
 **Never run a test workload on Dotmac Observer.** Observer owns the
 observability stack, OpenBao and the Knowledge service, and a test run there
-takes those down for everyone. This rule previously named Observer as THE test
+takes those down for everyone. This rule previously named Observer as the test
 host and offered `-n 2`/`-n 3` instead of `pytest -n auto` as the safeguard.
 That mitigation is disproven: a run already capped at `--memory=10g --cpus=3
 -n 3` triggered a host-global OOM that killed Prometheus for about fifteen
@@ -1779,10 +1780,11 @@ process. Reaching Observer for observability, OpenBao or Knowledge work is
 unaffected and remains correct.
 
 - `make check` — ruff lint, import-linter, mypy, bandit, the composed
-  migration gate (ADR-0006 D1), format check.
-- `make test-unit` — SQLite-fast: `tests/unit` + `tests/architecture`.
+  migration gate (ADR-0006 D1), format check (run on Git-hosted CI).
+- `make test-unit` — SQLite-fast: `tests/unit` + `tests/architecture` (run on
+  Git-hosted CI).
 - `make test-db-up && make test-integration && make test-db-down` —
-  Postgres RLS canaries (`TEST_DB_PORT` overridable).
+  Postgres RLS canaries (`TEST_DB_PORT` overridable; run on Git-hosted CI).
 
 ## Process
 

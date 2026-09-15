@@ -3,8 +3,9 @@
 `dotmac_erp`'s `scripts/dependency_normalisation.py::normalise_name` is the
 fleet's one canonical owner of the *validating* PEP 503 name-normalisation
 semantics. `scripts/bundle_envelope.py::_normalise_pep503_name` in THIS
-repository is a behaviour-verbatim PORT of it (see that module's docstring,
-"Slice 1a-iv") rather than an import, because nothing yet wires this
+repository ports its valid-string behaviour while additionally refusing
+non-string input (see that module's docstring, "Slice 1a-iv"). It is a port
+rather than an import because nothing yet wires this
 dependency-free `scripts/` file into ERP's dependency graph. That makes this
 repository's copy a second, independently-maintained implementation of the
 same semantics.
@@ -14,8 +15,9 @@ characterized it as a THIRD copy, alleging `dotmac_erp` also carries an
 inline copy in `scripts/erp_lock.py`. That is false at the pinned commit
 this repository's own docstring already names for byte-compatibility
 (`b449c4d82fdb6c19d2c9e26eab8ef85ba50528ed`): `erp_lock.py` imports
-`normalise_name` from `dependency_normalisation.py` rather than defining its
-own — ERP already consolidated onto one owner after its two scripts had
+the total `normalise_name_for_identity` from `dependency_normalisation.py`
+rather than defining its own — ERP already consolidated onto one owner after
+its two scripts had
 independently diverged (see `dependency_normalisation.py`'s own module
 docstring for the account). The fleet-wide count today is TWO
 implementations, not three. See
