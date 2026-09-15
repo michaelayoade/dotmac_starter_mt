@@ -611,11 +611,11 @@ _VALID_MANIFEST_RUN: dict = {
 }
 
 
-def _manifest_for(members: dict[str, bytes]) -> dict:
+def _manifest_for(members: dict[str, bytes], archive: Path) -> dict:
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "plan_digest": "a" * 64,
-        "archive_sha256": "b" * 64,
+        "archive_sha256": sha256_hex(archive.read_bytes()),
         "members": {
             name: {
                 "sha256": sha256_hex(data),
@@ -671,10 +671,32 @@ def test_a_clean_bundle_extracts_and_publishes_atomically(tmp_path: Path):
     archive = _make_zip(tmp_path, members)
     dest = tmp_path / "out"
 
-    extracted = extract_verified_bundle(archive, dest, _manifest_for(members))
+    extracted = extract_verified_bundle(archive, dest, _manifest_for(members, archive))
 
     assert sorted(extracted) == ["a.whl", "b.whl"]
     assert (dest / "a.whl").read_bytes() == b"AAAA"
+
+
+def test_extraction_refuses_an_archive_whose_outer_digest_was_mutated(
+    tmp_path: Path,
+):
+    """The manifest binds complete outer bytes before ZIP handling.
+
+    The archive is mutated after its manifest is built but remains a readable
+    ZIP, so deleting the digest check would publish it. The clean test above
+    is the positive control.
+    """
+
+    members = {"a.whl": b"AAAA"}
+    archive = _make_zip(tmp_path, members)
+    manifest = _manifest_for(members, archive)
+    archive.write_bytes(archive.read_bytes() + b"mutated outer bytes")
+    dest = tmp_path / "out"
+
+    with pytest.raises(BundleVerificationError, match="digest mismatch"):
+        extract_verified_bundle(archive, dest, manifest)
+
+    assert not dest.exists()
 
 
 # ── extraction: destination and filesystem refusals ──────────────────────
@@ -696,7 +718,7 @@ def test_extraction_refuses_a_pre_existing_destination(tmp_path: Path):
     dest.mkdir()
 
     with pytest.raises(ExtractionError, match="already exists"):
-        extract_verified_bundle(archive, dest, _manifest_for(members))
+        extract_verified_bundle(archive, dest, _manifest_for(members, archive))
 
 
 def test_extraction_refuses_when_its_parent_directory_cannot_be_created(
@@ -718,7 +740,7 @@ def test_extraction_refuses_when_its_parent_directory_cannot_be_created(
     dest = blocking_file / "nested" / "out"
 
     with pytest.raises(ExtractionError, match="cannot create parent directory"):
-        extract_verified_bundle(archive, dest, _manifest_for(members))
+        extract_verified_bundle(archive, dest, _manifest_for(members, archive))
 
 
 def test_extraction_refuses_when_the_staging_directory_cannot_be_created(
@@ -744,7 +766,7 @@ def test_extraction_refuses_when_the_staging_directory_cannot_be_created(
     monkeypatch.setattr(BUNDLE_ENVELOPE.tempfile, "mkdtemp", _raise)
 
     with pytest.raises(ExtractionError, match="cannot create a staging directory"):
-        extract_verified_bundle(archive, dest, _manifest_for(members))
+        extract_verified_bundle(archive, dest, _manifest_for(members, archive))
 
 
 # ── extraction: manifest shape sensitivity proof ──────────────────────────
@@ -815,7 +837,7 @@ def test_extract_verified_bundle_refuses_every_malformed_manifest_field(
 
     members = {"a.whl": b"AAAA"}
     archive = _make_zip(tmp_path, members)
-    manifest = _mutate(_manifest_for(members), mutation)
+    manifest = _mutate(_manifest_for(members, archive), mutation)
 
     with pytest.raises(BundleVerificationError):
         extract_verified_bundle(archive, tmp_path / "out", manifest)
@@ -838,7 +860,7 @@ def test_extraction_is_atomic_on_failure_nothing_is_published(tmp_path: Path):
     """
 
     archive = _make_zip(tmp_path, {"good.whl": b"GOOD", "bad.whl": b"BAD"})
-    bad_manifest = _manifest_for({"good.whl": b"GOOD", "bad.whl": b"BAD"})
+    bad_manifest = _manifest_for({"good.whl": b"GOOD", "bad.whl": b"BAD"}, archive)
     bad_manifest["members"]["bad.whl"]["sha256"] = sha256_hex(b"WRONG")
     dest = tmp_path / "out"
 
@@ -869,7 +891,7 @@ def test_a_duplicate_member_name_is_refused(tmp_path: Path):
 
     with pytest.raises(ExtractionError, match="duplicate"):
         extract_verified_bundle(
-            archive, tmp_path / "out", _manifest_for({"a.whl": b"AAAA"})
+            archive, tmp_path / "out", _manifest_for({"a.whl": b"AAAA"}, archive)
         )
 
 
@@ -886,7 +908,9 @@ def test_an_absolute_path_member_is_refused(tmp_path: Path):
 
     with pytest.raises(ExtractionError, match="absolute path"):
         extract_verified_bundle(
-            archive, tmp_path / "out", _manifest_for({"/etc/passwd": b"x"})
+            archive,
+            tmp_path / "out",
+            _manifest_for({"/etc/passwd": b"x"}, archive),
         )
 
 
@@ -902,7 +926,7 @@ def test_a_traversal_member_is_refused(tmp_path: Path):
 
     with pytest.raises(ExtractionError, match="traversal"):
         extract_verified_bundle(
-            archive, tmp_path / "out", _manifest_for({"../evil": b"x"})
+            archive, tmp_path / "out", _manifest_for({"../evil": b"x"}, archive)
         )
 
 
@@ -924,7 +948,9 @@ def test_a_symlink_member_is_refused(tmp_path: Path):
 
     with pytest.raises(ExtractionError, match="symlink"):
         extract_verified_bundle(
-            archive_path, tmp_path / "out", _manifest_for({"link": b"target"})
+            archive_path,
+            tmp_path / "out",
+            _manifest_for({"link": b"target"}, archive_path),
         )
 
 
@@ -941,7 +967,9 @@ def test_case_colliding_members_are_refused(tmp_path: Path):
 
     with pytest.raises(ExtractionError, match="collide case-insensitively"):
         extract_verified_bundle(
-            archive, tmp_path / "out", _manifest_for({"A.whl": b"A", "a.whl": b"a"})
+            archive,
+            tmp_path / "out",
+            _manifest_for({"A.whl": b"A", "a.whl": b"a"}, archive),
         )
 
 
@@ -958,7 +986,7 @@ def test_resolved_target_aliasing_is_refused(tmp_path: Path):
     with zipfile.ZipFile(archive_path, "w") as zf:
         zf.writestr("a.whl", "AAAA")
         zf.writestr("./a.whl", "BBBB")
-    manifest = _manifest_for({"a.whl": b"AAAA", "./a.whl": b"BBBB"})
+    manifest = _manifest_for({"a.whl": b"AAAA", "./a.whl": b"BBBB"}, archive_path)
 
     with pytest.raises(ExtractionError, match="SAME target path"):
         extract_verified_bundle(archive_path, tmp_path / "out", manifest)
@@ -978,7 +1006,7 @@ def test_an_oversized_member_is_refused(
 
     with pytest.raises(ExtractionError, match="cap"):
         extract_verified_bundle(
-            archive, tmp_path / "out", _manifest_for({"big.whl": b"AAAAAA"})
+            archive, tmp_path / "out", _manifest_for({"big.whl": b"AAAAAA"}, archive)
         )
 
 
@@ -994,7 +1022,7 @@ def test_an_unlisted_member_is_refused(tmp_path: Path):
 
     with pytest.raises(ExtractionError, match="not named in the verified"):
         extract_verified_bundle(
-            archive, tmp_path / "out", _manifest_for({"a.whl": b"AAAA"})
+            archive, tmp_path / "out", _manifest_for({"a.whl": b"AAAA"}, archive)
         )
 
 
@@ -1010,7 +1038,7 @@ def test_a_manifest_expected_member_missing_from_the_archive_is_refused(
     """
 
     archive = _make_zip(tmp_path, {"a.whl": b"AAAA"})
-    manifest = _manifest_for({"a.whl": b"AAAA"})
+    manifest = _manifest_for({"a.whl": b"AAAA"}, archive)
     manifest["members"]["missing.whl"] = {
         "sha256": "c" * 64,
         "size": 10,
@@ -1031,7 +1059,7 @@ def test_a_corrupted_archive_is_refused_not_a_raw_badzipfile(tmp_path: Path):
 
     archive = tmp_path / "corrupt.zip"
     archive.write_bytes(b"this is not a zip file at all")
-    manifest = _manifest_for({"a.whl": b"AAAA"})
+    manifest = _manifest_for({"a.whl": b"AAAA"}, archive)
 
     with pytest.raises(ExtractionError, match="cannot open"):
         extract_verified_bundle(archive, tmp_path / "out", manifest)
@@ -1051,7 +1079,9 @@ def test_the_aggregate_member_count_cap_is_enforced(
     archive = _make_zip(tmp_path, members)
 
     with pytest.raises(ExtractionError, match="member cap"):
-        extract_verified_bundle(archive, tmp_path / "out", _manifest_for(members))
+        extract_verified_bundle(
+            archive, tmp_path / "out", _manifest_for(members, archive)
+        )
 
 
 def test_the_aggregate_total_size_cap_is_enforced(
@@ -1070,7 +1100,9 @@ def test_the_aggregate_total_size_cap_is_enforced(
     archive = _make_zip(tmp_path, members)
 
     with pytest.raises(ExtractionError, match="aggregate"):
-        extract_verified_bundle(archive, tmp_path / "out", _manifest_for(members))
+        extract_verified_bundle(
+            archive, tmp_path / "out", _manifest_for(members, archive)
+        )
 
 
 def test_the_compression_ratio_cap_is_enforced(
@@ -1089,7 +1121,7 @@ def test_the_compression_ratio_cap_is_enforced(
     archive_path = tmp_path / "bomb.zip"
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("bomb.whl", payload)
-    manifest = _manifest_for({"bomb.whl": payload})
+    manifest = _manifest_for({"bomb.whl": payload}, archive_path)
 
     with pytest.raises(ExtractionError, match="compression ratio"):
         extract_verified_bundle(archive_path, tmp_path / "out", manifest)

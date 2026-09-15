@@ -715,6 +715,10 @@ def extract_verified_bundle(
             "overwrite one"
         )
     _refuse_malformed_bundle_manifest_shape(bundle_manifest)
+    # Bind the outer bytes before opening the ZIP or creating a staging tree.
+    # Member verification alone cannot detect a substituted archive whose
+    # contents happen to satisfy the supplied member records.
+    verify_archive_digest(archive_path, bundle_manifest["archive_sha256"])
     members = bundle_manifest.get("members")
     if not isinstance(members, dict) or not members:
         raise BundleVerificationError("bundle manifest carries no members to extract")
