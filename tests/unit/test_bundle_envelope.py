@@ -55,6 +55,7 @@ def _load_bundle_envelope():
 BUNDLE_ENVELOPE = _load_bundle_envelope()
 canonical_json_bytes = BUNDLE_ENVELOPE.canonical_json_bytes
 sha256_hex = BUNDLE_ENVELOPE.sha256_hex
+BundleEnvelopeError = BUNDLE_ENVELOPE.BundleEnvelopeError
 BundleVerificationError = BUNDLE_ENVELOPE.BundleVerificationError
 verify_archive_digest = BUNDLE_ENVELOPE.verify_archive_digest
 verify_member_hashes = BUNDLE_ENVELOPE.verify_member_hashes
@@ -158,6 +159,57 @@ def test_sha256_hex_known_answer():
         sha256_hex(b"")
         == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     )
+
+
+# ── exception hierarchy ───────────────────────────────────────────────
+
+
+def test_bundle_verification_error_is_a_bundle_envelope_error():
+    """`BundleVerificationError` is a subclass of the generic
+    `BundleEnvelopeError` root.
+
+    Breaks if `BundleVerificationError` is changed back to inherit
+    `Exception` directly instead of `BundleEnvelopeError` — the two-root
+    split this module's docstring describes would then be undeclared in
+    code, even though the docstring still claimed it.
+    """
+
+    assert issubclass(BundleVerificationError, BundleEnvelopeError)
+
+
+def test_catching_bundle_envelope_error_catches_a_raised_verification_error():
+    """A handler that catches `BundleEnvelopeError` genuinely catches a
+    `BundleVerificationError` actually raised at runtime — not just an
+    `issubclass` relationship on paper. This is the exact behaviour ERP's
+    CLI refusal handler will depend on at cutover.
+
+    Breaks if `BundleVerificationError` stops inheriting
+    `BundleEnvelopeError` (or inherits it only nominally through some
+    broken MRO): the `except BundleEnvelopeError` clause below would then
+    not fire, and the raised error would propagate past it uncaught.
+    """
+
+    caught: BaseException | None = None
+    try:
+        raise BundleVerificationError("boom")
+    except BundleEnvelopeError as exc:
+        caught = exc
+
+    assert isinstance(caught, BundleVerificationError)
+
+
+def test_bundle_envelope_error_inherits_exception_directly():
+    """`BundleEnvelopeError`'s only base is `Exception` itself — no ERP
+    class, and no other intermediate class, sits above it.
+
+    Breaks if `BundleEnvelopeError` is ever changed to inherit from some
+    other class instead of `Exception` (e.g. re-parented under an ERP
+    `DependencyBundleError` import, which is specifically the re-export
+    design this module's docstring rules out): `__bases__` would then no
+    longer be exactly `(Exception,)`.
+    """
+
+    assert BundleEnvelopeError.__bases__ == (Exception,)
 
 
 # ── archive digest ────────────────────────────────────────────────────

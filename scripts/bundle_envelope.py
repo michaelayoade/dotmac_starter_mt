@@ -49,14 +49,26 @@ expected digest/hash/shape — no filesystem traversal beyond a single
 `read_bytes()`, no ZIP handling, no extraction, no offline index, no
 constructor. Those stay out of scope for later slices, deliberately not
 anticipated here. `BundleVerificationError` is the one exception these
-functions raise; ERP defines it as a subclass of a module-wide
-`DependencyBundleError` base alongside sibling `ManifestError`,
-`PolicyError`, and `ExtractionError` classes for concerns (policy loading,
-ZIP extraction) this slice does not port. Carrying that unused base and its
-unrelated siblings here would misstate what this file does, so
-`BundleVerificationError` is ported as a direct `Exception` subclass instead
-— the same public name and the same behaviour for everything this slice
-raises, without implying a sibling hierarchy that does not exist yet.
+functions raise.
+
+## Two roots, deliberately not one
+
+Michael has ruled: this module owns a generic `BundleEnvelopeError` root,
+and `BundleVerificationError` is one of its subclasses. ERP separately
+keeps its own `DependencyBundleError` root for its product-POLICY refusals
+(plan digest construction, lock rules, off-index approval — none of that
+is ported here). These stay two distinct roots. A consumer adopting this
+module — ERP included, at cutover — catches BOTH roots in its existing
+refusal handler; this module's errors are NOT re-exported or aliased under
+ERP's `DependencyBundleError`, and ERP's errors are not folded into this
+one. Re-exporting under the other side's class was considered and is
+specifically NOT the chosen design: it would make one exception name mean
+two different, independently-evolving contracts depending on which module
+imported it first.
+
+`ExtractionError` (ZIP extraction, still unported) will join beneath
+`BundleEnvelopeError` in a later slice. It is not ported yet, so it is not
+declared here.
 """
 
 from __future__ import annotations
@@ -85,7 +97,18 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-class BundleVerificationError(Exception):
+class BundleEnvelopeError(Exception):
+    """The generic root for every error this module raises. Starter-owned,
+    product-policy-free, inheriting `Exception` directly — no ERP class sits
+    above or below it. ERP keeps its own `DependencyBundleError` root for
+    its product-policy refusals; a consumer catches both roots rather than
+    this module re-exporting its errors under ERP's class, or ERP's errors
+    being folded into this one. `BundleVerificationError` is the first
+    subclass; `ExtractionError` joins beneath this root in a later slice,
+    once extraction is actually ported."""
+
+
+class BundleVerificationError(BundleEnvelopeError):
     """A bundle, its run metadata, or its archive digest failed
     verification against an already-supplied expected value."""
 
