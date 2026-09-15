@@ -481,42 +481,178 @@ def test_both_writers_produce_THE_SAME_bytes(tmp_path: Path) -> None:
 # ── one publisher, across BOTH file sets ───────────────────────────────────
 
 
-def _publish_sites() -> set[str]:
-    """Every `os.link` publish in the package AND in `scripts/`.
+def _os_link_calls(tree: ast.AST) -> list[ast.Call]:
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", None) == "link"
+        and getattr(getattr(node.func, "value", None), "id", None) == "os"
+    ]
 
-    This suite's field of view was the package, so a runner reimplementing what
-    the package owns stayed invisible — before the merge and after it. That is
-    the blind spot that let two release writers for one store reach two branches
-    at once, each lane correctly building a writer nobody had told it existed.
+
+def _bundle_downloader_premise(source: str) -> bool:
+    """Prove downloader publication is unrelated to the lease/release store."""
+    tree = ast.parse(source)
+    links = _os_link_calls(tree)
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    acquire = functions.get("acquire_observed_artifact")
+    if acquire is None or len(links) != 1 or links[0] not in ast.walk(acquire):
+        return False
+    forbidden = {"release_path", "lease_store", "write_store_record_once"}
+    if any(
+        isinstance(node, ast.Name) and node.id in forbidden for node in ast.walk(tree)
+    ):
+        return False
+    if any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and ".release.json" in node.value
+        for node in ast.walk(tree)
+    ):
+        return False
+    return not any(
+        isinstance(node, ast.ImportFrom)
+        and (
+            "lease" in (node.module or "")
+            or any(alias.name in forbidden for alias in node.names)
+        )
+        for node in ast.walk(tree)
+    )
+
+
+def _runner_uses_private_download_destinations(source: str) -> bool:
+    """Require this runner's direct downloader calls to use its temp directory."""
+    tree = ast.parse(source)
+    verify = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_verify"
+        ),
+        None,
+    )
+    if verify is None:
+        return False
+    all_calls = [
+        node
+        for node in ast.walk(verify)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", None) == "acquire_observed_artifact"
+    ]
+    direct_calls = [
+        statement.value
+        for statement in verify.body
+        if isinstance(statement, ast.Assign)
+        and isinstance(statement.value, ast.Call)
+        and getattr(statement.value.func, "id", None) == "acquire_observed_artifact"
+    ]
+    bindings = [
+        node
+        for node in ast.walk(verify)
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "directory"
+                for target in node.targets
+            )
+        )
+        or (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "directory"
+        )
+        or (
+            isinstance(node, ast.AugAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "directory"
+        )
+        or (
+            isinstance(node, ast.NamedExpr)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "directory"
+        )
+    ]
+    direct_bindings = [
+        statement
+        for statement in verify.body
+        if isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "directory"
+            for target in statement.targets
+        )
+    ]
+    binding = bindings[0] if len(bindings) == 1 else None
+    has_private_binding = (
+        isinstance(binding, ast.Assign)
+        and direct_bindings == [binding]
+        and isinstance(binding.value, ast.Call)
+        and getattr(binding.value.func, "id", None) == "_runner_directory"
+        and verify.body.index(binding)
+        < min(
+            (
+                index
+                for index, statement in enumerate(verify.body)
+                if isinstance(statement, ast.Assign)
+                and isinstance(statement.value, ast.Call)
+                and getattr(statement.value.func, "id", None)
+                == "acquire_observed_artifact"
+            ),
+            default=0,
+        )
+    )
+    return (
+        has_private_binding
+        and len(all_calls) == len(direct_calls) == 2
+        and all(
+            len(call.args) == 5
+            and isinstance(call.args[4], ast.BinOp)
+            and isinstance(call.args[4].left, ast.Name)
+            and call.args[4].left.id == "directory"
+            and isinstance(call.args[4].op, ast.Div)
+            and isinstance(call.args[4].right, ast.Constant)
+            and call.args[4].right.value in {"archive.zip", "sidecar.zip"}
+            for call in direct_calls
+        )
+    )
+
+
+def _publish_sites() -> set[str]:
+    """Inventory every `os.link`; allow only the lease writer and downloader.
+
+    The downloader's one link is a verified-artifact tempfile publication, not
+    lease-store persistence. Its AST premise below proves that distinction and
+    that its current direct runner caller targets private temporary filenames;
+    future aliases or dynamic callers are unmonitored by this static region.
     """
     found: set[str] = set()
     for root in (PACKAGE, SCRIPTS):
         for path in python_files(root):
             tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.Call)
-                    and getattr(node.func, "attr", None) == "link"
-                    and getattr(getattr(node.func, "value", None), "id", None) == "os"
-                ):
-                    found.add(path.name)
+            if _os_link_calls(tree):
+                found.add(path.name)
     return found
 
 
-def test_only_the_PACKAGE_publishes_into_this_store() -> None:
-    """`lease.py` owns the store — it owns `load_lease` and derives
-    `release_path`. A script that writes a record into it must CALL the
-    package's writer, not carry its own.
+def test_only_the_lease_writer_publishes_into_this_store() -> None:
+    """`lease.py` owns store persistence; downloader has a proven separate role.
 
     Independent of the canonicalization ratchet on purpose: that one watches the
     BYTES, this one watches the PUBLISH. A second writer that shared the bytes
     helper and hand-rolled only the atomic create would slip past the first and
     fail here.
     """
-    assert _publish_sites() == {"lease.py"}, (
+    downloader = SCRIPTS / "bundle_artifact_download.py"
+    runner = SCRIPTS / "run_bundle_action.py"
+    assert _publish_sites() == {"bundle_artifact_download.py", "lease.py"}, (
         f"{sorted(_publish_sites())} publish with os.link. "
-        "`lease.write_store_record_once` is the release writer; a second one is "
-        "two answers to one question, and the store has one owner"
+        "only the leased-store writer and verified downloader are inventoried"
+    )
+    assert _bundle_downloader_premise(downloader.read_text(encoding="utf-8"))
+    assert _runner_uses_private_download_destinations(
+        runner.read_text(encoding="utf-8")
     )
 
 
@@ -527,11 +663,31 @@ def test_the_publish_sweep_would_see_a_second_writer(tmp_path: Path) -> None:
         "import os\ndef write_create_only(p, d):\n    os.link(p.with_suffix('.t'), p)\n"
     )
     tree = ast.parse((tmp_path / "runner.py").read_text())
-    hits = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and getattr(node.func, "attr", None) == "link"
-        and getattr(getattr(node.func, "value", None), "id", None) == "os"
-    ]
+    hits = _os_link_calls(tree)
     assert len(hits) == 1
+
+
+def test_downloader_premise_rejects_a_second_link_or_lease_reference() -> None:
+    source = (SCRIPTS / "bundle_artifact_download.py").read_text(encoding="utf-8")
+    assert not _bundle_downloader_premise(source + "\nos.link(a, b)\n")
+    assert not _bundle_downloader_premise(source + "\nrelease_path = object()\n")
+
+
+def test_runner_destination_premise_rejects_a_later_reassignment() -> None:
+    source = (SCRIPTS / "run_bundle_action.py").read_text(encoding="utf-8")
+    mutated = source.replace(
+        "    directory = _runner_directory()\n",
+        "    directory = _runner_directory()\n    directory = Path('/tmp/other')\n",
+        1,
+    )
+    assert not _runner_uses_private_download_destinations(mutated)
+
+
+def test_runner_destination_premise_rejects_an_unreachable_binding() -> None:
+    source = (SCRIPTS / "run_bundle_action.py").read_text(encoding="utf-8")
+    mutated = source.replace(
+        "    directory = _runner_directory()\n",
+        "    if False:\n        directory = _runner_directory()\n",
+        1,
+    )
+    assert not _runner_uses_private_download_destinations(mutated)

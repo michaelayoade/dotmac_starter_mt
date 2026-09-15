@@ -1,0 +1,77 @@
+name: Verified dependency bundle
+description: Construct or verify a dependency bundle against product-owned policy
+
+inputs:
+  operation:
+    required: true
+  expected-file:
+    required: true
+  producer-repository:
+    required: true
+  producer-repository-id:
+    required: true
+  producer-workflow-path:
+    required: true
+  archive-artifact-name:
+    required: true
+  sidecar-artifact-name:
+    required: true
+  archive-artifact-id:
+    required: true
+  acquired-dir:
+    required: false
+  archive-path:
+    required: false
+  environment-name:
+    required: false
+  run-id:
+    required: false
+  sidecar-artifact-id:
+    required: false
+  github-token:
+    required: false
+
+outputs:
+  manifest-path:
+    value: ${{ steps.bundle.outputs.manifest-path }}
+  index-root:
+    value: ${{ steps.bundle.outputs.index-root }}
+
+runs:
+  using: composite
+  steps:
+    - id: bundle
+      shell: bash
+      env:
+        BUNDLE_ACTION_REF: ${{ github.action_ref }}
+        BUNDLE_ACTION_REPOSITORY: ${{ github.action_repository }}
+        BUNDLE_OPERATION: ${{ inputs.operation }}
+        BUNDLE_EXPECTED_FILE: ${{ inputs.expected-file }}
+        BUNDLE_PRODUCER_REPOSITORY: ${{ inputs.producer-repository }}
+        BUNDLE_PRODUCER_REPOSITORY_ID: ${{ inputs.producer-repository-id }}
+        BUNDLE_PRODUCER_WORKFLOW_PATH: ${{ inputs.producer-workflow-path }}
+        BUNDLE_ARCHIVE_ARTIFACT_NAME: ${{ inputs.archive-artifact-name }}
+        BUNDLE_SIDECAR_ARTIFACT_NAME: ${{ inputs.sidecar-artifact-name }}
+        BUNDLE_ARCHIVE_ARTIFACT_ID: ${{ inputs.archive-artifact-id }}
+        BUNDLE_ACQUIRED_DIR: ${{ inputs.acquired-dir }}
+        BUNDLE_ARCHIVE_PATH: ${{ inputs.archive-path }}
+        BUNDLE_ENVIRONMENT_NAME: ${{ inputs.environment-name }}
+        BUNDLE_RUN_ID: ${{ inputs.run-id }}
+        BUNDLE_SIDECAR_ARTIFACT_ID: ${{ inputs.sidecar-artifact-id }}
+        BUNDLE_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../../scripts/run_bundle_action.py" \
+          --operation "$BUNDLE_OPERATION" \
+          --expected-file "$BUNDLE_EXPECTED_FILE" \
+          --producer-repository "$BUNDLE_PRODUCER_REPOSITORY" \
+          --producer-repository-id "$BUNDLE_PRODUCER_REPOSITORY_ID" \
+          --producer-workflow-path "$BUNDLE_PRODUCER_WORKFLOW_PATH" \
+          --archive-artifact-name "$BUNDLE_ARCHIVE_ARTIFACT_NAME" \
+          --sidecar-artifact-name "$BUNDLE_SIDECAR_ARTIFACT_NAME" \
+          --archive-artifact-id "$BUNDLE_ARCHIVE_ARTIFACT_ID" \
+          --acquired-dir "$BUNDLE_ACQUIRED_DIR" \
+          --archive-path "$BUNDLE_ARCHIVE_PATH" \
+          --environment-name "$BUNDLE_ENVIRONMENT_NAME" \
+          --run-id "$BUNDLE_RUN_ID" \
+          --sidecar-artifact-id "$BUNDLE_SIDECAR_ARTIFACT_ID"
