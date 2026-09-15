@@ -308,3 +308,34 @@ existence. Until then the region is *monitored and frozen* rather than
 
 **Status:** acknowledged in the profile, frozen by the ratchet, open until the
 controller is the sole executor.
+
+## 2026-09-15 — initial bundle-envelope PR uses the CI-first test gate
+
+**Control:** The former dedicated-test-host/pre-push expectation in Starter's
+`AGENTS.md` § "Validation before any commit". Its purpose was to require
+focused and full test evidence before a change was accepted.
+
+**What happened.** The initial bundle-envelope PR does not run its test suite
+before the first push, bypassing that former dedicated-host/pre-push
+expectation. The current CI-first rule is not bypassed: hosted PR CI executes
+the suite against the synthetic merge result for the pushed head SHA and its
+base revision, which is the Starter merge-acceptance evidence.
+
+**Why.** This repository's standing rule forbids local test commands and
+development-dependency installation; the former dedicated-test-host wording
+has been retired rather than treated as a second acceptance path. The
+recorded bypass is bounded to this initial CI-first PR and does not authorize
+tests on Dotmac Observer or any credential dispatch.
+
+**Cost.** The first hosted CI run may fail, delaying review and requiring a
+correction cycle before acceptance. No secret values are recorded or needed.
+
+**Closure.** Before any credential dispatch or merge, every named required
+hosted-CI context must be terminal green for the synthetic merge result
+associated with the pushed head SHA and its base revision; checks must be
+rerun if either changes. An independent reviewer must re-review the resulting
+delta. Partial or failed checks do not authorize merge.
+
+**Status:** historical; closed when the CI-first policy replaced the former
+expectation. The ordinary hosted-CI merge gate remains open until the exact
+head/base result is green and the independent delta re-review is complete.

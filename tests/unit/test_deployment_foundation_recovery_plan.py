@@ -698,6 +698,9 @@ def test_recover_is_still_out_of_the_authorization_vocabulary() -> None:
 #: in `test_candidate_attestation_signer.py` asserts the AST contains none.
 SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "audit_kernel_surface.py": 1,
+    # Dependency-bundle manifests are a separate, ERP-compatible envelope;
+    # this canonicalizer neither writes a HostLeaseRelease.v1 nor calls its store.
+    "bundle_envelope.py": 1,
     "candidate_source_binding.py": 4,
     "collect_github_release_artifact.py": 1,
     "collect_private_registry_files.py": 1,
@@ -741,11 +744,10 @@ def test_the_TOOLING_canonicalizing_population_has_not_moved() -> None:
     assert found == SCRIPT_CANONICALIZING_MODULES, (
         f"the tooling canonicalizing population moved. Now differing: {appeared}; "
         f"expected but not found as recorded: {vanished}. Before recording a new "
-        "one, ask whether the package already owns that document: a script that "
-        "writes a record into a store the package owns must CALL the package's "
-        "writer, not carry its own. `lease.write_store_record_once` is the "
-        "release writer; a second one in this directory is the defect this "
-        "baseline exists to surface"
+        "one, identify the document and its owner first: a script that writes "
+        "a record into a store the package owns must CALL the package's writer, "
+        "not carry its own. `lease.write_store_record_once` owns host-lease "
+        "release records, not every canonical document in scripts/"
     )
 
 
