@@ -17,8 +17,10 @@ Two things are pinned here, because the guard is worthless if either drifts:
 from __future__ import annotations
 
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -99,3 +101,47 @@ def test_publish_asserts_freshness_before_it_touches_the_artifact_or_the_token()
                 "the freshness check must run BEFORE the artifact download and "
                 "before the publish token is referenced"
             )
+
+
+def _assert_final_freshness_at_upload(steps: list[dict]) -> None:
+    upload_at = next(
+        i for i, step in enumerate(steps) if "twine upload" in str(step.get("run", ""))
+    )
+    assert "FORGEJO_PUBLISH_TOKEN" in str(steps[upload_at].get("env", ""))
+    assert upload_at >= 2
+    assert "assert_current_main.sh" in str(steps[upload_at - 1].get("run", ""))
+    assert "verify_kernel_artifact_hashes.py verify" in str(
+        steps[upload_at - 2].get("run", "")
+    )
+
+
+def test_final_freshness_check_is_immediately_before_registry_upload() -> None:
+    """Hashing can take time; main must be re-read after it, at the write edge."""
+    steps = _jobs()["publish"]["steps"]
+    _assert_final_freshness_at_upload(steps)
+
+    deleted = deepcopy(steps)
+    deleted.pop(
+        next(
+            i
+            for i, step in enumerate(deleted)
+            if step.get("name")
+            == "Re-assert exact protected main immediately before upload"
+        )
+    )
+    with pytest.raises(AssertionError):
+        _assert_final_freshness_at_upload(deleted)
+
+    inverted = deepcopy(steps)
+    final_at = next(
+        i
+        for i, step in enumerate(inverted)
+        if step.get("name")
+        == "Re-assert exact protected main immediately before upload"
+    )
+    inverted[final_at - 1], inverted[final_at] = (
+        inverted[final_at],
+        inverted[final_at - 1],
+    )
+    with pytest.raises(AssertionError):
+        _assert_final_freshness_at_upload(inverted)
