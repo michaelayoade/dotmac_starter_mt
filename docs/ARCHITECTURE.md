@@ -3460,10 +3460,27 @@ its product-policy provenance**. ERP/Workspace must compute it from their own
 immutable candidate dependency state and pass the trusted producer coordinates
 through reviewed, source-bound workflows. The action returns `manifest-path`
 after construction and `index-root` after verification, both under runner temp.
-No producer/consumer workflow calls this action yet, no package install or
-offline-only installer gate exists, and the protected environment, source-bound
-ruleset, broad-secret removal, and rotation remain separate work. ERP still
-executes its original verifier; this action is not a cutover receipt.
+`deployment-conformance-bundle.yml` is the additive, secret-free successor to
+the existing reusable conformance workflow. It preserves the descriptor and
+image checks but accepts observed producer coordinates, materializes the exact
+one-wheel expected document under runner temp, invokes the action at the
+immutable Starter commit that owns it **before candidate checkout**, and
+installs the declared `dotmac-deployment-foundation` wheel with `--no-index
+--no-deps` from the verified local index. It accepts no caller secret. The plan
+digest, wheel filename and wheel digest inputs are shape-checked, and the
+filename must carry the exact declared foundation version; the workflow still
+cannot prove the caller derived those coordinates from its actual dependency
+manifest. That caller-side binding is explicitly unmonitored until ERP and
+Workspace adopt the successor.
+
+During migration, `deployment-conformance.yml` and
+`deployment-conformance-bundle.yml` duplicate the descriptor/image check body.
+That is named transition debt, not a second permanent owner: retire the old
+credentialed workflow after both immutable caller pins move and their exact-head
+CI passes. No caller uses the successor yet, no protected producer exists, and
+the protected environment, source-bound ruleset, broad-secret removal, and
+rotation remain separate work. ERP still executes its original verifier; this
+workflow is not a cutover receipt.
 
 `docker-compose.yml` (prod) requires a published `APP_IMAGE`, no bind
 mounts, resource limits (`APP_MEM_LIMIT`, `APP_PIDS_LIMIT`), and a
