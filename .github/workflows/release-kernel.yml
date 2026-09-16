@@ -22,6 +22,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      wheel_sha256: ${{ steps.artifact_hashes.outputs.wheel_sha256 }}
+      sdist_sha256: ${{ steps.artifact_hashes.outputs.sdist_sha256 }}
     env:
       RELEASE_VERSION: ${{ inputs.version }}
     steps:
@@ -64,6 +67,12 @@ jobs:
         run: >-
           bash scripts/consumer_boot_check.sh --wheel
           packages/dotmac-kernel/dist
+      - name: Record hashes after wheel smoke and distribution inspection
+        id: artifact_hashes
+        run: |
+          python scripts/verify_kernel_artifact_hashes.py record \
+            --dist packages/dotmac-kernel/dist --version "$RELEASE_VERSION" \
+            --output "$GITHUB_OUTPUT"
       - name: Upload the exact built bytes
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -104,6 +113,15 @@ jobs:
         run: >-
           python scripts/kernel_release_authorization.py verify-release
           --phase publish --version "$RELEASE_VERSION"
+      - name: Verify downloaded bytes match build outputs
+        env:
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel_sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist_sha256 }}
+        run: >-
+          python scripts/verify_kernel_artifact_hashes.py verify
+          --dist dist --version "$RELEASE_VERSION"
+          --wheel-sha256 "$EXPECTED_WHEEL_SHA256"
+          --sdist-sha256 "$EXPECTED_SDIST_SHA256"
       - name: Re-assert exact protected main immediately before upload
         run: bash scripts/assert_current_main.sh "$GITHUB_SHA"
       - name: Upload the exact wheel and sdist

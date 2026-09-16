@@ -213,6 +213,24 @@ published and tagged but remains unadoptable because the clean artifact import
 fails. Kernel a101 is the first release eligible to traverse the separated
 facility end to end.
 
+## Decision amendment — 2026-09-16 (bind the publisher to built bytes)
+
+The uncredentialed kernel build job records the SHA-256 of its exact wheel and
+sdist **after** distribution inspection and the wheel smoke. The credentialed
+publish job accepts only those two filenames and recomputes both hashes from
+the downloaded Actions artifact before using the Forgejo writer. A missing,
+malformed, extra or changed artifact fails before the upload; the publisher
+never repairs a mismatch by rebuilding. This closes the
+build-job-to-publish-job handoff, not the separate question of what the registry
+ultimately serves.
+
+The independently dispatched verifier remains the sole registry read-back
+decision: it compares both retained build files with the named registry files,
+clean-installs them, and supplies the immutable per-version release record.
+Neither a green publisher job nor a matching build-job output substitutes for
+that verifier, and this new handoff check does not retroactively establish
+provenance or token identity for earlier releases.
+
 ## Follow-ups
 
 1. Stand up per `deploy/forgejo/RUNBOOK.md`; publish + verify `dotmac-kernel
