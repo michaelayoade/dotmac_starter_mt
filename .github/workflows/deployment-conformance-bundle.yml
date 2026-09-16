@@ -77,12 +77,11 @@ on:
         default: "3.12"
       strict-image-audit:
         description: >-
-          Fail when the image audit cannot be performed. Off by default because
-          a pull-request build has no built image yet; the release lane turns it
-          on, where the image exists and skipping would be a hole.
-        required: false
+          Fail when the image audit cannot be performed. Every caller must make
+          this choice explicitly: pull-request lanes may select false while a
+          release lane selects true, where skipping would be a hole.
+        required: true
         type: boolean
-        default: false
       require-real-digests:
         description: >-
           Keep the aggregate conformance check's placeholder-digest findings.

@@ -83,6 +83,13 @@ def _problems(workflow: dict[str, Any]) -> list[str]:
     )
     if missing:
         problems.append(f"required bundle inputs missing: {missing}")
+    strict_image = inputs.get("strict-image-audit", {})
+    if (
+        strict_image.get("required") is not True
+        or strict_image.get("type") != "boolean"
+        or "default" in strict_image
+    ):
+        problems.append("strict image audit is not an explicit caller decision")
     if call.get("secrets"):
         problems.append("workflow_call accepts a secret")
     strings = _string_values(workflow)
@@ -236,6 +243,16 @@ def test_the_guard_refuses_each_trust_boundary_regression() -> None:
     secret_env = copy.deepcopy(original)
     secret_env["jobs"]["descriptor"]["env"] = {"TOKEN": "${{ secrets.SOME_TOKEN }}"}
     assert "workflow references a registry or GitHub secret" in _problems(secret_env)
+
+    implicit_image_audit = copy.deepcopy(original)
+    strict_image = implicit_image_audit[True]["workflow_call"]["inputs"][
+        "strict-image-audit"
+    ]
+    strict_image["required"] = False
+    strict_image["default"] = False
+    assert "strict image audit is not an explicit caller decision" in _problems(
+        implicit_image_audit
+    )
 
     local_action = copy.deepcopy(original)
     next(

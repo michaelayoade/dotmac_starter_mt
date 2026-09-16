@@ -165,6 +165,23 @@ no declared production target.
 """
 
 [[entrypoint]]
+name = "workflow:deployment-conformance-bundle"
+family = "workflow"
+path = ".github/workflows/deployment-conformance-bundle.yml"
+trigger = "workflow_call (products pin it by commit)"
+credential = "GITHUB_TOKEN(contents:read, actions:read); no user-provisioned secret"
+disposition = "non_production_executor"
+targets = ["github-hosted-runner"]
+premise = """
+The additive secret-free conformance gate. It uses the caller-scoped GitHub
+token only to observe artifacts from a completed, successful main run in the
+same repository, installs one verified wheel from a local offline index, then
+renders and audits inside the caller's ephemeral runner. Candidate checkout
+occurs only after bundle verification and persists no credential. It accepts no
+registry credential, commands no production target, and reaches no host.
+"""
+
+[[entrypoint]]
 name = "workflow:composition-compatibility"
 family = "workflow"
 path = ".github/workflows/composition-compatibility.yml"
