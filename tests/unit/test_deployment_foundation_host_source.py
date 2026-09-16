@@ -50,6 +50,7 @@ from dotmac_deployment_foundation.host_source import (
     MALFORMED_SOURCE_REVISION,
     NO_RECEIPT,
     WRONG_KIND,
+    WRONG_SUBJECT,
     CandidateReceipt,
     HostSource,
     InstalledArtifact,
@@ -248,6 +249,32 @@ def test_a_receipt_about_another_facility_does_not_bind_these_bytes() -> None:
 
     assert refusal.value.code == DISAGREES
     assert "dotmac-deployment-control" in str(refusal.value)
+
+
+def test_an_internally_consistent_other_distribution_cannot_bind_foundation() -> None:
+    """PLANTED. A caller who supplies `distribution="dotmac-kernel"` alongside
+    a receipt whose `facility` is also `"dotmac-kernel"`, and an installed
+    reading that (via the `distribution` parameter) reports that same
+    distribution, is internally self-consistent end to end — every existing
+    comparison here is between two "dotmac-kernel" values and agrees. None of
+    that makes this module's own subject `dotmac-kernel`: `DISTRIBUTION` names
+    exactly one package, and no self-consistent triple about a DIFFERENT
+    package may bind it."""
+    document = _receipt_document()
+    document["facility"] = "dotmac-kernel"
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(
+            receipt=candidate_receipt_from_mapping(document),
+            distribution="dotmac-kernel",
+            metadata=FakeInstall(),
+            source_tree_digest=_source_tree_digest,
+        )
+
+    assert refusal.value.code == WRONG_SUBJECT
+    message = str(refusal.value)
+    assert "dotmac-kernel" in message, message
+    assert DISTRIBUTION in message, message
 
 
 def test_a_matching_digest_with_the_wrong_version_is_refused() -> None:
