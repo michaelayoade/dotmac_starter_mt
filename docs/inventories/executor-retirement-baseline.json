@@ -85,7 +85,7 @@
       "tree_complete": false
     },
     "systemd_unit": {
-      "incompleteness_premise": "a unit installed under /etc/systemd/system has no in-tree artifact, and `dotmac-books.service` was found installed and disabled — disabled is not absent, and absent from the tree is not absent from the host",
+      "incompleteness_premise": "a unit installed under /etc/systemd/system has no in-tree artifact, and `dotmac-books.service` was found installed and disabled \u2014 disabled is not absent, and absent from the tree is not absent from the host",
       "patterns": [
         "*.service",
         "*.timer",
@@ -100,7 +100,7 @@
       "tree_complete": false
     },
     "webhook": {
-      "incompleteness_premise": "the registration lives in the SENDER's configuration — a GitHub repository setting, a provider console — so a receiver route in this tree is at most half the entrypoint",
+      "incompleteness_premise": "the registration lives in the SENDER's configuration \u2014 a GitHub repository setting, a provider console \u2014 so a receiver route in this tree is at most half the entrypoint",
       "patterns": [],
       "roots": [],
       "tree_complete": false
@@ -140,7 +140,7 @@
           "not_an_executor": 5
         },
         "workflow": {
-          "non_production_executor": 6,
+          "non_production_executor": 7,
           "not_an_executor": 15
         }
       },
@@ -163,7 +163,7 @@
         "workflow",
         "script"
       ],
-      "inventory_digest": "sha256:d30bf6bf379d8db9f2f621a574350948eea28bcef16b1742f4d19377c1ed9d3d",
+      "inventory_digest": "sha256:94c178f1043bc4c679169563402eb495e623ec59f5e7b5155e9a9baf58445478",
       "measured_from": "working tree",
       "retired_total": 0,
       "revision": "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff",
@@ -173,9 +173,10 @@
         "workflow:ci",
         "workflow:deployment-adopter",
         "workflow:deployment-conformance",
+        "workflow:deployment-conformance-bundle",
         "workflow:deployment-rehearsal"
       ],
-      "unsanctioned_compose_mutations": 6
+      "unsanctioned_compose_mutations": 7
     }
   },
   "receipt_schema": "ExecutorRetirementReceipt.v1",
