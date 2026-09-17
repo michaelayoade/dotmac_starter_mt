@@ -28,14 +28,18 @@ def _secrets() -> dict[str, str]:
 
 
 def _item(**overrides: object) -> dict[str, object]:
+    # Field names match Sub's real `InvoiceAccountingSyncRead`
+    # (dotmac_sub/app/schemas/billing.py:334), verified by direct cross-repo
+    # read -- not the `id`/`status`/`total_amount` this fixture used before,
+    # which matched the (buggy) mapper rather than Sub's actual wire shape.
     base: dict[str, object] = {
-        "id": "11111111-1111-1111-1111-111111111111",
+        "source_invoice_id": "11111111-1111-1111-1111-111111111111",
         "account_id": "22222222-2222-2222-2222-222222222222",
         "contract_version": CONTRACT_VERSION,
-        "status": "invoiced",
+        "source_kind": "native",
         "updated_at": "2026-09-01T00:00:00+00:00",
         "disposition": "ready",
-        "total_amount": "100.00",
+        "total": "100.00",
         "currency": "NGN",
         "issues": [],
     }
@@ -187,11 +191,11 @@ def test_empty_subsequent_page_leaves_the_cursor_unchanged() -> None:
 
 def test_multi_page_advancement_uses_the_final_items_position() -> None:
     first = _item(
-        id="11111111-1111-1111-1111-111111111111",
+        source_invoice_id="11111111-1111-1111-1111-111111111111",
         updated_at="2026-09-01T00:00:00+00:00",
     )
     second = _item(
-        id="33333333-3333-3333-3333-333333333333",
+        source_invoice_id="33333333-3333-3333-3333-333333333333",
         updated_at="2026-09-01T00:00:01+00:00",
     )
     handler = _handler(lambda request: httpx.Response(200, json=_page([first, second])))
@@ -205,8 +209,14 @@ def test_multi_page_advancement_uses_the_final_items_position() -> None:
 
 def test_tied_timestamp_ordering_by_invoice_id_is_accepted() -> None:
     same_timestamp = "2026-09-01T00:00:00+00:00"
-    first = _item(id="11111111-1111-1111-1111-111111111111", updated_at=same_timestamp)
-    second = _item(id="99999999-9999-9999-9999-999999999999", updated_at=same_timestamp)
+    first = _item(
+        source_invoice_id="11111111-1111-1111-1111-111111111111",
+        updated_at=same_timestamp,
+    )
+    second = _item(
+        source_invoice_id="99999999-9999-9999-9999-999999999999",
+        updated_at=same_timestamp,
+    )
     handler = _handler(lambda request: httpx.Response(200, json=_page([first, second])))
     events, cursor = handler.poll(None, config={}, secrets=_secrets())
     assert len(events) == 2
@@ -215,11 +225,11 @@ def test_tied_timestamp_ordering_by_invoice_id_is_accepted() -> None:
 
 def test_non_monotonic_page_is_refused_not_silently_accepted() -> None:
     later = _item(
-        id="99999999-9999-9999-9999-999999999999",
+        source_invoice_id="99999999-9999-9999-9999-999999999999",
         updated_at="2026-09-01T00:00:01+00:00",
     )
     earlier = _item(
-        id="11111111-1111-1111-1111-111111111111",
+        source_invoice_id="11111111-1111-1111-1111-111111111111",
         updated_at="2026-09-01T00:00:00+00:00",
     )
     handler = _handler(

@@ -17,14 +17,18 @@ ACCOUNT_ID = "22222222-2222-2222-2222-222222222222"
 
 
 def _item(**overrides: object) -> dict[str, object]:
+    # Field names match Sub's real `InvoiceAccountingSyncRead`
+    # (dotmac_sub/app/schemas/billing.py:334), verified by direct cross-repo
+    # read — not the `id`/`status`/`total_amount` this fixture used before,
+    # which matched the (buggy) mapper rather than Sub's actual wire shape.
     base: dict[str, object] = {
-        "id": INVOICE_ID,
+        "source_invoice_id": INVOICE_ID,
         "account_id": ACCOUNT_ID,
         "contract_version": CONTRACT_VERSION,
-        "status": "invoiced",
+        "source_kind": "native",
         "updated_at": "2026-09-01T00:00:00+00:00",
         "disposition": "ready",
-        "total_amount": "100.00",
+        "total": "100.00",
         "currency": "ngn",
         "issues": [],
     }
@@ -56,7 +60,7 @@ def test_maps_a_ready_item_with_no_issues() -> None:
     assert event.payload["source_invoice_id"] == INVOICE_ID
     assert event.payload["source_account_id"] == ACCOUNT_ID
     assert event.payload["source_updated_at"] == "2026-09-01T00:00:00+00:00"
-    assert event.payload["source_kind"] == "invoiced"
+    assert event.payload["source_kind"] == "native"
     assert event.payload["disposition"] == "ready"
     assert event.payload["source_total_amount"] == "100.00"
     assert event.payload["source_currency"] == "NGN"
@@ -114,7 +118,7 @@ def test_rejects_unsupported_contract_version() -> None:
 
 def test_rejects_invalid_invoice_id() -> None:
     with pytest.raises(SubAccountingMappingError, match="id is not a valid UUID"):
-        map_item(_item(id="not-a-uuid"))
+        map_item(_item(source_invoice_id="not-a-uuid"))
 
 
 def test_rejects_invalid_account_id() -> None:
@@ -126,7 +130,7 @@ def test_preserves_the_exact_uuid_string_sub_sent() -> None:
     # Validated, never reformatted -- required so the next poll's cursor can
     # echo the exact value back to Sub.
     mixed_case = "11111111-AAAA-1111-1111-111111111111"
-    event, _, invoice_id = map_item(_item(id=mixed_case))
+    event, _, invoice_id = map_item(_item(source_invoice_id=mixed_case))
     assert event.payload["source_invoice_id"] == mixed_case
     assert invoice_id == mixed_case
 
@@ -154,7 +158,7 @@ def test_rejects_a_naive_optional_date() -> None:
 
 def test_rejects_missing_header_money_fields() -> None:
     with pytest.raises(SubAccountingMappingError, match="money"):
-        map_item(_item(total_amount=None))
+        map_item(_item(total=None))
 
 
 def test_rejects_an_invalid_currency() -> None:
@@ -203,9 +207,9 @@ def test_fingerprint_is_stable_regardless_of_raw_dict_key_order() -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda item: item.update(status="voided"),
+        lambda item: item.update(source_kind="splynx_legacy"),
         lambda item: item.update(disposition="blocked", issues=[_blocked_issue()]),
-        lambda item: item.update(total_amount="100.01"),
+        lambda item: item.update(total="100.01"),
         lambda item: item.update(currency="usd"),
         lambda item: item.update(updated_at="2026-09-01T00:00:01+00:00"),
         lambda item: item.update(account_id="33333333-3333-3333-3333-333333333333"),

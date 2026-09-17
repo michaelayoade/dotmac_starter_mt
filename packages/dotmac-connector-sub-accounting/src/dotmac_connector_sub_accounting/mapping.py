@@ -244,9 +244,16 @@ def map_item(raw: Mapping[str, object]) -> tuple[InboundEvent, datetime, str]:
             f"unsupported contract_version {contract_version!r}"
         )
 
-    source_invoice_id = _uuid(raw.get("id"))
+    # Field names verified directly against Sub's real
+    # `InvoiceAccountingSyncRead` (dotmac_sub/app/schemas/billing.py:334) this
+    # round — the previous version guessed `id`/`status`/`total_amount`,
+    # which do not exist on the wire (Sub sends `source_invoice_id`, a
+    # dedicated `source_kind` field distinct from the invoice's own
+    # lifecycle `status`, and `total`). Confirmed by direct cross-repo read,
+    # not re-guessed.
+    source_invoice_id = _uuid(raw.get("source_invoice_id"))
     if source_invoice_id is None:
-        raise SubAccountingMappingError("id is not a valid UUID")
+        raise SubAccountingMappingError("source_invoice_id is not a valid UUID")
 
     source_account_id = _uuid(raw.get("account_id"))
     if source_account_id is None:
@@ -254,15 +261,19 @@ def map_item(raw: Mapping[str, object]) -> tuple[InboundEvent, datetime, str]:
 
     updated_at_text, updated_at = _timestamp(raw.get("updated_at"), label="updated_at")
 
-    source_kind = _text(raw.get("status"))
+    # NOT `status` — Sub's `status: InvoiceStatus` is the invoice's own
+    # lifecycle state (draft/issued/paid/...), a different concept entirely.
+    # `source_kind` is its own direct field with a disjoint vocabulary
+    # (`native`/`splynx_legacy` — `InvoiceAccountingSyncSourceKind`).
+    source_kind = _text(raw.get("source_kind"))
     if source_kind is None:
-        raise SubAccountingMappingError("status is missing")
+        raise SubAccountingMappingError("source_kind is missing")
 
     disposition = _text(raw.get("disposition"))
     if disposition is None:
         raise SubAccountingMappingError("disposition is missing")
 
-    total_amount = _decimal(raw.get("total_amount"))
+    total_amount = _decimal(raw.get("total"))
     currency = _currency(raw.get("currency"))
     if total_amount is None or currency is None:
         raise SubAccountingMappingError("header money fields are invalid")
