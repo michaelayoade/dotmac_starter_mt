@@ -13,12 +13,13 @@ from dotmac_connector_sub_accounting.polling import (
     FEED_PATH,
     SubAccountingPollError,
 )
+from dotmac_integration.spi import PollHandler
 
 CAPABILITY_ID = "invoices.accounting_sync.observation.v1"
 API_KEY_VALUE = "held-sub-api-key-material"
 
 
-def _handler(respond) -> object:
+def _handler(respond) -> PollHandler:
     plugin = SubAccountingConnector(transport=httpx.MockTransport(respond))
     return plugin.poll_handler_for(CAPABILITY_ID)
 
