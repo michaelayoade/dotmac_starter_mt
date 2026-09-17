@@ -206,6 +206,9 @@ def test_multi_page_advancement_uses_the_final_items_position() -> None:
     handler = _handler(lambda request: httpx.Response(200, json=_page([first, second])))
     events, cursor = handler.poll(None, config={}, secrets=_secrets())
     assert len(events) == 2
+    # A multi-item page always yields a real cursor string; narrows the type
+    # for mypy without changing runtime behavior.
+    assert cursor is not None
     assert json.loads(cursor) == {
         "after_id": "33333333-3333-3333-3333-333333333333",
         "after_updated_at": "2026-09-01T00:00:01+00:00",
@@ -225,6 +228,9 @@ def test_tied_timestamp_ordering_by_invoice_id_is_accepted() -> None:
     handler = _handler(lambda request: httpx.Response(200, json=_page([first, second])))
     events, cursor = handler.poll(None, config={}, secrets=_secrets())
     assert len(events) == 2
+    # A multi-item page always yields a real cursor string; narrows the type
+    # for mypy without changing runtime behavior.
+    assert cursor is not None
     assert json.loads(cursor)["after_id"] == "99999999-9999-9999-9999-999999999999"
 
 
