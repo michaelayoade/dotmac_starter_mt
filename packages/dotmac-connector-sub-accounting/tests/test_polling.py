@@ -42,6 +42,10 @@ def _item(**overrides: object) -> dict[str, object]:
         "total": "100.00",
         "currency": "NGN",
         "issues": [],
+        "digest_version": 1,
+        "projection_digest": (
+            "0dfecf2e1f96a2d1a63eb8e5e9f78f0aefbf661ab2c424b841b5bb2eda85aa7c"
+        ),
     }
     base.update(overrides)
     return base

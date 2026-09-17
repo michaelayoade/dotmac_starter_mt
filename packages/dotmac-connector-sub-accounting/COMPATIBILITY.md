@@ -26,14 +26,14 @@ The public Python surface is `MANIFEST`, `PLUGIN`, `SubAccountingConnector`,
 `SubAccountingMappingError`, `CONTRACT_VERSION`, `CAPABILITY_ID`,
 `CONNECTOR_KEY` and `__version__`.
 
-## Known limitation — the fingerprint algorithm is unverified against ERP
+## Digest fields are forwarded, not computed
 
-`projection_fingerprint` is a best-effort reconstruction of ERP's shadow
-mapper's canonicalization algorithm, built without access to the ERP
-worktree. See `mapping.py`'s module docstring and `README.md`'s "Fingerprint
-risk" section for the exact points where this connector's canonicalization
-could disagree with ERP's real one. Do not treat a computed fingerprint as
-proven-consistent with ERP until this is reconciled.
+`digest_version` and `projection_digest` are computed by Sub and published on
+its feed item. This connector validates their wire shape only (positive int;
+64-lowercase-hex string) and forwards both verbatim — it never recomputes or
+reconstructs Sub's canonicalization algorithm. See `mapping.py`'s module
+docstring and `README.md`'s "Digest forwarding" section for the exact
+validation rules.
 
 ## Not wired into CI yet
 

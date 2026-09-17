@@ -19,11 +19,10 @@ Not published; no release run, no peeled tag. Not pinned into
   `idempotency_key`-shaped field. Those are supplied downstream by the
   generic Integration engine and the destination `ObservationPortClient`;
   Sub's `account_id` is never mapped onto ERP's `organization_id`.
-- Computes `projection_fingerprint` as a best-effort match of ERP's shadow
-  mapper's canonicalization algorithm. **Not verified against ERP's real
-  implementation** — the ERP worktree was unreachable while building this
-  connector. See `mapping.py`'s docstring and `COMPATIBILITY.md`'s "Known
-  limitation" section.
+- Validates and forwards Sub's own `digest_version`/`projection_digest`
+  verbatim (positive int; 64-lowercase-hex string) — this connector never
+  computes or reconstructs a digest itself. See `mapping.py`'s docstring and
+  `COMPATIBILITY.md`'s "Digest fields are forwarded, not computed" section.
 - Validates the disposition/issues consistency rule (a blocked observation
   with no issues, or a non-blocked observation carrying issues, is refused)
   before emitting, mirroring ERP's own `RecordInvoiceSyncOutcome`

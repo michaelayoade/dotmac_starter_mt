@@ -1,8 +1,6 @@
-"""``map_item`` — translation, disposition/issues consistency, fingerprint."""
+"""``map_item`` — translation, disposition/issues consistency, digest forwarding."""
 
 from __future__ import annotations
-
-import copy
 
 import pytest
 from dotmac_connector_sub_accounting.mapping import (
@@ -14,6 +12,12 @@ from dotmac_connector_sub_accounting.mapping import (
 
 INVOICE_ID = "11111111-1111-1111-1111-111111111111"
 ACCOUNT_ID = "22222222-2222-2222-2222-222222222222"
+
+#: A real, known-good digest from dotmac_sub's own fixture data for this same
+#: initiative (Sub computes it; this connector only validates and forwards).
+VALID_PROJECTION_DIGEST = (
+    "0dfecf2e1f96a2d1a63eb8e5e9f78f0aefbf661ab2c424b841b5bb2eda85aa7c"
+)
 
 
 def _item(**overrides: object) -> dict[str, object]:
@@ -31,6 +35,8 @@ def _item(**overrides: object) -> dict[str, object]:
         "total": "100.00",
         "currency": "ngn",
         "issues": [],
+        "digest_version": 1,
+        "projection_digest": VALID_PROJECTION_DIGEST,
     }
     base.update(overrides)
     return base
@@ -69,8 +75,8 @@ def test_maps_a_ready_item_with_no_issues() -> None:
     assert "idempotency_key" not in event.payload
     assert "source_issued_at" not in event.payload
     assert "source_due_at" not in event.payload
-    assert isinstance(event.payload["projection_fingerprint"], str)
-    assert len(event.payload["projection_fingerprint"]) == 64
+    assert event.payload["digest_version"] == 1
+    assert event.payload["projection_digest"] == VALID_PROJECTION_DIGEST
 
 
 def test_maps_a_blocked_item_and_renames_line_id_to_source_line_id() -> None:
@@ -181,49 +187,51 @@ def test_rejects_issues_that_is_not_a_list() -> None:
         map_item(_item(issues={"code": "x"}))
 
 
-# -- fingerprint stability and sensitivity ------------------------------------
+# -- digest_version / projection_digest: forwarded verbatim, never computed --
 
 
-def test_fingerprint_is_stable_across_repeated_computation() -> None:
-    first, _, _ = map_item(_item())
-    second, _, _ = map_item(_item())
-    assert (
-        first.payload["projection_fingerprint"]
-        == second.payload["projection_fingerprint"]
-    )
-
-
-def test_fingerprint_is_stable_regardless_of_raw_dict_key_order() -> None:
-    raw = _item()
-    reordered = dict(reversed(list(raw.items())))
-    first, _, _ = map_item(raw)
-    second, _, _ = map_item(reordered)
-    assert (
-        first.payload["projection_fingerprint"]
-        == second.payload["projection_fingerprint"]
-    )
+def test_forwards_digest_version_and_projection_digest_unchanged() -> None:
+    raw = _item(digest_version=7, projection_digest=VALID_PROJECTION_DIGEST)
+    event, _, _ = map_item(raw)
+    assert event.payload["digest_version"] == 7
+    assert event.payload["projection_digest"] == VALID_PROJECTION_DIGEST
 
 
 @pytest.mark.parametrize(
-    "mutate",
+    "digest_version",
+    [0, -1, 1.0, True, False, None],
+)
+def test_rejects_a_malformed_digest_version(digest_version: object) -> None:
+    with pytest.raises(SubAccountingMappingError, match="digest_version"):
+        map_item(_item(digest_version=digest_version))
+
+
+def test_rejects_a_missing_digest_version() -> None:
+    raw = _item()
+    del raw["digest_version"]
+    with pytest.raises(SubAccountingMappingError, match="digest_version"):
+        map_item(raw)
+
+
+@pytest.mark.parametrize(
+    "projection_digest",
     [
-        lambda item: item.update(source_kind="splynx_legacy"),
-        lambda item: item.update(disposition="blocked", issues=[_blocked_issue()]),
-        lambda item: item.update(total="100.01"),
-        lambda item: item.update(currency="usd"),
-        lambda item: item.update(updated_at="2026-09-01T00:00:01+00:00"),
-        lambda item: item.update(account_id="33333333-3333-3333-3333-333333333333"),
+        "a" * 63,  # too short
+        "a" * 65,  # too long
+        "A" * 64,  # uppercase
+        "g" * 64,  # non-hex character
+        "",
+        None,
+        123,
     ],
 )
-def test_fingerprint_changes_when_an_admitted_fact_changes(mutate) -> None:
-    baseline = _item()
-    mutated = copy.deepcopy(baseline)
-    mutate(mutated)
+def test_rejects_a_malformed_projection_digest(projection_digest: object) -> None:
+    with pytest.raises(SubAccountingMappingError, match="projection_digest"):
+        map_item(_item(projection_digest=projection_digest))
 
-    baseline_event, _, _ = map_item(baseline)
-    mutated_event, _, _ = map_item(mutated)
 
-    assert (
-        baseline_event.payload["projection_fingerprint"]
-        != mutated_event.payload["projection_fingerprint"]
-    )
+def test_rejects_a_missing_projection_digest() -> None:
+    raw = _item()
+    del raw["projection_digest"]
+    with pytest.raises(SubAccountingMappingError, match="projection_digest"):
+        map_item(raw)

@@ -10,49 +10,25 @@ would conflate two different systems' identifiers and is exactly the
 "provider metadata selects destination scope" anti-pattern this fleet's
 architecture forbids.
 
-## The fingerprint — the single highest-risk guess in this module
+## The digest — forwarded verbatim, never recomputed
 
-``projection_fingerprint`` is supposed to match, byte-for-byte, whatever ERP's
-own shadow mapper (``app/services/dotmac_sub/invoice_sync_shadow.py`` in the
-``dotmac_erp`` worktree) independently computes from the SAME Sub source
-record. That worktree was not reachable from here this session, so the exact
-algorithm below is a BEST-EFFORT reconstruction from the packet's description
-("normalized typed record -> recursive Decimal/datetime/enum-safe conversion
--> sorted compact JSON -> SHA-256, lowercase hex"), not a verified port. If
-ERP's canonicalization differs in any of these ways, every fingerprint this
-connector emits will silently mismatch ERP's own recomputation:
-
-* which fields are IN the fingerprinted record (this module fingerprints
-  every source-derived business fact below: contract version, invoice and
-  account identity, status/kind, disposition, header money, optional dates
-  and issues -- but not ``capability_id``, which is connector/Integration
-  scaffolding, not a Sub-sourced fact);
-* how a ``Decimal`` is stringified (here: Python's default ``str(Decimal)``,
-  which preserves the exact scale/precision Sub sent — a different
-  normalization, e.g. quantizing to 2dp, would disagree);
-* how a ``datetime`` is stringified (here: ``datetime.isoformat()`` on a
-  value parsed via ``datetime.fromisoformat`` after normalizing a trailing
-  ``Z`` to ``+00:00`` — a microsecond-precision or offset-format difference
-  changes the digest);
-* key ordering (here: ``json.dumps(..., sort_keys=True)``, so this part is
-  robust to *this* side's own key order, but not to ERP disagreeing on which
-  keys are included at all).
-
-This MUST be reconciled with ERP's slice 1b before either side trusts a
-computed fingerprint for drift detection — flagged prominently in the task
-report, not silently assumed correct.
+Sub now computes and publishes ``digest_version`` (a positive int) and
+``projection_digest`` (a 64-lowercase-hex SHA-256 digest) on its own feed
+item. This module's only job for those two fields is to validate their wire
+shape — a positive, non-boolean int for the version; exactly
+``[0-9a-f]{64}`` for the digest — and forward both verbatim into the
+observation payload. It never recomputes, canonicalizes, or reinterprets
+Sub's digest; a mismatch anywhere downstream now means a real transport or
+mapping bug, not an expected reconciliation gap.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from enum import Enum
 from typing import Final
 
 from dotmac_integration.spi import InboundEvent
@@ -77,6 +53,7 @@ CONTRACT_VERSION: Final = "invoice-accounting-sync.v2"
 BLOCKED_DISPOSITION: Final = "blocked"
 
 _CURRENCY_RE: Final[re.Pattern[str]] = re.compile(r"[A-Z]{3}")
+_PROJECTION_DIGEST_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}")
 
 __all__ = [
     "BLOCKED_DISPOSITION",
@@ -155,21 +132,13 @@ def _optional_timestamp(value: object, *, label: str) -> tuple[str, datetime] | 
     return _timestamp(value, label=label)
 
 
-def _issues(
-    value: object,
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    """Map Sub's ``line_id`` to ``source_line_id``.
-
-    Returns two parallel lists: the payload shape (money as exact decimal
-    strings, for the wire) and the fingerprint shape (money as ``Decimal``,
-    for canonicalization) — see :func:`_canonicalize`.
-    """
+def _issues(value: object) -> list[dict[str, object]]:
+    """Map Sub's ``line_id`` to ``source_line_id``."""
     if value is None:
-        return [], []
+        return []
     if not isinstance(value, list):
         raise SubAccountingMappingError("issues is not a list")
     payload_issues: list[dict[str, object]] = []
-    fingerprint_issues: list[dict[str, object]] = []
     for entry in value:
         if not isinstance(entry, Mapping):
             raise SubAccountingMappingError("issue entry is not an object")
@@ -192,36 +161,19 @@ def _issues(
                 "actual_amount": str(actual_amount),
             }
         )
-        fingerprint_issues.append(
-            {
-                "code": code,
-                "source_line_id": source_line_id,
-                "expected_amount": expected_amount,
-                "actual_amount": actual_amount,
-            }
-        )
-    return payload_issues, fingerprint_issues
+    return payload_issues
 
 
-def _canonicalize(value: object) -> object:
-    """Recursive Decimal/datetime/enum-safe conversion, per the packet."""
-    if isinstance(value, Mapping):
-        return {key: _canonicalize(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [_canonicalize(item) for item in value]
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, Enum):
-        return value.value
-    return value
+def _digest_version(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value > 0 else None
 
 
-def _fingerprint(record: Mapping[str, object]) -> str:
-    canonical = _canonicalize(record)
-    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+def _projection_digest(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if _PROJECTION_DIGEST_RE.fullmatch(value) is not None else None
 
 
 def map_item(raw: Mapping[str, object]) -> tuple[InboundEvent, datetime, str]:
@@ -281,7 +233,7 @@ def map_item(raw: Mapping[str, object]) -> tuple[InboundEvent, datetime, str]:
     issued = _optional_timestamp(raw.get("issued_at"), label="issued_at")
     due = _optional_timestamp(raw.get("due_at"), label="due_at")
 
-    payload_issues, fingerprint_issues = _issues(raw.get("issues"))
+    payload_issues = _issues(raw.get("issues"))
 
     is_blocked = disposition == BLOCKED_DISPOSITION
     if is_blocked and not payload_issues:
@@ -289,21 +241,13 @@ def map_item(raw: Mapping[str, object]) -> tuple[InboundEvent, datetime, str]:
     if not is_blocked and payload_issues:
         raise SubAccountingMappingError("non-blocked disposition carries issues")
 
-    fingerprint_record: dict[str, object] = {
-        "contract_version": contract_version,
-        "source_invoice_id": source_invoice_id,
-        "source_account_id": source_account_id,
-        "source_updated_at": updated_at,
-        "source_kind": source_kind,
-        "disposition": disposition,
-        "source_total_amount": total_amount,
-        "source_currency": currency,
-        "issues": fingerprint_issues,
-    }
-    if issued is not None:
-        fingerprint_record["source_issued_at"] = issued[1]
-    if due is not None:
-        fingerprint_record["source_due_at"] = due[1]
+    digest_version = _digest_version(raw.get("digest_version"))
+    if digest_version is None:
+        raise SubAccountingMappingError("digest_version is missing or invalid")
+
+    projection_digest = _projection_digest(raw.get("projection_digest"))
+    if projection_digest is None:
+        raise SubAccountingMappingError("projection_digest is missing or malformed")
 
     payload: dict[str, object] = {
         "capability_id": CAPABILITY_ID,
@@ -322,7 +266,8 @@ def map_item(raw: Mapping[str, object]) -> tuple[InboundEvent, datetime, str]:
     if due is not None:
         payload["source_due_at"] = due[0]
 
-    payload["projection_fingerprint"] = _fingerprint(fingerprint_record)
+    payload["digest_version"] = digest_version
+    payload["projection_digest"] = projection_digest
 
     event = InboundEvent(
         provider_event_id=f"{CONNECTOR_KEY}:{source_invoice_id}:{updated_at_text}",

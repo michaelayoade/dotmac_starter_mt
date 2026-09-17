@@ -6,7 +6,7 @@ owns the wire translation only — it never constructs the ERP-bound delivery
 request (no ``organization_id``, no ``idempotency_key``), which are the
 generic Integration engine's and the destination ``ObservationPortClient``'s
 responsibility. See ``mapping.py`` for the observation shape and the
-fingerprint algorithm's known-unverified risk.
+``digest_version``/``projection_digest`` forward-only wire-shape contract.
 """
 
 from __future__ import annotations

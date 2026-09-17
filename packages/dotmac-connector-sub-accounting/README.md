@@ -21,16 +21,16 @@ fleet's architecture forbids.
 
 | field | source |
 |---|---|
-| `source_invoice_id` | Sub feed item `id` (UUID, unmodified) |
+| `source_invoice_id` | Sub feed item `source_invoice_id` (UUID, unmodified) |
 | `source_account_id` | Sub feed item `account_id` (UUID, unmodified — never a destination scope) |
 | `source_updated_at` | Sub feed item `updated_at`, exact string |
-| `source_kind` | Sub feed item `status`, verbatim |
+| `source_kind` | Sub feed item `source_kind`, verbatim (a dedicated field, distinct from the invoice's own lifecycle `status`) |
 | `disposition` | Sub feed item `disposition`, verbatim |
 | `source_total_amount` / `source_currency` | Sub feed item header money fields |
 | `source_issued_at` / `source_due_at` | optional, when present |
 | `issues` | Sub feed item `issues`, `line_id` renamed to `source_line_id` |
 | `contract_version` | Sub feed item `contract_version`, must equal `invoice-accounting-sync.v2` |
-| `projection_fingerprint` | computed here — see "Fingerprint risk" below |
+| `digest_version` / `projection_digest` | Sub feed item fields, validated for wire shape and forwarded verbatim — see "Digest forwarding" below |
 
 ## Cursor
 
@@ -51,18 +51,15 @@ issues, is refused before it is ever emitted — mirroring the consistency rule
 ERP's own `RecordInvoiceSyncOutcome` construction enforces, as defense in
 depth rather than a replacement for it.
 
-## Fingerprint risk — read before trusting `projection_fingerprint`
+## Digest forwarding
 
-`projection_fingerprint` is meant to match, byte-for-byte, what ERP's own
-shadow mapper independently computes from the same Sub source record. The
-ERP worktree was not reachable from the session that built this connector, so
-the algorithm in `mapping.py` (normalized typed record -> recursive
-Decimal/datetime/enum-safe conversion -> sorted compact JSON -> SHA-256,
-lowercase hex) is a best-effort reconstruction from a description, not a
-verified port. See that module's docstring for the exact points of
-disagreement risk (which fields are included, Decimal stringification,
-datetime stringification). Reconcile this against ERP's real algorithm before
-relying on the fingerprint for drift detection.
+`digest_version` and `projection_digest` are computed by Sub, not by this
+connector. This connector validates their wire shape only — `digest_version`
+must be a positive, non-boolean int; `projection_digest` must be exactly 64
+lowercase hex characters — and forwards both values verbatim into the
+observation payload. There is no algorithm here to reconcile with ERP: a
+mismatch anywhere downstream means a real transport or mapping bug, not an
+expected reconciliation gap.
 
 ## Manifest
 
