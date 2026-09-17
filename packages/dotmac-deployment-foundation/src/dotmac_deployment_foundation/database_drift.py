@@ -32,7 +32,7 @@ from .database_structure import (
 from .errors import PreconditionFailed
 from .recovery import CatalogEvidence, EffectivePrivilegeFact
 from .render.compose import configuration_digest
-from .spec import SCHEMA_V2, DatabaseContract, ProductDeploymentSpec
+from .spec import SCHEMA_V2, SCHEMA_V3, DatabaseContract, ProductDeploymentSpec
 
 __all__ = [
     "POSTGRES_SYSTEM_EXCLUSIONS",
@@ -672,11 +672,11 @@ def compare_database_contract(
             raise PreconditionFailed(
                 "the catalog sidecar binds a different expected schema extent"
             )
-        descriptor_binds_catalogs = spec.descriptor_schema == SCHEMA_V2
+        descriptor_binds_catalogs = spec.descriptor_schema in (SCHEMA_V2, SCHEMA_V3)
         if descriptor_binds_catalogs and catalog_binding.catalogs != contract.catalogs:
             raise PreconditionFailed(
                 "the catalog evidence binding differs from the coordinates "
-                "embedded in ProductDeploymentSpec.v2"
+                "embedded in ProductDeploymentSpec.v2/v3"
             )
         if not isinstance(structure_witnesses, tuple) or not all(
             isinstance(witness, DatabaseStructureWitnessV1)
@@ -702,7 +702,7 @@ def compare_database_contract(
                     detail=(
                         "ProductDeploymentSpec.v1 cannot contain database catalog "
                         "coordinates. This sidecar is evidence design input, not a "
-                        "descriptor fact; only ProductDeploymentSpec.v2 may make it "
+                        "descriptor fact; only ProductDeploymentSpec.v2/v3 may make it "
                         "part of the authorized descriptor and enable a full match"
                     ),
                 )

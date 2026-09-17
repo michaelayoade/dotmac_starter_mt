@@ -189,6 +189,12 @@ class Effects(Protocol):
 
     def verify_backup(self, result: BackupResult) -> bool: ...
 
+    def run_support_job(
+        self, code: str, *, timeout_seconds: int, image: str
+    ) -> CommandResult:
+        """Run and verify the descriptor's profile-gated support job."""
+        ...
+
     # ── candidate-image injected work (item 7 of the a5 audit) ──
     #
     # Every method below takes the image the ENGINE says this deployment is
@@ -1585,6 +1591,27 @@ class Executor:
                 exit_code=result.exit_code,
             )
         return "migration role verified"
+
+    def _do_support_job(
+        self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
+    ) -> str:
+        topology = self._spec.compose_topology
+        if topology is None:
+            raise StepFailed(step.kind.value, "support job has no v3 topology")
+        job = next((item for item in topology.jobs if item.code == step.target), None)
+        if job is None or not job.run_during_deploy:
+            raise StepFailed(step.kind.value, "support job is not deploy-authorized")
+        result = self._effects.run_support_job(
+            job.code, timeout_seconds=step.timeout_seconds, image=plan.image
+        )
+        if not result.ok:
+            raise StepFailed(
+                step.kind.value,
+                f"support job {job.code!r} or its postcondition failed; "
+                "command output withheld",
+                exit_code=result.exit_code,
+            )
+        return f"{job.code} postcondition verified"
 
     def _do_stop_for_maintenance(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome

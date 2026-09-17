@@ -118,7 +118,8 @@ if TYPE_CHECKING:  # pragma: no cover - the runtime import is inside the method
 
 SCHEMA_V1: Final = "ProductDeploymentSpec.v1"
 SCHEMA_V2: Final = "ProductDeploymentSpec.v2"
-SCHEMAS: Final = (SCHEMA_V1, SCHEMA_V2)
+SCHEMA_V3: Final = "ProductDeploymentSpec.v3"
+SCHEMAS: Final = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3)
 # Backwards-compatible public name: existing callers importing SCHEMA mean the
 # schema their current descriptors use, not "whichever schema is newest".
 SCHEMA: Final = SCHEMA_V1
@@ -1835,7 +1836,7 @@ class DatabaseContract:
             IsolationInvariant.parse(item) for item in table.tables("isolation")
         )
         catalogs: tuple[DatabaseCatalogCoordinateV1, ...] = ()
-        if descriptor_schema == SCHEMA_V2:
+        if descriptor_schema in (SCHEMA_V2, SCHEMA_V3):
             parsed_catalogs: list[DatabaseCatalogCoordinateV1] = []
             for catalog_table in table.tables("catalogs"):
                 try:
@@ -2192,6 +2193,286 @@ class ExternalDependency:
 
 
 @dataclass(frozen=True, slots=True)
+class ComposeMount:
+    """A typed mount, never an arbitrary Compose fragment.
+
+    Host material names are resolved only when the deployment is authorized.
+    Repository paths are confined to the staged asset root; named volumes are
+    persistence, not host paths. The target may also be a material name so a
+    reusable descriptor need not carry a credential filename.
+    """
+
+    kind: str
+    source: str
+    source_digest: str
+    source_material: str
+    target: str
+    target_material: str
+    read_only: bool
+    justification: str
+    approved_by: str
+
+    @classmethod
+    def parse(cls, table: _Table) -> ComposeMount:
+        kind = table.str_("kind")
+        source = table.str_("source", default="")
+        source_digest = table.str_("source_digest", default="")
+        source_material = table.str_(
+            "source_material", default="", pattern=_MATERIAL_NAME
+        )
+        target = table.str_("target", default="")
+        target_material = table.str_(
+            "target_material", default="", pattern=_MATERIAL_NAME
+        )
+        read_only = table.bool_("read_only", default=True)
+        justification = table.str_("justification", default="")
+        approved_by = table.str_("approved_by", default="")
+        table.done()
+        if kind not in ("named", "repository", "host_material"):
+            raise SpecError("mount kind must be named, repository or host_material")
+        if bool(target) == bool(target_material):
+            raise SpecError("mount needs exactly one target or target_material")
+        if target and (
+            not target.startswith("/")
+            or ".." in PurePosixPath(target).parts
+            or ":" in target
+            or any(character in target for character in ("\n", "\r"))
+        ):
+            raise SpecError("mount target must be a safe absolute container path")
+        if kind == "host_material":
+            if source or not source_material:
+                raise SpecError(
+                    "host_material mount needs source_material and no source"
+                )
+        elif source_material or not source:
+            raise SpecError(f"{kind} mount needs source and no source_material")
+        if kind == "named" and not _CODE.fullmatch(source):
+            raise SpecError("named mount source must be a volume code")
+        if kind == "repository":
+            _contained_relative_path(source, key="source", where=table.path)
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", source_digest):
+                raise SpecError("repository mount needs an exact source_digest")
+            if not read_only:
+                raise SpecError("repository mount must be read-only")
+        elif source_digest:
+            raise SpecError("source_digest applies only to repository mounts")
+        if kind != "named" and (len(justification) < 24 or not approved_by):
+            raise SpecError(
+                "host/repository bind mount needs a real justification and "
+                "named approver"
+            )
+        if kind == "named" and (justification or approved_by):
+            raise SpecError("named volume is not a host-bind exception")
+        return cls(
+            kind=kind,
+            source=source,
+            source_digest=source_digest,
+            source_material=source_material,
+            target=target,
+            target_material=target_material,
+            read_only=read_only,
+            justification=justification,
+            approved_by=approved_by,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ComposeNetwork:
+    code: str
+    internal: bool
+    loopback_default: bool
+
+    @classmethod
+    def parse(cls, table: _Table) -> ComposeNetwork:
+        code = table.str_("code", pattern=_CODE)
+        internal = table.bool_("internal", default=False)
+        loopback_default = table.bool_("loopback_default", default=False)
+        table.done()
+        if internal and loopback_default:
+            raise SpecError("an internal network has no host binding default")
+        return cls(code=code, internal=internal, loopback_default=loopback_default)
+
+
+@dataclass(frozen=True, slots=True)
+class ComposePlacement:
+    """Extra topology for an existing role, dependency, or migration service."""
+
+    code: str
+    networks: tuple[str, ...]
+    network_mode: str
+    profiles: tuple[str, ...]
+    mounts: tuple[ComposeMount, ...]
+
+    @classmethod
+    def parse(cls, table: _Table) -> ComposePlacement:
+        code = table.str_("code", pattern=_CODE)
+        networks = table.str_list("networks", default=(), pattern=_CODE)
+        network_mode = table.str_("network_mode", default="")
+        profiles = table.str_list("profiles", default=(), pattern=_CODE)
+        mounts = tuple(ComposeMount.parse(row) for row in table.tables("mounts"))
+        table.done()
+        if network_mode not in ("", "none"):
+            raise SpecError("network_mode may only be none")
+        if bool(networks) == bool(network_mode):
+            raise SpecError(
+                f"service {code!r} needs networks or network_mode, not both/neither"
+            )
+        _unique(networks, what="network", where=code)
+        _unique(profiles, what="profile", where=code)
+        return cls(
+            code=code,
+            networks=networks,
+            network_mode=network_mode,
+            profiles=profiles,
+            mounts=mounts,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ComposeJob:
+    """A profile-gated support job; never a parallel runtime role."""
+
+    code: str
+    image_source: str
+    command: tuple[str, ...]
+    entrypoint: tuple[str, ...]
+    placement: ComposePlacement
+    security: Security
+    materials: tuple[str, ...]
+    volumes: tuple[VolumeMount, ...]
+    depends_on: tuple[str, ...]
+    run_during_deploy: bool
+    timeout_seconds: int
+    verify_command: tuple[str, ...]
+    verify_stdout: str
+    root_justification: str
+    root_approved_by: str
+
+    @classmethod
+    def parse(cls, table: _Table) -> ComposeJob:
+        code = table.str_("code", pattern=_CODE)
+        image_source = table.str_("image_source")
+        command = table.str_list("command")
+        entrypoint = table.str_list("entrypoint", default=())
+        networks = table.str_list("networks", default=(), pattern=_CODE)
+        network_mode = table.str_("network_mode", default="")
+        profiles = table.str_list("profiles", default=(), pattern=_CODE)
+        mounts = tuple(ComposeMount.parse(row) for row in table.tables("mounts"))
+        security = Security.parse(
+            table.table("security", optional=True), where=table.path
+        )
+        materials = table.str_list("materials", default=(), pattern=_MATERIAL_NAME)
+        volumes = tuple(VolumeMount.parse(row) for row in table.tables("volumes"))
+        depends_on = table.str_list("depends_on", default=(), pattern=_CODE)
+        run_during_deploy = table.bool_("run_during_deploy", default=False)
+        timeout_seconds = table.int_(
+            "timeout_seconds", default=120, minimum=1, maximum=3600
+        )
+        verify_command = table.str_list("verify_command", default=())
+        verify_stdout = table.str_("verify_stdout", default="")
+        root_justification = table.str_("root_justification", default="")
+        root_approved_by = table.str_("root_approved_by", default="")
+        table.done()
+        if not image_source == "product" and not image_source.startswith("dependency:"):
+            raise SpecError("job image_source must be product or dependency:<code>")
+        if not command or not profiles:
+            raise SpecError("support jobs need a command and an explicit profile")
+        if run_during_deploy and (
+            image_source == "product" or not verify_command or not verify_stdout
+        ):
+            raise SpecError(
+                "deploy-time support jobs need a dependency image and an "
+                "explicit verification command and expected stdout"
+            )
+        if run_during_deploy and entrypoint:
+            raise SpecError(
+                "deploy-time support jobs cannot override the entrypoint: "
+                "the verification command must execute directly"
+            )
+        if security.user == "0:0" and (
+            len(root_justification) < 24 or not root_approved_by
+        ):
+            raise SpecError("root support job needs justification and named approver")
+        if security.user != "0:0" and (root_justification or root_approved_by):
+            raise SpecError("root exception without root support-job user")
+        if bool(networks) == bool(network_mode) or network_mode not in ("", "none"):
+            raise SpecError("support job needs networks or network_mode=none")
+        _unique(networks, what="network", where=code)
+        _unique(profiles, what="profile", where=code)
+        _unique(depends_on, what="dependency", where=code)
+        return cls(
+            code=code,
+            image_source=image_source,
+            command=command,
+            entrypoint=entrypoint,
+            placement=ComposePlacement(
+                code=code,
+                networks=networks,
+                network_mode=network_mode,
+                profiles=profiles,
+                mounts=mounts,
+            ),
+            security=security,
+            materials=materials,
+            volumes=volumes,
+            depends_on=depends_on,
+            run_during_deploy=run_during_deploy,
+            timeout_seconds=timeout_seconds,
+            verify_command=verify_command,
+            verify_stdout=verify_stdout,
+            root_justification=root_justification,
+            root_approved_by=root_approved_by,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ComposeTopology:
+    networks: tuple[ComposeNetwork, ...]
+    placements: tuple[ComposePlacement, ...]
+    jobs: tuple[ComposeJob, ...]
+    roles_depend_on_migrate: bool
+
+    @classmethod
+    def parse(cls, table: _Table | None) -> ComposeTopology | None:
+        if table is None:
+            return None
+        networks = tuple(ComposeNetwork.parse(row) for row in table.tables("networks"))
+        placements = tuple(
+            ComposePlacement.parse(row) for row in table.tables("placements")
+        )
+        jobs = tuple(ComposeJob.parse(row) for row in table.tables("jobs"))
+        roles_depend_on_migrate = table.bool_("roles_depend_on_migrate", default=True)
+        table.done()
+        if not networks or not placements:
+            raise SpecError("compose topology needs networks and placements")
+        _unique(tuple(item.code for item in networks), what="network", where=table.path)
+        _unique(
+            tuple(item.code for item in placements) + tuple(job.code for job in jobs),
+            what="compose service",
+            where=table.path,
+        )
+        valid_networks = {item.code for item in networks}
+        for item in (*placements, *(job.placement for job in jobs)):
+            unknown = set(item.networks) - valid_networks
+            if unknown:
+                raise SpecError(
+                    f"{item.code!r} names unknown networks {sorted(unknown)}"
+                )
+        return cls(
+            networks=networks,
+            placements=placements,
+            jobs=jobs,
+            roles_depend_on_migrate=roles_depend_on_migrate,
+        )
+
+    def placement(self, code: str) -> ComposePlacement:
+        for item in self.placements:
+            if item.code == code:
+                return item
+        raise SpecError(f"compose topology omits service {code!r}")
+
+
+@dataclass(frozen=True, slots=True)
 class ProductAlert:
     """A DOMAIN alert. Infrastructure alerts belong to the foundation catalogue.
 
@@ -2275,6 +2556,9 @@ class ProductDeploymentSpec:
     product_alerts: tuple[ProductAlert, ...]
     stability_window_seconds: int
     rollback_images_retained: int
+    compose_topology: ComposeTopology | None = field(
+        default=None, metadata={"descriptor_since": SCHEMA_V3}
+    )
     source: str = field(default="", compare=False)
     descriptor_schema: str = field(
         default=SCHEMA_V1, repr=False, metadata={"canonical_root_only": True}
@@ -2292,14 +2576,112 @@ class ProductDeploymentSpec:
                 "ProductDeploymentSpec.v1 cannot carry database catalogs; use v2"
             )
         if (
-            self.descriptor_schema == SCHEMA_V2
+            self.descriptor_schema in (SCHEMA_V2, SCHEMA_V3)
             and self.database is not None
             and not catalogs
         ):
             raise SpecError(
-                "ProductDeploymentSpec.v2 [database] requires at least one "
+                "ProductDeploymentSpec.v2/v3 [database] requires at least one "
                 "database catalog coordinate"
             )
+        if self.descriptor_schema == SCHEMA_V3 and self.compose_topology is None:
+            raise SpecError("ProductDeploymentSpec.v3 requires [compose_topology]")
+        if self.descriptor_schema != SCHEMA_V3 and self.compose_topology is not None:
+            raise SpecError("compose_topology requires ProductDeploymentSpec.v3")
+        if self.compose_topology is not None:
+            expected = {role.code for role in self.roles}
+            expected.update(
+                item.code for item in self.external_dependencies if item.managed
+            )
+            expected.add("migrate")
+            if self.telemetry.collector_image:
+                expected.add("otel-collector")
+            placed = {item.code for item in self.compose_topology.placements}
+            if expected != placed:
+                raise SpecError(
+                    "compose placements must exactly cover rendered services: "
+                    f"missing={sorted(expected - placed)}, "
+                    f"unknown={sorted(placed - expected)}"
+                )
+            if self.compose_topology.roles_depend_on_migrate:
+                raise SpecError(
+                    "v3 runtime roles may not depend on migrate: Compose up "
+                    "must not execute DDL outside the authorized plan step"
+                )
+            if not self.compose_topology.placement("migrate").profiles:
+                raise SpecError(
+                    "migrate must be profile-gated; a bare compose up must "
+                    "not run DDL"
+                )
+            for role in self.roles:
+                if role.security.host_network:
+                    raise SpecError(
+                        f"v3 role {role.code!r} uses host_network and cannot "
+                        "also claim a Compose network placement"
+                    )
+            available = expected | {job.code for job in self.compose_topology.jobs}
+            dependencies = {
+                item.code: item for item in self.external_dependencies if item.managed
+            }
+            for dependency in dependencies.values():
+                if not _DIGEST_REF.fullmatch(dependency.image):
+                    raise SpecError(
+                        f"managed dependency {dependency.code!r} needs an exact "
+                        "digest image in a v3 deployment"
+                    )
+            mounts = (
+                mount
+                for placement in self.compose_topology.placements
+                for mount in placement.mounts
+            )
+            job_mounts = (
+                mount
+                for job in self.compose_topology.jobs
+                for mount in job.placement.mounts
+            )
+            undeclared_materials = {
+                material
+                for mount in (*mounts, *job_mounts)
+                for material in (mount.source_material, mount.target_material)
+                if material and material not in self.runtime_materials
+            }
+            if undeclared_materials:
+                raise SpecError(
+                    "compose mounts use undeclared runtime materials "
+                    f"{sorted(undeclared_materials)}"
+                )
+            for job in self.compose_topology.jobs:
+                job_mount_materials = {
+                    material
+                    for mount in job.placement.mounts
+                    for material in (mount.source_material, mount.target_material)
+                    if material
+                }
+                if self.migration.owner_material in (
+                    set(job.materials) | job_mount_materials
+                ):
+                    raise SpecError(
+                        f"support job {job.code!r} may not hold the migration "
+                        "owner material; only the migration service may run DDL"
+                    )
+                if job.image_source.startswith("dependency:"):
+                    dependency_code = job.image_source.removeprefix("dependency:")
+                    if dependency_code not in dependencies:
+                        raise SpecError(
+                            f"job {job.code!r} names unmanaged/unknown image "
+                            f"dependency {dependency_code!r}"
+                        )
+                unknown = set(job.depends_on) - available
+                if unknown or job.code in job.depends_on:
+                    raise SpecError(
+                        f"job {job.code!r} has invalid dependencies "
+                        f"{sorted(unknown | ({job.code} & set(job.depends_on)))}"
+                    )
+                if set(job.depends_on) - dependencies.keys():
+                    raise SpecError(
+                        f"job {job.code!r} may depend only on health-checked "
+                        "managed dependencies"
+                    )
         for catalog in catalogs:
             identity = catalog.product_identity
             if identity is not None and identity.descriptor_product != self.product:
@@ -2397,6 +2779,9 @@ class ProductDeploymentSpec:
         database = DatabaseContract.parse(
             root.table("database", optional=True), descriptor_schema=str(declared)
         )
+        compose_topology = ComposeTopology.parse(
+            root.table("compose_topology", optional=True)
+        )
 
         telemetry = Telemetry.parse(
             root.table("telemetry", optional=True), where=source
@@ -2463,6 +2848,7 @@ class ProductDeploymentSpec:
             product_alerts=product_alerts,
             stability_window_seconds=stability,
             rollback_images_retained=retained,
+            compose_topology=compose_topology,
             source=source,
             descriptor_schema=str(declared),
         )

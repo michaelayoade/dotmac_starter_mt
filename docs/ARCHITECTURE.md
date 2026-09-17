@@ -634,6 +634,18 @@ The sidecar is a
 typed migration seam, not a v1 descriptor fact. `ProductDeploymentSpec.v2` is
 the explicit successor: when it declares `[database]`, it requires and
 digest-covers those coordinates while the v1 reader continues to refuse them.
+`ProductDeploymentSpec.v3` retains that v2 database binding and adds a
+digest-covered `compose_topology` for multi-network placement, typed mounts,
+and profile-gated support jobs. The renderer derives the Compose services
+from this field; the host provider validates descriptor-bound bind-source
+hashes before mutating,
+requires a byte-checked retained Compose asset, and requires an exact-output
+postcondition for a deploy-time support job. A V3 plan does not promise
+rollback from a previous image digest alone, even after an online migration;
+the provider also refuses switching without a separately retained, authorized
+old asset. This
+schema is an implementation surface, not evidence that a product has adopted
+it or retired its handwritten deployment asset.
 
 Foundation does not parse those bytes or redefine their grammar. A separately
 owned typed comparator and live observer must be invoked by an integrated

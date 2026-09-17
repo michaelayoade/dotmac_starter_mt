@@ -579,3 +579,50 @@ amendment records and does not implement.
 - It does not name a target for any environment.
 - It does not retire any product's existing deployment path. Retirement is a
   separate change per product, gated on proven parity.
+
+## Amendment — 2026-09-17: typed Compose topology for deployment assets
+
+Platform CP's production Compose topology requires separate front/back
+networks, profile-gated support jobs, named volumes, a repository-sourced
+initialization script, and a host-held signing-material mount. A generic
+single-network render silently drops those facts; a hand-written Compose file
+beside it would preserve a second deployment writer. `ProductDeploymentSpec.v3`
+therefore makes topology an explicit, digest-covered descriptor field. It
+requires a placement for every rendered runtime role, managed dependency,
+migration service and collector; it names networks and mounts through typed
+fields rather than accepting arbitrary Compose YAML. Host and repository bind
+mounts carry justification and a named approver. The host provider rechecks
+repository confinement, descriptor-bound repository file hashes, and
+host-material paths immediately before mutation. Repository-source binds are
+read-only; a container cannot rewrite the file whose digest was admitted.
+
+A deploy-time support job is profile-gated, uses an exact dependency image,
+has a bounded timeout, executes under the normal deployment lock, and has an
+explicit command and exact-output postcondition. Its output is not included
+in deployment failure records. A support job cannot receive the migration
+owner material through either its environment or a mount. Runtime roles may
+omit an implicit Compose
+dependency on `migrate` only when the migration service is profile-gated;
+Foundation's migration plan remains the DDL authority. V1 and V2 canonical
+documents and rendering are unchanged by an absent V3 field. V3 inherits V2's
+database-catalog binding, not V1's sidecar-only limitation.
+
+This amendment describes an implementation path, not proof of adoption.
+For V3, the host provider requires a retained Compose file and its recorded
+SHA-256, checks those bytes against the descriptor's deterministic render, and
+installs the retained bytes. Candidate operations use a short-lived private
+copy of those verified bytes, not the previous release's on-disk Compose file.
+This local path-and-digest pair is not itself a release receipt or proof that
+CI retained the bytes; the Platform CP release producer and Control binding
+must supply that provenance before adoption.
+It refuses to synthesize rollback configuration
+from the candidate descriptor; a previous-release asset and separate
+authorization are still needed for a proven rollback.
+The V3 plan itself therefore reports rollback as unavailable even when the
+migration is online and a previous image digest is known. The old image is
+insufficient to reconstruct the old topology; this refusal must be lifted only
+with a typed, release-receipted old asset and its own rollback authorization.
+Platform CP's accepted descriptor, source/render hashes, host asset,
+authorization binding, rehearsed rollback, and old-writer retirement require
+separate evidence before any full cutover can be claimed. No deployment or
+release is authorized by the V3 schema alone.
