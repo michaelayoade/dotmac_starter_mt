@@ -7011,7 +7011,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-publishing": frozenset(),
     "dotmac-records": frozenset(),
     "dotmac-referrals": frozenset(),
-    "dotmac-release-catalog": frozenset(),
+    "dotmac-release-catalog": frozenset({"rl_0002_db_catalog_attestations.py"}),
     "dotmac-reseller-management": frozenset(),
     "dotmac-service-orders": frozenset(),
     "dotmac-sites": frozenset(),

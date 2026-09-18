@@ -2842,14 +2842,16 @@ The ownership chain has no live-database authoring path:
   registry and explicit plane selections, derives module schema/owner/plane,
   composes explicit kernel/assembly/extension host fragments, and refuses any
   missing, extra or duplicate relation;
-- `dotmac-release-catalog` will associate a typed module snapshot or complete
-  product snapshot with exact artifact bytes as a distinct, singular
-  attestation — NOT YET, and deliberately not in the change that adds this
-  contract. That module is a released distribution whose declared
-  `dotmac-kernel` floor is proved both sufficient and necessary by
-  `scripts/module_floor_check.sh`, and a floor may only name a PUBLISHED
-  kernel. Its adoption follows the kernel release that carries
-  `product_database_catalog`, together with the floor bump; and
+- `dotmac-release-catalog` provides distinct, singular module and
+  product database-catalogue attestation writers. They parse held canonical
+  bytes, check the expected digest and snapshot subject/version against the
+  release artifact, and persist a digest/URI pointer without fetching the URI.
+  This does not itself prove that artifact bytes produced those tables or that
+  a product assembly is complete; the release producer must independently
+  retain artifact provenance and construct the product snapshot with
+  `from_assembly`. The module's declared kernel floor names the earliest
+  published kernel with
+  `product_database_catalog`; `scripts/module_floor_check.sh` proves it; and
 - `dotmac_kernel.database_catalog_comparator` owns the read-only PostgreSQL
   observation and pure, digest-bound verifier. Its stable IDs are
   `dotmac.postgresql-tables-columns-observation/v1` and

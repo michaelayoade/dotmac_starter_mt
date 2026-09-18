@@ -154,8 +154,8 @@ class TestVocabularies:
             "offline_bundle",
         }
 
-    def test_attestation_kinds_answer_four_distinct_questions(self) -> None:
-        """Inside / built-how / vouched-by / product-declares.
+    def test_attestation_kinds_answer_six_distinct_questions(self) -> None:
+        """Inside / built-how / vouched-by / product-declares / two DB scopes.
 
         Merging any two into "provenance" is what lets an artifact look
         attested for a claim no document actually makes.
@@ -165,6 +165,8 @@ class TestVocabularies:
             "provenance",
             "signature",
             "product_manifest",
+            "module_database_catalog",
+            "product_database_catalog",
         }
 
     def test_members_are_plain_strings_for_a_text_column(self) -> None:

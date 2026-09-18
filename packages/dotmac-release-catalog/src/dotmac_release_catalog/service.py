@@ -33,6 +33,10 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
+from dotmac_kernel.product_database_catalog import (
+    ModuleDatabaseCatalogSnapshot,
+    ProductDatabaseCatalogSnapshot,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -49,6 +53,18 @@ from dotmac_release_catalog.vocabulary import ArtifactKind, AttestationKind
 
 class UnknownArtifactError(LookupError):
     """No artifact with that id, so there is nothing to attest."""
+
+
+class DatabaseCatalogArtifactMismatchError(ValueError):
+    """A verified database catalogue describes another release artifact."""
+
+
+_DATABASE_CATALOG_KINDS = frozenset(
+    {
+        AttestationKind.MODULE_DATABASE_CATALOG,
+        AttestationKind.PRODUCT_DATABASE_CATALOG,
+    }
+)
 
 
 def publish_artifact(
@@ -112,6 +128,11 @@ def attest_artifact(
     `uri` is stored and never fetched: ADR-0009's rule that a held reference is
     not a network call applies here too.
     """
+    kind = AttestationKind(attestation_kind)
+    if kind in _DATABASE_CATALOG_KINDS:
+        raise ValueError(
+            f"{kind.value} requires its typed database-catalogue attestation writer"
+        )
     if db.get(ReleaseArtifact, artifact_id) is None:
         raise UnknownArtifactError(
             f"no artifact {artifact_id}; attest only a published artifact"
@@ -120,9 +141,107 @@ def attest_artifact(
     parsed = digest if isinstance(digest, Digest) else Digest.parse(digest)
     attestation = ArtifactAttestation(
         artifact_id=artifact_id,
-        attestation_kind=AttestationKind(attestation_kind).value,
+        attestation_kind=kind.value,
         uri=uri,
         digest=str(parsed),
+    )
+    db.add(attestation)
+    db.flush()
+    return attestation
+
+
+def attest_module_database_catalog(
+    db: Session,
+    *,
+    artifact_id: UUID,
+    snapshot_bytes: bytes,
+    expected_digest: str,
+    uri: str,
+) -> ArtifactAttestation:
+    """Attest a held, canonical module database-catalogue snapshot.
+
+    The Kernel parser checks the caller's expected digest against the exact
+    held bytes before accepting the canonical document. This function never
+    dereferences ``uri`` and never treats a supplied digest alone as proof.
+    It records a verified snapshot-to-artifact association; it does not prove
+    that a product assembly is complete or that artifact bytes produced the
+    declared schema. Those require independently held provenance and the
+    assembly's ``from_assembly`` completeness proof downstream.
+    """
+    snapshot = ModuleDatabaseCatalogSnapshot.from_json_bytes(
+        snapshot_bytes, expected_digest=expected_digest
+    )
+    return _attest_database_catalog(
+        db,
+        artifact_id=artifact_id,
+        attestation_kind=AttestationKind.MODULE_DATABASE_CATALOG,
+        subject_code=snapshot.distribution_name,
+        subject_version=snapshot.distribution_version,
+        digest=snapshot.digest,
+        uri=uri,
+    )
+
+
+def attest_product_database_catalog(
+    db: Session,
+    *,
+    artifact_id: UUID,
+    snapshot_bytes: bytes,
+    expected_digest: str,
+    uri: str,
+) -> ArtifactAttestation:
+    """Attest a held, canonical product database-catalogue snapshot.
+
+    The parser proves self-consistency and the supplied digest for these exact
+    bytes, not completeness against a control-plane assembly or derivation
+    from artifact bytes. Those are independent downstream release proofs.
+    """
+    snapshot = ProductDatabaseCatalogSnapshot.from_json_bytes(
+        snapshot_bytes, expected_digest=expected_digest
+    )
+    return _attest_database_catalog(
+        db,
+        artifact_id=artifact_id,
+        attestation_kind=AttestationKind.PRODUCT_DATABASE_CATALOG,
+        subject_code=snapshot.product_code,
+        subject_version=snapshot.product_version,
+        digest=snapshot.digest,
+        uri=uri,
+    )
+
+
+def _attest_database_catalog(
+    db: Session,
+    *,
+    artifact_id: UUID,
+    attestation_kind: AttestationKind,
+    subject_code: str,
+    subject_version: str,
+    digest: str,
+    uri: str,
+) -> ArtifactAttestation:
+    """Persist a parser-verified database catalogue and its artifact binding.
+
+    The retained canonical bytes remain the authority for subject, version and
+    scope. The catalogue records their verified digest rather than duplicating
+    snapshot fields that could drift from those bytes.
+    """
+    artifact = db.get(ReleaseArtifact, artifact_id)
+    if artifact is None:
+        raise UnknownArtifactError(
+            f"no artifact {artifact_id}; attest only a published artifact"
+        )
+    if (artifact.product_code, artifact.version) != (subject_code, subject_version):
+        raise DatabaseCatalogArtifactMismatchError(
+            "database catalogue subject does not identify the release artifact: "
+            f"catalogue=({subject_code!r}, {subject_version!r}), "
+            f"artifact=({artifact.product_code!r}, {artifact.version!r})"
+        )
+    attestation = ArtifactAttestation(
+        artifact_id=artifact_id,
+        attestation_kind=attestation_kind.value,
+        uri=uri,
+        digest=digest,
     )
     db.add(attestation)
     db.flush()
@@ -376,9 +495,12 @@ def preview_publication(
 
 
 __all__ = [
+    "DatabaseCatalogArtifactMismatchError",
     "UnknownArtifactError",
     "artifact_attestations",
     "attest_artifact",
+    "attest_module_database_catalog",
+    "attest_product_database_catalog",
     "get_artifact",
     "list_artifacts",
     "preview_publication",
