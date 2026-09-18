@@ -1761,7 +1761,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a56"
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [package.source]

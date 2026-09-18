@@ -23,20 +23,13 @@ python = ">=3.11,<3.14"
 # `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
 # kernel; never on an assembly, and never on another module.
 #
-# The floor is the release that allocates `mod_rel` in
-# `MIGRATION_OWNER_LEDGER`. An earlier kernel cannot register this module at
-# all — `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` —
-# so this is a hard floor rather than a preference.
-#
-# 0.1.0a44 is the kernel version bumped IN THIS CHANGE, which is what carries
-# the allocation. It is a real floor, not a placeholder: no earlier kernel can
-# contain the row.
-#
-# a44, not a42: a42 and a43 are claimed by the upstream train (Audit R1 and
-# Application Directory / Workspace). Two branches minting the same kernel
-# version collide in the changelog and leave consumers unable to say which a42
-# they pinned, so the vendor modules renumber rather than the foundations.
-dotmac-kernel = ">=0.1.0a56"
+# The earlier allocation floor for `mod_rel` is superseded: 0.1.0a100 is the
+# published Kernel release that first carries
+# `product_database_catalog`. The two typed database-catalogue attestation
+# writers parse held canonical bytes through that contract, so an earlier floor
+# would let this distribution install against an API it imports but does not
+# have. a99 deliberately does not provide the contract.
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 # No `alembic` runtime dependency: unlike `dotmac_ticketing.linking`, nothing

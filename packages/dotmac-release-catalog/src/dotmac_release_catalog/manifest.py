@@ -24,11 +24,10 @@ This module is ATOMIC, and says so by saying nothing. `supported_plane_sets`
 is deliberately OMITTED rather than written as an explicit `()`: absence already
 means atomic, and the generated catalogue renders it that way.
 
-Omitting it is not only tidier — it is the honest compatibility floor. The
-keyword is a constructor field that only exists from kernel `0.1.0a61`, so
-writing it would force this module's floor up to `a61` for a value the default
-already supplies. Omitted, the floor stays at `0.1.0a56`, the earliest published
-kernel that has `platform_tables` at all — which is the real requirement.
+Omitting it is not only tidier: this atomic module needs no plane-selection
+keyword. The distribution floor is now `0.1.0a100` because the database-
+catalogue attestation writers consume Kernel's typed snapshot parsers. That
+floor is independent of this manifest's plane-selection default.
 
 A singleton `((ModulePlane.PLATFORM,),)` would not make the module selectable
 either: the current implementation treats one combination as atomic and rejects

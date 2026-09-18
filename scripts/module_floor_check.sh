@@ -42,7 +42,7 @@
 # The pair used to be two constants shared by every listed module, which worked
 # exactly as long as every listed module had the same floor. The moment
 # `dotmac-entitlement-allocation` moved to a66 for `idempotency_ledger.v1` while
-# `dotmac-release-catalog` stayed at a56, the constants described neither
+# `dotmac-release-catalog` then stayed at a56, the constants described neither
 # faithfully — and the failure was the good kind only by luck: the script
 # compares the declaration to the constant and refused. Had it defaulted to the
 # constant instead, it would have kept proving a real claim about the wrong

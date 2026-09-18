@@ -255,24 +255,12 @@ CAPABILITY_RAISED_FLOORS = {
     # Ticketing passed through a56 (`requires`) and a60 (`tenant_requires`) on
     # the way here. The floor is always the highest capability the module
     # actually consumes, not the first one that moved it.
-    # ADR-0023: release-catalog declares `platform_tables` and owns no tenant
-    # tables. The field was INTRODUCED in a53, but a53 was never published —
-    # the tags jump a50 to a56 — so a56 is the earliest kernel a consumer can
-    # actually install with it. A floor naming an unpublished version is
-    # unresolvable, which is why "earliest PUBLISHED" is the operative test,
-    # not "earliest".
-    #
-    # It declares no `requires` and calls no prerequisite helper, so a56 here
-    # is set by `platform_tables` alone and not by the a56 prerequisite
-    # contract that raised the modules above. `dotmac-entitlement-allocation`
-    # sat beside it on exactly that reasoning until `0.1.0a5`; see its own
-    # entry below for why it no longer does.
-    #
-    # `supported_plane_sets` is deliberately OMITTED rather than written as an
-    # explicit `()`. Writing it would consume an a61 constructor field for a
-    # value the default already supplies, raising the floor to a61 for
-    # nothing. Absence already means atomic.
-    "dotmac-release-catalog": ("0.1.0a56", "0.1.0a44"),
+    # Release Catalog's typed module/product database-catalogue attestation
+    # writers import the snapshot parsers first published in Kernel a100.
+    # The older a56 platform_tables floor remains historically true, but it
+    # is no longer sufficient for this distribution's runtime API imports.
+    # supported_plane_sets remains omitted because the module is atomic.
+    "dotmac-release-catalog": ("0.1.0a100", "0.1.0a44"),
     "dotmac-ticketing": ("0.1.0a61", "0.1.0a39"),
     # a61 (`supported_plane_sets`) held until a67 published `outbox_relay.v1`,
     # which this module's `ap_0002` verifies and its manifest declares. The
