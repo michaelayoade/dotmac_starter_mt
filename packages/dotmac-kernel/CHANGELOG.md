@@ -6,6 +6,53 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a104 — Release inventory
+
+This section inventories the source intended to ship first in `0.1.0a104`.
+Its presence is not allocation, publication or tag evidence — see the
+`0.1.0a103` section above this one for that distinction stated in full.
+
+### Added
+
+- **Sealed database-runtime binding.** A product can now supply, and
+  optionally require, its own `DatabaseRuntime` instead of always resolving
+  the reference assembly's. `bind_database_runtime` (idempotent on an
+  identical runtime or a strengthened policy; refuses a different runtime or
+  a weakened one) and `resolve_database_runtime` (the sole reader) replace
+  the free install/get/clear/set-required mutators. Every kernel-owned
+  consumer — `deps.get_db`/`get_platform_db`, the tenant middleware's
+  resolver session, `app_factory`'s startup checks, `machine_auth` — reads
+  through the one sealed binding; no public path clears or downgrades it
+  (#677).
+
+- **Typed per-transaction isolation.** `readonly_session()` runs REPEATABLE
+  READ with `postgresql_readonly=True`, so a write inside the block is
+  refused by PostgreSQL itself (error 25006), not merely by convention.
+  `serializable_session()` runs SERIALIZABLE. Both apply their isolation mode
+  before the transaction begins — ahead of every `after_begin` listener,
+  Sub's tenant-GUC hook among them — closing a gap where SQLAlchemy 2.0.51
+  silently discards execution options applied to an already-transacted
+  session instead of raising (Kernel slice 3, #681).
+
+- **Declared generated build asset.** Every published wheel has always
+  carried a sixteenth static file, `css/main.css` (the compiled Tailwind
+  stylesheet), that no tag accounts for: it is gitignored as a build
+  artifact and a function of the whole repository's Tailwind input at build
+  time, not of the kernel package alone, so two releases with byte-identical
+  kernel sources can legitimately ship different CSS. The build now proves
+  and refuses rather than silently shipping it: every git-tracked static
+  file must survive the build, the generated delta must be exactly
+  `{css/main.css}`, and the complete post-build tree must equal the wheel and
+  the sdist byte-for-byte in both directions, including symlink/hardlink
+  member checks.
+
+### Fixed
+
+- `product_database_catalog`/`database_catalog_comparator` no longer treat a
+  physical PostgreSQL column-ordinal gap left behind by a `DROP COLUMN` as
+  drift. Ordinal gaps are documented physical semantics of the catalogue now,
+  not a false-positive mismatch (#715).
+
 ## 0.1.0a103 — Release inventory
 
 This section inventories the source intended to ship first in `0.1.0a103`.
