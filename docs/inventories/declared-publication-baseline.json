@@ -138,7 +138,7 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a103+dev",
+      "declared": "0.1.0a104",
       "reason": "DEVELOPMENT MARKER OVER A PUBLISHED VERSION, NOT A PENDING RELEASE CLAIM. 0.1.0a103 IS published and tagged (dotmac-kernel-v0.1.0a103); main has since changed kernel src/ four times -- a sealed database-runtime binding seam (#677), typed per-transaction read-only/serializable isolation set before the transaction begins (#681), a build-time declaration of the one legitimately-generated wheel asset no tag can account for, and a fix letting database catalogues tolerate a physical PostgreSQL column-ordinal gap (#715) -- so continuing to declare bare 0.1.0a103 would make one released version name two different sets of importable bytes -- the exact defect a102 existed to repair. The local segment allocates no successor, cannot be published to any index, and needs no release authorization on its own. This row clears only when a real successor version is allocated and tagged at release time, a decision Michael makes separately from this change; do not remove the marker merely to quiet this sweep. `packages/dotmac-kernel/CHANGELOG.md`'s `0.1.0a104` section inventories this same set of changes ahead of that allocation.",
       "state": "declared-unpublished"
     },
