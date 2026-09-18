@@ -2820,6 +2820,12 @@ kind, persistence plane, ordered columns, PostgreSQL type identity and
 modifier, nullability, default/identity/generated state, and collation. Its
 digest is the digest of those exact bytes.
 
+Column ordinals are PostgreSQL `pg_attribute.attnum`, not a renumbered display
+position. Dropping a column leaves a gap in later ordinals; declarations and
+observations retain that gap and require only positive, unique, strictly
+increasing ordinals. Renumbering surviving columns would conceal physical
+drift and prevent a catalogue from describing an existing product lineage.
+
 Schema v1 says `scope=tables_and_columns`. It makes no claim about constraints,
 indexes, triggers, privileges or policies; those require an explicit later
 contract rather than interpreting absence as agreement.
