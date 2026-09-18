@@ -219,6 +219,25 @@ jobs:
       - run: poetry install
       - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term
 
+  # Slice 4's compatibility gate runs through Starter's own trusted reusable
+  # workflow, pinned to the protected-main commit that introduced its
+  # reviewed bytes.  Calling it at JOB level is the trust boundary: none of
+  # this candidate branch's steps, PATH changes, Git wrappers or environment
+  # setup run before the verifier.  The workflow owns its four immutable
+  # checkouts (this revision plus the three public product revisions at the
+  # exact commits the runner pins), its Python floor, and the SHA-pinned
+  # runner action -- so nothing here may add a step, and an inline `run:`
+  # cannot reach the gate.  The products are public: no credential, secret or
+  # GitHub App is referenced or needed.
+  #
+  # NOTE: `tests/architecture/test_compatibility_gate.py`'s real-coordinate
+  # assertion SKIPS when COMPAT_GATE_CLONE_* is unset, so it now skips inside
+  # the `unit` job.  That is intentional only because the authority moved
+  # here; the pytest-level skip is not evidence of anything and must never be
+  # read as one.
+  compatibility-gate:
+    uses: michaelayoade/dotmac_starter_mt/.github/workflows/composition-compatibility.yml@883c0928c3fe75397b59cc3f72c427bb9f3b27aa
+
   integration:
     runs-on: ubuntu-latest
     # Single source of truth for the disposable CI Postgres. `make test-db-up`
