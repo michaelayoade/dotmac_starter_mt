@@ -383,7 +383,7 @@ class TestDatabaseCatalogueAttestations:
     def test_product_writer_refuses_module_scope_bytes(self, db: Session) -> None:
         artifact = _publish(db)
         snapshot = _module_catalogue_bytes()
-        with pytest.raises(ProductDatabaseCatalogError, match="unsupported"):
+        with pytest.raises(ProductDatabaseCatalogError, match="fields differ"):
             attest_product_database_catalog(
                 db,
                 artifact_id=artifact.id,
@@ -395,7 +395,7 @@ class TestDatabaseCatalogueAttestations:
     def test_module_writer_refuses_product_scope_bytes(self, db: Session) -> None:
         artifact = _publish(db)
         snapshot = _product_catalogue_bytes()
-        with pytest.raises(ProductDatabaseCatalogError, match="unsupported"):
+        with pytest.raises(ProductDatabaseCatalogError, match="fields differ"):
             attest_module_database_catalog(
                 db,
                 artifact_id=artifact.id,
