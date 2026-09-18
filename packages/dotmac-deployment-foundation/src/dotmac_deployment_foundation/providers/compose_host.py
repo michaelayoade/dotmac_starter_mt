@@ -52,24 +52,35 @@ import time
 import urllib.error
 import urllib.request
 import zlib
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import IO
 
 from ..deployment_evidence import StepStanding
 from ..engine.run import BackupResult, CommandResult, RoleObservation
-from ..errors import PreconditionFailed, StepFailed
+from ..errors import PreconditionFailed, SpecError, StepFailed
 from ..evidence import SignedEvidenceEnvelope
 from ..execution_plan_v2 import PostgresPrincipalCredentialBootstrapV1
 from ..recovery import refuse_identity_stripping
-from ..render.compose import render_compose
+from ..render.compose import render_compose, render_compose_digest
 from ..render.nginx import _ingress_roles as _nginx_ingress_roles
 from ..render.nginx import handoff_contract_pattern, render_nginx
 from ..spec import BackupDataset, ProductDeploymentSpec
 from ..toolchain import DEFAULT_TOOLS, require_absolute_tool
 
-__all__ = ["ComposeHostEffects", "NginxInstaller"]
+__all__ = ["ComposeHostEffects", "NginxInstaller", "RetainedComposeAsset"]
+
+
+@dataclass(frozen=True, slots=True)
+class RetainedComposeAsset:
+    """A supplied Compose file and digest; not proof of release provenance."""
+
+    path: Path
+    digest: str
+
 
 Runner = Callable[..., CommandResult]
 PopenFactory = Callable[
@@ -259,6 +270,7 @@ class ComposeHostEffects:
         app_root: str = "/app",
         image_env_var: str = "APP_IMAGE",
         manage_compose_file: bool = True,
+        retained_compose_assets: Mapping[str, RetainedComposeAsset] | None = None,
         candidate_port_base: int = 18000,
         candidate_container_prefix: str | None = None,
         db_service: str = "db",
@@ -316,6 +328,20 @@ class ComposeHostEffects:
         # that reads `${APP_IMAGE}` and this facility must not overwrite it —
         # the shape Sub needs while its real engine is still the live path.
         self._manage_compose_file = manage_compose_file
+        if spec.compose_topology is not None and not manage_compose_file:
+            raise SpecError(
+                "v3 topology requires a Foundation-managed Compose asset; "
+                "a handwritten host file would be a second deployment writer"
+            )
+        self._retained_compose_assets = dict(retained_compose_assets or {})
+        if (
+            spec.compose_topology is not None
+            and spec.image not in self._retained_compose_assets
+        ):
+            raise SpecError(
+                "v3 deployment needs a retained Compose asset for its exact "
+                "candidate image before the host provider can execute"
+            )
         self._candidate_port_base = candidate_port_base
         self._candidate_container_prefix = (
             candidate_container_prefix
@@ -384,6 +410,24 @@ class ComposeHostEffects:
         env: Mapping[str, str] | None = None,
         capture: bool = True,
     ) -> CommandResult:
+        if (
+            self._spec.compose_topology is not None
+            and len(argv) >= 2
+            and argv[0] == self._docker_bin
+            and argv[1] == "compose"
+        ):
+            self._validate_v3_mounts()
+            bound = dict(env) if env is not None else dict(os.environ)
+            file_values = self._env_file_values()
+            for placement in (
+                *self._spec.compose_topology.placements,
+                *(job.placement for job in self._spec.compose_topology.jobs),
+            ):
+                for mount in placement.mounts:
+                    for name in (mount.source_material, mount.target_material):
+                        if name:
+                            bound[name] = file_values[name]
+            env = bound
         return self._runner(
             list(argv), timeout=timeout_seconds, env=env, capture=capture
         )
@@ -402,6 +446,20 @@ class ComposeHostEffects:
             "-f",
             str(self._compose_file),
         ]
+
+    @contextmanager
+    def _candidate_compose_argv(self, image: str) -> Iterator[list[str]]:
+        if self._spec.compose_topology is None:
+            yield self._compose_argv
+            return
+        _retained_file, content = self._retained_v3_compose(image)
+        with tempfile.TemporaryDirectory(
+            prefix=".foundation-candidate-", dir=self._deploy_dir
+        ) as directory:
+            candidate_file = Path(directory) / "docker-compose.yml"
+            candidate_file.write_text(content, encoding="utf-8")
+            candidate_file.chmod(0o400)
+            yield [*self._compose_argv[:-1], str(candidate_file)]
 
     # ── materials: names resolve, values never leave this file ─────────────
 
@@ -1042,35 +1100,150 @@ class ComposeHostEffects:
         runs the same argv inside a one-off container of the candidate image,
         on the compose project's network, with the migration owner material.
         """
-        argv = [
-            *self._compose_argv,
-            "run",
-            "--rm",
-            "--no-deps",
-            self._migration_service,
-            *command,
-        ]
         env = self._candidate_image_env(materials, image=image)
-        return self._run(argv, timeout_seconds=timeout_seconds, env=env)
+        with self._candidate_compose_argv(image) as compose:
+            argv = [
+                *compose,
+                "run",
+                "--rm",
+                "--no-deps",
+                self._migration_service,
+                *command,
+            ]
+            return self._run(argv, timeout_seconds=timeout_seconds, env=env)
+
+    def run_support_job(
+        self, code: str, *, timeout_seconds: int, image: str
+    ) -> CommandResult:
+        """Run a v3 support job and postcondition from retained candidate bytes.
+
+        The on-disk Compose file still names the previous release until switch.
+        An exact retained asset supplies the candidate's image and topology
+        without rewriting accepted host state or building on the host.
+        """
+        topology = self._spec.compose_topology
+        if topology is None or not self._manage_compose_file:
+            raise PreconditionFailed(
+                "support jobs require a v3 Foundation-managed Compose asset"
+            )
+        job = next((item for item in topology.jobs if item.code == code), None)
+        if job is None or not job.run_during_deploy:
+            raise PreconditionFailed(f"support job {code!r} is not deploy-authorized")
+        self._validate_v3_mounts()
+        materials = self._materials_env(job.materials)
+        with self._candidate_compose_argv(image) as compose:
+            argv = [*compose, "run", "--rm", "--no-deps", code]
+            result = self._run(argv, timeout_seconds=timeout_seconds, env=materials)
+            if not result.ok:
+                return CommandResult(result.exit_code, "", "support job failed")
+            verify = [
+                *compose,
+                "run",
+                "--rm",
+                "--no-deps",
+                code,
+                *job.verify_command,
+            ]
+            checked = self._run(verify, timeout_seconds=timeout_seconds, env=materials)
+            if not checked.ok:
+                return CommandResult(
+                    checked.exit_code, "", "support postcondition failed"
+                )
+            if checked.stdout.strip() != job.verify_stdout:
+                return CommandResult(1, "", "support postcondition output mismatch")
+            return CommandResult(0, "", "")
+
+    def _retained_v3_compose(self, image: str) -> tuple[Path, str]:
+        """Read retained bytes; never generate a V3 deployment asset on-host."""
+        if image != self._spec.image:
+            raise PreconditionFailed(
+                "v3 rollback needs a separately authorized, retained old "
+                "descriptor and Compose asset; current topology cannot mint it"
+            )
+        asset = self._retained_compose_assets.get(image)
+        if asset is None or not asset.path.is_absolute() or asset.path.is_symlink():
+            raise PreconditionFailed("v3 retained Compose asset is absent or unsafe")
+        try:
+            content = asset.path.read_bytes()
+            decoded = content.decode("utf-8")
+        except (OSError, UnicodeError) as error:
+            raise PreconditionFailed(
+                "v3 retained Compose asset is unreadable"
+            ) from error
+        observed = "sha256:" + hashlib.sha256(content).hexdigest()
+        if observed != asset.digest or observed != render_compose_digest(self._spec):
+            raise PreconditionFailed(
+                "v3 retained Compose bytes differ from supplied digest or "
+                "descriptor render"
+            )
+        return asset.path, decoded
+
+    def _validate_v3_mounts(self) -> None:
+        """Refuse escaping repository binds and malformed private path bindings."""
+        topology = self._spec.compose_topology
+        if topology is None:
+            return
+        root = self._deploy_dir.resolve()
+        placements = (
+            *topology.placements,
+            *(job.placement for job in topology.jobs),
+        )
+        for placement in placements:
+            for mount in placement.mounts:
+                if mount.kind == "repository":
+                    source = (root / mount.source).resolve()
+                    if not source.is_relative_to(root) or not source.is_file():
+                        raise PreconditionFailed(
+                            f"repository mount in {placement.code!r} escapes or "
+                            "is absent from the staged deployment root"
+                        )
+                    observed = (
+                        "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest()
+                    )
+                    if observed != mount.source_digest:
+                        raise PreconditionFailed(
+                            f"repository mount in {placement.code!r} differs "
+                            "from its descriptor-bound source digest"
+                        )
+                for material in (mount.source_material, mount.target_material):
+                    if not material:
+                        continue
+                    value = self._env_file_values().get(material, "")
+                    path = PurePosixPath(value)
+                    if (
+                        not path.is_absolute()
+                        or ".." in path.parts
+                        or ":" in value
+                        or "\n" in value
+                        or "\r" in value
+                    ):
+                        raise PreconditionFailed(
+                            f"{material} is not a safe absolute mount path"
+                        )
+                    if material == mount.source_material and not Path(value).is_file():
+                        raise PreconditionFailed(
+                            f"{material} does not name a regular host file"
+                        )
 
     def migration_heads(self, *, image: str) -> Sequence[str]:
-        argv = [
-            *self._compose_argv,
-            "run",
-            "--rm",
-            "--no-deps",
-            self._migration_service,
-            *self._migration_heads_command,
-        ]
-        result = self._run(
-            argv,
-            timeout_seconds=self._migration_heads_timeout_seconds,
-            # The heads READ runs in the candidate image too: the previous
-            # image's alembic may not know the new lineage's branch labels.
-            env=self._candidate_image_env(
-                (self._spec.migration.owner_material,), image=image
-            ),
-        )
+        with self._candidate_compose_argv(image) as compose:
+            argv = [
+                *compose,
+                "run",
+                "--rm",
+                "--no-deps",
+                self._migration_service,
+                *self._migration_heads_command,
+            ]
+            result = self._run(
+                argv,
+                timeout_seconds=self._migration_heads_timeout_seconds,
+                # The heads READ runs in the candidate image too: the previous
+                # image's alembic may not know the new lineage's branch labels.
+                env=self._candidate_image_env(
+                    (self._spec.migration.owner_material,), image=image
+                ),
+            )
         if not result.ok:
             raise StepFailed(
                 "verify_heads",
@@ -1130,27 +1303,25 @@ class ComposeHostEffects:
             [self._docker_bin, "rm", "-f", name],
             timeout_seconds=self._inspect_timeout_seconds,
         )
-        argv = [
-            *self._compose_argv,
-            "run",
-            "--no-deps",
-            "-d",
-            "--name",
-            name,
-            "-p",
-            f"{self._loopback}:{port}:{container_port}",
-            role,
-        ]
-        result = self._run(
-            argv,
-            timeout_seconds=timeout_seconds,
-            # The candidate starts on the CANDIDATE image, injected for this
-            # one invocation — before this, it started from the on-disk
-            # compose file, which still pins the previous image until `switch`
-            # re-renders it, and only the engine's post-hoc digest comparison
-            # stood between that and gating traffic onto the old release.
-            env=self._candidate_image_env(role_spec.materials, image=image),
-        )
+        with self._candidate_compose_argv(image) as compose:
+            argv = [
+                *compose,
+                "run",
+                "--no-deps",
+                "-d",
+                "--name",
+                name,
+                "-p",
+                f"{self._loopback}:{port}:{container_port}",
+                role,
+            ]
+            result = self._run(
+                argv,
+                timeout_seconds=timeout_seconds,
+                # Candidate image and topology come from retained V3 bytes,
+                # not the still-running release's on-disk Compose file.
+                env=self._candidate_image_env(role_spec.materials, image=image),
+            )
         if not result.ok:
             raise StepFailed(
                 "start_candidate",
@@ -1198,13 +1369,17 @@ class ComposeHostEffects:
         (`Executor._do_switch` picks which), and this method has no opinion
         about which — it writes whatever it is given.
 
-        With `manage_compose_file` (the default), the compose file is
-        RE-RENDERED for the target image before the recreate. Without it, only
-        the env file is repointed — which is correct for a host whose
-        hand-written compose file interpolates `${APP_IMAGE}` (Sub's
-        convention during a shadow or parity phase, where this facility must
-        not overwrite the file that is actually protecting production).
+        With `manage_compose_file` (the default), v1/v2 re-render the target
+        image while v3 installs byte-verified retained candidate bytes and
+        refuses an unbound rollback. Without it, only the env file is
+        repointed for the legacy v1/v2 shadow path; v3 refuses that mode.
         """
+        self._validate_v3_mounts()
+        retained_text = (
+            self._retained_v3_compose(image)[1]
+            if self._spec.compose_topology is not None
+            else None
+        )
         self._write_env_value(self._image_env_var, image)
         if self._manage_compose_file:
             # RE-RENDER, do not just repoint an environment variable. This
@@ -1221,7 +1396,10 @@ class ComposeHostEffects:
             # `dotmac-deploy drift` should say so rather than be talked out of
             # it here.
             self._write_atomic(
-                self._compose_file, render_compose(self._spec, image=image)
+                self._compose_file,
+                retained_text
+                if retained_text is not None
+                else render_compose(self._spec, image=image),
             )
         services = list(self._spec.role_codes)
         argv = [*self._compose_argv, "up", "-d", "--force-recreate", *services]

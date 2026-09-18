@@ -32,7 +32,7 @@ from .database_catalog import (
 )
 from .digest import Digest
 from .errors import PreconditionFailed, SpecError
-from .spec import SCHEMA_V2, ProductDeploymentSpec
+from .spec import SCHEMA_V2, SCHEMA_V3, ProductDeploymentSpec
 
 __all__ = [
     "DATABASE_DESCRIPTOR_CATALOG_BINDING_SCHEMA",
@@ -174,9 +174,12 @@ class DatabaseDescriptorCatalogBindingV1:
     ) -> DatabaseDescriptorCatalogBindingV1:
         if spec.database is None:
             raise SpecError("a database catalog binding requires [database]")
-        if spec.descriptor_schema == SCHEMA_V2 and catalogs != spec.database.catalogs:
+        if (
+            spec.descriptor_schema in (SCHEMA_V2, SCHEMA_V3)
+            and catalogs != spec.database.catalogs
+        ):
             raise SpecError(
-                "a v2 catalog binding must use exactly the coordinates embedded "
+                "a v2/v3 catalog binding must use exactly the coordinates embedded "
                 "in the descriptor"
             )
         from .render.compose import configuration_digest

@@ -111,6 +111,9 @@ from .. import ingress
 from ..document import build_canonical_document
 from ..errors import SpecError
 from ..spec import (
+    ComposeJob,
+    ComposeMount,
+    ComposePlacement,
     ExternalDependency,
     PortPublication,
     ProductDeploymentSpec,
@@ -249,6 +252,8 @@ _KIND_RELEASE = "release"
 _KIND_MIGRATION = "migration"
 _KIND_DEPENDENCY = "dependency"
 _KIND_TELEMETRY = "telemetry"
+_KIND_SUPPORT_RELEASE = "support-release"
+_KIND_SUPPORT_DEPENDENCY = "support-dependency"
 
 # The kinds that run the PRODUCT's own image, and therefore the only kinds that
 # may carry a release identity. A Redis or a vendor collector is recreated on
@@ -258,7 +263,9 @@ _KIND_TELEMETRY = "telemetry"
 # these labels exist to remove. The migration service is in, not out: it runs
 # the product image at this revision and is the release's first effect on the
 # database, so a controller asking what applied a schema change gets an answer.
-_RELEASE_BEARING_KINDS = frozenset({_KIND_RELEASE, _KIND_MIGRATION})
+_RELEASE_BEARING_KINDS = frozenset(
+    {_KIND_RELEASE, _KIND_MIGRATION, _KIND_SUPPORT_RELEASE}
+)
 
 # `migrate` runs DDL under the one credential with the widest database grant
 # in the whole deployment; it gets a hardened, bounded envelope of its own
@@ -578,7 +585,12 @@ def _depends_on(spec: ProductDeploymentSpec, role: Role) -> dict[str, str]:
     no readiness probe can never satisfy `service_healthy` and anything
     waiting on it would never start.
     """
-    conditions: dict[str, str] = {"migrate": "service_completed_successfully"}
+    require_migrate = (
+        spec.compose_topology is None or spec.compose_topology.roles_depend_on_migrate
+    )
+    conditions: dict[str, str] = (
+        {"migrate": "service_completed_successfully"} if require_migrate else {}
+    )
     managed = {item.code: item for item in spec.managed_dependencies}
     for dep_code in role.depends_on:
         dependency = managed.get(dep_code)
@@ -595,6 +607,54 @@ def _depends_on(spec: ProductDeploymentSpec, role: Role) -> dict[str, str]:
             "service_healthy" if dep_role.ready is not None else "service_started"
         )
     return conditions
+
+
+def _placement(spec: ProductDeploymentSpec, code: str) -> ComposePlacement | None:
+    return (
+        spec.compose_topology.placement(code)
+        if spec.compose_topology is not None
+        else None
+    )
+
+
+def _placement_lines(spec: ProductDeploymentSpec, code: str, level: int) -> list[str]:
+    placement = _placement(spec, code)
+    if placement is None:
+        return _list_block(level, "networks", [_scalar(_network_name(spec))])
+    lines = _list_block(level, "profiles", (_scalar(p) for p in placement.profiles))
+    if placement.network_mode:
+        lines.append(_line(level, f"network_mode: {_scalar(placement.network_mode)}"))
+    else:
+        lines.extend(
+            _list_block(
+                level, "networks", (_scalar(network) for network in placement.networks)
+            )
+        )
+    return lines
+
+
+def _compose_mount(mount: ComposeMount) -> str:
+    if mount.kind == "host_material":
+        source = f"${{{mount.source_material}:?{mount.source_material} must be set}}"
+    elif mount.kind == "repository":
+        source = f"./{mount.source.removeprefix('./')}"
+    else:
+        source = mount.source
+    target = (
+        f"${{{mount.target_material}:?{mount.target_material} must be set}}"
+        if mount.target_material
+        else mount.target
+    )
+    return f"{source}:{target}" + (":ro" if mount.read_only else ":rw")
+
+
+def _placement_mounts(spec: ProductDeploymentSpec, code: str) -> list[str]:
+    placement = _placement(spec, code)
+    return (
+        [_compose_mount(mount) for mount in placement.mounts]
+        if placement is not None
+        else []
+    )
 
 
 # ── security ─────────────────────────────────────────────────────────────────
@@ -853,7 +913,12 @@ def _migrate_service(spec: ProductDeploymentSpec, identity: _Identity) -> list[s
     placeholder = f"${{{name}:?{name} must be set}}"
     lines.append(_line(body, "environment:"))
     lines.append(_line(body + 1, f"{name}: {_scalar(placeholder)}"))
-    lines.extend(_list_block(body, "networks", [_scalar(_network_name(spec))]))
+    placement_mounts = _placement_mounts(spec, "migrate")
+    if placement_mounts:
+        lines.extend(
+            _list_block(body, "volumes", sorted(_scalar(m) for m in placement_mounts))
+        )
+    lines.extend(_placement_lines(spec, "migrate", body))
     lines.extend(_resource_lines(body, _MIGRATE_RESOURCES))
     lines.extend(_logging_lines(body))
     lines.extend(_security_lines(_MIGRATE_SECURITY, body))
@@ -891,10 +956,11 @@ def _role_service(
     lines.extend(_environment_lines(body, role.materials, role.environment))
 
     depends = _depends_on(spec, role)
-    lines.append(_line(body, "depends_on:"))
-    for dep_name in sorted(depends):
-        lines.append(_line(body + 1, f"{dep_name}:"))
-        lines.append(_line(body + 2, f"condition: {depends[dep_name]}"))
+    if depends:
+        lines.append(_line(body, "depends_on:"))
+        for dep_name in sorted(depends):
+            lines.append(_line(body + 1, f"{dep_name}:"))
+            lines.append(_line(body + 2, f"condition: {depends[dep_name]}"))
 
     lines.extend(_healthcheck_lines(role, body))
 
@@ -913,6 +979,7 @@ def _role_service(
         suffix = ":ro" if volume.read_only else ""
         mounts.append(f"{volume.name}:{volume.target}{suffix}")
     mounts.extend(_bind_mount_entries(role.security))
+    mounts.extend(_placement_mounts(spec, role.code))
     if mounts:
         lines.extend(
             _list_block(body, "volumes", [_scalar(m) for m in sorted(set(mounts))])
@@ -921,7 +988,7 @@ def _role_service(
     if host_network:
         lines.append(_line(body, f"network_mode: {_scalar('host')}"))
     else:
-        lines.extend(_list_block(body, "networks", [_scalar(_network_name(spec))]))
+        lines.extend(_placement_lines(spec, role.code, body))
 
     lines.extend(_resource_lines(body, role.resources, replicas=role.replicas))
     lines.extend(_logging_lines(body))
@@ -954,7 +1021,24 @@ def _role_service(
 
 
 def _networks_section(spec: ProductDeploymentSpec) -> list[str]:
-    return ["networks:", _line(1, f"{_network_name(spec)}: {{}}")]
+    if spec.compose_topology is None:
+        return ["networks:", _line(1, f"{_network_name(spec)}: {{}}")]
+    lines = ["networks:"]
+    for network in sorted(spec.compose_topology.networks, key=lambda item: item.code):
+        lines.append(_line(1, f"{network.code}:"))
+        lines.append(_line(2, "driver: bridge"))
+        if network.internal:
+            lines.append(_line(2, "internal: true"))
+        if network.loopback_default:
+            lines.append(_line(2, "driver_opts:"))
+            lines.append(
+                _line(
+                    3,
+                    "com.docker.network.bridge.host_binding_ipv4: "
+                    + _scalar("127.0.0.1"),
+                )
+            )
+    return lines
 
 
 def _declared_volume_names(spec: ProductDeploymentSpec) -> tuple[str, ...]:
@@ -972,6 +1056,16 @@ def _declared_volume_names(spec: ProductDeploymentSpec) -> tuple[str, ...]:
         names.update(volume.name for volume in role.volumes)
     for dependency in spec.managed_dependencies:
         names.update(volume.name for volume in dependency.volumes)
+    if spec.compose_topology is not None:
+        for placement in spec.compose_topology.placements:
+            names.update(
+                mount.source for mount in placement.mounts if mount.kind == "named"
+            )
+        for job in spec.compose_topology.jobs:
+            names.update(volume.name for volume in job.volumes)
+            names.update(
+                mount.source for mount in job.placement.mounts if mount.kind == "named"
+            )
     return tuple(sorted(names))
 
 
@@ -1022,11 +1116,12 @@ def _dependency_service(
     # rendering path here would have been a second place for the short form to
     # survive.
     lines.extend(_publication_lines(dependency.code, dependency.ports, body))
-    if dependency.volumes:
-        mounts = [
-            f"{volume.name}:{volume.target}" + (":ro" if volume.read_only else "")
-            for volume in dependency.volumes
-        ]
+    mounts = [
+        f"{volume.name}:{volume.target}" + (":ro" if volume.read_only else "")
+        for volume in dependency.volumes
+    ]
+    mounts.extend(_placement_mounts(spec, dependency.code))
+    if mounts:
         lines.extend(_list_block(body, "volumes", sorted(_scalar(m) for m in mounts)))
     lines.append(_line(body, "healthcheck:"))
     lines.append(_line(body + 1, "test:"))
@@ -1049,7 +1144,7 @@ def _dependency_service(
                 replicas=1,
             )
         )
-    lines.extend(_list_block(body, "networks", [_scalar(_network_name(spec))]))
+    lines.extend(_placement_lines(spec, dependency.code, body))
     lines.extend(_logging_lines(body))
     lines.append(_line(body, "restart: unless-stopped"))
     lines.extend(
@@ -1089,8 +1184,9 @@ def _collector_service(spec: ProductDeploymentSpec, identity: _Identity) -> list
         _line(body + 1, f"- {_scalar('--config=' + telemetry.collector_config_mount)}"),
     ]
     lines.extend(_environment_lines(body, [telemetry.endpoint_material], ()))
-    lines.extend(_list_block(body, "volumes", [_scalar(mount)]))
-    lines.extend(_list_block(body, "networks", [_scalar(_network_name(spec))]))
+    mounts = [mount, *_placement_mounts(spec, "otel-collector")]
+    lines.extend(_list_block(body, "volumes", sorted(_scalar(m) for m in mounts)))
+    lines.extend(_placement_lines(spec, "otel-collector", body))
     lines.extend(
         _resource_lines(
             body, Resources(cpus="0.5", memory="512m", pids=128), replicas=1
@@ -1112,6 +1208,63 @@ def _collector_service(spec: ProductDeploymentSpec, identity: _Identity) -> list
             _identity_labels(identity, service="otel-collector", kind=_KIND_TELEMETRY),
         )
     )
+    return lines
+
+
+def _support_job(
+    spec: ProductDeploymentSpec, job: ComposeJob, identity: _Identity
+) -> list[str]:
+    """Profile-gated support work, never included in the runtime role roster."""
+    body = 2
+    if job.image_source == "product":
+        image = _image_reference(spec)
+        kind = _KIND_SUPPORT_RELEASE
+    else:
+        code = job.image_source.removeprefix("dependency:")
+        image = next(
+            dependency.image
+            for dependency in spec.managed_dependencies
+            if dependency.code == code
+        )
+        kind = _KIND_SUPPORT_DEPENDENCY
+    lines = [_line(1, f"{job.code}:")]
+    lines.append(_line(body, f"image: {_scalar(image)}"))
+    if job.entrypoint:
+        lines.extend(
+            _list_block(body, "entrypoint", (_scalar(arg) for arg in job.entrypoint))
+        )
+    lines.extend(_list_block(body, "command", (_scalar(arg) for arg in job.command)))
+    lines.extend(_environment_lines(body, job.materials))
+    if job.depends_on:
+        lines.append(_line(body, "depends_on:"))
+        for code in sorted(job.depends_on):
+            lines.append(_line(body + 1, f"{code}:"))
+            lines.append(_line(body + 2, "condition: service_healthy"))
+    mounts = [
+        f"{volume.name}:{volume.target}" + (":ro" if volume.read_only else "")
+        for volume in job.volumes
+    ]
+    mounts.extend(_compose_mount(mount) for mount in job.placement.mounts)
+    if mounts:
+        lines.extend(_list_block(body, "volumes", sorted(_scalar(m) for m in mounts)))
+    lines.extend(_placement_lines_for_job(job.placement, body))
+    lines.extend(_logging_lines(body))
+    lines.extend(_security_lines(job.security, body))
+    lines.append(_line(body, f"restart: {_scalar('no')}"))
+    lines.extend(
+        _labels_block(body, _identity_labels(identity, service=job.code, kind=kind))
+    )
+    return lines
+
+
+def _placement_lines_for_job(placement: ComposePlacement, level: int) -> list[str]:
+    lines = _list_block(level, "profiles", (_scalar(p) for p in placement.profiles))
+    if placement.network_mode:
+        lines.append(_line(level, f"network_mode: {_scalar(placement.network_mode)}"))
+    else:
+        lines.extend(
+            _list_block(level, "networks", (_scalar(n) for n in placement.networks))
+        )
     return lines
 
 
@@ -1146,6 +1299,11 @@ def _render_compose_body(spec: ProductDeploymentSpec) -> str:
     if collector:
         blocks.append(collector)
     blocks.append(_migrate_service(spec, identity))
+    if spec.compose_topology is not None:
+        blocks.extend(
+            _support_job(spec, job, identity)
+            for job in sorted(spec.compose_topology.jobs, key=lambda item: item.code)
+        )
     blocks.extend(
         _role_service(spec, role, identity)
         for role in sorted(spec.roles, key=lambda r: r.code)
