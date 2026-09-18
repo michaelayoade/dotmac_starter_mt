@@ -421,6 +421,13 @@ class FakeEffects:
     def verify_backup(self, result: BackupResult) -> bool:
         return self.backup_verifies
 
+    def run_support_job(
+        self, code: str, *, timeout_seconds: int, image: str
+    ) -> CommandResult:
+        # The shared fake implements the complete Effects seam. V1/V2 plans
+        # never schedule this V3-only operation.
+        return self.command_results.get(code, self.default_command_result)
+
     def migration_heads(self, *, image: str) -> Sequence[str]:
         self.migration_images.append((("<heads>",), image))
         return self.heads
