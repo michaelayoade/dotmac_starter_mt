@@ -133,7 +133,20 @@ def _optional_timestamp(value: object, *, label: str) -> tuple[str, datetime] | 
 
 
 def _issues(value: object) -> list[dict[str, object]]:
-    """Map Sub's ``line_id`` to ``source_line_id``."""
+    """Map Sub's ``line_id`` to ``source_line_id``.
+
+    Only ``code`` is required. Sub's real ``InvoiceAccountingSyncIssueRead``
+    declares ``line_id``/``expected_amount``/``actual_amount`` as genuinely
+    optional (e.g. a header-level "discount has nowhere to allocate" issue
+    has no specific line and no "expected" amount, only an actual one) —
+    ERP's own ``InvoiceAccountingSyncIssue``/``IntegratorInvoiceSyncIssuePayload``
+    schema mirrors this. A field that is missing OR explicitly ``null`` in
+    the raw entry is omitted from the mapped dict entirely (matching this
+    module's existing top-level convention for ``source_issued_at``/
+    ``source_due_at``); a field that IS present with a non-null value that
+    fails to parse is still rejected — "absent" and "present but invalid"
+    are different outcomes.
+    """
     if value is None:
         return []
     if not isinstance(value, list):
@@ -143,24 +156,39 @@ def _issues(value: object) -> list[dict[str, object]]:
         if not isinstance(entry, Mapping):
             raise SubAccountingMappingError("issue entry is not an object")
         code = _text(entry.get("code"))
-        source_line_id = _text(entry.get("line_id"))
-        expected_amount = _decimal(entry.get("expected_amount"))
-        actual_amount = _decimal(entry.get("actual_amount"))
-        if (
-            code is None
-            or source_line_id is None
-            or expected_amount is None
-            or actual_amount is None
-        ):
+        if code is None:
             raise SubAccountingMappingError("issue entry is missing a required field")
-        payload_issues.append(
-            {
-                "code": code,
-                "source_line_id": source_line_id,
-                "expected_amount": str(expected_amount),
-                "actual_amount": str(actual_amount),
-            }
-        )
+
+        issue: dict[str, object] = {"code": code}
+
+        raw_line_id = entry.get("line_id")
+        if raw_line_id is not None:
+            source_line_id = _text(raw_line_id)
+            if source_line_id is None:
+                raise SubAccountingMappingError(
+                    "issue entry has an invalid source_line_id"
+                )
+            issue["source_line_id"] = source_line_id
+
+        raw_expected_amount = entry.get("expected_amount")
+        if raw_expected_amount is not None:
+            expected_amount = _decimal(raw_expected_amount)
+            if expected_amount is None:
+                raise SubAccountingMappingError(
+                    "issue entry has an invalid expected_amount"
+                )
+            issue["expected_amount"] = str(expected_amount)
+
+        raw_actual_amount = entry.get("actual_amount")
+        if raw_actual_amount is not None:
+            actual_amount = _decimal(raw_actual_amount)
+            if actual_amount is None:
+                raise SubAccountingMappingError(
+                    "issue entry has an invalid actual_amount"
+                )
+            issue["actual_amount"] = str(actual_amount)
+
+        payload_issues.append(issue)
     return payload_issues
 
 

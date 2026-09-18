@@ -172,12 +172,77 @@ def test_rejects_an_invalid_currency() -> None:
         map_item(_item(currency="not-a-currency"))
 
 
-def test_rejects_an_issue_entry_missing_a_field() -> None:
+def test_rejects_an_issue_entry_missing_its_code() -> None:
+    # `code` is the only genuinely required field on an issue entry.
     with pytest.raises(SubAccountingMappingError, match="issue entry"):
         map_item(
             _item(
                 disposition="blocked",
-                issues=[{"code": "x", "line_id": "line-1"}],
+                issues=[{"line_id": "line-1", "actual_amount": "10.00"}],
+            )
+        )
+
+
+def test_accepts_an_issue_entry_with_missing_optional_fields() -> None:
+    # Sub's real `InvoiceAccountingSyncIssueRead` declares `line_id`,
+    # `expected_amount`, and `actual_amount` as all genuinely optional (e.g.
+    # a header-level discount-allocation issue has no specific line and no
+    # "expected" amount) -- a missing (or null) optional field is omitted
+    # from the mapped dict, not rejected.
+    event, _, _ = map_item(
+        _item(
+            disposition="blocked",
+            issues=[{"code": "x", "line_id": None, "expected_amount": None}],
+        )
+    )
+    assert event.payload["issues"] == [{"code": "x"}]
+    assert "source_line_id" not in event.payload["issues"][0]
+    assert "expected_amount" not in event.payload["issues"][0]
+    assert "actual_amount" not in event.payload["issues"][0]
+
+
+def test_accepts_an_issue_entry_shaped_like_the_shared_fixtures_real_issue() -> None:
+    # code present; line_id/expected_amount absent; actual_amount present --
+    # exactly the shape of the shared Sub fixture's real issue entry.
+    event, _, _ = map_item(
+        _item(
+            disposition="blocked",
+            issues=[
+                {"code": "discount_allocation_undefined", "actual_amount": "10000.00"}
+            ],
+        )
+    )
+    assert event.payload["issues"] == [
+        {"code": "discount_allocation_undefined", "actual_amount": "10000.00"}
+    ]
+    assert "source_line_id" not in event.payload["issues"][0]
+    assert "expected_amount" not in event.payload["issues"][0]
+
+
+def test_rejects_an_issue_entry_with_a_present_but_malformed_expected_amount() -> None:
+    # "missing" and "present but invalid" are different outcomes -- a
+    # present, non-null, unparseable value is still rejected.
+    with pytest.raises(SubAccountingMappingError, match="expected_amount"):
+        map_item(
+            _item(
+                disposition="blocked",
+                issues=[
+                    {
+                        "code": "x",
+                        "expected_amount": "not-a-number",
+                        "actual_amount": "10.00",
+                    }
+                ],
+            )
+        )
+
+
+def test_rejects_an_issue_entry_with_a_present_but_malformed_actual_amount() -> None:
+    with pytest.raises(SubAccountingMappingError, match="actual_amount"):
+        map_item(
+            _item(
+                disposition="blocked",
+                issues=[{"code": "x", "actual_amount": "not-a-number"}],
             )
         )
 
