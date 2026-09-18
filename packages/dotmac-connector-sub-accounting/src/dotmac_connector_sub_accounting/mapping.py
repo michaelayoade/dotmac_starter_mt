@@ -163,7 +163,7 @@ def _issues(value: object) -> list[dict[str, object]]:
 
         raw_line_id = entry.get("line_id")
         if raw_line_id is not None:
-            source_line_id = _text(raw_line_id)
+            source_line_id = _uuid(raw_line_id)
             if source_line_id is None:
                 raise SubAccountingMappingError(
                     "issue entry has an invalid source_line_id"

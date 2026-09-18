@@ -12,6 +12,7 @@ from dotmac_connector_sub_accounting.mapping import (
 
 INVOICE_ID = "11111111-1111-1111-1111-111111111111"
 ACCOUNT_ID = "22222222-2222-2222-2222-222222222222"
+LINE_ID = "33333333-3333-3333-3333-333333333333"
 
 #: A real, known-good digest from dotmac_sub's own fixture data for this same
 #: initiative (Sub computes it; this connector only validates and forwards).
@@ -45,7 +46,7 @@ def _item(**overrides: object) -> dict[str, object]:
 def _blocked_issue(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "code": "amount_mismatch",
-        "line_id": "line-1",
+        "line_id": LINE_ID,
         "expected_amount": "50.00",
         "actual_amount": "40.00",
     }
@@ -85,7 +86,7 @@ def test_maps_a_blocked_item_and_renames_line_id_to_source_line_id() -> None:
     assert event.payload["issues"] == [
         {
             "code": "amount_mismatch",
-            "source_line_id": "line-1",
+            "source_line_id": LINE_ID,
             "expected_amount": "50.00",
             "actual_amount": "40.00",
         }
@@ -217,6 +218,21 @@ def test_accepts_an_issue_entry_shaped_like_the_shared_fixtures_real_issue() -> 
     ]
     assert "source_line_id" not in event.payload["issues"][0]
     assert "expected_amount" not in event.payload["issues"][0]
+
+
+def test_rejects_an_issue_entry_with_a_present_but_malformed_line_id() -> None:
+    # "missing" and "present but invalid" are different outcomes -- a
+    # present, non-null, non-UUID line_id is rejected rather than passed
+    # through as an opaque string.
+    with pytest.raises(SubAccountingMappingError, match="source_line_id"):
+        map_item(
+            _item(
+                disposition="blocked",
+                issues=[
+                    {"code": "x", "line_id": "not-a-uuid", "actual_amount": "10.00"}
+                ],
+            )
+        )
 
 
 def test_rejects_an_issue_entry_with_a_present_but_malformed_expected_amount() -> None:
