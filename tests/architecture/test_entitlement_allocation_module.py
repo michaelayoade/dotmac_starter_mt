@@ -728,11 +728,13 @@ def test_the_platform_audit_write_is_declared_and_verified() -> None:
 
 
 def test_the_floor_is_the_highest_prerequisite_release() -> None:
-    """a68 publishes the audit prerequisite after the a66 ledger name."""
+    """a104 publishes the database_catalog comparator's ordinal-gap fix this
+    module's new contribution depends on, after the a68 audit prerequisite and
+    the a66 ledger name."""
     manifest = tomllib.loads(
         (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
-    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a68"
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a104"
 
 
 def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
