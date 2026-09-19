@@ -32,6 +32,107 @@ from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1, PLATFORM_AUDIT_LOG_V1
+from dotmac_kernel.product_database_catalog import (
+    DatabaseColumnContractV1,
+    DatabaseColumnGeneration,
+    DatabaseRelationKind,
+    ModuleDatabaseCatalogContributionV1,
+    ModuleDatabaseTableContractV1,
+    PostgresTypeContractV1,
+    PostgresTypeKind,
+)
+
+_PG_CATALOG = "pg_catalog"
+
+
+def _base_type(name: str, formatted: str) -> PostgresTypeContractV1:
+    return PostgresTypeContractV1(
+        kind=PostgresTypeKind.BASE, schema=_PG_CATALOG, name=name, formatted=formatted
+    )
+
+
+_UUID = _base_type("uuid", "uuid")
+_INT4 = _base_type("int4", "integer")
+_BOOL = _base_type("bool", "boolean")
+_TIMESTAMPTZ = _base_type("timestamptz", "timestamp with time zone")
+
+
+def _varchar(length: int) -> PostgresTypeContractV1:
+    return _base_type("varchar", f"character varying({length})")
+
+
+def _col(
+    name: str, ordinal: int, pg_type: PostgresTypeContractV1, *, nullable: bool
+) -> DatabaseColumnContractV1:
+    return DatabaseColumnContractV1(
+        name=name, ordinal=ordinal, postgres_type=pg_type, nullable=nullable
+    )
+
+
+def _timestamp_col(name: str, ordinal: int) -> DatabaseColumnContractV1:
+    return DatabaseColumnContractV1(
+        name=name,
+        ordinal=ordinal,
+        postgres_type=_TIMESTAMPTZ,
+        nullable=False,
+        generation=DatabaseColumnGeneration.DEFAULT,
+        expression="now()",
+    )
+
+
+def _bool_default_false(name: str, ordinal: int) -> DatabaseColumnContractV1:
+    return DatabaseColumnContractV1(
+        name=name,
+        ordinal=ordinal,
+        postgres_type=_BOOL,
+        nullable=False,
+        generation=DatabaseColumnGeneration.DEFAULT,
+        expression="false",
+    )
+
+
+# Facts observed live against PostgreSQL 16 (kernel + assembly + this module's
+# migrations composed to head `ea_0003_platform_audit_log`) via
+# `dotmac_kernel.database_catalog_comparator.observe_postgres_tables_columns`,
+# self-verified with `compare_module_database_catalog` before being frozen
+# here. Never hand-derived from the migration source.
+_ALLOCATIONS_COLUMNS = (
+    _col("id", 1, _UUID, nullable=False),
+    _col("contract_ref", 2, _UUID, nullable=False),
+    _col("product_code", 3, _varchar(120), nullable=False),
+    _col("customer_ref", 4, _varchar(200), nullable=False),
+    _col("content_hash", 5, _varchar(128), nullable=False),
+    _col("status", 6, _varchar(20), nullable=False),
+    _col("source_event_id", 7, _varchar(200), nullable=False),
+    _col("snapshot_fingerprint", 8, _varchar(64), nullable=False),
+    _timestamp_col("created_at", 9),
+    _timestamp_col("updated_at", 10),
+    _bool_default_false("sealed", 11),
+)
+_ALLOCATION_ENTRIES_COLUMNS = (
+    _col("id", 1, _UUID, nullable=False),
+    _col("allocation_id", 2, _UUID, nullable=False),
+    _col("capability_code", 3, _varchar(120), nullable=False),
+    _col("quantity", 4, _INT4, nullable=False),
+    _timestamp_col("created_at", 5),
+    _timestamp_col("updated_at", 6),
+)
+
+_DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
+    lineage_head="ea_0003_platform_audit_log",
+    tables=(
+        ModuleDatabaseTableContractV1(
+            name="allocation_entries",
+            relation_kind=DatabaseRelationKind.TABLE,
+            columns=_ALLOCATION_ENTRIES_COLUMNS,
+        ),
+        ModuleDatabaseTableContractV1(
+            name="allocations",
+            relation_kind=DatabaseRelationKind.TABLE,
+            columns=_ALLOCATIONS_COLUMNS,
+        ),
+    ),
+)
 
 module = ModuleManifest(
     code="entitlement_allocation",
@@ -42,6 +143,7 @@ module = ModuleManifest(
     migration_branch="entitlement_allocation",
     tables=(),
     platform_tables=("allocations", "allocation_entries"),
+    database_catalog=_DATABASE_CATALOG,
     # ── Logical database prerequisites ──────────────────────────────────────
     # The TWO effects this module needs that its own migrations do not create.
     # `stage_allocation` delegates at-most-once to the kernel (hard rule 21,

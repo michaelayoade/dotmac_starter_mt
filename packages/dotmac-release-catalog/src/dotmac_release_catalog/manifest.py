@@ -62,6 +62,105 @@ same change.
 from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.product_database_catalog import (
+    DatabaseColumnContractV1,
+    DatabaseColumnGeneration,
+    DatabaseRelationKind,
+    ModuleDatabaseCatalogContributionV1,
+    ModuleDatabaseTableContractV1,
+    PostgresTypeContractV1,
+    PostgresTypeKind,
+)
+
+_PG_CATALOG = "pg_catalog"
+
+
+def _base_type(name: str, formatted: str) -> PostgresTypeContractV1:
+    return PostgresTypeContractV1(
+        kind=PostgresTypeKind.BASE, schema=_PG_CATALOG, name=name, formatted=formatted
+    )
+
+
+_UUID = _base_type("uuid", "uuid")
+_INT8 = _base_type("int8", "bigint")
+_TEXT = _base_type("text", "text")
+_TIMESTAMPTZ = _base_type("timestamptz", "timestamp with time zone")
+
+
+def _varchar(length: int) -> PostgresTypeContractV1:
+    return _base_type("varchar", f"character varying({length})")
+
+
+def _col(
+    name: str, ordinal: int, pg_type: PostgresTypeContractV1, *, nullable: bool
+) -> DatabaseColumnContractV1:
+    return DatabaseColumnContractV1(
+        name=name, ordinal=ordinal, postgres_type=pg_type, nullable=nullable
+    )
+
+
+def _timestamp_col(
+    name: str, ordinal: int, *, nullable: bool = False
+) -> DatabaseColumnContractV1:
+    if nullable:
+        return DatabaseColumnContractV1(
+            name=name, ordinal=ordinal, postgres_type=_TIMESTAMPTZ, nullable=True
+        )
+    return DatabaseColumnContractV1(
+        name=name,
+        ordinal=ordinal,
+        postgres_type=_TIMESTAMPTZ,
+        nullable=False,
+        generation=DatabaseColumnGeneration.DEFAULT,
+        expression="now()",
+    )
+
+
+# Facts observed live against PostgreSQL 16 (kernel + assembly + this module's
+# migrations composed to head `rl_0002_db_catalog_attestations`) via
+# `dotmac_kernel.database_catalog_comparator.observe_postgres_tables_columns`,
+# self-verified with `compare_module_database_catalog` before being frozen
+# here. Never hand-derived from the migration source. `rl_0002` adds only
+# partial unique indexes (outside V1's tables-and-columns scope), so it does
+# not change this module's column facts — only its lineage head.
+_RELEASE_ARTIFACTS_COLUMNS = (
+    _col("id", 1, _UUID, nullable=False),
+    _col("product_code", 2, _varchar(120), nullable=False),
+    _col("version", 3, _varchar(120), nullable=False),
+    _col("artifact_kind", 4, _varchar(40), nullable=False),
+    _col("digest", 5, _varchar(160), nullable=False),
+    _col("artifact_ref", 6, _TEXT, nullable=False),
+    _col("size_bytes", 7, _INT8, nullable=True),
+    _col("source_revision", 8, _varchar(120), nullable=True),
+    _timestamp_col("published_at", 9, nullable=True),
+    _timestamp_col("created_at", 10),
+    _timestamp_col("updated_at", 11),
+)
+_ARTIFACT_ATTESTATIONS_COLUMNS = (
+    _col("id", 1, _UUID, nullable=False),
+    _col("artifact_id", 2, _UUID, nullable=False),
+    _col("attestation_kind", 3, _varchar(40), nullable=False),
+    _col("uri", 4, _TEXT, nullable=False),
+    _col("digest", 5, _varchar(160), nullable=False),
+    _timestamp_col("created_at", 6),
+    _timestamp_col("updated_at", 7),
+)
+
+_DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
+    lineage_head="rl_0002_db_catalog_attestations",
+    tables=(
+        ModuleDatabaseTableContractV1(
+            name="artifact_attestations",
+            relation_kind=DatabaseRelationKind.TABLE,
+            columns=_ARTIFACT_ATTESTATIONS_COLUMNS,
+        ),
+        ModuleDatabaseTableContractV1(
+            name="release_artifacts",
+            relation_kind=DatabaseRelationKind.TABLE,
+            columns=_RELEASE_ARTIFACTS_COLUMNS,
+        ),
+    ),
+)
 
 module = ModuleManifest(
     code="release_catalog",
@@ -73,6 +172,7 @@ module = ModuleManifest(
     migration_branch="release_catalog",
     tables=(),
     platform_tables=("release_artifacts", "artifact_attestations"),
+    database_catalog=_DATABASE_CATALOG,
 )
 
 __all__ = ["module"]

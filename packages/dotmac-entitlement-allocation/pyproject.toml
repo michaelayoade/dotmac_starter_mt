@@ -37,7 +37,16 @@ python = ">=3.11,<3.14"
 # This raise is VISIBLE to consumers: a1..a4 are all published and all install
 # on a56..a65; a5 will not. That is the correct trade — every one of those
 # installs against a kernel whose ledger it silently requires and cannot state.
-dotmac-kernel = ">=0.1.0a68"
+#
+# a100: this module's manifest now declares `database_catalog=`
+# (ModuleDatabaseCatalogContributionV1), importing
+# `dotmac_kernel.product_database_catalog`, first published in a100. Floor
+# moves again for the same reason a56/a66/a68 moved it before: capability
+# outranks allocation. (a104 later fixed a DROP-COLUMN physical-ordinal-gap
+# false positive in the separate comparator module that VERIFIES this
+# declaration, kernel PR #715, but nothing this manifest imports needs a104
+# to load.)
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [build-system]
