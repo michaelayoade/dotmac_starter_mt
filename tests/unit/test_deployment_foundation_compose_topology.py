@@ -52,7 +52,7 @@ source_revision = "{"d" * 40}"
 [runtime_materials]
 names = [
   "DATABASE_URL", "PLATFORM_DATABASE_URL", "VENDOR_RELAY_DISPATCHER_DATABASE_URL",
-  "MIGRATION_DATABASE_URL",
+  "MIGRATION_DATABASE_URL", "BACKUP_DATABASE_URL",
   "SIGNING_KEY_SOURCE", "SIGNING_KEY_TARGET"
 ]
 
@@ -92,6 +92,13 @@ heads_command = ["python", "-m", "migrate", "current"]
 owner_material = "MIGRATION_DATABASE_URL"
 expected_heads = ["head_1"]
 compatibility = "maintenance_required"
+
+[backup]
+[[backup.datasets]]
+code = "primary"
+kind = "postgres"
+material = "BACKUP_DATABASE_URL"
+retention_days = 14
 
 [[external_dependencies]]
 code = "db"
@@ -202,7 +209,7 @@ command = ["python", "-m", "app", "diagnose"]
 profiles = ["ops"]
 networks = ["back"]
 depends_on = ["db"]
-materials = ["DATABASE_URL"]
+materials = ["DATABASE_URL", "PLATFORM_DATABASE_URL"]
 [[compose_topology.jobs.mounts]]
 kind = "named"
 source = "manifests"
@@ -241,6 +248,11 @@ def test_v3_renders_complete_isolated_support_topology() -> None:
     assert "migrate" not in services["app"].get("depends_on", {})
     assert "MIGRATION_DATABASE_URL" not in services["app"].get("environment", {})
     assert "MIGRATION_DATABASE_URL" not in services["relay"].get("environment", {})
+    assert "MIGRATION_DATABASE_URL" not in services["ops"].get("environment", {})
+    assert "MIGRATION_DATABASE_URL" in services["migrate"].get("environment", {})
+    assert "VENDOR_RELAY_DISPATCHER_DATABASE_URL" not in services["app"].get(
+        "environment", {}
+    )
     assert services["app"]["environment"]["PLATFORM_DATABASE_URL"].startswith("${")
     assert services["relay"]["environment"][
         "VENDOR_RELAY_DISPATCHER_DATABASE_URL"
@@ -250,7 +262,7 @@ def test_v3_renders_complete_isolated_support_topology() -> None:
     assert any("SIGNING_KEY_SOURCE" in mount for mount in services["relay"]["volumes"])
     assert "manifests:/run/dotmac/product-manifests:ro" in services["app"]["volumes"]
     assert "manifests:/run/dotmac/product-manifests:ro" in services["relay"]["volumes"]
-    assert "manifests:/run/dotmac/product-manifests" in services["ops"]["volumes"]
+    assert "manifests:/run/dotmac/product-manifests:rw" in services["ops"]["volumes"]
     assert "compose_topology" in build_canonical_document(spec).content["descriptor"]
     assert render_compose(spec) == rendered
 
@@ -290,10 +302,11 @@ def test_relay_ping_requires_durable_health_verdict(
     assert (observed.returncode == 0) is ok
 
 
-def test_support_job_is_an_authorized_mutation_before_migration() -> None:
+def test_support_job_follows_verified_backup_and_precedes_migration() -> None:
     plan = build_plan(_parse())
     kinds = [step.kind for step in plan.steps]
     assert kinds.count(StepKind.SUPPORT_JOB) == 1
+    assert kinds.index(StepKind.VERIFY_BACKUP) < kinds.index(StepKind.SUPPORT_JOB)
     assert kinds.index(StepKind.SUPPORT_JOB) < kinds.index(StepKind.MIGRATION_PREFLIGHT)
     step = plan.steps[kinds.index(StepKind.SUPPORT_JOB)]
     assert step.phase is Phase.MUTATE
@@ -326,7 +339,7 @@ def test_support_job_is_an_authorized_mutation_before_migration() -> None:
             "root support job",
         ),
         (
-            'verify_stdout = "10001:10001"',
+            'verify_stdout = "10001:10001:750"',
             'verify_stdout = ""',
             "expected stdout",
         ),
@@ -353,13 +366,15 @@ def test_support_job_cannot_receive_migration_owner_material() -> None:
         '[[compose_topology.jobs]]\ncode = "ops"'
     )
     assert marker
+    original = 'materials = ["DATABASE_URL", "PLATFORM_DATABASE_URL"]'
+    assert original in ops
     with pytest.raises(SpecError, match="may not hold the migration owner"):
         _parse(
             before
             + marker
             + ops.replace(
-                'materials = ["DATABASE_URL"]',
-                'materials = ["MIGRATION_DATABASE_URL"]',
+                original,
+                'materials = ["DATABASE_URL", "MIGRATION_DATABASE_URL"]',
                 1,
             )
         )
@@ -495,7 +510,7 @@ def test_deploy_support_job_refuses_missing_repository_mount(tmp_path: Path) -> 
 
 def test_deploy_support_job_refuses_changed_repository_mount(tmp_path: Path) -> None:
     _staged_host(tmp_path)
-    (tmp_path / "deploy" / "postgres" / "init.sh").write_text("changed\n")
+    (tmp_path / "deploy" / "postgres" / "init-roles.sh").write_text("changed\n")
     effects = ComposeHostEffects(
         _parse(), tmp_path, retained_compose_assets=_retained_asset(tmp_path)
     )

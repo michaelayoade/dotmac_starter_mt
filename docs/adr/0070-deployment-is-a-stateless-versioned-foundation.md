@@ -626,3 +626,28 @@ Platform CP's accepted descriptor, source/render hashes, host asset,
 authorization binding, rehearsed rollback, and old-writer retirement require
 separate evidence before any full cutover can be claimed. No deployment or
 release is authorized by the V3 schema alone.
+
+## Amendment — 2026-09-19: Platform CP topology admission boundary
+
+The CP-shaped V3 fixture covers the production topology observed at
+`dotmac_platform_control_plane` commit
+`1524580f43549a5804134131d4d9ed3b2237edef`: separate app, platform and
+relay-dispatcher credentials; a backend-only relay without a misleading
+container healthcheck; both first-cluster PostgreSQL init mounts; the
+network-isolated manifest initializer with exact owner and mode verification;
+read-only app/relay and read-write ops manifest mounts; and the one-shot
+Foundation migration owner. The relay's existing `dotmac-platform relay health`
+CLI exits successfully even for an unhealthy verdict, so a Foundation worker
+ping must check its machine-readable `data.verdict` for `relay_draining` rather
+than trust the CLI exit status alone. A fixture demonstrates that contract; CP's
+accepted product descriptor has not yet adopted it.
+
+Foundation runs deploy-time support jobs **after a verified backup and before
+migration preflight**. CP's current script runs `manifest-init` before backup.
+The existing Foundation order remains the safety boundary: no generic job is
+authorized to mutate a volume before the snapshot. CP must reconcile this
+order in its adoption workflow, or a separate narrowly typed volume-init
+contract with its own containment proof must be reviewed before changing the
+Foundation plan. A render test is not evidence that CP's workflow consumes the
+retained bytes, that its descriptor is accepted, or that a release/cutover has
+occurred.
