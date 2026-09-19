@@ -222,7 +222,7 @@ _DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
 
 module = ModuleManifest(
     code="licensing",
-    version="0.1.0a1+dev",
+    version="0.1.0a2",
     core=False,
     short_code="licensing",
     migration_prefix="li",
