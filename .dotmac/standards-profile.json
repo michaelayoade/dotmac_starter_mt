@@ -206,7 +206,7 @@
   },
   "external_connector_surface": {
     "baselines": {
-      "outbound_transport": 0,
+      "outbound_transport": 2,
       "webhook_surface": 0,
       "provider_credential": 0,
       "connector_task": 0,
