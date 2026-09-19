@@ -637,10 +637,15 @@ container healthcheck; both first-cluster PostgreSQL init mounts; the
 network-isolated manifest initializer with exact owner and mode verification;
 read-only app/relay and read-write ops manifest mounts; and the one-shot
 Foundation migration owner. Its image and mounted-source bytes are synthetic;
-it is not a render of CP's accepted descriptor. CP uses its image-default app
-startup and one `ops` service with the migration credential, whereas V3 renders
-an explicit app command and a separate migration service that alone holds the
-owner material. These are adoption decisions, not proven equivalences.
+it is not a render of CP's accepted descriptor. V3's explicit `command = []`
+on a role inherits the exact-digest image's default CMD and omits Compose's
+`command`; an absent key still refuses, and V1/V2 still require a nonempty
+array. This keeps CP's container-local bind address in its pinned image, not
+as a host-address literal in the signed deployment descriptor. Existing
+nonempty-command V3 canonical documents gain no field or changed bytes. CP
+still uses one `ops` service with the migration credential, whereas V3 renders
+a separate migration service that alone holds the owner material. That split
+remains an adoption decision, not a proven equivalence.
 The relay's existing `dotmac-platform relay health`
 CLI exits successfully even for an unhealthy verdict, so a Foundation worker
 ping must check its machine-readable `data.verdict` for `relay_draining` rather

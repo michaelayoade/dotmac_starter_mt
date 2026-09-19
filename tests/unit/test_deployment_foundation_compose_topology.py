@@ -58,7 +58,7 @@ names = [
 
 [[roles]]
 code = "app"
-command = ["uvicorn", "vendor_cp.main:app", "--host", "0.0.0.0", "--port", "8000"]
+command = []
 materials = ["DATABASE_URL", "PLATFORM_DATABASE_URL"]
 [roles.resources]
 cpus = "1.0"
@@ -240,6 +240,7 @@ def test_v3_renders_cp_shaped_isolated_support_topology() -> None:
     assert set(services) == {"app", "db", "manifest-init", "migrate", "ops", "relay"}
     assert project["networks"]["back"]["internal"] is True
     assert services["app"]["networks"] == ["front", "back"]
+    assert "command" not in services["app"]
     assert services["relay"]["networks"] == ["back"]
     assert services["manifest-init"]["network_mode"] == "none"
     assert services["manifest-init"]["profiles"] == ["ops"]
@@ -362,6 +363,17 @@ def test_v3_refuses_unbound_or_unsafe_topology(old: str, new: str, reason: str) 
 def test_v1_and_v2_do_not_accept_v3_topology() -> None:
     for schema in ("ProductDeploymentSpec.v1", "ProductDeploymentSpec.v2"):
         with pytest.raises(SpecError):
+            _parse(DESCRIPTOR.replace("ProductDeploymentSpec.v3", schema))
+
+
+def test_v3_rejects_missing_role_command() -> None:
+    with pytest.raises(SpecError, match="required key 'command'"):
+        _parse(DESCRIPTOR.replace("command = []\n", "", 1))
+
+
+def test_image_default_command_is_v3_only() -> None:
+    for schema in ("ProductDeploymentSpec.v1", "ProductDeploymentSpec.v2"):
+        with pytest.raises(SpecError, match="image default"):
             _parse(DESCRIPTOR.replace("ProductDeploymentSpec.v3", schema))
 
 

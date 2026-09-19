@@ -952,7 +952,10 @@ def _role_service(
     lines.append(_line(1, f"{role.code}:"))
 
     lines.append(_line(body, f"image: {_scalar(_image_reference(spec))}"))
-    lines.extend(_list_block(body, "command", [_scalar(part) for part in role.command]))
+    if role.command:
+        lines.extend(
+            _list_block(body, "command", [_scalar(part) for part in role.command])
+        )
     lines.extend(_environment_lines(body, role.materials, role.environment))
 
     depends = _depends_on(spec, role)
