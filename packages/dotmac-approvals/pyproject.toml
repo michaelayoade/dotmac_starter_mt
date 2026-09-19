@@ -12,7 +12,11 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a67"
+# a104: this module's manifest now declares `database_catalog=`
+# (ModuleDatabaseCatalogContributionV1); a104 fixed a DROP-COLUMN
+# physical-ordinal-gap false positive in the comparator that verifies it
+# (kernel PR #715).
+dotmac-kernel = ">=0.1.0a104"
 sqlalchemy = "^2.0"
 
 [build-system]

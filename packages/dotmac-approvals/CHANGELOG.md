@@ -7,6 +7,19 @@ entry landed once the live Postgres migration and catalog gate passed;
 
 ## Unreleased — `0.1.0a5+dev`
 
+**Database catalogue contribution.** The manifest now declares
+`database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
+`ap_0002_outbox_relay`, covering all six tables across both planes. Every
+column fact (Postgres type identity, nullability, generation, default
+expression) was captured from an actual PostgreSQL 16 observation
+(`dotmac_kernel.database_catalog_comparator.observe_postgres_tables_columns`)
+against this module's real composed migration graph, then self-verified with
+`compare_module_database_catalog` (zero drift) before being frozen here — none
+of it was hand-derived from reading the migration source. The `dotmac-kernel`
+floor moves to `>=0.1.0a104`, the release that fixed a DROP-COLUMN
+physical-ordinal-gap false positive in the comparator this contribution now
+depends on (kernel PR #715).
+
 **Public typed READ contracts.** `list_tenant_requests` / `list_platform_requests`
 over a closed, page-bounded `RequestFilter`; `get_tenant_request` /
 `get_platform_request` returning a `RequestDetail` with the bound policy
