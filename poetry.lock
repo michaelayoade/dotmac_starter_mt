@@ -604,7 +604,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a67"
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -750,7 +750,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a77"
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -1049,7 +1049,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a68"
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -1329,7 +1329,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a77"
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [package.source]

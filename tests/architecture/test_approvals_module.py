@@ -419,7 +419,7 @@ def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     assert entry["db_schema"] == module.db_schema
     assert entry["import_name"] == "dotmac_approvals"
     assert entry["tag_prefix"] == "dotmac-approvals-v"
-    assert entry["kernel_floor"] == "0.1.0a67"
+    assert entry["kernel_floor"] == "0.1.0a100"
     # The lineage is a REQUIRED wheel content: this repository does not compose
     # the module, so a wheel that shipped the manifest and dropped the migration
     # would fail first in an adopter's deployment rather than here.

@@ -259,13 +259,19 @@ CAPABILITY_RAISED_FLOORS = {
     # writers import the snapshot parsers first published in Kernel a100.
     # The older a56 platform_tables floor remains historically true, but it
     # is no longer sufficient for this distribution's runtime API imports.
-    # supported_plane_sets remains omitted because the module is atomic.
+    # supported_plane_sets remains omitted because the module is atomic. The
+    # manifest's own new `database_catalog=` (`ModuleDatabaseCatalogContributionV1`)
+    # import is the SAME a100 module the attestation writers already required,
+    # so a100 still suffices — no further move.
     "dotmac-release-catalog": ("0.1.0a100", "0.1.0a44"),
     "dotmac-ticketing": ("0.1.0a61", "0.1.0a39"),
     # a61 (`supported_plane_sets`) held until a67 published `outbox_relay.v1`,
     # which this module's `ap_0002` verifies and its manifest declares. The
     # floor is always the HIGHEST capability actually consumed.
-    "dotmac-approvals": ("0.1.0a67", "0.1.0a59"),
+    # a67 held until a100: this module's own manifest now declares
+    # `database_catalog=` (`ModuleDatabaseCatalogContributionV1`), importing
+    # `dotmac_kernel.product_database_catalog`, first published in a100.
+    "dotmac-approvals": ("0.1.0a100", "0.1.0a59"),
     # Numbering's own ledger row is a65, and for one release that WAS its floor
     # — every other capability it consumes (`platform_tables` a53,
     # `requires`/`tenant_requires` a56/a60, `supported_plane_sets` a61) predates
@@ -315,7 +321,20 @@ CAPABILITY_RAISED_FLOORS = {
     # excludes a66/a67. Every one
     # of those four runs against a kernel whose ledger it silently requires
     # and cannot state.
-    "dotmac-entitlement-allocation": ("0.1.0a68", "0.1.0a45"),
+    # a68 held until a100: this module's own manifest now declares
+    # `database_catalog=` (`ModuleDatabaseCatalogContributionV1`), importing
+    # `dotmac_kernel.product_database_catalog`, first published in a100.
+    "dotmac-entitlement-allocation": ("0.1.0a100", "0.1.0a45"),
+    # Both moved OUT of UNPUBLISHED_ALLOCATION_FLOORS below: that map's rule is
+    # "the allocation itself is the highest thing needed, rounded up to the
+    # first PUBLISHED kernel" (a74/a75 were never published; a77 is the first
+    # installable kernel carrying either). That rule no longer describes these
+    # two — each module's manifest now declares `database_catalog=`
+    # (`ModuleDatabaseCatalogContributionV1`), importing
+    # `dotmac_kernel.product_database_catalog`, first published in a100, a real
+    # CAPABILITY above the rounded-up a77 allocation floor.
+    "dotmac-commercial-agreements": ("0.1.0a100", "0.1.0a74"),
+    "dotmac-licensing": ("0.1.0a100", "0.1.0a75"),
 }
 
 # The third rule, and the one the other two maps cannot state: a module whose
@@ -382,8 +401,6 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
     "dotmac-pon-access": ("0.1.0a83", "0.1.0a82"),
     "dotmac-referrals": ("0.1.0a85", "0.1.0a84"),
     "dotmac-reseller-management": ("0.1.0a85", "0.1.0a84"),
-    "dotmac-commercial-agreements": ("0.1.0a77", "0.1.0a74"),
-    "dotmac-licensing": ("0.1.0a77", "0.1.0a75"),
     "dotmac-deployment-control": ("0.1.0a77", "0.1.0a76"),
     "dotmac-media-observations": ("0.1.0a81", "0.1.0a78"),
     "dotmac-content": ("0.1.0a81", "0.1.0a79"),

@@ -29,6 +29,13 @@ python = ">=3.11,<3.14"
 # writers parse held canonical bytes through that contract, so an earlier floor
 # would let this distribution install against an API it imports but does not
 # have. a99 deliberately does not provide the contract.
+#
+# The manifest's own new `database_catalog=` (`ModuleDatabaseCatalogContributionV1`)
+# import is the SAME `dotmac_kernel.product_database_catalog` module the
+# attestation writers already required, so a100 already suffices — no further
+# floor move. (a104 later fixed a DROP-COLUMN physical-ordinal-gap false
+# positive in the separate comparator module that VERIFIES this declaration,
+# kernel PR #715, but nothing this manifest imports needs a104 to load.)
 dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
