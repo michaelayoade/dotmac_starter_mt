@@ -325,6 +325,16 @@ CAPABILITY_RAISED_FLOORS = {
     # `database_catalog=` (`ModuleDatabaseCatalogContributionV1`), importing
     # `dotmac_kernel.product_database_catalog`, first published in a100.
     "dotmac-entitlement-allocation": ("0.1.0a100", "0.1.0a45"),
+    # Both moved OUT of UNPUBLISHED_ALLOCATION_FLOORS below: that map's rule is
+    # "the allocation itself is the highest thing needed, rounded up to the
+    # first PUBLISHED kernel" (a74/a75 were never published; a77 is the first
+    # installable kernel carrying either). That rule no longer describes these
+    # two — each module's manifest now declares `database_catalog=`
+    # (`ModuleDatabaseCatalogContributionV1`), importing
+    # `dotmac_kernel.product_database_catalog`, first published in a100, a real
+    # CAPABILITY above the rounded-up a77 allocation floor.
+    "dotmac-commercial-agreements": ("0.1.0a100", "0.1.0a74"),
+    "dotmac-licensing": ("0.1.0a100", "0.1.0a75"),
 }
 
 # The third rule, and the one the other two maps cannot state: a module whose
@@ -391,11 +401,6 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
     "dotmac-pon-access": ("0.1.0a83", "0.1.0a82"),
     "dotmac-referrals": ("0.1.0a85", "0.1.0a84"),
     "dotmac-reseller-management": ("0.1.0a85", "0.1.0a84"),
-    # Both a77 held until a100: each module's own manifest now declares
-    # `database_catalog=` (`ModuleDatabaseCatalogContributionV1`), importing
-    # `dotmac_kernel.product_database_catalog`, first published in a100.
-    "dotmac-commercial-agreements": ("0.1.0a100", "0.1.0a74"),
-    "dotmac-licensing": ("0.1.0a100", "0.1.0a75"),
     "dotmac-deployment-control": ("0.1.0a77", "0.1.0a76"),
     "dotmac-media-observations": ("0.1.0a81", "0.1.0a78"),
     "dotmac-content": ("0.1.0a81", "0.1.0a79"),
