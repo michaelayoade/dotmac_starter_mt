@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,7 +24,17 @@ from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
 _IMAGE = "registry.example.invalid/control@sha256:" + "a" * 64
 _POSTGRES = "registry.example.invalid/postgres@sha256:" + "b" * 64
-_INIT_SCRIPT_DIGEST = "sha256:" + hashlib.sha256(b"#!/bin/sh\n").hexdigest()
+_INIT_ROLES_DIGEST = "sha256:" + hashlib.sha256(b"#!/bin/sh\nroles\n").hexdigest()
+_BOOTSTRAP_CREDENTIAL_DIGEST = (
+    "sha256:" + hashlib.sha256(b"-- bootstrap credential function\n").hexdigest()
+)
+_RELAY_PING_SCRIPT = (
+    "import json,subprocess,sys; "
+    "p=subprocess.run(['dotmac-platform','--format','json','relay','health'],"
+    "capture_output=True,text=True); "
+    "sys.exit(0 if p.returncode == 0 and "
+    "json.loads(p.stdout)['data']['verdict'] == 'relay_draining' else 1)"
+)
 
 DESCRIPTOR = f"""
 schema = "ProductDeploymentSpec.v3"
@@ -37,14 +51,15 @@ source_revision = "{"d" * 40}"
 
 [runtime_materials]
 names = [
-  "DATABASE_URL", "MIGRATION_DATABASE_URL",
+  "DATABASE_URL", "PLATFORM_DATABASE_URL", "VENDOR_RELAY_DISPATCHER_DATABASE_URL",
+  "MIGRATION_DATABASE_URL",
   "SIGNING_KEY_SOURCE", "SIGNING_KEY_TARGET"
 ]
 
 [[roles]]
 code = "app"
 command = ["python", "-m", "app"]
-materials = ["DATABASE_URL"]
+materials = ["DATABASE_URL", "PLATFORM_DATABASE_URL"]
 [roles.resources]
 cpus = "1.0"
 memory = "512m"
@@ -54,14 +69,22 @@ port = 8000
 
 [[roles]]
 code = "relay"
-command = ["python", "-m", "relay"]
-materials = ["DATABASE_URL"]
+command = ["dotmac-platform", "relay", "run", "--worker-id", "fixture-relay-1"]
+materials = [
+  "DATABASE_URL", "PLATFORM_DATABASE_URL",
+  "VENDOR_RELAY_DISPATCHER_DATABASE_URL",
+]
 [roles.resources]
 cpus = "0.5"
 memory = "256m"
-[roles.health.live]
-path = "/health"
-port = 8001
+[roles.worker]
+kind = "custom"
+ping_command = [
+  "python", "-c",
+  {json.dumps(_RELAY_PING_SCRIPT)},
+]
+heartbeat_max_age_seconds = 120
+max_backlog = 1000
 
 [migration]
 command = ["python", "-m", "migrate"]
@@ -97,10 +120,17 @@ code = "db"
 networks = ["back"]
 [[compose_topology.placements.mounts]]
 kind = "repository"
-source = "deploy/postgres/init.sh"
-source_digest = "{_INIT_SCRIPT_DIGEST}"
-target = "/docker-entrypoint-initdb.d/init.sh"
-justification = "Install the reviewed first-cluster role bootstrap script."
+source = "deploy/postgres/init-roles.sh"
+source_digest = "{_INIT_ROLES_DIGEST}"
+target = "/docker-entrypoint-initdb.d/001-vendor-roles.sh"
+justification = "Install the reviewed first-cluster database roles script."
+approved_by = "deployment-owner"
+[[compose_topology.placements.mounts]]
+kind = "repository"
+source = "deploy/postgres/bootstrap-credential-function.sql"
+source_digest = "{_BOOTSTRAP_CREDENTIAL_DIGEST}"
+target = "/docker-entrypoint-initdb.d/002-bootstrap-credential-function.sql"
+justification = "Install the reviewed first-cluster credential function script."
 approved_by = "deployment-owner"
 
 [[compose_topology.placements]]
@@ -112,6 +142,11 @@ profiles = ["ops"]
 code = "app"
 networks = ["front", "back"]
 [[compose_topology.placements.mounts]]
+kind = "named"
+source = "manifests"
+target = "/run/dotmac/product-manifests"
+read_only = true
+[[compose_topology.placements.mounts]]
 kind = "host_material"
 source_material = "SIGNING_KEY_SOURCE"
 target_material = "SIGNING_KEY_TARGET"
@@ -121,13 +156,24 @@ approved_by = "security-owner"
 [[compose_topology.placements]]
 code = "relay"
 networks = ["back"]
+[[compose_topology.placements.mounts]]
+kind = "named"
+source = "manifests"
+target = "/run/dotmac/product-manifests"
+read_only = true
+[[compose_topology.placements.mounts]]
+kind = "host_material"
+source_material = "SIGNING_KEY_SOURCE"
+target_material = "SIGNING_KEY_TARGET"
+justification = "Mount the held signing material only into this process."
+approved_by = "security-owner"
 
 [[compose_topology.jobs]]
 code = "manifest-init"
 image_source = "dependency:db"
-command = ["chown", "10001:10001", "/manifests"]
-verify_command = ["stat", "-c", "%u:%g", "/manifests"]
-verify_stdout = "10001:10001"
+command = ["/bin/sh", "-ec", "chown 10001:10001 /manifests && chmod 0750 /manifests"]
+verify_command = ["stat", "-c", "%u:%g:%a", "/manifests"]
+verify_stdout = "10001:10001:750"
 run_during_deploy = true
 profiles = ["ops"]
 network_mode = "none"
@@ -139,6 +185,11 @@ user = "0:0"
 kind = "capability"
 value = "CHOWN"
 justification = "Permit the one-shot volume ownership transition."
+approved_by = "deployment-owner"
+[[compose_topology.jobs.security.exceptions]]
+kind = "capability"
+value = "FOWNER"
+justification = "Permit the one-shot volume mode transition after ownership."
 approved_by = "deployment-owner"
 [[compose_topology.jobs.volumes]]
 name = "manifests"
@@ -152,6 +203,17 @@ profiles = ["ops"]
 networks = ["back"]
 depends_on = ["db"]
 materials = ["DATABASE_URL"]
+[[compose_topology.jobs.mounts]]
+kind = "named"
+source = "manifests"
+target = "/run/dotmac/product-manifests"
+read_only = false
+[[compose_topology.jobs.mounts]]
+kind = "host_material"
+source_material = "SIGNING_KEY_SOURCE"
+target_material = "SIGNING_KEY_TARGET"
+justification = "Mount the held signing material only into this process."
+approved_by = "security-owner"
 """
 
 
@@ -173,13 +235,59 @@ def test_v3_renders_complete_isolated_support_topology() -> None:
     assert services["ops"]["profiles"] == ["ops"]
     assert services["ops"]["image"] == _IMAGE
     assert services["manifest-init"]["image"] == _POSTGRES
+    assert services["manifest-init"]["cap_add"] == ["CHOWN", "FOWNER"]
+    assert services["manifest-init"]["volumes"] == ["manifests:/manifests"]
     assert services["migrate"]["profiles"] == ["ops"]
     assert "migrate" not in services["app"].get("depends_on", {})
     assert "MIGRATION_DATABASE_URL" not in services["app"].get("environment", {})
     assert "MIGRATION_DATABASE_URL" not in services["relay"].get("environment", {})
+    assert services["app"]["environment"]["PLATFORM_DATABASE_URL"].startswith("${")
+    assert services["relay"]["environment"][
+        "VENDOR_RELAY_DISPATCHER_DATABASE_URL"
+    ].startswith("${")
+    assert "healthcheck" not in services["relay"]
     assert any("SIGNING_KEY_SOURCE" in mount for mount in services["app"]["volumes"])
+    assert any("SIGNING_KEY_SOURCE" in mount for mount in services["relay"]["volumes"])
+    assert "manifests:/run/dotmac/product-manifests:ro" in services["app"]["volumes"]
+    assert "manifests:/run/dotmac/product-manifests:ro" in services["relay"]["volumes"]
+    assert "manifests:/run/dotmac/product-manifests" in services["ops"]["volumes"]
     assert "compose_topology" in build_canonical_document(spec).content["descriptor"]
     assert render_compose(spec) == rendered
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "ok"),
+    [
+        (0, '{"data":{"verdict":"relay_draining"}}', True),
+        (0, '{"data":{"verdict":"relay_not_running"}}', False),
+        (1, '{"data":{"verdict":"relay_draining"}}', False),
+        (0, "not-json", False),
+    ],
+)
+def test_relay_ping_requires_durable_health_verdict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: str,
+    ok: bool,
+) -> None:
+    worker = _parse().role("relay").worker
+    assert worker is not None
+    fake_cli = tmp_path / "dotmac-platform"
+    fake_cli.write_text(
+        "#!/bin/sh\nprintf '%s' \"$FAKE_RELAY_RESPONSE\"\n" 'exit "$FAKE_RELAY_EXIT"\n'
+    )
+    fake_cli.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_RELAY_RESPONSE", stdout)
+    monkeypatch.setenv("FAKE_RELAY_EXIT", str(returncode))
+    observed = subprocess.run(  # noqa: S603 -- exact fixture argv, fake CLI in PATH
+        [sys.executable, *worker.ping_command[1:]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (observed.returncode == 0) is ok
 
 
 def test_support_job_is_an_authorized_mutation_before_migration() -> None:
@@ -208,8 +316,8 @@ def test_support_job_is_an_authorized_mutation_before_migration() -> None:
         ),
         ('approved_by = "security-owner"', 'approved_by = ""', "named approver"),
         (
-            f'source_digest = "{_INIT_SCRIPT_DIGEST}"',
-            f'source_digest = "{_INIT_SCRIPT_DIGEST}"\nread_only = false',
+            f'source_digest = "{_INIT_ROLES_DIGEST}"',
+            f'source_digest = "{_INIT_ROLES_DIGEST}"\nread_only = false',
             "repository mount must be read-only",
         ),
         (
@@ -272,7 +380,12 @@ approved_by = "deployment-owner"
 
 def _staged_host(tmp_path: Path) -> tuple[Path, Path]:
     (tmp_path / "deploy" / "postgres").mkdir(parents=True)
-    (tmp_path / "deploy" / "postgres" / "init.sh").write_text("#!/bin/sh\n")
+    (tmp_path / "deploy" / "postgres" / "init-roles.sh").write_text(
+        "#!/bin/sh\nroles\n"
+    )
+    (tmp_path / "deploy" / "postgres" / "bootstrap-credential-function.sql").write_text(
+        "-- bootstrap credential function\n"
+    )
     source = tmp_path / "held-key"
     source.write_text("fixture material")
     (tmp_path / ".env").write_text(
@@ -302,7 +415,7 @@ def test_deploy_support_job_verifies_exact_output_without_exposing_it(
     def runner(argv: list[str], **kwargs: object) -> CommandResult:
         calls.append(argv)
         candidate_bytes.append(Path(argv[argv.index("-f") + 1]).read_bytes())
-        return CommandResult(0, "10001:10001\n" if len(calls) == 2 else "", "")
+        return CommandResult(0, "10001:10001:750\n" if len(calls) == 2 else "", "")
 
     effects = ComposeHostEffects(
         _parse(),
@@ -316,7 +429,7 @@ def test_deploy_support_job_verifies_exact_output_without_exposing_it(
     assert all("--project-directory" in argv for argv in calls)
     assert all(str(tmp_path) in argv for argv in calls)
     assert calls[0][-1] == "manifest-init"
-    assert calls[1][-4:] == ["stat", "-c", "%u:%g", "/manifests"]
+    assert calls[1][-4:] == ["stat", "-c", "%u:%g:%a", "/manifests"]
     assert candidate_bytes == [render_compose(_parse()).encode("utf-8")] * 2
     assert not list(tmp_path.glob(".foundation-candidate-*"))
 
