@@ -668,6 +668,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ap_0001 was edited in place twice before this guard enrolled the module.
     # The exact three historical byte sets are recorded here; the explicit
     # grandfathered-divergence ledger below decides which one the tree retains.
+    "dotmac-approvals-v0.1.0a6": (
+        "dotmac-approvals",
+        "dc94adbb2469ce4b8f75b3e61d9b10cba0e65b77",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+            "ap_0002_outbox_relay.py": (
+                "6aace60a4925ad5f5c693b81a356807c1ad2b9ffe1664fdfcd1417429d127e2d"
+            ),
+        },
+    ),
     "dotmac-approvals-v0.1.0a1": (
         "dotmac-approvals",
         "221f6868651426397e6e8443ca8b544234648247",
