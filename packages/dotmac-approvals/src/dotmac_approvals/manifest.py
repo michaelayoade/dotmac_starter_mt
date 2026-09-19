@@ -206,7 +206,7 @@ _DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
 
 module = ModuleManifest(
     code="approvals",
-    version="0.1.0a5+dev",
+    version="0.1.0a6",
     core=False,
     short_code="approvals",
     migration_prefix="ap",

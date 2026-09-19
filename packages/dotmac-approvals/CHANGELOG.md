@@ -5,7 +5,7 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 entry landed once the live Postgres migration and catalog gate passed;
 `0.1.0a1` through `0.1.0a5` have since been published.
 
-## Unreleased — `0.1.0a5+dev`
+## 0.1.0a6 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
 
 **Database catalogue contribution.** The manifest now declares
 `database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
@@ -43,9 +43,10 @@ attribution is the actor this module authorised and its timestamp is this
 module's own clock. `cancelled_by` is not an exception: it is compared against
 the stored `requested_by` and refused when it differs.
 
-**The declared version now carries a PEP 440 local development marker.**
-`0.1.0a5` is published and tagged; `src/` has moved since, and one version may
-not name two sets of importable bytes.
+**Version prepared.** The `0.1.0a5+dev` local-development marker is removed;
+the package now declares `0.1.0a6`. This is a prepared release candidate only —
+publication happens through a separate, later `workflow_dispatch` of
+`release-module.yml`.
 
 ## 0.1.0a5 — 2026-08-16
 
