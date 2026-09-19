@@ -150,7 +150,7 @@ from dotmac_commercial_agreements.service import (
     terminate,
 )
 
-__version__ = "0.1.0a2+dev"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "AGREEMENT_ACTIVATED_V1",
