@@ -34,12 +34,12 @@ def test_declares_exactly_one_poll_only_capability() -> None:
     assert capability.modes == frozenset({ConnectorMode.POLL})
 
 
-def test_the_capability_contract_digest_is_explicitly_unset() -> None:
-    # Correction #4: slice 1b hasn't published its capability contract yet,
-    # so there is no real digest to pin. This must be None, never a
-    # fabricated placeholder value.
+def test_the_capability_claims_erp_published_contract_digest() -> None:
+    # ERP's v3 descriptor owns this schema. The connector only claims it.
     capability = MANIFEST.require_declares(CAPABILITY_ID)
-    assert capability.claims_contract_digest is None
+    assert capability.claims_contract_digest == (
+        "f69ffd1e486a298bfdff5ab6a4b1a30a6962075b30d91400ef6ca4247609ac74"
+    )
 
 
 def test_declares_exactly_the_one_secret_binding() -> None:

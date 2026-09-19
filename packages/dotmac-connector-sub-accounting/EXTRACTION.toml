@@ -61,10 +61,10 @@ inventory_evidence = [
   "docs/adr/0024-apps-compose-by-synchronizing-data.md",
 ]
 
-first_cutover = "After the parallel ERP-side slice (1b) publishes invoices.accounting_sync.observation.v1's capability contract and this connector's claims_contract_digest is pinned to it (see the TODO in plugin.py), publish this connector, exact-pin it in dotmac_integrator, reconcile the ObservationPortClient descriptor, and run a POLL shadow cutover against Sub's real feed with no ERP-side consequence yet."
+first_cutover = "ERP publishes invoices.accounting_sync.observation.v1's observation schema in its ProductPort descriptor v3, and this connector claims that contract digest. After cross-repository CI validates the descriptor and wire fixture, separately authorize publication and exact-pinning in an isolated ERP dotmac_integrator instance; reconcile the descriptor and run a POLL shadow cutover against Sub's feed with no ERP-side GL consequence. This dossier does not authorize activation."
 
 shadow_and_drift = "Compare every polled item's mapped fields, disposition/issues consistency verdict and forwarded projection_digest against ERP's own independently-computed shadow record for the same source item, over a full accounting cycle. Because this connector forwards Sub's own digest_version/projection_digest verbatim rather than computing them, a mismatch here now means a real transport or mapping bug — not an expected reconciliation gap — and should be investigated as a runtime bug."
 
 local_copy_retirement = "No qualifying Dotmac client for this feed existed at build time, so there is no local copy to retire. If a product introduces a direct Sub accounting-sync client before this connector's first cutover, remove that provider transport, credential access and poll checkpoint in the adopting change; the product retains only its own accounting decisions and typed Integration port."
 
-next_action = "Confirm Sub's exact InvoiceAccountingSyncRead field names against dotmac_sub's real app/schemas/billing.py, pin claims_contract_digest once slice 1b publishes its capability contract, then wire this package's tests into CI and pursue authenticated shadow polling before any production binding."
+next_action = "Run CI for the Sub fixture, connector mapping and claimed ERP contract digest, Integrator descriptor reconciliation and HTTP mirror, and ERP receiver parity/legacy/conflict cases. Keep the port disabled until a separately authorized binding and cutover."

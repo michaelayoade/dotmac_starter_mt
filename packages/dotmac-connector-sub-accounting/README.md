@@ -72,6 +72,7 @@ production coordinate declared in code, not an activation**: building the
 manifest correctly is still useful for review, but this connector must not be
 bound or enabled without a separate explicit go-ahead.
 
-`claims_contract_digest` is explicitly `None` on the one capability: the
-parallel ERP-side slice (1b) has not yet published its capability contract,
-so there is no real digest to pin. See the `TODO` in `plugin.py`.
+`claims_contract_digest` pins ERP's published v3 ProductPort observation
+contract. The connector does not author a competing schema; a digest mismatch
+fails composition/binding closed. The port remains disabled pending separate
+activation authority.

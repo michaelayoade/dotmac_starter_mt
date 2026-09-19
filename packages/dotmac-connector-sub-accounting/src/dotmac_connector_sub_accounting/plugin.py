@@ -64,13 +64,12 @@ MANIFEST: Final = ConnectorManifest(
             capability_id=CAPABILITY_ID,
             config_schema=CONFIG_SCHEMA,
             modes=frozenset({ConnectorMode.POLL}),
-            # TODO: pin ERP's real observation contract_digest once slice 1b
-            # publishes it — see sub-erp-productport-billing-flow-scoping in
-            # Knowledge. There is no real digest to pin yet (1b hasn't
-            # declared its capability contract), so this is left explicitly
-            # None (the SPI's own "nothing published yet" state) rather than
-            # a fabricated value.
-            claims_contract_digest=None,
+            # ERP's ProductPort descriptor v3 owns the observation schema.
+            # This claim is pinned to its published contract, not a second
+            # connector-authored schema. A change requires a new capability id.
+            claims_contract_digest=(
+                "f69ffd1e486a298bfdff5ab6a4b1a30a6962075b30d91400ef6ca4247609ac74"
+            ),
         ),
     ),
     secret_bindings=(

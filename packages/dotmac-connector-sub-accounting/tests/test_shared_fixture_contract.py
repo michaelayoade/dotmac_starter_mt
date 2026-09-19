@@ -19,14 +19,45 @@ synthetic connector-only fixtures.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
 from dotmac_connector_sub_accounting.mapping import map_item
+from dotmac_integration import (
+    ProductObservationSource,
+    ProductRequest,
+    product_observation_document,
+)
 
 FIXTURE_PATH = (
     Path(__file__).parent / "fixtures" / "shared_invoice_accounting_sync_v2_sample.json"
 )
+GOLDEN_DOCUMENT_PATH = (
+    Path(__file__).parent / "fixtures" / "shared_invoice_product_observation_v1.json"
+)
+
+
+def _canonical_json(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+@dataclass(frozen=True, slots=True)
+class _FixtureScope:
+    kind: str
+    ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class _FixtureDestination:
+    capability_binding_id: UUID
+    capability_id: str
+    application: str
+    scope: _FixtureScope
+    contract_version: int
+    destination_revision_id: UUID
 
 
 def test_maps_subs_real_shared_fixture_without_error() -> None:
@@ -62,4 +93,40 @@ def test_maps_subs_real_shared_fixture_without_error() -> None:
     assert (
         event.payload["projection_digest"]
         == "0dfecf2e1f96a2d1a63eb8e5e9f78f0aefbf661ab2c424b841b5bb2eda85aa7c"
+    )
+
+
+def test_real_fixture_uses_generic_product_observation_wire_builder() -> None:
+    assert hashlib.sha256(GOLDEN_DOCUMENT_PATH.read_bytes()).hexdigest() == (
+        "dec305d41b87d34563198faf4fd110f5884da3314ca8afa33770d014262ec038"
+    )
+    raw = json.loads(FIXTURE_PATH.read_text())
+    event, _, _ = map_item(raw)
+    destination = _FixtureDestination(
+        capability_binding_id=UUID("bbbbbbbb-2222-4222-8222-222222222222"),
+        capability_id="invoices.accounting_sync.observation.v1",
+        application="erp",
+        scope=_FixtureScope(kind="organization", ref="shared-fixture-org"),
+        contract_version=1,
+        destination_revision_id=UUID("aaaaaaaa-1111-4111-8111-111111111111"),
+    )
+    request = ProductRequest(
+        destination=destination,
+        source=ProductObservationSource(
+            installation_id=UUID("cccccccc-3333-4333-8333-333333333333"),
+            connector_key="sub_accounting",
+        ),
+        contract_version=1,
+        idempotency_key="receipt:fixture",
+        request_fingerprint="fixture-fingerprint",
+        correlation_id="fixture-correlation",
+        receipt_id=UUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        provider_event_id=event.provider_event_id,
+        event_type=event.event_type,
+        observation=event.payload,
+    )
+
+    expected = json.loads(GOLDEN_DOCUMENT_PATH.read_text())
+    assert _canonical_json(product_observation_document(request)) == _canonical_json(
+        expected
     )
