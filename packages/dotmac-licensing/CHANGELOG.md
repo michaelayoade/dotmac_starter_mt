@@ -5,7 +5,7 @@ All notable changes to the `dotmac-licensing` distribution. This package follows
 surface is still settling — a `0.MINOR` bump may carry breaking changes, each
 called out here.
 
-## Unreleased — `0.1.0a1+dev`
+## 0.1.0a2 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
 
 **Database catalogue contribution.** The manifest now declares
 `database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
@@ -38,10 +38,10 @@ way back. `AcknowledgementState` is deliberately not a delivery state —
 deployment can apply a licence and never report. There is no attempt count, retry
 outcome or connection reference, and a test refuses one.
 
-**The declared version now carries a PEP 440 local development marker.**
-`0.1.0a1` is published and tagged; `src/` has moved since (this change and the
-docstring drift already recorded in the released-source drift baseline), and one
-version may not name two sets of importable bytes.
+**Version prepared.** The `0.1.0a1+dev` local-development marker is removed;
+the package now declares `0.1.0a2`. This is a prepared release candidate only —
+publication happens through a separate, later `workflow_dispatch` of
+`release-module.yml`.
 
 ## 0.1.0a1 — 2026-08-19
 
