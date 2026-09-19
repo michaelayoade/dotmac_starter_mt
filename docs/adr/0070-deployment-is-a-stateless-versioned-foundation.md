@@ -661,3 +661,10 @@ contract with its own containment proof must be reviewed before changing the
 Foundation plan. A render test is not evidence that CP's workflow consumes the
 retained bytes, that its descriptor is accepted, or that a release/cutover has
 occurred.
+
+Michael approved the adoption direction on 2026-09-19: Platform CP will move
+manifest initialization after the verified backup and use Foundation's
+separate one-shot migration service as the sole DDL owner. This is a contract
+for the subsequent CP adoption change, not a claim that CP's current script or
+descriptor has already changed. A pre-backup mutation path is not part of this
+Foundation source slice.
