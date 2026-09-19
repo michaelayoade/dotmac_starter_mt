@@ -16,9 +16,8 @@ expression) was captured from an actual PostgreSQL 16 observation
 against this module's real composed migration graph, then self-verified with
 `compare_module_database_catalog` (zero drift) before being frozen here — none
 of it was hand-derived from reading the migration source. The `dotmac-kernel`
-floor moves to `>=0.1.0a104`, the release that fixed a DROP-COLUMN
-physical-ordinal-gap false positive in the comparator this contribution now
-depends on (kernel PR #715).
+floor moves to `>=0.1.0a100`, the release that first published
+`dotmac_kernel.product_database_catalog`, which this manifest now imports.
 
 **Public typed READ contracts.** `list_tenant_requests` / `list_platform_requests`
 over a closed, page-bounded `RequestFilter`; `get_tenant_request` /

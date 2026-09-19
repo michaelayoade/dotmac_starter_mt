@@ -58,11 +58,9 @@ self-verified against a fresh observation of the same database with
 `compare_module_database_catalog(...).matched is True` and zero drifts before
 teardown.
 
-The `dotmac-kernel` floor moves to `>=0.1.0a104` for this: kernel PR #715
-fixed a comparator false positive where a live table's `DROP COLUMN` ordinal
-gap was wrongly reported as drift against a correct declaration. A floor
-below a104 would carry the new contribution into a kernel still capable of
-raising that false positive.
+The `dotmac-kernel` floor moves to `>=0.1.0a100` for this: the contribution
+type and `dotmac_kernel.product_database_catalog` were first published in
+a100, above the a74 allocation floor this module previously declared.
 
 ## 0.1.0a2 — 2026-08-25 (unreleased)
 

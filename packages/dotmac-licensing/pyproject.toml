@@ -32,12 +32,14 @@ python = ">=3.11,<3.14"
 # rather than on a capability — a worse error message for the same defect, since
 # the manifest raises while it is being CONSTRUCTED.
 #
-# a104: this module's manifest now declares `database_catalog=`
-# (ModuleDatabaseCatalogContributionV1); a104 fixed a DROP-COLUMN
-# physical-ordinal-gap false positive in the comparator that verifies it
-# (kernel PR #715). Same reasoning as the allocation/prerequisite floors
-# above: capability outranks allocation.
-dotmac-kernel = ">=0.1.0a104"
+# a100: this module's manifest now declares `database_catalog=`
+# (ModuleDatabaseCatalogContributionV1), importing
+# `dotmac_kernel.product_database_catalog`, first published in a100. Same
+# reasoning as the allocation/prerequisite floors above: capability outranks
+# allocation. (a104 later fixed a DROP-COLUMN physical-ordinal-gap false
+# positive in the separate comparator module that VERIFIES this declaration,
+# kernel PR #715, but nothing this manifest imports needs a104 to load.)
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [build-system]

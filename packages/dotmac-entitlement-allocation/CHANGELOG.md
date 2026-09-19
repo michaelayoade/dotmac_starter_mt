@@ -26,9 +26,9 @@ an actual PostgreSQL 16 observation
 against this module's real composed migration graph — including the two
 no-DDL prerequisite-verification revisions, `ea_0002` and `ea_0003` — then
 self-verified with `compare_module_database_catalog` (zero drift) before being
-frozen here. The `dotmac-kernel` floor moves to `>=0.1.0a104`, the release
-that fixed a DROP-COLUMN physical-ordinal-gap false positive in the comparator
-this contribution now depends on (kernel PR #715).
+frozen here. The `dotmac-kernel` floor moves to `>=0.1.0a100`, the release
+that first published `dotmac_kernel.product_database_catalog`, which this
+manifest now imports.
 
 **Public typed READ contracts** (`dotmac_entitlement_allocation.facts`):
 `get_allocation`, `allocations_for_contract`, `list_allocations` over a closed

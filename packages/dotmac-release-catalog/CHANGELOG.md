@@ -13,10 +13,10 @@ the stable one.
 captured from an actual PostgreSQL 16 observation
 (`dotmac_kernel.database_catalog_comparator.observe_postgres_tables_columns`)
 against this module's real composed migration graph, then self-verified with
-`compare_module_database_catalog` (zero drift) before being frozen here. The
-`dotmac-kernel` floor moves to `>=0.1.0a104`, the release that fixed a
-DROP-COLUMN physical-ordinal-gap false positive in the comparator this
-contribution now depends on (kernel PR #715).
+`compare_module_database_catalog` (zero drift) before being frozen here. No
+`dotmac-kernel` floor change: the already-declared `>=0.1.0a100` (needed for
+the existing typed attestation writers' `product_database_catalog` import)
+already covers this manifest's identical new import.
 
 **Public typed READ contracts** (`dotmac_release_catalog.facts`): `list_artifacts`
 over a closed, page-bounded `ArtifactFilter`; `get_artifact` returning an

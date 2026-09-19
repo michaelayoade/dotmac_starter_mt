@@ -30,13 +30,14 @@ python = ">=3.11,<3.14"
 # manifest raises while it is being CONSTRUCTED, before any composition check
 # a reader could interpret.
 #
-# Bumped to a104 for the manifest's new `database_catalog=` contribution
-# (verified, live-observed against `cg_0001_agreements`): kernel PR #715 fixed
-# a comparator false positive where a `DROP COLUMN` ordinal gap on a live
-# table was wrongly reported as drift against a declared contribution. A
-# floor below a104 would carry the contribution into a kernel still capable
-# of raising that false positive on an otherwise-correct declaration.
-dotmac-kernel = ">=0.1.0a104"
+# Bumped to a100 for the manifest's new `database_catalog=` contribution
+# (verified, live-observed against `cg_0001_agreements`): the contribution
+# type and its `dotmac_kernel.product_database_catalog` module were first
+# published in a100, a new capability that now outranks the a74 allocation.
+# (a104 later fixed a DROP-COLUMN physical-ordinal-gap false positive in the
+# separate comparator module that VERIFIES this declaration, kernel PR #715,
+# but nothing this manifest imports needs a104 to load.)
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [build-system]

@@ -329,7 +329,7 @@
       "package_dir": "packages/dotmac-approvals",
       "import_name": "dotmac_approvals",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a104",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_approvals",
       "tag_prefix": "dotmac-approvals-v",
       "wheel_contents": {
@@ -676,7 +676,7 @@
       "package_dir": "packages/dotmac-commercial-agreements",
       "import_name": "dotmac_commercial_agreements",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a104",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_agreements",
       "tag_prefix": "dotmac-commercial-agreements-v",
       "wheel_contents": {
@@ -918,7 +918,7 @@
       "package_dir": "packages/dotmac-entitlement-allocation",
       "import_name": "dotmac_entitlement_allocation",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a104",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_ealloc",
       "tag_prefix": "dotmac-entitlement-allocation-v",
       "wheel_contents": {
@@ -1894,7 +1894,7 @@
       "package_dir": "packages/dotmac-licensing",
       "import_name": "dotmac_licensing",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a104",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_licensing",
       "tag_prefix": "dotmac-licensing-v",
       "wheel_contents": {
@@ -2713,7 +2713,7 @@
       "package_dir": "packages/dotmac-release-catalog",
       "import_name": "dotmac_release_catalog",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a104",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_rel",
       "tag_prefix": "dotmac-release-catalog-v",
       "wheel_contents": {
