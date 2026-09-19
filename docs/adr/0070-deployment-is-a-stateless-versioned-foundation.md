@@ -629,14 +629,19 @@ release is authorized by the V3 schema alone.
 
 ## Amendment — 2026-09-19: Platform CP topology admission boundary
 
-The CP-shaped V3 fixture covers the production topology observed at
+The CP-shaped V3 diagnostic fixture models structural features observed at
 `dotmac_platform_control_plane` commit
 `1524580f43549a5804134131d4d9ed3b2237edef`: separate app, platform and
 relay-dispatcher credentials; a backend-only relay without a misleading
 container healthcheck; both first-cluster PostgreSQL init mounts; the
 network-isolated manifest initializer with exact owner and mode verification;
 read-only app/relay and read-write ops manifest mounts; and the one-shot
-Foundation migration owner. The relay's existing `dotmac-platform relay health`
+Foundation migration owner. Its image and mounted-source bytes are synthetic;
+it is not a render of CP's accepted descriptor. CP uses its image-default app
+startup and one `ops` service with the migration credential, whereas V3 renders
+an explicit app command and a separate migration service that alone holds the
+owner material. These are adoption decisions, not proven equivalences.
+The relay's existing `dotmac-platform relay health`
 CLI exits successfully even for an unhealthy verdict, so a Foundation worker
 ping must check its machine-readable `data.verdict` for `relay_draining` rather
 than trust the CLI exit status alone. A fixture demonstrates that contract; CP's

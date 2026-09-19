@@ -1,4 +1,4 @@
-"""The v3 topology extension renders CP-shaped assets without product branches."""
+"""A CP-shaped diagnostic fixture for the generic V3 topology renderer."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ names = [
 
 [[roles]]
 code = "app"
-command = ["python", "-m", "app"]
+command = ["uvicorn", "vendor_cp.main:app", "--host", "0.0.0.0", "--port", "8000"]
 materials = ["DATABASE_URL", "PLATFORM_DATABASE_URL"]
 [roles.resources]
 cpus = "1.0"
@@ -87,10 +87,14 @@ heartbeat_max_age_seconds = 120
 max_backlog = 1000
 
 [migration]
-command = ["python", "-m", "migrate"]
-heads_command = ["python", "-m", "migrate", "current"]
+command = ["dotmac-platform", "admin", "migrate"]
+heads_command = ["dotmac-platform", "admin", "migrate", "--target", "current"]
 owner_material = "MIGRATION_DATABASE_URL"
-expected_heads = ["head_1"]
+expected_heads = [
+  "0028_machine_attribution", "ap_0002_outbox_relay",
+  "dc_0002_canonical_plan_digest", "ea_0003_platform_audit_log",
+  "rl_0001_release_artifacts", "v019_relay_heartbeat",
+]
 compatibility = "maintenance_required"
 
 [backup]
@@ -205,7 +209,7 @@ target = "/manifests"
 [[compose_topology.jobs]]
 code = "ops"
 image_source = "product"
-command = ["python", "-m", "app", "diagnose"]
+command = ["dotmac-platform", "diagnose", "self"]
 profiles = ["ops"]
 networks = ["back"]
 depends_on = ["db"]
@@ -228,7 +232,7 @@ def _parse(text: str = DESCRIPTOR) -> ProductDeploymentSpec:
     return ProductDeploymentSpec.loads(text)
 
 
-def test_v3_renders_complete_isolated_support_topology() -> None:
+def test_v3_renders_cp_shaped_isolated_support_topology() -> None:
     spec = _parse()
     rendered = render_compose(spec)
     project = yaml.safe_load(rendered)
@@ -452,10 +456,11 @@ def test_deploy_support_job_verifies_exact_output_without_exposing_it(
 def test_v3_migration_commands_consume_retained_candidate_bytes(tmp_path: Path) -> None:
     _staged_host(tmp_path)
     calls: list[list[str]] = []
+    expected_heads = list(_parse().migration.expected_heads)
 
     def runner(argv: list[str], **kwargs: object) -> CommandResult:
         calls.append(argv)
-        return CommandResult(0, "head_1\n", "")
+        return CommandResult(0, "\n".join(expected_heads) + "\n", "")
 
     effects = ComposeHostEffects(
         _parse(),
@@ -464,9 +469,9 @@ def test_v3_migration_commands_consume_retained_candidate_bytes(tmp_path: Path) 
         retained_compose_assets=_retained_asset(tmp_path),
     )
     assert effects.run_migration_command(
-        ["python", "-m", "migrate"], timeout_seconds=120, image=_IMAGE
+        ["dotmac-platform", "admin", "migrate"], timeout_seconds=120, image=_IMAGE
     ).ok
-    assert effects.migration_heads(image=_IMAGE) == ["head_1"]
+    assert effects.migration_heads(image=_IMAGE) == expected_heads
     assert len(calls) == 2
     assert all(
         argv[argv.index("-f") + 1] != str(tmp_path / "docker-compose.yml")
