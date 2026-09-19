@@ -7,6 +7,19 @@ called out here.
 
 ## Unreleased — `0.1.0a1+dev`
 
+**Database catalogue contribution.** The manifest now declares
+`database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
+`li_0001_licensing`, covering all six tables. Every column fact (Postgres type
+identity, nullability, generation, default expression) was captured from an
+actual PostgreSQL 16 observation
+(`dotmac_kernel.database_catalog_comparator.observe_postgres_tables_columns`)
+against this module's real composed migration graph, then self-verified with
+`compare_module_database_catalog` (zero drift) before being frozen here — none
+of it was hand-derived from reading the migration source. The `dotmac-kernel`
+floor moves to `>=0.1.0a104`, the release that fixed a DROP-COLUMN
+physical-ordinal-gap false positive in the comparator this contribution now
+depends on (kernel PR #715).
+
 **Public typed READ contracts.** `list_licences` over a closed page-bounded
 `LicenceFilter` answering `LicenceSummary` rows (not `LicenceView`, which
 carries every issuance in the lineage and would be a nested page per row);
