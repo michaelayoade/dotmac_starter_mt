@@ -148,8 +148,8 @@
       "state": "declared-unpublished"
     },
     "dotmac-release-catalog": {
-      "declared": "0.1.0a4+dev",
-      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a4 IS published and tagged (dotmac-release-catalog-v0.1.0a4). Wave 2 added the public typed read contracts (dotmac_release_catalog.facts, plus list_artifacts / get_artifact / artifact_attestations / preview_publication), so src/ no longer matches the bytes that tag names and a bare 0.1.0a4 would make one version name two importable surfaces -- structurally the defect that let dotmac-ui 0.1.0a7 reach the registry without map_frame. The local segment is a PEP 440 local version: no index accepts it, so it allocates nothing, cannot be published, and needs no release authorization. Michael authorizes release versions; nothing authorizes main to claim a version it is not. Remove this row by ALLOCATING the next version at release time -- never by editing the marker off to make this sweep quiet, which would restore the false claim.",
+      "declared": "0.1.0a5",
+      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a4 remains the last published and tagged version (dotmac-release-catalog-v0.1.0a4); 0.1.0a5 was allocated to name the manifest's first ModuleDatabaseCatalogContributionV1 at the corrected dotmac-kernel >=0.1.0a100 floor as a version distinct from a4, replacing the 0.1.0a4+dev marker that held the same gap open. Michael authorizes release versions; nothing authorizes main to claim a version it is not, so a5 awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep, which would restore the false claim.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {
