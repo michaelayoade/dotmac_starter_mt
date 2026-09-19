@@ -47,6 +47,23 @@ re-export them; no caller's import changes.
 `0.1.0a2` is published and tagged; `src/` has moved since, and one version may
 not name two sets of importable bytes.
 
+**The manifest now carries a `database_catalog=` contribution**
+(`ModuleDatabaseCatalogContributionV1`, lineage head `cg_0001_agreements`,
+covering all three platform tables in sorted order). Every column, ordinal,
+PostgreSQL type and generation fact was transcribed verbatim from
+`observe_postgres_tables_columns` against a disposable PostgreSQL 16 database
+composed from the kernel lineage, this assembly and `cg_0001_agreements` at
+that exact head — never hand-typed from the migration source — and
+self-verified against a fresh observation of the same database with
+`compare_module_database_catalog(...).matched is True` and zero drifts before
+teardown.
+
+The `dotmac-kernel` floor moves to `>=0.1.0a104` for this: kernel PR #715
+fixed a comparator false positive where a live table's `DROP COLUMN` ordinal
+gap was wrongly reported as drift against a correct declaration. A floor
+below a104 would carry the new contribution into a kernel still capable of
+raising that false positive.
+
 ## 0.1.0a2 — 2026-08-25 (unreleased)
 
 ### Added

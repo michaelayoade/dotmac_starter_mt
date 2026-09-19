@@ -29,7 +29,14 @@ python = ">=3.11,<3.14"
 # a capability, which is a worse error message for the same defect — the
 # manifest raises while it is being CONSTRUCTED, before any composition check
 # a reader could interpret.
-dotmac-kernel = ">=0.1.0a77"
+#
+# Bumped to a104 for the manifest's new `database_catalog=` contribution
+# (verified, live-observed against `cg_0001_agreements`): kernel PR #715 fixed
+# a comparator false positive where a `DROP COLUMN` ordinal gap on a live
+# table was wrongly reported as drift against a declared contribution. A
+# floor below a104 would carry the contribution into a kernel still capable
+# of raising that false positive on an otherwise-correct declaration.
+dotmac-kernel = ">=0.1.0a104"
 sqlalchemy = "^2.0"
 
 [build-system]
