@@ -626,3 +626,45 @@ Platform CP's accepted descriptor, source/render hashes, host asset,
 authorization binding, rehearsed rollback, and old-writer retirement require
 separate evidence before any full cutover can be claimed. No deployment or
 release is authorized by the V3 schema alone.
+
+## Amendment — 2026-09-19: Platform CP topology admission boundary
+
+The CP-shaped V3 diagnostic fixture models structural features observed at
+`dotmac_platform_control_plane` commit
+`1524580f43549a5804134131d4d9ed3b2237edef`: separate app, platform and
+relay-dispatcher credentials; a backend-only relay without a misleading
+container healthcheck; both first-cluster PostgreSQL init mounts; the
+network-isolated manifest initializer with exact owner and mode verification;
+read-only app/relay and read-write ops manifest mounts; and the one-shot
+Foundation migration owner. Its image and mounted-source bytes are synthetic;
+it is not a render of CP's accepted descriptor. V3's explicit `command = []`
+on a role inherits the exact-digest image's default CMD and omits Compose's
+`command`; an absent key still refuses, and V1/V2 still require a nonempty
+array. This keeps CP's container-local bind address in its pinned image, not
+as a host-address literal in the signed deployment descriptor. Existing
+nonempty-command V3 canonical documents gain no field or changed bytes. CP
+still uses one `ops` service with the migration credential, whereas V3 renders
+a separate migration service that alone holds the owner material. That split
+remains an adoption decision, not a proven equivalence.
+The relay's existing `dotmac-platform relay health`
+CLI exits successfully even for an unhealthy verdict, so a Foundation worker
+ping must check its machine-readable `data.verdict` for `relay_draining` rather
+than trust the CLI exit status alone. A fixture demonstrates that contract; CP's
+accepted product descriptor has not yet adopted it.
+
+Foundation runs deploy-time support jobs **after a verified backup and before
+migration preflight**. CP's current script runs `manifest-init` before backup.
+The existing Foundation order remains the safety boundary: no generic job is
+authorized to mutate a volume before the snapshot. CP must reconcile this
+order in its adoption workflow, or a separate narrowly typed volume-init
+contract with its own containment proof must be reviewed before changing the
+Foundation plan. A render test is not evidence that CP's workflow consumes the
+retained bytes, that its descriptor is accepted, or that a release/cutover has
+occurred.
+
+Michael approved the adoption direction on 2026-09-19: Platform CP will move
+manifest initialization after the verified backup and use Foundation's
+separate one-shot migration service as the sole DDL owner. This is a contract
+for the subsequent CP adoption change, not a claim that CP's current script or
+descriptor has already changed. A pre-backup mutation path is not part of this
+Foundation source slice.

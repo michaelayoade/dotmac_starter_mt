@@ -950,13 +950,6 @@ class Role:
     def parse(cls, table: _Table) -> Role:
         code = table.str_("code", pattern=_CODE)
         command = table.str_list("command")
-        if not command:
-            raise SpecError(
-                "command may not be empty, and it is an ARGUMENT ARRAY rather "
-                "than a shell string so that no host's shell gets a vote in "
-                "how it is split",
-                where=table.path,
-            )
         replicas = table.int_("replicas", default=1, minimum=0, maximum=64)
         depends_on = table.str_list("depends_on", default=(), pattern=_CODE)
         resources = Resources.parse(table.table("resources") or _Table({}, table.path))
@@ -2583,6 +2576,13 @@ class ProductDeploymentSpec:
             raise SpecError(
                 "ProductDeploymentSpec.v2/v3 [database] requires at least one "
                 "database catalog coordinate"
+            )
+        if self.descriptor_schema != SCHEMA_V3 and any(
+            not role.command for role in self.roles
+        ):
+            raise SpecError(
+                "an empty role command (use the image default) requires "
+                "ProductDeploymentSpec.v3"
             )
         if self.descriptor_schema == SCHEMA_V3 and self.compose_topology is None:
             raise SpecError("ProductDeploymentSpec.v3 requires [compose_topology]")
