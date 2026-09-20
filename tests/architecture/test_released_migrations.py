@@ -6794,6 +6794,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-release-catalog ──
+    "dotmac-release-catalog-v0.1.0a5": (
+        "dotmac-release-catalog",
+        "9a9403624a8c21571053e36043f3eeab7ec34480",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+            "rl_0002_db_catalog_attestations.py": (
+                "e05f9ec0f7cced74f184b0fdbdc30997f0f9aa83b7384856c6250db2f1ca46ce"
+            ),
+        },
+    ),
     "dotmac-release-catalog-v0.1.0a4": (
         "dotmac-release-catalog",
         "7556b96e8751d46a8bf3cb014b95a9a64eb03b0c",
@@ -7129,7 +7141,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-publishing": frozenset(),
     "dotmac-records": frozenset(),
     "dotmac-referrals": frozenset(),
-    "dotmac-release-catalog": frozenset({"rl_0002_db_catalog_attestations.py"}),
+    "dotmac-release-catalog": frozenset(),
     "dotmac-reseller-management": frozenset(),
     "dotmac-service-orders": frozenset(),
     "dotmac-sites": frozenset(),
