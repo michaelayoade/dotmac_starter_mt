@@ -717,10 +717,11 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     "dotmac-approvals-v0.1.0a6": (
-        # a6 adds only a database_catalog= manifest declaration; the migration
-        # lineage is byte-identical to a5, so the same commit and digests apply.
+        # a6's migration bytes are identical to a5, but the recorded commit is
+        # THIS tag's own peeled commit, per test_each_recorded_commit_is_the_
+        # exact_peeled_tag — never a prior release's commit.
         "dotmac-approvals",
-        "8d4ddfd9e285da06ce1fdd29b59f1b483d6ea38c",
+        "dc94adbb2469ce4b8f75b3e61d9b10cba0e65b77",
         {
             "ap_0001_approvals.py": (
                 "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
@@ -1822,10 +1823,11 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     "dotmac-commercial-agreements-v0.1.0a3": (
-        # a3 adds only a database_catalog= manifest declaration; the migration
-        # lineage is byte-identical to a2, so the same commit and digest apply.
+        # a3's migration bytes are identical to a2, but the recorded commit is
+        # THIS tag's own peeled commit, per test_each_recorded_commit_is_the_
+        # exact_peeled_tag — never a prior release's commit.
         "dotmac-commercial-agreements",
-        "42acc8b30f1bcaed1580d312fd33d7b5ef358817",
+        "5005e998a4cac9b4f7e3ba91f371967b0ee8b2a2",
         {
             "cg_0001_agreements.py": (
                 "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
@@ -6976,6 +6978,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
                         "dotmac-approvals-v0.1.0a3",
                         "dotmac-approvals-v0.1.0a4",
                         "dotmac-approvals-v0.1.0a5",
+                        "dotmac-approvals-v0.1.0a6",
                     }
                 ),
             ),
