@@ -72,16 +72,6 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
-    "dotmac-approvals": {
-      "declared": "0.1.0a6",
-      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a5 remains the last published and tagged version (dotmac-approvals-v0.1.0a5); 0.1.0a6 was allocated to name the manifest's first ModuleDatabaseCatalogContributionV1 at the corrected dotmac-kernel >=0.1.0a100 floor as a version distinct from a5, replacing the 0.1.0a5+dev marker that held the same gap open. Michael authorizes release versions; nothing authorizes main to claim a version it is not, so a6 awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep.",
-      "state": "declared-unpublished"
-    },
-    "dotmac-commercial-agreements": {
-      "declared": "0.1.0a3",
-      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a2 remains the last published and tagged version (dotmac-commercial-agreements-v0.1.0a2); 0.1.0a3 was allocated to name the manifest's first ModuleDatabaseCatalogContributionV1 at the corrected dotmac-kernel >=0.1.0a100 floor as a version distinct from a2, replacing the 0.1.0a2+dev marker that held the same gap open. Michael authorizes release versions; nothing authorizes main to claim a version it is not, so a3 awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep.",
-      "state": "declared-unpublished"
-    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
@@ -148,8 +138,8 @@
       "state": "declared-unpublished"
     },
     "dotmac-release-catalog": {
-      "declared": "0.1.0a4+dev",
-      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a4 IS published and tagged (dotmac-release-catalog-v0.1.0a4). Wave 2 added the public typed read contracts (dotmac_release_catalog.facts, plus list_artifacts / get_artifact / artifact_attestations / preview_publication), so src/ no longer matches the bytes that tag names and a bare 0.1.0a4 would make one version name two importable surfaces -- structurally the defect that let dotmac-ui 0.1.0a7 reach the registry without map_frame. The local segment is a PEP 440 local version: no index accepts it, so it allocates nothing, cannot be published, and needs no release authorization. Michael authorizes release versions; nothing authorizes main to claim a version it is not. Remove this row by ALLOCATING the next version at release time -- never by editing the marker off to make this sweep quiet, which would restore the false claim.",
+      "declared": "0.1.0a5",
+      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a4 remains the last published and tagged version (dotmac-release-catalog-v0.1.0a4); 0.1.0a5 was allocated to name the manifest's first ModuleDatabaseCatalogContributionV1 at the corrected dotmac-kernel >=0.1.0a100 floor as a version distinct from a4, replacing the 0.1.0a4+dev marker that held the same gap open. Michael authorizes release versions; nothing authorizes main to claim a version it is not, so a5 awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep, which would restore the false claim.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {
