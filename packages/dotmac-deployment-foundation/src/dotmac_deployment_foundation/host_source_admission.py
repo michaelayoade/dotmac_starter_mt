@@ -70,10 +70,15 @@ distinction has to stay visible at the call site.
 ships. It delegates to `host_source.require_host_source(receipt=None)` —
 byte-for-byte today's existing refusal, with the same typed codes
 (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`) and zero effects — so a caller supplying
-no provider observes no behavior change. A provider that can genuinely admit
-a `HostSource` composes this module's `admit_host_source()` function against
-real Control-resolved attestations; building and installing one is later,
-separate, cross-repo work.
+no provider observes no behavior change. The protocol is a composition seam,
+NOT an authority proof: any Python caller able to construct an executor can
+hand it an object returning a fabricated success. The shipped CLI supplies no
+provider, and its refusal-only call sites are guarded by an architecture test.
+Before a production assembly may supply one, it must prove that request input
+cannot select or replace the installed implementation and that the provider
+uses this module's `admit_host_source()` against fresh Control-resolved trust,
+host identity, and replay state. That provider and proof are later cross-repo
+work; this seam alone cannot establish positive admission.
 """
 
 from __future__ import annotations
@@ -110,12 +115,13 @@ __all__ = [
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class HostSourceAdmissionTrace:
-    """What was actually checked, for a log line an operator can trust.
+    """Coordinates of the checks made by :func:`admit_host_source`.
 
-    Every field is read from an AUTHENTICATED envelope or subject — never
-    from a caller-supplied value the admission itself was supposed to check.
-    Nothing in this package consumes this type yet; it exists so the fields
-    an eventual consumer will need are named now, not invented ad hoc later.
+    That function reads every field from an authenticated envelope or subject.
+    The dataclass is publicly constructible, however, so its TYPE alone does
+    not prove that the function ran. An executor handed an arbitrary provider
+    cannot treat a returned trace as authenticated until trusted composition
+    establishes the provider's implementation. Nothing consumes it yet.
     """
 
     candidate_subject_digest: Digest

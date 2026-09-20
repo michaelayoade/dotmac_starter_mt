@@ -708,3 +708,26 @@ attestation-verification seam (`admit_host_source()`, `verify_attestation_pair()
 `HostSource`, remains separate, later, cross-repo work. This amendment
 records the seam a provider is handed through, not a claim that real
 admission works end-to-end.
+
+### Correction, 2026-09-20: a provider protocol does not prove its provider
+
+The constructor parameter is a trusted-composition extension point, not a
+new security boundary. An in-process caller can supply a structurally valid
+provider that returns invented `HostSource` and trace values without ever
+calling `admit_host_source()` or Control. The synthetic accepting provider in
+unit tests demonstrates this reachability; those tests prove executor and
+recovery sequencing only, not trusted provenance. This corrects the preceding
+amendment wherever "provider" could be read as "verified provider".
+
+The installed `dotmac-deploy` CLI currently passes no admission provider to
+any of its three direct mutating executor construction sites. A
+sensitivity-tested architecture guard checks those sites and rejects explicit
+`admission_provider=` or dynamic keyword expansion anywhere in that CLI; it
+does not prove a future indirect factory safe. It also does not cover an
+external embedder or Platform CP. Before either may pass a positive provider,
+the assembly must fix its selection at trusted installation/startup, prove
+that requests and operators cannot replace it, and obtain fresh authenticated
+Control trust-root/revocation, enrolled-host identity and replay-consumption
+state for each invocation. Absence or failure refuses before effects. A
+real positive admission still belongs first in the protected exact-wheel
+artifact rehearsal; neither a passing unit test nor this PR retires that gate.

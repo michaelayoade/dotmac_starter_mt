@@ -645,16 +645,16 @@ class Executor:
         # shape" and "verify the metadata's shape" turns it into proof of
         # what a trusted third party attested.
         #
-        # The seam this class DOES accept now is `admission_provider`, and it
-        # is not a third respelling of the same exploit: a provider is not a
-        # parsing primitive a caller fills with authored values compared
-        # against each other. It is one argument-free method,
-        # `admit_host_source() -> tuple[HostSource, HostSourceAdmissionTrace]`
-        # — a real provider implementation reaches Control and evidence
-        # itself, entirely inside its own method body, and there is no
-        # parameter through which a caller states a digest, a receipt, or
-        # anything else this class could compare against itself. The DEFAULT,
-        # when no provider is supplied, is `RefusingHostSourceAdmissionProvider`
+        # The seam this class DOES accept now is `admission_provider`: one
+        # argument-free method returning a HostSource and trace. This type is
+        # NOT proof of provenance. An arbitrary in-process constructor caller
+        # can supply a method returning invented values; the executor does not
+        # authenticate the provider or its result. A real provider therefore
+        # requires a trusted, non-request-selectable assembly binding and
+        # fresh Control-backed verification before it can be used in a
+        # mutating deployment. The shipped CLI supplies none, and an
+        # architecture test guards that refusal-only call-site premise. The
+        # default when no provider is supplied is `RefusingHostSourceAdmissionProvider`
         # — which itself calls exactly `require_host_source(receipt=None)` and
         # always refuses, with the exact typed refusal (`NO_RECEIPT`, or
         # `ABSENT`/`WRONG_KIND` if the interpreter itself has nothing
@@ -663,12 +663,11 @@ class Executor:
         # provider; a caller supplying no provider observes no behavior
         # change from before this seam existed.
         #
-        # The bound identity, once verified, plus what was actually checked to
-        # produce it. Both `None` until `_verify_host_source` runs; held so a
-        # caller inspecting a completed run can see which Foundation performed
-        # it. Neither is branched on anywhere in this class — the trace exists
-        # for a log line an operator can trust, not for a decision this class
-        # makes.
+        # The provider's reported identity and trace. Both remain `None`
+        # until `_verify_host_source` runs, but their types alone do not prove
+        # verification: only a trusted composition can establish that the
+        # provider actually invoked the authenticated admission function.
+        # Neither is branched on or persisted by this class.
         self._host_source: HostSource | None = None
         self._host_source_admission_trace: HostSourceAdmissionTrace | None = None
 
@@ -697,11 +696,12 @@ class Executor:
         that. Both are typed refusals with zero effects: nothing between the
         caller's lock and this call has mutated anything.
 
-        Boundary 4's ruling — "the executor must call `require_host_source`
-        itself", not be handed a `HostSource` a caller could construct — now
-        reads as "the executor must call its admission provider itself, and
-        the provider is HANDED OVER at construction, never discovered". A
-        supplied provider's own `PreconditionFailed`/`SpecError` propagates
+        This changes Boundary 4's earlier call-shape ruling: the executor
+        invokes a handed-over provider rather than `require_host_source`
+        directly. The protocol alone cannot enforce that the provider used
+        the verifier; only trusted assembly composition can make a positive
+        result admissible. A supplied provider's own
+        `PreconditionFailed`/`SpecError` propagates
         unchanged: this method catches nothing, retries nothing, and never
         falls back to the refusing default once a real provider has been
         supplied. Ordering is the other half, unchanged from before this

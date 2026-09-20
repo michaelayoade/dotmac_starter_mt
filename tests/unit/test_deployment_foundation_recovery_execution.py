@@ -6,16 +6,17 @@ deployment `Effects` protocol has no restore method among its twenty-four. That
 is the same shape as `ExecutionPlanDigestV1` before a5: built, tested, and
 unreachable from anything that touches a host.
 
-## `RecoveryExecutor.run` used to refuse UNCONDITIONALLY — now genuinely reachable
+## `RecoveryExecutor.run` used to refuse UNCONDITIONALLY — now sequence-testable
 
 `_verify_host_source` delegates to `self._admission_provider.admit_host_source()`
 (`host_source_admission.py`). With the default `RefusingHostSourceAdmissionProvider`
 it still always refuses — a typed refusal with zero effects, in every
 environment — so `RecoveryExecutor.run(...)` still cannot reach
 `_do_fresh_target` for a caller supplying no provider. A caller that supplies
-a genuinely admitting `HostSourceAdmissionProvider` (this suite's synthetic
-`accepting_admission_provider()`, from `tests.unit.host_source_stance`) now
-reaches every step past the gate for real.
+a synthetic `HostSourceAdmissionProvider` (this suite's
+`accepting_admission_provider()`, from `tests.unit.host_source_stance`) can
+exercise every step past the gate. That provider bypasses provenance solely to
+test sequencing; it is not trusted admission evidence.
 
 An earlier repair (`061cf4bd`) drove the ten steps through `_drive_steps`, a
 test helper that replicated `run()`'s dispatch loop — `restore_plan`, the
@@ -298,12 +299,12 @@ def test_do_start_product_image_succeeds_when_the_image_becomes_ready() -> None:
     executor._do_start_product_image({}, outcome)  # must not raise
 
 
-# ── the real ten-step sequence, admitted through the provider seam ──────────
+# ── the real ten-step sequence, exercised through the provider seam ─────────
 #
 # Everything above drives one handler at a time. These drive the REAL
 # `run()`/`_dispatch` loop — `restore_plan`, the procedure-drift check, the
 # `for` loop, the `StepFailed`/`PreconditionFailed` handling — exactly as
-# shipped, admitted past `_verify_host_source` by a genuinely accepting
+# shipped, exercised past `_verify_host_source` by a synthetic
 # `HostSourceAdmissionProvider` rather than a reimplemented copy of the loop
 # (`_drive_steps`, deleted at `061cf4bd` for being exactly that).
 

@@ -15,7 +15,7 @@ An independent review at `541cee5d` named this correctly:
 `valid_host_source_kwargs()` **was the exploit** `host_source_installed=`
 originally produced, respelled with a `json.dumps` in between. Supplying a
 `CandidateReceipt` and an `InstalledMetadata` that agree is not "the same
-successful path a genuine artifact takes" — it is a caller stating the same
+trusted path a genuine artifact takes" — it is a caller stating the same
 digest on both sides of the one comparison `require_host_source` makes.
 `CandidateReceipt` and `InstalledMetadata` are PARSING interfaces (they turn
 a document/a `.dist-info` reading into a typed value); neither is
@@ -31,23 +31,26 @@ Trusted host provenance (`host_source_admission.py`'s `admit_host_source()`)
 landed as its own, separate piece of work, and PR-2 wires a
 `HostSourceAdmissionProvider` seam into both mutating executors: a
 constructor-supplied, argument-free `admit_host_source() -> tuple[HostSource,
-HostSourceAdmissionTrace]`. This is not the parsing exploit above respelled a
-third time — a provider is not a caller-authored value compared against
-another caller-authored value; it is a HANDED-OVER object whose method a real
-implementation fills in by reaching Control and evidence itself, entirely
-inside its own body.
+HostSourceAdmissionTrace]`. This test seam is not intended to prove trusted
+provenance: it is a HANDED-OVER object whose method supplies synthetic values
+so callers can exercise post-gate sequencing. A production implementation may
+obtain those values from Control and evidence, but that behavior is outside
+this fixture's claim.
 
 `valid_host_source_kwargs()` now returns `{"admission_provider": <a fresh
-synthetic ACCEPTING provider>}` — a test double whose `admit_host_source()`
-returns a valid, made-up-but-internally-consistent `(HostSource,
-HostSourceAdmissionTrace)` pair, never anything that touched
-`require_host_source` or a real artifact reading. Every call site in this
+synthetic ACCEPTING provider>}` — a sequencing test double whose
+`admit_host_source()` returns a valid, made-up-but-internally-consistent
+`(HostSource, HostSourceAdmissionTrace)` pair, never anything that touched
+`require_host_source` or a real artifact reading. It bypasses provenance only
+to exercise code after the gate; it is not evidence of trusted admission.
+Every call site in this
 suite spreads the return value as `**valid_host_source_kwargs()` (or copies
 its items with `setdefault`), so the fixture rename is invisible at each call
-site: what used to admit `Executor`/`RecoveryExecutor` through two
-caller-authored parsing values now admits them through one caller-supplied
-provider object, and every test that used to reach `pytest.skip` through this
-fixture now actually drives the executor past the host-source gate.
+site: what used to let tests exercise `Executor`/`RecoveryExecutor` through
+two caller-authored parsing values now lets them exercise the post-gate path
+through one caller-supplied provider object, and every test that used to reach
+`pytest.skip` through this fixture now drives the executor past the
+host-source gate without asserting real provenance.
 """
 
 from __future__ import annotations

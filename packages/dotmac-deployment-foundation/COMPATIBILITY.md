@@ -74,14 +74,17 @@
   parameter for a receipt, a pre-parsed subject, an installed artifact, a
   metadata reader, a distribution selector, or any preverified result — the
   same inexpressible-bypass shape as `verify_candidate_attestation()`.
-  `HostSourceAdmissionTrace` is a frozen, slotted record of authenticated
-  fields only (`candidate_subject_digest`, `host_observation_id`,
-  `host_identity`, both signer fingerprints, both trust-root versions); it is
-  consumed by nothing in this contract revision. `trusted_host_source.py` is
+  `HostSourceAdmissionTrace` is a frozen, slotted record populated from
+  authenticated fields by `admit_host_source()` (`candidate_subject_digest`,
+  `host_observation_id`, `host_identity`, both signer fingerprints, both
+  trust-root versions). The publicly constructible type alone proves no
+  authentication; it is consumed by nothing in this contract revision.
+  `trusted_host_source.py` is
   unchanged by this addition and remains zero-I/O; `require_host_source()`'s
   signature and behavior are unchanged and it remains the constructor a
-  receipt-only caller uses. Neither executor accepts `admit_host_source()`'s
-  output in this contract revision.
+  receipt-only caller uses. Neither executor accepts a directly supplied
+  `HostSource` or trace; each accepts the return of a handed-over provider,
+  whose trust must be established by the composing assembly.
 - `HostSourceAdmissionProvider` and `RefusingHostSourceAdmissionProvider`
   (`host_source_admission.py`), plus the keyword-only `admission_provider`
   parameter on `engine/run.py`'s `Executor` and `recovery_execution.py`'s
@@ -89,8 +92,11 @@
   `runtime_checkable` Protocol with one argument-free method,
   `admit_host_source() -> tuple[HostSource, HostSourceAdmissionTrace]` — no
   parameter for a receipt, an envelope, a subject, a trust policy, a
-  verifier, or any preverified result, so a real implementation must reach
-  its own Control context and evidence entirely inside that method body.
+  verifier, or any preverified result. This shape does not force an
+  implementation to reach Control: an arbitrary constructor caller can hand
+  over a provider returning invented values. Positive use therefore requires
+  trusted, non-request-selectable assembly composition and current Control
+  verification; the shipped CLI passes no provider and remains refusal-only.
   `admission_provider` is keyword-only and defaults to
   `RefusingHostSourceAdmissionProvider()`, which itself calls exactly
   `require_host_source(receipt=None)`: a caller that supplies no provider

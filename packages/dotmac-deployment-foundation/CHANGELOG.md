@@ -22,7 +22,9 @@ unchanged.
 This is additive API under the current unreleased version; no successor is
 allocated by this change. A provider that actually reaches Control's
 trust-root/revocation/replay-consumption state to admit a real `HostSource`
-is later, separate, cross-repo work — this change only wires the seam.
+is later, separate, cross-repo work — this change only wires the seam. The
+protocol is not proof of that future provider: the shipped CLI supplies none,
+and its three executor callsites remain refusal-only.
 
 ### `admit_host_source()` composes the v2 attestation seams into a `HostSource` — synthetic and UNWIRED
 

@@ -1,13 +1,16 @@
-"""The admission-provider SEAM itself: positive path, freshness, and shape.
+"""The admission-provider SEAM itself: sequencing, freshness, and shape.
 
 `test_deployment_foundation_host_source_gate.py` proves the DEFAULT
 (`RefusingHostSourceAdmissionProvider`) — no provider supplied, unconditional
-refusal, in every environment. This file proves the other half: a genuinely
-ACCEPTING provider (`tests/unit/host_source_stance.py`'s
-`AcceptingHostSourceAdmissionProvider`) actually admits both `Executor` and
-`RecoveryExecutor` past the gate, is consulted FRESH on every mutating entry
-point rather than cached, and that an explicitly-supplied refusing provider
-still refuses exactly like the default. It also proves the constructor and
+refusal, in every environment. This file exercises the other half with a
+synthetic ACCEPTING provider (`tests/unit/host_source_stance.py`'s
+`AcceptingHostSourceAdmissionProvider`) to drive both `Executor` and
+`RecoveryExecutor` past the gate for sequencing tests. The provider is not
+trusted provenance. It is consulted FRESH on every mutating entry point rather
+than cached, and an explicitly-supplied refusing provider
+still refuses exactly like the default. The synthetic accepting provider only
+bypasses provenance to exercise sequencing after the gate; it is not a trusted
+positive path. It also proves the constructor and
 evidence-shape properties every consumer of the seam depends on:
 `admission_provider` is keyword-only on both classes with no receipt/envelope/
 subject/metadata/trust-policy/verifier/root/expected-host/preverified-result
@@ -99,14 +102,14 @@ def _recovery_executor(*, admission_provider):  # type: ignore[no-untyped-def]
     return effects, executor
 
 
-# ── positive path: a genuine accepting provider admits both executors ──────
+# ── sequencing path: a synthetic provider exercises both executors ─────────
 
 
 def test_a_valid_accepting_provider_admits_the_deployment_executor_past_the_gate() -> (
     None
 ):
-    """`accepting_admission_provider()` genuinely admits `Executor.run` — the
-    run either succeeds or fails on some LATER gate, but never on the
+    """The synthetic provider bypasses provenance to exercise `Executor.run`.
+    The run either succeeds or fails on some LATER gate, but never on the
     host-source refusal that fires unconditionally against the default."""
     spec, plan, _effects, executor = _deploy_executor(
         admission_provider=accepting_admission_provider()
@@ -140,10 +143,9 @@ def test_valid_host_source_kwargs_itself_admits_the_deployment_executor() -> Non
 def test_a_valid_accepting_provider_admits_the_recovery_executor_past_the_gate() -> (
     None
 ):
-    """`RecoveryExecutor.run` reaches `_do_fresh_target` (step 1) and beyond
-    once a real accepting provider is supplied — proved by observing the
-    first real effect fire, not merely by the absence of a host-source
-    refusal."""
+    """A synthetic provider bypasses provenance so `RecoveryExecutor.run`
+    reaches `_do_fresh_target` (step 1) and beyond — proved by observing the
+    first effect fire, not merely by the absence of a host-source refusal."""
     effects, executor = _recovery_executor(
         admission_provider=accepting_admission_provider()
     )

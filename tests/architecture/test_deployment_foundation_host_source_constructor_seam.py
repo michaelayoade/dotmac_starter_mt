@@ -69,6 +69,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 RUN_PY = (
     REPO
@@ -85,6 +87,12 @@ HOST_SOURCE_ADMISSION_PY = (
     / "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
     / "host_source_admission.py"
 )
+CLI_PY = (
+    REPO
+    / "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
+    / "cli.py"
+)
+_EXPECTED_CLI_EXECUTOR_CALLS = ("Executor", "RecoveryExecutor", "Executor")
 
 #: Parameters that let a caller state an artifact/launcher digest, or either
 #: of the two ingredients (`CandidateReceipt`, `InstalledMetadata`) that
@@ -140,6 +148,43 @@ def _positional_names(args: ast.arguments) -> list[str]:
     (an exact ordered list, not a set) rather than being folded into the
     keyword-only denylist below."""
     return [a.arg for a in (*args.posonlyargs, *args.args) if a.arg != "self"]
+
+
+def _executor_constructor_calls(tree: ast.Module) -> list[ast.Call]:
+    return sorted(
+        [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"Executor", "RecoveryExecutor"}
+        ],
+        key=lambda node: node.lineno,
+    )
+
+
+def _unsafe_cli_calls(tree: ast.Module) -> list[tuple[str | None, int]]:
+    return [
+        (keyword.arg, node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "admission_provider" or keyword.arg is None
+    ]
+
+
+def _assert_cli_executor_calls_are_refusal_only(tree: ast.Module) -> None:
+    calls = _executor_constructor_calls(tree)
+    names = tuple(call.func.id for call in calls if isinstance(call.func, ast.Name))
+    assert names == _EXPECTED_CLI_EXECUTOR_CALLS, (
+        f"CLI executor construction callsites changed: expected "
+        f"{_EXPECTED_CLI_EXECUTOR_CALLS}, found {names}"
+    )
+    unsafe = _unsafe_cli_calls(tree)
+    assert unsafe == [], (
+        "the shipped CLI contains an admission-provider or dynamic-keyword "
+        f"call: {unsafe}"
+    )
 
 
 # ── the named proof: no forbidden KEYWORD parameter, on the real files ─────
@@ -556,3 +601,47 @@ def test_the_real_classes_are_actually_found() -> None:
         isinstance(node, ast.ClassDef) and node.name == "RecoveryExecutor"
         for node in ast.walk(recovery_tree)
     )
+
+
+def test_cli_constructs_exactly_the_refusal_only_executor_calls() -> None:
+    """The shipped CLI must not inject an accepting admission provider."""
+    tree = ast.parse(CLI_PY.read_text(encoding="utf-8"), filename=str(CLI_PY))
+    _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_a_planted_admission_provider() -> None:
+    """Sensitivity: a provider keyword in any CLI construction is caught."""
+    source = """
+Executor(spec, effects, grant, admission_provider=provider)
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant)
+"""
+    tree = ast.parse(source, filename="<plant: CLI admission provider>")
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_planted_dynamic_keywords() -> None:
+    """Sensitivity: dynamic keywords cannot hide an admission provider."""
+    source = """
+Executor(spec, effects, grant, **kwargs)
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant)
+"""
+    tree = ast.parse(source, filename="<plant: CLI dynamic keywords>")
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_aliased_or_qualified_plants() -> None:
+    """Sensitivity: aliases and qualified factories cannot hide the token."""
+    source = """
+Executor(spec, effects, grant)
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant)
+factory.Executor(spec, effects, grant, admission_provider=provider)
+foundation.RecoveryExecutor(spec, manifest, effects, **kwargs)
+"""
+    tree = ast.parse(source, filename="<plant: CLI aliased construction>")
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(tree)

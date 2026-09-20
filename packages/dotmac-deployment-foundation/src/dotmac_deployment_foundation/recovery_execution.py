@@ -326,7 +326,11 @@ class RecoveryExecutor:
         # `admission_provider` is the one host-source-related parameter this
         # class DOES accept, HANDED OVER never discovered, uniform with
         # `engine.run.Executor` (Boundary 4: "the same prerequisite covers
-        # every mutating executor path"). It defaults to
+        # every mutating executor path"). It is not an authority proof: a
+        # constructor caller can return invented values from its method, so
+        # positive admission awaits a trusted, non-request-selectable assembly
+        # binding and fresh Control verification. The shipped CLI passes no
+        # provider. This parameter defaults to
         # `RefusingHostSourceAdmissionProvider`, which itself calls exactly
         # `require_host_source(receipt=None)` and always refuses — a caller
         # supplying no provider observes no behavior change. `_do_fresh_target`
