@@ -23,6 +23,8 @@ so that someone reading the first cannot quietly convert this into a live gate.
 
 from __future__ import annotations
 
+from typing import Final
+
 import pytest
 from dotmac_deployment_foundation.application_profile import (
     APPLICATION_PROFILE_SCHEMA,
@@ -478,6 +480,127 @@ def test_verification_refuses_a_moving_image_reference() -> None:
         verify_profile_against_candidate(
             _profile(), image_digest="acme/app:latest", installed=_installed()
         )
+
+
+# ── § 7, closed: the generic admission mechanism, for all thirteen slots ────
+#
+# The tests above prove the mechanism exists using one shared implementation
+# identity (`acme-foundation`) bound to every slot, which is why a handful of
+# concern names (identity_session via `test_the_verification_names_the_binding
+# _that_failed`, authorization, worker_execution, edge_security,
+# api_web_interaction, deployment_recovery via the other module-level tests
+# above) ended up named somewhere in this file and the other seven did not.
+# That was never a claim about which concerns are fleet-mature — this module
+# holds no such opinion (see `application_profile.py`'s docstring) — it was
+# simply incomplete exercise of a mechanism that is supposed to work
+# identically for all thirteen. The table below closes that gap: every
+# `FoundationConcern` gets its own distinguishable SYNTHETIC implementation
+# identity (never a real-looking provider or product name) and is proven,
+# generically, against a positive match, a missing-implementation finding and
+# a wrong-version finding.
+
+#: Hard-coded rather than `tuple(FoundationConcern)`: the point of this table
+#: is that it can go OUT of sync with the enum. If a fourteenth concern is
+#: added to `FoundationConcern` without a matching entry here,
+#: `test_the_admission_case_table_covers_every_declared_concern` fails until
+#: this table is updated — the same two-directional-ratchet shape this
+#: repository already applies to other closed registries (AGENTS.md rule 25).
+_ADMISSION_CASE_CONCERNS: Final[tuple[FoundationConcern, ...]] = (
+    FoundationConcern.IDENTITY_SESSION,
+    FoundationConcern.REQUEST_EVIDENCE_CONTEXT,
+    FoundationConcern.AUTHORIZATION,
+    FoundationConcern.PERSISTENCE_MIGRATIONS,
+    FoundationConcern.SETTINGS_SECRETS,
+    FoundationConcern.AUDIT_TELEMETRY,
+    FoundationConcern.HEALTH_RUNTIME_ADMISSION,
+    FoundationConcern.WORKER_EXECUTION,
+    FoundationConcern.EDGE_SECURITY,
+    FoundationConcern.API_WEB_INTERACTION,
+    FoundationConcern.DATA_GOVERNANCE,
+    FoundationConcern.INTEGRATION,
+    FoundationConcern.DEPLOYMENT_RECOVERY,
+)
+
+
+def test_the_admission_case_table_covers_every_declared_concern() -> None:
+    """Two-directional: the table cannot silently drop one of today's thirteen,
+    and a fourteenth concern added to the enum later cannot silently go
+    unexercised by it either."""
+    assert set(_ADMISSION_CASE_CONCERNS) == set(FoundationConcern)
+    assert len(_ADMISSION_CASE_CONCERNS) == len(FoundationConcern)
+
+
+def _synthetic_implementation(concern: FoundationConcern) -> str:
+    """A distinguishable, obviously-synthetic identity — never a name that
+    could be mistaken for a real provider or product."""
+    return f"synthetic-concern-{concern.value}"
+
+
+def _synthetic_slots() -> dict[FoundationConcern, ConcernBinding]:
+    return {
+        concern: ConcernBinding(
+            implementation=_synthetic_implementation(concern),
+            version="1.0.0",
+            coordinates=f"synthetic-concern-{concern.value}@sha256:" + "0" * 64,
+        )
+        for concern in FoundationConcern
+    }
+
+
+def _synthetic_profile() -> ApplicationFoundationProfile:
+    return ApplicationFoundationProfile(
+        application="synthetic-admission-app", slots=_synthetic_slots()
+    )
+
+
+def _synthetic_installed() -> dict[str, str]:
+    return {
+        _synthetic_implementation(concern): "1.0.0" for concern in FoundationConcern
+    }
+
+
+@pytest.mark.parametrize("concern", _ADMISSION_CASE_CONCERNS)
+def test_generic_admission_mechanism_proven_for_every_concern(
+    concern: FoundationConcern,
+) -> None:
+    """The mechanism itself — positive match, missing-implementation finding,
+    wrong-version finding — proven uniformly across all thirteen slots. This
+    is NOT a fleet-maturity claim about any concern: every implementation
+    identity here is synthetic, and this test asserts nothing about which
+    concerns any real assembly can bind today."""
+    profile = _synthetic_profile()
+    label = CONCERN_LABELS[concern]
+    implementation = _synthetic_implementation(concern)
+
+    # Positive: the full, correct inventory admits with no findings at all.
+    assert (
+        verify_profile_against_candidate(
+            profile, image_digest=IMAGE, installed=_synthetic_installed()
+        )
+        == ()
+    )
+
+    # Missing implementation: remove ONLY this concern's implementation.
+    installed_missing = _synthetic_installed()
+    del installed_missing[implementation]
+    findings = verify_profile_against_candidate(
+        profile, image_digest=IMAGE, installed=installed_missing
+    )
+    assert len(findings) == 1
+    assert concern.value in findings[0]
+    assert label in findings[0]
+    assert implementation in findings[0]
+
+    # Wrong version: change ONLY this concern's installed version.
+    installed_wrong_version = _synthetic_installed()
+    installed_wrong_version[implementation] = "9.9.9"
+    findings = verify_profile_against_candidate(
+        profile, image_digest=IMAGE, installed=installed_wrong_version
+    )
+    assert len(findings) == 1
+    assert concern.value in findings[0]
+    assert "1.0.0" in findings[0]
+    assert "9.9.9" in findings[0]
 
 
 # ── § 8: the read-back COMPARES, never DERIVES ──────────────────────────────
