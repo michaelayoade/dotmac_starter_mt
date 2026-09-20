@@ -6633,6 +6633,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-licensing ──
+    "dotmac-licensing-v0.1.0a2": (
+        "dotmac-licensing",
+        "e88df7915efc3acc27541856f111902b5af6fafb",
+        {
+            "li_0001_licensing.py": (
+                "3c6e610e75016fd652b678674bca4d50c01beb7d9f9c15450a4b1bebf43b2e4d"
+            ),
+        },
+    ),
     "dotmac-licensing-v0.1.0a1": (
         "dotmac-licensing",
         "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",

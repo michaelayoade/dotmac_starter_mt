@@ -349,11 +349,14 @@ def candidate_receipt_from_mapping(
 class HostSource:
     """Foundation's own identity on this host, bound to a reviewable tree.
 
-    Constructible only through :func:`require_host_source`, in the sense that
-    every check lives there; a dataclass cannot forbid its own constructor, and
+    Constructible through two independently-checked paths — the legacy
+    receipt-based :func:`require_host_source`, and
+    :func:`host_source_admission.admit_host_source`'s v2 attestation-pair
+    admission — in the sense that every field's check lives in whichever of
+    the two constructed it; a dataclass cannot forbid its own constructor, and
     pretending otherwise with a private sentinel would be theatre. What it CAN
-    do is carry no field that was not checked, so that holding one of these is
-    not a claim about anything unverified.
+    do is carry no field that was not checked BY ONE OF THEM, so that holding
+    one of these is not a claim about anything unverified.
     """
 
     distribution: str

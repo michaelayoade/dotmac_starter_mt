@@ -2,6 +2,28 @@
 
 ## Unreleased — successor not allocated
 
+### `admit_host_source()` composes the v2 attestation seams into a `HostSource` — synthetic and UNWIRED
+
+`host_source_admission.py` adds `admit_host_source()` and
+`HostSourceAdmissionTrace`: the first function that turns a verified pair of
+`AttestationEnvelopeV2` values into a real, checked `HostSource`. It calls
+`verify_attestation_pair()` first (letting every existing refusal propagate
+unchanged), then `verify_candidate_attestation()` again against the same
+`candidate` object to obtain the authenticated subject, reads the
+interpreter's own installed artifact only after the pair check succeeds, and
+refuses with `host_source.DISAGREES` if that real reading disagrees with the
+authenticated installed-host subject. `trusted_host_source.py` stays
+completely unchanged — its zero-I/O promise is preserved by doing the one
+I/O read here instead — and `require_host_source`'s signature and behavior
+are untouched.
+
+This is exercised today only against SYNTHETIC, non-secret attestation
+envelopes built in the unit test suite. No executor calls this function:
+`engine/run.py`'s `Executor` and `recovery_execution.py`'s `RecoveryExecutor`
+are unmodified, and `HostSourceAdmissionTrace` is consumed by nothing in this
+package. Wiring either executor to this function is later, separate work,
+blocked on a delivery-seam decision that has not been made.
+
 ### A trusted host workload authenticates a candidate instead of trusting a parsed value
 
 `verify_candidate_attestation()` is the one seam that turns a signed
