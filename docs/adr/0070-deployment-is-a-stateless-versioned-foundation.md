@@ -668,3 +668,43 @@ separate one-shot migration service as the sole DDL owner. This is a contract
 for the subsequent CP adoption change, not a claim that CP's current script or
 descriptor has already changed. A pre-backup mutation path is not part of this
 Foundation source slice.
+
+## Amendment — 2026-09-20: the admission-provider seam is wired, real admission is not
+
+`host_source_admission.py` adds `HostSourceAdmissionProvider`, a Protocol
+with one argument-free method, `admit_host_source()`, and
+`RefusingHostSourceAdmissionProvider`, the shipped reference implementation
+that delegates to `require_host_source(receipt=None)` and therefore always
+refuses. `engine/run.py`'s `Executor` and `recovery_execution.py`'s
+`RecoveryExecutor` each now accept the provider as a keyword-only
+constructor parameter, defaulting to `RefusingHostSourceAdmissionProvider`,
+and each class's `_verify_host_source` calls
+`self._admission_provider.admit_host_source()` fresh on every `run`/
+`rollback` invocation rather than caching a result across calls on the same
+instance.
+
+The provider is HANDED OVER at construction, the same rule this ADR and
+`host_source_admission.py` already apply to every other host-source
+ingredient (`recovery_receipts`, `evidence_policy`, `evidence_verifier`):
+Foundation owns no installation mechanism of its own, and there is no
+ambient registry, module-level global, or discovery path either executor
+consults instead. An executor that went looking for a provider could not
+distinguish "no provider was installed" from "the wrong provider was
+installed", and a mutating executor is exactly where that distinction has
+to stay visible at the call site. Argument-free is deliberate on the
+Protocol method itself: a real provider implementation reaches Control and
+evidence entirely inside its own method body, so this amendment does not
+invent a request/context parameter schema for Control before Control has
+one.
+
+The one implementation this package ships, `RefusingHostSourceAdmissionProvider`,
+reproduces the prior unconditional refusal byte-for-byte — same typed
+codes (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`), zero effects — so a caller
+supplying no provider observes no behavior change from before this seam
+existed. A REAL provider, one that actually reaches Control's trust-root,
+revocation, and replay-consumption state and Foundation's own
+attestation-verification seam (`admit_host_source()`, `verify_attestation_pair()`,
+`verify_candidate_attestation()`) to produce a genuinely admitted
+`HostSource`, remains separate, later, cross-repo work. This amendment
+records the seam a provider is handed through, not a claim that real
+admission works end-to-end.

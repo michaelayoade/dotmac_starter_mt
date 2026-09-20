@@ -82,6 +82,29 @@
   signature and behavior are unchanged and it remains the constructor a
   receipt-only caller uses. Neither executor accepts `admit_host_source()`'s
   output in this contract revision.
+- `HostSourceAdmissionProvider` and `RefusingHostSourceAdmissionProvider`
+  (`host_source_admission.py`), plus the keyword-only `admission_provider`
+  parameter on `engine/run.py`'s `Executor` and `recovery_execution.py`'s
+  `RecoveryExecutor` constructors. `HostSourceAdmissionProvider` is a
+  `runtime_checkable` Protocol with one argument-free method,
+  `admit_host_source() -> tuple[HostSource, HostSourceAdmissionTrace]` — no
+  parameter for a receipt, an envelope, a subject, a trust policy, a
+  verifier, or any preverified result, so a real implementation must reach
+  its own Control context and evidence entirely inside that method body.
+  `admission_provider` is keyword-only and defaults to
+  `RefusingHostSourceAdmissionProvider()`, which itself calls exactly
+  `require_host_source(receipt=None)`: a caller that supplies no provider
+  observes IDENTICAL behavior to before this parameter existed, same typed
+  refusal codes (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`), zero effects. Both
+  executors' `_verify_host_source` calls
+  `self._admission_provider.admit_host_source()` fresh on every `run`/
+  `rollback` invocation — never cached, never memoized across calls on the
+  same instance — and a supplied provider's own
+  `PreconditionFailed`/`SpecError` propagates unchanged. Neither executor
+  discovers a provider from an ambient registry or module-level global; the
+  provider is HANDED OVER at construction only. A provider that composes
+  `admit_host_source()` above against real Control-resolved attestations to
+  genuinely admit a `HostSource` is later, separate, cross-repo work.
 - `ExposureEffects`, plus `OWNERSHIP_PREFIX`, `ownership_comment()`,
   `foreign_rules()`, `foreign_rule_arguments()`, `managed_ports()` and
   `require_preserved_foreign_rules()`. Ownership is part of the CONTRACT rather
