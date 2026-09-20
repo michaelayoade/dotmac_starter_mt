@@ -84,7 +84,12 @@ from typing import Protocol, runtime_checkable
 
 from .digest import Digest
 from .errors import PreconditionFailed
-from .host_source import DISAGREES, HostSource, read_installed_artifact, require_host_source
+from .host_source import (
+    DISAGREES,
+    HostSource,
+    read_installed_artifact,
+    require_host_source,
+)
 from .trusted_host_source import (
     AttestationEnvelopeV2,
     AttestationTrustPolicy,

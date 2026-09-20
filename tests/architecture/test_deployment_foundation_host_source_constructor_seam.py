@@ -245,7 +245,7 @@ def test_recovery_executor_init_has_exactly_the_allowed_positional_parameters() 
 
 
 def _admission_provider_calls(func_node: ast.FunctionDef) -> list[ast.Call]:
-    """Every call in `func_node` shaped `self._admission_provider.admit_host_source(...)`."""
+    """Every call in `func_node` shaped `self._admission_provider.admit_host_source`."""
     return [
         node
         for node in ast.walk(func_node)
@@ -326,9 +326,7 @@ def test_executor_verify_host_source_delegates_to_the_provider_with_no_argument(
     )
 
 
-def test_recovery_executor_verify_host_source_delegates_to_the_provider_with_no_argument() -> (
-    None
-):
+def test_recovery_executor_verify_host_source_calls_provider_argument_free() -> None:
     tree = ast.parse(
         RECOVERY_EXECUTION_PY.read_text(encoding="utf-8"),
         filename=str(RECOVERY_EXECUTION_PY),

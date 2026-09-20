@@ -283,7 +283,7 @@ def test_the_verification_call_happens_exactly_once_on_the_refusal_path(
         executor.run(plan, lock=held_lock(spec.product))
 
     assert spy.call_count == 1, (
-        f"require_host_source was called {spy.call_count} time(s), not " "exactly once"
+        f"require_host_source was called {spy.call_count} time(s), not exactly once"
     )
 
 

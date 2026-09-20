@@ -24,7 +24,12 @@ import inspect
 import pytest
 from dotmac_deployment_foundation.engine.run import Executor
 from dotmac_deployment_foundation.errors import PreconditionFailed
-from dotmac_deployment_foundation.host_source import ABSENT, DISAGREES, NO_RECEIPT, WRONG_KIND
+from dotmac_deployment_foundation.host_source import (
+    ABSENT,
+    DISAGREES,
+    NO_RECEIPT,
+    WRONG_KIND,
+)
 from dotmac_deployment_foundation.host_source_admission import (
     HostSourceAdmissionProvider,
     HostSourceAdmissionTrace,
@@ -103,7 +108,7 @@ def test_a_valid_accepting_provider_admits_the_deployment_executor_past_the_gate
     """`accepting_admission_provider()` genuinely admits `Executor.run` — the
     run either succeeds or fails on some LATER gate, but never on the
     host-source refusal that fires unconditionally against the default."""
-    spec, plan, effects, executor = _deploy_executor(
+    spec, plan, _effects, executor = _deploy_executor(
         admission_provider=accepting_admission_provider()
     )
     outcome = executor.run(plan, lock=held_lock(spec.product))
@@ -139,7 +144,9 @@ def test_a_valid_accepting_provider_admits_the_recovery_executor_past_the_gate()
     once a real accepting provider is supplied — proved by observing the
     first real effect fire, not merely by the absence of a host-source
     refusal."""
-    effects, executor = _recovery_executor(admission_provider=accepting_admission_provider())
+    effects, executor = _recovery_executor(
+        admission_provider=accepting_admission_provider()
+    )
     outcome = executor.run(bundle={})
     assert executor._host_source is not None
     assert executor._host_source_admission_trace is not None
@@ -161,7 +168,7 @@ def test_the_deployment_executor_consults_the_provider_fresh_on_every_run() -> N
     call for an unrelated reason (the plan/grant were authorized for a single
     execution)."""
     provider = accepting_admission_provider()
-    spec, plan, effects, executor = _deploy_executor(admission_provider=provider)
+    spec, plan, _effects, executor = _deploy_executor(admission_provider=provider)
 
     executor.run(plan, lock=held_lock(spec.product))
     assert provider.calls == 1
@@ -170,10 +177,13 @@ def test_the_deployment_executor_consults_the_provider_fresh_on_every_run() -> N
     # fails on some LATER gate (the plan/grant may not tolerate a repeat
     # execution) is irrelevant to this proof: `_verify_host_source` is the
     # second statement in `run()`, ahead of the grant/plan checks, so the
-    # provider is consulted regardless of what happens afterward.
+    # provider is consulted regardless of what happens afterward. The
+    # exception itself is not the subject of this test -- only whether the
+    # provider was consulted again -- so it is deliberately swallowed rather
+    # than asserted on.
     try:
         executor.run(plan, lock=held_lock(spec.product))
-    except Exception:
+    except Exception:  # noqa: S110 -- deliberately not this test's subject
         pass
     assert provider.calls == 2, (
         f"the provider was consulted {provider.calls} time(s) across two "
@@ -187,14 +197,17 @@ def test_the_recovery_executor_consults_the_provider_fresh_on_every_run() -> Non
     is the first statement in `run()`, ahead of `restore_plan` and the dispatch
     loop, so it fires on every call regardless of what the rest of the run does."""
     provider = accepting_admission_provider()
-    effects, executor = _recovery_executor(admission_provider=provider)
+    _effects, executor = _recovery_executor(admission_provider=provider)
 
     executor.run(bundle={})
     assert provider.calls == 1
 
+    # See the deployment-executor half of this proof above: the second
+    # call's outcome is not this test's subject, only whether the provider
+    # was consulted again.
     try:
         executor.run(bundle={})
-    except Exception:
+    except Exception:  # noqa: S110 -- deliberately not this test's subject
         pass
     assert provider.calls == 2, (
         f"the provider was consulted {provider.calls} time(s) across two "
@@ -205,9 +218,7 @@ def test_the_recovery_executor_consults_the_provider_fresh_on_every_run() -> Non
 # ── an explicitly-supplied refusing provider propagates unchanged ──────────
 
 
-def test_an_explicitly_supplied_refusing_provider_refuses_exactly_like_the_default() -> (
-    None
-):
+def test_an_explicit_refusing_provider_refuses_exactly_like_the_default() -> None:
     """`RefusingHostSourceAdmissionProvider` is the DEFAULT, but nothing about
     its refusal is special-cased to "no provider was supplied" — handing one
     over explicitly produces the identical typed refusal."""
@@ -221,9 +232,7 @@ def test_an_explicitly_supplied_refusing_provider_refuses_exactly_like_the_defau
     assert effects.snapshot() == before, "a refusal must leave the world untouched"
 
 
-def test_an_explicitly_supplied_refusing_provider_refuses_the_recovery_executor_too() -> (
-    None
-):
+def test_an_explicit_refusing_provider_refuses_the_recovery_executor_too() -> None:
     effects, executor = _recovery_executor(
         admission_provider=RefusingHostSourceAdmissionProvider()
     )
@@ -238,7 +247,9 @@ def test_an_explicitly_supplied_refusing_provider_refuses_the_recovery_executor_
 
 
 def test_the_refusing_provider_satisfies_the_runtime_checkable_protocol() -> None:
-    assert isinstance(RefusingHostSourceAdmissionProvider(), HostSourceAdmissionProvider)
+    assert isinstance(
+        RefusingHostSourceAdmissionProvider(), HostSourceAdmissionProvider
+    )
 
 
 def test_the_accepting_test_provider_satisfies_the_runtime_checkable_protocol() -> None:
@@ -313,7 +324,7 @@ def test_admission_provider_is_keyword_only_on_the_recovery_executor() -> None:
 
 
 def test_the_admission_trace_is_absent_from_the_deployment_evidence_document() -> None:
-    spec, plan, effects, executor = _deploy_executor(
+    spec, plan, _effects, executor = _deploy_executor(
         admission_provider=accepting_admission_provider()
     )
     outcome = executor.run(plan, lock=held_lock(spec.product))
@@ -321,9 +332,7 @@ def test_the_admission_trace_is_absent_from_the_deployment_evidence_document() -
     assert executor._host_source_admission_trace is not None
 
     document = outcome.as_evidence()
-    trace_field_names = {
-        field for field in HostSourceAdmissionTrace.__dataclass_fields__
-    }
+    trace_field_names = set(HostSourceAdmissionTrace.__dataclass_fields__)
     leaked = trace_field_names & set(document)
     assert leaked == set(), (
         f"the admission trace's own field names leaked into the deployment "
@@ -334,16 +343,14 @@ def test_the_admission_trace_is_absent_from_the_deployment_evidence_document() -
 
 
 def test_the_admission_trace_is_absent_from_the_recovery_evidence_document() -> None:
-    effects, executor = _recovery_executor(
+    _effects, executor = _recovery_executor(
         admission_provider=accepting_admission_provider()
     )
     outcome = executor.run(bundle={})
     assert executor._host_source_admission_trace is not None
 
     document = outcome.as_evidence()
-    trace_field_names = {
-        field for field in HostSourceAdmissionTrace.__dataclass_fields__
-    }
+    trace_field_names = set(HostSourceAdmissionTrace.__dataclass_fields__)
     leaked = trace_field_names & set(document)
     assert leaked == set(), (
         f"the admission trace's own field names leaked into the recovery "
