@@ -697,12 +697,18 @@ filesystem walk is a failed evidence collection: the gate preserves its
 partial listing and diagnostics, then refuses instead of truncating the input
 and auditing an empty file.
 
-**Adoption status.** Version `0.2.0a1` is published, registry-install-verified
-and tagged; `0.2.0a2` is declared for the strict image-collector repair and is
-not published yet. No product has completed adoption or retired its existing
-engine. ERP is the first candidate and may pin a2 only after its protected
-release oracle succeeds; Integrator and Sub remain later candidates. Decision:
-ADR-0070. Sources and the eighteen defects deliberately not extracted:
+**Adoption status (repository baseline, 2026-09-20).** The latest published
+Foundation version is `0.2.0a2`; `0.4.0a1` was built once, then its candidate
+artifact was left unrecorded and its source drifted, so it is not an eligible
+publication or rehearsal coordinate. No product has completed the Foundation
+executor cutover or retired its previous writer. Platform CP is the current
+control-plane bootstrap and first executor-cutover target; ERP remains the first
+full data-plane adopter, followed by Sub. That distinction reconciles the
+programme sequence with ADR-0070's original "ERP first full adopter" wording;
+it does not amend the ADR. The measured gates and next work are in
+`docs/BUILD_ONCE_CUTOVER_ROADMAP.md`; the publication baseline is
+`docs/inventories/declared-publication-baseline.json`. Decision: ADR-0070.
+Sources and the eighteen defects deliberately not extracted:
 `docs/inventories/deployment-foundation-sources.md`.
 
 ### Target tenant lifecycle and global commercial foundations
