@@ -1362,6 +1362,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # migration is still ours". It is not — those bytes have run in databases
     # this repository does not own, which is why `ea_0002` exists as its own
     # head instead of a `require_prerequisites` line appended to `ea_0001`.
+    "dotmac-entitlement-allocation-v0.1.0a7": (
+        "dotmac-entitlement-allocation",
+        "c9de0a1b65a816e38b13bb6cc892b2a05bd653eb",
+        {
+            "ea_0001_allocations.py": (
+                "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            ),
+            "ea_0002_idempotency_ledger.py": (
+                "56076edb3f086b6e00b510df95d7af3b35153e8795f7b66754c89a2ad90032c2"
+            ),
+            "ea_0003_platform_audit_log.py": (
+                "63027541404d7f9c824cade44c247098aa5f19bdb6d70cf321c1452974e0e072"
+            ),
+        },
+    ),
     "dotmac-entitlement-allocation-v0.1.0a1": (
         "dotmac-entitlement-allocation",
         "847ce0b5ea89dabdc34c26029df86173da80a4ab",
