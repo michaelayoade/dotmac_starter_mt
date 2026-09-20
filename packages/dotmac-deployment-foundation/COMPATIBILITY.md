@@ -61,6 +61,27 @@
   envelope to authenticate plus Control-resolved trust configuration
   (`verifier`, `trust_policy`, `now`); there is no parameter for a
   preconstructed subject, receipt, digest, or ad hoc root.
+- `admit_host_source()` and `HostSourceAdmissionTrace`
+  (`host_source_admission.py`). `admit_host_source(*, candidate, installed,
+  verifier, trust_policy, expected_host_identity, now)` returns
+  `tuple[HostSource, HostSourceAdmissionTrace]` or raises: every existing
+  `SpecError`/`PreconditionFailed` from `verify_attestation_pair()` /
+  `verify_candidate_attestation()` propagates unchanged, plus one new
+  disagreement refusal using `host_source.DISAGREES` when the interpreter's
+  own installed-artifact reading (taken only after the attestation pair is
+  verified) disagrees with the authenticated installed-host subject's
+  `package`/`version`/`wheel_sha256`. The six-parameter signature has no
+  parameter for a receipt, a pre-parsed subject, an installed artifact, a
+  metadata reader, a distribution selector, or any preverified result — the
+  same inexpressible-bypass shape as `verify_candidate_attestation()`.
+  `HostSourceAdmissionTrace` is a frozen, slotted record of authenticated
+  fields only (`candidate_subject_digest`, `host_observation_id`,
+  `host_identity`, both signer fingerprints, both trust-root versions); it is
+  consumed by nothing in this contract revision. `trusted_host_source.py` is
+  unchanged by this addition and remains zero-I/O; `require_host_source()`'s
+  signature and behavior are unchanged and it remains the constructor a
+  receipt-only caller uses. Neither executor accepts `admit_host_source()`'s
+  output in this contract revision.
 - `ExposureEffects`, plus `OWNERSHIP_PREFIX`, `ownership_comment()`,
   `foreign_rules()`, `foreign_rule_arguments()`, `managed_ports()` and
   `require_preserved_foreign_rules()`. Ownership is part of the CONTRACT rather
