@@ -595,7 +595,7 @@ url = "packages/dotmac-application-directory"
 
 [[package]]
 name = "dotmac-approvals"
-version = "0.1.0a5+dev"
+version = "0.1.0a6"
 description = "DotMac dual-plane approval policy revisions, content-bound requests and decisions"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -741,7 +741,7 @@ url = "packages/dotmac-collections"
 
 [[package]]
 name = "dotmac-commercial-agreements"
-version = "0.1.0a2+dev"
+version = "0.1.0a3"
 description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0057 § 1)"
 optional = false
 python-versions = ">=3.11,<3.14"
