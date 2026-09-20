@@ -11,12 +11,18 @@ changes, each called out here.
 `dotmac-commercial-agreements-v0.1.0a1` resolves to exact revision
 `fead57bc93d6551450f5e6ae1c9de1296e27b0ae`.
 
-`0.1.0a2` is declared and unreleased. Source presence is not registry evidence;
-Vendor remains authoritative on its exact a1 pin until a2 has passed the
+`0.1.0a2` is also published. Its peeled tag
+`dotmac-commercial-agreements-v0.1.0a2` resolves to exact revision
+`42acc8b30f1bcaed1580d312fd33d7b5ef358817`. (This section previously read
+"`0.1.0a2` is declared and unreleased" — that was stale; the tag above already
+existed on `main`.)
+
+`0.1.0a3` is declared and unreleased. Source presence is not registry evidence;
+Vendor remains authoritative on its exact a2 pin until a3 has passed the
 protected release workflow and Vendor deliberately adopts that immutable
 artifact.
 
-## Unreleased — `0.1.0a2+dev`
+## 0.1.0a3 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
 
 **Public typed READ contracts.** `detail()` returns an `AgreementDetail` — the
 agreement and its lines, the lifecycle timeline, the owner-derived
@@ -43,10 +49,6 @@ click.
 `facts` can bound the filter without importing `service`. Both modules still
 re-export them; no caller's import changes.
 
-**The declared version now carries a PEP 440 local development marker.**
-`0.1.0a2` is published and tagged; `src/` has moved since, and one version may
-not name two sets of importable bytes.
-
 **The manifest now carries a `database_catalog=` contribution**
 (`ModuleDatabaseCatalogContributionV1`, lineage head `cg_0001_agreements`,
 covering all three platform tables in sorted order). Every column, ordinal,
@@ -62,7 +64,11 @@ The `dotmac-kernel` floor moves to `>=0.1.0a100` for this: the contribution
 type and `dotmac_kernel.product_database_catalog` were first published in
 a100, above the a74 allocation floor this module previously declared.
 
-## 0.1.0a2 — 2026-08-25 (unreleased)
+## 0.1.0a2 — 2026-08-25
+
+Published; peeled tag `dotmac-commercial-agreements-v0.1.0a2` resolves to
+`42acc8b30f1bcaed1580d312fd33d7b5ef358817`. (Previously marked "unreleased" in
+this file — stale; see "Release state" above.)
 
 ### Added
 
