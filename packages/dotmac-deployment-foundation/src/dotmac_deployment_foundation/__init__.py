@@ -219,6 +219,10 @@ from .host_source import (
     read_installed_artifact,
     require_host_source,
 )
+from .host_source_admission import (
+    HostSourceAdmissionTrace,
+    admit_host_source,
+)
 from .image import AuditReport, audit_image
 from .ingress import (
     ADDRESS_FAMILIES,
@@ -723,7 +727,9 @@ __all__ = [
     "write_lease",
     "CandidateReceipt",
     "HostSource",
+    "HostSourceAdmissionTrace",
     "InstalledArtifact",
+    "admit_host_source",
     "candidate_receipt_from_mapping",
     "read_installed_artifact",
     "require_host_source",
