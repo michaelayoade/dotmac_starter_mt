@@ -913,8 +913,7 @@ def test_admit_host_source_never_reads_the_interpreter_before_pair_verification(
 
     def _must_not_be_called() -> InstalledArtifact:
         pytest.fail(
-            "read_installed_artifact must not run before pair verification "
-            "succeeds"
+            "read_installed_artifact must not run before pair verification succeeds"
         )
 
     monkeypatch.setattr(

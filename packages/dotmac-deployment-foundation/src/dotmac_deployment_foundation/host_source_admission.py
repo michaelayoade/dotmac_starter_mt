@@ -126,9 +126,15 @@ def admit_host_source(
         now=now,
     )
     # `verify_attestation_pair` raises unless both halves are present and
-    # agree; past this point they are proven non-None.
-    assert candidate is not None
-    assert installed is not None
+    # agree; past this point they are proven non-None. An `assert` here would
+    # be silently removed under Python's `-O` flag (bandit B101) and this
+    # module does not get to rely on a narrowing that a runtime flag can
+    # strip — a real, unstrippable branch instead of a suppressed lint.
+    if candidate is None or installed is None:  # pragma: no cover - unreachable
+        raise AssertionError(
+            "unreachable: verify_attestation_pair already guarantees both "
+            "attestations are present"
+        )
 
     authenticated_candidate = verify_candidate_attestation(
         candidate=candidate,
