@@ -108,7 +108,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Final, Protocol, runtime_checkable
 
 from .errors import PreconditionFailed, StepFailed
-from .host_source import HostSource, require_host_source
+from .host_source import HostSource
+from .host_source_admission import (
+    HostSourceAdmissionProvider,
+    HostSourceAdmissionTrace,
+    RefusingHostSourceAdmissionProvider,
+)
 from .recovery import (
     RESTORE_PROCEDURE,
     Adjudication,
@@ -295,6 +300,7 @@ class RecoveryExecutor:
         *,
         source_evidence: CatalogEvidence,
         product_image: str,
+        admission_provider: HostSourceAdmissionProvider | None = None,
     ) -> None:
         self._spec = spec
         self._manifest = manifest
@@ -307,36 +313,46 @@ class RecoveryExecutor:
                 "restore nothing has started the real application against is a "
                 "database that was copied rather than a system that recovered"
             )
-        # NO HOST SOURCE INGREDIENTS ARE ACCEPTED HERE, for the identical
-        # reason `engine.run.Executor.__init__` accepts none — see that
-        # class's constructor comment for the full account of why a prior
-        # repair (`host_source_metadata` plus a receipt resolved from an
-        # operator-named directory) was itself a live bypass, not a closure
-        # of one: `CandidateReceipt` and `InstalledMetadata` are both
+        # NO HOST SOURCE PARSING INGREDIENTS ARE ACCEPTED HERE, for the
+        # identical reason `engine.run.Executor.__init__` accepts none — see
+        # that class's constructor comment for the full account of why a
+        # prior repair (`host_source_metadata` plus a receipt resolved from
+        # an operator-named directory) was itself a live bypass, not a
+        # closure of one: `CandidateReceipt` and `InstalledMetadata` are both
         # caller-authored data, and a caller supplying mutually agreeing
         # values for both stated the same digest on both sides of the
         # comparison exactly as the original `host_source_installed=` did.
         #
-        # `_do_fresh_target` (below) is this class's first effect — creating
-        # a cluster — and Boundary 4's ruling ("the same prerequisite covers
-        # every mutating executor path") applies to it exactly as it applies
-        # to `Executor.run`/`rollback`. `_verify_host_source` always calls
-        # `require_host_source(receipt=None)`: there is no receipt this class
-        # could have gotten from anywhere authenticated, so it always
-        # refuses, with a typed refusal and zero effects.
+        # `admission_provider` is the one host-source-related parameter this
+        # class DOES accept, HANDED OVER never discovered, uniform with
+        # `engine.run.Executor` (Boundary 4: "the same prerequisite covers
+        # every mutating executor path"). It defaults to
+        # `RefusingHostSourceAdmissionProvider`, which itself calls exactly
+        # `require_host_source(receipt=None)` and always refuses — a caller
+        # supplying no provider observes no behavior change. `_do_fresh_target`
+        # (below) is this class's first effect — creating a cluster — and the
+        # provider is consulted before it, never after.
+        self._admission_provider: HostSourceAdmissionProvider = (
+            admission_provider
+            if admission_provider is not None
+            else RefusingHostSourceAdmissionProvider()
+        )
         self._host_source: HostSource | None = None
+        self._host_source_admission_trace: HostSourceAdmissionTrace | None = None
 
     def _verify_host_source(self) -> None:
         """THE MANDATORY PREREQUISITE, called before this class's first effect.
 
-        Same shape as `engine.run.Executor._verify_host_source`, and the same
-        posture: SAFETY-ONLY. There is no seam by which a caller supplies a
-        receipt or an installed-artifact reading, so this always refuses —
-        `NO_RECEIPT` against a genuine installed artifact, `ABSENT`/
-        `WRONG_KIND` otherwise. Trusted provenance is a separate piece of
-        work, not started here.
+        Same shape as `engine.run.Executor._verify_host_source`: delegates to
+        `self._admission_provider.admit_host_source()`, a FRESH call every
+        time. With the default `RefusingHostSourceAdmissionProvider`, this
+        always refuses — `NO_RECEIPT` against a genuine installed artifact,
+        `ABSENT`/`WRONG_KIND` otherwise. A supplied provider's own
+        `PreconditionFailed`/`SpecError` propagates unchanged.
         """
-        self._host_source = require_host_source(receipt=None)
+        self._host_source, self._host_source_admission_trace = (
+            self._admission_provider.admit_host_source()
+        )
 
     def run(self, bundle: Mapping[str, Any]) -> RecoveryOutcome:
         """Restore, adjudicate, prove — or destroy and say why."""

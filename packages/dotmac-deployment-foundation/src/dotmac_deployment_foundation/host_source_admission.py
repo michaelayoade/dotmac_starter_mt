@@ -45,23 +45,46 @@ authenticated — reading first and discarding the result on a later
 attestation failure would still be an unconditional, ungated read of host
 state on every call, authenticated or not.
 
-## What this module does NOT do
+## The provider seam — install-once, handed over, never discovered
 
-It does not decide when a mutating executor is trusted to call it — the
-`HostSourceAdmissionTrace` this module returns is consumed by nothing in this
-revision, and neither `engine/run.py`'s `Executor` nor
-`recovery_execution.py`'s `RecoveryExecutor` import this module. That wiring,
-and the delivery-seam decision it depends on, is later, separate work.
+`engine/run.py`'s `Executor` and `recovery_execution.py`'s `RecoveryExecutor`
+both mutate a host, and both need "which Foundation is asking?" answered
+before their first effect. Neither imports Control's real attestation
+context, and this module does not either — so the seam between them is a
+`HostSourceAdmissionProvider`: one argument-free method, `admit_host_source()`,
+returning exactly the pair this module's own `admit_host_source()` function
+returns. Argument-free is deliberate: a real provider implementation reaches
+Control and evidence itself, entirely inside its own method body, so there is
+no request/context parameter schema to invent here before Control has one.
+
+The provider is a CONSTRUCTOR parameter on both executors, defaulting to
+:class:`RefusingHostSourceAdmissionProvider` below — never an ambient
+registry, a module-level "installed provider" global, or anything this
+package discovers on its own. `install_secret_source`-style ambient
+installation is the wrong shape here on purpose: an executor that goes
+looking for a provider cannot tell "no provider was installed" from "the
+wrong provider was installed", and a mutating executor is exactly where that
+distinction has to stay visible at the call site.
+
+`RefusingHostSourceAdmissionProvider` is the ONLY implementation this package
+ships. It delegates to `host_source.require_host_source(receipt=None)` —
+byte-for-byte today's existing refusal, with the same typed codes
+(`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`) and zero effects — so a caller supplying
+no provider observes no behavior change. A provider that can genuinely admit
+a `HostSource` composes this module's `admit_host_source()` function against
+real Control-resolved attestations; building and installing one is later,
+separate, cross-repo work.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from datetime import datetime
+from typing import Protocol, runtime_checkable
 
 from .digest import Digest
 from .errors import PreconditionFailed
-from .host_source import DISAGREES, HostSource, read_installed_artifact
+from .host_source import DISAGREES, HostSource, read_installed_artifact, require_host_source
 from .trusted_host_source import (
     AttestationEnvelopeV2,
     AttestationTrustPolicy,
@@ -73,7 +96,9 @@ from .trusted_host_source import (
 )
 
 __all__ = [
+    "HostSourceAdmissionProvider",
     "HostSourceAdmissionTrace",
+    "RefusingHostSourceAdmissionProvider",
     "admit_host_source",
 ]
 
@@ -197,3 +222,43 @@ def admit_host_source(
         installed_trust_root_version=installed.trust_root_version,
     )
     return host_source, trace
+
+
+@runtime_checkable
+class HostSourceAdmissionProvider(Protocol):
+    """The whole seam a mutating executor is handed at construction.
+
+    One argument-free method. No parameter for a receipt, an envelope, a
+    subject, a metadata reader, a trust policy, a verifier, a root, an
+    expected host identity, or a preverified result — a real implementation
+    obtains current Control context and evidence itself, entirely inside its
+    own method body. This is deliberate: Control has no request/context API
+    for this yet, and defining one here would invent it rather than receive
+    it.
+    """
+
+    def admit_host_source(self) -> tuple[HostSource, HostSourceAdmissionTrace]: ...
+
+
+class RefusingHostSourceAdmissionProvider:
+    """The reference implementation: delegates to today's existing refusal.
+
+    Used as the default when a caller supplies no provider at all, so the
+    no-provider path produces EXACTLY today's behavior — the same
+    `ABSENT`/`WRONG_KIND`/`NO_RECEIPT` codes, zero effects, in every
+    environment. This class introduces no new refusal vocabulary; it is a
+    pure delegation to `require_host_source(receipt=None)`.
+    """
+
+    def admit_host_source(self) -> tuple[HostSource, HostSourceAdmissionTrace]:
+        require_host_source(receipt=None)
+        # `require_host_source(receipt=None)` cannot return normally: `receipt`
+        # is the literal constant `None` here, so either an earlier check
+        # (ABSENT/WRONG_SUBJECT/WRONG_KIND) raises first, or execution reaches
+        # the `if receipt is None:` branch and raises NO_RECEIPT. There is no
+        # path through that function, fed a literal `None`, that returns a
+        # value — this is a real, unstrippable branch stating that fact
+        # rather than a comment trusting it as an invariant.
+        raise AssertionError(  # pragma: no cover - unreachable, see above
+            "unreachable: require_host_source(receipt=None) always refuses"
+        )

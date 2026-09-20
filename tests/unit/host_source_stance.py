@@ -1,4 +1,4 @@
-"""There is no genuine host-source stance a test can construct any more.
+"""A synthetic ACCEPTING admission provider, handed to a test executor.
 
 ## Why this module used to exist, and why the thing it built was the defect
 
@@ -21,71 +21,115 @@ digest on both sides of the one comparison `require_host_source` makes.
 a document/a `.dist-info` reading into a typed value); neither is
 authority-bearing evidence, and no combination of the two — however
 carefully the fixture agrees with itself — turns caller-authored data into
-proof that a trusted third party attested to it.
+proof that a trusted third party attested to it. `Executor` and
+`RecoveryExecutor` were repaired to accept **no such parsing parameter of any
+kind**, and stayed that way.
 
-Michael's ruling: `Executor`/`RecoveryExecutor` now accept **no host-source
-parameter of any kind**. `_verify_host_source` always calls
-`require_host_source(receipt=None)`, which always refuses — a typed refusal
-(`NO_RECEIPT`/`ABSENT`/`WRONG_KIND`) with zero effects, in every environment,
-including this one. There is no way to construct an "admitted" `Executor` or
-`RecoveryExecutor` any longer, by design, until trusted provenance (an
-externally committed/signed candidate attestation, an independently signed
-installed-host observation, checked against distinct trust roots) lands as
-its own separate piece of work.
+## What changed: an install-once PROVIDER seam, not a parsing parameter
 
-## What this means for every test that used to call this module
+Trusted host provenance (`host_source_admission.py`'s `admit_host_source()`)
+landed as its own, separate piece of work, and PR-2 wires a
+`HostSourceAdmissionProvider` seam into both mutating executors: a
+constructor-supplied, argument-free `admit_host_source() -> tuple[HostSource,
+HostSourceAdmissionTrace]`. This is not the parsing exploit above respelled a
+third time — a provider is not a caller-authored value compared against
+another caller-authored value; it is a HANDED-OVER object whose method a real
+implementation fills in by reaching Control and evidence itself, entirely
+inside its own body.
 
-Every recorded test that built an `Executor` via
-`valid_host_source_kwargs()` in order to reach PAST the host-source gate and
-exercise something downstream of it (lock capability, the authorization
-cross-matrix, failure injection, principal bootstrap, deployment evidence,
-external recovery) can no longer reach that subject through this seam at
-all — `run()`/`rollback()` refuse before any of it. That is not a test gap to
-be engineered around here: Michael was explicit that losing this coverage
-and naming it is the correct outcome, not a defect to route around with a
-new test-only hook (which is exactly how the prior "repair" reintroduced the
-bypass).
-
-`valid_host_source_kwargs()` therefore no longer returns admitting kwargs —
-there are none to return. It calls `pytest.skip` with this explanation, so
-every test still calling it (the call sites have not all been individually
-rewritten — see each file's own note) is marked SKIPPED rather than
-FAILING for an unrelated reason or silently reporting a false pass. A
-skipped test is visible lost coverage; a test that raises `TypeError` on an
-unexpected keyword is a maintenance fire that obscures the real finding.
-
-The behaviours those tests exercised — the pieces of `Executor` beyond the
-host-source gate — are UNMONITORED by this suite until trusted provenance
-lands and a genuine admission path exists to drive them through again.
-`RecoveryExecutor.run` has a different gap: its full ten-step behavioral tests
-were deleted rather than routed through this helper, so it is tracked by the
-separate `RECOVERY_BEHAVIOR_GAP_INVENTORY` architecture obligation.
-`test_deployment_foundation_host_source_gate.py` and the remaining direct
-handler tests in `test_deployment_foundation_recovery_execution.py` are not
-quarantined through this stub.
+`valid_host_source_kwargs()` now returns `{"admission_provider": <a fresh
+synthetic ACCEPTING provider>}` — a test double whose `admit_host_source()`
+returns a valid, made-up-but-internally-consistent `(HostSource,
+HostSourceAdmissionTrace)` pair, never anything that touched
+`require_host_source` or a real artifact reading. Every call site in this
+suite spreads the return value as `**valid_host_source_kwargs()` (or copies
+its items with `setdefault`), so the fixture rename is invisible at each call
+site: what used to admit `Executor`/`RecoveryExecutor` through two
+caller-authored parsing values now admits them through one caller-supplied
+provider object, and every test that used to reach `pytest.skip` through this
+fixture now actually drives the executor past the host-source gate.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
-import pytest
+from dotmac_deployment_foundation.digest import Digest
+from dotmac_deployment_foundation.host_source import HostSource
+from dotmac_deployment_foundation.host_source_admission import (
+    HostSourceAdmissionProvider,
+    HostSourceAdmissionTrace,
+)
+
+#: A syntactically valid sha256 hex digest, reused wherever this module needs
+#: a placeholder digest — the value is never compared against a real
+#: artifact, so any correctly-shaped 64 hex character string does.
+_DIGEST = "b" * 64
+
+
+@dataclasses.dataclass(slots=True)
+class AcceptingHostSourceAdmissionProvider:
+    """A synthetic provider whose `admit_host_source()` always succeeds.
+
+    Every field of the returned pair is internally consistent and
+    self-contained — no real attestation, no real installed artifact, no
+    call to `require_host_source` anywhere in this class. `calls` counts
+    invocations, which is what `test_deployment_foundation_host_source_
+    admission_provider.py`'s freshness proof reads to show the executor
+    consults the provider again on every mutating entry point rather than
+    caching one admission across calls.
+    """
+
+    host_source: HostSource = dataclasses.field(
+        default_factory=lambda: HostSource(
+            distribution="dotmac-deployment-foundation",
+            version="0.1.0",
+            artifact_digest=Digest.parse(_DIGEST, where="test fixture"),
+            source_revision="a" * 40,
+            repository="dotmac/dotmac-deployment-foundation",
+            run_id="run-1",
+            artifact_id="artifact-1",
+            read_from="synthetic test fixture, not a real installer reading",
+        )
+    )
+    trace: HostSourceAdmissionTrace = dataclasses.field(
+        default_factory=lambda: HostSourceAdmissionTrace(
+            candidate_subject_digest=Digest.parse(_DIGEST, where="test fixture"),
+            host_observation_id="observation-1",
+            host_identity="test-host-1",
+            candidate_signer_fingerprint="candidate-signer-1",
+            candidate_trust_root_version="v1",
+            installed_signer_fingerprint="installed-signer-1",
+            installed_trust_root_version="v1",
+        )
+    )
+    calls: int = 0
+
+    def admit_host_source(self) -> tuple[HostSource, HostSourceAdmissionTrace]:
+        self.calls += 1
+        return self.host_source, self.trace
+
+
+def accepting_admission_provider() -> AcceptingHostSourceAdmissionProvider:
+    """A fresh synthetic accepting provider, isinstance-checkable as the
+    Protocol it satisfies."""
+    provider = AcceptingHostSourceAdmissionProvider()
+    assert isinstance(provider, HostSourceAdmissionProvider), (
+        "AcceptingHostSourceAdmissionProvider must satisfy the runtime-"
+        "checkable HostSourceAdmissionProvider protocol"
+    )
+    return provider
 
 
 def valid_host_source_kwargs() -> dict[str, Any]:
-    """No longer returns anything admitting — see the module docstring.
+    """The kwargs that admit a test `Executor`/`RecoveryExecutor` past the
+    host-source gate: a fresh synthetic ACCEPTING provider, handed over as
+    `admission_provider=`.
 
-    Skips the calling test rather than returning a value, so every remaining
-    call site (unrewritten test bodies that still call this) is reported as
-    lost coverage rather than as a spurious pass or an unrelated crash.
+    A FRESH provider on every call, never a shared instance — a caller
+    counting invocations on the returned provider (the freshness proof)
+    would otherwise see calls from unrelated tests accumulate on one shared
+    object.
     """
-    pytest.skip(
-        "unreachable since the host-source gate accepts no caller-suppliable "
-        "receipt or metadata at all (Executor always refuses "
-        "require_host_source(receipt=None)); this Executor test's subject is "
-        "beyond the gate and is unmonitored until trusted provenance lands. "
-        "RecoveryExecutor's integrated ten-step run is a separate named gap — "
-        "see "
-        "host_source_stance.py"
-    )
-    raise AssertionError("unreachable")  # pragma: no cover
+    return {"admission_provider": accepting_admission_provider()}

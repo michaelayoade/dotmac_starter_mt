@@ -1,4 +1,24 @@
-"""The executor calls `require_host_source` ITSELF, and can never be admitted.
+"""The executor's DEFAULT never admits; a supplied provider is a separate seam.
+
+## Amendment: the trusted-provenance admission provider seam
+
+`Executor`/`RecoveryExecutor` now accept a constructor-supplied
+`admission_provider` (`host_source_admission.HostSourceAdmissionProvider`),
+defaulting to `RefusingHostSourceAdmissionProvider` when none is supplied.
+This file's subject is exactly that DEFAULT: with no provider, the executor
+still refuses unconditionally, on exactly the codes and exactly the ordering
+below, because the default provider itself calls
+`require_host_source(receipt=None)` and nothing else. The claims this file's
+original docstring made about "no admit control" and "unreachable... by
+design" described the pre-provider-seam world; a genuinely admitting
+`Executor`/`RecoveryExecutor` is now reachable by SUPPLYING a provider, which
+is exactly what `tests/unit/host_source_stance.py`'s synthetic accepting
+provider does for the tests that previously skipped through this gate (see
+`test_deployment_foundation_host_source_admission_provider.py` for the
+admission-path proofs). What has NOT changed, and what the rest of this
+file's original account below still proves: no caller-authored PARSING value
+(a `CandidateReceipt`, an `InstalledMetadata`) can reach `require_host_source`
+through either constructor, by any route.
 
 ## The ruling this file proves (Michael, verbatim), UPDATED after `541cee5d`
 
@@ -17,12 +37,15 @@ used.
 Michael's ruling, reshaping this into a SAFETY-ONLY file:
 
 * `Executor.__init__`/`RecoveryExecutor.__init__` accept **no host-source
-  parameter of any kind** — no receipt, no metadata, no directory. There is
-  nothing left to construct an "admitted" executor with, and this file no
-  longer tries to.
-* `_verify_host_source` always calls `require_host_source(receipt=None)`,
-  which always refuses — a typed refusal (`ABSENT`/`WRONG_KIND`/
-  `NO_RECEIPT`) with zero effects, in EVERY environment.
+  PARSING parameter of any kind** — no receipt, no metadata, no directory.
+  There is nothing left to construct an "admitted" executor with THROUGH THAT
+  ROUTE, and this file does not try to. (The later `admission_provider` seam
+  is a different, non-parsing mechanism — see the amendment above.)
+* With no provider supplied, `_verify_host_source` always calls
+  `RefusingHostSourceAdmissionProvider.admit_host_source()`, which itself
+  calls exactly `require_host_source(receipt=None)` — always refusing, a
+  typed refusal (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`) with zero effects, in
+  EVERY environment where no provider was handed over.
 * Verification ordering (after the lock, before the grant, before every
   step) is PRESERVED and re-proved below — on the refusal path, since that
   is now the only path that exists.
@@ -61,7 +84,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import dotmac_deployment_foundation.engine.run as run_module
 import pytest
 from dotmac_deployment_foundation.authorization import ExecutionGrant
 from dotmac_deployment_foundation.engine.run import Executor
@@ -235,11 +257,17 @@ def test_the_verification_call_happens_exactly_once_on_the_refusal_path(
 ) -> None:
     """NON-VACUITY. A `require_host_source` that is imported but never
     CALLED would let every refusal test in this file fail for an unrelated
-    reason and let this one pass by accident. Proved on the refusal path,
-    since that is the only path `Executor` has today."""
-    real = run_module.require_host_source
+    reason and let this one pass by accident. `Executor` with no
+    `admission_provider` supplied defaults to
+    `RefusingHostSourceAdmissionProvider`, whose own `admit_host_source()`
+    (in `host_source_admission.py`, not `engine/run.py` any more — the call
+    moved with the provider seam) is what actually calls
+    `require_host_source`, so that is the module patched here."""
+    import dotmac_deployment_foundation.host_source_admission as admission_module
+
+    real = admission_module.require_host_source
     spy = MagicMock(side_effect=real)
-    monkeypatch.setattr(run_module, "require_host_source", spy)
+    monkeypatch.setattr(admission_module, "require_host_source", spy)
 
     spec, plan, effects = _fixture()
     execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
@@ -263,9 +291,11 @@ def test_rollback_also_reaches_the_verification_call_on_the_refusal_path(
     monkeypatch,
 ) -> None:
     """The refusal-path admit control's rollback half."""
-    real = run_module.require_host_source
+    import dotmac_deployment_foundation.host_source_admission as admission_module
+
+    real = admission_module.require_host_source
     spy = MagicMock(side_effect=real)
-    monkeypatch.setattr(run_module, "require_host_source", spy)
+    monkeypatch.setattr(admission_module, "require_host_source", spy)
 
     spec, plan, effects = _fixture()
     execution_plan, digest = _plan_and_digest(
