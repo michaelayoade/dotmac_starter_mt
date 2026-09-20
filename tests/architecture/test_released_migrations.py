@@ -1789,6 +1789,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-commercial-agreements ──
+    "dotmac-commercial-agreements-v0.1.0a3": (
+        "dotmac-commercial-agreements",
+        "5005e998a4cac9b4f7e3ba91f371967b0ee8b2a2",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            ),
+        },
+    ),
     "dotmac-commercial-agreements-v0.1.0a1": (
         "dotmac-commercial-agreements",
         "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
