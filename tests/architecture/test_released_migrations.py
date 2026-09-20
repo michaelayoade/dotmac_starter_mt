@@ -716,6 +716,20 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-approvals-v0.1.0a6": (
+        # a6 adds only a database_catalog= manifest declaration; the migration
+        # lineage is byte-identical to a5, so the same commit and digests apply.
+        "dotmac-approvals",
+        "8d4ddfd9e285da06ce1fdd29b59f1b483d6ea38c",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+            "ap_0002_outbox_relay.py": (
+                "6aace60a4925ad5f5c693b81a356807c1ad2b9ffe1664fdfcd1417429d127e2d"
+            ),
+        },
+    ),
     "dotmac-integration-v0.1.0a17": (
         "dotmac-integration",
         "2cab76b442e6cc6c8ed81a409d943ba250351c3d",
@@ -1799,6 +1813,17 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     "dotmac-commercial-agreements-v0.1.0a2": (
+        "dotmac-commercial-agreements",
+        "42acc8b30f1bcaed1580d312fd33d7b5ef358817",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            ),
+        },
+    ),
+    "dotmac-commercial-agreements-v0.1.0a3": (
+        # a3 adds only a database_catalog= manifest declaration; the migration
+        # lineage is byte-identical to a2, so the same commit and digest apply.
         "dotmac-commercial-agreements",
         "42acc8b30f1bcaed1580d312fd33d7b5ef358817",
         {
