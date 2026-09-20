@@ -1415,6 +1415,25 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-entitlement-allocation-v0.1.0a7": (
+        # a7 adds only a database_catalog= manifest declaration; the migration
+        # lineage is byte-identical to a6, so the same digests apply. Commit
+        # is this tag's own peeled commit, per
+        # test_each_recorded_commit_is_the_exact_peeled_tag.
+        "dotmac-entitlement-allocation",
+        "c9de0a1b65a816e38b13bb6cc892b2a05bd653eb",
+        {
+            "ea_0001_allocations.py": (
+                "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            ),
+            "ea_0002_idempotency_ledger.py": (
+                "56076edb3f086b6e00b510df95d7af3b35153e8795f7b66754c89a2ad90032c2"
+            ),
+            "ea_0003_platform_audit_log.py": (
+                "63027541404d7f9c824cade44c247098aa5f19bdb6d70cf321c1452974e0e072"
+            ),
+        },
+    ),
     # ── dotmac-files ────────────────────────────────────────────────────────
     # a2's root is the published atomic catalogue. a3 adds fi_0002 rather than
     # changing this digest, so an existing a2 installation and a fresh a3
