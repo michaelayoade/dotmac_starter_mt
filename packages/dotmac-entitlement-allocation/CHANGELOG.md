@@ -15,7 +15,7 @@ audit dependencies.
 
 Nothing in this file is a publication claim except this section.
 
-## Unreleased — `0.1.0a6+dev`
+## 0.1.0a7 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
 
 **Database catalogue contribution.** The manifest now declares
 `database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
@@ -58,9 +58,10 @@ is how an operator finds the row that needs repairing.
 `AllocationStatus`, `STAGED` and `AllocatedCapability` now live in `facts` and
 are re-exported from `models` and `service`; no caller's import changes.
 
-**The declared version now carries a PEP 440 local development marker.**
-`0.1.0a6` is published and tagged; `src/` has moved since, and one version may
-not name two sets of importable bytes.
+**Version prepared.** The `0.1.0a6+dev` local-development marker is removed;
+the package now declares `0.1.0a7`. This is a prepared release candidate only —
+publication happens through a separate, later `workflow_dispatch` of
+`release-module.yml`.
 
 ## 0.1.0a6 — released 2026-08-17
 

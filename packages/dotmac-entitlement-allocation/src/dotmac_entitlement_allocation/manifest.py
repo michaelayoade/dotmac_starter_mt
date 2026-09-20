@@ -136,7 +136,7 @@ _DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
 
 module = ModuleManifest(
     code="entitlement_allocation",
-    version="0.1.0a6+dev",
+    version="0.1.0a7",
     core=False,
     short_code="ealloc",
     migration_prefix="ea",
