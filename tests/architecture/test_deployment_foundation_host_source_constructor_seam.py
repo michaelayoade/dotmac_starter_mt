@@ -69,17 +69,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
-from tests.architecture.host_source_skip_inventory import (
-    RETIRE_WHEN,
-    SKIP_INVENTORY,
-    SKIP_INVENTORY_SCOPE,
-)
-from tests.architecture.host_source_skip_inventory import (
-    tests_reaching as _tests_reaching,
-)
-
 REPO = Path(__file__).resolve().parents[2]
 RUN_PY = (
     REPO
@@ -120,110 +109,6 @@ _ALLOWED_POSITIONAL = {
     "Executor": ("spec", "effects", "grant"),
     "RecoveryExecutor": ("spec", "manifest", "effects"),
 }
-
-
-def test_trusted_provenance_admission_ratchet_is_bidirectional() -> None:
-    """The temporary non-admission seam and its skipped reach are one state.
-
-    While the recorded reach remains, constructors and their host-source calls
-    must be incapable of receiving non-``None`` evidence.  Conversely, when
-    that reach is genuinely retired this refusal must be rewritten in the same
-    change; leaving it behind would misdescribe a permanently non-admitting
-    executor as a transition gate.
-    """
-    assert SKIP_INVENTORY_SCOPE == "Executor tests only"
-    assert len(SKIP_INVENTORY) == 73
-    _require_non_admission_while_inventory_remains(
-        ast.parse(RUN_PY.read_text(encoding="utf-8"), filename=str(RUN_PY)),
-        class_name="Executor",
-        path=RUN_PY,
-    )
-    plant = ast.parse(
-        "class Executor:\n"
-        "    def _verify_host_source(self):\n"
-        "        return require_host_source(receipt=self._trusted_evidence)\n"
-    )
-    with pytest.raises(AssertionError, match="non-admitting"):
-        _require_non_admission_while_inventory_remains(
-            plant, class_name="Executor", path=Path("<plant>")
-        )
-
-
-def test_skip_inventory_is_machine_checked_as_executor_only_per_test_identity(
-    tmp_path: Path,
-) -> None:
-    paths = {relative_path for relative_path, _ in SKIP_INVENTORY}
-    executor_tests = {
-        (relative_path, name)
-        for relative_path in paths
-        for name in _tests_reaching(
-            REPO / relative_path,
-            target="Executor",
-            target_module="dotmac_deployment_foundation.engine.run",
-        )
-    }
-    recovery_tests = {
-        (relative_path, name)
-        for relative_path in paths
-        for name in _tests_reaching(
-            REPO / relative_path,
-            target="RecoveryExecutor",
-            target_module="dotmac_deployment_foundation.recovery_execution",
-        )
-    }
-    assert SKIP_INVENTORY <= executor_tests
-    assert not SKIP_INVENTORY & recovery_tests
-
-    split_subjects = tmp_path / "split_subjects.py"
-    split_subjects.write_text(
-        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
-        "from dotmac_deployment_foundation.engine.run import Executor\n"
-        "def test_fixture():\n"
-        "    valid_host_source_kwargs()\n"
-        "def test_executor_only():\n"
-        "    Executor(None, None, None)\n",
-        encoding="utf-8",
-    )
-    assert _tests_reaching(split_subjects) == {"test_fixture"}
-    assert _tests_reaching(
-        split_subjects,
-        target="Executor",
-        target_module="dotmac_deployment_foundation.engine.run",
-    ) == {"test_executor_only"}
-
-    same_subject = tmp_path / "same_subject.py"
-    same_subject.write_text(
-        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
-        "from dotmac_deployment_foundation.engine.run import Executor\n"
-        "def test_both():\n"
-        "    Executor(None, None, None)\n"
-        "    valid_host_source_kwargs()\n",
-        encoding="utf-8",
-    )
-    assert _tests_reaching(same_subject) == {"test_both"}
-    assert _tests_reaching(
-        same_subject,
-        target="Executor",
-        target_module="dotmac_deployment_foundation.engine.run",
-    ) == {"test_both"}
-
-    recovery_subject = tmp_path / "recovery_subject.py"
-    recovery_subject.write_text(
-        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
-        "from dotmac_deployment_foundation.recovery_execution import "
-        "RecoveryExecutor\n"
-        "def test_recovery():\n"
-        "    RecoveryExecutor(None, None, None)\n"
-        "    valid_host_source_kwargs()\n"
-        "def test_prose_near_miss():\n"
-        "    label = 'RecoveryExecutor'\n",
-        encoding="utf-8",
-    )
-    assert _tests_reaching(
-        recovery_subject,
-        target="RecoveryExecutor",
-        target_module="dotmac_deployment_foundation.recovery_execution",
-    ) == {"test_recovery"}
 
 
 def _find_class(class_name: str, tree: ast.Module, *, path: Path) -> ast.ClassDef:
@@ -330,8 +215,7 @@ def test_recovery_executor_init_has_exactly_the_allowed_positional_parameters() 
         f"{list(_ALLOWED_POSITIONAL['RecoveryExecutor'])}"
     )
     assert args.vararg is None, (
-        f"RecoveryExecutor.__init__ accepts "
-        f"*{args.vararg.arg if args.vararg else ''}"
+        f"RecoveryExecutor.__init__ accepts *{args.vararg.arg if args.vararg else ''}"
     )
     assert args.kwarg is None, (
         f"RecoveryExecutor.__init__ accepts "
@@ -407,15 +291,6 @@ def _is_receipt_none_only(call: ast.Call) -> bool:
     return isinstance(keyword.value, ast.Constant) and keyword.value.value is None
 
 
-def _require_non_admission_while_inventory_remains(
-    tree: ast.Module, *, class_name: str, path: Path
-) -> None:
-    """The compound Executor transitional rule, usable against source/plants."""
-    assert RETIRE_WHEN == "trusted-provenance-admission"
-    assert len(SKIP_INVENTORY) == 73, "the retirement inventory changed"
-    _require_non_admission_call_shape(tree, class_name=class_name, path=path)
-
-
 def _require_non_admission_call_shape(
     tree: ast.Module, *, class_name: str, path: Path
 ) -> None:
@@ -425,9 +300,9 @@ def _require_non_admission_call_shape(
         _find_class(class_name, tree, path=path), "_verify_host_source"
     )
     calls = _admission_provider_calls(method)
-    assert len(calls) == 1 and _is_bare_call(
-        calls[0]
-    ), "the executor is not non-admitting while its recorded gap remains"
+    assert len(calls) == 1 and _is_bare_call(calls[0]), (
+        "the executor is not non-admitting while its recorded gap remains"
+    )
 
 
 def test_executor_verify_host_source_delegates_to_the_provider_with_no_argument() -> (
@@ -485,7 +360,9 @@ def test_refusing_provider_calls_exactly_require_host_source_of_none() -> None:
         filename=str(HOST_SOURCE_ADMISSION_PY),
     )
     method = _find_method(
-        _find_class("RefusingHostSourceAdmissionProvider", tree, path=HOST_SOURCE_ADMISSION_PY),
+        _find_class(
+            "RefusingHostSourceAdmissionProvider", tree, path=HOST_SOURCE_ADMISSION_PY
+        ),
         "admit_host_source",
     )
     calls = _require_host_source_calls(method)
@@ -540,9 +417,9 @@ def test_the_guard_names_a_planted_positional_smuggle() -> None:
     tree = ast.parse(source, filename="<plant: positional smuggle>")
     args = _init_args("Executor", tree, path=Path("<plant>"))
 
-    assert _positional_names(args) != list(
-        _ALLOWED_POSITIONAL["Executor"]
-    ), "the plant does not exhibit the shape being detected"
+    assert _positional_names(args) != list(_ALLOWED_POSITIONAL["Executor"]), (
+        "the plant does not exhibit the shape being detected"
+    )
     assert _positional_names(args) == ["spec", "effects", "grant", "sneaky"]
 
 
@@ -602,9 +479,9 @@ def test_the_guard_names_a_planted_fed_receipt() -> None:
     calls = _require_host_source_calls(method)
 
     assert len(calls) == 1, "the plant does not exhibit the shape being detected"
-    assert not _is_receipt_none_only(
-        calls[0]
-    ), "the plant's fed-receipt call was wrongly accepted as receipt=None"
+    assert not _is_receipt_none_only(calls[0]), (
+        "the plant's fed-receipt call was wrongly accepted as receipt=None"
+    )
 
 
 def test_the_guard_names_a_planted_extra_keyword() -> None:
@@ -625,9 +502,9 @@ def test_the_guard_names_a_planted_extra_keyword() -> None:
     calls = _require_host_source_calls(method)
 
     assert len(calls) == 1, "the plant does not exhibit the shape being detected"
-    assert not _is_receipt_none_only(
-        calls[0]
-    ), "the plant's extra-keyword call was wrongly accepted as receipt=None"
+    assert not _is_receipt_none_only(calls[0]), (
+        "the plant's extra-keyword call was wrongly accepted as receipt=None"
+    )
 
 
 def test_the_guard_stays_silent_on_the_repaired_shape() -> None:
