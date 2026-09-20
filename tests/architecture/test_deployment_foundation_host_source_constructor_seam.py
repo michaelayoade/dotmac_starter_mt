@@ -1,7 +1,10 @@
 """No parameter of `Executor.__init__` or `RecoveryExecutor.__init__` lets a
 caller state the artifact digest or the launcher digest, by ANY route — and
-`_verify_host_source` on both classes calls EXACTLY
-`require_host_source(receipt=None)`, never anything a caller could reach.
+`_verify_host_source` on both classes delegates to its admission provider
+with no argument at all, and the DEFAULT provider
+(`RefusingHostSourceAdmissionProvider`) calls EXACTLY
+`require_host_source(receipt=None)`, never anything a caller could reach. See
+the amendment below for why this is now a two-link claim.
 
 ## The defect this closes — three times, now
 
@@ -39,6 +42,26 @@ reuses one of the names already on the list — it says nothing about:
 This file now checks all three: the full ALLOWED positional parameter list
 (nothing extra, no vararg), the absence of `**kwargs`, and the EXACT call
 shape of `require_host_source` inside both `_verify_host_source` methods.
+
+## Amendment: the admission-provider seam moved the call, not the property
+
+`host_source_admission.py`'s provider seam landed after round 3 above:
+`_verify_host_source` on both classes no longer calls `require_host_source`
+itself at all — it delegates to `self._admission_provider.admit_host_source()`,
+a HANDED-OVER, argument-free method (see that module's docstring). The
+property round 3 exists to protect — "no route lets a caller feed
+`require_host_source` anything but the literal `None`" — still has to hold,
+it just holds one hop further down: `RefusingHostSourceAdmissionProvider`
+(the DEFAULT, `host_source_admission.py`) is the one object that still calls
+exactly `require_host_source(receipt=None)`, and `_verify_host_source` itself
+must call the provider with NO positional or keyword argument at all — a
+provider call fed `self._anything` would let a caller-controlled value ride
+through the provider seam exactly like a caller-controlled `receipt=` used to
+ride through `require_host_source` directly. So the CALL-SHAPE proof below is
+now two links: `_verify_host_source` calls exactly
+`self._admission_provider.admit_host_source()`, and separately,
+`RefusingHostSourceAdmissionProvider.admit_host_source()` calls exactly
+`require_host_source(receipt=None)`.
 """
 
 from __future__ import annotations
@@ -67,6 +90,11 @@ RECOVERY_EXECUTION_PY = (
     REPO
     / "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
     / "recovery_execution.py"
+)
+HOST_SOURCE_ADMISSION_PY = (
+    REPO
+    / "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
+    / "host_source_admission.py"
 )
 
 #: Parameters that let a caller state an artifact/launcher digest, or either
@@ -311,16 +339,47 @@ def test_recovery_executor_init_has_exactly_the_allowed_positional_parameters() 
     )
 
 
-# ── the CALL-SHAPE proof: `_verify_host_source` calls EXACTLY
-# `require_host_source(receipt=None)` — not merely "is called" ─────────────
+# ── the CALL-SHAPE proof, now in TWO LINKS since the provider seam landed ───
+#
+# Link 1: `_verify_host_source` on both executors delegates to
+# `self._admission_provider.admit_host_source()` with NO argument of any
+# kind — a fed argument would be exactly the "caller-controlled value rides
+# through" shape this file exists to refuse, one hop later than before.
+#
+# Link 2: `RefusingHostSourceAdmissionProvider.admit_host_source()`
+# (`host_source_admission.py`) is the one object that still calls
+# `require_host_source`, and it must call EXACTLY
+# `require_host_source(receipt=None)` — the original claim, now living one
+# module over.
 #
 # The sibling coverage guards
 # (`test_deployment_foundation_host_source_coverage.py` and its
 # `RecoveryExecutor` sibling) prove `_verify_host_source` is CALLED from
-# every mutating entry point. Neither ever inspected what `_verify_host_
-# source` itself calls `require_host_source` WITH — a gate proven to fire is
-# not the same claim as a gate proven to be unfeedable. This is that second
-# claim.
+# every mutating entry point. Neither ever inspected what it is called WITH
+# — a gate proven to fire is not the same claim as a gate proven to be
+# unfeedable. This is that second claim, for both links.
+
+
+def _admission_provider_calls(func_node: ast.FunctionDef) -> list[ast.Call]:
+    """Every call in `func_node` shaped `self._admission_provider.admit_host_source(...)`."""
+    return [
+        node
+        for node in ast.walk(func_node)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "admit_host_source"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "_admission_provider"
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "self"
+    ]
+
+
+def _is_bare_call(call: ast.Call) -> bool:
+    """`True` iff `call` carries no positional or keyword argument at all —
+    the one shape a caller-controlled value cannot ride through, since there
+    is nowhere on the call to put one."""
+    return not call.args and not call.keywords
 
 
 def _require_host_source_calls(func_node: ast.FunctionDef) -> list[ast.Call]:
@@ -360,38 +419,39 @@ def _require_non_admission_while_inventory_remains(
 def _require_non_admission_call_shape(
     tree: ast.Module, *, class_name: str, path: Path
 ) -> None:
-    """Assert a class's host-source helper can only request ``None``."""
+    """Assert a class's host-source helper delegates to its admission
+    provider with no argument of any kind — link 1 above."""
     method = _find_method(
         _find_class(class_name, tree, path=path), "_verify_host_source"
     )
-    calls = _require_host_source_calls(method)
-    assert len(calls) == 1 and _is_receipt_none_only(
+    calls = _admission_provider_calls(method)
+    assert len(calls) == 1 and _is_bare_call(
         calls[0]
     ), "the executor is not non-admitting while its recorded gap remains"
 
 
-def test_executor_verify_host_source_calls_exactly_require_host_source_of_none() -> (
+def test_executor_verify_host_source_delegates_to_the_provider_with_no_argument() -> (
     None
 ):
     tree = ast.parse(RUN_PY.read_text(encoding="utf-8"), filename=str(RUN_PY))
     method = _find_method(
         _find_class("Executor", tree, path=RUN_PY), "_verify_host_source"
     )
-    calls = _require_host_source_calls(method)
+    calls = _admission_provider_calls(method)
 
     assert len(calls) == 1, (
-        f"_verify_host_source calls require_host_source {len(calls)} time(s) "
-        "in its own source, not exactly once"
+        f"_verify_host_source calls self._admission_provider.admit_host_source() "
+        f"{len(calls)} time(s) in its own source, not exactly once"
     )
-    assert _is_receipt_none_only(calls[0]), (
-        "Executor._verify_host_source's call to require_host_source is not "
-        "exactly `require_host_source(receipt=None)` — "
+    assert _is_bare_call(calls[0]), (
+        "Executor._verify_host_source's call to admit_host_source() is not "
+        "argument-free — "
         f"args={[ast.dump(a) for a in calls[0].args]}, "
         f"keywords={[(k.arg, ast.dump(k.value)) for k in calls[0].keywords]}"
     )
 
 
-def test_recovery_executor_verify_host_source_calls_require_host_source_of_none() -> (
+def test_recovery_executor_verify_host_source_delegates_to_the_provider_with_no_argument() -> (
     None
 ):
     tree = ast.parse(
@@ -402,15 +462,41 @@ def test_recovery_executor_verify_host_source_calls_require_host_source_of_none(
         _find_class("RecoveryExecutor", tree, path=RECOVERY_EXECUTION_PY),
         "_verify_host_source",
     )
+    calls = _admission_provider_calls(method)
+
+    assert len(calls) == 1, (
+        f"_verify_host_source calls self._admission_provider.admit_host_source() "
+        f"{len(calls)} time(s) in its own source, not exactly once"
+    )
+    assert _is_bare_call(calls[0]), (
+        "RecoveryExecutor._verify_host_source's call to admit_host_source() "
+        "is not argument-free — "
+        f"args={[ast.dump(a) for a in calls[0].args]}, "
+        f"keywords={[(k.arg, ast.dump(k.value)) for k in calls[0].keywords]}"
+    )
+
+
+def test_refusing_provider_calls_exactly_require_host_source_of_none() -> None:
+    """Link 2: the ONE object that still calls `require_host_source` at all —
+    `RefusingHostSourceAdmissionProvider.admit_host_source()` — calls it with
+    exactly `receipt=None`, never anything a caller could reach."""
+    tree = ast.parse(
+        HOST_SOURCE_ADMISSION_PY.read_text(encoding="utf-8"),
+        filename=str(HOST_SOURCE_ADMISSION_PY),
+    )
+    method = _find_method(
+        _find_class("RefusingHostSourceAdmissionProvider", tree, path=HOST_SOURCE_ADMISSION_PY),
+        "admit_host_source",
+    )
     calls = _require_host_source_calls(method)
 
     assert len(calls) == 1, (
-        f"_verify_host_source calls require_host_source {len(calls)} time(s) "
-        "in its own source, not exactly once"
+        f"RefusingHostSourceAdmissionProvider.admit_host_source calls "
+        f"require_host_source {len(calls)} time(s), not exactly once"
     )
     assert _is_receipt_none_only(calls[0]), (
-        "RecoveryExecutor._verify_host_source's call to require_host_source "
-        "is not exactly `require_host_source(receipt=None)` — "
+        "RefusingHostSourceAdmissionProvider.admit_host_source's call to "
+        "require_host_source is not exactly `require_host_source(receipt=None)` — "
         f"args={[ast.dump(a) for a in calls[0].args]}, "
         f"keywords={[(k.arg, ast.dump(k.value)) for k in calls[0].keywords]}"
     )

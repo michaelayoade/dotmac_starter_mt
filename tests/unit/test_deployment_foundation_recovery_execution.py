@@ -332,17 +332,21 @@ def test_recovery_executor_init_accepts_no_host_source_parameter() -> None:
 
 
 def test_the_verification_call_happens_exactly_once(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """NON-VACUITY, on the refusal path — the only path that exists. A
-    `require_host_source` that is imported but never CALLED would let the
-    refusal test above fail for an unrelated reason and let this one pass by
-    accident."""
+    """NON-VACUITY, on the refusal path — the default (no provider supplied)
+    still refuses unconditionally. `recovery_execution.py` no longer imports
+    `require_host_source` at all — `_verify_host_source` delegates to
+    `self._admission_provider.admit_host_source()`, and it is
+    `RefusingHostSourceAdmissionProvider` (`host_source_admission.py`) that
+    actually calls `require_host_source`, so that is the module patched
+    here — the same move `test_deployment_foundation_host_source_gate.py`
+    made for `Executor`'s half of this same seam."""
     from unittest.mock import MagicMock
 
-    import dotmac_deployment_foundation.recovery_execution as recovery_execution_module
+    import dotmac_deployment_foundation.host_source_admission as admission_module
 
-    real = recovery_execution_module.require_host_source
+    real = admission_module.require_host_source
     spy = MagicMock(side_effect=real)
-    monkeypatch.setattr(recovery_execution_module, "require_host_source", spy)
+    monkeypatch.setattr(admission_module, "require_host_source", spy)
 
     effects = RecordingRecoveryEffects()
     with pytest.raises(PreconditionFailed):
