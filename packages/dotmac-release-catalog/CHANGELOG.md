@@ -4,7 +4,7 @@ All notable changes to the `dotmac-release-catalog` distribution. Pre-1.0 the
 surface is still settling; the top-level `dotmac_release_catalog` namespace is
 the stable one.
 
-## Unreleased — `0.1.0a4+dev`
+## 0.1.0a5 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
 
 **Database catalogue contribution.** The manifest now declares
 `database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
@@ -35,10 +35,10 @@ caller has nowhere to assert it. `EvidenceState` deliberately reports
 `signature_recorded` and never "verified": this module does not fetch an
 attestation URI (ADR-0009), so it cannot know that one validated.
 
-**The declared version now carries a PEP 440 local development marker.**
-`0.1.0a4` is published and tagged; `src/` has moved since, and one version may
-not name two sets of importable bytes. The marker allocates nothing and cannot
-be published — the next release allocates a real version.
+**Version prepared.** The `0.1.0a4+dev` local-development marker is removed;
+the package now declares `0.1.0a5`. This is a prepared release candidate only —
+publication happens through a separate, later `workflow_dispatch` of
+`release-module.yml`.
 
 ## 0.1.0a4 — 2026-08-15
 
