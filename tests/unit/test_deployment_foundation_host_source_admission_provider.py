@@ -233,14 +233,21 @@ def test_an_explicit_refusing_provider_refuses_exactly_like_the_default() -> Non
 
 
 def test_an_explicit_refusing_provider_refuses_the_recovery_executor_too() -> None:
+    """`RecoveryExecutor._verify_host_source` runs before `RecoveryOutcome`
+    even exists (see `run()`'s own body), so a refusal PROPAGATES — it is
+    never caught into a returned outcome. Same shape as
+    `test_a_bare_recovery_executor_refuses_by_default`
+    (`test_deployment_foundation_recovery_execution.py`), proved here with an
+    EXPLICITLY supplied refusing provider rather than the default."""
     effects, executor = _recovery_executor(
         admission_provider=RefusingHostSourceAdmissionProvider()
     )
-    outcome = executor.run(bundle={})
-    assert outcome.failure, "an explicitly-supplied refusing provider admitted"
-    assert effects.calls == [], (
-        f"the gate did not fire before the first effect: {effects.calls}"
-    )
+    with pytest.raises(PreconditionFailed) as refusal:
+        executor.run(bundle={})
+    assert refusal.value.code in HOST_SOURCE_CODES
+    assert (
+        effects.calls == []
+    ), f"the gate did not fire before the first effect: {effects.calls}"
 
 
 # ── the Protocol is satisfied by both shipped implementations ──────────────

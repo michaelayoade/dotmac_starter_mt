@@ -121,9 +121,9 @@ def test_the_coverage_guard_names_a_planted_omission() -> None:
     tree = ast.parse(source, filename="<plant: omitted prerequisite>")
     executor = _recovery_executor_class(tree)
     points = _public_methods(executor)
-    assert {p.name for p in points} == {"run"}, (
-        "the plant does not exhibit the shape being detected"
-    )
+    assert {p.name for p in points} == {
+        "run"
+    }, "the plant does not exhibit the shape being detected"
 
     missing = [p.name for p in points if not _calls_prerequisite(p)]
     assert missing == ["run"], (

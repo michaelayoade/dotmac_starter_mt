@@ -282,9 +282,9 @@ def test_the_verification_call_happens_exactly_once_on_the_refusal_path(
     with pytest.raises(PreconditionFailed):
         executor.run(plan, lock=held_lock(spec.product))
 
-    assert spy.call_count == 1, (
-        f"require_host_source was called {spy.call_count} time(s), not exactly once"
-    )
+    assert (
+        spy.call_count == 1
+    ), f"require_host_source was called {spy.call_count} time(s), not exactly once"
 
 
 def test_rollback_also_reaches_the_verification_call_on_the_refusal_path(

@@ -422,9 +422,9 @@ def test_a_bare_recovery_executor_refuses_by_default() -> None:
         f"refused with {refusal.value.code!r}, not one of the host-source "
         f"codes {HOST_SOURCE_CODES}"
     )
-    assert effects.calls == [], (
-        f"the gate did not fire before the first effect: {effects.calls}"
-    )
+    assert (
+        effects.calls == []
+    ), f"the gate did not fire before the first effect: {effects.calls}"
 
 
 def test_recovery_executor_init_accepts_no_host_source_parameter() -> None:
@@ -465,9 +465,9 @@ def test_the_verification_call_happens_exactly_once(monkeypatch) -> None:  # typ
     with pytest.raises(PreconditionFailed):
         _executor(effects).run(bundle={})
 
-    assert spy.call_count == 1, (
-        f"require_host_source was called {spy.call_count} time(s), not exactly once"
-    )
+    assert (
+        spy.call_count == 1
+    ), f"require_host_source was called {spy.call_count} time(s), not exactly once"
     assert effects.calls == []
 
 

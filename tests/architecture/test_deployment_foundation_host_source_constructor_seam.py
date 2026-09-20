@@ -214,9 +214,9 @@ def test_recovery_executor_init_has_exactly_the_allowed_positional_parameters() 
         f"{_positional_names(args)}, not exactly "
         f"{list(_ALLOWED_POSITIONAL['RecoveryExecutor'])}"
     )
-    assert args.vararg is None, (
-        f"RecoveryExecutor.__init__ accepts *{args.vararg.arg if args.vararg else ''}"
-    )
+    assert (
+        args.vararg is None
+    ), f"RecoveryExecutor.__init__ accepts *{args.vararg.arg if args.vararg else ''}"
     assert args.kwarg is None, (
         f"RecoveryExecutor.__init__ accepts "
         f"**{args.kwarg.arg if args.kwarg else ''}, which admits ANY keyword"
@@ -300,9 +300,9 @@ def _require_non_admission_call_shape(
         _find_class(class_name, tree, path=path), "_verify_host_source"
     )
     calls = _admission_provider_calls(method)
-    assert len(calls) == 1 and _is_bare_call(calls[0]), (
-        "the executor is not non-admitting while its recorded gap remains"
-    )
+    assert len(calls) == 1 and _is_bare_call(
+        calls[0]
+    ), "the executor is not non-admitting while its recorded gap remains"
 
 
 def test_executor_verify_host_source_delegates_to_the_provider_with_no_argument() -> (
@@ -415,9 +415,9 @@ def test_the_guard_names_a_planted_positional_smuggle() -> None:
     tree = ast.parse(source, filename="<plant: positional smuggle>")
     args = _init_args("Executor", tree, path=Path("<plant>"))
 
-    assert _positional_names(args) != list(_ALLOWED_POSITIONAL["Executor"]), (
-        "the plant does not exhibit the shape being detected"
-    )
+    assert _positional_names(args) != list(
+        _ALLOWED_POSITIONAL["Executor"]
+    ), "the plant does not exhibit the shape being detected"
     assert _positional_names(args) == ["spec", "effects", "grant", "sneaky"]
 
 
@@ -477,9 +477,9 @@ def test_the_guard_names_a_planted_fed_receipt() -> None:
     calls = _require_host_source_calls(method)
 
     assert len(calls) == 1, "the plant does not exhibit the shape being detected"
-    assert not _is_receipt_none_only(calls[0]), (
-        "the plant's fed-receipt call was wrongly accepted as receipt=None"
-    )
+    assert not _is_receipt_none_only(
+        calls[0]
+    ), "the plant's fed-receipt call was wrongly accepted as receipt=None"
 
 
 def test_the_guard_names_a_planted_extra_keyword() -> None:
@@ -500,9 +500,9 @@ def test_the_guard_names_a_planted_extra_keyword() -> None:
     calls = _require_host_source_calls(method)
 
     assert len(calls) == 1, "the plant does not exhibit the shape being detected"
-    assert not _is_receipt_none_only(calls[0]), (
-        "the plant's extra-keyword call was wrongly accepted as receipt=None"
-    )
+    assert not _is_receipt_none_only(
+        calls[0]
+    ), "the plant's extra-keyword call was wrongly accepted as receipt=None"
 
 
 def test_the_guard_stays_silent_on_the_repaired_shape() -> None:
