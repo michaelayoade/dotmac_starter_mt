@@ -27,11 +27,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.architecture.host_source_skip_inventory import (
-    RECOVERY_BEHAVIOR_GAP_INVENTORY,
-    RECOVERY_BEHAVIOR_GAP_RETIRE_WHEN,
-    SKIP_INVENTORY_SCOPE,
-)
 from tests.architecture.test_deployment_foundation_host_source_constructor_seam import (
     _require_non_admission_call_shape,
 )
@@ -195,33 +190,16 @@ def test_the_real_class_is_actually_found() -> None:
     ), "RecoveryExecutor no longer defines _verify_host_source at all"
 
 
-def test_recovery_behavior_gap_is_named_and_separate_from_executor_skip_inventory() -> (
-    None
-):
-    """The 73 skips do not claim coverage of RecoveryExecutor.run's sequence."""
-    assert SKIP_INVENTORY_SCOPE == "Executor tests only"
-    assert RECOVERY_BEHAVIOR_GAP_RETIRE_WHEN == (
-        "trusted-provenance-admission-and-real-RecoveryExecutor.run-coverage"
-    )
-    tree = ast.parse(
-        RECOVERY_EXECUTION_PY.read_text(encoding="utf-8"),
-        filename=str(RECOVERY_EXECUTION_PY),
-    )
-    executor = _recovery_executor_class(tree)
-    assert RECOVERY_BEHAVIOR_GAP_INVENTORY == (
-        "RecoveryExecutor.run::real-ten-step-sequence",
-    )
-    run = _run_method(executor)
-    assert any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "_verify_host_source"
-        for node in ast.walk(run)
-    )
-
-
-def test_recovery_gap_stays_non_admitting_until_real_run_coverage_exists() -> None:
-    """A planted admission call cannot silently retire the named gap."""
+def test_require_non_admission_call_shape_names_a_planted_recovery_admission() -> None:
+    """PLANTED sensitivity proof for `_require_non_admission_call_shape`
+    (`test_deployment_foundation_host_source_constructor_seam.py`), on
+    `RecoveryExecutor`'s shape: a `_verify_host_source` that returns a value
+    directly rather than delegating to `self._admission_provider
+    .admit_host_source()` must be caught, and caught BY NAME
+    ("non-admitting"). The real `RecoveryExecutor._verify_host_source` does
+    delegate — see `test_recovery_executor_verify_host_source_delegates_to_
+    the_provider_with_no_argument` in the sibling file — this is the negative
+    control proving the checker actually discriminates."""
     source = (
         "class RecoveryExecutor:\n"
         "    def _verify_host_source(self):\n"
@@ -234,9 +212,6 @@ def test_recovery_gap_stays_non_admitting_until_real_run_coverage_exists() -> No
         _require_non_admission_call_shape(
             tree, class_name="RecoveryExecutor", path=Path("<plant>")
         )
-    assert RECOVERY_BEHAVIOR_GAP_RETIRE_WHEN.endswith(
-        "real-RecoveryExecutor.run-coverage"
-    )
     assert any(
         isinstance(node, ast.Attribute) and node.attr == "attested_pair"
         for node in ast.walk(tree)

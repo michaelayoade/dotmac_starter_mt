@@ -220,7 +220,9 @@ from .host_source import (
     require_host_source,
 )
 from .host_source_admission import (
+    HostSourceAdmissionProvider,
     HostSourceAdmissionTrace,
+    RefusingHostSourceAdmissionProvider,
     admit_host_source,
 )
 from .image import AuditReport, audit_image
@@ -727,8 +729,10 @@ __all__ = [
     "write_lease",
     "CandidateReceipt",
     "HostSource",
+    "HostSourceAdmissionProvider",
     "HostSourceAdmissionTrace",
     "InstalledArtifact",
+    "RefusingHostSourceAdmissionProvider",
     "admit_host_source",
     "candidate_receipt_from_mapping",
     "read_installed_artifact",

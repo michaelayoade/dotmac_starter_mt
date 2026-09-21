@@ -1,7 +1,10 @@
 """No parameter of `Executor.__init__` or `RecoveryExecutor.__init__` lets a
 caller state the artifact digest or the launcher digest, by ANY route — and
-`_verify_host_source` on both classes calls EXACTLY
-`require_host_source(receipt=None)`, never anything a caller could reach.
+`_verify_host_source` on both classes delegates to its admission provider
+with no argument at all, and the DEFAULT provider
+(`RefusingHostSourceAdmissionProvider`) calls EXACTLY
+`require_host_source(receipt=None)`, never anything a caller could reach. See
+the amendment below for why this is now a two-link claim.
 
 ## The defect this closes — three times, now
 
@@ -39,6 +42,26 @@ reuses one of the names already on the list — it says nothing about:
 This file now checks all three: the full ALLOWED positional parameter list
 (nothing extra, no vararg), the absence of `**kwargs`, and the EXACT call
 shape of `require_host_source` inside both `_verify_host_source` methods.
+
+## Amendment: the admission-provider seam moved the call, not the property
+
+`host_source_admission.py`'s provider seam landed after round 3 above:
+`_verify_host_source` on both classes no longer calls `require_host_source`
+itself at all — it delegates to `self._admission_provider.admit_host_source()`,
+a HANDED-OVER, argument-free method (see that module's docstring). The
+property round 3 exists to protect — "no route lets a caller feed
+`require_host_source` anything but the literal `None`" — still has to hold,
+it just holds one hop further down: `RefusingHostSourceAdmissionProvider`
+(the DEFAULT, `host_source_admission.py`) is the one object that still calls
+exactly `require_host_source(receipt=None)`, and `_verify_host_source` itself
+must call the provider with NO positional or keyword argument at all — a
+provider call fed `self._anything` would let a caller-controlled value ride
+through the provider seam exactly like a caller-controlled `receipt=` used to
+ride through `require_host_source` directly. So the CALL-SHAPE proof below is
+now two links: `_verify_host_source` calls exactly
+`self._admission_provider.admit_host_source()`, and separately,
+`RefusingHostSourceAdmissionProvider.admit_host_source()` calls exactly
+`require_host_source(receipt=None)`.
 """
 
 from __future__ import annotations
@@ -47,15 +70,6 @@ import ast
 from pathlib import Path
 
 import pytest
-
-from tests.architecture.host_source_skip_inventory import (
-    RETIRE_WHEN,
-    SKIP_INVENTORY,
-    SKIP_INVENTORY_SCOPE,
-)
-from tests.architecture.host_source_skip_inventory import (
-    tests_reaching as _tests_reaching,
-)
 
 REPO = Path(__file__).resolve().parents[2]
 RUN_PY = (
@@ -68,6 +82,17 @@ RECOVERY_EXECUTION_PY = (
     / "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
     / "recovery_execution.py"
 )
+HOST_SOURCE_ADMISSION_PY = (
+    REPO
+    / "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
+    / "host_source_admission.py"
+)
+CLI_PY = (
+    REPO
+    / "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
+    / "cli.py"
+)
+_EXPECTED_CLI_EXECUTOR_CALLS = ("Executor", "RecoveryExecutor", "Executor")
 
 #: Parameters that let a caller state an artifact/launcher digest, or either
 #: of the two ingredients (`CandidateReceipt`, `InstalledMetadata`) that
@@ -92,110 +117,6 @@ _ALLOWED_POSITIONAL = {
     "Executor": ("spec", "effects", "grant"),
     "RecoveryExecutor": ("spec", "manifest", "effects"),
 }
-
-
-def test_trusted_provenance_admission_ratchet_is_bidirectional() -> None:
-    """The temporary non-admission seam and its skipped reach are one state.
-
-    While the recorded reach remains, constructors and their host-source calls
-    must be incapable of receiving non-``None`` evidence.  Conversely, when
-    that reach is genuinely retired this refusal must be rewritten in the same
-    change; leaving it behind would misdescribe a permanently non-admitting
-    executor as a transition gate.
-    """
-    assert SKIP_INVENTORY_SCOPE == "Executor tests only"
-    assert len(SKIP_INVENTORY) == 73
-    _require_non_admission_while_inventory_remains(
-        ast.parse(RUN_PY.read_text(encoding="utf-8"), filename=str(RUN_PY)),
-        class_name="Executor",
-        path=RUN_PY,
-    )
-    plant = ast.parse(
-        "class Executor:\n"
-        "    def _verify_host_source(self):\n"
-        "        return require_host_source(receipt=self._trusted_evidence)\n"
-    )
-    with pytest.raises(AssertionError, match="non-admitting"):
-        _require_non_admission_while_inventory_remains(
-            plant, class_name="Executor", path=Path("<plant>")
-        )
-
-
-def test_skip_inventory_is_machine_checked_as_executor_only_per_test_identity(
-    tmp_path: Path,
-) -> None:
-    paths = {relative_path for relative_path, _ in SKIP_INVENTORY}
-    executor_tests = {
-        (relative_path, name)
-        for relative_path in paths
-        for name in _tests_reaching(
-            REPO / relative_path,
-            target="Executor",
-            target_module="dotmac_deployment_foundation.engine.run",
-        )
-    }
-    recovery_tests = {
-        (relative_path, name)
-        for relative_path in paths
-        for name in _tests_reaching(
-            REPO / relative_path,
-            target="RecoveryExecutor",
-            target_module="dotmac_deployment_foundation.recovery_execution",
-        )
-    }
-    assert SKIP_INVENTORY <= executor_tests
-    assert not SKIP_INVENTORY & recovery_tests
-
-    split_subjects = tmp_path / "split_subjects.py"
-    split_subjects.write_text(
-        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
-        "from dotmac_deployment_foundation.engine.run import Executor\n"
-        "def test_fixture():\n"
-        "    valid_host_source_kwargs()\n"
-        "def test_executor_only():\n"
-        "    Executor(None, None, None)\n",
-        encoding="utf-8",
-    )
-    assert _tests_reaching(split_subjects) == {"test_fixture"}
-    assert _tests_reaching(
-        split_subjects,
-        target="Executor",
-        target_module="dotmac_deployment_foundation.engine.run",
-    ) == {"test_executor_only"}
-
-    same_subject = tmp_path / "same_subject.py"
-    same_subject.write_text(
-        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
-        "from dotmac_deployment_foundation.engine.run import Executor\n"
-        "def test_both():\n"
-        "    Executor(None, None, None)\n"
-        "    valid_host_source_kwargs()\n",
-        encoding="utf-8",
-    )
-    assert _tests_reaching(same_subject) == {"test_both"}
-    assert _tests_reaching(
-        same_subject,
-        target="Executor",
-        target_module="dotmac_deployment_foundation.engine.run",
-    ) == {"test_both"}
-
-    recovery_subject = tmp_path / "recovery_subject.py"
-    recovery_subject.write_text(
-        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
-        "from dotmac_deployment_foundation.recovery_execution import "
-        "RecoveryExecutor\n"
-        "def test_recovery():\n"
-        "    RecoveryExecutor(None, None, None)\n"
-        "    valid_host_source_kwargs()\n"
-        "def test_prose_near_miss():\n"
-        "    label = 'RecoveryExecutor'\n",
-        encoding="utf-8",
-    )
-    assert _tests_reaching(
-        recovery_subject,
-        target="RecoveryExecutor",
-        target_module="dotmac_deployment_foundation.recovery_execution",
-    ) == {"test_recovery"}
 
 
 def _find_class(class_name: str, tree: ast.Module, *, path: Path) -> ast.ClassDef:
@@ -227,6 +148,43 @@ def _positional_names(args: ast.arguments) -> list[str]:
     (an exact ordered list, not a set) rather than being folded into the
     keyword-only denylist below."""
     return [a.arg for a in (*args.posonlyargs, *args.args) if a.arg != "self"]
+
+
+def _executor_constructor_calls(tree: ast.Module) -> list[ast.Call]:
+    return sorted(
+        [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"Executor", "RecoveryExecutor"}
+        ],
+        key=lambda node: node.lineno,
+    )
+
+
+def _unsafe_cli_calls(tree: ast.Module) -> list[tuple[str | None, int]]:
+    return [
+        (keyword.arg, node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "admission_provider" or keyword.arg is None
+    ]
+
+
+def _assert_cli_executor_calls_are_refusal_only(tree: ast.Module) -> None:
+    calls = _executor_constructor_calls(tree)
+    names = tuple(call.func.id for call in calls if isinstance(call.func, ast.Name))
+    assert names == _EXPECTED_CLI_EXECUTOR_CALLS, (
+        f"CLI executor construction callsites changed: expected "
+        f"{_EXPECTED_CLI_EXECUTOR_CALLS}, found {names}"
+    )
+    unsafe = _unsafe_cli_calls(tree)
+    assert unsafe == [], (
+        "the shipped CLI contains an admission-provider or dynamic-keyword "
+        f"call: {unsafe}"
+    )
 
 
 # ── the named proof: no forbidden KEYWORD parameter, on the real files ─────
@@ -301,26 +259,56 @@ def test_recovery_executor_init_has_exactly_the_allowed_positional_parameters() 
         f"{_positional_names(args)}, not exactly "
         f"{list(_ALLOWED_POSITIONAL['RecoveryExecutor'])}"
     )
-    assert args.vararg is None, (
-        f"RecoveryExecutor.__init__ accepts "
-        f"*{args.vararg.arg if args.vararg else ''}"
-    )
+    assert (
+        args.vararg is None
+    ), f"RecoveryExecutor.__init__ accepts *{args.vararg.arg if args.vararg else ''}"
     assert args.kwarg is None, (
         f"RecoveryExecutor.__init__ accepts "
         f"**{args.kwarg.arg if args.kwarg else ''}, which admits ANY keyword"
     )
 
 
-# ── the CALL-SHAPE proof: `_verify_host_source` calls EXACTLY
-# `require_host_source(receipt=None)` — not merely "is called" ─────────────
+# ── the CALL-SHAPE proof, now in TWO LINKS since the provider seam landed ───
+#
+# Link 1: `_verify_host_source` on both executors delegates to
+# `self._admission_provider.admit_host_source()` with NO argument of any
+# kind — a fed argument would be exactly the "caller-controlled value rides
+# through" shape this file exists to refuse, one hop later than before.
+#
+# Link 2: `RefusingHostSourceAdmissionProvider.admit_host_source()`
+# (`host_source_admission.py`) is the one object that still calls
+# `require_host_source`, and it must call EXACTLY
+# `require_host_source(receipt=None)` — the original claim, now living one
+# module over.
 #
 # The sibling coverage guards
 # (`test_deployment_foundation_host_source_coverage.py` and its
 # `RecoveryExecutor` sibling) prove `_verify_host_source` is CALLED from
-# every mutating entry point. Neither ever inspected what `_verify_host_
-# source` itself calls `require_host_source` WITH — a gate proven to fire is
-# not the same claim as a gate proven to be unfeedable. This is that second
-# claim.
+# every mutating entry point. Neither ever inspected what it is called WITH
+# — a gate proven to fire is not the same claim as a gate proven to be
+# unfeedable. This is that second claim, for both links.
+
+
+def _admission_provider_calls(func_node: ast.FunctionDef) -> list[ast.Call]:
+    """Every call in `func_node` shaped `self._admission_provider.admit_host_source`."""
+    return [
+        node
+        for node in ast.walk(func_node)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "admit_host_source"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "_admission_provider"
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "self"
+    ]
+
+
+def _is_bare_call(call: ast.Call) -> bool:
+    """`True` iff `call` carries no positional or keyword argument at all —
+    the one shape a caller-controlled value cannot ride through, since there
+    is nowhere on the call to put one."""
+    return not call.args and not call.keywords
 
 
 def _require_host_source_calls(func_node: ast.FunctionDef) -> list[ast.Call]:
@@ -348,52 +336,42 @@ def _is_receipt_none_only(call: ast.Call) -> bool:
     return isinstance(keyword.value, ast.Constant) and keyword.value.value is None
 
 
-def _require_non_admission_while_inventory_remains(
-    tree: ast.Module, *, class_name: str, path: Path
-) -> None:
-    """The compound Executor transitional rule, usable against source/plants."""
-    assert RETIRE_WHEN == "trusted-provenance-admission"
-    assert len(SKIP_INVENTORY) == 73, "the retirement inventory changed"
-    _require_non_admission_call_shape(tree, class_name=class_name, path=path)
-
-
 def _require_non_admission_call_shape(
     tree: ast.Module, *, class_name: str, path: Path
 ) -> None:
-    """Assert a class's host-source helper can only request ``None``."""
+    """Assert a class's host-source helper delegates to its admission
+    provider with no argument of any kind — link 1 above."""
     method = _find_method(
         _find_class(class_name, tree, path=path), "_verify_host_source"
     )
-    calls = _require_host_source_calls(method)
-    assert len(calls) == 1 and _is_receipt_none_only(
+    calls = _admission_provider_calls(method)
+    assert len(calls) == 1 and _is_bare_call(
         calls[0]
     ), "the executor is not non-admitting while its recorded gap remains"
 
 
-def test_executor_verify_host_source_calls_exactly_require_host_source_of_none() -> (
+def test_executor_verify_host_source_delegates_to_the_provider_with_no_argument() -> (
     None
 ):
     tree = ast.parse(RUN_PY.read_text(encoding="utf-8"), filename=str(RUN_PY))
     method = _find_method(
         _find_class("Executor", tree, path=RUN_PY), "_verify_host_source"
     )
-    calls = _require_host_source_calls(method)
+    calls = _admission_provider_calls(method)
 
     assert len(calls) == 1, (
-        f"_verify_host_source calls require_host_source {len(calls)} time(s) "
-        "in its own source, not exactly once"
+        f"_verify_host_source calls self._admission_provider.admit_host_source() "
+        f"{len(calls)} time(s) in its own source, not exactly once"
     )
-    assert _is_receipt_none_only(calls[0]), (
-        "Executor._verify_host_source's call to require_host_source is not "
-        "exactly `require_host_source(receipt=None)` — "
+    assert _is_bare_call(calls[0]), (
+        "Executor._verify_host_source's call to admit_host_source() is not "
+        "argument-free — "
         f"args={[ast.dump(a) for a in calls[0].args]}, "
         f"keywords={[(k.arg, ast.dump(k.value)) for k in calls[0].keywords]}"
     )
 
 
-def test_recovery_executor_verify_host_source_calls_require_host_source_of_none() -> (
-    None
-):
+def test_recovery_executor_verify_host_source_calls_provider_argument_free() -> None:
     tree = ast.parse(
         RECOVERY_EXECUTION_PY.read_text(encoding="utf-8"),
         filename=str(RECOVERY_EXECUTION_PY),
@@ -402,15 +380,43 @@ def test_recovery_executor_verify_host_source_calls_require_host_source_of_none(
         _find_class("RecoveryExecutor", tree, path=RECOVERY_EXECUTION_PY),
         "_verify_host_source",
     )
+    calls = _admission_provider_calls(method)
+
+    assert len(calls) == 1, (
+        f"_verify_host_source calls self._admission_provider.admit_host_source() "
+        f"{len(calls)} time(s) in its own source, not exactly once"
+    )
+    assert _is_bare_call(calls[0]), (
+        "RecoveryExecutor._verify_host_source's call to admit_host_source() "
+        "is not argument-free — "
+        f"args={[ast.dump(a) for a in calls[0].args]}, "
+        f"keywords={[(k.arg, ast.dump(k.value)) for k in calls[0].keywords]}"
+    )
+
+
+def test_refusing_provider_calls_exactly_require_host_source_of_none() -> None:
+    """Link 2: the ONE object that still calls `require_host_source` at all —
+    `RefusingHostSourceAdmissionProvider.admit_host_source()` — calls it with
+    exactly `receipt=None`, never anything a caller could reach."""
+    tree = ast.parse(
+        HOST_SOURCE_ADMISSION_PY.read_text(encoding="utf-8"),
+        filename=str(HOST_SOURCE_ADMISSION_PY),
+    )
+    method = _find_method(
+        _find_class(
+            "RefusingHostSourceAdmissionProvider", tree, path=HOST_SOURCE_ADMISSION_PY
+        ),
+        "admit_host_source",
+    )
     calls = _require_host_source_calls(method)
 
     assert len(calls) == 1, (
-        f"_verify_host_source calls require_host_source {len(calls)} time(s) "
-        "in its own source, not exactly once"
+        f"RefusingHostSourceAdmissionProvider.admit_host_source calls "
+        f"require_host_source {len(calls)} time(s), not exactly once"
     )
     assert _is_receipt_none_only(calls[0]), (
-        "RecoveryExecutor._verify_host_source's call to require_host_source "
-        "is not exactly `require_host_source(receipt=None)` — "
+        "RefusingHostSourceAdmissionProvider.admit_host_source's call to "
+        "require_host_source is not exactly `require_host_source(receipt=None)` — "
         f"args={[ast.dump(a) for a in calls[0].args]}, "
         f"keywords={[(k.arg, ast.dump(k.value)) for k in calls[0].keywords]}"
     )
@@ -595,3 +601,47 @@ def test_the_real_classes_are_actually_found() -> None:
         isinstance(node, ast.ClassDef) and node.name == "RecoveryExecutor"
         for node in ast.walk(recovery_tree)
     )
+
+
+def test_cli_constructs_exactly_the_refusal_only_executor_calls() -> None:
+    """The shipped CLI must not inject an accepting admission provider."""
+    tree = ast.parse(CLI_PY.read_text(encoding="utf-8"), filename=str(CLI_PY))
+    _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_a_planted_admission_provider() -> None:
+    """Sensitivity: a provider keyword in any CLI construction is caught."""
+    source = """
+Executor(spec, effects, grant, admission_provider=provider)
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant)
+"""
+    tree = ast.parse(source, filename="<plant: CLI admission provider>")
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_planted_dynamic_keywords() -> None:
+    """Sensitivity: dynamic keywords cannot hide an admission provider."""
+    source = """
+Executor(spec, effects, grant, **kwargs)
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant)
+"""
+    tree = ast.parse(source, filename="<plant: CLI dynamic keywords>")
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_aliased_or_qualified_plants() -> None:
+    """Sensitivity: aliases and qualified factories cannot hide the token."""
+    source = """
+Executor(spec, effects, grant)
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant)
+factory.Executor(spec, effects, grant, admission_provider=provider)
+foundation.RecoveryExecutor(spec, manifest, effects, **kwargs)
+"""
+    tree = ast.parse(source, filename="<plant: CLI aliased construction>")
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(tree)

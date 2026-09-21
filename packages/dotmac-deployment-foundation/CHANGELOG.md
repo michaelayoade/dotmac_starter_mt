@@ -2,6 +2,30 @@
 
 ## Unreleased — successor not allocated
 
+### Both mutating executors accept a host-source admission provider, handed over at construction
+
+`host_source_admission.py` adds `HostSourceAdmissionProvider` (a Protocol
+with one argument-free method, `admit_host_source() -> tuple[HostSource,
+HostSourceAdmissionTrace]`) and `RefusingHostSourceAdmissionProvider`, the
+reference implementation that delegates to
+`require_host_source(receipt=None)` and therefore always refuses.
+`engine/run.py`'s `Executor` and `recovery_execution.py`'s
+`RecoveryExecutor` each gain a keyword-only `admission_provider` constructor
+parameter defaulting to `RefusingHostSourceAdmissionProvider()`, so a caller
+that supplies nothing observes exactly today's refusal behavior. Both
+executors' `_verify_host_source` now delegates to
+`self._admission_provider.admit_host_source()` — called fresh on every
+`run`/`rollback` invocation, never cached across calls on the same instance —
+and a supplied provider's `PreconditionFailed`/`SpecError` propagates
+unchanged.
+
+This is additive API under the current unreleased version; no successor is
+allocated by this change. A provider that actually reaches Control's
+trust-root/revocation/replay-consumption state to admit a real `HostSource`
+is later, separate, cross-repo work — this change only wires the seam. The
+protocol is not proof of that future provider: the shipped CLI supplies none,
+and its three executor callsites remain refusal-only.
+
 ### `admit_host_source()` composes the v2 attestation seams into a `HostSource` — synthetic and UNWIRED
 
 `host_source_admission.py` adds `admit_host_source()` and

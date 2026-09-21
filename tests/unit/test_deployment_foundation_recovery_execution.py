@@ -6,12 +6,17 @@ deployment `Effects` protocol has no restore method among its twenty-four. That
 is the same shape as `ExecutionPlanDigestV1` before a5: built, tested, and
 unreachable from anything that touches a host.
 
-## `RecoveryExecutor.run` refuses UNCONDITIONALLY — the full sequence is UNMONITORED
+## `RecoveryExecutor.run` used to refuse UNCONDITIONALLY — now sequence-testable
 
-`_verify_host_source` always calls `require_host_source(receipt=None)`, which
-always refuses — a typed refusal with zero effects, in every environment.
-`RecoveryExecutor.run(...)` therefore cannot reach `_do_fresh_target` or any
-step after it, anywhere, until trusted provenance (separate, future work) lands.
+`_verify_host_source` delegates to `self._admission_provider.admit_host_source()`
+(`host_source_admission.py`). With the default `RefusingHostSourceAdmissionProvider`
+it still always refuses — a typed refusal with zero effects, in every
+environment — so `RecoveryExecutor.run(...)` still cannot reach
+`_do_fresh_target` for a caller supplying no provider. A caller that supplies
+a synthetic `HostSourceAdmissionProvider` (this suite's
+`accepting_admission_provider()`, from `tests.unit.host_source_stance`) can
+exercise every step past the gate. That provider bypasses provenance solely to
+test sequencing; it is not trusted admission evidence.
 
 An earlier repair (`061cf4bd`) drove the ten steps through `_drive_steps`, a
 test helper that replicated `run()`'s dispatch loop — `restore_plan`, the
@@ -23,23 +28,22 @@ its docstring called it a "byte-for-byte replica" while it silently omitted
 the procedure-drift refusal (`run()`'s own `if tuple(...) != tuple(...):
 raise PreconditionFailed` check has no equivalent in `_drive_steps`). A
 replica that drifts on day one is the strongest argument against keeping one
-at all, not a reason to fix the drift and keep going.
+at all, not a reason to fix the drift and keep going. `_drive_steps` stays
+deleted — the tests below reinstate the SAME assertions the pre-`061cf4bd`
+version made (a real `.run()` call, no reimplemented sequencing), now
+admitted through the provider seam instead of a receipts-directory bypass.
 
-`_drive_steps` and everything it enabled — the ten-step happy path, the
-whole-sequence catalog-mismatch stop, the whole-sequence unready-image
-failure — are DELETED, not repaired. **The full recovery sequence (all ten
-steps executing in the real declared order, via the real `run()`/`_dispatch`)
-is UNMONITORED by this test suite** until trusted provenance makes the real
-`RecoveryExecutor.run` reachable.
-
-What remains, per Michael's instruction to retain "direct pure-function and
-individual-handler tests" — those exercise REAL subjects with no
-reimplemented sequencing:
+What this file holds:
 
 * each `_do_*` step handler, called directly with a manually-prepared
   `RecoveryOutcome` (never through `_dispatch`, never through a loop this
   file owns) — `test_do_fresh_target_...`, `test_do_adjudicate_...`,
   `test_do_prove_catalog_...`, `test_do_start_product_image_...` below;
+* the full ten-step sequence, walked through the REAL `run()`/`_dispatch`
+  with `admission_provider=accepting_admission_provider()` — the positive
+  walk (`test_an_admitted_clean_restore_walks_every_step_...`) and a
+  mid-sequence negative case that fails at a specific later step rather than
+  earlier or later (`test_an_admitted_catalog_mismatch_stops_at_prove_catalog_...`);
 * `tests/architecture/
   test_deployment_foundation_recovery_execution_host_source_coverage.py`
   for STRUCTURAL proof, over the real `run()` method's own source, that
@@ -61,6 +65,7 @@ from dotmac_deployment_foundation.host_source import (
     WRONG_KIND,
 )
 from dotmac_deployment_foundation.recovery import (
+    RESTORE_PROCEDURE,
     CatalogEvidence,
     Disposition,
     RestoreAttempt,
@@ -72,6 +77,7 @@ from dotmac_deployment_foundation.recovery_execution import (
     RestoreTarget,
 )
 
+from tests.unit.host_source_stance import accepting_admission_provider
 from tests.unit.test_deployment_foundation_recovery_bundle import (
     _evidence,
     _manifest,
@@ -293,6 +299,114 @@ def test_do_start_product_image_succeeds_when_the_image_becomes_ready() -> None:
     executor._do_start_product_image({}, outcome)  # must not raise
 
 
+# ── the real ten-step sequence, exercised through the provider seam ─────────
+#
+# Everything above drives one handler at a time. These drive the REAL
+# `run()`/`_dispatch` loop — `restore_plan`, the procedure-drift check, the
+# `for` loop, the `StepFailed`/`PreconditionFailed` handling — exactly as
+# shipped, exercised past `_verify_host_source` by a synthetic
+# `HostSourceAdmissionProvider` rather than a reimplemented copy of the loop
+# (`_drive_steps`, deleted at `061cf4bd` for being exactly that).
+
+
+def _admitted_executor(effects: RecordingRecoveryEffects) -> RecoveryExecutor:
+    return RecoveryExecutor(
+        _spec(),
+        _manifest(),
+        effects,
+        source_evidence=_evidence(),
+        product_image=IMAGE,
+        admission_provider=accepting_admission_provider(),
+    )
+
+
+def test_an_admitted_clean_restore_walks_every_step_of_the_declared_procedure() -> None:
+    """POSITIVE WALK. All ten `RESTORE_PROCEDURE` steps execute, through the
+    real `run()`, in the contract's declared order — proved two ways: the
+    logical steps recorded on the outcome, and the underlying host effects
+    each step performs, recorded by `RecordingRecoveryEffects` in call order."""
+    effects = RecordingRecoveryEffects()
+    outcome = _admitted_executor(effects).run(bundle={})
+
+    assert outcome.failure == "", outcome.failure
+    assert outcome.proved is True
+    assert outcome.destroyed is False
+    assert outcome.steps_completed == tuple(
+        step.step.value for step in RESTORE_PROCEDURE
+    ), "the executor walked a different procedure than the contract declares"
+    assert len(outcome.steps_completed) == len(RESTORE_PROCEDURE) == 10
+
+    # The underlying effects, in the order the ten steps actually invoke
+    # them: fresh_target(1) creates; restore_roles(2)/restore_objects(3)
+    # restore; adjudicate(4) performs no effect on a clean exit;
+    # install_login_material(5); prove_catalog(6)/prove_plane_isolation(7)/
+    # prove_revocations(8) each re-observe the catalog rather than trusting
+    # an earlier read (`observe_plane_isolation` only inside step 7);
+    # start_product_image(9); emit_receipt(10) performs no effect.
+    assert effects.calls == [
+        "create_fresh_target",
+        "restore_roles",
+        "restore_objects",
+        "install_login_material",
+        "observe_catalog",
+        "observe_catalog",
+        "observe_plane_isolation",
+        "observe_catalog",
+        "start_product_image",
+    ]
+    assert effects.created == [_manifest().postgres_major], (
+        "the major version must come from the BUNDLE/manifest — a restore "
+        "across majors is a migration wearing a recovery's clothes"
+    )
+
+
+def test_an_admitted_catalog_mismatch_stops_at_prove_catalog_not_earlier_or_later() -> (
+    None
+):
+    """NEGATIVE, WITHIN THE SEQUENCE — not the admission-gate refusal (covered
+    elsewhere). A catalog missing its roles is only detectable once the
+    restored catalog is observed, at step 6 (`prove_catalog`). This proves
+    the declared order is actually enforced: steps 1-5 must have run for the
+    failure to be reachable at all, and steps 7-10 must never run once it
+    fires."""
+    lost_roles = CatalogEvidence(
+        **{
+            **{f: getattr(_evidence(), f) for f in _evidence().__dataclass_fields__},
+            "roles": (),
+        }
+    )
+    effects = RecordingRecoveryEffects(restored=lost_roles)
+    outcome = _admitted_executor(effects).run(bundle={})
+
+    assert outcome.proved is False
+    assert outcome.failure, "the sequence must record why it stopped"
+    assert outcome.findings, "the findings must be carried, not just the failure"
+
+    # Steps 1-5 (in order) completed; prove_catalog (6) did not, and nothing
+    # after it did either.
+    assert outcome.steps_completed == (
+        "fresh_target",
+        "restore_roles",
+        "restore_objects",
+        "adjudicate",
+        "install_login_material",
+    )
+    assert "prove_catalog" not in outcome.steps_completed
+    assert effects.calls == [
+        "create_fresh_target",
+        "restore_roles",
+        "restore_objects",
+        "install_login_material",
+        "observe_catalog",
+    ], (
+        "the walk must stop exactly at prove_catalog's single observe_catalog "
+        "call — an earlier stop means an earlier step is wrongly refusing, a "
+        "later one means the mismatch was not caught where it should be"
+    )
+    assert "observe_plane_isolation" not in effects.calls
+    assert "start_product_image" not in effects.calls
+
+
 # ── the host-source gate: SAFETY-ONLY, unconditional, no admit path ─────────
 
 
@@ -332,25 +446,29 @@ def test_recovery_executor_init_accepts_no_host_source_parameter() -> None:
 
 
 def test_the_verification_call_happens_exactly_once(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """NON-VACUITY, on the refusal path — the only path that exists. A
-    `require_host_source` that is imported but never CALLED would let the
-    refusal test above fail for an unrelated reason and let this one pass by
-    accident."""
+    """NON-VACUITY, on the refusal path — the default (no provider supplied)
+    still refuses unconditionally. `recovery_execution.py` no longer imports
+    `require_host_source` at all — `_verify_host_source` delegates to
+    `self._admission_provider.admit_host_source()`, and it is
+    `RefusingHostSourceAdmissionProvider` (`host_source_admission.py`) that
+    actually calls `require_host_source`, so that is the module patched
+    here — the same move `test_deployment_foundation_host_source_gate.py`
+    made for `Executor`'s half of this same seam."""
     from unittest.mock import MagicMock
 
-    import dotmac_deployment_foundation.recovery_execution as recovery_execution_module
+    import dotmac_deployment_foundation.host_source_admission as admission_module
 
-    real = recovery_execution_module.require_host_source
+    real = admission_module.require_host_source
     spy = MagicMock(side_effect=real)
-    monkeypatch.setattr(recovery_execution_module, "require_host_source", spy)
+    monkeypatch.setattr(admission_module, "require_host_source", spy)
 
     effects = RecordingRecoveryEffects()
     with pytest.raises(PreconditionFailed):
         _executor(effects).run(bundle={})
 
-    assert spy.call_count == 1, (
-        f"require_host_source was called {spy.call_count} time(s), not " "exactly once"
-    )
+    assert (
+        spy.call_count == 1
+    ), f"require_host_source was called {spy.call_count} time(s), not exactly once"
     assert effects.calls == []
 
 

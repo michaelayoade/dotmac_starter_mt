@@ -83,7 +83,12 @@ from ..external_recovery import (
     backup_record_from_receipt,
     require_restore_proof,
 )
-from ..host_source import HostSource, require_host_source
+from ..host_source import HostSource
+from ..host_source_admission import (
+    HostSourceAdmissionProvider,
+    HostSourceAdmissionTrace,
+    RefusingHostSourceAdmissionProvider,
+)
 from ..policy import build_firewall_plan
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
@@ -471,6 +476,7 @@ class Executor:
         deployment_id: str = "",
         evidence_policy: TrustPolicy | None = None,
         evidence_verifier: SignatureVerifier | None = None,
+        admission_provider: HostSourceAdmissionProvider | None = None,
         recovery_receipts: Mapping[str, object] | None = None,
         recovery_verifier: SignatureVerifier | None = None,
         recovery_records: Mapping[str, Sequence[BackupRecord]] | None = None,
@@ -497,6 +503,19 @@ class Executor:
         # neither of which verifies anything.
         self._evidence_policy = evidence_policy
         self._evidence_verifier = evidence_verifier
+        # HANDED OVER, never discovered — the same rule as `recovery_receipts`
+        # just below, applied to the host-source admission seam. Defaults to
+        # `RefusingHostSourceAdmissionProvider()` rather than `None`-and-refuse
+        # -at-use: `_verify_host_source` always has a provider to call, and the
+        # provider it calls when none is supplied is the one that reproduces
+        # today's unconditional refusal exactly. See `host_source_admission.py`
+        # for why this is a constructor parameter and never an ambient
+        # registry.
+        self._admission_provider: HostSourceAdmissionProvider = (
+            admission_provider
+            if admission_provider is not None
+            else RefusingHostSourceAdmissionProvider()
+        )
         # HANDED OVER, never discovered. There is no directory scan and no
         # `Effects.find_receipt()`: the caller passes the exact envelope for
         # each dataset, exactly as `--authorization` passes an
@@ -605,8 +624,8 @@ class Executor:
         # rather than Optional-with-a-default-path: a value invented at
         # construction would be a lock path for a lock nobody took.
         self._lock_path: Path | str = ""
-        # NO HOST SOURCE INGREDIENTS ARE ACCEPTED HERE AT ALL, DELIBERATELY,
-        # and this is the SECOND time this comment has had to say so.
+        # NO HOST SOURCE PARSING INGREDIENTS ARE ACCEPTED HERE, DELIBERATELY,
+        # and this is the THIRD time this comment has had to say so.
         #
         # The first repair (`host_source_receipt`/`host_source_metadata` as
         # the only accepted parameters, `host_source_installed`/
@@ -618,38 +637,39 @@ class Executor:
         # could still state the SAME digest on both sides of the comparison
         # `require_host_source` makes — byte-for-byte the admission
         # `host_source_installed=` produced, with a `json.dumps` in between.
-        # `valid_host_source_kwargs()` (removed from `tests/unit/
-        # host_source_stance.py`) WAS this exploit, shipped as a convenience
-        # fixture every "admitted executor" test used.
+        # `valid_host_source_kwargs()` (`tests/unit/host_source_stance.py`)
+        # WAS this exploit, shipped as a convenience fixture every "admitted
+        # executor" test used. `CandidateReceipt` and `InstalledMetadata` are
+        # PARSING interfaces — either half, alone or together, is
+        # caller-authored data, and no combination of "verify the receipt's
+        # shape" and "verify the metadata's shape" turns it into proof of
+        # what a trusted third party attested.
         #
-        # There is no seam left to close it with, because `CandidateReceipt`
-        # and `InstalledMetadata` are PARSING interfaces — either half, alone
-        # or together, is authored data a caller controls, and no
-        # combination of "verify the receipt's shape" and "verify the
-        # metadata's shape" turns caller-authored data into proof of what a
-        # trusted third party attested. Trusted provenance (an externally
-        # committed/signed candidate attestation, an independently signed
-        # installed-host observation, checked inside this method against
-        # DISTINCT trust roots) is a separate piece of work, not started
-        # here and not hooked for here: this class holds no field, accepts
-        # no parameter, and exposes no attribute that a future patch could
-        # quietly wire up to skip the read.
+        # The seam this class DOES accept now is `admission_provider`: one
+        # argument-free method returning a HostSource and trace. This type is
+        # NOT proof of provenance. An arbitrary in-process constructor caller
+        # can supply a method returning invented values; the executor does not
+        # authenticate the provider or its result. A real provider therefore
+        # requires a trusted, non-request-selectable assembly binding and
+        # fresh Control-backed verification before it can be used in a
+        # mutating deployment. The shipped CLI supplies none, and an
+        # architecture test guards that refusal-only call-site premise. The
+        # default when no provider is supplied is `RefusingHostSourceAdmissionProvider`
+        # — which itself calls exactly `require_host_source(receipt=None)` and
+        # always refuses, with the exact typed refusal (`NO_RECEIPT`, or
+        # `ABSENT`/`WRONG_KIND` if the interpreter itself has nothing
+        # installed) `require_host_source` already produces today. `run` and
+        # `rollback` call `_verify_host_source` themselves, which calls the
+        # provider; a caller supplying no provider observes no behavior
+        # change from before this seam existed.
         #
-        # So: NOTHING is held. `_verify_host_source` always calls
-        # `require_host_source(receipt=None)` — no receipt exists that this
-        # class could have gotten from anywhere authenticated, so it always
-        # refuses, with the exact typed refusal (`NO_RECEIPT`, or `ABSENT` if
-        # the interpreter itself has nothing installed) `require_host_source`
-        # already produces for "no receipt" today. `run` and `rollback` call
-        # it THEMSELVES; nothing else in this class can make that call
-        # satisfied, because there is no longer anything TO supply.
-        #
-        # The bound identity, once verified. `None` until `_verify_host_source`
-        # runs; held so a caller inspecting a completed run can see which
-        # Foundation performed it, never read before that point. In practice
-        # this is never reached today: every call to `_verify_host_source`
-        # refuses.
+        # The provider's reported identity and trace. Both remain `None`
+        # until `_verify_host_source` runs, but their types alone do not prove
+        # verification: only a trusted composition can establish that the
+        # provider actually invoked the authenticated admission function.
+        # Neither is branched on or persisted by this class.
         self._host_source: HostSource | None = None
+        self._host_source_admission_trace: HostSourceAdmissionTrace | None = None
 
     # ── entry point ─────────────────────────────────────────────────────────
 
@@ -665,30 +685,34 @@ class Executor:
     def _verify_host_source(self) -> None:
         """THE MANDATORY PREREQUISITE every mutating entry point calls.
 
-        This is a SAFETY-ONLY gate today, not an admission path: there is no
-        receipt this class could have gotten from anywhere authenticated
-        (see the constructor's comment for why that is deliberate, not an
-        oversight), so `receipt=None` always, and `require_host_source`
-        always refuses — `NO_RECEIPT` if the interpreter has a genuine
-        installed artifact and no receipt behind it, `ABSENT`/`WRONG_KIND` if
-        it does not even have that. Both are typed refusals with zero
-        effects: nothing between the caller's lock and this call has
-        mutated anything.
+        Delegates to `self._admission_provider.admit_host_source()` — a
+        FRESH call every time, never cached across `run`/`rollback`
+        invocations on the same instance. With no provider supplied at
+        construction (the default), that provider is
+        `RefusingHostSourceAdmissionProvider`, which itself calls exactly
+        `require_host_source(receipt=None)` and always refuses —
+        `NO_RECEIPT` if the interpreter has a genuine installed artifact and
+        no receipt behind it, `ABSENT`/`WRONG_KIND` if it does not even have
+        that. Both are typed refusals with zero effects: nothing between the
+        caller's lock and this call has mutated anything.
 
-        Boundary 4's ruling, verbatim: "the executor must call
-        `require_host_source` itself" — not be handed a `HostSource`, which
-        proves nothing because anyone can construct one. Ordering is the
-        other half: called after the lock is proven held (so there is
+        This changes Boundary 4's earlier call-shape ruling: the executor
+        invokes a handed-over provider rather than `require_host_source`
+        directly. The protocol alone cannot enforce that the provider used
+        the verifier; only trusted assembly composition can make a positive
+        result admissible. A supplied provider's own
+        `PreconditionFailed`/`SpecError` propagates
+        unchanged: this method catches nothing, retries nothing, and never
+        falls back to the refusing default once a real provider has been
+        supplied. Ordering is the other half, unchanged from before this
+        seam existed: called after the lock is proven held (so there is
         something to serialise against) and before EVERYTHING else — grant
         revalidation, plan-digest recomputation, annotations, principal
-        bootstrap, every step. Preserved from the prior repair because it was
-        correct; what was wrong was what fed the call, not when it ran.
-
-        There is no way to make this admit. That is the point until trusted
-        provenance (see the constructor's comment) lands as its own,
-        separate piece of work.
+        bootstrap, every step.
         """
-        self._host_source = require_host_source(receipt=None)
+        self._host_source, self._host_source_admission_trace = (
+            self._admission_provider.admit_host_source()
+        )
 
     def run(
         self, plan: DeploymentPlan, *, lock: DeploymentLockHeld
