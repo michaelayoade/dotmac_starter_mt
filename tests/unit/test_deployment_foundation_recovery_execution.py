@@ -117,11 +117,13 @@ class RecordingRecoveryEffects:
         self,
         *,
         attempt: RestoreAttempt = CLEAN,
+        roles_attempt: RestoreAttempt = CLEAN,
         restored: CatalogEvidence | None = None,
         image_ready: bool = True,
     ) -> None:
         self.calls: list[str] = []
         self.attempt = attempt
+        self.roles_attempt = roles_attempt
         self.restored = restored if restored is not None else _evidence()
         self.image_ready = image_ready
         self.destroyed: list[str] = []
@@ -136,7 +138,7 @@ class RecordingRecoveryEffects:
         self, target: RestoreTarget, *, bundle: Mapping[str, Any]
     ) -> RestoreAttempt:
         self.calls.append("restore_roles")
-        return CLEAN
+        return self.roles_attempt
 
     def restore_objects(
         self, target: RestoreTarget, *, bundle: Mapping[str, Any]
@@ -405,6 +407,44 @@ def test_an_admitted_catalog_mismatch_stops_at_prove_catalog_not_earlier_or_late
     )
     assert "observe_plane_isolation" not in effects.calls
     assert "start_product_image" not in effects.calls
+
+
+def test_roles_failure_is_not_hidden_by_successful_objects_restore() -> None:
+    """A successful objects restore cannot erase a failed roles restore."""
+    roles_failed = RestoreAttempt(
+        exit_status=1, missing_role_errors=2, stderr_excerpt="role missing"
+    )
+    effects = RecordingRecoveryEffects(roles_attempt=roles_failed, attempt=CLEAN)
+
+    outcome = _admitted_executor(effects).run(bundle={})
+
+    assert outcome.roles_attempt == roles_failed
+    assert outcome.objects_attempt == CLEAN
+    assert outcome.attempt is roles_failed
+    assert outcome.as_evidence()["exit_status"] == 1
+    assert outcome.adjudication is not None
+    assert outcome.adjudication.disposition is Disposition.DESTROY
+    assert outcome.failure.startswith("adjudicate: the restore was adjudicated DESTROY")
+    assert "roles restore:" in outcome.failure
+    assert effects.calls == [
+        "create_fresh_target",
+        "restore_roles",
+        "restore_objects",
+        "destroy_target",
+    ]
+
+
+def test_successful_roles_and_objects_restores_still_proceed() -> None:
+    """Retaining two successful results must not turn the clean path into a refusal."""
+    effects = RecordingRecoveryEffects(roles_attempt=CLEAN, attempt=CLEAN)
+
+    outcome = _admitted_executor(effects).run(bundle={})
+
+    assert outcome.failure == ""
+    assert outcome.attempt is CLEAN
+    assert outcome.as_evidence()["exit_status"] == 0
+    assert outcome.adjudication is not None
+    assert outcome.adjudication.disposition is Disposition.PROCEED
 
 
 # ── the host-source gate: SAFETY-ONLY, unconditional, no admit path ─────────

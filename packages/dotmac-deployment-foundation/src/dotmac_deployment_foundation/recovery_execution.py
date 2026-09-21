@@ -255,6 +255,8 @@ class RecoveryOutcome:
     target: RestoreTarget | None = None
     steps_completed: tuple[str, ...] = ()
     attempt: RestoreAttempt | None = None
+    roles_attempt: RestoreAttempt | None = None
+    objects_attempt: RestoreAttempt | None = None
     adjudication: Adjudication | None = None
     findings: tuple[str, ...] = ()
     destroyed: bool = False
@@ -416,14 +418,14 @@ class RecoveryExecutor:
     def _do_restore_roles(
         self, bundle: Mapping[str, Any], outcome: RecoveryOutcome
     ) -> None:
-        outcome.attempt = self._effects.restore_roles(
+        outcome.roles_attempt = self._effects.restore_roles(
             self._require_target(outcome), bundle=bundle
         )
 
     def _do_restore_objects(
         self, bundle: Mapping[str, Any], outcome: RecoveryOutcome
     ) -> None:
-        outcome.attempt = self._effects.restore_objects(
+        outcome.objects_attempt = self._effects.restore_objects(
             self._require_target(outcome), bundle=bundle
         )
 
@@ -438,10 +440,42 @@ class RecoveryExecutor:
         behind after exiting 1, and the next reader would have found a database
         that passes a table count.
         """
-        attempt = outcome.attempt
-        if attempt is None:  # pragma: no cover - ordering canary
+        attempts = (
+            ("roles", outcome.roles_attempt),
+            ("objects", outcome.objects_attempt),
+        )
+        if all(attempt is None for _, attempt in attempts) and outcome.attempt:
+            # Preserve the direct-handler seam used by callers that prepare a
+            # single legacy attempt explicitly; the real procedure always
+            # fills both step-specific slots above.
+            attempts = (("restore", outcome.attempt),)
+        if any(attempt is None for _, attempt in attempts):  # pragma: no cover
             raise PreconditionFailed("nothing was restored, so nothing can be judged")
-        outcome.adjudication = adjudicate_restore(attempt)
+        for name, attempt in attempts:
+            if attempt is None:  # pragma: no cover - ordering canary
+                raise PreconditionFailed(
+                    "nothing was restored, so nothing can be judged"
+                )
+            adjudication = adjudicate_restore(attempt)
+            if adjudication.must_destroy:
+                outcome.attempt = attempt
+                outcome.adjudication = dataclasses.replace(
+                    adjudication,
+                    reasons=tuple(
+                        f"{name} restore: {reason}" for reason in adjudication.reasons
+                    ),
+                )
+                break
+        else:
+            # Keep the final successful result available through the legacy
+            # aggregate field while retaining both step-specific results above.
+            final_attempt = attempts[-1][1]
+            if final_attempt is None:  # pragma: no cover - ordering canary
+                raise PreconditionFailed(
+                    "nothing was restored, so nothing can be judged"
+                )
+            outcome.attempt = final_attempt
+            outcome.adjudication = adjudicate_restore(final_attempt)
         if outcome.adjudication.must_destroy:
             self._effects.destroy_target(self._require_target(outcome))
             outcome.destroyed = True
