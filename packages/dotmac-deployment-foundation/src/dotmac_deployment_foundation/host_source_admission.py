@@ -140,11 +140,13 @@ def admit_host_source(
     verifier: AttestationVerifier,
     trust_policy: AttestationTrustPolicy,
     expected_host_identity: str,
+    expected_observation_id: str,
+    expected_package: str,
     now: datetime,
 ) -> tuple[HostSource, HostSourceAdmissionTrace]:
     """Admit a `HostSource` from a verified v2 attestation pair, or refuse.
 
-    Six parameters, all inputs the caller could not have forged into a
+    Eight parameters, all inputs the caller could not have forged into a
     result: there is no parameter for a receipt, a pre-parsed subject, an
     installed artifact reading, a metadata reader, a distribution selector, or
     any preverified outcome. Every `SpecError`/`PreconditionFailed` the called
@@ -159,6 +161,8 @@ def admit_host_source(
         verifier=verifier,
         trust_policy=trust_policy,
         expected_host_identity=expected_host_identity,
+        expected_observation_id=expected_observation_id,
+        expected_package=expected_package,
         now=now,
     )
     # `verify_attestation_pair` raises unless both halves are present and

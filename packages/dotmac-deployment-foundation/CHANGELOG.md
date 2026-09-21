@@ -2,6 +2,25 @@
 
 ## Unreleased — successor not allocated
 
+### ADR-0073: admission coordinates and full attestation-envelope digest
+
+`AttestationEnvelopeV2.canonical_document()` now exposes the exact parsed full
+envelope mapping, including `signature`; `attestation_envelope_digest()` hashes
+that mapping with the package's canonical JSON rules. This is additive to the
+existing `signed_bytes()` method: it does not change that method's return type
+or wire meaning.
+
+`verify_attestation_pair()` now requires the Control-derived
+`expected_observation_id` (the signed dispatch coordinate) and
+`expected_package`, refusing mismatches with the distinct public constants
+`OBSERVATION_ID_MISMATCH` and `PACKAGE_MISMATCH`. `admit_host_source()` carries
+the same two keyword-only inputs, for eight keyword-only parameters total, and
+checks them before reading the installed artifact from the host.
+
+The successor remains unallocated and this is source-only, unreleased
+Foundation contract work. No Control implementation, signer, or positive
+executor admission path is claimed here.
+
 ### Both mutating executors accept a host-source admission provider, handed over at construction
 
 `host_source_admission.py` adds `HostSourceAdmissionProvider` (a Protocol
@@ -36,10 +55,10 @@ unchanged), then `verify_candidate_attestation()` again against the same
 `candidate` object to obtain the authenticated subject, reads the
 interpreter's own installed artifact only after the pair check succeeds, and
 refuses with `host_source.DISAGREES` if that real reading disagrees with the
-authenticated installed-host subject. `trusted_host_source.py` stays
-completely unchanged — its zero-I/O promise is preserved by doing the one
-I/O read here instead — and `require_host_source`'s signature and behavior
-are untouched.
+authenticated installed-host subject. `trusted_host_source.py` remains
+zero-I/O; its additive canonical mapping and digest surface are preserved by
+doing the one host I/O read here instead, and `require_host_source`'s
+signature and behavior are untouched.
 
 This is exercised today only against SYNTHETIC, non-secret attestation
 envelopes built in the unit test suite. No executor calls this function:

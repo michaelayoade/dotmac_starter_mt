@@ -59,22 +59,7 @@ def attestation_envelope_document(envelope: AttestationEnvelopeV2) -> dict[str, 
     through this function, never through an inline dict literal at the call
     site.
     """
-    return {
-        "schema": envelope.schema,
-        "purpose": envelope.purpose,
-        "issuer": envelope.issuer,
-        "key_id": envelope.key_id,
-        "algorithm": envelope.algorithm,
-        "public_key_fingerprint": envelope.public_key_fingerprint,
-        "custody_domain": envelope.custody_domain,
-        "trust_root_version": envelope.trust_root_version,
-        "issued_at": envelope.issued_at,
-        "expires_at": envelope.expires_at,
-        "audience": envelope.audience,
-        "observation_id": envelope.observation_id,
-        "subject": envelope.subject_mapping(),
-        "signature": envelope.signature,
-    }
+    return envelope.canonical_document()
 
 
 def write_attestation_record(path: Path, envelope: AttestationEnvelopeV2) -> Path:
