@@ -46,10 +46,15 @@
 - `TrustedHostAttestation.v2`: `AttestationEnvelopeV2`,
   `AttestationTrustPolicy`, `AttestationTrustRootV2`,
   `CandidateAttestationSubjectV2`, `InstalledHostAttestationSubjectV2`,
-  `AttestationVerifier`, `verify_attestation_pair()`,
+  `AttestationVerifier`, `attestation_envelope_digest()`,
+  `verify_attestation_pair()`,
   `verify_candidate_attestation()` and the exported schema, purpose and
-  refusal-code constants, including `SAME_KEY_SIGNED_BOTH`. The signed
-  canonical bytes and refusal codes are public contract. The verifier
+  refusal-code constants, including `SAME_KEY_SIGNED_BOTH`,
+  `OBSERVATION_ID_MISMATCH` and `PACKAGE_MISMATCH`. The parsed envelope's
+  complete mapping is public through `AttestationEnvelopeV2.canonical_document()`;
+  `attestation_envelope_digest()` hashes its exact canonical JSON mapping,
+  including `signature`. The signed canonical bytes and refusal codes are
+  public contract. The verifier
   identifies a signing key by `public_key_fingerprint`, never by the reusable
   `key_id` label, and remains a non-admitting composition seam: neither
   executor accepts these values in this contract revision.
@@ -63,14 +68,17 @@
   preconstructed subject, receipt, digest, or ad hoc root.
 - `admit_host_source()` and `HostSourceAdmissionTrace`
   (`host_source_admission.py`). `admit_host_source(*, candidate, installed,
-  verifier, trust_policy, expected_host_identity, now)` returns
+  verifier, trust_policy, expected_host_identity, expected_observation_id,
+  expected_package, now)` returns
   `tuple[HostSource, HostSourceAdmissionTrace]` or raises: every existing
   `SpecError`/`PreconditionFailed` from `verify_attestation_pair()` /
-  `verify_candidate_attestation()` propagates unchanged, plus one new
-  disagreement refusal using `host_source.DISAGREES` when the interpreter's
+  `verify_candidate_attestation()` propagates unchanged, plus distinct
+  coordinate refusals for a mismatched Control dispatch observation or
+  expected package, and one disagreement refusal using `host_source.DISAGREES`
+  when the interpreter's
   own installed-artifact reading (taken only after the attestation pair is
   verified) disagrees with the authenticated installed-host subject's
-  `package`/`version`/`wheel_sha256`. The six-parameter signature has no
+  `package`/`version`/`wheel_sha256`. The eight-parameter signature has no
   parameter for a receipt, a pre-parsed subject, an installed artifact, a
   metadata reader, a distribution selector, or any preverified result — the
   same inexpressible-bypass shape as `verify_candidate_attestation()`.
@@ -79,8 +87,7 @@
   `host_observation_id`, `host_identity`, both signer fingerprints, both
   trust-root versions). The publicly constructible type alone proves no
   authentication; it is consumed by nothing in this contract revision.
-  `trusted_host_source.py` is
-  unchanged by this addition and remains zero-I/O; `require_host_source()`'s
+  `trusted_host_source.py` remains zero-I/O; `require_host_source()`'s
   signature and behavior are unchanged and it remains the constructor a
   receipt-only caller uses. Neither executor accepts a directly supplied
   `HostSource` or trace; each accepts the return of a handed-over provider,

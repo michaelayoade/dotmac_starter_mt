@@ -29,12 +29,15 @@ __all__ = [
     "ATTESTATION_SCHEMA",
     "CANDIDATE_ATTESTATION_PURPOSE",
     "INSTALLED_OBSERVATION_PURPOSE",
+    "attestation_envelope_digest",
     "ATTESTATIONS_DISAGREE",
     "AUDIENCE_MISMATCH",
     "FUTURE",
     "KEY_NOT_TRUSTED",
     "OBSERVATION_ABSENT",
+    "OBSERVATION_ID_MISMATCH",
     "OBSERVATION_MALFORMED",
+    "PACKAGE_MISMATCH",
     "ROOT_BINDING_MISMATCH",
     "ROOT_NOT_VALID",
     "ROOT_PURPOSE_MISMATCH",
@@ -65,6 +68,8 @@ SAME_KEY_SIGNED_BOTH: Final = "trusted-host-source-same-key-signed-both"
 KEY_NOT_TRUSTED: Final = "trusted-host-source-key-not-trusted"
 SIGNATURE_INVALID: Final = "trusted-host-source-signature-invalid"
 ATTESTATIONS_DISAGREE: Final = "trusted-host-source-attestations-disagree"
+OBSERVATION_ID_MISMATCH: Final = "trusted-host-source-observation-id-mismatch"
+PACKAGE_MISMATCH: Final = "trusted-host-source-package-mismatch"
 ROOT_PURPOSE_MISMATCH: Final = "trusted-host-source-root-purpose-mismatch"
 ROOT_BINDING_MISMATCH: Final = "trusted-host-source-root-binding-mismatch"
 ROOT_REVOKED: Final = "trusted-host-source-root-revoked"
@@ -319,6 +324,12 @@ class AttestationEnvelopeV2:
             )
 
     def signed_bytes(self) -> bytes:
+        document = self.canonical_document()
+        document.pop("signature")
+        return _canonical(document)
+
+    def canonical_document(self) -> dict[str, Any]:
+        """Return the complete parsed envelope mapping, including signature."""
         fields = (
             "schema",
             "purpose",
@@ -333,10 +344,11 @@ class AttestationEnvelopeV2:
             "audience",
             "observation_id",
             "subject",
+            "signature",
         )
         document = {name: getattr(self, name) for name in fields if name != "subject"}
         document["subject"] = json.loads(self._subject_bytes)
-        return _canonical(document)
+        return document
 
     def subject_mapping(self) -> Mapping[str, Any]:
         value = json.loads(self._subject_bytes)
@@ -648,6 +660,16 @@ def candidate_subject_digest(candidate: CandidateAttestationSubjectV2) -> Digest
     return Digest.of(_canonical(candidate.canonical_document()))
 
 
+def attestation_envelope_digest(envelope: AttestationEnvelopeV2) -> Digest:
+    """Digest the complete parsed envelope mapping, including its signature."""
+    if not isinstance(envelope, AttestationEnvelopeV2):
+        raise SpecError(
+            "attestation_envelope_digest requires an AttestationEnvelopeV2",
+            code=OBSERVATION_MALFORMED,
+        )
+    return Digest.of(_canonical(envelope.canonical_document()))
+
+
 def verify_attestation_pair(
     *,
     candidate: AttestationEnvelopeV2 | None,
@@ -655,6 +677,8 @@ def verify_attestation_pair(
     verifier: AttestationVerifier,
     trust_policy: AttestationTrustPolicy,
     expected_host_identity: str,
+    expected_observation_id: str,
+    expected_package: str,
     now: datetime,
 ) -> None:
     """Verify v2 evidence; success creates no caller-constructible authority."""
@@ -706,6 +730,25 @@ def verify_attestation_pair(
     installed_subject = InstalledHostAttestationSubjectV2.from_mapping(
         installed.subject_mapping()
     )
+    expected_observation_id = _required(
+        expected_observation_id, "expected_observation_id"
+    )
+    if installed.observation_id != expected_observation_id:
+        raise PreconditionFailed(
+            "installed observation does not match expected Control dispatch",
+            code=OBSERVATION_ID_MISMATCH,
+        )
+    expected_package = _required(expected_package, "expected_package")
+    if candidate_subject.package != expected_package:
+        raise PreconditionFailed(
+            "candidate package does not match expected package",
+            code=PACKAGE_MISMATCH,
+        )
+    if installed_subject.package != expected_package:
+        raise PreconditionFailed(
+            "installed package does not match expected package",
+            code=PACKAGE_MISMATCH,
+        )
     expected = candidate_subject_digest(candidate_subject)
     if installed_subject.candidate_subject_digest != expected:
         raise PreconditionFailed(

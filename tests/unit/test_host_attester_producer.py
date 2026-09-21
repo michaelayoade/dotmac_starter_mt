@@ -267,6 +267,8 @@ def test_build_installed_attestation_pairs_with_a_genuine_candidate() -> None:
             verifier=_HmacVerifier(),
             trust_policy=_policy("host:canonical-a"),
             expected_host_identity="host:canonical-a",
+            expected_observation_id="host-observation",
+            expected_package="dotmac-deployment-foundation",
             now=NOW,
         )
         is None
@@ -294,6 +296,8 @@ def test_mutated_subject_refusal_carries_the_signature_invalid_code() -> None:
             verifier=_HmacVerifier(),
             trust_policy=_policy("host:canonical-a"),
             expected_host_identity="host:canonical-a",
+            expected_observation_id="host-observation",
+            expected_package="dotmac-deployment-foundation",
             now=NOW,
         )
     assert raised.value.code == "trusted-host-source-signature-invalid"
