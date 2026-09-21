@@ -440,7 +440,7 @@ class RecoveryExecutor:
         behind after exiting 1, and the next reader would have found a database
         that passes a table count.
         """
-        attempts = (
+        attempts: tuple[tuple[str, RestoreAttempt | None], ...] = (
             ("roles", outcome.roles_attempt),
             ("objects", outcome.objects_attempt),
         )
