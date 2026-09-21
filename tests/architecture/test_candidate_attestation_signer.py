@@ -268,6 +268,8 @@ def test_verify_attestation_pair_accepts_the_signed_candidate_envelope() -> None
         verifier=_ReferenceEd25519Verifier(),
         trust_policy=policy,
         expected_host_identity="test-target-host-01",
+        expected_observation_id=installed_envelope.observation_id,
+        expected_package="dotmac-deployment-foundation",
         now=now,
     )
 
@@ -360,6 +362,8 @@ def test_mutating_one_subject_field_after_signing_is_refused() -> None:
         verifier=_ReferenceEd25519Verifier(),
         trust_policy=policy,
         expected_host_identity="test-target-host-01",
+        expected_observation_id=installed_envelope.observation_id,
+        expected_package="dotmac-deployment-foundation",
         now=now,
     )
 
@@ -378,6 +382,8 @@ def test_mutating_one_subject_field_after_signing_is_refused() -> None:
             verifier=_ReferenceEd25519Verifier(),
             trust_policy=policy,
             expected_host_identity="test-target-host-01",
+            expected_observation_id=installed_envelope.observation_id,
+            expected_package="dotmac-deployment-foundation",
             now=now,
         )
     assert excinfo.value.code == SIGNATURE_INVALID
@@ -442,6 +448,8 @@ def test_reusing_the_same_key_for_both_roles_is_refused_independent_of_policy() 
             verifier=_ReferenceEd25519Verifier(),
             trust_policy=policy,
             expected_host_identity="test-target-host-01",
+            expected_observation_id=installed_envelope.observation_id,
+            expected_package="dotmac-deployment-foundation",
             now=now,
         )
     assert excinfo.value.code == SAME_KEY_SIGNED_BOTH
