@@ -90,6 +90,9 @@ CANDIDATE_KEY = b"starter-release-workflow-key"
 HOST_FP = "sha256:" + hashlib.sha256(HOST_KEY).hexdigest()
 CANDIDATE_FP = "sha256:" + hashlib.sha256(CANDIDATE_KEY).hexdigest()
 ALGORITHM = "ed25519"
+#: Opaque, blind-echoed value passed to `verify_attestation_pair` — this
+#: module does not exercise its content, only its threading.
+VERIFICATION_CONTEXT_DIGEST = "sha256:" + "ab" * 32
 
 
 @dataclasses.dataclass(frozen=True)
@@ -260,19 +263,18 @@ def test_build_installed_attestation_pairs_with_a_genuine_candidate() -> None:
     installed = _build(host_source)
     candidate = _candidate_envelope(host_source, host_identity="host:canonical-a")
 
-    assert (
-        verify_attestation_pair(
-            candidate=candidate,
-            installed=installed,
-            verifier=_HmacVerifier(),
-            trust_policy=_policy("host:canonical-a"),
-            expected_host_identity="host:canonical-a",
-            expected_observation_id="host-observation",
-            expected_package="dotmac-deployment-foundation",
-            now=NOW,
-        )
-        is None
+    result = verify_attestation_pair(
+        candidate=candidate,
+        installed=installed,
+        verifier=_HmacVerifier(),
+        trust_policy=_policy("host:canonical-a"),
+        expected_host_identity="host:canonical-a",
+        expected_observation_id="host-observation",
+        expected_package="dotmac-deployment-foundation",
+        verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
+        now=NOW,
     )
+    assert result.verification_context_digest == VERIFICATION_CONTEXT_DIGEST
 
 
 def test_mutated_subject_refusal_carries_the_signature_invalid_code() -> None:
@@ -298,6 +300,7 @@ def test_mutated_subject_refusal_carries_the_signature_invalid_code() -> None:
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == "trusted-host-source-signature-invalid"

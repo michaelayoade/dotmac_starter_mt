@@ -2,6 +2,32 @@
 
 ## Unreleased — successor not allocated
 
+### ADR-0073 redesign step 1: `verify_attestation_pair` returns typed, non-authorizing evidence
+
+**Breaking**: `verify_attestation_pair()` now returns `AttestationPairVerificationResultV1`
+on success instead of bare `None`, and requires one new keyword-only parameter,
+`verification_context_digest: str`. This is step 1 of a 3-step cross-repo
+redesign (Foundation → Control → CP adapter) closing an availability hazard in
+the merged ADR-0073 host-admission protocol: the current design holds Control
+locks across this out-of-process verification call, which can block emergency
+root revocation if the call stalls. The redesign moves to a resolve →
+transaction-free-verify → revalidate/consume shape; this typed result is what
+lets Control's later revalidation step bind Foundation's actual verification
+outcome without either package importing the other's types.
+
+`verification_context_digest` is Foundation's **opaque**: it is Control's own
+digest over its resolved admission context, carried through this function
+unread and unvalidated beyond a non-empty check, and returned unchanged in the
+result only on success. Foundation does not compute, interpret, or reproduce
+it — digest ownership stays singular per repository (Foundation owns the two
+attestation-envelope digests it already computes; Control owns the context
+digest). `admit_host_source()` carries the same new parameter through
+unchanged in spirit, for nine keyword-only parameters total, still discarding
+`verify_attestation_pair`'s return value since it only needs pass/fail.
+
+The successor remains unallocated and this is source-only, unreleased
+Foundation contract work. No Control implementation or CP adapter exists yet.
+
 ### ADR-0073: admission coordinates and full attestation-envelope digest
 
 `AttestationEnvelopeV2.canonical_document()` now exposes the exact parsed full

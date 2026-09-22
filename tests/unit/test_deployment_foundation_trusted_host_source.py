@@ -30,6 +30,7 @@ from dotmac_deployment_foundation.trusted_host_source import (
     INSTALLED_OBSERVATION_PURPOSE,
     SAME_KEY_SIGNED_BOTH,
     AttestationEnvelopeV2,
+    AttestationPairVerificationResultV1,
     AttestationTrustPolicy,
     AttestationTrustRootV2,
     CandidateAttestationSubjectV2,
@@ -45,6 +46,10 @@ CANDIDATE_KEY, HOST_KEY = b"candidate", b"host"
 CANDIDATE_FP = "sha256:" + hashlib.sha256(CANDIDATE_KEY).hexdigest()
 HOST_FP = "sha256:" + hashlib.sha256(HOST_KEY).hexdigest()
 ALGORITHM = "ed25519"
+#: Opaque, blind-echoed value — Foundation never parses or interprets this;
+#: it is Control's own value, carried through unchanged (see
+#: AttestationPairVerificationResultV1).
+VERIFICATION_CONTEXT_DIGEST = "sha256:" + "ab" * 32
 
 
 class Verifier:
@@ -171,7 +176,49 @@ def _pair() -> tuple[AttestationEnvelopeV2, AttestationEnvelopeV2]:
 
 def test_pair_binds_complete_candidate_to_expected_host() -> None:
     candidate, installed = _pair()
-    assert (
+    result = verify_attestation_pair(
+        candidate=candidate,
+        installed=installed,
+        verifier=Verifier(),
+        trust_policy=_policy(),
+        expected_host_identity="host:canonical-a",
+        expected_observation_id="host-observation",
+        expected_package="dotmac-deployment-foundation",
+        verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
+        now=NOW,
+    )
+    assert isinstance(result, AttestationPairVerificationResultV1)
+
+
+def test_pair_result_echoes_digest_and_carries_real_computed_envelope_digests() -> None:
+    """Fixed-vector positive test: the returned result's envelope digests
+    must equal independently-computed digests of the SAME parsed envelope
+    objects — proving they are the real computed values, not a copy of any
+    presentation-supplied input — and the context digest must be echoed back
+    byte-for-byte, proving the blind-echo contract."""
+    candidate, installed = _pair()
+    expected_candidate_digest = str(attestation_envelope_digest(candidate))
+    expected_installed_digest = str(attestation_envelope_digest(installed))
+    result = verify_attestation_pair(
+        candidate=candidate,
+        installed=installed,
+        verifier=Verifier(),
+        trust_policy=_policy(),
+        expected_host_identity="host:canonical-a",
+        expected_observation_id="host-observation",
+        expected_package="dotmac-deployment-foundation",
+        verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
+        now=NOW,
+    )
+    assert result.verification_context_digest == VERIFICATION_CONTEXT_DIGEST
+    assert result.candidate_attestation_envelope_digest == expected_candidate_digest
+    assert result.installed_attestation_envelope_digest == expected_installed_digest
+
+
+@pytest.mark.parametrize("bad_value", ["", None])
+def test_verification_context_digest_is_required(bad_value: object) -> None:
+    candidate, installed = _pair()
+    with pytest.raises(SpecError) as raised:
         verify_attestation_pair(
             candidate=candidate,
             installed=installed,
@@ -180,10 +227,10 @@ def test_pair_binds_complete_candidate_to_expected_host() -> None:
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=bad_value,  # type: ignore[arg-type]
             now=NOW,
         )
-        is None
-    )
+    assert raised.value.code == trusted_host_source.OBSERVATION_MALFORMED
 
 
 def test_attestation_envelope_digest_fixed_vector_and_signature_sensitive() -> None:
@@ -220,6 +267,7 @@ def test_pair_refuses_coordinate_substitution(
         "expected_host_identity": "host:canonical-a",
         "expected_observation_id": "host-observation",
         "expected_package": "dotmac-deployment-foundation",
+        "verification_context_digest": VERIFICATION_CONTEXT_DIGEST,
         "now": NOW,
     }
     kwargs[field] = value
@@ -259,6 +307,7 @@ def test_missing_halves_refuse_distinctly_from_all_other_failures(
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == expected
@@ -278,6 +327,7 @@ def test_unknown_material_and_invalid_signature_have_exact_refusals() -> None:
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == "trusted-host-source-key-not-trusted"
@@ -291,6 +341,7 @@ def test_unknown_material_and_invalid_signature_have_exact_refusals() -> None:
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == "trusted-host-source-signature-invalid"
@@ -314,6 +365,7 @@ def test_same_fingerprint_refuses_before_even_invalid_policy_evaluation() -> Non
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == SAME_KEY_SIGNED_BOTH
@@ -323,19 +375,18 @@ def test_distinct_fingerprints_with_same_key_id_are_admitted() -> None:
     candidate, installed = _pair()
     assert candidate.key_id == installed.key_id
     assert candidate.public_key_fingerprint != installed.public_key_fingerprint
-    assert (
-        verify_attestation_pair(
-            candidate=candidate,
-            installed=installed,
-            verifier=Verifier(),
-            trust_policy=_policy(),
-            expected_host_identity="host:canonical-a",
-            expected_observation_id="host-observation",
-            expected_package="dotmac-deployment-foundation",
-            now=NOW,
-        )
-        is None
+    result = verify_attestation_pair(
+        candidate=candidate,
+        installed=installed,
+        verifier=Verifier(),
+        trust_policy=_policy(),
+        expected_host_identity="host:canonical-a",
+        expected_observation_id="host-observation",
+        expected_package="dotmac-deployment-foundation",
+        verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
+        now=NOW,
     )
+    assert isinstance(result, AttestationPairVerificationResultV1)
 
 
 def test_policy_coerces_collection_and_refuses_same_material_under_other_id() -> None:
@@ -396,6 +447,7 @@ def test_revocation_and_validity_refuse(root_changes: dict[str, object]) -> None
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
 
@@ -418,6 +470,7 @@ def test_key_id_is_bound_by_the_enrolled_root_not_a_rotation_escape() -> None:
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == "trusted-host-source-root-binding-mismatch"
@@ -471,6 +524,7 @@ def test_audience_future_and_subject_mismatch_refuse(
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=now,
         )
     assert raised.value.code == expected
@@ -478,7 +532,10 @@ def test_audience_future_and_subject_mismatch_refuse(
 
 def test_no_preverified_result_or_v1_binding_is_public() -> None:
     assert not hasattr(trusted_host_source, "TrustedAttestationBinding")
-    assert verify_attestation_pair.__annotations__["return"] in (None, "None")
+    assert verify_attestation_pair.__annotations__["return"] in (
+        AttestationPairVerificationResultV1,
+        "AttestationPairVerificationResultV1",
+    )
 
 
 @pytest.mark.parametrize(
@@ -568,6 +625,7 @@ def test_malformed_verification_inputs_are_named(changes: dict[str, object]) -> 
         "expected_host_identity": "host:canonical-a",
         "expected_observation_id": "host-observation",
         "expected_package": "dotmac-deployment-foundation",
+        "verification_context_digest": VERIFICATION_CONTEXT_DIGEST,
         "now": NOW,
     }
     arguments.update(changes)
@@ -646,19 +704,18 @@ def test_pair_reuses_the_seam_rather_than_a_parallel_implementation(
         return real_seam(**kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(trusted_host_source, "verify_candidate_attestation", spy)
-    assert (
-        trusted_host_source.verify_attestation_pair(
-            candidate=candidate,
-            installed=installed,
-            verifier=Verifier(),
-            trust_policy=_policy(),
-            expected_host_identity="host:canonical-a",
-            expected_observation_id="host-observation",
-            expected_package="dotmac-deployment-foundation",
-            now=NOW,
-        )
-        is None
+    result = trusted_host_source.verify_attestation_pair(
+        candidate=candidate,
+        installed=installed,
+        verifier=Verifier(),
+        trust_policy=_policy(),
+        expected_host_identity="host:canonical-a",
+        expected_observation_id="host-observation",
+        expected_package="dotmac-deployment-foundation",
+        verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
+        now=NOW,
     )
+    assert isinstance(result, AttestationPairVerificationResultV1)
     assert len(calls) == 1
     assert calls[0]["candidate"] is candidate
 
@@ -682,6 +739,7 @@ def test_pair_reuses_the_seam_rather_than_a_parallel_implementation(
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == "trusted-host-source-subject-mismatch"
@@ -713,6 +771,7 @@ def test_a_defect_in_shared_verification_surfaces_in_both_entry_points() -> None
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert pair_control.value.code == "trusted-host-source-signature-invalid"
@@ -728,19 +787,18 @@ def test_a_defect_in_shared_verification_surfaces_in_both_entry_points() -> None
         now=NOW,
     )
     assert subject.package == "dotmac-deployment-foundation"
-    assert (
-        verify_attestation_pair(
-            candidate=bad_signature,
-            installed=installed,
-            verifier=AlwaysTrueVerifier(),
-            trust_policy=_policy(),
-            expected_host_identity="host:canonical-a",
-            expected_observation_id="host-observation",
-            expected_package="dotmac-deployment-foundation",
-            now=NOW,
-        )
-        is None
+    result = verify_attestation_pair(
+        candidate=bad_signature,
+        installed=installed,
+        verifier=AlwaysTrueVerifier(),
+        trust_policy=_policy(),
+        expected_host_identity="host:canonical-a",
+        expected_observation_id="host-observation",
+        expected_package="dotmac-deployment-foundation",
+        verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
+        now=NOW,
     )
+    assert isinstance(result, AttestationPairVerificationResultV1)
 
 
 def test_no_parallel_candidate_verification_call_site_exists() -> None:
@@ -775,6 +833,7 @@ def test_expired_candidate_attestation_refuses_stale() -> None:
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=after_expiry,
         )
     assert raised.value.code == trusted_host_source.STALE
@@ -812,6 +871,7 @@ def test_installed_subject_digest_binding_mismatch_refuses_subject_mismatch() ->
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == trusted_host_source.SUBJECT_MISMATCH
@@ -839,6 +899,7 @@ def test_same_key_signed_both_survives_the_refactor_with_distinct_roots() -> Non
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == SAME_KEY_SIGNED_BOTH
@@ -905,6 +966,7 @@ def test_admit_host_source_binds_verified_pair_to_the_installed_reading(
         expected_host_identity="host:canonical-a",
         expected_observation_id="host-observation",
         expected_package="dotmac-deployment-foundation",
+        verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
         now=NOW,
     )
 
@@ -971,6 +1033,7 @@ def test_admit_host_source_refuses_when_the_real_reading_disagrees(
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == DISAGREES
@@ -1009,6 +1072,7 @@ def test_admit_host_source_never_reads_the_interpreter_before_pair_verification(
             expected_host_identity="host:canonical-a",
             expected_observation_id="host-observation",
             expected_package="dotmac-deployment-foundation",
+            verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
             now=NOW,
         )
     assert raised.value.code == SAME_KEY_SIGNED_BOTH
@@ -1048,6 +1112,7 @@ def test_admission_coordinate_mismatch_refuses_before_host_read(
         "expected_host_identity": "host:canonical-a",
         "expected_observation_id": "host-observation",
         "expected_package": "dotmac-deployment-foundation",
+        "verification_context_digest": VERIFICATION_CONTEXT_DIGEST,
         "now": NOW,
     }
     kwargs[field] = value
@@ -1068,6 +1133,7 @@ def test_admit_host_source_signature_has_exactly_the_documented_parameters() -> 
         "expected_host_identity",
         "expected_observation_id",
         "expected_package",
+        "verification_context_digest",
         "now",
     }
     for forbidden in (
