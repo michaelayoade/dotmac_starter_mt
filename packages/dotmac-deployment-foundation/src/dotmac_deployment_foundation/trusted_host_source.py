@@ -51,6 +51,7 @@ __all__ = [
     "AttestationPairVerificationResultV1",
     "AttestationTrustPolicy",
     "AttestationTrustRootV2",
+    "AttestationVerifiedRootV1",
     "AttestationVerifier",
     "CandidateAttestationSubjectV2",
     "InstalledHostAttestationSubjectV2",
@@ -504,7 +505,7 @@ def _verify(
     purpose: str,
     audience: str,
     now: datetime,
-) -> None:
+) -> AttestationTrustRootV2:
     matches = [
         root
         for root in roots
@@ -578,6 +579,54 @@ def _verify(
         raise PreconditionFailed(
             "attestation signature is invalid", code=SIGNATURE_INVALID
         )
+    return root
+
+
+def _verify_candidate_and_root(
+    *,
+    candidate: AttestationEnvelopeV2,
+    verifier: AttestationVerifier,
+    trust_policy: AttestationTrustPolicy,
+    now: datetime,
+) -> tuple[CandidateAttestationSubjectV2, AttestationTrustRootV2]:
+    """The one candidate verification code path.
+
+    Both ``verify_candidate_attestation`` (the public seam) and
+    ``verify_attestation_pair`` call this exact function — there is exactly
+    one candidate verification code path in this module, not two that could
+    drift apart. The only difference from the public wrapper is that this
+    also returns the matched trust root, which ``verify_attestation_pair``
+    needs to echo back in its widened result.
+    """
+    if not isinstance(candidate, AttestationEnvelopeV2):
+        raise SpecError(
+            "candidate attestation must be a parsed AttestationEnvelopeV2",
+            code=OBSERVATION_MALFORMED,
+        )
+    if not isinstance(trust_policy, AttestationTrustPolicy):
+        raise SpecError(
+            "trust_policy must be an AttestationTrustPolicy",
+            code=OBSERVATION_MALFORMED,
+        )
+    if not isinstance(verifier, AttestationVerifier):
+        raise SpecError(
+            "verifier must implement AttestationVerifier",
+            code=OBSERVATION_MALFORMED,
+        )
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        raise SpecError(
+            "verification now must be timezone-aware", code=OBSERVATION_MALFORMED
+        )
+    now = now.astimezone(UTC)
+    root = _verify(
+        candidate,
+        verifier,
+        trust_policy.candidate_roots,
+        CANDIDATE_ATTESTATION_PURPOSE,
+        trust_policy.candidate_audience,
+        now,
+    )
+    return CandidateAttestationSubjectV2.from_mapping(candidate.subject_mapping()), root
 
 
 def verify_candidate_attestation(
@@ -603,39 +652,16 @@ def verify_candidate_attestation(
     trust configuration Control already resolved (``verifier`` stays
     injected, per this facility's zero-runtime-dependency crypto seam;
     ``trust_policy`` is the whole immutable, internally-validated root set,
-    not a caller-editable list). ``verify_attestation_pair`` calls this exact
-    function for its candidate half — there is exactly one candidate
-    verification code path in this module, not two that could drift apart.
+    not a caller-editable list). This is a thin wrapper over
+    ``_verify_candidate_and_root`` — the same private function
+    ``verify_attestation_pair`` calls for its candidate half — so there is
+    exactly one candidate verification code path in this module, not two
+    that could drift apart.
     """
-    if not isinstance(candidate, AttestationEnvelopeV2):
-        raise SpecError(
-            "candidate attestation must be a parsed AttestationEnvelopeV2",
-            code=OBSERVATION_MALFORMED,
-        )
-    if not isinstance(trust_policy, AttestationTrustPolicy):
-        raise SpecError(
-            "trust_policy must be an AttestationTrustPolicy",
-            code=OBSERVATION_MALFORMED,
-        )
-    if not isinstance(verifier, AttestationVerifier):
-        raise SpecError(
-            "verifier must implement AttestationVerifier",
-            code=OBSERVATION_MALFORMED,
-        )
-    if not isinstance(now, datetime) or now.tzinfo is None:
-        raise SpecError(
-            "verification now must be timezone-aware", code=OBSERVATION_MALFORMED
-        )
-    now = now.astimezone(UTC)
-    _verify(
-        candidate,
-        verifier,
-        trust_policy.candidate_roots,
-        CANDIDATE_ATTESTATION_PURPOSE,
-        trust_policy.candidate_audience,
-        now,
+    subject, _root = _verify_candidate_and_root(
+        candidate=candidate, verifier=verifier, trust_policy=trust_policy, now=now
     )
-    return CandidateAttestationSubjectV2.from_mapping(candidate.subject_mapping())
+    return subject
 
 
 def candidate_subject_digest(candidate: CandidateAttestationSubjectV2) -> Digest:
@@ -672,13 +698,46 @@ def attestation_envelope_digest(envelope: AttestationEnvelopeV2) -> Digest:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class AttestationVerifiedRootV1:
+    """The specific trust root that actually matched and authenticated one
+    half of the attestation pair -- echoed back so Control can compare it
+    against what it itself resolved, the same way the envelope digests
+    already are. Not the whole `AttestationTrustRootV2` (which also carries
+    `public_key_base64`/`not_before`/`not_after`/`revoked` -- policy
+    configuration Control already has from its own resolution, not something
+    that needs echoing back as "what was verified against")."""
+
+    public_key_fingerprint: str
+    trust_root_version: str
+    key_id: str
+    algorithm: str
+    purpose: str
+    custody_domain: str
+    issuer: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class AttestationPairVerificationResultV1:
-    """Non-authorizing verification evidence — never a HostSource or execution
-    token. Foundation verifies statelessly; only Control decides consequence."""
+    """Non-authorizing verification evidence -- never a HostSource or execution
+    token. Foundation verifies statelessly; only Control decides consequence.
+
+    Reports EVERYTHING actually verified, not only digests: the caller-
+    supplied expectations that were checked, the audiences the trust policy
+    declared, and the specific root that matched each half. This is what
+    lets Control compare Foundation's real verification against what Control
+    itself resolved, instead of trusting a caller-supplied echo of its own
+    input back at it unchanged."""
 
     candidate_attestation_envelope_digest: str
     installed_attestation_envelope_digest: str
     verification_context_digest: str
+    expected_host_identity: str
+    expected_observation_id: str
+    expected_package: str
+    candidate_audience: str
+    installed_audience: str
+    candidate_root: AttestationVerifiedRootV1
+    installed_root: AttestationVerifiedRootV1
 
 
 def verify_attestation_pair(
@@ -720,8 +779,9 @@ def verify_attestation_pair(
     # The candidate half is authenticated through the one shared seam: this
     # is what makes it impossible for this function to drift from what a
     # trusted host workload gets when it calls verify_candidate_attestation
-    # directly.
-    candidate_subject = verify_candidate_attestation(
+    # directly (that public wrapper is itself a thin call to this same
+    # private function).
+    candidate_subject, candidate_root = _verify_candidate_and_root(
         candidate=candidate, verifier=verifier, trust_policy=trust_policy, now=now
     )
     expected_host_identity = _required(expected_host_identity, "expected_host_identity")
@@ -734,7 +794,7 @@ def verify_attestation_pair(
             "installed role audience does not match expected host identity",
             code=AUDIENCE_MISMATCH,
         )
-    _verify(
+    installed_root = _verify(
         installed,
         verifier,
         trust_policy.installed_roots,
@@ -795,4 +855,27 @@ def verify_attestation_pair(
             attestation_envelope_digest(installed)
         ),
         verification_context_digest=verification_context_digest,
+        expected_host_identity=expected_host_identity,
+        expected_observation_id=expected_observation_id,
+        expected_package=expected_package,
+        candidate_audience=trust_policy.candidate_audience,
+        installed_audience=trust_policy.installed_audience,
+        candidate_root=AttestationVerifiedRootV1(
+            public_key_fingerprint=candidate_root.public_key_fingerprint,
+            trust_root_version=candidate_root.trust_root_version,
+            key_id=candidate_root.key_id,
+            algorithm=candidate_root.algorithm,
+            purpose=candidate_root.purpose,
+            custody_domain=candidate_root.custody_domain,
+            issuer=candidate_root.issuer,
+        ),
+        installed_root=AttestationVerifiedRootV1(
+            public_key_fingerprint=installed_root.public_key_fingerprint,
+            trust_root_version=installed_root.trust_root_version,
+            key_id=installed_root.key_id,
+            algorithm=installed_root.algorithm,
+            purpose=installed_root.purpose,
+            custody_domain=installed_root.custody_domain,
+            issuer=installed_root.issuer,
+        ),
     )

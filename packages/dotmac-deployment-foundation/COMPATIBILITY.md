@@ -44,7 +44,7 @@
   not production authority, and product-vocabulary mapping remains a later
   Platform adapter responsibility.
 - `TrustedHostAttestation.v2`: `AttestationEnvelopeV2`,
-  `AttestationTrustPolicy`, `AttestationTrustRootV2`,
+  `AttestationTrustPolicy`, `AttestationTrustRootV2`, `AttestationVerifiedRootV1`,
   `CandidateAttestationSubjectV2`, `InstalledHostAttestationSubjectV2`,
   `AttestationVerifier`, `attestation_envelope_digest()`,
   `verify_attestation_pair()`,
@@ -67,18 +67,40 @@
   (`verifier`, `trust_policy`, `now`); there is no parameter for a
   preconstructed subject, receipt, digest, or ad hoc root.
 - **Breaking (ADR-0073 redesign step 1)**: `verify_attestation_pair()` now
-  returns `AttestationPairVerificationResultV1` (`candidate_attestation_envelope_digest`,
-  `installed_attestation_envelope_digest`, `verification_context_digest`) on
-  success instead of bare `None`, and requires one new keyword-only parameter,
+  returns `AttestationPairVerificationResultV1` on success instead of bare
+  `None`, and requires one new keyword-only parameter,
   `verification_context_digest: str`. That parameter is Foundation's opaque —
   Control's own digest over its resolved admission context, validated only for
   non-emptiness and echoed back unchanged in the result on success; Foundation
-  never computes, interprets, or reproduces it. The two envelope digests in the
-  result are computed from the actual parsed `candidate`/`installed` objects
-  this call verified, identically to `attestation_envelope_digest()` — never
-  copied from a caller-supplied value. This result is explicitly
+  never computes, interprets, or reproduces it. This result is explicitly
   non-authorizing: never a `HostSource` or execution token; only Control
   decides consequence from it.
+- **Breaking (ADR-0073 redesign step 2, result widening)**:
+  `AttestationPairVerificationResultV1` now carries ten fields —
+  `candidate_attestation_envelope_digest`, `installed_attestation_envelope_digest`,
+  `verification_context_digest`, `expected_host_identity`,
+  `expected_observation_id`, `expected_package`, `candidate_audience`,
+  `installed_audience`, `candidate_root`, `installed_root` — reporting
+  EVERYTHING actually verified, not only digests. The two envelope digests
+  are computed from the actual parsed `candidate`/`installed` objects this
+  call verified, identically to `attestation_envelope_digest()` — never
+  copied from a caller-supplied value. `expected_host_identity`,
+  `expected_observation_id` and `expected_package` are this call's own
+  validated local values (the exact strings checked against the
+  authenticated subjects), not an unchecked echo of caller input.
+  `candidate_audience`/`installed_audience` are `trust_policy`'s own
+  declared audiences. `candidate_root`/`installed_root` are a new frozen
+  dataclass, `AttestationVerifiedRootV1` (`public_key_fingerprint`,
+  `trust_root_version`, `key_id`, `algorithm`, `purpose`, `custody_domain`,
+  `issuer`) — the specific trust root from `trust_policy` that actually
+  matched and authenticated each half, not the whole `AttestationTrustRootV2`
+  (which also carries `public_key_base64`/`not_before`/`not_after`/`revoked`,
+  policy configuration Control already has from its own resolution). This is
+  what lets a later Control change compare its own resolution against what
+  Foundation actually verified against, instead of trusting a caller-supplied
+  echo of its own input back at it unchanged.
+  `AttestationPairVerificationResultV1` has never appeared in a published
+  release, so this widens the type in place; there is no V2.
 - `admit_host_source()` and `HostSourceAdmissionTrace`
   (`host_source_admission.py`). `admit_host_source(*, candidate, installed,
   verifier, trust_policy, expected_host_identity, expected_observation_id,
