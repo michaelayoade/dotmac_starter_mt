@@ -527,6 +527,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     from .engine.lock import deployment_lock
     from .engine.run import Executor
     from .execution_plan import HostPrestateV1, render_execution_plan
+    from .host_source_admission import RefusingHostSourceAdmissionProvider
 
     bindings = _load_bindings(args)
     grant = _require_grant(args, spec, "deploy", bindings=bindings)
@@ -566,6 +567,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         evidence_verifier=bindings.evidence_verifier if bindings else None,
         recovery_verifier=bindings.recovery_verifier if bindings else None,
         exposure_effects=_build_exposure_effects(spec, args, bindings=bindings),
+        # This CLI wires no real host-source admission (that requires a
+        # trusted, non-request-selectable assembly binding and fresh
+        # Control-backed verification — later cross-repo work). Passing the
+        # refusing provider explicitly preserves today's unconditional
+        # refusal, now as a visible decision rather than a silent default.
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
     # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
     # `_do_release_lock` are no-op steps that say so in their own detail text
@@ -791,6 +798,7 @@ def _execute_restore_rehearsal(
     constant rather than restated here.
     """
     from .execution_bindings import ENTRY_POINT_GROUP
+    from .host_source_admission import RefusingHostSourceAdmissionProvider
     from .recovery import load_manifest
     from .recovery_execution import (
         SESSION_ABSENT,
@@ -837,6 +845,10 @@ def _execute_restore_rehearsal(
         session.effects,
         source_evidence=session.source_evidence,
         product_image=session.product_image,
+        # This CLI wires no real host-source admission (see the matching
+        # comment in `cmd_deploy`); the refusing provider preserves today's
+        # unconditional refusal as a visible decision.
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     ).run(session.bundle)
 
     print()
@@ -1155,6 +1167,7 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     from .engine.lock import deployment_lock
     from .engine.run import Executor
     from .execution_plan import HostPrestateV1, render_execution_plan
+    from .host_source_admission import RefusingHostSourceAdmissionProvider
 
     # A SEPARATE grant from the deploy's. One approval that covered both would
     # let a single decision make a change and then erase it.
@@ -1182,6 +1195,9 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         evidence_verifier=bindings.evidence_verifier if bindings else None,
         recovery_verifier=bindings.recovery_verifier if bindings else None,
         exposure_effects=_build_exposure_effects(spec, args, bindings=bindings),
+        # Same rule as `cmd_deploy`: no real admission is wired in, so the
+        # refusing provider is passed explicitly to preserve today's refusal.
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
     # Same rule as `cmd_deploy`: the lock wraps the whole run, and the hold is
     # handed to it rather than asserted around it.

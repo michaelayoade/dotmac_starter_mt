@@ -403,6 +403,7 @@ def test_the_executor_accepts_v2_and_still_refuses_a_recovery_plan() -> None:
             execution_plan=accepted,
             sleep=lambda _: None,
             evidence_policy=evidence_policy(),
+            **valid_host_source_kwargs(),
         )
     with pytest.raises(PreconditionFailed) as exc:
         Executor(
@@ -411,6 +412,7 @@ def test_the_executor_accepts_v2_and_still_refuses_a_recovery_plan() -> None:
             _grant(spec, execution_plan_digest=v2.digest()),
             execution_plan=_recovery(),  # type: ignore[arg-type]
             sleep=lambda _: None,
+            **valid_host_source_kwargs(),
         )
     assert exc.value.code == EXECUTION_PLAN_WRONG_TYPE
 
