@@ -213,6 +213,35 @@ def test_pair_result_echoes_digest_and_carries_real_computed_envelope_digests() 
     assert result.verification_context_digest == VERIFICATION_CONTEXT_DIGEST
     assert result.candidate_attestation_envelope_digest == expected_candidate_digest
     assert result.installed_attestation_envelope_digest == expected_installed_digest
+    # The widened result reports EVERYTHING actually verified -- the real
+    # expectations checked, the real trust-policy audiences, and the real
+    # matched roots -- not placeholders and not a caller-supplied echo.
+    policy = _policy()
+    assert result.expected_host_identity == "host:canonical-a"
+    assert result.expected_observation_id == "host-observation"
+    assert result.expected_package == "dotmac-deployment-foundation"
+    assert result.candidate_audience == policy.candidate_audience
+    assert result.installed_audience == policy.installed_audience
+    candidate_root = policy.candidate_roots[0]
+    installed_root = policy.installed_roots[0]
+    assert result.candidate_root == trusted_host_source.AttestationVerifiedRootV1(
+        public_key_fingerprint=candidate_root.public_key_fingerprint,
+        trust_root_version=candidate_root.trust_root_version,
+        key_id=candidate_root.key_id,
+        algorithm=candidate_root.algorithm,
+        purpose=candidate_root.purpose,
+        custody_domain=candidate_root.custody_domain,
+        issuer=candidate_root.issuer,
+    )
+    assert result.installed_root == trusted_host_source.AttestationVerifiedRootV1(
+        public_key_fingerprint=installed_root.public_key_fingerprint,
+        trust_root_version=installed_root.trust_root_version,
+        key_id=installed_root.key_id,
+        algorithm=installed_root.algorithm,
+        purpose=installed_root.purpose,
+        custody_domain=installed_root.custody_domain,
+        issuer=installed_root.issuer,
+    )
 
 
 @pytest.mark.parametrize("bad_value", ["", None])
@@ -691,19 +720,28 @@ def test_module_carries_no_mutable_trust_state_a_caller_could_poison() -> None:
 def test_pair_reuses_the_seam_rather_than_a_parallel_implementation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`verify_attestation_pair` must call the seam for its candidate half.
-    Replacing the seam with a spy proves the call happens and its return
-    value is what feeds the rest of the pair check, rather than the pair
-    re-deriving the subject some other way."""
+    """`verify_attestation_pair` must call the shared seam for its candidate
+    half. Replacing the seam with a spy proves the call happens and its
+    return value is what feeds the rest of the pair check, rather than the
+    pair re-deriving the subject some other way.
+
+    The shared seam is `_verify_candidate_and_root` -- the ONE candidate
+    verification code path both the public `verify_candidate_attestation`
+    wrapper and `verify_attestation_pair` call through (see that function's
+    docstring)."""
     candidate, installed = _pair()
     calls: list[dict[str, object]] = []
-    real_seam = trusted_host_source.verify_candidate_attestation
+    real_seam = trusted_host_source._verify_candidate_and_root
 
-    def spy(**kwargs: object) -> CandidateAttestationSubjectV2:
+    def spy(
+        **kwargs: object,
+    ) -> tuple[
+        CandidateAttestationSubjectV2, trusted_host_source.AttestationTrustRootV2
+    ]:
         calls.append(kwargs)
         return real_seam(**kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(trusted_host_source, "verify_candidate_attestation", spy)
+    monkeypatch.setattr(trusted_host_source, "_verify_candidate_and_root", spy)
     result = trusted_host_source.verify_attestation_pair(
         candidate=candidate,
         installed=installed,
@@ -723,12 +761,16 @@ def test_pair_reuses_the_seam_rather_than_a_parallel_implementation(
     # binding check must be the thing that catches it -- proving the pair
     # actually consumes the seam's return value rather than recomputing an
     # equivalent subject in parallel.
-    def wrong_subject_spy(**kwargs: object) -> CandidateAttestationSubjectV2:
-        real: CandidateAttestationSubjectV2 = real_seam(**kwargs)  # type: ignore[arg-type]
-        return dataclasses.replace(real, version="tampered")
+    def wrong_subject_spy(
+        **kwargs: object,
+    ) -> tuple[
+        CandidateAttestationSubjectV2, trusted_host_source.AttestationTrustRootV2
+    ]:
+        subject, root = real_seam(**kwargs)  # type: ignore[arg-type]
+        return dataclasses.replace(subject, version="tampered"), root
 
     monkeypatch.setattr(
-        trusted_host_source, "verify_candidate_attestation", wrong_subject_spy
+        trusted_host_source, "_verify_candidate_and_root", wrong_subject_spy
     )
     with pytest.raises(PreconditionFailed) as raised:
         trusted_host_source.verify_attestation_pair(
@@ -803,13 +845,14 @@ def test_a_defect_in_shared_verification_surfaces_in_both_entry_points() -> None
 
 def test_no_parallel_candidate_verification_call_site_exists() -> None:
     """Static guard: `verify_attestation_pair` must call the shared seam
-    rather than repeating an inline `_verify(..., CANDIDATE_ATTESTATION_
-    PURPOSE, ...)` call. Fails if a future change reintroduces a second,
-    parallel candidate-authentication code path."""
+    (`_verify_candidate_and_root`) rather than repeating an inline
+    `_verify(..., CANDIDATE_ATTESTATION_PURPOSE, ...)` call. Fails if a
+    future change reintroduces a second, parallel candidate-authentication
+    code path."""
     import inspect
 
     pair_source = inspect.getsource(verify_attestation_pair)
-    assert "verify_candidate_attestation(" in pair_source
+    assert "_verify_candidate_and_root(" in pair_source
     assert "CANDIDATE_ATTESTATION_PURPOSE" not in pair_source
 
     module_source = inspect.getsource(trusted_host_source)

@@ -2,7 +2,7 @@
 
 ## Unreleased — successor not allocated
 
-### ADR-0073 redesign step 1: `verify_attestation_pair` returns typed, non-authorizing evidence
+### ADR-0073 redesign step 1 + step 2: `verify_attestation_pair` returns typed, non-authorizing evidence, widened to report everything verified
 
 **Breaking**: `verify_attestation_pair()` now returns `AttestationPairVerificationResultV1`
 on success instead of bare `None`, and requires one new keyword-only parameter,
@@ -24,6 +24,26 @@ attestation-envelope digests it already computes; Control owns the context
 digest). `admit_host_source()` carries the same new parameter through
 unchanged in spirit, for nine keyword-only parameters total, still discarding
 `verify_attestation_pair`'s return value since it only needs pass/fail.
+
+**Step 2 (result widening)**: `AttestationPairVerificationResultV1` gained
+seven more fields — `expected_host_identity`, `expected_observation_id`,
+`expected_package`, `candidate_audience`, `installed_audience`,
+`candidate_root`, `installed_root` (the last two a new small frozen
+dataclass, `AttestationVerifiedRootV1`) — closing half of a real
+security-boundary gap an independent review found on
+`dotmac_platform_control_plane`#192: today, Control's CP adapter caller
+supplies `expected_host_identity`/`expected_observation_id`/
+`expected_package`/`trust_policy` with NO downstream comparison against what
+Control itself resolved. Foundation now reports EVERYTHING it actually
+verified — the caller-supplied expectations that were checked, the audiences
+the trust policy declared, and the specific root that matched each half —
+so a later Control change can compare its own resolution against what
+Foundation actually verified against, instead of trusting a caller-supplied
+echo of its own input back at it unchanged. `AttestationPairVerificationResultV1`
+has never been published in any real release (`0.4.0a1`, which introduced it,
+was never tagged), so this widens the type in place rather than adding a V2.
+Control's comparison and the CP adapter's simplification are separate,
+later, cross-repository tasks.
 
 The successor remains unallocated and this is source-only, unreleased
 Foundation contract work. No Control implementation or CP adapter exists yet.
