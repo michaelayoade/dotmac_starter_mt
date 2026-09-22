@@ -731,3 +731,166 @@ Control trust-root/revocation, enrolled-host identity and replay-consumption
 state for each invocation. Absence or failure refuses before effects. A
 real positive admission still belongs first in the protected exact-wheel
 artifact rehearsal; neither a passing unit test nor this PR retires that gate.
+
+## Amendment — 2026-09-22: three distinct immutable candidate-provenance artifacts, and the record/signing order they fix
+
+Decision 2 of the 2026-09-08 amendment ("six admission decisions") states the
+ordering as "build once, sign the exact bytes, commit the receipt, rehearse,
+then publish" — one word, "receipt", carrying two different meanings across
+that sentence and the paragraph following it: `CandidateArtifact.v1`
+(decision 1's committed, non-authorizing binding of source revision,
+wheel/sdist digest, build run and artifact IDs) and whatever record binds a
+SIGNED envelope back to that artifact. Read literally, the sentence orders
+signing before any commit — which, followed literally, would let a signer
+produce a signed envelope against bytes nobody has yet durably recorded,
+reopening exactly the non-repudiation gap `CandidateArtifact.v1` exists to
+close: a record built or adjusted AFTER signing can always be made to agree
+with whatever was signed. `scripts/candidate_attestation_signer.py` already
+implements the correct order in practice — it "reads an already-committed-shape
+`CandidateArtifact.v1` receipt" and signs from it, never the reverse — but the
+ADR text never stated that as a rule, and never named the POST-sign record as
+its own distinct type. This amendment corrects both omissions.
+
+**Three artifacts, not two, each immutable and append-only, each with a
+single writer:**
+
+1. **`CandidateArtifact.v1`** — committed FIRST, before any signature exists.
+   Non-authorizing (decision 1: it shapes how admission is eventually built,
+   it does not itself admit anything). Binds source revision, the final
+   wheel/sdist digest(s), the build run ID and artifact ID, and an expiry.
+   Written once, by the build workflow, from the exact bytes the build
+   produced — never recomputed by a later re-hash, re-read, or a fresh API
+   call (already decision 2's own rule; restated here because it is the
+   property the ordering fix depends on). A `CandidateArtifact.v1` record is
+   never edited after it is committed.
+
+2. **The signed candidate-attestation envelope** (`TrustedHostAttestation.v2`,
+   already specified by the 2026-09-07 "trusted host provenance v2" amendment)
+   — produced only AFTER verifying that a committed `CandidateArtifact.v1`
+   record exists and that the artifact being signed matches it exactly (same
+   digest, same run and artifact IDs). The signer never signs from a fresh
+   build, a fresh hash, or an unrecorded artifact; it signs from the committed
+   record and nothing else. This is decision 2's "sign the exact bytes"
+   restated with its precondition made explicit: the bytes being signed are
+   the bytes the ALREADY-COMMITTED record names, not bytes the signer
+   independently trusts.
+
+3. **`CandidateAttestationReceipt.v1`** — committed AFTER the signed envelope
+   exists, in the SAME reviewed commit that lands the envelope itself (the
+   shape `scripts/candidate_attestation_signer.py`'s own docstring already
+   describes: "A human commits the signed envelope (and the bound receipt)
+   under `docs/inventories/` in a follow-up, reviewed change" — this
+   amendment names the vocabulary that docstring already assumed). It binds,
+   BY VALUE, never by path alone:
+   - the committed `CandidateArtifact.v1` record's revision identifier and
+     the canonical SHA-256 of the record's OWN bytes (not the wheel digest
+     the record itself names);
+   - the signed envelope's own canonical SHA-256 and the immutable artifact
+     coordinate (`CandidateArtifact.v1`'s build run ID and artifact ID) it
+     was produced from;
+   - the candidate's facility name and version;
+   - the identity of the one process that wrote it — the protected Starter
+     release-workflow signing step, the same identity decision 1 names as
+     the signer, and the ONLY writer this record ever has.
+
+   A record naming a FILE PATH to the artifact record or the envelope,
+   without also carrying that record's or envelope's own canonical digest,
+   is not a binding: a path can be repointed at a different file without
+   changing the receipt, a digest cannot. Duplicating the envelope's own
+   already-signed fields (package, version, wheel digest) without ALSO
+   carrying `CandidateArtifact.v1`'s OWN canonical digest closes nothing
+   either — that leaves no verifiable link back to the specific committed
+   record the signer actually read, only to facts the envelope already
+   separately asserts about itself. Without both digests present, a reader
+   cannot distinguish "this envelope was signed from this exact committed
+   record" from "this envelope happens to name the same package and version
+   as some record." This is the type the ADR text previously left unnamed.
+   It exists so a reader (or a later admission decision) can answer "which
+   committed artifact record does this signed envelope attest to" from a
+   durable, append-only pointer, rather than from the signer's own
+   now-unverifiable claim or from re-deriving the binding out-of-band.
+   Foundation's existing 2026-09-07 "successor Control receipt is a
+   Foundation value, not admission" amendment already establishes the
+   pattern of Foundation retaining a minimal, import-free consumer receipt
+   after cross-validating separately signed documents;
+   `CandidateAttestationReceipt.v1` is the SAME shape of thing, one step
+   earlier in the pipeline, for the candidate's own signed envelope rather
+   than for Control's authorization pair.
+
+**The fixed order, restated precisely**: freeze source → allocate → build once
+→ commit `CandidateArtifact.v1` → sign the exact recorded bytes → commit
+`CandidateAttestationReceipt.v1` → rehearse → publish. Reordering any step —
+signing before the artifact record is committed, committing the receipt before
+the envelope is actually signed, or rehearsing/publishing against anything
+other than the exact bytes both records name — reopens the same gap decision
+2 already named and this amendment now makes unambiguous.
+
+**Three distinct revisions, not one.** "Freeze source" — the first step of
+the fixed order — fixes the CANDIDATE SOURCE REVISION: the exact commit of
+`packages/dotmac-deployment-foundation` the build was taken from. Neither the
+`CandidateArtifact.v1` record's own commit, nor the
+`CandidateAttestationReceipt.v1` commit that lands afterward, IS that source
+revision, and neither is required to be — they are evidence ABOUT a frozen
+source revision, committed later, in the starter monorepo's own history, not
+inside the facility's source tree itself. A later evidence commit (fixing a
+typo in the receipt, recording a rehearsal result, or any change that does
+not touch `packages/dotmac-deployment-foundation` itself) does NOT by itself
+spend the candidate. What spends it is a change to the FACILITY SOURCE TREE
+or its declared version under the same candidate identity: if
+`packages/dotmac-deployment-foundation`'s tree, or its `pyproject.toml`
+version, no longer matches the frozen source revision `CandidateArtifact.v1`
+names, the candidate is spent — full stop, regardless of how many or how few
+evidence commits followed it. Unrelated evidence, runner, or documentation
+commits elsewhere in the monorepo never spend a candidate on their own.
+
+**A failed or drifted candidate is spent.** If a build fails, if the recorded
+digest does not match what actually got produced, or if a `CandidateArtifact.v1`
+record is found to disagree with the bytes it names at any later check, that
+candidate identity is spent: no `CandidateAttestationReceipt.v1` may bind to
+it, and the version it was allocated against is never reused (the existing
+rule that `0.4.0a1` remains "spent/drifted" and must never be reused for a
+real release is this same rule, applied once already, ahead of it being
+written down as a general one here). A fresh attempt allocates a fresh
+version and starts a fresh `CandidateArtifact.v1`, never resurrects a spent
+one.
+
+**Records are append-only, and a correction is never a same-identity
+replacement.** None of the three artifacts is ever edited in place once
+committed. A DEFECT discovered in a committed record — the build failed, a
+digest was wrong, rehearsal found a mismatch — is recorded as an APPENDED
+DISPOSITION: a new, separate record marking the existing
+`CandidateArtifact.v1` (and any `CandidateAttestationReceipt.v1` bound to it)
+spent, stating why. It is never a corrected `CandidateArtifact.v1` committed
+under the same candidate version — that would be exactly the same-identity
+edit this rule forbids, only routed through a second record instead of an
+in-place rewrite. A REPLACEMENT candidate — one meant to actually supersede
+the defective one and proceed to rehearsal and publication — requires a
+NEWLY ALLOCATED version and starts its own fresh `CandidateArtifact.v1`, per
+"a failed or drifted candidate is spent" above; it does not reference the
+spent record as something it supersedes, because a provenance record is
+never superseded under its own identity, only disposed of and left in place.
+The general append-only discipline this restates is the same one
+`AGENTS.md` rule 34 already requires of a published connector manifest,
+applied here to a candidate's own provenance chain before it ever reaches
+publication.
+
+**Publication may use only the exact rehearsed bytes.** The artifact that is
+eventually published must be bit-for-bit the same artifact the committed
+`CandidateArtifact.v1` names, the same artifact the signed envelope attests to,
+and the same artifact the protected rehearsal workflow (decision 5) actually
+exercised — never a rebuild, even an ostensibly-identical one. This restates
+decision 2's ordering as an invariant that holds continuously from commit
+through publication, not only at the moment each record is written.
+
+This amendment resolves the record/signing ordering conflict only. It does
+not allocate a Foundation successor version, does not build or sign a real
+`0.4.0a2` candidate, does not activate a production rehearsal issuer, and does
+not change `dotmac-deployment-control`'s pin. Those remain separately gated —
+Gate 0 (the protected disposable rehearsal-issuer contract, including
+ADR-0013 A6.4 immutable-reference derivation, signer custody, lease and
+controller identity) and Gate 1 (real CP `build_trust_policy` binding,
+applicable follow-ups closed before that binding becomes reachable,
+replay/refusal proof, Lane 3 runner capability, and the real ten-step recovery
+and roles-fail/objects-succeed adjudication test) must both be reviewed and
+green before a successor is allocated at all, and `0.4.0a1` remains spent and
+is never reused.
