@@ -9,14 +9,16 @@ unreachable from anything that touches a host.
 ## `RecoveryExecutor.run` used to refuse UNCONDITIONALLY — now sequence-testable
 
 `_verify_host_source` delegates to `self._admission_provider.admit_host_source()`
-(`host_source_admission.py`). With the default `RefusingHostSourceAdmissionProvider`
-it still always refuses — a typed refusal with zero effects, in every
+(`host_source_admission.py`). `admission_provider` is a REQUIRED constructor
+parameter with no default: a caller that wants today's unconditional refusal
+constructs `RefusingHostSourceAdmissionProvider()` explicitly (`_executor`,
+below) — it still always refuses, a typed refusal with zero effects, in every
 environment — so `RecoveryExecutor.run(...)` still cannot reach
-`_do_fresh_target` for a caller supplying no provider. A caller that supplies
-a synthetic `HostSourceAdmissionProvider` (this suite's
-`accepting_admission_provider()`, from `tests.unit.host_source_stance`) can
-exercise every step past the gate. That provider bypasses provenance solely to
-test sequencing; it is not trusted admission evidence.
+`_do_fresh_target` through it. A caller that supplies a synthetic
+`HostSourceAdmissionProvider` (this suite's `accepting_admission_provider()`,
+from `tests.unit.host_source_stance`) can exercise every step past the gate.
+That provider bypasses provenance solely to test sequencing; it is not
+trusted admission evidence.
 
 An earlier repair (`061cf4bd`) drove the ten steps through `_drive_steps`, a
 test helper that replicated `run()`'s dispatch loop — `restore_plan`, the
@@ -63,6 +65,9 @@ from dotmac_deployment_foundation.host_source import (
     DISAGREES,
     NO_RECEIPT,
     WRONG_KIND,
+)
+from dotmac_deployment_foundation.host_source_admission import (
+    RefusingHostSourceAdmissionProvider,
 )
 from dotmac_deployment_foundation.recovery import (
     RESTORE_PROCEDURE,
@@ -173,6 +178,11 @@ def _executor(effects: RecordingRecoveryEffects) -> RecoveryExecutor:
         effects,
         source_evidence=_evidence(),
         product_image=IMAGE,
+        # This helper is for the refusal-path tests below, which never
+        # exercise anything past `_verify_host_source` — the explicit
+        # refusing provider preserves exactly what this helper always
+        # produced, back when the parameter still defaulted to it.
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
 
 
@@ -525,6 +535,7 @@ def test_a_recovery_with_no_product_image_is_refused_at_construction() -> None:
             RecordingRecoveryEffects(),
             source_evidence=_evidence(),
             product_image="  ",
+            admission_provider=RefusingHostSourceAdmissionProvider(),
         )
 
 

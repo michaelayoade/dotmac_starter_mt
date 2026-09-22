@@ -1,8 +1,10 @@
 """No parameter of `Executor.__init__` or `RecoveryExecutor.__init__` lets a
 caller state the artifact digest or the launcher digest, by ANY route — and
 `_verify_host_source` on both classes delegates to its admission provider
-with no argument at all, and the DEFAULT provider
-(`RefusingHostSourceAdmissionProvider`) calls EXACTLY
+with no argument at all. `admission_provider` is now a REQUIRED
+constructor parameter with no default (see `_unsafe_cli_calls` below); the
+shipped CLI passes `RefusingHostSourceAdmissionProvider()` EXPLICITLY at
+every call site, and that provider calls EXACTLY
 `require_host_source(receipt=None)`, never anything a caller could reach. See
 the amendment below for why this is now a two-link claim.
 
@@ -163,13 +165,35 @@ def _executor_constructor_calls(tree: ast.Module) -> list[ast.Call]:
     )
 
 
+#: `admission_provider` became a REQUIRED constructor parameter with no
+#: default, so the shipped CLI must now pass it explicitly at every call
+#: site — the safe, literal shape is a bare, zero-argument call to
+#: `RefusingHostSourceAdmissionProvider`, exactly reproducing the refusal
+#: the old default produced. This is the ONE value this guard accepts for
+#: that keyword; anything else (a bare name, an aliased/qualified call, a
+#: call with arguments, `**kwargs` hiding the value dynamically) is still
+#: exactly the "planted admission provider" this file exists to catch.
+def _is_safe_refusing_provider_call(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "RefusingHostSourceAdmissionProvider"
+        and not node.args
+        and not node.keywords
+    )
+
+
 def _unsafe_cli_calls(tree: ast.Module) -> list[tuple[str | None, int]]:
     return [
         (keyword.arg, node.lineno)
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         for keyword in node.keywords
-        if keyword.arg == "admission_provider" or keyword.arg is None
+        if keyword.arg is None
+        or (
+            keyword.arg == "admission_provider"
+            and not _is_safe_refusing_provider_call(keyword.value)
+        )
     ]
 
 
@@ -182,8 +206,9 @@ def _assert_cli_executor_calls_are_refusal_only(tree: ast.Module) -> None:
     )
     unsafe = _unsafe_cli_calls(tree)
     assert unsafe == [], (
-        "the shipped CLI contains an admission-provider or dynamic-keyword "
-        f"call: {unsafe}"
+        "the shipped CLI contains an admission-provider call that is not "
+        "the safe, literal `RefusingHostSourceAdmissionProvider()`, or a "
+        f"dynamic-keyword call: {unsafe}"
     )
 
 
@@ -645,3 +670,24 @@ foundation.RecoveryExecutor(spec, manifest, effects, **kwargs)
     tree = ast.parse(source, filename="<plant: CLI aliased construction>")
     with pytest.raises(AssertionError, match="shipped CLI contains"):
         _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_admits_the_real_safe_literal() -> None:
+    """POSITIVE CONTROL. `admission_provider` is now REQUIRED, so the shipped
+    CLI must pass it explicitly — this proves the guard was narrowed to
+    accept exactly the one safe shape (a bare, zero-argument call to
+    `RefusingHostSourceAdmissionProvider`) rather than accidentally widened
+    to accept everything, which would defeat the three refusal tests above
+    for the wrong reason (a guard that never fires proves nothing)."""
+    source = """
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+"""
+    tree = ast.parse(source, filename="<the real, safe CLI shape>")
+    _assert_cli_executor_calls_are_refusal_only(tree)  # must not raise
+    # `test_cli_constructs_exactly_the_refusal_only_executor_calls` above
+    # already runs this same assertion against the real, shipped `CLI_PY` —
+    # this synthetic positive control exists so the three refusal tests
+    # above are proven to fire for the RIGHT reason (an actually-unsafe
+    # shape), not merely because the guard now rejects everything.
