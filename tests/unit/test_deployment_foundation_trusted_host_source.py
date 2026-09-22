@@ -966,6 +966,7 @@ def test_admit_host_source_binds_verified_pair_to_the_installed_reading(
         expected_host_identity="host:canonical-a",
         expected_observation_id="host-observation",
         expected_package="dotmac-deployment-foundation",
+        verification_context_digest=VERIFICATION_CONTEXT_DIGEST,
         now=NOW,
     )
 
