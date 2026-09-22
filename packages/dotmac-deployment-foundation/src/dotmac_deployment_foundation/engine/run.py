@@ -683,10 +683,11 @@ class Executor:
 
         Delegates to `self._admission_provider.admit_host_source()` — a
         FRESH call every time, never cached across `run`/`rollback`
-        invocations on the same instance. With no provider supplied at
-        construction (the default), that provider is
-        `RefusingHostSourceAdmissionProvider`, which itself calls exactly
-        `require_host_source(receipt=None)` and always refuses —
+        invocations on the same instance. `admission_provider` is a required
+        constructor argument with no default; a caller that wants today's
+        unconditional refusal constructs `RefusingHostSourceAdmissionProvider`
+        explicitly, which itself calls exactly `require_host_source(receipt=None)`
+        and always refuses —
         `NO_RECEIPT` if the interpreter has a genuine installed artifact and
         no receipt behind it, `ABSENT`/`WRONG_KIND` if it does not even have
         that. Both are typed refusals with zero effects: nothing between the
