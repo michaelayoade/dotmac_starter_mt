@@ -776,19 +776,46 @@ single writer:**
    independently trusts.
 
 3. **`CandidateAttestationReceipt.v1`** — committed AFTER the signed envelope
-   exists, binding the envelope to the `CandidateArtifact.v1` record it was
-   produced from, WITHOUT modifying that original record. This is the type
-   the ADR text previously left unnamed. It exists so a reader (or a later
-   admission decision) can answer "which committed artifact record does this
-   signed envelope attest to" from a durable, append-only pointer, rather
-   than from the signer's own now-unverifiable claim or from re-deriving the
-   binding out-of-band. Foundation's existing 2026-09-07 "successor Control
-   receipt is a Foundation value, not admission" amendment already establishes
-   the pattern of Foundation retaining a minimal, import-free consumer receipt
-   after cross-validating separately signed documents; `CandidateAttestationReceipt.v1`
-   is the SAME shape of thing, one step earlier in the pipeline, for the
-   candidate's own signed envelope rather than for Control's authorization
-   pair.
+   exists, in the SAME reviewed commit that lands the envelope itself (the
+   shape `scripts/candidate_attestation_signer.py`'s own docstring already
+   describes: "A human commits the signed envelope (and the bound receipt)
+   under `docs/inventories/` in a follow-up, reviewed change" — this
+   amendment names the vocabulary that docstring already assumed). It binds,
+   BY VALUE, never by path alone:
+   - the committed `CandidateArtifact.v1` record's revision identifier and
+     the canonical SHA-256 of the record's OWN bytes (not the wheel digest
+     the record itself names);
+   - the signed envelope's own canonical SHA-256 and the immutable artifact
+     coordinate (`CandidateArtifact.v1`'s build run ID and artifact ID) it
+     was produced from;
+   - the candidate's facility name and version;
+   - the identity of the one process that wrote it — the protected Starter
+     release-workflow signing step, the same identity decision 1 names as
+     the signer, and the ONLY writer this record ever has.
+
+   A record naming a FILE PATH to the artifact record or the envelope,
+   without also carrying that record's or envelope's own canonical digest,
+   is not a binding: a path can be repointed at a different file without
+   changing the receipt, a digest cannot. Duplicating the envelope's own
+   already-signed fields (package, version, wheel digest) without ALSO
+   carrying `CandidateArtifact.v1`'s OWN canonical digest closes nothing
+   either — that leaves no verifiable link back to the specific committed
+   record the signer actually read, only to facts the envelope already
+   separately asserts about itself. Without both digests present, a reader
+   cannot distinguish "this envelope was signed from this exact committed
+   record" from "this envelope happens to name the same package and version
+   as some record." This is the type the ADR text previously left unnamed.
+   It exists so a reader (or a later admission decision) can answer "which
+   committed artifact record does this signed envelope attest to" from a
+   durable, append-only pointer, rather than from the signer's own
+   now-unverifiable claim or from re-deriving the binding out-of-band.
+   Foundation's existing 2026-09-07 "successor Control receipt is a
+   Foundation value, not admission" amendment already establishes the
+   pattern of Foundation retaining a minimal, import-free consumer receipt
+   after cross-validating separately signed documents;
+   `CandidateAttestationReceipt.v1` is the SAME shape of thing, one step
+   earlier in the pipeline, for the candidate's own signed envelope rather
+   than for Control's authorization pair.
 
 **The fixed order, restated precisely**: freeze source → allocate → build once
 → commit `CandidateArtifact.v1` → sign the exact recorded bytes → commit
@@ -797,6 +824,24 @@ signing before the artifact record is committed, committing the receipt before
 the envelope is actually signed, or rehearsing/publishing against anything
 other than the exact bytes both records name — reopens the same gap decision
 2 already named and this amendment now makes unambiguous.
+
+**Three distinct revisions, not one.** "Freeze source" — the first step of
+the fixed order — fixes the CANDIDATE SOURCE REVISION: the exact commit of
+`packages/dotmac-deployment-foundation` the build was taken from. Neither the
+`CandidateArtifact.v1` record's own commit, nor the
+`CandidateAttestationReceipt.v1` commit that lands afterward, IS that source
+revision, and neither is required to be — they are evidence ABOUT a frozen
+source revision, committed later, in the starter monorepo's own history, not
+inside the facility's source tree itself. A later evidence commit (fixing a
+typo in the receipt, recording a rehearsal result, or any change that does
+not touch `packages/dotmac-deployment-foundation` itself) does NOT by itself
+spend the candidate. What spends it is a change to the FACILITY SOURCE TREE
+or its declared version under the same candidate identity: if
+`packages/dotmac-deployment-foundation`'s tree, or its `pyproject.toml`
+version, no longer matches the frozen source revision `CandidateArtifact.v1`
+names, the candidate is spent — full stop, regardless of how many or how few
+evidence commits followed it. Unrelated evidence, runner, or documentation
+commits elsewhere in the monorepo never spend a candidate on their own.
 
 **A failed or drifted candidate is spent.** If a build fails, if the recorded
 digest does not match what actually got produced, or if a `CandidateArtifact.v1`
@@ -809,11 +854,25 @@ written down as a general one here). A fresh attempt allocates a fresh
 version and starts a fresh `CandidateArtifact.v1`, never resurrects a spent
 one.
 
-**Records are append-only.** None of the three artifacts is ever edited in
-place once committed. A correction is a NEW record referencing the one it
-supersedes, never a rewrite — the same discipline `AGENTS.md` rule 34 already
-requires of a published connector manifest, applied here to a candidate's own
-provenance chain before it ever reaches publication.
+**Records are append-only, and a correction is never a same-identity
+replacement.** None of the three artifacts is ever edited in place once
+committed. A DEFECT discovered in a committed record — the build failed, a
+digest was wrong, rehearsal found a mismatch — is recorded as an APPENDED
+DISPOSITION: a new, separate record marking the existing
+`CandidateArtifact.v1` (and any `CandidateAttestationReceipt.v1` bound to it)
+spent, stating why. It is never a corrected `CandidateArtifact.v1` committed
+under the same candidate version — that would be exactly the same-identity
+edit this rule forbids, only routed through a second record instead of an
+in-place rewrite. A REPLACEMENT candidate — one meant to actually supersede
+the defective one and proceed to rehearsal and publication — requires a
+NEWLY ALLOCATED version and starts its own fresh `CandidateArtifact.v1`, per
+"a failed or drifted candidate is spent" above; it does not reference the
+spent record as something it supersedes, because a provenance record is
+never superseded under its own identity, only disposed of and left in place.
+The general append-only discipline this restates is the same one
+`AGENTS.md` rule 34 already requires of a published connector manifest,
+applied here to a candidate's own provenance chain before it ever reaches
+publication.
 
 **Publication may use only the exact rehearsed bytes.** The artifact that is
 eventually published must be bit-for-bit the same artifact the committed
