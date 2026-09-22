@@ -142,18 +142,20 @@ def admit_host_source(
     expected_host_identity: str,
     expected_observation_id: str,
     expected_package: str,
+    verification_context_digest: str,
     now: datetime,
 ) -> tuple[HostSource, HostSourceAdmissionTrace]:
     """Admit a `HostSource` from a verified v2 attestation pair, or refuse.
 
-    Eight parameters, all inputs the caller could not have forged into a
+    Nine parameters, all inputs the caller could not have forged into a
     result: there is no parameter for a receipt, a pre-parsed subject, an
     installed artifact reading, a metadata reader, a distribution selector, or
     any preverified outcome. Every `SpecError`/`PreconditionFailed` the called
     functions raise propagates unchanged — this function adds exactly one new
     refusal, reusing `host_source.DISAGREES`, for the one new check it
     performs: the real interpreter reading against the authenticated
-    installed-host subject.
+    installed-host subject. `verification_context_digest` is opaque here too —
+    it is only ever forwarded to `verify_attestation_pair`, never inspected.
     """
     verify_attestation_pair(
         candidate=candidate,
@@ -163,6 +165,7 @@ def admit_host_source(
         expected_host_identity=expected_host_identity,
         expected_observation_id=expected_observation_id,
         expected_package=expected_package,
+        verification_context_digest=verification_context_digest,
         now=now,
     )
     # `verify_attestation_pair` raises unless both halves are present and

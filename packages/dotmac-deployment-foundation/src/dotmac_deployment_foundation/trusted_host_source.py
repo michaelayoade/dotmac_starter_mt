@@ -48,6 +48,7 @@ __all__ = [
     "TRUST_ROOTS_NOT_DISTINCT",
     "SAME_KEY_SIGNED_BOTH",
     "AttestationEnvelopeV2",
+    "AttestationPairVerificationResultV1",
     "AttestationTrustPolicy",
     "AttestationTrustRootV2",
     "AttestationVerifier",
@@ -670,6 +671,16 @@ def attestation_envelope_digest(envelope: AttestationEnvelopeV2) -> Digest:
     return Digest.of(_canonical(envelope.canonical_document()))
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class AttestationPairVerificationResultV1:
+    """Non-authorizing verification evidence — never a HostSource or execution
+    token. Foundation verifies statelessly; only Control decides consequence."""
+
+    candidate_attestation_envelope_digest: str
+    installed_attestation_envelope_digest: str
+    verification_context_digest: str
+
+
 def verify_attestation_pair(
     *,
     candidate: AttestationEnvelopeV2 | None,
@@ -679,8 +690,9 @@ def verify_attestation_pair(
     expected_host_identity: str,
     expected_observation_id: str,
     expected_package: str,
+    verification_context_digest: str,
     now: datetime,
-) -> None:
+) -> AttestationPairVerificationResultV1:
     """Verify v2 evidence; success creates no caller-constructible authority."""
     if candidate is None:
         raise PreconditionFailed(
@@ -713,6 +725,9 @@ def verify_attestation_pair(
         candidate=candidate, verifier=verifier, trust_policy=trust_policy, now=now
     )
     expected_host_identity = _required(expected_host_identity, "expected_host_identity")
+    verification_context_digest = _required(
+        verification_context_digest, "verification_context_digest"
+    )
     now = now.astimezone(UTC)
     if trust_policy.installed_audience != expected_host_identity:
         raise PreconditionFailed(
@@ -772,3 +787,12 @@ def verify_attestation_pair(
             "candidate and host attest different package bytes",
             code=ATTESTATIONS_DISAGREE,
         )
+    return AttestationPairVerificationResultV1(
+        candidate_attestation_envelope_digest=str(
+            attestation_envelope_digest(candidate)
+        ),
+        installed_attestation_envelope_digest=str(
+            attestation_envelope_digest(installed)
+        ),
+        verification_context_digest=verification_context_digest,
+    )

@@ -66,10 +66,23 @@
   envelope to authenticate plus Control-resolved trust configuration
   (`verifier`, `trust_policy`, `now`); there is no parameter for a
   preconstructed subject, receipt, digest, or ad hoc root.
+- **Breaking (ADR-0073 redesign step 1)**: `verify_attestation_pair()` now
+  returns `AttestationPairVerificationResultV1` (`candidate_attestation_envelope_digest`,
+  `installed_attestation_envelope_digest`, `verification_context_digest`) on
+  success instead of bare `None`, and requires one new keyword-only parameter,
+  `verification_context_digest: str`. That parameter is Foundation's opaque —
+  Control's own digest over its resolved admission context, validated only for
+  non-emptiness and echoed back unchanged in the result on success; Foundation
+  never computes, interprets, or reproduces it. The two envelope digests in the
+  result are computed from the actual parsed `candidate`/`installed` objects
+  this call verified, identically to `attestation_envelope_digest()` — never
+  copied from a caller-supplied value. This result is explicitly
+  non-authorizing: never a `HostSource` or execution token; only Control
+  decides consequence from it.
 - `admit_host_source()` and `HostSourceAdmissionTrace`
   (`host_source_admission.py`). `admit_host_source(*, candidate, installed,
   verifier, trust_policy, expected_host_identity, expected_observation_id,
-  expected_package, now)` returns
+  expected_package, verification_context_digest, now)` returns
   `tuple[HostSource, HostSourceAdmissionTrace]` or raises: every existing
   `SpecError`/`PreconditionFailed` from `verify_attestation_pair()` /
   `verify_candidate_attestation()` propagates unchanged, plus distinct
@@ -78,10 +91,13 @@
   when the interpreter's
   own installed-artifact reading (taken only after the attestation pair is
   verified) disagrees with the authenticated installed-host subject's
-  `package`/`version`/`wheel_sha256`. The eight-parameter signature has no
+  `package`/`version`/`wheel_sha256`. The nine-parameter signature has no
   parameter for a receipt, a pre-parsed subject, an installed artifact, a
   metadata reader, a distribution selector, or any preverified result — the
   same inexpressible-bypass shape as `verify_candidate_attestation()`.
+  `verification_context_digest` is threaded through to `verify_attestation_pair()`
+  unread; `admit_host_source()` itself discards that call's typed return value,
+  since it only needs pass/fail.
   `HostSourceAdmissionTrace` is a frozen, slotted record populated from
   authenticated fields by `admit_host_source()` (`candidate_subject_digest`,
   `host_observation_id`, `host_identity`, both signer fingerprints, both
