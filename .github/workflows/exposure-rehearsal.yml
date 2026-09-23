@@ -108,6 +108,42 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+
+      # Can this SOURCE produce a Lane 3 rehearsal receipt at all?
+      #
+      # `foundation-candidate.yml` already runs this exact check before it will
+      # build a candidate; this lane executes the candidate and had never asked
+      # the same question of its own source. It runs BEFORE the control runner
+      # is even queried, for the same reason `foundation-candidate.yml` runs it
+      # before the version binding, the facility resolve and the build: refusing
+      # after querying a runner would spend a runner-availability check — and
+      # here, a held host lease — on a revision that was never eligible to
+      # rehearse in the first place. Stdlib only; no dependencies needed, which
+      # is why it can run in `preflight` before any Foundation package exists.
+      - name: Refuse a source whose runner cannot produce a rehearsal receipt
+        run: |
+          python scripts/lane3_runner_capability.py \
+            --root . \
+            --out lane3-runner-capability.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      # Preserved whatever the verdict, because a refusal is the more useful
+      # record of the two: it names which reasons blocked this revision, and the
+      # next attempt is measured against it rather than against a recollection.
+      - name: Upload the capability record
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lane3-runner-capability
+          path: lane3-runner-capability.json
+          retention-days: 90
+          # `error`, matching every other upload in this lane. The record is
+          # written before the script exits on either verdict, so an absent file
+          # means the step did not run to completion — and a missing capability
+          # record must not pass quietly, which is the whole failure this gate
+          # exists to end.
+          if-no-files-found: error
+
       # RUNNER_QUERY_TOKEN needs `administration: read`, which a workflow
       # `permissions:` block cannot grant — the job token is structurally unable
       # to list runners. The script REFUSES when the secret is absent rather
