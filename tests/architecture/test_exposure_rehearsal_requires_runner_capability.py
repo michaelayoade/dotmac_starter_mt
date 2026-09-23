@@ -31,8 +31,9 @@ file's checks depend on.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
+import pytest
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -137,19 +138,89 @@ def test_capability_check_runs_in_preflight_before_the_runner_liveness_check() -
 # ── 3. the capability-check step cannot be silenced ──────────────────────────
 
 
+#: Shell-level ways a NOT_CAPABLE exit status could be masked without ever
+#: touching the YAML-level `continue-on-error`/`if` keys this test also
+#: checks. An independent review of this file found the ORIGINAL version of
+#: `test_capability_check_step_is_unconditional_and_can_fail_the_job` only
+#: caught a LITERAL YAML boolean `continue-on-error: true` — `step.get(...)
+#: is not True` is `True` (i.e. the assertion PASSES, wrongly) for
+#: `continue-on-error: ${{ true }}`, because that value is a GitHub Actions
+#: expression STRING, never the Python `True` singleton PyYAML would have to
+#: produce for the check to fail. Neither the original check nor any other
+#: check in this file inspected the `run:` shell text itself, so `|| true`,
+#: `|| exit 0` or `; exit 0` appended after the capability command would
+#: mask its exit status and pass silently too. Both gaps are closed below by
+#: two small, independently-testable pure functions rather than inline
+#: assertions, so each one's own sensitivity is provable against a planted
+#: value without parsing a real workflow file.
+_EXIT_MASKING_PATTERNS: Final = ("|| true", "|| exit 0", "; exit 0")
+
+
+def _declares_continue_on_error(step: dict[str, Any]) -> bool:
+    """The KEY's mere presence is unsafe, regardless of its value. A literal
+    YAML boolean `true` is unsafe, and so is any other value, because
+    `continue-on-error: ${{ <any expression> }}` is parsed as a STRING (a
+    GitHub Actions expression, evaluated at run time) — checking `value is
+    not True` would pass on that string, since a string is never the `True`
+    singleton. Presence, not value, is what must be refused."""
+    return "continue-on-error" in step
+
+
+def _shell_masks_exit_status(run: str) -> str | None:
+    """The first exit-masking pattern found in a step's `run:` text, or
+    `None` if none is present."""
+    for pattern in _EXIT_MASKING_PATTERNS:
+        if pattern in run:
+            return pattern
+    return None
+
+
 def test_capability_check_step_is_unconditional_and_can_fail_the_job() -> None:
     workflow = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
     step = _step_invoking(_steps(workflow, "preflight"), CAPABILITY_SCRIPT)
 
-    assert step.get("continue-on-error") is not True, (
-        "the capability-check step tolerates a NOT_CAPABLE verdict via "
-        "continue-on-error, which is exactly what must not happen"
+    assert not _declares_continue_on_error(step), (
+        "the capability-check step declares continue-on-error at all "
+        f"(value: {step.get('continue-on-error')!r}) — any value, literal or "
+        "a `${{ }}` expression, can tolerate a NOT_CAPABLE verdict; the key "
+        "must be absent entirely"
     )
     assert "if" not in step, (
         "the capability-check step is gated by an `if:` condition, which "
         "could skip it entirely and let a NOT_CAPABLE verdict pass silently — "
         "mirror foundation-candidate.yml's own unconditional step"
     )
+    run = str(step.get("run", ""))
+    masking = _shell_masks_exit_status(run)
+    assert masking is None, (
+        "the capability-check step's shell command contains an exit-status "
+        f"masking pattern {masking!r} — this would let a NOT_CAPABLE "
+        "verdict's non-zero exit be swallowed before bash's own -e ever sees "
+        f"it, defeating the unconditional-refusal property this test proves: "
+        f"{run!r}"
+    )
+
+
+def test_continue_on_error_detector_catches_a_planted_expression_value() -> None:
+    """Sensitivity: proves `_declares_continue_on_error` catches the string-
+    vs-`True` bypass directly, without needing a real workflow file."""
+    assert _declares_continue_on_error({"continue-on-error": True})
+    assert _declares_continue_on_error({"continue-on-error": "${{ true }}"})
+    assert _declares_continue_on_error({"continue-on-error": False})
+    assert not _declares_continue_on_error({"run": "python x.py"})
+
+
+@pytest.mark.parametrize("masking_suffix", _EXIT_MASKING_PATTERNS)
+def test_exit_masking_detector_catches_each_planted_pattern(
+    masking_suffix: str,
+) -> None:
+    """Sensitivity: each exit-masking pattern is proven, planted one at a
+    time, to actually trip `_shell_masks_exit_status` — and a clean command
+    with none of them is proven NOT to trip it, so the detector cannot be
+    satisfied by matching everything."""
+    run = f"python {CAPABILITY_SCRIPT} --root . {masking_suffix}"
+    assert _shell_masks_exit_status(run) == masking_suffix
+    assert _shell_masks_exit_status(f"python {CAPABILITY_SCRIPT} --root .") is None
 
 
 # ── 4. the artifact upload matches foundation-candidate.yml's shape ─────────
