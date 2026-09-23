@@ -65,6 +65,73 @@ def _step_invoking(steps: list[dict[str, Any]], needle: str) -> dict[str, Any]:
     return matches[0]
 
 
+#: PINNED literals, independent of either workflow file. A THIRD independent
+#: review round found that comparing exposure-rehearsal.yml's step only
+#: against foundation-candidate.yml's (never against a fixed known-good
+#: value) proves nothing if BOTH files are weakened the SAME way — appending
+#: `|| true` to both keeps them equal to each other, and the three substring
+#: checks that were the only "positive control" on the candidate side stay
+#: satisfied too, since substring containment does not care what comes after.
+#: Whole-dict equality against these literals closes that gap and, as a
+#: side effect, also rejects any extra step key (`shell`, `env`,
+#: `working-directory`) the earlier `run`-only / key-presence-only checks
+#: never inspected.
+CANONICAL_CAPABILITY_STEP: dict[str, Any] = {
+    "name": "Refuse a source whose runner cannot produce a rehearsal receipt",
+    "run": (
+        "python scripts/lane3_runner_capability.py \\\n"
+        "  --root . \\\n"
+        "  --out lane3-runner-capability.json \\\n"
+        '  --summary "${GITHUB_STEP_SUMMARY}"\n'
+    ),
+}
+
+CANONICAL_UPLOAD_STEP: dict[str, Any] = {
+    "name": "Upload the capability record",
+    "if": "always()",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "with": {
+        "name": "lane3-runner-capability",
+        "path": "lane3-runner-capability.json",
+        "retention-days": 90,
+        "if-no-files-found": "error",
+    },
+}
+
+
+def _assert_step_matches_canonical(
+    step: dict[str, Any], canonical: dict[str, Any], *, source: str
+) -> None:
+    """The step must be EXACTLY the canonical mapping — no extra key (a
+    `shell:`, `env:` or `working-directory:` override that would let the
+    script run under a no-op shell or a poisoned `PATH`/`BASH_ENV`; a
+    `continue-on-error`/`if` gate), no missing key, no different value.
+
+    Deliberately whole-dict equality against a PINNED literal, not a
+    comparison between the two workflow files: two files weakened THE SAME
+    WAY still equal each other, so equality-between-files alone proves the
+    two files agree, never that either one is actually correct.
+    """
+    assert step == canonical, (
+        f"{source}'s step does not exactly match the pinned canonical "
+        f"mapping:\n{source}: {step!r}\ncanonical: {canonical!r}"
+    )
+
+
+def _upload_step(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    matches = [
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+        and step.get("with", {}).get("name") == "lane3-runner-capability"
+    ]
+    assert len(matches) == 1, (
+        "expected exactly one lane3-runner-capability upload-artifact step, "
+        f"found {len(matches)}"
+    )
+    return matches[0]
+
+
 def _index_invoking(steps: list[dict[str, Any]], needle: str) -> int:
     matches = [
         index for index, step in enumerate(steps) if needle in str(step.get("run", ""))
@@ -97,14 +164,9 @@ def test_both_workflows_parse_to_non_trivial_documents_with_a_jobs_key() -> None
 # ── 1. both workflows invoke the EXACT SAME canonical command ───────────────
 
 
-def _capability_run_text(workflow: dict[str, Any], job_name: str) -> str:
-    step = _step_invoking(_steps(workflow, job_name), CAPABILITY_SCRIPT)
-    return str(step.get("run", ""))
-
-
 def test_both_workflows_invoke_the_capability_script_with_root_dot() -> None:
-    """Exact canonical-command equality against `foundation-candidate.yml`,
-    not substring/pattern matching.
+    """Exact canonical-command equality between the two files, PLUS each
+    file independently checked against a pinned literal.
 
     An independent review found the ORIGINAL version of this test — three
     `substring in run` assertions — passes on a commented-out invocation.
@@ -113,60 +175,118 @@ def test_both_workflows_invoke_the_capability_script_with_root_dot() -> None:
     `#`-prefixed line survives YAML PARSING (it is inside the `run:` block's
     own string value, not YAML syntax the parser discards — unlike a `#`
     comment in the YAML document ITSELF, which the module docstring above
-    correctly says the parser is blind to). Exact string equality against
-    `foundation-candidate.yml`'s own already-reviewed invocation closes this
-    and every masking bypass in one property: ANY difference — a comment
-    prefix, an appended `|| true`, an inserted `set +e`, a conditional
-    wrapper — makes the two strings unequal, so no denylist of bypasses needs
-    to be maintained or kept complete.
+    correctly says the parser is blind to).
+
+    A THIRD independent review round then found that exact equality BETWEEN
+    THE TWO FILES, on its own, does not prove either file is correct — only
+    that they agree. Appending the identical `|| true` to both files keeps
+    them equal to each other, and the three substring checks that used to be
+    the only "positive control" here stay satisfied too, since substring
+    containment does not care what comes after. `_assert_step_matches_
+    canonical` below closes this: each file's step is checked against
+    `CANONICAL_CAPABILITY_STEP`, a literal independent of either file.
     """
     exposure = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
     candidate = _load_yaml(FOUNDATION_CANDIDATE_WORKFLOW)
 
-    exposure_run = _capability_run_text(exposure, "preflight")
-    candidate_run = _capability_run_text(candidate, "candidate")
+    exposure_step = _step_invoking(_steps(exposure, "preflight"), CAPABILITY_SCRIPT)
+    candidate_step = _step_invoking(_steps(candidate, "candidate"), CAPABILITY_SCRIPT)
 
-    assert exposure_run == candidate_run, (
+    assert exposure_step["run"] == candidate_step["run"], (
         "exposure-rehearsal.yml's capability-check command does not exactly "
         "match foundation-candidate.yml's canonical invocation:\n"
-        f"exposure-rehearsal.yml: {exposure_run!r}\n"
-        f"foundation-candidate.yml: {candidate_run!r}"
+        f"exposure-rehearsal.yml: {exposure_step['run']!r}\n"
+        f"foundation-candidate.yml: {candidate_step['run']!r}"
     )
-    # A positive control on the canonical text itself, so a change to BOTH
-    # files in the same way (which exact equality alone cannot see) does not
-    # silently drift the actual command shape this whole file assumes.
-    assert "--root ." in candidate_run
-    assert "--out lane3-runner-capability.json" in candidate_run
-    assert '--summary "${GITHUB_STEP_SUMMARY}"' in candidate_run
+    _assert_step_matches_canonical(
+        exposure_step, CANONICAL_CAPABILITY_STEP, source="exposure-rehearsal.yml"
+    )
+    _assert_step_matches_canonical(
+        candidate_step, CANONICAL_CAPABILITY_STEP, source="foundation-candidate.yml"
+    )
 
 
-def test_exact_equality_catches_a_planted_commented_out_invocation() -> None:
-    """Sensitivity: the exact bypass the independent review named, proven
-    directly rather than trusted from the reasoning alone."""
-    canonical = (
-        "python scripts/lane3_runner_capability.py \\\n"
-        "  --root . \\\n"
-        "  --out lane3-runner-capability.json \\\n"
-        '  --summary "${GITHUB_STEP_SUMMARY}"\n'
-    )
-    commented = "# " + canonical
-    assert CAPABILITY_SCRIPT in commented, "the plant must still contain the needle"
-    assert commented != canonical
+def test_canonical_step_check_catches_a_planted_commented_out_invocation() -> None:
+    """Sensitivity: the exact bypass the FIRST independent review round
+    named, proven by calling the REAL checking function on a realistic
+    mutated step — not by comparing two hand-written strings to each other,
+    which a prior version of this test did and which never actually
+    exercised `_assert_step_matches_canonical` or the loaded-YAML path."""
+    mutated = dict(CANONICAL_CAPABILITY_STEP)
+    mutated["run"] = "# " + mutated["run"]
+    assert (
+        CAPABILITY_SCRIPT in mutated["run"]
+    ), "the plant must still contain the needle"
+    with pytest.raises(AssertionError):
+        _assert_step_matches_canonical(
+            mutated, CANONICAL_CAPABILITY_STEP, source="planted"
+        )
 
 
 @pytest.mark.parametrize(
     "masking_suffix",
     (" || true", " || :", " || exit 0", "; exit 0", "\nset +e"),
 )
-def test_exact_equality_catches_each_planted_masking_pattern(
+def test_canonical_step_check_catches_each_planted_masking_pattern(
     masking_suffix: str,
 ) -> None:
-    """Sensitivity: every masking pattern named across both review rounds —
-    including `|| :` and `set +e`, which a hand-maintained denylist missed —
-    is caught by exact equality without needing its own list entry."""
-    canonical = f"python {CAPABILITY_SCRIPT} --root ."
-    masked = canonical + masking_suffix
-    assert masked != canonical
+    """Sensitivity: every masking pattern named across the first two review
+    rounds — including `|| :` and `set +e`, which a hand-maintained denylist
+    missed — is caught by the real checker without needing its own list
+    entry. Runs the actual function, not a bare string comparison."""
+    mutated = dict(CANONICAL_CAPABILITY_STEP)
+    mutated["run"] = mutated["run"].rstrip("\n") + masking_suffix + "\n"
+    with pytest.raises(AssertionError):
+        _assert_step_matches_canonical(
+            mutated, CANONICAL_CAPABILITY_STEP, source="planted"
+        )
+
+
+def test_canonical_step_check_catches_a_mirrored_weakening_of_both_files() -> None:
+    """The exact gap the THIRD independent review round named: appending the
+    SAME masking suffix to both files keeps them equal to EACH OTHER, so
+    the cross-file equality check above would not catch it. The pinned
+    canonical is what actually closes this."""
+    weakened = dict(CANONICAL_CAPABILITY_STEP)
+    weakened["run"] = weakened["run"].rstrip("\n") + " || true\n"
+    weakened_other_file = dict(weakened)  # identically mirrored, byte-for-byte
+    assert weakened == weakened_other_file, (
+        "the plant itself must reproduce the property under test: two "
+        "identically-weakened steps that are still equal to each other"
+    )
+    with pytest.raises(AssertionError):
+        _assert_step_matches_canonical(
+            weakened, CANONICAL_CAPABILITY_STEP, source="planted-exposure"
+        )
+    with pytest.raises(AssertionError):
+        _assert_step_matches_canonical(
+            weakened_other_file, CANONICAL_CAPABILITY_STEP, source="planted-candidate"
+        )
+
+
+def test_canonical_step_check_catches_an_added_shell_override() -> None:
+    """`shell: "true {0}"` (or any other custom-shell template) would let
+    GitHub Actions accept the step, log the unchanged `run:` text, and
+    execute nothing — the run-text-only check the first two review rounds
+    left in place never inspected this key at all."""
+    mutated = dict(CANONICAL_CAPABILITY_STEP)
+    mutated["shell"] = "true {0}"
+    with pytest.raises(AssertionError):
+        _assert_step_matches_canonical(
+            mutated, CANONICAL_CAPABILITY_STEP, source="planted"
+        )
+
+
+def test_canonical_step_check_catches_an_added_env_override() -> None:
+    """An `env:` override (e.g. a `BASH_ENV` pointing at a file that shadows
+    `python`) can silence the script without touching `run:`, `if`, or
+    `continue-on-error` — none of which the earlier checks would catch."""
+    mutated = dict(CANONICAL_CAPABILITY_STEP)
+    mutated["env"] = {"BASH_ENV": "shadow-python.sh"}
+    with pytest.raises(AssertionError):
+        _assert_step_matches_canonical(
+            mutated, CANONICAL_CAPABILITY_STEP, source="planted"
+        )
 
 
 # ── 2. exposure-rehearsal.yml runs it in preflight, before require_runner.py ─
@@ -221,29 +341,29 @@ def _declares_continue_on_error(step: dict[str, Any]) -> bool:
 def test_capability_check_step_is_unconditional_and_can_fail_the_job() -> None:
     exposure = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
     candidate = _load_yaml(FOUNDATION_CANDIDATE_WORKFLOW)
-    step = _step_invoking(_steps(exposure, "preflight"), CAPABILITY_SCRIPT)
+    exposure_step = _step_invoking(_steps(exposure, "preflight"), CAPABILITY_SCRIPT)
+    candidate_step = _step_invoking(_steps(candidate, "candidate"), CAPABILITY_SCRIPT)
 
-    assert not _declares_continue_on_error(step), (
+    assert not _declares_continue_on_error(exposure_step), (
         "the capability-check step declares continue-on-error at all "
-        f"(value: {step.get('continue-on-error')!r}) — any value, literal or "
-        "a `${{ }}` expression, can tolerate a NOT_CAPABLE verdict; the key "
-        "must be absent entirely"
+        f"(value: {exposure_step.get('continue-on-error')!r}) — any value, "
+        "literal or a `${{ }}` expression, can tolerate a NOT_CAPABLE "
+        "verdict; the key must be absent entirely"
     )
-    assert "if" not in step, (
+    assert "if" not in exposure_step, (
         "the capability-check step is gated by an `if:` condition, which "
         "could skip it entirely and let a NOT_CAPABLE verdict pass silently — "
         "mirror foundation-candidate.yml's own unconditional step"
     )
-    # Exact equality, not a masking denylist — see the module-level comment
-    # above for why. Any appended `|| true`, `|| :`, `set +e`, a conditional
-    # wrapper, or a commented-out line all fail this the same way: they are
-    # not byte-identical to the canonical, already-reviewed command.
-    exposure_run = _capability_run_text(exposure, "preflight")
-    candidate_run = _capability_run_text(candidate, "candidate")
-    assert exposure_run == candidate_run, (
-        "the capability-check step's command is not byte-identical to "
-        f"foundation-candidate.yml's canonical invocation: {exposure_run!r} "
-        f"!= {candidate_run!r}"
+    # Whole-dict equality against a PINNED literal, not just against each
+    # other — see `_assert_step_matches_canonical`'s own docstring and
+    # `test_canonical_step_check_catches_a_mirrored_weakening_of_both_files`
+    # for why cross-file equality alone is not enough.
+    _assert_step_matches_canonical(
+        exposure_step, CANONICAL_CAPABILITY_STEP, source="exposure-rehearsal.yml"
+    )
+    _assert_step_matches_canonical(
+        candidate_step, CANONICAL_CAPABILITY_STEP, source="foundation-candidate.yml"
     )
 
 
@@ -266,35 +386,45 @@ def test_capability_record_upload_matches_foundation_candidates_shape() -> None:
     exposure_steps = _steps(exposure, "preflight")
     candidate_steps = _steps(candidate, "candidate")
 
-    capability_step = _step_invoking(exposure_steps, CAPABILITY_SCRIPT)
-    capability_run = str(capability_step["run"])
+    capability_run = str(_step_invoking(exposure_steps, CAPABILITY_SCRIPT)["run"])
     assert "--out lane3-runner-capability.json" in capability_run
-
-    def _upload_step(steps: list[dict[str, Any]]) -> dict[str, Any]:
-        matches = [
-            step
-            for step in steps
-            if str(step.get("uses", "")).startswith("actions/upload-artifact")
-            and step.get("with", {}).get("name") == "lane3-runner-capability"
-        ]
-        assert len(matches) == 1, (
-            "expected exactly one lane3-runner-capability upload-artifact step, "
-            f"found {len(matches)}"
-        )
-        return matches[0]
 
     exposure_upload = _upload_step(exposure_steps)
     candidate_upload = _upload_step(candidate_steps)
 
-    assert exposure_upload["uses"] == candidate_upload["uses"], (
-        "exposure-rehearsal.yml's upload-artifact pin does not match "
-        "foundation-candidate.yml's — verify the current pin in "
-        "foundation-candidate.yml rather than assuming it is unchanged"
+    # Whole-dict equality against a PINNED literal for BOTH files, not
+    # `exposure_upload["uses"] == candidate_upload["uses"]` alone -- the same
+    # "equal to each other proves nothing about either being correct" gap
+    # named for the capability-check step above applies here identically,
+    # and also rejects an extra key (e.g. a silently-added
+    # `continue-on-error` that would let a failed upload pass quietly).
+    _assert_step_matches_canonical(
+        exposure_upload, CANONICAL_UPLOAD_STEP, source="exposure-rehearsal.yml upload"
     )
-    assert exposure_upload.get("if") == "always()"
-    assert exposure_upload["with"]["retention-days"] == 90
-    assert exposure_upload["with"]["if-no-files-found"] == "error"
-    assert exposure_upload["with"]["path"] == "lane3-runner-capability.json"
+    _assert_step_matches_canonical(
+        candidate_upload,
+        CANONICAL_UPLOAD_STEP,
+        source="foundation-candidate.yml upload",
+    )
     # The artifact's declared `path` must be the exact file the capability
     # check step wrote via `--out`, not merely a similarly-named string.
     assert exposure_upload["with"]["path"] in capability_run
+
+
+def test_canonical_upload_step_check_catches_a_dropped_always_condition() -> None:
+    """Sensitivity: dropping `if: always()` would mean a failed capability
+    check's own artifact never uploads, hiding the evidence of why CI
+    failed."""
+    mutated = dict(CANONICAL_UPLOAD_STEP)
+    del mutated["if"]
+    with pytest.raises(AssertionError):
+        _assert_step_matches_canonical(mutated, CANONICAL_UPLOAD_STEP, source="planted")
+
+
+def test_canonical_upload_step_check_catches_an_added_continue_on_error() -> None:
+    """A `continue-on-error` on the upload step would let a missing/failed
+    record pass quietly instead of failing the job."""
+    mutated = dict(CANONICAL_UPLOAD_STEP)
+    mutated["continue-on-error"] = True
+    with pytest.raises(AssertionError):
+        _assert_step_matches_canonical(mutated, CANONICAL_UPLOAD_STEP, source="planted")
