@@ -31,7 +31,7 @@ file's checks depend on.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 import pytest
 import yaml
@@ -94,27 +94,79 @@ def test_both_workflows_parse_to_non_trivial_documents_with_a_jobs_key() -> None
     assert "candidate" in candidate["jobs"]
 
 
-# ── 1. both workflows invoke the same script, with the same argument shape ──
+# ── 1. both workflows invoke the EXACT SAME canonical command ───────────────
+
+
+def _capability_run_text(workflow: dict[str, Any], job_name: str) -> str:
+    step = _step_invoking(_steps(workflow, job_name), CAPABILITY_SCRIPT)
+    return str(step.get("run", ""))
 
 
 def test_both_workflows_invoke_the_capability_script_with_root_dot() -> None:
+    """Exact canonical-command equality against `foundation-candidate.yml`,
+    not substring/pattern matching.
+
+    An independent review found the ORIGINAL version of this test — three
+    `substring in run` assertions — passes on a commented-out invocation.
+    `# python scripts/lane3_runner_capability.py --root . --out ... --summary
+    ...` contains every one of those substrings while executing nothing: a
+    `#`-prefixed line survives YAML PARSING (it is inside the `run:` block's
+    own string value, not YAML syntax the parser discards — unlike a `#`
+    comment in the YAML document ITSELF, which the module docstring above
+    correctly says the parser is blind to). Exact string equality against
+    `foundation-candidate.yml`'s own already-reviewed invocation closes this
+    and every masking bypass in one property: ANY difference — a comment
+    prefix, an appended `|| true`, an inserted `set +e`, a conditional
+    wrapper — makes the two strings unequal, so no denylist of bypasses needs
+    to be maintained or kept complete.
+    """
     exposure = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
     candidate = _load_yaml(FOUNDATION_CANDIDATE_WORKFLOW)
 
-    exposure_step = _step_invoking(_steps(exposure, "preflight"), CAPABILITY_SCRIPT)
-    candidate_step = _step_invoking(_steps(candidate, "candidate"), CAPABILITY_SCRIPT)
+    exposure_run = _capability_run_text(exposure, "preflight")
+    candidate_run = _capability_run_text(candidate, "candidate")
 
-    for step, workflow_name in (
-        (exposure_step, "exposure-rehearsal.yml"),
-        (candidate_step, "foundation-candidate.yml"),
-    ):
-        run = str(step["run"])
-        assert "--root ." in run, (
-            f"{workflow_name}'s capability-check step does not pass --root ., "
-            f"got: {run!r}"
-        )
-        assert "--out lane3-runner-capability.json" in run, workflow_name
-        assert '--summary "${GITHUB_STEP_SUMMARY}"' in run, workflow_name
+    assert exposure_run == candidate_run, (
+        "exposure-rehearsal.yml's capability-check command does not exactly "
+        "match foundation-candidate.yml's canonical invocation:\n"
+        f"exposure-rehearsal.yml: {exposure_run!r}\n"
+        f"foundation-candidate.yml: {candidate_run!r}"
+    )
+    # A positive control on the canonical text itself, so a change to BOTH
+    # files in the same way (which exact equality alone cannot see) does not
+    # silently drift the actual command shape this whole file assumes.
+    assert "--root ." in candidate_run
+    assert "--out lane3-runner-capability.json" in candidate_run
+    assert '--summary "${GITHUB_STEP_SUMMARY}"' in candidate_run
+
+
+def test_exact_equality_catches_a_planted_commented_out_invocation() -> None:
+    """Sensitivity: the exact bypass the independent review named, proven
+    directly rather than trusted from the reasoning alone."""
+    canonical = (
+        "python scripts/lane3_runner_capability.py \\\n"
+        "  --root . \\\n"
+        "  --out lane3-runner-capability.json \\\n"
+        '  --summary "${GITHUB_STEP_SUMMARY}"\n'
+    )
+    commented = "# " + canonical
+    assert CAPABILITY_SCRIPT in commented, "the plant must still contain the needle"
+    assert commented != canonical
+
+
+@pytest.mark.parametrize(
+    "masking_suffix",
+    (" || true", " || :", " || exit 0", "; exit 0", "\nset +e"),
+)
+def test_exact_equality_catches_each_planted_masking_pattern(
+    masking_suffix: str,
+) -> None:
+    """Sensitivity: every masking pattern named across both review rounds —
+    including `|| :` and `set +e`, which a hand-maintained denylist missed —
+    is caught by exact equality without needing its own list entry."""
+    canonical = f"python {CAPABILITY_SCRIPT} --root ."
+    masked = canonical + masking_suffix
+    assert masked != canonical
 
 
 # ── 2. exposure-rehearsal.yml runs it in preflight, before require_runner.py ─
@@ -138,22 +190,22 @@ def test_capability_check_runs_in_preflight_before_the_runner_liveness_check() -
 # ── 3. the capability-check step cannot be silenced ──────────────────────────
 
 
-#: Shell-level ways a NOT_CAPABLE exit status could be masked without ever
-#: touching the YAML-level `continue-on-error`/`if` keys this test also
-#: checks. An independent review of this file found the ORIGINAL version of
-#: `test_capability_check_step_is_unconditional_and_can_fail_the_job` only
-#: caught a LITERAL YAML boolean `continue-on-error: true` — `step.get(...)
-#: is not True` is `True` (i.e. the assertion PASSES, wrongly) for
-#: `continue-on-error: ${{ true }}`, because that value is a GitHub Actions
-#: expression STRING, never the Python `True` singleton PyYAML would have to
-#: produce for the check to fail. Neither the original check nor any other
-#: check in this file inspected the `run:` shell text itself, so `|| true`,
-#: `|| exit 0` or `; exit 0` appended after the capability command would
-#: mask its exit status and pass silently too. Both gaps are closed below by
-#: two small, independently-testable pure functions rather than inline
-#: assertions, so each one's own sensitivity is provable against a planted
-#: value without parsing a real workflow file.
-_EXIT_MASKING_PATTERNS: Final = ("|| true", "|| exit 0", "; exit 0")
+#: A hand-maintained denylist of shell-level exit-masking patterns was tried
+#: here and rejected after TWO independent review rounds. Round 1 found
+#: `step.get("continue-on-error") is not True` passes, wrongly, on
+#: `continue-on-error: ${{ true }}` (a GitHub Actions expression STRING,
+#: never the Python `True` singleton the check compared against) — fixed by
+#: checking the key's PRESENCE, not its value, below. Round 2 found the
+#: three-pattern denylist (`|| true`, `|| exit 0`, `; exit 0`) that replaced
+#: it missed real, equally valid bypasses (`|| :`, `set +e`, a conditional
+#: wrapper) — the exact "denylist wearing a structural claim" shape this
+#: codebase's own `test_deployment_foundation_host_source_constructor_seam
+#: .py` names and rejects elsewhere for an unrelated guard. A denylist can
+#: only ever catch a bypass someone thought of. The `run:` text check below
+#: is exact equality against `foundation-candidate.yml`'s own canonical
+#: invocation (see `test_both_workflows_invoke_the_capability_script_with_
+#: root_dot` above) instead — ANY difference, whatever shape it takes, fails
+#: it, so no enumeration of bypass shapes is needed or kept.
 
 
 def _declares_continue_on_error(step: dict[str, Any]) -> bool:
@@ -166,18 +218,10 @@ def _declares_continue_on_error(step: dict[str, Any]) -> bool:
     return "continue-on-error" in step
 
 
-def _shell_masks_exit_status(run: str) -> str | None:
-    """The first exit-masking pattern found in a step's `run:` text, or
-    `None` if none is present."""
-    for pattern in _EXIT_MASKING_PATTERNS:
-        if pattern in run:
-            return pattern
-    return None
-
-
 def test_capability_check_step_is_unconditional_and_can_fail_the_job() -> None:
-    workflow = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
-    step = _step_invoking(_steps(workflow, "preflight"), CAPABILITY_SCRIPT)
+    exposure = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
+    candidate = _load_yaml(FOUNDATION_CANDIDATE_WORKFLOW)
+    step = _step_invoking(_steps(exposure, "preflight"), CAPABILITY_SCRIPT)
 
     assert not _declares_continue_on_error(step), (
         "the capability-check step declares continue-on-error at all "
@@ -190,14 +234,16 @@ def test_capability_check_step_is_unconditional_and_can_fail_the_job() -> None:
         "could skip it entirely and let a NOT_CAPABLE verdict pass silently — "
         "mirror foundation-candidate.yml's own unconditional step"
     )
-    run = str(step.get("run", ""))
-    masking = _shell_masks_exit_status(run)
-    assert masking is None, (
-        "the capability-check step's shell command contains an exit-status "
-        f"masking pattern {masking!r} — this would let a NOT_CAPABLE "
-        "verdict's non-zero exit be swallowed before bash's own -e ever sees "
-        f"it, defeating the unconditional-refusal property this test proves: "
-        f"{run!r}"
+    # Exact equality, not a masking denylist — see the module-level comment
+    # above for why. Any appended `|| true`, `|| :`, `set +e`, a conditional
+    # wrapper, or a commented-out line all fail this the same way: they are
+    # not byte-identical to the canonical, already-reviewed command.
+    exposure_run = _capability_run_text(exposure, "preflight")
+    candidate_run = _capability_run_text(candidate, "candidate")
+    assert exposure_run == candidate_run, (
+        "the capability-check step's command is not byte-identical to "
+        f"foundation-candidate.yml's canonical invocation: {exposure_run!r} "
+        f"!= {candidate_run!r}"
     )
 
 
@@ -208,19 +254,6 @@ def test_continue_on_error_detector_catches_a_planted_expression_value() -> None
     assert _declares_continue_on_error({"continue-on-error": "${{ true }}"})
     assert _declares_continue_on_error({"continue-on-error": False})
     assert not _declares_continue_on_error({"run": "python x.py"})
-
-
-@pytest.mark.parametrize("masking_suffix", _EXIT_MASKING_PATTERNS)
-def test_exit_masking_detector_catches_each_planted_pattern(
-    masking_suffix: str,
-) -> None:
-    """Sensitivity: each exit-masking pattern is proven, planted one at a
-    time, to actually trip `_shell_masks_exit_status` — and a clean command
-    with none of them is proven NOT to trip it, so the detector cannot be
-    satisfied by matching everything."""
-    run = f"python {CAPABILITY_SCRIPT} --root . {masking_suffix}"
-    assert _shell_masks_exit_status(run) == masking_suffix
-    assert _shell_masks_exit_status(f"python {CAPABILITY_SCRIPT} --root .") is None
 
 
 # ── 4. the artifact upload matches foundation-candidate.yml's shape ─────────
