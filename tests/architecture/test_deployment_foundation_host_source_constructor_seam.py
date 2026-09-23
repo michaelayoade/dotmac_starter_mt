@@ -1,8 +1,10 @@
 """No parameter of `Executor.__init__` or `RecoveryExecutor.__init__` lets a
 caller state the artifact digest or the launcher digest, by ANY route — and
 `_verify_host_source` on both classes delegates to its admission provider
-with no argument at all, and the DEFAULT provider
-(`RefusingHostSourceAdmissionProvider`) calls EXACTLY
+with no argument at all. `admission_provider` is now a REQUIRED
+constructor parameter with no default (see `_unsafe_cli_calls` below); the
+shipped CLI passes `RefusingHostSourceAdmissionProvider()` EXPLICITLY at
+every call site, and that provider calls EXACTLY
 `require_host_source(receipt=None)`, never anything a caller could reach. See
 the amendment below for why this is now a two-link claim.
 
@@ -163,14 +165,86 @@ def _executor_constructor_calls(tree: ast.Module) -> list[ast.Call]:
     )
 
 
+#: `admission_provider` became a REQUIRED constructor parameter with no
+#: default, so the shipped CLI must now pass it explicitly at every call
+#: site — the safe, literal shape is a bare, zero-argument call to
+#: `RefusingHostSourceAdmissionProvider`, exactly reproducing the refusal
+#: the old default produced. This is the ONE value this guard accepts for
+#: that keyword; anything else (a bare name, an aliased/qualified call, a
+#: call with arguments, `**kwargs` hiding the value dynamically) is still
+#: exactly the "planted admission provider" this file exists to catch.
+def _is_safe_refusing_provider_call(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "RefusingHostSourceAdmissionProvider"
+        and not node.args
+        and not node.keywords
+    )
+
+
 def _unsafe_cli_calls(tree: ast.Module) -> list[tuple[str | None, int]]:
     return [
         (keyword.arg, node.lineno)
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         for keyword in node.keywords
-        if keyword.arg == "admission_provider" or keyword.arg is None
+        if keyword.arg is None
+        or (
+            keyword.arg == "admission_provider"
+            and not _is_safe_refusing_provider_call(keyword.value)
+        )
     ]
+
+
+#: `_is_safe_refusing_provider_call` proves the CALL SITE's syntax is the
+#: safe literal — a bare, zero-argument `RefusingHostSourceAdmissionProvider()`
+#: — but it only ever inspects the keyword's VALUE expression, never how the
+#: name `RefusingHostSourceAdmissionProvider` itself got bound. An
+#: independent review of this guard found the gap this closes: nothing stops
+#: `cli.py` from importing a DIFFERENT provider under that name —
+#: `from .wired_admission import ControlBackedAdmissionProvider as
+#: RefusingHostSourceAdmissionProvider` — after which every call site still
+#: reads as the safe literal while the shipped CLI admits for real. A
+#: wildcard import (`from .anything import *`) has the identical effect and
+#: is checked here too, since it could shadow the name without a matching
+#: `ImportFrom` alias to inspect at all.
+_PROVIDER_NAME = "RefusingHostSourceAdmissionProvider"
+
+
+def _unsafe_provider_name_bindings(tree: ast.Module) -> list[tuple[str, int]]:
+    """Every way the identifier `RefusingHostSourceAdmissionProvider` could
+    end up bound in `cli.py`'s namespace to something other than the real
+    class from `host_source_admission`. What matters is the EFFECTIVE bound
+    name (`alias.asname or alias.name`), not `alias.name` alone — a first
+    version of this check compared `alias.name` directly and missed exactly
+    the bypass it was written for: `from .wired_admission import
+    ControlBackedAdmissionProvider as RefusingHostSourceAdmissionProvider`
+    has `alias.name == "ControlBackedAdmissionProvider"`, so a same-name
+    comparison never even looks at it, while the EFFECTIVE name it binds is
+    the safe one's. Caught by testing this function directly against that
+    exact plant before trusting it."""
+    unsafe: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "*":
+                    unsafe.append(("wildcard import", node.lineno))
+                    continue
+                effective = alias.asname or alias.name
+                if effective != _PROVIDER_NAME:
+                    continue
+                if (
+                    node.module != "host_source_admission"
+                    or alias.name != _PROVIDER_NAME
+                ):
+                    detail = f"bound from {node.module!r}:{alias.name!r}"
+                    unsafe.append((detail, node.lineno))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if (alias.asname or alias.name) == _PROVIDER_NAME:
+                    unsafe.append((f"import {alias.name} as ...", node.lineno))
+    return unsafe
 
 
 def _assert_cli_executor_calls_are_refusal_only(tree: ast.Module) -> None:
@@ -182,8 +256,17 @@ def _assert_cli_executor_calls_are_refusal_only(tree: ast.Module) -> None:
     )
     unsafe = _unsafe_cli_calls(tree)
     assert unsafe == [], (
-        "the shipped CLI contains an admission-provider or dynamic-keyword "
-        f"call: {unsafe}"
+        "the shipped CLI contains an admission-provider call that is not "
+        "the safe, literal `RefusingHostSourceAdmissionProvider()`, or a "
+        f"dynamic-keyword call: {unsafe}"
+    )
+    unsafe_bindings = _unsafe_provider_name_bindings(tree)
+    assert unsafe_bindings == [], (
+        "the shipped CLI binds the name `RefusingHostSourceAdmissionProvider` "
+        "to something other than the real class from `host_source_admission`, "
+        "under its own name, with no wildcard import in the file — a call "
+        "site can read as the safe literal while the bound name is a "
+        f"different, real provider: {unsafe_bindings}"
     )
 
 
@@ -644,4 +727,62 @@ foundation.RecoveryExecutor(spec, manifest, effects, **kwargs)
 """
     tree = ast.parse(source, filename="<plant: CLI aliased construction>")
     with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_admits_the_real_safe_literal() -> None:
+    """POSITIVE CONTROL. `admission_provider` is now REQUIRED, so the shipped
+    CLI must pass it explicitly — this proves the guard was narrowed to
+    accept exactly the one safe shape (a bare, zero-argument call to
+    `RefusingHostSourceAdmissionProvider`) rather than accidentally widened
+    to accept everything, which would defeat the three refusal tests above
+    for the wrong reason (a guard that never fires proves nothing)."""
+    source = """
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+"""
+    tree = ast.parse(source, filename="<the real, safe CLI shape>")
+    _assert_cli_executor_calls_are_refusal_only(tree)  # must not raise
+    # `test_cli_constructs_exactly_the_refusal_only_executor_calls` above
+    # already runs this same assertion against the real, shipped `CLI_PY` —
+    # this synthetic positive control exists so the three refusal tests
+    # above are proven to fire for the RIGHT reason (an actually-unsafe
+    # shape), not merely because the guard now rejects everything.
+
+
+def test_cli_executor_guard_refuses_a_rebound_provider_name() -> None:
+    """Sensitivity: an independent security review of `_is_safe_refusing_
+    provider_call` found it verifies the call-site's SYNTAX but never how
+    the name `RefusingHostSourceAdmissionProvider` itself got bound — every
+    call site here reads as the safe literal while the shipped CLI would
+    admit a real, different provider under that name. The `admission_
+    provider=RefusingHostSourceAdmissionProvider()` calls below are
+    syntactically identical to the real, safe CLI shape; only the import at
+    the top differs."""
+    source = """
+from .wired import RealProvider as RefusingHostSourceAdmissionProvider
+
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+"""
+    tree = ast.parse(source, filename="<plant: rebound provider name>")
+    with pytest.raises(AssertionError, match="binds the name"):
+        _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_a_wildcard_import() -> None:
+    """Sensitivity: a wildcard import could shadow the safe name with no
+    `ImportFrom` alias naming it at all, so it is refused unconditionally
+    rather than only when the plant happens to name the token explicitly."""
+    source = """
+from .wired_admission import *
+
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+"""
+    tree = ast.parse(source, filename="<plant: wildcard import>")
+    with pytest.raises(AssertionError, match="binds the name"):
         _assert_cli_executor_calls_are_refusal_only(tree)

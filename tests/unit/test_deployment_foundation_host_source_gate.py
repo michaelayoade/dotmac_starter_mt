@@ -1,24 +1,25 @@
-"""The executor's DEFAULT never admits; a supplied provider is a separate seam.
+"""`RefusingHostSourceAdmissionProvider`, EXPLICITLY supplied, never admits; a
+supplied ACCEPTING provider is a separate seam.
 
 ## Amendment: the trusted-provenance admission provider seam
 
-`Executor`/`RecoveryExecutor` now accept a constructor-supplied
-`admission_provider` (`host_source_admission.HostSourceAdmissionProvider`),
-defaulting to `RefusingHostSourceAdmissionProvider` when none is supplied.
-This file's subject is exactly that DEFAULT: with no provider, the executor
-still refuses unconditionally, on exactly the codes and exactly the ordering
-below, because the default provider itself calls
-`require_host_source(receipt=None)` and nothing else. The claims this file's
-original docstring made about "no admit control" and "unreachable... by
-design" described the pre-provider-seam world; a genuinely admitting
-`Executor`/`RecoveryExecutor` is now reachable by SUPPLYING a provider, which
-is exactly what `tests/unit/host_source_stance.py`'s synthetic accepting
-provider does for the tests that previously skipped through this gate (see
-`test_deployment_foundation_host_source_admission_provider.py` for the
-admission-path proofs). What has NOT changed, and what the rest of this
-file's original account below still proves: no caller-authored PARSING value
-(a `CandidateReceipt`, an `InstalledMetadata`) can reach `require_host_source`
-through either constructor, by any route.
+`Executor`/`RecoveryExecutor` accept a constructor-supplied `admission_provider`
+(`host_source_admission.HostSourceAdmissionProvider`) that is now REQUIRED,
+with no default: a caller that wants today's unconditional refusal constructs
+`RefusingHostSourceAdmissionProvider()` itself. This file's subject is exactly
+that explicit refusing provider: supplied with it, the executor still refuses
+unconditionally, on exactly the codes and exactly the ordering below, because
+that provider itself calls `require_host_source(receipt=None)` and nothing
+else. The claims this file's original docstring made about "no admit control"
+and "unreachable... by design" described the pre-provider-seam world; a
+genuinely admitting `Executor`/`RecoveryExecutor` is reachable by SUPPLYING an
+accepting provider, which is exactly what `tests/unit/host_source_stance.py`'s
+synthetic accepting provider does for the tests that previously skipped
+through this gate (see `test_deployment_foundation_host_source_admission_provider.py`
+for the admission-path proofs). What has NOT changed, and what the rest of
+this file's original account below still proves: no caller-authored PARSING
+value (a `CandidateReceipt`, an `InstalledMetadata`) can reach
+`require_host_source` through either constructor, by any route.
 
 ## The ruling this file proves (Michael, verbatim), UPDATED after `541cee5d`
 
@@ -41,11 +42,12 @@ Michael's ruling, reshaping this into a SAFETY-ONLY file:
   There is nothing left to construct an "admitted" executor with THROUGH THAT
   ROUTE, and this file does not try to. (The later `admission_provider` seam
   is a different, non-parsing mechanism — see the amendment above.)
-* With no provider supplied, `_verify_host_source` always calls
+* With `RefusingHostSourceAdmissionProvider()` explicitly supplied,
+  `_verify_host_source` always calls
   `RefusingHostSourceAdmissionProvider.admit_host_source()`, which itself
   calls exactly `require_host_source(receipt=None)` — always refusing, a
   typed refusal (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`) with zero effects, in
-  EVERY environment where no provider was handed over.
+  EVERY environment where the refusing provider was handed over.
 * Verification ordering (after the lock, before the grant, before every
   step) is PRESERVED and re-proved below — on the refusal path, since that
   is now the only path that exists.
@@ -95,6 +97,9 @@ from dotmac_deployment_foundation.host_source import (
     WRONG_KIND,
     require_host_source,
 )
+from dotmac_deployment_foundation.host_source_admission import (
+    RefusingHostSourceAdmissionProvider,
+)
 
 from tests.unit.deployment_lock_harness import held_lock
 from tests.unit.test_deployment_foundation_execution_binding import (
@@ -130,6 +135,7 @@ def test_a_bare_executor_refuses_by_default() -> None:
         _grant(spec, execution_plan_digest=digest),
         execution_plan=execution_plan,
         sleep=lambda _: None,
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
     before = effects.snapshot()
     with pytest.raises(PreconditionFailed) as refusal:
@@ -155,6 +161,7 @@ def test_a_bare_executor_refuses_on_rollback_too() -> None:
         _grant(spec, operation="rollback", execution_plan_digest=digest),
         execution_plan=execution_plan,
         sleep=lambda _: None,
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
     before = effects.snapshot()
     with pytest.raises(PreconditionFailed) as refusal:
@@ -195,6 +202,7 @@ def test_mutually_agreeing_receipt_and_metadata_cannot_admit_the_executor() -> N
             grant,
             execution_plan=execution_plan,
             sleep=lambda _: None,
+            admission_provider=RefusingHostSourceAdmissionProvider(),
             host_source_receipt=receipt,
             host_source_metadata=metadata,
         )
@@ -203,7 +211,12 @@ def test_mutually_agreeing_receipt_and_metadata_cannot_admit_the_executor() -> N
     # value, because there is no parameter through which to supply them —
     # still refuses when run.
     executor = Executor(
-        spec, effects, grant, execution_plan=execution_plan, sleep=lambda _: None
+        spec,
+        effects,
+        grant,
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
     assert not hasattr(executor, "_host_source_receipt")
     assert not hasattr(executor, "_host_source_metadata")
@@ -232,6 +245,7 @@ def test_the_gate_fires_before_grant_revalidation(monkeypatch) -> None:  # type:
         _grant(spec, execution_plan_digest=digest),
         execution_plan=execution_plan,
         sleep=lambda _: None,
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
 
     calls: list[str] = []
@@ -257,11 +271,10 @@ def test_the_verification_call_happens_exactly_once_on_the_refusal_path(
 ) -> None:
     """NON-VACUITY. A `require_host_source` that is imported but never
     CALLED would let every refusal test in this file fail for an unrelated
-    reason and let this one pass by accident. `Executor` with no
-    `admission_provider` supplied defaults to
-    `RefusingHostSourceAdmissionProvider`, whose own `admit_host_source()`
-    (in `host_source_admission.py`, not `engine/run.py` any more — the call
-    moved with the provider seam) is what actually calls
+    reason and let this one pass by accident. `Executor` supplied with an
+    explicit `RefusingHostSourceAdmissionProvider()`, whose own
+    `admit_host_source()` (in `host_source_admission.py`, not `engine/run.py`
+    any more — the call moved with the provider seam) is what actually calls
     `require_host_source`, so that is the module patched here."""
     import dotmac_deployment_foundation.host_source_admission as admission_module
 
@@ -277,6 +290,7 @@ def test_the_verification_call_happens_exactly_once_on_the_refusal_path(
         _grant(spec, execution_plan_digest=digest),
         execution_plan=execution_plan,
         sleep=lambda _: None,
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
 
     with pytest.raises(PreconditionFailed):
@@ -307,6 +321,7 @@ def test_rollback_also_reaches_the_verification_call_on_the_refusal_path(
         _grant(spec, operation="rollback", execution_plan_digest=digest),
         execution_plan=execution_plan,
         sleep=lambda _: None,
+        admission_provider=RefusingHostSourceAdmissionProvider(),
     )
 
     with pytest.raises(PreconditionFailed):

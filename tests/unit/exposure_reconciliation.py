@@ -26,6 +26,7 @@ from dotmac_deployment_foundation.execution_plan_v2 import (
 from dotmac_deployment_foundation.ingress import FAMILIES, FILTER_CHAIN
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
+from tests.unit.host_source_stance import valid_host_source_kwargs
 from tests.unit.test_deployment_foundation_execution_binding import (
     AcceptingVerifier,
     RecordingEffects,
@@ -67,6 +68,7 @@ def authorized_executor(
         exposure_effects=exposure_effects,  # type: ignore[arg-type]
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     )
     return executor, DeploymentOutcome(plan=plan)
 

@@ -370,6 +370,9 @@ def test_the_executor_refuses_a_recovery_plan_at_CONSTRUCTION() -> None:
     attribute 'operation'` — after the executor had been built, and presented to
     an operator as a traceback rather than a refusal."""
     from dotmac_deployment_foundation.engine.run import Executor
+    from dotmac_deployment_foundation.host_source_admission import (
+        RefusingHostSourceAdmissionProvider,
+    )
 
     with pytest.raises(PreconditionFailed) as exc:
         Executor(
@@ -377,6 +380,7 @@ def test_the_executor_refuses_a_recovery_plan_at_CONSTRUCTION() -> None:
             object(),  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
             execution_plan=_recovery(),  # type: ignore[arg-type]
+            admission_provider=RefusingHostSourceAdmissionProvider(),
         )
     assert exc.value.code == EXECUTION_PLAN_WRONG_TYPE
 

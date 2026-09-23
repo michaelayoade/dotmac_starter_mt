@@ -57,28 +57,35 @@ returns. Argument-free is deliberate: a real provider implementation reaches
 Control and evidence itself, entirely inside its own method body, so there is
 no request/context parameter schema to invent here before Control has one.
 
-The provider is a CONSTRUCTOR parameter on both executors, defaulting to
-:class:`RefusingHostSourceAdmissionProvider` below — never an ambient
-registry, a module-level "installed provider" global, or anything this
-package discovers on its own. `install_secret_source`-style ambient
-installation is the wrong shape here on purpose: an executor that goes
-looking for a provider cannot tell "no provider was installed" from "the
-wrong provider was installed", and a mutating executor is exactly where that
-distinction has to stay visible at the call site.
+The provider is a REQUIRED CONSTRUCTOR parameter on both executors, with no
+default — never an ambient registry, a module-level "installed provider"
+global, or anything this package discovers on its own. `install_secret_source`
+-style ambient installation is the wrong shape here on purpose: an executor
+that goes looking for a provider cannot tell "no provider was installed" from
+"the wrong provider was installed", and a mutating executor is exactly where
+that distinction has to stay visible at the call site. Requiring the argument
+turns "no real admission was wired in" into a visible per-call-site decision:
+a caller that wants today's unconditional refusal constructs
+:class:`RefusingHostSourceAdmissionProvider` below explicitly.
 
 `RefusingHostSourceAdmissionProvider` is the ONLY implementation this package
 ships. It delegates to `host_source.require_host_source(receipt=None)` —
 byte-for-byte today's existing refusal, with the same typed codes
-(`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`) and zero effects — so a caller supplying
-no provider observes no behavior change. The protocol is a composition seam,
+(`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`) and zero effects — so a caller passing it
+explicitly observes no behavior change. The protocol is a composition seam,
 NOT an authority proof: any Python caller able to construct an executor can
-hand it an object returning a fabricated success. The shipped CLI supplies no
-provider, and its refusal-only call sites are guarded by an architecture test.
-Before a production assembly may supply one, it must prove that request input
-cannot select or replace the installed implementation and that the provider
-uses this module's `admit_host_source()` against fresh Control-resolved trust,
-host identity, and replay state. That provider and proof are later cross-repo
-work; this seam alone cannot establish positive admission.
+hand it an object returning a fabricated success. The shipped CLI passes
+`RefusingHostSourceAdmissionProvider()` explicitly at every call site, and
+those refusal-only call sites are guarded by an architecture test — which
+also checks how the name `RefusingHostSourceAdmissionProvider` itself is
+bound in that file, not only the shape of each call, so an import that
+rebinds the name to a different, real provider is caught too.
+Before a production assembly may supply an accepting one, it must prove that
+request input cannot select or replace the installed implementation and that
+the provider uses this module's `admit_host_source()` against fresh
+Control-resolved trust, host identity, and replay state. That provider and
+proof are later cross-repo work; this seam alone cannot establish positive
+admission.
 """
 
 from __future__ import annotations
@@ -261,11 +268,12 @@ class HostSourceAdmissionProvider(Protocol):
 class RefusingHostSourceAdmissionProvider:
     """The reference implementation: delegates to today's existing refusal.
 
-    Used as the default when a caller supplies no provider at all, so the
-    no-provider path produces EXACTLY today's behavior — the same
-    `ABSENT`/`WRONG_KIND`/`NO_RECEIPT` codes, zero effects, in every
-    environment. This class introduces no new refusal vocabulary; it is a
-    pure delegation to `require_host_source(receipt=None)`.
+    `admission_provider` is a required constructor parameter with no
+    default; a caller that wants today's behavior constructs this class
+    explicitly, and the explicit-provider path produces EXACTLY today's
+    behavior — the same `ABSENT`/`WRONG_KIND`/`NO_RECEIPT` codes, zero
+    effects, in every environment. This class introduces no new refusal
+    vocabulary; it is a pure delegation to `require_host_source(receipt=None)`.
     """
 
     def admit_host_source(self) -> tuple[HostSource, HostSourceAdmissionTrace]:

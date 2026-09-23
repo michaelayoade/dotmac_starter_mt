@@ -87,7 +87,6 @@ from ..host_source import HostSource
 from ..host_source_admission import (
     HostSourceAdmissionProvider,
     HostSourceAdmissionTrace,
-    RefusingHostSourceAdmissionProvider,
 )
 from ..policy import build_firewall_plan
 from ..spec import ProductDeploymentSpec
@@ -476,7 +475,7 @@ class Executor:
         deployment_id: str = "",
         evidence_policy: TrustPolicy | None = None,
         evidence_verifier: SignatureVerifier | None = None,
-        admission_provider: HostSourceAdmissionProvider | None = None,
+        admission_provider: HostSourceAdmissionProvider,
         recovery_receipts: Mapping[str, object] | None = None,
         recovery_verifier: SignatureVerifier | None = None,
         recovery_records: Mapping[str, Sequence[BackupRecord]] | None = None,
@@ -504,18 +503,13 @@ class Executor:
         self._evidence_policy = evidence_policy
         self._evidence_verifier = evidence_verifier
         # HANDED OVER, never discovered — the same rule as `recovery_receipts`
-        # just below, applied to the host-source admission seam. Defaults to
-        # `RefusingHostSourceAdmissionProvider()` rather than `None`-and-refuse
-        # -at-use: `_verify_host_source` always has a provider to call, and the
-        # provider it calls when none is supplied is the one that reproduces
-        # today's unconditional refusal exactly. See `host_source_admission.py`
-        # for why this is a constructor parameter and never an ambient
-        # registry.
-        self._admission_provider: HostSourceAdmissionProvider = (
-            admission_provider
-            if admission_provider is not None
-            else RefusingHostSourceAdmissionProvider()
-        )
+        # just below, applied to the host-source admission seam. REQUIRED, no
+        # default: a caller that wants today's unconditional refusal passes
+        # `RefusingHostSourceAdmissionProvider()` explicitly, so "no real
+        # admission was wired in" is a visible decision at every call site
+        # rather than a silent fallback. See `host_source_admission.py` for why
+        # this is a constructor parameter and never an ambient registry.
+        self._admission_provider: HostSourceAdmissionProvider = admission_provider
         # HANDED OVER, never discovered. There is no directory scan and no
         # `Effects.find_receipt()`: the caller passes the exact envelope for
         # each dataset, exactly as `--authorization` passes an
@@ -652,16 +646,18 @@ class Executor:
         # authenticate the provider or its result. A real provider therefore
         # requires a trusted, non-request-selectable assembly binding and
         # fresh Control-backed verification before it can be used in a
-        # mutating deployment. The shipped CLI supplies none, and an
-        # architecture test guards that refusal-only call-site premise. The
-        # default when no provider is supplied is `RefusingHostSourceAdmissionProvider`
-        # — which itself calls exactly `require_host_source(receipt=None)` and
+        # mutating deployment. The shipped CLI passes
+        # `RefusingHostSourceAdmissionProvider()` explicitly, and an
+        # architecture test guards that refusal-only call-site premise. This
+        # parameter is REQUIRED, with no default: a caller that wants today's
+        # unconditional refusal constructs `RefusingHostSourceAdmissionProvider()`
+        # itself — which calls exactly `require_host_source(receipt=None)` and
         # always refuses, with the exact typed refusal (`NO_RECEIPT`, or
         # `ABSENT`/`WRONG_KIND` if the interpreter itself has nothing
         # installed) `require_host_source` already produces today. `run` and
         # `rollback` call `_verify_host_source` themselves, which calls the
-        # provider; a caller supplying no provider observes no behavior
-        # change from before this seam existed.
+        # provider; a caller explicitly supplying the refusing provider
+        # observes no behavior change from before this seam existed.
         #
         # The provider's reported identity and trace. Both remain `None`
         # until `_verify_host_source` runs, but their types alone do not prove
@@ -687,10 +683,11 @@ class Executor:
 
         Delegates to `self._admission_provider.admit_host_source()` — a
         FRESH call every time, never cached across `run`/`rollback`
-        invocations on the same instance. With no provider supplied at
-        construction (the default), that provider is
-        `RefusingHostSourceAdmissionProvider`, which itself calls exactly
-        `require_host_source(receipt=None)` and always refuses —
+        invocations on the same instance. `admission_provider` is a required
+        constructor argument with no default; a caller that wants today's
+        unconditional refusal constructs `RefusingHostSourceAdmissionProvider`
+        explicitly, which itself calls exactly `require_host_source(receipt=None)`
+        and always refuses —
         `NO_RECEIPT` if the interpreter has a genuine installed artifact and
         no receipt behind it, `ABSENT`/`WRONG_KIND` if it does not even have
         that. Both are typed refusals with zero effects: nothing between the

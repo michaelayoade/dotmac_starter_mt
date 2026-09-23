@@ -112,7 +112,6 @@ from .host_source import HostSource
 from .host_source_admission import (
     HostSourceAdmissionProvider,
     HostSourceAdmissionTrace,
-    RefusingHostSourceAdmissionProvider,
 )
 from .recovery import (
     RESTORE_PROCEDURE,
@@ -302,7 +301,7 @@ class RecoveryExecutor:
         *,
         source_evidence: CatalogEvidence,
         product_image: str,
-        admission_provider: HostSourceAdmissionProvider | None = None,
+        admission_provider: HostSourceAdmissionProvider,
     ) -> None:
         self._spec = spec
         self._manifest = manifest
@@ -331,18 +330,15 @@ class RecoveryExecutor:
         # every mutating executor path"). It is not an authority proof: a
         # constructor caller can return invented values from its method, so
         # positive admission awaits a trusted, non-request-selectable assembly
-        # binding and fresh Control verification. The shipped CLI passes no
-        # provider. This parameter defaults to
-        # `RefusingHostSourceAdmissionProvider`, which itself calls exactly
-        # `require_host_source(receipt=None)` and always refuses — a caller
-        # supplying no provider observes no behavior change. `_do_fresh_target`
+        # binding and fresh Control verification. REQUIRED, with no default: a
+        # caller that wants today's unconditional refusal constructs
+        # `RefusingHostSourceAdmissionProvider()` itself — which calls exactly
+        # `require_host_source(receipt=None)` and always refuses — so a caller
+        # explicitly supplying the refusing provider observes no behavior
+        # change. The shipped CLI does exactly that. `_do_fresh_target`
         # (below) is this class's first effect — creating a cluster — and the
         # provider is consulted before it, never after.
-        self._admission_provider: HostSourceAdmissionProvider = (
-            admission_provider
-            if admission_provider is not None
-            else RefusingHostSourceAdmissionProvider()
-        )
+        self._admission_provider: HostSourceAdmissionProvider = admission_provider
         self._host_source: HostSource | None = None
         self._host_source_admission_trace: HostSourceAdmissionTrace | None = None
 
@@ -351,9 +347,9 @@ class RecoveryExecutor:
 
         Same shape as `engine.run.Executor._verify_host_source`: delegates to
         `self._admission_provider.admit_host_source()`, a FRESH call every
-        time. With the default `RefusingHostSourceAdmissionProvider`, this
-        always refuses — `NO_RECEIPT` against a genuine installed artifact,
-        `ABSENT`/`WRONG_KIND` otherwise. A supplied provider's own
+        time. With an explicitly supplied `RefusingHostSourceAdmissionProvider`,
+        this always refuses — `NO_RECEIPT` against a genuine installed
+        artifact, `ABSENT`/`WRONG_KIND` otherwise. A supplied provider's own
         `PreconditionFailed`/`SpecError` propagates unchanged.
         """
         self._host_source, self._host_source_admission_trace = (
