@@ -131,3 +131,110 @@ reviewed rehearsal-issuer design, a capable Lane 3 runner and a protected
 Foundation source tree whose admission and recovery paths can be exercised
 against one exact built candidate. Only then does the short, irreversible
 candidate window begin.
+
+## Update, 2026-09-24 — Gate 0/1's mechanism half is proven; the authority
+## contract (Work Packet A) is drafted, pending ratification
+
+**This section is a dated observation, not a rewrite of the plan above** —
+the gate table and its evidence discipline stand. This records what actually
+closed since the 2026-09-20 baseline and reconciles this roadmap's 0–7 gate
+numbering with the simpler three-gate framing Michael has since used when
+directing this exact work, so nobody mistakes two numbering schemes for two
+plans.
+
+### Refreshed baseline
+
+Superseding the § "Baseline" coordinates above (re-verify before acting, per
+that section's own instruction): Platform CP `main`
+`c80415fa6837b2f2c9ebb4755d5a0b3f9fbf55f3`; Starter `main`
+`96780a9fd30f33b468bdcc1af3a5001d2026beec`; `dotmac_deployment_control` `main`
+`a3b7f9d64f92529e2f3ce7f77da12af38165c602`, publishing `dotmac-deployment-control`
+`0.1.0a14` — independently verified published, tagged, and pinnable, not
+merely declared. CP PR #187 is superseded by this baseline; #193 (the full
+Control-a14/Kernel-a101 application rewrite) remains HELD, uncommitted,
+locally at `/private/tmp/cp1-rehearsal-issuer-composition-20260923`.
+
+### Reconciling the two gate numberings
+
+Michael's own recent framing (Gate 0 → Gate 2 → Gate 3) is the SAME sequence
+this roadmap's Gates 0–3 describe, at coarser grain — it folds this roadmap's
+Gates 0 and 1 into one "protected issuer readiness" gate, and keeps this
+roadmap's Gates 2 and 3 as-is:
+
+| Michael's gate | This roadmap's gate(s) | Status as of this update |
+| --- | --- | --- |
+| **Gate 0** — protected issuer readiness | Gates 0 ("Settle the bootstrap contracts") + 1 ("Make source and runner ready") | MECHANISM half proven (below); PROTECTED-COMPOSITION half open (Work Packets A–E) |
+| **Gate 2** — allocate/build one successor | Gate 2 ("Freeze and build one successor") | Not started; blocked on Gate 0 closing in full |
+| **Gate 3** — authorize and rehearse exact bytes | Gate 3 ("Rehearse exact bytes before publication") | Not started |
+
+Nothing below changes gates 4–7 or their owners.
+
+### What closed: the mechanism half of gates 0–1
+
+Platform CP #194 (a dependency-light, stdlib-only source seam translating a
+caller's three fields into Control's exact accepted request shape) and #195
+(a disposable, candidate-independent harness proving the real, published
+Control `0.1.0a14` wheel — paired with `dotmac-kernel` `0.1.0a100` — genuinely
+issues, holds committed standing on, revokes, and single-use-consumes
+rehearsal-issuer authority) are both merged. #195's final CI run is real
+evidence, not a claim: 16 of 16 tests passed against real migrated
+PostgreSQL, with `platform_api` (not the migrator) performing every issuer
+operation, matching `docs/ARCHITECTURE.md`'s real production role contract
+exactly (`app_admin` stayed `NOCREATEROLE` throughout).
+
+This proves the MECHANISM — Control's real issuance/standing/revocation/
+consumption code, called with the real published artifacts, under a
+production-shaped privilege model — is sound. It does not close gate 0/1's
+protected-composition half: no protected GitHub Environment, no real key
+custody, no genuine `dotmac-approvals` decision, and no real per-run
+controller identity exist yet (confirmed absent below). Reaching a "16/16"
+mechanism proof and reaching "the protected rehearsal issuer may act for a
+real approval, under real custody, on a real runner" are different claims,
+and this roadmap's own gate-0 pass evidence ("Accepted design and
+source-level refusal tests… protected rehearsal workflow prepared") already
+named the second, not the first, as what closes the gate.
+
+### What remains: five work packets closing gate 0/1's protected-composition half
+
+Platform CP's `docs/adr/0013-operator-authorization-issuer-and-its-bootstrap.md`
+§ A7 (added 2026-09-24, drafted, pending Michael's ratification) is now the
+authoritative document-purpose/identity/ownership matrix for these. Summary,
+Starter's own stake in each:
+
+| Packet | Owner | Starter's stake |
+| --- | --- | --- |
+| **A. Authority contract** | CP + Starter docs (this section, plus CP ADR-0013 § A7) | Freezes gate sequencing, the five-document purpose matrix (rehearsal-issuer authorization vs. Foundation `ExecutionGrant` vs. harness evidence vs. `ApprovalEvidence` vs. Lane-3 receipt — never conflate the first two), and ownership, before B–E may merge |
+| **B. Protected issuer composition** | Platform CP | Real approvals via `dotmac-approvals` (not rollout-coupled) and real signer/verifier providers — no rollout, no deployment |
+| **C1. Execution semantics** | Deployment Foundation | Selects Foundation's real `ExecutionGrant` path and fixes its digest semantics — this is what the rehearsal-issuer envelope must NEVER be mistaken for |
+| **C2. Assembly binding** | Starter/CP binding package | Installs B's genuine (non-ephemeral) verifier into the candidate environment |
+| **D. Protected workflow** | Starter + infrastructure | Protected GitHub Environment, OIDC, real per-run controller-key custody, immutable readiness receipts, and the Lane-3 observer/jump/inside-vantage configuration this roadmap's own gate 1 already named |
+
+A must merge before B/C1/C2/D begin implementation; B and C1 may then run in
+parallel; C2 and D follow their respective contracts. **This ordering exists
+specifically to avoid recreating the circularity #194/#195 just broke**: a
+pre-allocation, candidate-bound Lane-3 authorization would be exactly that
+regression, so gate 2 (successor allocation) still does not start until gate
+0/1 is reviewed closed in full — mechanism plus protected composition,
+together.
+
+### Confirmed absent, read-only, 2026-09-24
+
+Independently verified against live GitHub state (no host action, workflow
+dispatch, key creation, OpenBao read, or secret value observed):
+
+- No protected rehearsal GitHub Environment exists — `pypi-release` and
+  `registry-release` are the only two environments on this repository.
+- `control-runner-starter-mt` is online and idle, carrying exactly
+  `self-hosted, Linux, X64, dotmac-control-runner, dotmac-foundation-control`.
+  Its only observed diagnostic run was cancelled 2026-08-31; none has
+  succeeded.
+- Repository variables are exactly `LANE3_PROBE_HOST` and
+  `RELEASE_RECORDER_CLIENT_ID` — no observer-user, jump-key, or
+  inside-vantage variable exists yet, so `docs/inventories/lane3-acceptance-
+  criteria.md`'s own vantage requirements (§§ 2a–2c: far-end source
+  addresses, `privileged_vantage_refused`, `private_inside`) remain
+  unconfigurable until Work Packet D lands.
+
+These are gate-1 preconditions this roadmap already listed as open ("prepares
+a protected, real ten-step recovery and Lane 3 runner"); this update dates
+and confirms them rather than changing what gate 1 requires.
