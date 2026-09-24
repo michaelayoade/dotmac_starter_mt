@@ -69,7 +69,7 @@ production steps stay serial.
 | **0. Settle the bootstrap contracts** | CP + Control + Foundation: review the pre-publication rehearsal issuer, immutable candidate reference, custody-approved signer, lease and controller identity. Specify how the five ADR-0013 A6.4 plan inputs are derived without an operator-supplied image. Reconcile the existing single-use persistence-bootstrap receipt with the no-application-replacement rule. | Accepted design and source-level refusal tests for wrong candidate, signer, target, profile, image and plan; protected rehearsal workflow prepared. The issuer path must be implementable once a candidate exists, but cannot produce a candidate-bound authorization yet. | PR #187's current refusal is honest. Do not patch around it with flags, a free-text `authorization_ref` or a fake receipt. Recommend a protected disposable issuer for rehearsal only; production issuer activation remains a separate gate. Any departure from ADR-0013 needs its owner's amendment, not just host approval. |
 | **1. Make source and runner ready** | Foundation wires trusted candidate + installed-host admission through both executors; prepares concrete assembly binding and absence-evidence collection for the declared concerns beyond #735's synthetic verifier tests; fixes recovery's per-step adjudication; prepares a protected, real ten-step recovery and Lane 3 runner. Control prepares enrolment/revocation, challenge and signed authorization/grant semantics. | Source-level negative tests for same-author, wrong-artifact, wrong-host, revoked-key, replay and `receipt=None`; a `Lane3RunnerCapability.v1` check proves the runner can produce the required evidence before allocation. Positive candidate admission and live ten-step recovery are **not** claimed at this gate. | `_do_restore_objects` currently overwrites `outcome.attempt` from `_do_restore_roles` before adjudication: add roles-fail/objects-succeed refusal. No second CP renderer or Control decision engine. Do not require a candidate-bound proof before the candidate exists. |
 | **2. Freeze and build one successor** | Starter release captain freezes an exact protected-main source revision, disposes of spent `0.4.0a1`, allocates fresh `0.4.0a2`, and builds wheel and sdist once. Reconcile ADR-0070's “sign, then commit receipt” ordering with `foundation-candidate-attestation.yml`, which requires an **already committed** `CandidateArtifact.v1`; distinguish that artifact record from the later signed attestation and review any owning ADR amendment before executing the sequence. | Protected candidate run; committed artifact record with source, wheel/sdist digests, run/artifact IDs and observed expiry; exact bytes re-fetched and verified with the required 30-day retention margin; independent signed envelope and its reviewed record at the sequence the reconciled contract requires. | **Not published or tagged yet.** Missing/expired artifacts or source-tree drift under the same version spend the candidate; disposition and a new version are required. An evidence-only main commit does not automatically void the window. Release-ancestry and freeze guards must still pass. Do not allocate before issuer design and runner readiness are reviewed. |
-| **3. Rehearse exact bytes before publication** | CP/Control activate the gate-0 **rehearsal** issuer on a specifically authorized disposable target. Foundation installs the gate-2 wheel as an exact verified file, never a name-only resolution. Exercise candidate/host admission, real ten-step recovery and Lane 3 with the lease, controller identity and actual source-set probes. Retain the Lane 3 receipt as its workflow artifact; do not move the release revision after that run. | Issuer authorization run ID; signed candidate/host and recovery receipts; Lane 3 `RehearsalReceipt.v1` with **16/16 `executed_passed`**, including provoked rollback and non-vacuous running-service negatives. The rehearsal run binds the **later release revision** that contains the committed candidate record; that revision separately binds the candidate source tree and artifact digest. | Human names the exact SSH endpoint and action before host work. `vendor-cp-prod` is a logical host ID, not an inferred SSH target. A disposable issuer's identity is not production authority. No positive admission on editable CI or ordinary main. |
+| **3. Authorize and rehearse exact bytes before publication** | After gate 2 has produced the one exact artifact, CP/Control activate the gate-0 **rehearsal** issuer on a specifically authorized disposable target. Foundation issues and validates its candidate-bound `ExecutionGrant`, binding the exact gate-2 artifact bytes, rendered plan, target/host and controller identity before any executor or Lane-3 action. Foundation installs that wheel as an exact verified file, never a name-only resolution, then exercises candidate/host admission, real ten-step recovery and Lane 3 with the lease, controller identity and actual source-set probes. Retain the Lane 3 receipt as its workflow artifact; do not move the release revision after that run. | The accepted Foundation `ExecutionGrant` coordinate and issuer authorization run ID; signed candidate/host and recovery receipts; Lane 3 `RehearsalReceipt.v1` with **16/16 `executed_passed`**, including provoked rollback and non-vacuous running-service negatives. The grant and rehearsal run bind the **later release revision** that contains the committed candidate record; that revision separately binds the candidate source tree and artifact digest. | Human names the exact SSH endpoint and action before host work. `vendor-cp-prod` is a logical host ID, not an inferred SSH target. A rehearsal issuer's identity and Control's authorization to operate it are not Foundation execution authority; no executor starts until the `ExecutionGrant` is accepted. No positive admission on editable CI or ordinary main. |
 | **4. Publish the rehearsed candidate** | Starter release captain publishes the **same wheel and sdist bytes** from the rehearsed candidate, reads them back from the registry, verifies digests, tags and merges the truthful release record under the short named freeze. | Protected release run, immutable tag/peeled candidate-source commit, registry read-back, install-back of exact files and green release-record main. The release workflow separately checks candidate source, release revision and rehearsal-runner revision. | No rebuild, mutable tag, name-only install, skipped gate, or use of the spent a1 artifact. Publication still does not transfer a product executor. |
 | **5. Land CP's consuming source** | CP implements ADR-0017's concrete design only with Michael's separate implementation go-ahead and the topology-complete published Foundation pin. First, pre-merge CI renders and byte-compares the effective `docker-compose.production.yml` **without authorization or an independent image slot**. Reconcile #187 and schema 11. After merge, publish a CP image and verify its release receipt and registry read-back; only then derive `admit_candidate_image` and let Control bind that image, retained render, private inventory, target and approval. | Required hosted checks green at the final PR head; retained asset hash and consuming workflow; negative tests for edited bytes, `COMPOSE_FILE` diversion, image injection, wrong authorized inputs and missing receipted rollback asset. Accepted descriptors remain until their specified successful migration/runtime promotion. | A green render is neither image admission nor Control authorization. #187 stays draft until its real Governance gate is green. Do not let a pre-merge candidate authorize production or retroactively mutate `deploy/product.toml` or its ledger. |
 | **6. Activate production issuer; execute and retire CP** | On Michael's exact production-host authorization, activate the **production** issuer with approved invocation, signer custody, persistence and authorization path **without application replacement**. CP then performs an authorized Foundation deployment **and redeployment**, verifies image/profile/catalog/asset and runtime read-backs, proves recovery and observes the displacement window. Retire direct-Compose **and** the bootstrap mutation path. | Production issuer admission; two distinct controller-owned deploy-run IDs and signed receipts, including the CP-authorized second-deployment oracle and image digest; bootstrap receipt supersession, checked-in launcher/call-site deletion to zero, old-executor zero-surface proof and product retirement receipt. | Reconcile the already-run single-use bootstrap; never replay it by assumption. A rollback needs a separately receipted previous asset and authorization; V3 currently reports it unavailable. If either ordinary or bootstrap legacy path can still write, cutover is not complete. |
@@ -131,3 +131,116 @@ reviewed rehearsal-issuer design, a capable Lane 3 runner and a protected
 Foundation source tree whose admission and recovery paths can be exercised
 against one exact built candidate. Only then does the short, irreversible
 candidate window begin.
+
+## Update, 2026-09-24 — Gate 0/1's mechanism half is proven; the authority
+## contract (Work Packet A) is drafted, pending ratification
+
+**This section is a dated observation, not a rewrite of the plan above** —
+the gate table and its evidence discipline stand. This records what actually
+closed since the 2026-09-20 baseline and reconciles this roadmap's 0–7 gate
+numbering with the simpler three-gate framing Michael has since used when
+directing this exact work, so nobody mistakes two numbering schemes for two
+plans.
+
+### Refreshed baseline
+
+Superseding the § "Baseline" coordinates above (re-verify before acting, per
+that section's own instruction): Platform CP `main`
+`c80415fa6837b2f2c9ebb4755d5a0b3f9fbf55f3`; Starter `main`
+`96780a9fd30f33b468bdcc1af3a5001d2026beec`; `dotmac_deployment_control` `main`
+`a3b7f9d64f92529e2f3ce7f77da12af38165c602`, publishing `dotmac-deployment-control`
+`0.1.0a14` — independently verified published, tagged, and pinnable, not
+merely declared. CP PR #187 is superseded by this baseline; #193 (the full
+Control-a14/Kernel-a101 application rewrite) remains HELD, uncommitted,
+locally at `/private/tmp/cp1-rehearsal-issuer-composition-20260923`.
+
+### Reconciling the two gate numberings
+
+Michael's own recent framing (Gate 0 → Gate 2 → Gate 3) is the SAME sequence
+this roadmap's Gates 0–3 describe, at coarser grain — it folds this roadmap's
+Gates 0 and 1 into one "protected issuer readiness" gate, and keeps this
+roadmap's Gates 2 and 3 as-is:
+
+| Michael's gate | This roadmap's gate(s) | Status as of this update |
+| --- | --- | --- |
+| **Gate 0** — protected issuer readiness | Gates 0 ("Settle the bootstrap contracts") + 1 ("Make source and runner ready") | MECHANISM half proven (below); PROTECTED-COMPOSITION half open (Work Packets A–E) |
+| **Gate 2** — allocate/build/sign one successor | Gate 2 ("Freeze and build one successor") | Not started; blocked on Gate 0 closing in full; produces no execution authority and performs no rehearsal |
+| **Gate 3** — authorize and rehearse exact bytes | Gate 3 ("Authorize and rehearse exact bytes before publication") | Not started; issues and validates Foundation's candidate-bound `ExecutionGrant` before any executor or Lane-3 action |
+
+Nothing below changes gates 4–7 or their owners.
+
+### What closed: the mechanism half of gates 0–1
+
+Platform CP #194 (a dependency-light, stdlib-only source seam translating a
+caller's three fields into Control's exact accepted request shape) and #195
+(a disposable, candidate-independent harness proving the real, published
+Control `0.1.0a14` wheel — paired with `dotmac-kernel` `0.1.0a100` — genuinely
+issues, holds committed standing on, revokes, and single-use-consumes
+rehearsal-issuer authority) are both merged. #195's final CI run is real
+evidence, not a claim: 16 of 16 tests passed against real migrated
+PostgreSQL, with `platform_api` (not the migrator) performing every issuer
+operation, matching `docs/ARCHITECTURE.md`'s real production role contract
+exactly (`app_admin` stayed `NOCREATEROLE` throughout).
+
+This proves the MECHANISM — Control's real issuance/standing/revocation/
+consumption code, called with the real published artifacts, under a
+production-shaped privilege model — is sound. It does not close gate 0/1's
+protected-composition half: no protected GitHub Environment, no real key
+custody, no genuine `dotmac-approvals` decision, and no real per-run
+controller identity exist yet (confirmed absent below). Reaching a "16/16"
+mechanism proof and reaching "the protected rehearsal issuer may act for a
+real approval, under real custody, on a real runner" are different claims,
+and this roadmap's own gate-0 pass evidence ("Accepted design and
+source-level refusal tests… protected rehearsal workflow prepared") already
+named the second, not the first, as what closes the gate.
+
+### What remains: five work packets closing gate 0/1's protected-composition half
+
+Platform CP's `docs/adr/0013-operator-authorization-issuer-and-its-bootstrap.md`
+§ A7 (added 2026-09-24, drafted, pending Michael's ratification) is the
+proposed document-purpose/identity/ownership matrix for these. It is not
+authoritative and grants no implementation authority unless Michael ratifies
+it. Summary, including Starter's own stake in each:
+
+| Packet | Owner | Starter's stake |
+| --- | --- | --- |
+| **A. Authority contract** | CP + Starter docs (this section, plus CP ADR-0013 § A7) | Proposes gate sequencing, the five-document purpose matrix (rehearsal-issuer authorization vs. Foundation `ExecutionGrant` vs. harness evidence vs. `ApprovalEvidence` vs. Lane-3 receipt — never conflate the first two), and ownership. It freezes those rules only when Michael ratifies the corrected text; merging proposed prose is not ratification. |
+| **B. Protected issuer composition** | Platform CP | Real approvals via `dotmac-approvals` (not rollout-coupled) and real signer/verifier providers — no rollout, no deployment |
+| **C1. Execution semantics** | Deployment Foundation | Selects Foundation's real `ExecutionGrant` path and fixes its digest semantics — this is what the rehearsal-issuer envelope must NEVER be mistaken for |
+| **C2. Assembly binding** | Starter/CP binding package | Installs B's genuine (non-ephemeral) verifier into the candidate-independent protected rehearsal-issuer composition. It requires no Foundation candidate and creates no candidate environment. |
+| **D. Protected workflow** | Starter protected-workflow owner | Creates the protected GitHub Environment, OIDC and real per-run controller-key custody, and configures the Lane-3 observer/jump/inside vantage this roadmap's own gate 1 already named. It emits protected workflow evidence for E; it does not write the Gate-0 readiness receipt. |
+| **E. Operational Gate-0 acceptance** | Platform CP, as the single writer of the readiness receipt | After B, C1, C2 and D are accepted, consumes D's protected-workflow evidence and records one immutable, candidate-independent issuer-readiness receipt proving genuine approval, signer custody, controller identity, issuance and standing, revocation, single-use consumption and the required refusal cases. It allocates, builds, signs and rehearses no Foundation candidate; issues no candidate-bound `ExecutionGrant`; and authorizes no deployment. |
+
+A must be ratified and merged before B/C1/C2/D/E begin implementation; merge
+alone is insufficient. B and C1 may then run in parallel; C2 and D follow
+their respective contracts; E runs only after B, C1, C2 and D are accepted
+and is the sole operational closeout of gate 0/1. **This ordering exists
+specifically to avoid recreating the circularity #194/#195 just broke**: a
+pre-allocation, candidate-bound Lane-3 authorization would be exactly that
+regression, so gate 2 (successor allocation/build/sign only) still does not
+start until gate 0/1 is reviewed closed in full — mechanism, protected
+composition and E's immutable candidate-independent readiness receipt,
+together. Candidate-specific execution authority is issued and validated
+only at gate 3, after gate 2 has produced the exact bytes it binds.
+
+### Confirmed absent, read-only, 2026-09-24
+
+Independently verified against live GitHub state (no host action, workflow
+dispatch, key creation, OpenBao read, or secret value observed):
+
+- No protected rehearsal GitHub Environment exists — `pypi-release` and
+  `registry-release` are the only two environments on this repository.
+- `control-runner-starter-mt` is online and idle, carrying exactly
+  `self-hosted, Linux, X64, dotmac-control-runner, dotmac-foundation-control`.
+  Its only observed diagnostic run was cancelled 2026-08-31; none has
+  succeeded.
+- Repository variables are exactly `LANE3_PROBE_HOST` and
+  `RELEASE_RECORDER_CLIENT_ID` — no observer-user, jump-key, or
+  inside-vantage variable exists yet, so `docs/inventories/lane3-acceptance-
+  criteria.md`'s own vantage requirements (§§ 2a–2c: far-end source
+  addresses, `privileged_vantage_refused`, `private_inside`) remain
+  unconfigurable until Work Packet D lands.
+
+These are gate-1 preconditions this roadmap already listed as open ("prepares
+a protected, real ten-step recovery and Lane 3 runner"); this update dates
+and confirms them rather than changing what gate 1 requires.
