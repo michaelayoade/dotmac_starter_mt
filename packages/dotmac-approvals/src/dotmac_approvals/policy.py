@@ -220,6 +220,14 @@ def evaluate(
             satisfied_levels=_satisfied_count(policy, decisions),
             reason="cancelled",
         )
+    if state is ApprovalState.WITHDRAWN:
+        return Evaluation(
+            state=state,
+            current_level=current_level,
+            total_levels=policy.total_levels,
+            satisfied_levels=_satisfied_count(policy, decisions),
+            reason="withdrawn",
+        )
 
     satisfied = _satisfied_count(policy, decisions)
     if satisfied >= policy.total_levels:

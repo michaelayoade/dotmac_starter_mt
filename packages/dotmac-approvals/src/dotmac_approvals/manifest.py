@@ -168,8 +168,35 @@ _PLATFORM_APPROVAL_DECISIONS_COLUMNS = (
     _timestamp_col("updated_at", 11),
 )
 
+# Candidate ap_0003 declaration. These column coordinates are UNVERIFIED until
+# Git-hosted PostgreSQL 16 observes and compares the migrated catalogue.
+_APPROVAL_WITHDRAWALS_COLUMNS = (
+    _col("id", 1, _UUID, nullable=False),
+    _col("tenant_id", 2, _UUID, nullable=False),
+    _col("request_id", 3, _UUID, nullable=False),
+    _col("actor_id", 4, _UUID, nullable=False),
+    _col("authority_ref", 5, _varchar(200), nullable=False),
+    _col("reason", 6, _TEXT, nullable=False),
+    _col("effective_at", 7, _TIMESTAMPTZ, nullable=False),
+    _col("external_ref", 8, _varchar(200), nullable=False),
+    _col("approved_at", 9, _TIMESTAMPTZ, nullable=False),
+    _timestamp_col("created_at", 10),
+)
+_PLATFORM_APPROVAL_WITHDRAWALS_COLUMNS = (
+    _col("id", 1, _UUID, nullable=False),
+    _col("request_id", 2, _UUID, nullable=False),
+    _col("actor_id", 3, _UUID, nullable=False),
+    _col("authority_ref", 4, _varchar(200), nullable=False),
+    _col("reason", 5, _TEXT, nullable=False),
+    _col("effective_at", 6, _TIMESTAMPTZ, nullable=False),
+    _col("external_ref", 7, _varchar(200), nullable=False),
+    _col("approved_at", 8, _TIMESTAMPTZ, nullable=False),
+    _timestamp_col("created_at", 9),
+)
+
+
 _DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
-    lineage_head="ap_0002_outbox_relay",
+    lineage_head="ap_0003_withdrawals",
     tables=(
         ModuleDatabaseTableContractV1(
             name="approval_decisions",
@@ -187,6 +214,11 @@ _DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
             columns=_APPROVAL_REQUESTS_COLUMNS,
         ),
         ModuleDatabaseTableContractV1(
+            name="approval_withdrawals",
+            relation_kind=DatabaseRelationKind.TABLE,
+            columns=_APPROVAL_WITHDRAWALS_COLUMNS,
+        ),
+        ModuleDatabaseTableContractV1(
             name="platform_approval_decisions",
             relation_kind=DatabaseRelationKind.TABLE,
             columns=_PLATFORM_APPROVAL_DECISIONS_COLUMNS,
@@ -200,6 +232,11 @@ _DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
             name="platform_approval_requests",
             relation_kind=DatabaseRelationKind.TABLE,
             columns=_PLATFORM_APPROVAL_REQUESTS_COLUMNS,
+        ),
+        ModuleDatabaseTableContractV1(
+            name="platform_approval_withdrawals",
+            relation_kind=DatabaseRelationKind.TABLE,
+            columns=_PLATFORM_APPROVAL_WITHDRAWALS_COLUMNS,
         ),
     ),
 )

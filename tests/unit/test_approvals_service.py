@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from dotmac_approvals.contracts import (
@@ -28,20 +29,32 @@ from dotmac_approvals.contracts import (
     PolicyVersionExists,
     RequestNotPending,
     SoDRule,
+    WithdrawalReferenceConflict,
+    WithdrawalRefused,
 )
 from dotmac_approvals.models import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    ApprovalWithdrawal,
     PlatformApprovalDecision,
     PlatformApprovalPolicy,
     PlatformApprovalRequest,
+    PlatformApprovalWithdrawal,
+)
+from dotmac_approvals.service import (
+    _withdraw_platform_approval as withdraw_platform_approval,
+)
+from dotmac_approvals.service import (
+    _withdraw_tenant_approval as withdraw_tenant_approval,
 )
 from dotmac_approvals.service import (
     cancel_platform_request,
     cancel_tenant_request,
     evaluate_platform_approval,
     evaluate_tenant_approval,
+    get_platform_request,
+    get_tenant_request,
     policy_document_digest,
     publish_platform_policy_version,
     publish_tenant_policy_version,
@@ -75,9 +88,11 @@ def db() -> Iterator[Session]:
         ApprovalPolicy,
         ApprovalRequest,
         ApprovalDecision,
+        ApprovalWithdrawal,
         PlatformApprovalPolicy,
         PlatformApprovalRequest,
         PlatformApprovalDecision,
+        PlatformApprovalWithdrawal,
     ):
         model.__table__.create(engine)
     with Session(engine) as session:
@@ -539,3 +554,182 @@ def test_the_platform_plane_refuses_self_approval_and_cancels_by_requester(
         ).state
         is ApprovalState.CANCELLED
     )
+
+
+def test_tenant_withdrawal_preserves_approval_and_replays_exact_evidence(
+    db: Session,
+) -> None:
+    publish_tenant_policy_version(db, tenant_id=TENANT, revision=_revision())
+    request_id = _open_tenant(db)
+    record_tenant_decision(
+        db,
+        tenant_id=TENANT,
+        request_id=request_id,
+        actor=_actor(ALICE),
+        action=DecisionAction.APPROVE,
+        content_digest=DIGEST,
+    )
+    approved_row = db.get(ApprovalRequest, request_id)
+    assert approved_row is not None and approved_row.completed_at is not None
+    approved_at = approved_row.completed_at
+    command = {
+        "tenant_id": TENANT,
+        "request_id": request_id,
+        "actor": _actor(BOB),
+        "authority_ref": "security-review-7",
+        "reason": "superseded authority",
+        "external_ref": "control-revoke-7",
+    }
+    first = withdraw_tenant_approval(db, **command)
+    assert first.state is ApprovalState.WITHDRAWN
+    assert first.evaluation.reason == "withdrawn"
+    event = first.events[0]
+    assert event.event_type == "approval.withdrawn"
+    assert event.withdrawal is not None
+    assert event.withdrawal.approved_at.replace(tzinfo=None) == approved_at.replace(
+        tzinfo=None
+    )
+    assert event.payload()["external_ref"] == "control-revoke-7"
+    assert event.payload()["content_digest"] == DIGEST
+    assert withdraw_tenant_approval(db, **command).events == ()
+    assert len(db.execute(select(ApprovalWithdrawal)).scalars().all()) == 1
+    current_row = db.get(ApprovalRequest, request_id)
+    assert current_row is not None and current_row.completed_at == approved_at
+    detail = get_tenant_request(db, tenant_id=TENANT, request_id=request_id)
+    assert detail is not None
+    assert detail.evaluation.is_approved is False
+    assert detail.withdrawal is not None
+    assert detail.withdrawal.withdrawal_id == event.withdrawal.withdrawal_id
+    assert len(detail.decisions) == 1
+    assert detail.decisions[0].action is DecisionAction.APPROVE
+    with pytest.raises(WithdrawalReferenceConflict):
+        withdraw_tenant_approval(db, **{**command, "reason": "different"})
+    with pytest.raises(WithdrawalReferenceConflict):
+        withdraw_tenant_approval(db, **{**command, "external_ref": "another"})
+
+
+def test_withdrawal_refuses_unapproved_requests_and_empty_authority(
+    db: Session,
+) -> None:
+    publish_tenant_policy_version(db, tenant_id=TENANT, revision=_revision())
+    request_id = _open_tenant(db)
+    command = {
+        "tenant_id": TENANT,
+        "request_id": request_id,
+        "actor": _actor(BOB),
+        "authority_ref": "review-1",
+        "reason": "invalid approval",
+        "external_ref": "revoke-1",
+    }
+    with pytest.raises(WithdrawalRefused, match="completed approval"):
+        withdraw_tenant_approval(db, **command)
+    record_tenant_decision(
+        db,
+        tenant_id=TENANT,
+        request_id=request_id,
+        actor=_actor(ALICE),
+        action=DecisionAction.REJECT,
+        content_digest=DIGEST,
+    )
+    with pytest.raises(WithdrawalRefused, match="completed approval"):
+        withdraw_tenant_approval(db, **command)
+    with pytest.raises(WithdrawalRefused, match="authority_ref"):
+        withdraw_tenant_approval(db, **{**command, "authority_ref": " "})
+
+
+def test_platform_withdrawal_is_separate_and_one_per_request(db: Session) -> None:
+    publish_platform_policy_version(db, revision=_revision())
+    first_request = request_platform_approval(
+        db,
+        policy_code="payment.release",
+        policy_version=1,
+        subject_type="fleet.plan",
+        subject_id="plan-1",
+        content_digest=DIGEST,
+        requested_by=REQUESTER,
+        idempotency_key="plan-1",
+    ).request_id
+    record_platform_decision(
+        db,
+        request_id=first_request,
+        actor=_actor(ALICE),
+        action=DecisionAction.APPROVE,
+        content_digest=DIGEST,
+    )
+    command = {
+        "request_id": first_request,
+        "actor": _actor(BOB),
+        "authority_ref": "cp-review-1",
+        "reason": "plan invalidated",
+        "external_ref": "control-revoke-1",
+    }
+    result = withdraw_platform_approval(db, **command)
+    assert result.state is ApprovalState.WITHDRAWN
+    assert result.events[0].payload()["subject_id"] == "plan-1"
+    assert withdraw_platform_approval(db, **command).events == ()
+    assert len(db.execute(select(PlatformApprovalWithdrawal)).scalars().all()) == 1
+    detail = get_platform_request(db, request_id=first_request)
+    assert detail is not None and detail.withdrawal is not None
+    assert len(detail.decisions) == 1
+    second_request = request_platform_approval(
+        db,
+        policy_code="payment.release",
+        policy_version=1,
+        subject_type="fleet.plan",
+        subject_id="plan-2",
+        content_digest=DIGEST,
+        requested_by=REQUESTER,
+        idempotency_key="plan-2",
+    ).request_id
+    record_platform_decision(
+        db,
+        request_id=second_request,
+        actor=_actor(ALICE),
+        action=DecisionAction.APPROVE,
+        content_digest=DIGEST,
+    )
+    with pytest.raises(WithdrawalReferenceConflict, match="another request"):
+        withdraw_platform_approval(db, **{**command, "request_id": second_request})
+
+
+def test_withdrawal_contract_refuses_backdating_and_inconsistent_detail(
+    db: Session,
+) -> None:
+    publish_platform_policy_version(db, revision=_revision())
+    request_id = request_platform_approval(
+        db,
+        policy_code="payment.release",
+        policy_version=1,
+        subject_type="fleet.plan",
+        subject_id="plan-contract",
+        content_digest=DIGEST,
+        requested_by=REQUESTER,
+        idempotency_key="plan-contract",
+    ).request_id
+    record_platform_decision(
+        db,
+        request_id=request_id,
+        actor=_actor(ALICE),
+        action=DecisionAction.APPROVE,
+        content_digest=DIGEST,
+    )
+    outcome = withdraw_platform_approval(
+        db,
+        request_id=request_id,
+        actor=_actor(BOB),
+        authority_ref="cp-review-contract",
+        reason="plan invalidated",
+        external_ref="control-revoke-contract",
+    )
+    evidence = outcome.events[0].withdrawal
+    assert evidence is not None
+    with pytest.raises(ValueError, match="before its approval"):
+        replace(
+            evidence,
+            effective_at=evidence.approved_at - timedelta(microseconds=1),
+        )
+
+    detail = get_platform_request(db, request_id=request_id)
+    assert detail is not None and detail.withdrawal is not None
+    with pytest.raises(ValueError, match="required exactly"):
+        replace(detail, withdrawal=None)

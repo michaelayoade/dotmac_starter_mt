@@ -17,16 +17,41 @@ different ones:
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import os
 import uuid
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
+from dotmac_approvals.contracts import (
+    Actor,
+    ApprovalEvent,
+    ApprovalLevel,
+    ApprovalState,
+    ApproverKind,
+    DecisionAction,
+    PolicyRevision,
+    WithdrawalReferenceConflict,
+)
+from dotmac_approvals.outbox import withdraw_platform_approval
+from dotmac_approvals.service import (
+    get_platform_request,
+    get_tenant_request,
+    publish_platform_policy_version,
+    publish_tenant_policy_version,
+    record_platform_decision,
+    record_tenant_decision,
+    request_platform_approval,
+    request_tenant_approval,
+)
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -37,11 +62,17 @@ APPROVALS_VERSIONS = (
     REPO_ROOT / "packages/dotmac-approvals/src/dotmac_approvals/migrations/versions"
 )
 
-TENANT_TABLES = ("approval_policies", "approval_requests", "approval_decisions")
+TENANT_TABLES = (
+    "approval_policies",
+    "approval_requests",
+    "approval_decisions",
+    "approval_withdrawals",
+)
 PLATFORM_TABLES = (
     "platform_approval_policies",
     "platform_approval_requests",
     "platform_approval_decisions",
+    "platform_approval_withdrawals",
 )
 DIGEST = "sha256:" + "a" * 64
 
@@ -147,6 +178,51 @@ def platform_only_scratch() -> Iterator[str]:
         )
         cfg.attributes["module_plane_selections"] = (
             ModulePlaneSelection(module="approvals", planes=(ModulePlane.PLATFORM,)),
+        )
+        os.environ["MIGRATION_DATABASE_URL"] = admin_url
+        command.upgrade(cfg, "heads")
+        yield admin_url
+    finally:
+        with server.connect() as conn:
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :n AND pid <> pg_backend_pid()"
+                ),
+                {"n": name},
+            )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        server.dispose()
+
+
+@pytest.fixture
+def tenant_only_scratch() -> Iterator[str]:
+    """A real composed lineage with only the approvals tenant plane."""
+    superuser = _superuser_url()
+    name = f"approvals_tenant_{uuid.uuid4().hex[:12]}"
+    server = create_engine(superuser, isolation_level="AUTOCOMMIT")
+    with server.connect() as conn:
+        conn.execute(text(f'CREATE DATABASE "{name}"'))
+    setup = create_engine(_url_for(superuser, name), isolation_level="AUTOCOMMIT")
+    with setup.connect() as conn:
+        conn.execute(text("ALTER SCHEMA public OWNER TO app_admin"))
+        conn.execute(text(f'GRANT CREATE ON DATABASE "{name}" TO app_admin'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO app_user'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO platform_api'))
+    setup.dispose()
+    admin_url = _url_for(superuser, name, user="app_admin")
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config(str(REPO_ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        cfg.set_main_option(
+            "version_locations",
+            f"{KERNEL_VERSIONS} {ASSEMBLY_VERSIONS} {APPROVALS_VERSIONS}",
+        )
+        cfg.attributes["module_plane_selections"] = (
+            ModulePlaneSelection(module="approvals", planes=(ModulePlane.TENANT,)),
         )
         os.environ["MIGRATION_DATABASE_URL"] = admin_url
         command.upgrade(cfg, "heads")
@@ -322,6 +398,51 @@ def test_one_tenant_cannot_read_or_write_another_tenants_rows(
         engine.dispose()
 
 
+def test_withdrawal_evidence_obeys_tenant_rls_on_insert_and_read(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_user_url, _ = migrated_scratch
+    tenant_a, tenant_b = _seed_two_tenants(admin_url)
+    admin = create_engine(admin_url)
+    with admin.connect() as conn:
+        request_b = conn.execute(
+            text("SELECT id FROM mod_approvals.approval_requests WHERE tenant_id = :t"),
+            {"t": tenant_b},
+        ).scalar_one()
+    admin.dispose()
+    runtime = create_engine(app_user_url)
+    try:
+        with runtime.connect() as conn:
+            conn.execute(
+                text("SELECT set_config('app.current_tenant', :t, false)"),
+                {"t": str(tenant_a)},
+            )
+            assert (
+                conn.execute(
+                    text("SELECT count(*) FROM mod_approvals.approval_withdrawals")
+                ).scalar_one()
+                == 0
+            )
+            with pytest.raises(DBAPIError):
+                conn.execute(
+                    text(
+                        "INSERT INTO mod_approvals.approval_withdrawals "
+                        "(id, tenant_id, request_id, actor_id, authority_ref, reason, "
+                        "effective_at, external_ref, approved_at) VALUES "
+                        "(:id, :tenant, :request, :actor, 'review-1', 'invalid', "
+                        "now(), 'revoke-1', now())"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "tenant": tenant_b,
+                        "request": request_b,
+                        "actor": uuid.uuid4(),
+                    },
+                )
+    finally:
+        runtime.dispose()
+
+
 def test_platform_tables_are_unreadable_by_the_tenant_role(
     migrated_scratch: tuple[str, str, str],
 ) -> None:
@@ -382,6 +503,859 @@ def test_the_platform_runtime_role_can_still_operate(
                     )
                 ).scalar_one()
                 == 1
+            )
+    finally:
+        engine.dispose()
+
+
+def test_withdrawal_rows_are_immutable_even_for_the_table_owner(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, _, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    try:
+        approver, requester = uuid.uuid4(), uuid.uuid4()
+        revision = PolicyRevision(
+            policy_code="fleet.immutable",
+            version=1,
+            levels=(
+                ApprovalLevel(
+                    sequence=1,
+                    approver_kind=ApproverKind.USER,
+                    approver_id=str(approver),
+                    quorum=1,
+                ),
+            ),
+        )
+        with Session(engine) as db, db.begin():
+            publish_platform_policy_version(db, revision=revision)
+            request_id = request_platform_approval(
+                db,
+                policy_code="fleet.immutable",
+                policy_version=1,
+                subject_type="fleet.plan",
+                subject_id="immutable-plan",
+                content_digest=DIGEST,
+                requested_by=requester,
+                idempotency_key="immutable-plan",
+            ).request_id
+            record_platform_decision(
+                db,
+                request_id=request_id,
+                actor=Actor(actor_id=approver),
+                action=DecisionAction.APPROVE,
+                content_digest=DIGEST,
+            )
+        with engine.begin() as conn:
+            withdrawal_id = uuid.uuid4()
+            conn.execute(
+                text(
+                    "SELECT mod_approvals.record_platform_withdrawal("
+                    ":request, :id, :actor, 'review-1', 'invalid', 'ref-1')"
+                ),
+                {
+                    "id": withdrawal_id,
+                    "request": request_id,
+                    "actor": uuid.uuid4(),
+                },
+            )
+        for statement in (
+            "UPDATE mod_approvals.platform_approval_withdrawals "
+            "SET reason = 'changed' WHERE id = :id",
+            "DELETE FROM mod_approvals.platform_approval_withdrawals WHERE id = :id",
+        ):
+            with engine.begin() as conn, pytest.raises(DBAPIError, match="append-only"):
+                conn.execute(text(statement), {"id": withdrawal_id})
+        with engine.begin() as conn, pytest.raises(DBAPIError):
+            conn.execute(
+                text(
+                    "DELETE FROM mod_approvals.platform_approval_requests "
+                    "WHERE id = :id"
+                ),
+                {"id": request_id},
+            )
+    finally:
+        engine.dispose()
+
+
+def test_online_role_cannot_forge_withdrawn_or_evidence(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """The DB function, not direct online DML, owns the paired transition."""
+    admin_url, _, platform_url = migrated_scratch
+    admin = create_engine(admin_url)
+    online = create_engine(platform_url)
+    request_id = uuid.uuid4()
+    try:
+        with admin.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO mod_approvals.platform_approval_requests "
+                    "(id, policy_code, policy_version, subject_type, subject_id, "
+                    "content_digest, requested_by, state, current_level, "
+                    "idempotency_key, completed_at) VALUES "
+                    "(:id, 'fleet.plan', 1, 'fleet.plan', 'forgery', "
+                    ":digest, :actor, 'approved', 1, 'forgery', now())"
+                ),
+                {"id": request_id, "digest": DIGEST, "actor": uuid.uuid4()},
+            )
+        with online.begin() as conn, pytest.raises(DBAPIError):
+            conn.execute(
+                text(
+                    "UPDATE mod_approvals.platform_approval_requests "
+                    "SET state = 'withdrawn' WHERE id = :id"
+                ),
+                {"id": request_id},
+            )
+        with admin.begin() as conn, pytest.raises(DBAPIError):
+            # The owner cannot bypass the paired-evidence invariant either.
+            conn.execute(
+                text(
+                    "UPDATE mod_approvals.platform_approval_requests "
+                    "SET state = 'withdrawn' WHERE id = :id"
+                ),
+                {"id": request_id},
+            )
+        with online.begin() as conn, pytest.raises(DBAPIError):
+            conn.execute(
+                text(
+                    "INSERT INTO mod_approvals.platform_approval_withdrawals "
+                    "(id, request_id, actor_id, authority_ref, reason, "
+                    "effective_at, external_ref, approved_at) VALUES "
+                    "(:id, :request, :actor, 'fake', 'fake', now(), 'fake', now())"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "request": request_id,
+                    "actor": uuid.uuid4(),
+                },
+            )
+        with pytest.raises(DBAPIError):
+            with admin.begin() as conn:
+                # The deferred trigger fires at COMMIT, not INSERT.
+                conn.execute(
+                    text(
+                        "INSERT INTO mod_approvals.platform_approval_withdrawals "
+                        "(id, request_id, actor_id, authority_ref, reason, "
+                        "effective_at, external_ref, approved_at) "
+                        "SELECT :id, id, :actor, 'orphan', 'orphan', now(), 'orphan', "
+                        "completed_at FROM mod_approvals.platform_approval_requests "
+                        "WHERE id = :request"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "request": request_id,
+                        "actor": uuid.uuid4(),
+                    },
+                )
+    finally:
+        admin.dispose()
+        online.dispose()
+
+
+@pytest.mark.parametrize("state", ("pending", "rejected"))
+def test_direct_evidence_cannot_relabel_a_nonapproved_request(
+    migrated_scratch: tuple[str, str, str], state: str
+) -> None:
+    """Even the owner cannot insert withdrawal evidence for a non-approval."""
+    admin_url, _, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            request_id = uuid.uuid4()
+            conn.execute(
+                text(
+                    "INSERT INTO mod_approvals.platform_approval_requests "
+                    "(id, policy_code, policy_version, subject_type, subject_id, "
+                    "content_digest, requested_by, state, current_level, "
+                    "idempotency_key) VALUES (:id, 'fleet.plan', 1, 'fleet.plan', "
+                    ":subject, :digest, :actor, :state, 1, :key)"
+                ),
+                {
+                    "id": request_id,
+                    "subject": f"nonapproved-{state}",
+                    "digest": DIGEST,
+                    "actor": uuid.uuid4(),
+                    "state": state,
+                    "key": f"nonapproved-{state}",
+                },
+            )
+        with engine.begin() as conn, pytest.raises(DBAPIError):
+            conn.execute(
+                text(
+                    "INSERT INTO mod_approvals.platform_approval_withdrawals "
+                    "(id, request_id, actor_id, authority_ref, reason, "
+                    "effective_at, external_ref, approved_at) VALUES "
+                    "(:id, :request, :actor, 'fake', 'fake', now(), :ref, now())"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "request": request_id,
+                    "actor": uuid.uuid4(),
+                    "ref": f"fake-{state}",
+                },
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("tenant_plane", (True, False))
+def test_direct_database_withdrawal_always_emits_exactly_one_event(
+    migrated_scratch: tuple[str, str, str], tenant_plane: bool
+) -> None:
+    """Direct EXECUTE is authoritative and cannot omit the durable event."""
+    admin_url, app_user_url, platform_url = migrated_scratch
+    engine = create_engine(admin_url)
+    tenant_id = uuid.uuid4()
+    requester, approver = uuid.uuid4(), uuid.uuid4()
+    revision = PolicyRevision(
+        policy_code="fleet.direct",
+        version=1,
+        levels=(
+            ApprovalLevel(
+                sequence=1,
+                approver_kind=ApproverKind.USER,
+                approver_id=str(approver),
+                quorum=1,
+            ),
+        ),
+    )
+    try:
+        if tenant_plane:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO public.tenants (id, slug, name) "
+                        "VALUES (:id, :slug, 'Direct')"
+                    ),
+                    {"id": tenant_id, "slug": f"direct-{tenant_id.hex[:12]}"},
+                )
+        with Session(engine) as db, db.begin():
+            if tenant_plane:
+                db.execute(
+                    text("SELECT set_config('app.current_tenant', :t, true)"),
+                    {"t": str(tenant_id)},
+                )
+                publish_tenant_policy_version(
+                    db, tenant_id=tenant_id, revision=revision
+                )
+                request_id = request_tenant_approval(
+                    db,
+                    tenant_id=tenant_id,
+                    policy_code="fleet.direct",
+                    policy_version=1,
+                    subject_type="fleet.plan",
+                    subject_id="direct-plan",
+                    content_digest=DIGEST,
+                    requested_by=requester,
+                    idempotency_key="direct-plan",
+                ).request_id
+                record_tenant_decision(
+                    db,
+                    tenant_id=tenant_id,
+                    request_id=request_id,
+                    actor=Actor(actor_id=approver),
+                    action=DecisionAction.APPROVE,
+                    content_digest=DIGEST,
+                )
+            else:
+                publish_platform_policy_version(db, revision=revision)
+                request_id = request_platform_approval(
+                    db,
+                    policy_code="fleet.direct",
+                    policy_version=1,
+                    subject_type="fleet.plan",
+                    subject_id="direct-plan",
+                    content_digest=DIGEST,
+                    requested_by=requester,
+                    idempotency_key="direct-plan",
+                ).request_id
+                record_platform_decision(
+                    db,
+                    request_id=request_id,
+                    actor=Actor(actor_id=approver),
+                    action=DecisionAction.APPROVE,
+                    content_digest=DIGEST,
+                )
+
+        if tenant_plane:
+            command = text(
+                "SELECT mod_approvals.record_tenant_withdrawal("
+                ":tenant, :request, :withdrawal, :actor, "
+                "'cp-review', 'invalidated', 'direct-ref')"
+            )
+            outbox_select = text(
+                "SELECT payload, status, attempts, correlation_id "
+                "FROM public.outbox_events"
+            )
+            outbox_count = text("SELECT count(*) FROM public.outbox_events")
+        else:
+            command = text(
+                "SELECT mod_approvals.record_platform_withdrawal("
+                ":request, :withdrawal, :actor, "
+                "'cp-review', 'invalidated', 'direct-ref')"
+            )
+            outbox_select = text(
+                "SELECT payload, status, attempts, correlation_id "
+                "FROM public.platform_outbox_events"
+            )
+            outbox_count = text("SELECT count(*) FROM public.platform_outbox_events")
+        parameters = {
+            "tenant": tenant_id,
+            "request": request_id,
+            "withdrawal": uuid.uuid4(),
+            "actor": requester,
+        }
+        # Execute as the actual online role, not as the migration owner.
+        online = create_engine(app_user_url if tenant_plane else platform_url)
+        with online.begin() as conn:
+            if tenant_plane:
+                conn.execute(
+                    text("SELECT set_config('app.current_tenant', :t, true)"),
+                    {"t": str(tenant_id)},
+                )
+            conn.execute(command, parameters)
+        online.dispose()
+
+        with Session(engine) as db, db.begin():
+            if tenant_plane:
+                db.execute(
+                    text("SELECT set_config('app.current_tenant', :t, true)"),
+                    {"t": str(tenant_id)},
+                )
+                detail = get_tenant_request(
+                    db, tenant_id=tenant_id, request_id=request_id
+                )
+            else:
+                detail = get_platform_request(db, request_id=request_id)
+            assert detail is not None and detail.withdrawal is not None
+            expected = ApprovalEvent(
+                event_type="approval.withdrawn",
+                subject_type=detail.request.subject_type,
+                subject_id=detail.request.subject_id,
+                request_id=request_id,
+                policy_code=detail.request.policy_code,
+                policy_version=detail.request.policy_version,
+                content_digest=detail.request.content_digest,
+                state=ApprovalState.WITHDRAWN,
+                withdrawal=detail.withdrawal,
+            ).payload()
+            row = db.execute(outbox_select).one()
+            assert row.payload == expected
+            assert (row.status, row.attempts, row.correlation_id) == (
+                "pending",
+                0,
+                "direct-ref",
+            )
+
+        online = create_engine(app_user_url if tenant_plane else platform_url)
+        with pytest.raises(DBAPIError):
+            with online.begin() as conn:
+                if tenant_plane:
+                    conn.execute(
+                        text("SELECT set_config('app.current_tenant', :t, true)"),
+                        {"t": str(tenant_id)},
+                    )
+                conn.execute(command, parameters)
+        online.dispose()
+        with engine.begin() as conn:
+            if tenant_plane:
+                conn.execute(
+                    text("SELECT set_config('app.current_tenant', :t, true)"),
+                    {"t": str(tenant_id)},
+                )
+            assert conn.execute(outbox_count).scalar_one() == 1
+    finally:
+        engine.dispose()
+
+
+def test_owner_composed_withdrawal_cannot_omit_outbox(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """Paired raw DML by the table owner must still stage the typed event."""
+    admin_url, _, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    approver, requester = uuid.uuid4(), uuid.uuid4()
+    revision = PolicyRevision(
+        policy_code="fleet.owner",
+        version=1,
+        levels=(
+            ApprovalLevel(
+                sequence=1,
+                approver_kind=ApproverKind.USER,
+                approver_id=str(approver),
+                quorum=1,
+            ),
+        ),
+    )
+    try:
+        with Session(engine) as db, db.begin():
+            publish_platform_policy_version(db, revision=revision)
+            request_id = request_platform_approval(
+                db,
+                policy_code="fleet.owner",
+                policy_version=1,
+                subject_type="fleet.plan",
+                subject_id="owner-plan",
+                content_digest=DIGEST,
+                requested_by=requester,
+                idempotency_key="owner-plan",
+            ).request_id
+            record_platform_decision(
+                db,
+                request_id=request_id,
+                actor=Actor(actor_id=approver),
+                action=DecisionAction.APPROVE,
+                content_digest=DIGEST,
+            )
+        withdrawal_id = uuid.uuid4()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO mod_approvals.platform_approval_withdrawals "
+                    "(id, request_id, actor_id, authority_ref, reason, "
+                    "effective_at, external_ref, approved_at) "
+                    "SELECT :withdrawal, id, :actor, 'cp-review', "
+                    "'invalidated', clock_timestamp(), 'owner-ref', completed_at "
+                    "FROM mod_approvals.platform_approval_requests WHERE id = :request"
+                ),
+                {
+                    "withdrawal": withdrawal_id,
+                    "actor": requester,
+                    "request": request_id,
+                },
+            )
+            conn.execute(
+                text(
+                    "UPDATE mod_approvals.platform_approval_requests "
+                    "SET state = 'withdrawn' WHERE id = :request"
+                ),
+                {"request": request_id},
+            )
+        with Session(engine) as db, db.begin():
+            detail = get_platform_request(db, request_id=request_id)
+            assert detail is not None and detail.withdrawal is not None
+            expected = ApprovalEvent(
+                event_type="approval.withdrawn",
+                subject_type=detail.request.subject_type,
+                subject_id=detail.request.subject_id,
+                request_id=request_id,
+                policy_code=detail.request.policy_code,
+                policy_version=detail.request.policy_version,
+                content_digest=detail.request.content_digest,
+                state=ApprovalState.WITHDRAWN,
+                withdrawal=detail.withdrawal,
+            ).payload()
+            rows = db.execute(
+                text(
+                    "SELECT id, payload, event_type FROM public.platform_outbox_events"
+                )
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].id == withdrawal_id
+            assert rows[0].event_type == "approval.withdrawn"
+            assert rows[0].payload == expected
+    finally:
+        engine.dispose()
+
+
+def _ap_0003_operations(conn: Connection, planes: tuple[ModulePlane, ...]):
+    """Run one revision against a real connection, with explicit plane intent."""
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    path = APPROVALS_VERSIONS / "ap_0003_withdrawals.py"
+    spec = importlib.util.spec_from_file_location("ap_0003_live_probe", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    migration.op = Operations(MigrationContext.configure(conn))
+    migration.selected_module_planes = lambda _code: frozenset(planes)
+    return migration
+
+
+def _seed_withdrawal_for_downgrade(admin_url: str, *, tenant: bool) -> None:
+    """Create real approved history and withdraw through the public owner."""
+    from dotmac_approvals.outbox import withdraw_tenant_approval
+
+    engine = create_engine(admin_url)
+    tenant_id = uuid.uuid4()
+    requester, approver = uuid.uuid4(), uuid.uuid4()
+    revision = PolicyRevision(
+        policy_code="fleet.downgrade",
+        version=1,
+        levels=(
+            ApprovalLevel(
+                sequence=1,
+                approver_kind=ApproverKind.USER,
+                approver_id=str(approver),
+                quorum=1,
+            ),
+        ),
+    )
+    try:
+        if tenant:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO public.tenants (id, slug, name) "
+                        "VALUES (:id, :slug, 'Downgrade')"
+                    ),
+                    {"id": tenant_id, "slug": f"downgrade-{tenant_id.hex[:12]}"},
+                )
+        with Session(engine) as db, db.begin():
+            if tenant:
+                db.execute(
+                    text("SELECT set_config('app.current_tenant', :t, true)"),
+                    {"t": str(tenant_id)},
+                )
+                publish_tenant_policy_version(
+                    db, tenant_id=tenant_id, revision=revision
+                )
+                request_id = request_tenant_approval(
+                    db,
+                    tenant_id=tenant_id,
+                    policy_code="fleet.downgrade",
+                    policy_version=1,
+                    subject_type="fleet.plan",
+                    subject_id="downgrade-plan",
+                    content_digest=DIGEST,
+                    requested_by=requester,
+                    idempotency_key="downgrade-plan",
+                ).request_id
+                record_tenant_decision(
+                    db,
+                    tenant_id=tenant_id,
+                    request_id=request_id,
+                    actor=Actor(actor_id=approver),
+                    action=DecisionAction.APPROVE,
+                    content_digest=DIGEST,
+                )
+                withdraw_tenant_approval(
+                    db,
+                    tenant_id=tenant_id,
+                    request_id=request_id,
+                    actor=Actor(actor_id=requester),
+                    authority_ref="cp-review",
+                    reason="downgrade refusal proof",
+                    external_ref="downgrade-ref",
+                )
+            else:
+                publish_platform_policy_version(db, revision=revision)
+                request_id = request_platform_approval(
+                    db,
+                    policy_code="fleet.downgrade",
+                    policy_version=1,
+                    subject_type="fleet.plan",
+                    subject_id="downgrade-plan",
+                    content_digest=DIGEST,
+                    requested_by=requester,
+                    idempotency_key="downgrade-plan",
+                ).request_id
+                record_platform_decision(
+                    db,
+                    request_id=request_id,
+                    actor=Actor(actor_id=approver),
+                    action=DecisionAction.APPROVE,
+                    content_digest=DIGEST,
+                )
+                withdraw_platform_approval(
+                    db,
+                    request_id=request_id,
+                    actor=Actor(actor_id=requester),
+                    authority_ref="cp-review",
+                    reason="downgrade refusal proof",
+                    external_ref="downgrade-ref",
+                )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "scratch_name, planes, evidence_is_tenant",
+    (
+        ("tenant_only_scratch", (ModulePlane.TENANT,), True),
+        ("platform_only_scratch", (ModulePlane.PLATFORM,), False),
+        (
+            "migrated_scratch",
+            (ModulePlane.TENANT, ModulePlane.PLATFORM),
+            False,
+        ),
+    ),
+)
+def test_withdrawal_downgrade_refuses_evidence_before_any_drop(
+    request: pytest.FixtureRequest,
+    scratch_name: str,
+    planes: tuple[ModulePlane, ...],
+    evidence_is_tenant: bool,
+) -> None:
+    scratch = request.getfixturevalue(scratch_name)
+    admin_url = scratch[0] if isinstance(scratch, tuple) else scratch
+    _seed_withdrawal_for_downgrade(admin_url, tenant=evidence_is_tenant)
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            migration = _ap_0003_operations(conn, planes)
+            with pytest.raises(RuntimeError, match="immutable withdrawal evidence"):
+                migration.downgrade()
+            for plane in planes:
+                table = (
+                    "mod_approvals.approval_withdrawals"
+                    if plane is ModulePlane.TENANT
+                    else "mod_approvals.platform_approval_withdrawals"
+                )
+                assert (
+                    conn.execute(
+                        text("SELECT to_regclass(:name)"), {"name": table}
+                    ).scalar_one()
+                    is not None
+                )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "scratch_name, planes",
+    (
+        ("tenant_only_scratch", (ModulePlane.TENANT,)),
+        ("platform_only_scratch", (ModulePlane.PLATFORM,)),
+        ("migrated_scratch", (ModulePlane.TENANT, ModulePlane.PLATFORM)),
+    ),
+)
+def test_empty_withdrawal_downgrade_can_reupgrade_exact_selection(
+    request: pytest.FixtureRequest,
+    scratch_name: str,
+    planes: tuple[ModulePlane, ...],
+) -> None:
+    scratch = request.getfixturevalue(scratch_name)
+    admin_url = scratch[0] if isinstance(scratch, tuple) else scratch
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            migration = _ap_0003_operations(conn, planes)
+            migration.downgrade()
+            migration.upgrade()
+            for plane in planes:
+                table = (
+                    "mod_approvals.approval_withdrawals"
+                    if plane is ModulePlane.TENANT
+                    else "mod_approvals.platform_approval_withdrawals"
+                )
+                assert (
+                    conn.execute(
+                        text("SELECT to_regclass(:name)"), {"name": table}
+                    ).scalar_one()
+                    is not None
+                )
+    finally:
+        engine.dispose()
+
+
+def test_competing_platform_withdrawals_have_one_durable_winner(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """The request lock and unique row agree under real PostgreSQL concurrency."""
+    _, _, platform_url = migrated_scratch
+    engine = create_engine(platform_url)
+    approver, requester = uuid.uuid4(), uuid.uuid4()
+    revision = PolicyRevision(
+        policy_code="fleet.plan",
+        version=1,
+        levels=(
+            ApprovalLevel(
+                sequence=1,
+                approver_kind=ApproverKind.USER,
+                approver_id=str(approver),
+                quorum=1,
+            ),
+        ),
+    )
+    try:
+        with Session(engine) as db, db.begin():
+            publish_platform_policy_version(db, revision=revision)
+            request_id = request_platform_approval(
+                db,
+                policy_code="fleet.plan",
+                policy_version=1,
+                subject_type="fleet.plan",
+                subject_id="plan-race",
+                content_digest=DIGEST,
+                requested_by=requester,
+                idempotency_key="plan-race",
+            ).request_id
+            record_platform_decision(
+                db,
+                request_id=request_id,
+                actor=Actor(actor_id=approver),
+                action=DecisionAction.APPROVE,
+                content_digest=DIGEST,
+            )
+
+        start = Barrier(2)
+
+        def attempt(ref: str) -> tuple[str, int]:
+            start.wait(timeout=10)
+            try:
+                with Session(engine) as db, db.begin():
+                    outcome = withdraw_platform_approval(
+                        db,
+                        request_id=request_id,
+                        actor=Actor(actor_id=requester),
+                        authority_ref="cp-review",
+                        reason="plan invalidated",
+                        external_ref=ref,
+                    )
+                    return "accepted", len(outcome.events)
+            except WithdrawalReferenceConflict:
+                return "conflict", 0
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(attempt, ("revoke-a", "revoke-b")))
+        assert sorted(results) == [("accepted", 1), ("conflict", 0)]
+        winning_ref = next(
+            ref
+            for ref, result in zip(("revoke-a", "revoke-b"), results, strict=True)
+            if result[0] == "accepted"
+        )
+        with Session(engine) as db, db.begin():
+            replay = withdraw_platform_approval(
+                db,
+                request_id=request_id,
+                actor=Actor(actor_id=requester),
+                authority_ref="cp-review",
+                reason="plan invalidated",
+                external_ref=winning_ref,
+            )
+            assert replay.events == ()
+        with engine.connect() as conn:
+            assert (
+                conn.execute(
+                    text(
+                        "SELECT count(*) FROM "
+                        "mod_approvals.platform_approval_withdrawals "
+                        "WHERE request_id = :request"
+                    ),
+                    {"request": request_id},
+                ).scalar_one()
+                == 1
+            )
+            assert (
+                conn.execute(
+                    text(
+                        "SELECT count(*) FROM public.platform_outbox_events "
+                        "WHERE event_type = 'approval.withdrawn'"
+                    )
+                ).scalar_one()
+                == 1
+            )
+    finally:
+        engine.dispose()
+
+
+def test_cross_request_reference_race_preserves_unrelated_caller_work(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """A unique-reference loser gets a typed conflict, not an aborted session."""
+    _, _, platform_url = migrated_scratch
+    engine = create_engine(platform_url)
+    approver, requester = uuid.uuid4(), uuid.uuid4()
+    revision = PolicyRevision(
+        policy_code="fleet.race",
+        version=1,
+        levels=(
+            ApprovalLevel(
+                sequence=1,
+                approver_kind=ApproverKind.USER,
+                approver_id=str(approver),
+                quorum=1,
+            ),
+        ),
+    )
+    try:
+        with Session(engine) as db, db.begin():
+            publish_platform_policy_version(db, revision=revision)
+            request_ids = []
+            for index in (1, 2):
+                request_id = request_platform_approval(
+                    db,
+                    policy_code="fleet.race",
+                    policy_version=1,
+                    subject_type="fleet.plan",
+                    subject_id=f"plan-cross-{index}",
+                    content_digest=DIGEST,
+                    requested_by=requester,
+                    idempotency_key=f"cross-{index}",
+                ).request_id
+                record_platform_decision(
+                    db,
+                    request_id=request_id,
+                    actor=Actor(actor_id=approver),
+                    action=DecisionAction.APPROVE,
+                    content_digest=DIGEST,
+                )
+                request_ids.append(request_id)
+
+        start = Barrier(2)
+
+        def attempt(index: int) -> str:
+            with Session(engine) as db, db.begin():
+                # This write belongs to the caller, not withdrawal. A failed
+                # reference race must not wipe its outer transaction.
+                request_platform_approval(
+                    db,
+                    policy_code="fleet.race",
+                    policy_version=1,
+                    subject_type="fleet.plan",
+                    subject_id=f"unrelated-{index}",
+                    content_digest=DIGEST,
+                    requested_by=requester,
+                    idempotency_key=f"unrelated-{index}",
+                )
+                start.wait(timeout=10)
+                try:
+                    withdraw_platform_approval(
+                        db,
+                        request_id=request_ids[index],
+                        actor=Actor(actor_id=requester),
+                        authority_ref="cp-review",
+                        reason="same external act",
+                        external_ref="cross-shared-ref",
+                    )
+                except WithdrawalReferenceConflict:
+                    return "conflict"
+                return "accepted"
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(attempt, (0, 1)))
+        assert sorted(results) == ["accepted", "conflict"]
+        with engine.connect() as conn:
+            assert (
+                conn.execute(
+                    text(
+                        "SELECT count(*) FROM "
+                        "mod_approvals.platform_approval_withdrawals "
+                        "WHERE external_ref = 'cross-shared-ref'"
+                    )
+                ).scalar_one()
+                == 1
+            )
+            assert (
+                conn.execute(
+                    text(
+                        "SELECT count(*) FROM public.platform_outbox_events "
+                        "WHERE event_type = 'approval.withdrawn'"
+                    )
+                ).scalar_one()
+                == 1
+            )
+            assert (
+                conn.execute(
+                    text(
+                        "SELECT count(*) FROM mod_approvals.platform_approval_requests "
+                        "WHERE idempotency_key LIKE 'unrelated-%'"
+                    )
+                ).scalar_one()
+                == 2
             )
     finally:
         engine.dispose()

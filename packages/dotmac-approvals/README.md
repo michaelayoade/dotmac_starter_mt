@@ -5,7 +5,7 @@ One decision, and never the transition that follows:
 > Has the required set of eligible actors approved **this exact content** under
 > **this exact policy revision**, and is that decision still valid?
 
-The module answers `pending | approved | rejected | cancelled` and emits an
+The module answers `pending | approved | rejected | cancelled | withdrawn` and emits an
 event. The subject's owner reacts and runs its own guarded transition.
 **Approving a payment does not post it** — Finance still decides whether an
 approved payment may be posted.
@@ -25,12 +25,16 @@ request_tenant_approval(db, tenant_id=…, …)
 record_tenant_decision(db, tenant_id=…, …)
 evaluate_tenant_approval(db, tenant_id=…, request_id=…)
 cancel_tenant_request(db, tenant_id=…, …)
+withdraw_tenant_approval(db, tenant_id=…, request_id=…, actor=…,
+                        authority_ref=…, reason=…, external_ref=…)
 
 publish_platform_policy_version(db, revision=…)
 request_platform_approval(db, …)
 record_platform_decision(db, …)
 evaluate_platform_approval(db, request_id=…)
 cancel_platform_request(db, …)
+withdraw_platform_approval(db, request_id=…, actor=…,
+                           authority_ref=…, reason=…, external_ref=…)
 ```
 
 A caller states its security context by naming the operation, so putting a row
@@ -42,10 +46,31 @@ between them.
 The **rules** are shared and pure: `policy.py` imports no session, no model and
 no plane, so both surfaces reach the same verdict rather than drifting.
 
+Withdrawal is a later, terminal standing of an **approved** request. It never
+changes an APPROVE vote or the request's original `completed_at`. A distinct
+append-only row records who withdrew it, the caller's authority reference, the
+reason, a service-generated UTC effective time, and a stable external reference.
+The same reference with identical facts replays with no new event; another
+reference or changed facts is refused. Pending, rejected and cancelled requests
+cannot become withdrawn. `get_*_request` returns both the original decisions and
+the withdrawal evidence, while `evaluation.is_approved` describes current
+standing. Public `withdraw_tenant_approval` and `withdraw_platform_approval`
+are outbox-owning commands: they persist the evidence, terminal standing and
+one `approval.withdrawn` outbox row in the **same caller transaction**. On
+PostgreSQL the approved-to-withdrawn transition trigger inserts that row even
+for direct paired owner DML;
+the public adapter does not enqueue twice. A replay
+persists no second event. The event includes the original approval completion time, request,
+subject, content digest and withdrawal evidence so a consumer can deduplicate
+and project the revocation without reconstructing a decision. The host's
+guarded adapter authorizes the actor before invoking this service; Approvals
+records that authority and does not decide the host's access policy.
+
 ## What it will not do
 
-- **Perform the transition.** It returns `ApprovalEvent` values; `outbox.py` is
-  an optional adapter onto the kernel's transactional outbox. A module that
+- **Perform the subject's transition.** Generic lifecycle commands return
+  `ApprovalEvent` values; withdrawal additionally requires its public outbox
+  adapter because revocation must be delivered. A module that
   executed the consequence would need a domain vocabulary and would become a
   second writer on the subject.
 - **Route by amount.** Threshold selection and FX conversion stay in the domain

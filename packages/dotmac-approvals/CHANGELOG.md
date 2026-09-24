@@ -5,6 +5,26 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 entry landed once the live Postgres migration and catalog gate passed;
 `0.1.0a1` through `0.1.0a5` have since been published.
 
+## Unreleased — approved-decision withdrawal candidate
+
+- Add one immutable withdrawal record per completed approval on both selected
+  planes. The original APPROVE votes and completion time remain queryable;
+  effective standing becomes `withdrawn`, distinct from rejection and cancellation.
+- Add typed tenant/platform withdrawal APIs with actor, authority, reason and
+  stable external reference. The public outbox-owned command persists one
+  `approval.withdrawn` row atomically with the terminal standing; exact retries
+  produce no second event. Typed read
+  and event values refuse missing, blank, naive-time or backdated withdrawal
+  evidence rather than representing an internally contradictory standing.
+- Add `ap_0003_withdrawals` with tenant RLS, platform role isolation, restrictive
+  request references, a DB-owned withdrawal operation and triggers enforcing
+  approved-parent evidence, paired terminal standing and append-only history.
+  The state-transition trigger also writes the complete typed outbox payload
+  atomically, including for direct paired owner DML; downgrade refuses any selected plane with
+  withdrawal evidence before dropping either plane.
+- The `ap_0003` column catalogue declaration is a candidate pending Git-hosted
+  PostgreSQL observation and comparison. No publication claim is made here.
+
 ## 0.1.0a6 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
 
 **Database catalogue contribution.** The manifest now declares
