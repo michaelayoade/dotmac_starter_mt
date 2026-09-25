@@ -1,5 +1,28 @@
 {
   "$comment": "Producer-owned immutable coordinates for verified module publications. Rows are appended mechanically by the release recorder from the annotated tag and the exact build-once wheel carried into registry verification; source changes never predict future release hashes. Every row carries a verification_run_id and is proven against its annotated tag's ModuleReleaseTagEvidence.v1 message (rendered/parsed by scripts/write_release_record.py), never trusted from the row alone.",
   "schema": "ModuleReleaseVerifications.v1",
-  "releases": []
+  "releases": [
+    {
+      "distribution": "dotmac-approvals",
+      "version": "0.1.0a7",
+      "tag": "dotmac-approvals-v0.1.0a7",
+      "tag_object": "d59ee6f273755c2c2e7330bfd9f45e6ca1e1d85a",
+      "peeled_commit": "7cab65c56272c1d8e3a2784ce5b91ce601dd9b05",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_approvals-0.1.0a7-py3-none-any.whl": "ef8b804b55fe1d5d860ea8f666fa2931876a51db8ce38166539821e9883d61b7"
+      },
+      "verification_run_id": "36151575723",
+      "source_run_id": "36151575723",
+      "release_authority_digest": "sha256:d3778c9781a3164a730f90f87607acd00cebdc5da91b1415913bce14f3edee98",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a104-py3-none-any.whl",
+          "sha256": "54562973a659427aed067a504aa0eaaa427fda8e13d184e8401d72d234ec2534"
+        }
+      ]
+    }
+  ]
 }
