@@ -1,4 +1,5 @@
 name: Release module
+run-name: Release module ${{ inputs.module }} ${{ inputs.version }}
 defaults:
   run:
     shell: bash --noprofile --norc -eo pipefail {0}
@@ -165,6 +166,9 @@ jobs:
       package_dir: ${{ steps.resolve.outputs.package_dir }}
       tag: ${{ steps.resolve.outputs.tag }}
       kernel_floor: ${{ steps.resolve.outputs.kernel_floor }}
+    env:
+      MODULE: ${{ inputs.module }}
+      VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -189,7 +193,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/release_module.py resolve \
-            "${{ inputs.module }}" --version "${{ inputs.version }}" \
+            "$MODULE" --version "$VERSION" \
             | tee -a "${GITHUB_OUTPUT}"
 
       - name: Build wheel + sdist
@@ -201,9 +205,11 @@ jobs:
       # per-module reviewed set, no secret-shaped files. A stateless module is
       # additionally refused if any migration lineage appears in its wheel.
       - name: Inspect artifacts
+        env:
+          PACKAGE_DIR: ${{ steps.resolve.outputs.package_dir }}
         run: |
-          python scripts/release_module.py inspect "${{ inputs.module }}" \
-            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+          python scripts/release_module.py inspect "$MODULE" \
+            --dist "$PACKAGE_DIR/dist"
 
       # The smoke needs a kernel ARTIFACT. The module floors at the release
       # that allocated its schema, and that kernel may not be published yet —
@@ -223,7 +229,7 @@ jobs:
       - name: Build allowed first-party dependency wheels for the smoke
         run: |
           python scripts/release_module.py build-local-dependencies \
-            "${{ inputs.module }}" \
+            "$MODULE" \
             --output "${GITHUB_WORKSPACE}/dependency-dist"
 
       # Release-artifact smoke: install the freshly built wheel into a clean
@@ -231,11 +237,23 @@ jobs:
       # NamespaceRegistry for stateful members). Proves the bytes about to be
       # published are installable and registrable, not merely well-formed.
       - name: Release wheel smoke
+        env:
+          PACKAGE_DIR: ${{ steps.resolve.outputs.package_dir }}
         run: |
-          python scripts/release_module.py verify-wheel "${{ inputs.module }}" \
-            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+          python scripts/release_module.py verify-wheel "$MODULE" \
+            --dist "$PACKAGE_DIR/dist" \
             --kernel-dist "${GITHUB_WORKSPACE}/kernel-dist" \
-            --dependency-dist "${GITHUB_WORKSPACE}/dependency-dist"
+            --dependency-dist "${GITHUB_WORKSPACE}/dependency-dist" \
+            --emit-dependency-manifest "${GITHUB_WORKSPACE}/smoke-dependencies/smoke-dependencies.json"
+
+      # The exact kernel/dependency wheels the smoke installed, by filename and
+      # SHA-256 — carried into the tag evidence and the verification row.
+      - name: Upload the smoke dependency manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.module }}-smoke-dependencies
+          path: smoke-dependencies/smoke-dependencies.json
+          retention-days: 90
 
       - name: Upload built artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -250,6 +268,9 @@ jobs:
     environment: registry-release    # main-only release credential boundary; no reviewer wait
     permissions:
       contents: read
+    env:
+      MODULE: ${{ inputs.module }}
+      VERSION: ${{ inputs.version }}
     steps:
       # RE-check freshness at the irreversible boundary. `build` proved this
       # run was main's tip at dispatch time, but a queued job can start after
@@ -269,7 +290,7 @@ jobs:
       - name: Re-assert the target is allowlisted
         run: |
           python scripts/release_module.py resolve \
-            "${{ inputs.module }}" --version "${{ inputs.version }}" >/dev/null
+            "$MODULE" --version "$VERSION" >/dev/null
 
       - name: Download the exact built bytes
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -294,13 +315,46 @@ jobs:
     environment: registry-release
     permissions:
       contents: write                # create the post-verification tag
+    env:
+      MODULE: ${{ inputs.module }}
+      VERSION: ${{ inputs.version }}
+      TAG: ${{ needs.build.outputs.tag }}
+      PACKAGE_DIR: ${{ needs.build.outputs.package_dir }}
+      RUN_ID: ${{ github.run_id }}
+      COMPOSE_WITH: ${{ inputs.compose_with }}
+      COMPOSE_KERNEL: ${{ inputs.compose_kernel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # `runner.temp` is only available in step/job `run:` context, never in
+      # `jobs.<id>.env:` — the `runner` context is not available
+      # there and GitHub refuses the workflow. Resolve it once, in the first step, into `GITHUB_ENV` so every
+      # later step in this job sees the same `ARTIFACT_DIR`.
+      - name: Resolve the shared artifact directory
+        run: |
+          echo "ARTIFACT_DIR=${RUNNER_TEMP}/module-release-dist" >> "$GITHUB_ENV"
+          echo "SMOKE_MANIFEST=${RUNNER_TEMP}/smoke-dependencies/smoke-dependencies.json" >> "$GITHUB_ENV"
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+
+      # Carry the exact build-once bytes into the verification/record job. The
+      # recorder hashes this wheel after the annotated tag exists; it never
+      # rebuilds a release or predicts a digest from source.
+      - name: Download exact built bytes for the publication record
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.module }}-dist
+          path: ${{ runner.temp }}/module-release-dist
+
+      - name: Download the smoke dependency manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.module }}-smoke-dependencies
+          path: ${{ runner.temp }}/smoke-dependencies
 
       # The index may lag a few seconds after publish.
       - name: Wait for the release on the Forgejo index
@@ -309,13 +363,25 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             if INDEX_PAGE="$(curl -sf "$IDX")" \
-              && grep -q "${{ inputs.version }}" <<<"${INDEX_PAGE}"; then
+              && grep -q "$VERSION" <<<"${INDEX_PAGE}"; then
               echo "available on the Forgejo index"; exit 0
             fi
             echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
           done
-          echo "::error::${{ inputs.module }} ${{ inputs.version }} did not appear in time"
+          echo "::error::$MODULE $VERSION did not appear in time"
           exit 1
+
+      # A successful registry installation does not prove that its wheel is
+      # the build-once wheel retained for this run. Compare every published
+      # artifact byte-for-byte before the immutable tag or record can exist.
+      - name: Prove published bytes match the retained build artifact
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python scripts/release_module.py compare-published "$MODULE" \
+            --version "$VERSION" \
+            --index "${INDEX}" \
+            --dist "${ARTIFACT_DIR}"
 
       # Install the PUBLISHED release from the index into a clean venv and
       # register it. Requires the kernel at `kernel_floor` to already be
@@ -327,7 +393,7 @@ jobs:
         run: |
           python scripts/release_module.py verify-registry \
             --index "${INDEX}" \
-            --pin "${{ inputs.module }}==${{ inputs.version }}"
+            --pin "${MODULE}==${VERSION}"
 
       # LEVEL 2 — composition, when this release completes a set.
       #
@@ -354,40 +420,44 @@ jobs:
         env:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
         run: |
-          if [ -z "${{ inputs.compose_kernel }}" ]; then
+          if [ -z "${COMPOSE_KERNEL}" ]; then
             echo "::error::compose_with is set but compose_kernel is empty — the"
             echo "::error::composition must pin an EXACT published kernel, or it"
             echo "::error::proves the set against whatever pip happens to resolve."
             exit 1
           fi
           ARGS=""
-          for pin in ${{ inputs.compose_with }}; do ARGS="${ARGS} --pin ${pin}"; done
+          for pin in ${COMPOSE_WITH}; do ARGS="${ARGS} --pin ${pin}"; done
           python scripts/release_module.py verify-registry \
             --index "${INDEX}" \
-            --kernel "${{ inputs.compose_kernel }}" \
-            --pin "${{ inputs.module }}==${{ inputs.version }}" ${ARGS}
+            --kernel "${COMPOSE_KERNEL}" \
+            --pin "${MODULE}==${VERSION}" ${ARGS}
 
-      # Only AFTER registry verification: tag the published SHA.
+      # Only AFTER registry verification: tag the published SHA. The tag
+      # message is canonical `ModuleReleaseTagEvidence.v1` evidence, computed
+      # from the SAME retained artifact directory `compare-published` just
+      # verified — never a free-text NOTE. Fail-closed: refuses an existing
+      # tag rather than force/recreate.
       - name: Tag the verified release
         run: |
-          TAG="${{ needs.build.outputs.tag }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          COMPOSED="${{ inputs.compose_with }}"
-          if [ -n "${COMPOSED}" ]; then
-            NOTE="verified on the Forgejo registry; composes with ${COMPOSED} on kernel ${{ inputs.compose_kernel }}"
-          else
-            NOTE="verified on the Forgejo registry (installed and registered alone)"
-          fi
-          git tag -a "${TAG}" \
-            -m "${{ inputs.module }} ${{ inputs.version }} (${NOTE})" \
-            "${GITHUB_SHA}"
-          git push origin "${TAG}"
-          echo "tagged ${TAG} on ${GITHUB_SHA}"
+          python scripts/tag_module_release.py \
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit "${GITHUB_SHA}" \
+            --artifact-dir "${ARTIFACT_DIR}" \
+            --run-id "$RUN_ID" \
+            --source-run-id "$RUN_ID" \
+            --smoke-dependencies "${SMOKE_MANIFEST}" \
+            --remote origin
 
       # The tag makes the publication-ledger row false THE MOMENT it lands, and
-      # any released migration becomes bytes that must not change. Five gates
-      # fail from that instant until the record is written. Leaving that to
+      # any released migration becomes bytes that must not change. The exact
+      # verified wheel and annotated tag also need a producer-owned immutable
+      # coordinate row. Five gates fail from that instant until the record is
+      # written. Leaving that to
       # memory put `main` red four times in two days, so the record PR is
       # opened HERE rather than remembered. `if: always()` is deliberate: the
       # tag is pushed by the step above, so a later failure must not leave a
@@ -406,7 +476,10 @@ jobs:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/open_release_record_pr.sh \
-            --distribution "${{ inputs.module }}" \
-            --version "${{ inputs.version }}" \
-            --tag "${{ needs.build.outputs.tag }}" \
-            --package-dir "${{ needs.build.outputs.package_dir }}"
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --package-dir "$PACKAGE_DIR" \
+            --artifact-dir "${ARTIFACT_DIR}" \
+            --expected-run-id "$RUN_ID" \
+            --expected-commit "${GITHUB_SHA}"

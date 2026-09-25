@@ -68,7 +68,7 @@ production steps stay serial.
 | --- | --- | --- | --- |
 | **0. Settle the bootstrap contracts** | CP + Control + Foundation: review the pre-publication rehearsal issuer, immutable candidate reference, custody-approved signer, lease and controller identity. Specify how the five ADR-0013 A6.4 plan inputs are derived without an operator-supplied image. Reconcile the existing single-use persistence-bootstrap receipt with the no-application-replacement rule. | Accepted design and source-level refusal tests for wrong candidate, signer, target, profile, image and plan; protected rehearsal workflow prepared. The issuer path must be implementable once a candidate exists, but cannot produce a candidate-bound authorization yet. | PR #187's current refusal is honest. Do not patch around it with flags, a free-text `authorization_ref` or a fake receipt. Recommend a protected disposable issuer for rehearsal only; production issuer activation remains a separate gate. Any departure from ADR-0013 needs its owner's amendment, not just host approval. |
 | **1. Make source and runner ready** | Foundation wires trusted candidate + installed-host admission through both executors; prepares concrete assembly binding and absence-evidence collection for the declared concerns beyond #735's synthetic verifier tests; fixes recovery's per-step adjudication; prepares a protected, real ten-step recovery and Lane 3 runner. Control prepares enrolment/revocation, challenge and signed authorization/grant semantics. | Source-level negative tests for same-author, wrong-artifact, wrong-host, revoked-key, replay and `receipt=None`; a `Lane3RunnerCapability.v1` check proves the runner can produce the required evidence before allocation. Positive candidate admission and live ten-step recovery are **not** claimed at this gate. | `_do_restore_objects` currently overwrites `outcome.attempt` from `_do_restore_roles` before adjudication: add roles-fail/objects-succeed refusal. No second CP renderer or Control decision engine. Do not require a candidate-bound proof before the candidate exists. |
-| **2. Freeze and build one successor** | Starter release captain freezes an exact protected-main source revision, disposes of spent `0.4.0a1`, allocates fresh `0.4.0a2`, and builds wheel and sdist once. Reconcile ADR-0070's “sign, then commit receipt” ordering with `foundation-candidate-attestation.yml`, which requires an **already committed** `CandidateArtifact.v1`; distinguish that artifact record from the later signed attestation and review any owning ADR amendment before executing the sequence. | Protected candidate run; committed artifact record with source, wheel/sdist digests, run/artifact IDs and observed expiry; exact bytes re-fetched and verified with the required 30-day retention margin; independent signed envelope and its reviewed record at the sequence the reconciled contract requires. | **Not published or tagged yet.** Missing/expired artifacts or source-tree drift under the same version spend the candidate; disposition and a new version are required. An evidence-only main commit does not automatically void the window. Release-ancestry and freeze guards must still pass. Do not allocate before issuer design and runner readiness are reviewed. |
+| **2. Freeze and build one successor** | Starter release captain freezes an exact protected-main source revision, disposes of spent `0.4.0a1`, allocates fresh `0.4.0a2`, and builds wheel and sdist once. Follow the record/signing order fixed by ADR-0070's 2026-09-22 amendment ("three distinct immutable candidate-provenance artifacts, and the record/signing order they fix"), which resolved the earlier conflict between ADR-0070's “sign, then commit receipt” wording and `foundation-candidate-attestation.yml`'s requirement for an **already committed** `CandidateArtifact.v1`; keep that artifact record distinct from the later signed attestation. | Protected candidate run; committed artifact record with source, wheel/sdist digests, run/artifact IDs and observed expiry; exact bytes re-fetched and verified with the required 30-day retention margin; independent signed envelope and its reviewed record at the sequence the reconciled contract requires. | **Not published or tagged yet.** Missing/expired artifacts or source-tree drift under the same version spend the candidate; disposition and a new version are required. An evidence-only main commit does not automatically void the window. Release-ancestry and freeze guards must still pass. Do not allocate before issuer design and runner readiness are reviewed. |
 | **3. Authorize and rehearse exact bytes before publication** | After gate 2 has produced the one exact artifact, CP/Control activate the gate-0 **rehearsal** issuer on a specifically authorized disposable target. Foundation issues and validates its candidate-bound `ExecutionGrant`, binding the exact gate-2 artifact bytes, rendered plan, target/host and controller identity before any executor or Lane-3 action. Foundation installs that wheel as an exact verified file, never a name-only resolution, then exercises candidate/host admission, real ten-step recovery and Lane 3 with the lease, controller identity and actual source-set probes. Retain the Lane 3 receipt as its workflow artifact; do not move the release revision after that run. | The accepted Foundation `ExecutionGrant` coordinate and issuer authorization run ID; signed candidate/host and recovery receipts; Lane 3 `RehearsalReceipt.v1` with **16/16 `executed_passed`**, including provoked rollback and non-vacuous running-service negatives. The grant and rehearsal run bind the **later release revision** that contains the committed candidate record; that revision separately binds the candidate source tree and artifact digest. | Human names the exact SSH endpoint and action before host work. `vendor-cp-prod` is a logical host ID, not an inferred SSH target. A rehearsal issuer's identity and Control's authorization to operate it are not Foundation execution authority; no executor starts until the `ExecutionGrant` is accepted. No positive admission on editable CI or ordinary main. |
 | **4. Publish the rehearsed candidate** | Starter release captain publishes the **same wheel and sdist bytes** from the rehearsed candidate, reads them back from the registry, verifies digests, tags and merges the truthful release record under the short named freeze. | Protected release run, immutable tag/peeled candidate-source commit, registry read-back, install-back of exact files and green release-record main. The release workflow separately checks candidate source, release revision and rehearsal-runner revision. | No rebuild, mutable tag, name-only install, skipped gate, or use of the spent a1 artifact. Publication still does not transfer a product executor. |
 | **5. Land CP's consuming source** | CP implements ADR-0017's concrete design only with Michael's separate implementation go-ahead and the topology-complete published Foundation pin. First, pre-merge CI renders and byte-compares the effective `docker-compose.production.yml` **without authorization or an independent image slot**. Reconcile #187 and schema 11. After merge, publish a CP image and verify its release receipt and registry read-back; only then derive `admit_candidate_image` and let Control bind that image, retained render, private inventory, target and approval. | Required hosted checks green at the final PR head; retained asset hash and consuming workflow; negative tests for edited bytes, `COMPOSE_FILE` diversion, image injection, wrong authorized inputs and missing receipted rollback asset. Accepted descriptors remain until their specified successful migration/runtime promotion. | A green render is neither image admission nor Control authorization. #187 stays draft until its real Governance gate is green. Do not let a pre-merge candidate authorize production or retroactively mutate `deploy/product.toml` or its ledger. |
@@ -105,11 +105,11 @@ evidence and the refusal it removes.
   protected disposable CP issuer (recommended) or whether a production
   in-place issuer is contractually necessary. That decision must identify the
   signer/trust domain and the distinction between rehearsal and production
-  authorization. He also ratifies CP ADR-0013 A6.4's replacement text before
-  its immutable-reference rule is treated as accepted implementation authority;
-  the current amendment calls that ratification pending. The ADR-0070 versus
-  attestation-workflow ordering conflict needs an owning contract correction
-  before the successor build. None of these decisions authorizes SSH or deployment.
+  authorization. Michael ratified the complete CP ADR-0013 A6 amendment,
+  including A6.4's replacement immutable-reference rule, on 2026-09-25. The
+  ADR-0070 versus
+  attestation-workflow ordering conflict has since been resolved by ADR-0070's
+  2026-09-22 amendment. None of these decisions authorizes SSH or deployment.
 - **Before host work:** Michael supplies the exact SSH endpoint, environment,
   action and scope. ADR-0013 names `vendor-cp-prod` as a logical target; a
   historical address in a runbook is not current permission. No broad Docker
@@ -125,15 +125,16 @@ evidence and the refusal it removes.
   product cutover record in the same change.
 
 The immediate executable package is therefore **gates 0–1's contract and
-source-readiness PRs**, plus resolution of the signing-order conflict—not an
-issuer deployment or a new Foundation build. The next joint checkpoint is a
+source-readiness PRs** (the signing-order conflict has since been resolved by
+ADR-0070's 2026-09-22 amendment)—not an issuer deployment or a new Foundation
+build. The next joint checkpoint is a
 reviewed rehearsal-issuer design, a capable Lane 3 runner and a protected
 Foundation source tree whose admission and recovery paths can be exercised
 against one exact built candidate. Only then does the short, irreversible
 candidate window begin.
 
 ## Update, 2026-09-24 — Gate 0/1's mechanism half is proven; the authority
-## contract (Work Packet A) is drafted, pending ratification
+## contract (Work Packet A) is ratified
 
 **This section is a dated observation, not a rewrite of the plan above** —
 the gate table and its evidence discipline stand. This records what actually
@@ -197,22 +198,27 @@ named the second, not the first, as what closes the gate.
 ### What remains: five work packets closing gate 0/1's protected-composition half
 
 Platform CP's `docs/adr/0013-operator-authorization-issuer-and-its-bootstrap.md`
-§ A7 (added 2026-09-24, drafted, pending Michael's ratification) is the
-proposed document-purpose/identity/ownership matrix for these. It is not
-authoritative and grants no implementation authority unless Michael ratifies
-it. Summary, including Starter's own stake in each:
+§ A7 is the ratified document-purpose/identity/ownership matrix for these.
+It merged as CP PR #196 (`c8ead5a`) with this section as Starter PR #747
+(`ead3b8a`), and Michael Ayoade ratified it separately afterwards, on
+2026-09-24 ("a is ratified"); the ratification is recorded at the head of
+§ A7. That 2026-09-24 record covers § A7 only. Michael separately ratified the
+complete CP ADR-0013 A6 amendment, including replacement A6.4, on 2026-09-25;
+CP records that later decision at the head of A6. Summary, including Starter's
+own stake in each:
 
 | Packet | Owner | Starter's stake |
 | --- | --- | --- |
-| **A. Authority contract** | CP + Starter docs (this section, plus CP ADR-0013 § A7) | Proposes gate sequencing, the five-document purpose matrix (rehearsal-issuer authorization vs. Foundation `ExecutionGrant` vs. harness evidence vs. `ApprovalEvidence` vs. Lane-3 receipt — never conflate the first two), and ownership. It freezes those rules only when Michael ratifies the corrected text; merging proposed prose is not ratification. |
+| **A. Authority contract** | CP + Starter docs (this section, plus CP ADR-0013 § A7) | Proposes gate sequencing, the five-document purpose matrix (rehearsal-issuer authorization vs. Foundation `ExecutionGrant` vs. harness evidence vs. `ApprovalEvidence` vs. Lane-3 receipt — never conflate the first two), and ownership. **Closed:** ratified by Michael on 2026-09-24, after merge, which is what froze these rules — merging proposed prose alone would not have. |
 | **B. Protected issuer composition** | Platform CP | Real approvals via `dotmac-approvals` (not rollout-coupled) and real signer/verifier providers — no rollout, no deployment |
 | **C1. Execution semantics** | Deployment Foundation | Selects Foundation's real `ExecutionGrant` path and fixes its digest semantics — this is what the rehearsal-issuer envelope must NEVER be mistaken for |
 | **C2. Assembly binding** | Starter/CP binding package | Installs B's genuine (non-ephemeral) verifier into the candidate-independent protected rehearsal-issuer composition. It requires no Foundation candidate and creates no candidate environment. |
 | **D. Protected workflow** | Starter protected-workflow owner | Creates the protected GitHub Environment, OIDC and real per-run controller-key custody, and configures the Lane-3 observer/jump/inside vantage this roadmap's own gate 1 already named. It emits protected workflow evidence for E; it does not write the Gate-0 readiness receipt. |
 | **E. Operational Gate-0 acceptance** | Platform CP, as the single writer of the readiness receipt | After B, C1, C2 and D are accepted, consumes D's protected-workflow evidence and records one immutable, candidate-independent issuer-readiness receipt proving genuine approval, signer custody, controller identity, issuance and standing, revocation, single-use consumption and the required refusal cases. It allocates, builds, signs and rehearses no Foundation candidate; issues no candidate-bound `ExecutionGrant`; and authorizes no deployment. |
 
-A must be ratified and merged before B/C1/C2/D/E begin implementation; merge
-alone is insufficient. B and C1 may then run in parallel; C2 and D follow
+A had to be ratified and merged before B/C1/C2/D/E could begin
+implementation; merge alone was insufficient. Both are now done, so B and C1
+may run in parallel; C2 and D follow
 their respective contracts; E runs only after B, C1, C2 and D are accepted
 and is the sole operational closeout of gate 0/1. **This ordering exists
 specifically to avoid recreating the circularity #194/#195 just broke**: a

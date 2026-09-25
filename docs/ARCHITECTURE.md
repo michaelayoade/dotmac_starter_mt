@@ -904,6 +904,135 @@ every repository-local distribution named by that module's reviewed
 `module -> dotmac-ui` direction stays installable without giving the build job a
 registry credential. The post-publish smoke separately installs from the
 registry, so local dependency artifacts cannot substitute for publication.
+The verify job also downloads the same immutable build artifact that the
+publish job uploaded and invokes `compare-published` against the private index
+before any tag. After registry verification and annotated tagging, the
+post-release recorder hashes that exact wheel and appends its filename,
+SHA-256, annotated tag object and peeled source commit to
+`docs/inventories/module-release-verifications.json`. The row is producer-owned,
+append-only and refuses coordinate rewrites; source work never predicts a
+future release hash. The CI architecture gate validates every row and compares
+the disjoint verification and legacy-unverified inventories with the complete
+local annotated-tag oracle. Deleting a post-cutover verification row, changing
+a tag object or peeled commit, or leaving a new tag unrecorded fails. The 120
+pre-cutover governed tags in `module-release-legacy-unverified.json` retain
+only real tag coordinates as of accepted source base
+`7281adb1620ae5b5942518a9a01290330e198ec3`, because their registry-byte
+proof was not retained;
+they are debt/history, never verified or pinnable evidence. A consumer may pin
+a checked-in verification row and independently recheck registry bytes, but
+the legacy baseline cannot satisfy that check.
+
+The annotated tag itself carries the canonical evidence, not free text: its
+message is exactly one line of `ModuleReleaseTagEvidence.v1` JSON —
+`distribution`, `version`, `wheel_filename`, `wheel_sha256` and
+`verification_run_id` — produced by the single renderer
+`render_module_release_tag_evidence` and read back only by its paired
+`parse_module_release_tag_evidence` (both in `scripts/write_release_record.py`).
+`scripts/tag_module_release.py` is the one fail-closed writer of that tag:
+it refuses an already-existing tag, local or remote, and never force-tags,
+deletes or recreates one — a release that needs a new tag ships a new
+version instead. The recorder's validator proves a row against the tag
+object it names by re-deriving `ModuleReleaseTagEvidence.v1` from the tag
+message and checking the row's wheel filename, SHA-256 and
+`verification_run_id` against it field-for-field; a row whose
+`verification_run_id` disagrees with its own tag's embedded run id fails
+the gate. The legacy `module-release-legacy-unverified.json` inventory is
+frozen byte-identical to its accepted source base and carries no
+`verification_run_id` — it is bootstrap history, not evidence, and the
+gate never asks it to prove anything. `recover-module-release.yml`'s
+artifacts (the downloaded original build and the record-PR's manual-fallback
+guidance) live under the runner's own temp directory for the duration of
+that run only; nothing persists there past the job, and the manual fallback
+in `scripts/open_release_record_pr.sh` never prints that path to an
+operator — it tells them to `gh run download` a fresh copy instead, which
+`write_release_record.py` will refuse unless its digest matches the one
+already embedded in the tag.
+
+Separately, hosted CI compares the complete verification ledger at each PR's
+immutable `pull_request.base.sha` (and each main push's `before` SHA) with the
+new tree: accepted rows must remain identical and in order; only append is
+allowed. A shallow checkout, unresolved base, or missing base ledger is a
+refusal, not an implicit empty ledger. The initial inventory therefore needs
+its own reviewed bootstrap commit before the append-only implementation gate
+can run against it.
+A row's `verification_run_id` and `source_run_id` name Actions runs, and the
+Actions runs API exposes no dispatch inputs — so a real, successful run for
+one module at a given commit is otherwise indistinguishable from a forged
+ledger row naming that same run for a different module or version.
+`scripts/module_release_provenance.py` is the single CI-invoked prover of
+that binding, over only the rows a PR/push newly appended (an older row was
+already proven when it was appended, and its run may since have expired or
+been deleted from GitHub's retention window). For every new row it requires:
+the named run belongs to an approved workflow (`release-module.yml` or
+`recover-module-release.yml`), re-derived independently from its
+`workflow_id`; was triggered by `workflow_dispatch`; reports `head_branch`
+`main` AND its head commit is on the first-parent line of
+`refs/remotes/origin/main` (a ref merely NAMED `main` or `origin/main`, such
+as a tag, cannot satisfy this, and neither can a commit that only entered
+main inside a merged branch); `repository` and
+`head_repository` are this repository; the run id matches exactly; its
+`display_title`
+(rendered from the workflow's top-level `run-name`) equals exactly `Release
+module <distribution> <version>` or `Recover module <distribution>
+<version>`, binding the run to the specific module and version the row
+claims; its "Tag the ..." step succeeded inside the job that owns tag
+creation (`verify` or `recover`); the tag's peeled commit is itself on that
+same first-parent line; and the run itself completed
+successfully within a bounded wait. A release additionally requires
+`source_run_id == verification_run_id` and that run's `head_sha` to equal the
+tagged commit. A recovery additionally requires a `source_run_id` naming a
+DIFFERENT run passing the same identity checks against `release-module.yml`
+(including the first-parent check on its head commit), titled `Release module <distribution> <version>`, built at the tagged
+commit, that did NOT succeed — recovery only ever applies to a release that
+failed after publishing but before tagging. Runs dispatched before the
+`run-name` binding existed carry no provable title and cannot be checked this
+way; this is acceptable because no governed module has a verified row yet.
+`ModuleReleaseTagEvidence.v1` gained `source_run_id` in place because no
+tag carrying the earlier shape was ever emitted (no governed module release
+ran between the two changes). Residuals, stated rather than implied: (a) the
+check runs the pull request's own copy of the script, the same class as the
+append-only checker, so a weakening made in the same diff is caught only by
+review; (b) replacing a tag after a legitimate run (delete and re-push with a
+different digest while keeping real run ids) is not bound to anything the run
+itself produced — an availability risk to the record, not to registry
+integrity, since publication is environment-protected; (c) restricting tag
+creation to a dedicated release App ruleset is pending Michael, and no
+blanket GitHub Actions bypass is granted in its place.
+**Release authority at execution time (`ReleaseAuthority.v1`).**
+`scripts/release_authority.py` derives the module release control surface
+mechanically — both release workflows, every local composite action and
+script they reach (run bodies, shell references, Python imports and string
+references inside `scripts/`), the release allowlist, the row-deciding
+checkers (`module_release_provenance.py`,
+`check_module_release_verification_append_only.py`) and itself — plus every
+third-party action as an `action:<owner/repo@40-hex>` coordinate (a mutable
+reference is refused). Its canonical digest is the active authority in
+`docs/inventories/release-authority.json`, whose `history` is append-only; a
+test fails whenever the surface changes without the ledger moving. The tag
+step computes the digest from its own checkout, refuses a stale ledger, and
+records it in the tag evidence and the verification row. A new row is
+authorized only when its digest is already in the BASE branch's history, the
+ledger at the exact commit of the run that wrote the tag marked it active,
+that commit's bytes (with the surface re-derived there) reconstruct it, and
+the commit is on main's first-parent line — so a later authority change
+cannot invalidate an authorized release, and a release PR cannot invent
+authority. A pull request that changes the authority ledger and adds a
+release row is refused, as is any row over a base without a ledger.
+Dependency source is tested input, not release control: the smoke installs
+the target, kernel and first-party dependencies only as the exact wheels the
+run built, proves in an isolated interpreter that each installed
+distribution came from exactly that file and has no files under the
+checkout, and records every kernel/dependency wheel's filename and SHA-256
+as `smoke_dependency_wheels` in the tag evidence and row. A rerun of the
+same run may accept an existing tag only when its canonical bytes, tag
+object, peeled commit, run ids, authority digest, smoke wheels and wheel
+digest all match exactly; a recovery never replaces a tag — it adopts one
+only after matching it to the original run and the recovered artifact, and
+the row records the adopting run as `adopting_run_id`, which provenance
+checks as a separate successful, authorized recovery run. Rebase-merge
+configuration is optional hardening and is not part of this proof.
+
 `scripts/module_catalog.py` joins those inputs deterministically, and
 `tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
 refuse drift or an undiscoverable new distribution. An application still owns
