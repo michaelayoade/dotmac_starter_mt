@@ -98,6 +98,7 @@ def test_module_release_verification_appends_exact_immutable_coordinates() -> No
         wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
         wheel_sha256="3" * 64,
         verification_run_id="123456789",
+        source_run_id="123456789",
     )
     assert added
     document = json.loads(after)
@@ -113,6 +114,7 @@ def test_module_release_verification_appends_exact_immutable_coordinates() -> No
             "pinnable": True,
             "sha256": {"dotmac_approvals-0.1.0a7-py3-none-any.whl": "3" * 64},
             "verification_run_id": "123456789",
+            "source_run_id": "123456789",
         }
     ]
 
@@ -126,6 +128,7 @@ def test_module_release_verification_appends_exact_immutable_coordinates() -> No
         wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
         wheel_sha256="3" * 64,
         verification_run_id="123456789",
+        source_run_id="123456789",
     )
     assert not added_again
     assert unchanged == after
@@ -143,6 +146,7 @@ def test_module_release_verification_refuses_coordinate_rewrite() -> None:
         wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
         wheel_sha256="3" * 64,
         verification_run_id="123456789",
+        source_run_id="123456789",
     )
     with pytest.raises(writer.ReleaseRecordError, match="different coordinates"):
         writer.add_module_release_verification(
@@ -155,6 +159,7 @@ def test_module_release_verification_refuses_coordinate_rewrite() -> None:
             wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
             wheel_sha256="4" * 64,
             verification_run_id="123456789",
+            source_run_id="123456789",
         )
 
 
@@ -375,6 +380,7 @@ def _synthetic_module_inventory():
         "pinnable": True,
         "sha256": {"dotmac_approvals-0.1.0a99-py3-none-any.whl": "c" * 64},
         "verification_run_id": "999000111",
+        "source_run_id": "999000111",
     }
     verified = {
         "$comment": "verified",
@@ -402,6 +408,7 @@ def test_missing_or_deleted_verified_row_is_refused_by_live_tag() -> None:
             "wheel_filename": filename,
             "wheel_sha256": digest,
             "verification_run_id": row["verification_run_id"],
+            "source_run_id": row["source_run_id"],
         }
     }
     writer.validate_module_release_inventory(

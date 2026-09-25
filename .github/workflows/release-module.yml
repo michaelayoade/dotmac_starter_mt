@@ -430,6 +430,7 @@ jobs:
             --commit "${GITHUB_SHA}" \
             --artifact-dir "${ARTIFACT_DIR}" \
             --run-id "$RUN_ID" \
+            --source-run-id "$RUN_ID" \
             --remote origin
 
       # The tag makes the publication-ledger row false THE MOMENT it lands, and

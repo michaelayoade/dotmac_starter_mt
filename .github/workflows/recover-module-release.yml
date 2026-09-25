@@ -277,6 +277,7 @@ jobs:
             --commit "$ORIGIN_SHA" \
             --artifact-dir "$RECOVERED_DIST" \
             --run-id "$RUN_ID" \
+            --source-run-id "$ORIGINAL_RUN_ID" \
             --remote origin
 
       # Recovery writes the same irreversible tag as an ordinary release and

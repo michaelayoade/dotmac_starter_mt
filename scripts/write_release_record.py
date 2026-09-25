@@ -174,6 +174,7 @@ _TAG_EVIDENCE_KEYS = {
     "wheel_filename",
     "wheel_sha256",
     "verification_run_id",
+    "source_run_id",
 }
 
 
@@ -184,6 +185,7 @@ def render_module_release_tag_evidence(
     wheel_filename: str,
     wheel_sha256: str,
     verification_run_id: str,
+    source_run_id: str,
 ) -> str:
     """The one line of canonical JSON a governed module release tag carries.
 
@@ -191,6 +193,10 @@ def render_module_release_tag_evidence(
     trailing whitespace or newline — `parse_module_release_tag_evidence` below
     refuses anything that does not reproduce this exact byte string, so
     canonical-ness is enforced by round-trip rather than by convention.
+
+    ``source_run_id`` names the run that BUILT and PUBLISHED the wheel: for a
+    normal release it equals ``verification_run_id``; for a recovery it is the
+    original failed run whose artifact is being retroactively verified.
     """
     if not _SHA256.fullmatch(wheel_sha256):
         raise ReleaseRecordError(
@@ -199,6 +205,10 @@ def render_module_release_tag_evidence(
     if not _DECIMAL.fullmatch(verification_run_id):
         raise ReleaseRecordError(
             "module release tag evidence requires a decimal verification_run_id"
+        )
+    if not _DECIMAL.fullmatch(source_run_id):
+        raise ReleaseRecordError(
+            "module release tag evidence requires a decimal source_run_id"
         )
     if not _wheel_filename(wheel_filename, distribution=distribution, version=version):
         raise ReleaseRecordError(
@@ -212,6 +222,7 @@ def render_module_release_tag_evidence(
         "wheel_filename": wheel_filename,
         "wheel_sha256": wheel_sha256,
         "verification_run_id": verification_run_id,
+        "source_run_id": source_run_id,
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -244,8 +255,11 @@ def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
         for key in ("distribution", "version", "wheel_filename", "wheel_sha256")
     }
     run_id = payload["verification_run_id"]
-    if not all(isinstance(value, str) for value in fields.values()) or not isinstance(
-        run_id, str
+    source_run_id = payload["source_run_id"]
+    if (
+        not all(isinstance(value, str) for value in fields.values())
+        or not isinstance(run_id, str)
+        or not isinstance(source_run_id, str)
     ):
         raise ReleaseRecordError(
             "module release tag evidence fields must all be strings"
@@ -256,10 +270,11 @@ def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
         wheel_filename=fields["wheel_filename"],
         wheel_sha256=fields["wheel_sha256"],
         verification_run_id=run_id,
+        source_run_id=source_run_id,
     )
     if canonical != message:
         raise ReleaseRecordError("module release tag evidence is not canonical JSON")
-    return {**fields, "verification_run_id": run_id}
+    return {**fields, "verification_run_id": run_id, "source_run_id": source_run_id}
 
 
 def annotated_tag_message(tag: str) -> str:
@@ -368,6 +383,7 @@ def parse_module_release_verifications(
         "pinnable",
         "sha256",
         "verification_run_id",
+        "source_run_id",
     }
     for row in document["releases"]:
         if not isinstance(row, dict) or set(row) != keys:
@@ -378,6 +394,12 @@ def parse_module_release_verifications(
             raise ReleaseRecordError(
                 f"module verification {row.get('tag')} has an invalid "
                 "verification_run_id"
+            )
+        if not isinstance(row["source_run_id"], str) or not _DECIMAL.fullmatch(
+            row["source_run_id"]
+        ):
+            raise ReleaseRecordError(
+                f"module verification {row.get('tag')} has an invalid source_run_id"
             )
         tag = row["tag"]
         distribution, version = _coordinate(tag, targets=governed)
@@ -582,6 +604,10 @@ def validate_module_release_inventory(
             raise ReleaseRecordError(f"module tag {tag} evidence digest mismatch")
         if proof["verification_run_id"] != row["verification_run_id"]:
             raise ReleaseRecordError(f"module tag {tag} evidence run id mismatch")
+        if proof["source_run_id"] != row["source_run_id"]:
+            raise ReleaseRecordError(
+                f"module tag {tag} evidence source run id mismatch"
+            )
 
 
 def module_wheel_digest(
@@ -625,11 +651,16 @@ def add_module_release_verification(
     wheel_filename: str,
     wheel_sha256: str,
     verification_run_id: str,
+    source_run_id: str,
 ) -> tuple[str, bool]:
     """Append one immutable, producer-owned module publication record."""
     if not _DECIMAL.fullmatch(verification_run_id):
         raise ReleaseRecordError(
             f"module verification {tag} requires a decimal verification_run_id"
+        )
+    if not _DECIMAL.fullmatch(source_run_id):
+        raise ReleaseRecordError(
+            f"module verification {tag} requires a decimal source_run_id"
         )
     existing_rows = parse_module_release_verifications(text)
     document = cast(
@@ -646,6 +677,7 @@ def add_module_release_verification(
         "pinnable": True,
         "sha256": {wheel_filename: wheel_sha256},
         "verification_run_id": verification_run_id,
+        "source_run_id": source_run_id,
     }
     for existing in existing_rows.values():
         if (existing["distribution"], existing["version"]) != (
@@ -1503,6 +1535,7 @@ def write_record(
             wheel_filename=wheel_filename,
             wheel_sha256=wheel_sha256,
             verification_run_id=evidence["verification_run_id"],
+            source_run_id=evidence["source_run_id"],
         )
         if added:
             changed.append(

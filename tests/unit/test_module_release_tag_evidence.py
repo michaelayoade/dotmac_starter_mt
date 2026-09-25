@@ -94,9 +94,11 @@ def test_canonical_render_round_trips_through_the_strict_parser() -> None:
         wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
         wheel_sha256="a" * 64,
         verification_run_id="123456789",
+        source_run_id="123456789",
     )
     assert message == (
         '{"distribution":"dotmac-approvals","schema":"ModuleReleaseTagEvidence.v1",'
+        '"source_run_id":"123456789",'
         '"verification_run_id":"123456789",'
         '"version":"0.1.0a7","wheel_filename":"dotmac_approvals-0.1.0a7-py3-none-any.whl",'
         '"wheel_sha256":"' + "a" * 64 + '"}'
@@ -107,6 +109,7 @@ def test_canonical_render_round_trips_through_the_strict_parser() -> None:
         "wheel_filename": "dotmac_approvals-0.1.0a7-py3-none-any.whl",
         "wheel_sha256": "a" * 64,
         "verification_run_id": "123456789",
+        "source_run_id": "123456789",
     }
 
 
@@ -117,6 +120,7 @@ def _canonical_message(writer) -> str:
         wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
         wheel_sha256="a" * 64,
         verification_run_id="123456789",
+        source_run_id="123456789",
     )
 
 
@@ -186,6 +190,7 @@ def test_parser_refuses_a_non_decimal_run_id() -> None:
             wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
             wheel_sha256="a" * 64,
             verification_run_id="12x",
+            source_run_id="123456789",
         )
     payload = json.loads(_canonical_message(writer))
     payload["verification_run_id"] = "12x"
@@ -300,6 +305,8 @@ def _tag_a_release(
             str(artifact_dir),
             "--run-id",
             run_id,
+            "--source-run-id",
+            run_id,
             "--remote",
             "origin",
             "--repo-root",
@@ -326,6 +333,7 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
     assert evidence["version"] == _VERSION
     assert evidence["wheel_filename"] == _WHEEL_NAME
     assert evidence["verification_run_id"] == "555000111"
+    assert evidence["source_run_id"] == "555000111"
 
     tag_object = writer.annotated_tag_object(_TAG)
     peeled_commit = writer.tag_commit(_TAG)
@@ -341,6 +349,7 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
         wheel_filename=evidence["wheel_filename"],
         wheel_sha256=evidence["wheel_sha256"],
         verification_run_id=evidence["verification_run_id"],
+        source_run_id=evidence["source_run_id"],
     )
     assert added
 
@@ -411,6 +420,7 @@ def test_full_write_record_records_the_verified_wheel_from_a_real_tag(
     recorded = json.loads(module_verifications.read_text(encoding="utf-8"))
     assert recorded["releases"][0]["tag"] == _TAG
     assert recorded["releases"][0]["verification_run_id"] == "555000222"
+    assert recorded["releases"][0]["source_run_id"] == "555000222"
 
     # Idempotent re-run converges rather than refusing.
     assert (
@@ -572,6 +582,7 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "pinnable": True,
         "sha256": {"dotmac_approvals-0.1.0a99-py3-none-any.whl": "c" * 64},
         "verification_run_id": "999",
+        "source_run_id": "999",
     }
     evidence = {
         "distribution": "dotmac-approvals",
@@ -579,6 +590,7 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "wheel_filename": "dotmac_approvals-0.1.0a99-py3-none-any.whl",
         "wheel_sha256": "c" * 64,
         "verification_run_id": "999",
+        "source_run_id": "999",
     }
     return row, evidence
 

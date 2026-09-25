@@ -107,6 +107,12 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="the run id of the job creating this tag (github.run_id)",
     )
+    parser.add_argument(
+        "--source-run-id",
+        required=True,
+        help="the run id that BUILT and PUBLISHED the wheel: equal to --run-id "
+        "for a normal release, or the original failed run for a recovery",
+    )
     parser.add_argument("--remote", default="origin")
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
     args = parser.parse_args(argv)
@@ -122,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             wheel_filename=wheel_filename,
             wheel_sha256=wheel_sha256,
             verification_run_id=args.run_id,
+            source_run_id=args.source_run_id,
         )
         create_and_push_tag(
             tag=args.tag,
