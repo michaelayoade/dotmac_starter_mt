@@ -25,11 +25,11 @@ from .execution_plan_v3 import (
 from .host_source import read_installed_artifact
 from .host_source_admission import HostSourceAdmissionTrace
 from .provenance import (
-    AuthorizationReceiptV2,
     AuthorizationReceiptV2Attester,
     attest_authorization_receipt_v2,
     normalize_digest,
 )
+from .trusted_host_source import AttestationPairVerificationResultV1
 
 if TYPE_CHECKING:
     from .execution_bindings import ExecutionBindings
@@ -84,12 +84,15 @@ class ExecutionContextV3:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ControlConsumptionRequestV3:
-    """Exact pair and coordinates, with a deterministic Control ledger key."""
+    """Exact pair, F2 trace, and deterministic Control recovery coordinate.
+
+    The trace's opaque continuation is passed through unchanged. Foundation
+    never interprets it or accepts Control standing from this request.
+    """
 
     authorization_material_json: bytes
     dispatch_material_json: bytes
-    expected_receipt: AuthorizationReceiptV2
-    expected_context: ExecutionContextV3
+    host_source_trace: HostSourceAdmissionTrace
     expected_execution_plan_digest: str
     control_consumption_ref: str
 
@@ -234,6 +237,22 @@ def require_committed_consumption_v3(
         or trace.host_observation_id != grant.receipt.dispatch_id
     ):
         raise PreconditionFailed("F2 admitted host disagrees with Control dispatch")
+    pair = trace.pair_verification_result
+    if not isinstance(pair, AttestationPairVerificationResultV1):
+        raise PreconditionFailed("F2 supplied no actual pair verification result")
+    if trace.opaque_finalization is None:
+        raise PreconditionFailed("F2 supplied no Control finalization continuation")
+    if (
+        pair.expected_host_identity != trace.host_identity
+        or pair.expected_observation_id != trace.host_observation_id
+        or pair.installed_root.public_key_fingerprint
+        != trace.installed_signer_fingerprint
+        or pair.installed_root.trust_root_version != trace.installed_trust_root_version
+        or pair.candidate_root.public_key_fingerprint
+        != trace.candidate_signer_fingerprint
+        or pair.candidate_root.trust_root_version != trace.candidate_trust_root_version
+    ):
+        raise PreconditionFailed("F2 pair result disagrees with admitted host trace")
     digest = plan.digest()
     if (
         grant.receipt.execution_plan_digest != digest
@@ -264,8 +283,7 @@ def require_committed_consumption_v3(
     request = ControlConsumptionRequestV3(
         authorization_material_json=grant.authorization_material_json,
         dispatch_material_json=grant.dispatch_material_json,
-        expected_receipt=grant.receipt,
-        expected_context=fresh,
+        host_source_trace=trace,
         expected_execution_plan_digest=digest,
         control_consumption_ref=recovery_ref,
     )

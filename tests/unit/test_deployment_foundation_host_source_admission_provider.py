@@ -23,6 +23,8 @@ persisted evidence document.
 from __future__ import annotations
 
 import inspect
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from dotmac_deployment_foundation.engine.run import Executor
@@ -68,6 +70,86 @@ from tests.unit.test_deployment_foundation_recovery_execution import (
 )
 
 HOST_SOURCE_CODES = {ABSENT, WRONG_KIND, DISAGREES, NO_RECEIPT}
+
+
+def test_admit_host_source_retains_actual_pair_verification_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmac_deployment_foundation import host_source_admission
+    from dotmac_deployment_foundation.host_source import InstalledArtifact
+
+    synthetic = accepting_admission_provider()
+    pair = synthetic.trace.pair_verification_result
+    assert pair is not None
+    source = synthetic.host_source
+    candidate_subject = SimpleNamespace(
+        package=source.distribution,
+        version=source.version,
+        wheel_sha256=source.artifact_digest,
+        source_revision=source.source_revision,
+        repository=source.repository,
+        run_id=source.run_id,
+        artifact_id=source.artifact_id,
+    )
+    installed_subject = SimpleNamespace(
+        package=source.distribution,
+        version=source.version,
+        wheel_sha256=source.artifact_digest,
+        host_identity=synthetic.trace.host_identity,
+    )
+    monkeypatch.setattr(
+        host_source_admission, "verify_attestation_pair", lambda **_kwargs: pair
+    )
+    monkeypatch.setattr(
+        host_source_admission,
+        "verify_candidate_attestation",
+        lambda **_kwargs: candidate_subject,
+    )
+    monkeypatch.setattr(
+        host_source_admission,
+        "candidate_subject_digest",
+        lambda _candidate: synthetic.trace.candidate_subject_digest,
+    )
+    monkeypatch.setattr(
+        host_source_admission.InstalledHostAttestationSubjectV2,
+        "from_mapping",
+        lambda _mapping: installed_subject,
+    )
+    monkeypatch.setattr(
+        host_source_admission,
+        "read_installed_artifact",
+        lambda: InstalledArtifact(
+            distribution=source.distribution,
+            version=source.version,
+            artifact_digest=source.artifact_digest,
+            installed_content_digest=source.artifact_digest,
+            read_from="synthetic installed artifact",
+        ),
+    )
+    candidate = SimpleNamespace(
+        public_key_fingerprint=synthetic.trace.candidate_signer_fingerprint,
+        trust_root_version=synthetic.trace.candidate_trust_root_version,
+    )
+    installed = SimpleNamespace(
+        public_key_fingerprint=synthetic.trace.installed_signer_fingerprint,
+        trust_root_version=synthetic.trace.installed_trust_root_version,
+        observation_id=synthetic.trace.host_observation_id,
+        subject_mapping=lambda: {},
+    )
+    admitted, trace = host_source_admission.admit_host_source(
+        candidate=candidate,
+        installed=installed,
+        verifier=object(),
+        trust_policy=object(),
+        expected_host_identity=synthetic.trace.host_identity,
+        expected_observation_id=synthetic.trace.host_observation_id,
+        expected_package=source.distribution,
+        verification_context_digest=pair.verification_context_digest,
+        now=datetime(2026, 9, 1, tzinfo=UTC),
+    )
+    assert admitted.distribution == source.distribution
+    assert trace.pair_verification_result is pair
+    assert trace.opaque_finalization is None
 
 
 # ── helpers ──────────────────────────────────────────────────────────────

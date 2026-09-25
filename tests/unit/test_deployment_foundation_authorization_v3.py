@@ -306,6 +306,91 @@ def test_f2_incarnation_and_root_must_match_v3_before_effects(
     assert grant.v3_provider.consumed is False
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_pair",
+        "missing_continuation",
+        "pair_host",
+        "pair_observation",
+        "pair_installed_root",
+        "pair_candidate_root",
+    ],
+)
+def test_v3_refuses_incomplete_or_changed_f2_trace_before_effects(
+    mutation: str,
+) -> None:
+    spec = load()
+    effects = FakeEffects()
+    work = build_plan(spec)
+    plan, _ = _plan_and_digest(spec, work, effects=effects)
+    grant = grant_for_plan(spec, plan)
+    admission = accepting_admission_provider()
+    trace = admission.trace
+    pair = trace.pair_verification_result
+    assert pair is not None
+    if mutation == "missing_pair":
+        trace = dataclasses.replace(trace, pair_verification_result=None)
+    elif mutation == "missing_continuation":
+        trace = dataclasses.replace(trace, opaque_finalization=None)
+    elif mutation == "pair_host":
+        trace = dataclasses.replace(
+            trace,
+            pair_verification_result=dataclasses.replace(
+                pair, expected_host_identity="fleet-host-b"
+            ),
+        )
+    elif mutation == "pair_observation":
+        trace = dataclasses.replace(
+            trace,
+            pair_verification_result=dataclasses.replace(
+                pair, expected_observation_id="another-dispatch"
+            ),
+        )
+    elif mutation == "pair_installed_root":
+        trace = dataclasses.replace(
+            trace,
+            pair_verification_result=dataclasses.replace(
+                pair,
+                installed_root=dataclasses.replace(
+                    pair.installed_root, trust_root_version="another-root"
+                ),
+            ),
+        )
+    else:
+        trace = dataclasses.replace(
+            trace,
+            pair_verification_result=dataclasses.replace(
+                pair,
+                candidate_root=dataclasses.replace(
+                    pair.candidate_root, public_key_fingerprint="another-candidate"
+                ),
+            ),
+        )
+    admission.trace = trace
+    executor = Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=plan,
+        sleep=lambda _: None,
+        admission_provider=admission,
+    )
+    before = effects.snapshot()
+    with pytest.raises(PreconditionFailed, match="F2"):
+        executor.run(work, lock=held_lock(spec.product))
+    assert effects.snapshot() == before
+    assert grant.v3_provider.consumed is False
+
+
+def test_opaque_f2_continuation_is_not_rendered_or_compared() -> None:
+    trace = accepting_admission_provider().trace
+    continuation = trace.opaque_finalization
+    assert continuation is not None
+    assert repr(continuation) not in repr(trace)
+    assert dataclasses.replace(trace, opaque_finalization=object()) == trace
+
+
 def test_v3_digest_moves_for_each_authority_coordinate(tmp_path: Path) -> None:
     _, plan = _subject(tmp_path)
     for field in (
@@ -411,6 +496,7 @@ def test_successful_consume_has_deterministic_recovery_ref_and_effect_boundary(
     plan, _ = _plan_and_digest(spec, work, operation=operation, effects=effects)
     grant = grant_for_plan(spec, plan)
     provider = grant.v3_provider
+    admission = accepting_admission_provider()
     events: list[str] = []
     original_consume = provider.consume_dispatch
     original_annotate = effects.emit_annotation
@@ -431,7 +517,7 @@ def test_successful_consume_has_deterministic_recovery_ref_and_effect_boundary(
         grant,
         execution_plan=plan,
         sleep=lambda _: None,
-        **valid_host_source_kwargs(),
+        admission_provider=admission,
     )
     outcome = (
         executor.run(work, lock=held_lock(spec.product))
@@ -441,6 +527,7 @@ def test_successful_consume_has_deterministic_recovery_ref_and_effect_boundary(
     expected = f"control-dispatch:{grant.receipt.dispatch_id}"
     assert provider.consumed is True
     assert provider.last_consumption_ref == expected
+    assert provider.last_trace is admission.trace
     assert events[:2] == ["consume", "effect"]
     assert outcome.control_consumption_ref == expected
     evidence = outcome.as_evidence()

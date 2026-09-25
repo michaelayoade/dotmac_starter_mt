@@ -32,12 +32,17 @@
   carries no authenticated target identity, so the trusted CP composition must
   construct the V3 provider, F2 admission provider and Effects as one bundle.
   `ExecutionAuthorityV3Provider.consume_dispatch()` receives immutable
-  canonical copies of the exact attested authorization+dispatch material and
-  expected V3 coordinates and deterministic `control-dispatch:<dispatch_id>`
-  recovery key. It returns `None` only after CP atomically revalidates current
-  standing, spends that exact dispatch and commits; otherwise it raises before
-  commit. Foundation checks the live receipt, fresh host context and F2 trace
-  before calling it, with no fallible post-commit gate. Successful local run
+  canonical copies of the exact attested authorization+dispatch material, the
+  exact F2 admission trace, the execution-plan digest and deterministic
+  `control-dispatch:<dispatch_id>` recovery key. The trace retains Foundation's
+  actual pair-verification result and a transient opaque CP continuation;
+  Foundation checks its presence and pair/host coordinates but neither
+  interprets nor persists the continuation. CP passes both to Control's one
+  host-admission-and-execution finalizer, which freshly rederives both standings
+  and stages one dispatch marker. The provider returns `None` only after CP
+  commits; otherwise it raises before commit. Foundation checks the live
+  receipt and independently observed context before calling it, with no
+  fallible post-commit gate. Successful local run
   evidence uses `DeploymentEvidence.v2` to carry the recovery key; V1 bytes
   remain unchanged. Control's committed ledger is authoritative if Foundation
   crashes before that local evidence can be written. This is a required trust contract for the external CP adapter, not
@@ -145,13 +150,22 @@
   metadata reader, a distribution selector, or any preverified result — the
   same inexpressible-bypass shape as `verify_candidate_attestation()`.
   `verification_context_digest` is threaded through to `verify_attestation_pair()`
-  unread; `admit_host_source()` itself discards that call's typed return value,
-  since it only needs pass/fail.
+  unread; `admit_host_source()` retains that call's actual typed
+  `AttestationPairVerificationResultV1` in the trace, without treating it as
+  caller-constructible authority.
   `HostSourceAdmissionTrace` is a frozen, slotted record populated from
   authenticated fields by `admit_host_source()` (`candidate_subject_digest`,
   `host_observation_id`, `host_identity`, both signer fingerprints, both
-  trust-root versions). The publicly constructible type alone proves no
-  authentication; it is consumed by nothing in this contract revision.
+  trust-root versions, and the actual pair-verification result). A trusted CP
+  F2 provider may attach a transient `opaque_finalization` continuation;
+  Foundation checks only its presence, excludes it from repr/equality and
+  never persists or interprets it. The publicly constructible trace type
+  alone proves no authentication. The V3 pre-effect check is its only
+  consumption path: it compares the trace and pair-result host, signed
+  dispatch-observation and root coordinates against independently observed V3
+  facts, then passes the exact trace to the startup-fixed provider for one
+  Control host-admission-and-execution finalizer. Non-V3 callers retain the
+  historical host-source behavior without making this trace a grant.
   `trusted_host_source.py` remains zero-I/O; `require_host_source()`'s
   signature and behavior are unchanged and it remains the constructor a
   receipt-only caller uses. Neither executor accepts a directly supplied
@@ -167,13 +181,14 @@
   verifier, or any preverified result. This shape does not force an
   implementation to reach Control: an arbitrary constructor caller can hand
   over a provider returning invented values. Positive use therefore requires
-  trusted, non-request-selectable assembly composition and current Control
-  verification; the shipped CLI passes no provider and remains refusal-only.
-  `admission_provider` is keyword-only and defaults to
-  `RefusingHostSourceAdmissionProvider()`, which itself calls exactly
-  `require_host_source(receipt=None)`: a caller that supplies no provider
-  observes IDENTICAL behavior to before this parameter existed, same typed
-  refusal codes (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`), zero effects. Both
+  trusted, startup-fixed, non-request-selectable assembly composition and
+  current Control verification. `admission_provider` is keyword-only and
+  **required** on both executor constructors, with no implicit fallback. The
+  shipped CLI explicitly passes `RefusingHostSourceAdmissionProvider()`,
+  which calls exactly `require_host_source(receipt=None)` and preserves the
+  historical refusal-only behavior and typed codes
+  (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`) with zero effects; it cannot authorize
+  V3. Both
   executors' `_verify_host_source` calls
   `self._admission_provider.admit_host_source()` fresh on every `run`/
   `rollback` invocation — never cached, never memoized across calls on the

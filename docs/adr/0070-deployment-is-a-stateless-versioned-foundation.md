@@ -470,6 +470,16 @@ therefore part of the composition gate. This slice defines and uses that
 provider contract; the real CP adapter and conformance proof are external and
 not claimed here.
 
+Correction, 2026-09-25: the Control-facing request does not carry the receipt
+or observed execution context as separately trusted claims. Foundation checks
+both before the call, then passes exact signed-pair bytes, the F2 trace
+(including its actual pair-verification result and transient opaque CP
+continuation), the execution-plan digest and deterministic recovery coordinate.
+CP submits these to one Control host-admission-and-execution finalizer, which
+freshly rederives both standings and stages one dispatch consumption in its
+caller-owned transaction. Foundation neither interprets nor persists the
+continuation.
+
 ## What this ADR does not decide
 
 ### Amendment — 2026-09-07: successor Control receipt is a Foundation value, not admission

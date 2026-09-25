@@ -22,9 +22,8 @@ a second, independently-checked path rather than replacing it.
 
 ## The double candidate-verification cost, and why it is paid anyway
 
-`verify_attestation_pair` already verifies the candidate half internally, but
-it returns `None` — "success creates no caller-constructible authority" is
-the whole point of that signature. Constructing a `HostSource` needs the
+`verify_attestation_pair` already verifies the candidate half internally and
+returns non-authorizing verification evidence. Constructing a `HostSource` needs the
 *fields* of the authenticated candidate subject, not just the fact that
 verification succeeded, and `trusted_host_source.py`'s private `_verify`
 helper is exactly that: private, and part of a module that has earned the
@@ -104,6 +103,7 @@ from .host_source import (
 )
 from .trusted_host_source import (
     AttestationEnvelopeV2,
+    AttestationPairVerificationResultV1,
     AttestationTrustPolicy,
     AttestationVerifier,
     InstalledHostAttestationSubjectV2,
@@ -130,7 +130,11 @@ class HostSourceAdmissionTrace:
     cannot treat a returned trace as authenticated until trusted composition
     establishes the provider's implementation. The V3 executor compares its
     installed-host identity/root coordinates to the independently observed
-    execution subject before effects; type alone is not authentication.
+    execution subject before effects; type alone is not authentication. The
+    actual pair-verification result is retained for Control's later single
+    finalizer. ``opaque_finalization`` is a transient CP continuation:
+    Foundation checks only its presence and passes the trace through unchanged.
+    It is excluded from repr and equality, and never becomes outcome evidence.
     """
 
     candidate_subject_digest: Digest
@@ -140,6 +144,10 @@ class HostSourceAdmissionTrace:
     candidate_trust_root_version: str
     installed_signer_fingerprint: str
     installed_trust_root_version: str
+    pair_verification_result: AttestationPairVerificationResultV1 | None = None
+    opaque_finalization: object | None = dataclasses.field(
+        default=None, repr=False, compare=False
+    )
 
 
 def admit_host_source(
@@ -166,7 +174,7 @@ def admit_host_source(
     installed-host subject. `verification_context_digest` is opaque here too —
     it is only ever forwarded to `verify_attestation_pair`, never inspected.
     """
-    verify_attestation_pair(
+    pair_result = verify_attestation_pair(
         candidate=candidate,
         installed=installed,
         verifier=verifier,
@@ -247,6 +255,7 @@ def admit_host_source(
         candidate_trust_root_version=candidate.trust_root_version,
         installed_signer_fingerprint=installed.public_key_fingerprint,
         installed_trust_root_version=installed.trust_root_version,
+        pair_verification_result=pair_result,
     )
     return host_source, trace
 

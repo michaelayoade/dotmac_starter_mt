@@ -26,6 +26,7 @@ from dotmac_deployment_foundation.execution_plan_v3 import (
     FoundationExecutionPlanV3,
     render_execution_plan_v3,
 )
+from dotmac_deployment_foundation.host_source_admission import HostSourceAdmissionTrace
 from dotmac_deployment_foundation.provenance import AuthorizationReceiptV2
 
 WHEEL = "sha256:" + "a" * 64
@@ -66,6 +67,7 @@ class SyntheticV3Provider:
     approval_current: bool = True
     commit_fails: bool = False
     last_consumption_ref: str = ""
+    last_trace: HostSourceAdmissionTrace | None = None
 
     @property
     def attester(self) -> SyntheticV3Provider:
@@ -97,12 +99,12 @@ class SyntheticV3Provider:
             request.dispatch_material_json != b'{"kind":"dispatch"}'
         ):
             raise PreconditionFailed("Control consumption received changed pair")
-        if request.expected_receipt != self.receipt:
-            raise PreconditionFailed("Control approval standing or pair changed")
-        if request.expected_context != self.context or (
-            request.expected_execution_plan_digest != self.receipt.execution_plan_digest
+        if request.host_source_trace.opaque_finalization is None or (
+            request.host_source_trace.pair_verification_result is None
         ):
-            raise PreconditionFailed("Control subject changed before consumption")
+            raise PreconditionFailed("Control did not receive F2 continuation")
+        if request.expected_execution_plan_digest != self.receipt.execution_plan_digest:
+            raise PreconditionFailed("Control plan digest changed before consumption")
         if (
             request.control_consumption_ref
             != f"control-dispatch:{self.receipt.dispatch_id}"
@@ -113,6 +115,7 @@ class SyntheticV3Provider:
         if self.commit_fails:
             raise PreconditionFailed("Control transaction did not commit")
         self.last_consumption_ref = request.control_consumption_ref
+        self.last_trace = request.host_source_trace
         self.consumed = True
 
 
