@@ -552,6 +552,9 @@ def test_write_record_refuses_a_wheel_that_disagrees_with_the_tags_digest(
             import_name=None,
             no_lineage=True,
             artifact_dir=str(artifact_dir),
+            # Correct binding, so the only defect left is the swapped wheel.
+            expected_run_id="555000333",
+            expected_commit=commit,
         )
     # Refused before any file is mutated.
     persisted = json.loads(module_verifications.read_text(encoding="utf-8"))
@@ -885,8 +888,8 @@ def test_recovery_dist_detector_is_sensitive_to_a_reintroduced_bare_literal() ->
 #
 # GitHub expands `jobs.<id>.env` values from only github/needs/strategy/
 # matrix/vars/secrets/inputs — `runner` is a step/job `run:` context object,
-# not an env-expression context, and silently resolves to an empty string
-# there. `runner.temp` at step level (e.g. `actions/download-artifact`'s
+# not available in job-level env, and GitHub refuses a workflow that uses
+# it there. `runner.temp` at step level (e.g. `actions/download-artifact`'s
 # `with: path:`) is legal and untouched by this check.
 
 

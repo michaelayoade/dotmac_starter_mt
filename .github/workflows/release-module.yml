@@ -318,8 +318,8 @@ jobs:
           fetch-depth: 0
 
       # `runner.temp` is only available in step/job `run:` context, never in
-      # `jobs.<id>.env:` — GitHub silently leaves that interpolation empty
-      # there. Resolve it once, in the first step, into `GITHUB_ENV` so every
+      # `jobs.<id>.env:` — the `runner` context is not available
+      # there and GitHub refuses the workflow. Resolve it once, in the first step, into `GITHUB_ENV` so every
       # later step in this job sees the same `ARTIFACT_DIR`.
       - name: Resolve the shared artifact directory
         run: echo "ARTIFACT_DIR=${RUNNER_TEMP}/module-release-dist" >> "$GITHUB_ENV"
