@@ -17,6 +17,10 @@ from __future__ import annotations
 
 from dotmac_deployment_foundation.engine.plan import build_plan
 from dotmac_deployment_foundation.engine.run import DeploymentOutcome, Executor
+from dotmac_deployment_foundation.execution_plan import (
+    HostPrestateV1,
+    render_execution_plan,
+)
 from dotmac_deployment_foundation.execution_plan_v2 import (
     ExposureReconciliationV1,
     render_execution_plan_v2,
@@ -24,12 +28,13 @@ from dotmac_deployment_foundation.execution_plan_v2 import (
 from dotmac_deployment_foundation.ingress import FAMILIES, FILTER_CHAIN
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
+from tests.unit.foundation_v3_support import v3_plan
 from tests.unit.host_source_stance import valid_host_source_kwargs
 from tests.unit.test_deployment_foundation_execution_binding import (
+    TARGET,
     AcceptingVerifier,
     RecordingEffects,
     _grant,
-    _plan_and_digest,
     evidence_policy,
 )
 
@@ -53,15 +58,27 @@ def authorized_executor(
     """A real `Executor`, authorized for exposure, plus a fresh outcome."""
     plan = build_plan(spec)
     effects = RecordingEffects()
-    v1, _ = _plan_and_digest(spec, plan, effects=effects)
-    v2 = render_execution_plan_v2(
-        v1, exposure_reconciliations=reconciliations(*families)
+    # The same V1 base `_plan_and_digest` renders, carrying the exposure acts
+    # in its V2 layer, wrapped as the V3 plan the grant is issued for — so the
+    # receipt's execution plan digest is the digest of exactly this plan.
+    base = render_execution_plan(
+        spec,
+        plan,
+        target=TARGET,
+        operation="deploy",
+        descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        prestate=HostPrestateV1.from_observations(effects.observe_roles()),
+        application_profile_digest="",
     )
+    v2 = render_execution_plan_v2(
+        base, exposure_reconciliations=reconciliations(*families)
+    )
+    v3 = v3_plan(v2)
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=v2.digest()),
-        execution_plan=v2,
+        _grant(spec, execution_plan=v3),
+        execution_plan=v3,
         sleep=lambda _: None,
         exposure_effects=exposure_effects,  # type: ignore[arg-type]
         evidence_policy=evidence_policy(),

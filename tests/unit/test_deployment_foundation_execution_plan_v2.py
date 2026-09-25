@@ -425,21 +425,65 @@ def test_the_v2_reachability_is_CONFINED_to_the_executor() -> None:
                 "execution_plan_v2"
             ):
                 importers.add(path.name)
-    assert importers == {"run.py", "compose_host.py"}, (
+    # Gate-0 ruling R3 (reviewed in #753): `FoundationExecutionPlanV3` is V2's
+    # exact acts plus the authority subject, so V3 wraps a V2 base, and the CLI
+    # renders that base ONLY as the argument of `render_execution_plan_v3` (see
+    # the next test). Authority is still Control's signed digest over the V3
+    # bytes; rendering confers none.
+    assert importers == {
+        "run.py",
+        "compose_host.py",
+        "execution_plan_v3.py",
+        "cli.py",
+    }, (
         f"V2's reachability moved: {sorted(importers)}. `run.py` executes an "
-        "authorized plan and `compose_host.py` refuses the effect it cannot "
-        "perform; a third importer is a widening that needs a reviewer, not a "
-        "test edit"
+        "authorized plan, `compose_host.py` refuses the effect it cannot "
+        "perform, `execution_plan_v3.py` wraps a V2 base, and `cli.py` renders "
+        "that base only inside a V3 render; another importer is a widening "
+        "that needs a reviewer, not a test edit"
     )
 
 
-def test_the_cli_still_constructs_no_v2_plan() -> None:
-    """The other half of "confined": the executor may EXECUTE one, but nothing
-    in this facility BUILDS one for itself. A caller renders it and hands it in,
-    so an authorized bootstrap cannot be invented on this side."""
+def _standalone_v2_renders(source: str) -> list[int]:
+    """Lines where `render_execution_plan_v2(...)` is called other than as a
+    direct argument of `render_execution_plan_v3(...)`."""
+    tree = ast.parse(source)
+    wrapped: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "render_execution_plan_v3"
+        ):
+            for argument in [*node.args, *(k.value for k in node.keywords)]:
+                wrapped.add(id(argument))
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "render_execution_plan_v2"
+        and id(node) not in wrapped
+    ]
+
+
+def test_the_cli_still_constructs_no_standalone_v2_plan() -> None:
+    """The other half of "confined": the executor may EXECUTE one, but the CLI
+    never BUILDS a V2 plan to stand on its own. Under V3 it renders a V2 base
+    only inside `render_execution_plan_v3`, whose digest Control must sign, so
+    no authorized bootstrap can be invented on this side."""
     source = (PACKAGE / "cli.py").read_text(encoding="utf-8")
-    assert "render_execution_plan_v2" not in source
+    assert _standalone_v2_renders(source) == []
     assert "FoundationExecutionPlanV2" not in source
+
+
+def test_the_standalone_v2_detector_is_sensitive() -> None:
+    planted = (
+        "def f(base):\n"
+        "    plan = render_execution_plan_v2(base)\n"
+        "    return render_execution_plan_v3(render_execution_plan_v2(base))\n"
+    )
+    assert _standalone_v2_renders(planted) == [2]
 
 
 def test_the_operation_vocabulary_did_not_widen() -> None:

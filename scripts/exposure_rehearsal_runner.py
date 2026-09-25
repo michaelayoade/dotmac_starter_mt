@@ -72,7 +72,7 @@ missing any of the sixteen.
 
 ## It cannot treat DISPATCH TEXT as authorization, and until 2026-09-05 it did
 
-`--authorization-run` and `--authorization-doc-digest` arrived as
+`--authorization-run` and an authorization document-digest flag arrived as
 `workflow_dispatch` strings, and the only comparison ever made was
 `lease.covers(authorization_run_id=...)` — a string equality against a lease
 record the same operator writes. Nothing here imported `provenance.py` or
@@ -86,7 +86,7 @@ before the lease is taken and before the host is contacted. It refuses today,
 and the refusal is the honest state rather than a regression: no
 `AuthorizationVerifier` exists fleet-wide, so `establish_authorization` reports
 `unanswerable` and this runner exits `EXIT_INDETERMINATE` naming every
-precondition that would have to exist first. `--authorization-doc-digest` is
+precondition that would have to exist first. The document-digest flag is
 GONE rather than deprecated: an argument that names proof and supplies none is
 the defect itself, and the receipt's middle term now comes out of an attested
 receipt instead of off the command line.

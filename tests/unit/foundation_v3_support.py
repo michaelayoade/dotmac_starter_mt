@@ -90,7 +90,14 @@ class SyntheticV3Provider:
             "kind": "dispatch"
         }:
             raise ValueError("synthetic Control pair disagrees")
-        return {**self.receipt.as_document(), **self.attested_overrides}
+        # A real Control attests the values it stores, verbatim. `as_document()`
+        # normalizes every digest, so restore each digest field's raw spelling
+        # (e.g. Control's bare-hex `control_plan_digest`) before any override.
+        document = self.receipt.as_document()
+        for key in document:
+            if key.endswith("digest") and hasattr(self.receipt, key):
+                document[key] = getattr(self.receipt, key)
+        return {**document, **self.attested_overrides}
 
     def observe(self) -> ExecutionContextV3:
         return self.context
