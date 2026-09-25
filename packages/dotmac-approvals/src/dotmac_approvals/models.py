@@ -36,14 +36,17 @@ from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -106,6 +109,24 @@ class _DecisionColumns:
     mfa_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     decided_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+
+
+class _WithdrawalColumns:
+    """One immutable withdrawal of a completed approval."""
+
+    actor_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    authority_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    effective_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    external_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    approved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
@@ -188,6 +209,34 @@ class ApprovalDecision(Base, _DecisionColumns, TimestampMixin):
     )
 
 
+class ApprovalWithdrawal(Base, _WithdrawalColumns):
+    """Tenant withdrawal evidence; one immutable row per approved request."""
+
+    __tablename__ = "approval_withdrawals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "request_id"],
+            [f"{SCHEMA}.approval_requests.tenant_id", f"{SCHEMA}.approval_requests.id"],
+            name="fk_approval_withdrawals_request",
+        ),
+        UniqueConstraint(
+            "tenant_id", "request_id", name="uq_approval_withdrawals_request"
+        ),
+        UniqueConstraint(
+            "tenant_id", "external_ref", name="uq_approval_withdrawals_external_ref"
+        ),
+        CheckConstraint(
+            "effective_at >= approved_at",
+            name="ck_approval_withdrawals_effective_after_approval",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    request_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+
+
 # ── Platform plane ──────────────────────────────────────────────────────────
 
 
@@ -251,15 +300,39 @@ class PlatformApprovalDecision(Base, _DecisionColumns, TimestampMixin):
     )
 
 
+class PlatformApprovalWithdrawal(Base, _WithdrawalColumns):
+    """Platform withdrawal evidence; one immutable row per approved request."""
+
+    __tablename__ = "platform_approval_withdrawals"
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_platform_approval_withdrawals_request"),
+        UniqueConstraint(
+            "external_ref", name="uq_platform_approval_withdrawals_external_ref"
+        ),
+        CheckConstraint(
+            "effective_at >= approved_at",
+            name="ck_platform_approval_withdrawals_effective_after_approval",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    request_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(f"{SCHEMA}.platform_approval_requests.id"), nullable=False
+    )
+
+
 TENANT_TABLES: tuple[str, ...] = (
     "approval_policies",
     "approval_requests",
     "approval_decisions",
+    "approval_withdrawals",
 )
 PLATFORM_TABLES: tuple[str, ...] = (
     "platform_approval_policies",
     "platform_approval_requests",
     "platform_approval_decisions",
+    "platform_approval_withdrawals",
 )
 
 __all__ = [
@@ -269,7 +342,9 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalPolicy",
     "ApprovalRequest",
+    "ApprovalWithdrawal",
     "PlatformApprovalDecision",
     "PlatformApprovalPolicy",
     "PlatformApprovalRequest",
+    "PlatformApprovalWithdrawal",
 ]

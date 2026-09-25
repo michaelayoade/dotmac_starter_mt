@@ -4,8 +4,9 @@
 > **this exact policy revision**, and is that decision still valid?
 
 That is the whole of it. The module answers
-`pending | approved | rejected | cancelled` and emits an event; the subject's
-owner performs its own guarded transition. Approving a payment does not post it.
+`pending | approved | rejected | cancelled | withdrawn` and emits an event; the
+subject's owner performs its own guarded transition. Approving a payment does
+not post it.
 
 Boundary: ADR-0026, "Approvals decide approval, never the transition".
 Source evidence: the A1 audit and its 24-row disposition ledger under
@@ -19,7 +20,8 @@ Public surface, by file:
   (`list_*_requests`, `get_*_request`, `*_decision_history`, `get_*_policy`,
   `list_*_policy_versions`), all answering in the typed values of `contracts`
   and never in ORM rows;
-- `outbox` — the optional adapter onto the kernel's transactional outbox;
+- `outbox` — the mandatory public withdrawal command and the generic event
+  adapter onto the kernel's transactional outbox;
 - `models`, `manifest` — persistence and registration;
 - `migrations` — `versions_dir()`, where a consuming assembly finds the `ap`
   lineage to compose into its `version_locations`.
@@ -60,11 +62,18 @@ from dotmac_approvals.contracts import (
     SelfApprovalRefused,
     SoDRule,
     SoDViolation,
+    WithdrawalEvidence,
+    WithdrawalReferenceConflict,
+    WithdrawalRefused,
 )
 from dotmac_approvals.manifest import module
 from dotmac_approvals.migrations import versions_dir
+from dotmac_approvals.outbox import (
+    withdraw_platform_approval,
+    withdraw_tenant_approval,
+)
 
-__version__ = "0.1.0a6"
+__version__ = "0.1.0a7"
 
 __all__ = [
     "ActionRefusal",
@@ -97,7 +106,12 @@ __all__ = [
     "SelfApprovalRefused",
     "SoDRule",
     "SoDViolation",
+    "WithdrawalEvidence",
+    "WithdrawalReferenceConflict",
+    "WithdrawalRefused",
     "__version__",
     "module",
     "versions_dir",
+    "withdraw_platform_approval",
+    "withdraw_tenant_approval",
 ]

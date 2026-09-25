@@ -38,7 +38,7 @@ DIGEST_LENGTH: Final[int] = len(DIGEST_PREFIX) + 64
 
 
 class ApprovalState(StrEnum):
-    """The only four answers the module gives.
+    """The effective standing of a request.
 
     `PENDING` is the sole non-terminal state. ERP additionally carried
     `ESCALATED`, which is not ported: escalation changes WHO may approve, not
@@ -50,10 +50,16 @@ class ApprovalState(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+    WITHDRAWN = "withdrawn"
 
 
 TERMINAL_STATES: Final[frozenset[ApprovalState]] = frozenset(
-    {ApprovalState.APPROVED, ApprovalState.REJECTED, ApprovalState.CANCELLED}
+    {
+        ApprovalState.APPROVED,
+        ApprovalState.REJECTED,
+        ApprovalState.CANCELLED,
+        ApprovalState.WITHDRAWN,
+    }
 )
 
 
@@ -151,6 +157,14 @@ class NotRequester(ApprovalError):
 
 class MFARequired(ApprovalError):
     """The level demands verified MFA and the decision did not carry it."""
+
+
+class WithdrawalRefused(ApprovalError):
+    """Only a completed approval may be withdrawn, once."""
+
+
+class WithdrawalReferenceConflict(ApprovalError):
+    """A withdrawal reference was reused for different evidence."""
 
 
 # ── Values ──────────────────────────────────────────────────────────────────
@@ -335,6 +349,34 @@ class Evaluation:
 
 
 @dataclass(frozen=True, slots=True)
+class WithdrawalEvidence:
+    """Immutable provenance for an approval whose standing was withdrawn."""
+
+    withdrawal_id: UUID
+    approved_at: datetime
+    actor_id: UUID
+    authority_ref: str
+    reason: str
+    effective_at: datetime
+    external_ref: str
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("authority_ref", self.authority_ref),
+            ("reason", self.reason),
+            ("external_ref", self.external_ref),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"withdrawal {field_name} must be a non-empty string")
+        if len(self.authority_ref) > 200 or len(self.external_ref) > 200:
+            raise ValueError("withdrawal references must fit 200 characters")
+        if self.approved_at.tzinfo is None or self.effective_at.tzinfo is None:
+            raise ValueError("withdrawal timestamps must be timezone-aware")
+        if self.effective_at < self.approved_at:
+            raise ValueError("a withdrawal cannot take effect before its approval")
+
+
+@dataclass(frozen=True, slots=True)
 class ApprovalEvent:
     """What the consuming domain reacts to (ADR-0026 § 6).
 
@@ -351,9 +393,16 @@ class ApprovalEvent:
     policy_version: int
     content_digest: str
     state: ApprovalState
+    withdrawal: WithdrawalEvidence | None = None
+
+    def __post_init__(self) -> None:
+        if (self.state is ApprovalState.WITHDRAWN) != (self.withdrawal is not None):
+            raise ValueError(
+                "withdrawal evidence is required exactly for withdrawn events"
+            )
 
     def payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "request_id": str(self.request_id),
             "subject_type": self.subject_type,
             "subject_id": self.subject_id,
@@ -362,6 +411,17 @@ class ApprovalEvent:
             "content_digest": self.content_digest,
             "state": str(self.state),
         }
+        if self.withdrawal is not None:
+            payload.update(
+                withdrawal_id=str(self.withdrawal.withdrawal_id),
+                approved_at=self.withdrawal.approved_at.isoformat(),
+                actor_id=str(self.withdrawal.actor_id),
+                authority_ref=self.withdrawal.authority_ref,
+                reason=self.withdrawal.reason,
+                effective_at=self.withdrawal.effective_at.isoformat(),
+                external_ref=self.withdrawal.external_ref,
+            )
+        return payload
 
 
 # ── Read contracts ──────────────────────────────────────────────────────────
@@ -487,6 +547,15 @@ class RequestDetail:
     evaluation: Evaluation
     permitted_actions: tuple[RequestAction, ...] = ()
     refusals: tuple[ActionRefusal, ...] = ()
+    withdrawal: WithdrawalEvidence | None = None
+
+    def __post_init__(self) -> None:
+        withdrawn = self.evaluation.state is ApprovalState.WITHDRAWN
+        if withdrawn != (self.withdrawal is not None):
+            raise ValueError(
+                "withdrawal evidence is required exactly when current standing "
+                "is withdrawn"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -552,12 +621,14 @@ EVENT_REQUESTED: Final[str] = "approval.requested"
 EVENT_APPROVED: Final[str] = "approval.approved"
 EVENT_REJECTED: Final[str] = "approval.rejected"
 EVENT_CANCELLED: Final[str] = "approval.cancelled"
+EVENT_WITHDRAWN: Final[str] = "approval.withdrawn"
 
 EVENT_FOR_STATE: Final[Mapping[ApprovalState, str]] = {
     ApprovalState.PENDING: EVENT_REQUESTED,
     ApprovalState.APPROVED: EVENT_APPROVED,
     ApprovalState.REJECTED: EVENT_REJECTED,
     ApprovalState.CANCELLED: EVENT_CANCELLED,
+    ApprovalState.WITHDRAWN: EVENT_WITHDRAWN,
 }
 
 
@@ -587,6 +658,7 @@ __all__ = [
     "EVENT_FOR_STATE",
     "EVENT_REJECTED",
     "EVENT_REQUESTED",
+    "EVENT_WITHDRAWN",
     "TERMINAL_STATES",
     "ActionRefusal",
     "Actor",
@@ -618,5 +690,8 @@ __all__ = [
     "SelfApprovalRefused",
     "SoDRule",
     "SoDViolation",
+    "WithdrawalEvidence",
+    "WithdrawalReferenceConflict",
+    "WithdrawalRefused",
     "validate_digest",
 ]

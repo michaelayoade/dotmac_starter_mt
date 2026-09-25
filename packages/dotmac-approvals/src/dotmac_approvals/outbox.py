@@ -1,4 +1,4 @@
-"""Optional adapter: approval events onto the kernel's transactional outbox.
+"""Approval events onto the kernel's transactional outbox.
 
 ADR-0026 § 6 says consequences leave as outbox events and the consuming domain
 runs its own guarded transition. This module supplies the write side of that,
@@ -13,19 +13,28 @@ and it is deliberately a SEPARATE import from `service`:
   those tables exist. Keeping it out of `service` means a consumer that has its
   own delivery mechanism — or none — is not forced to install the kernel's.
 
-Both functions `add`/`flush` into the caller's session and never commit, so an
-event is persisted if and only if the approval state change it describes is.
-That atomicity is the whole point of an outbox: the two can never diverge.
+Generic event emission remains callable separately. Withdrawal is different:
+the only public withdrawal commands live here and wrap the private lifecycle
+mutation in a SAVEPOINT in the caller's session. On PostgreSQL, the database's
+approved-to-withdrawn transition trigger itself inserts the outbox row, so even
+direct paired owner DML cannot omit delivery; the Python enqueue is only the SQLite
+unit-fixture fallback. An idempotent replay adds no row. No function commits;
+if delivery staging fails, the mutation rolls back with it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 from uuid import UUID
 
+from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy.orm import Session
 
-from dotmac_approvals.contracts import ApprovalEvent
+from dotmac_approvals.contracts import Actor, ApprovalEvent, WithdrawalRefused
+
+if TYPE_CHECKING:
+    from dotmac_approvals.service import ApprovalOutcome
 
 # The kernel import is deliberately INSIDE the functions below, not here.
 #
@@ -85,4 +94,73 @@ def emit_platform_events(
     return written
 
 
-__all__ = ["emit_platform_events", "emit_tenant_events"]
+def withdraw_tenant_approval(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    request_id: UUID,
+    actor: Actor,
+    authority_ref: str,
+    reason: str,
+    external_ref: str,
+) -> ApprovalOutcome:
+    """Atomically withdraw and enqueue the one durable tenant revocation event."""
+    from dotmac_approvals.service import _withdraw_tenant_approval
+
+    with conflict_savepoint(db):
+        outcome = _withdraw_tenant_approval(
+            db,
+            tenant_id=tenant_id,
+            request_id=request_id,
+            actor=actor,
+            authority_ref=authority_ref,
+            reason=reason,
+            external_ref=external_ref,
+        )
+        # PostgreSQL's standing-transition trigger already inserted the
+        # outbox row. SQLite unit fixtures retain the Python adapter path.
+        if (
+            outcome.events
+            and db.get_bind().dialect.name != "postgresql"
+            and emit_tenant_events(db, tenant_id=tenant_id, events=outcome.events) != 1
+        ):
+            raise WithdrawalRefused("withdrawal must enqueue exactly one event")
+    return outcome
+
+
+def withdraw_platform_approval(
+    db: Session,
+    *,
+    request_id: UUID,
+    actor: Actor,
+    authority_ref: str,
+    reason: str,
+    external_ref: str,
+) -> ApprovalOutcome:
+    """Atomically withdraw and enqueue the one durable platform event."""
+    from dotmac_approvals.service import _withdraw_platform_approval
+
+    with conflict_savepoint(db):
+        outcome = _withdraw_platform_approval(
+            db,
+            request_id=request_id,
+            actor=actor,
+            authority_ref=authority_ref,
+            reason=reason,
+            external_ref=external_ref,
+        )
+        if (
+            outcome.events
+            and db.get_bind().dialect.name != "postgresql"
+            and emit_platform_events(db, events=outcome.events) != 1
+        ):
+            raise WithdrawalRefused("withdrawal must enqueue exactly one event")
+    return outcome
+
+
+__all__ = [
+    "emit_platform_events",
+    "emit_tenant_events",
+    "withdraw_platform_approval",
+    "withdraw_tenant_approval",
+]

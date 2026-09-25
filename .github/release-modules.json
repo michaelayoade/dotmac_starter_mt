@@ -343,7 +343,8 @@
           "dotmac_approvals/outbox.py",
           "dotmac_approvals/migrations/__init__.py",
           "dotmac_approvals/migrations/versions/ap_0001_approvals.py",
-          "dotmac_approvals/migrations/versions/ap_0002_outbox_relay.py"
+          "dotmac_approvals/migrations/versions/ap_0002_outbox_relay.py",
+          "dotmac_approvals/migrations/versions/ap_0003_withdrawals.py"
         ],
         "forbidden_prefixes": [
           "app/",

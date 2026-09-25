@@ -7088,7 +7088,9 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-numbering": frozenset(),
-    "dotmac-approvals": frozenset(),
+    # `ap_0003` records approved-decision withdrawals; still editable until
+    # `dotmac-approvals` 0.1.0a7 is tagged.
+    "dotmac-approvals": frozenset({"ap_0003_withdrawals.py"}),
     "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),

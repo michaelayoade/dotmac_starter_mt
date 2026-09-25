@@ -72,6 +72,11 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-approvals": {
+      "declared": "0.1.0a7",
+      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a6 remains the last published and tagged version (dotmac-approvals-v0.1.0a6); 0.1.0a7 was allocated to name the approved-decision withdrawal surface and the ap_0003_withdrawals migration as a version distinct from a6, since one version may not name two sets of importable bytes. Michael authorized the 0.1.0a7 release on 2026-09-25; it awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep.",
+      "state": "declared-unpublished"
+    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
