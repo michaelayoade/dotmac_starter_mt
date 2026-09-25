@@ -7038,6 +7038,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
                         "dotmac-approvals-v0.1.0a4",
                         "dotmac-approvals-v0.1.0a5",
                         "dotmac-approvals-v0.1.0a6",
+                        "dotmac-approvals-v0.1.0a7",
                     }
                 ),
             ),

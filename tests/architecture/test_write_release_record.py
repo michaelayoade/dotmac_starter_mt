@@ -87,6 +87,14 @@ def _module_release_verification_text(writer) -> str:
     return writer.MODULE_RELEASE_VERIFICATIONS.read_text(encoding="utf-8")
 
 
+def _empty_module_release_verification_text(writer) -> str:
+    """The real ledger document with no rows: synthetic append tests must not
+    depend on which releases the real ledger already records."""
+    document = json.loads(_module_release_verification_text(writer))
+    document["releases"] = []
+    return json.dumps(document, indent=2) + "\n"
+
+
 def _legacy_module_text(writer) -> str:
     return writer.MODULE_RELEASE_LEGACY.read_text(encoding="utf-8")
 
@@ -96,7 +104,7 @@ def _legacy_module_text(writer) -> str:
 
 def test_module_release_verification_appends_exact_immutable_coordinates() -> None:
     writer = _writer()
-    before = _module_release_verification_text(writer)
+    before = _empty_module_release_verification_text(writer)
     after, added = writer.add_module_release_verification(
         before,
         distribution="dotmac-approvals",
@@ -153,7 +161,7 @@ def test_module_release_verification_appends_exact_immutable_coordinates() -> No
 def test_module_release_verification_refuses_coordinate_rewrite() -> None:
     writer = _writer()
     after, _ = writer.add_module_release_verification(
-        _module_release_verification_text(writer),
+        _empty_module_release_verification_text(writer),
         distribution="dotmac-approvals",
         version="0.1.0a7",
         tag="dotmac-approvals-v0.1.0a7",
