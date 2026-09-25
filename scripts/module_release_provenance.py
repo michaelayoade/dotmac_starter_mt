@@ -56,6 +56,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+import release_authority
 from write_release_record import ReleaseRecordError, parse_module_release_verifications
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +74,7 @@ APPROVED_VERIFICATION_WORKFLOWS = {
 #: wheel) is ever allowed to be, whether it is also the verification run
 #: (release) or a separate, failed, earlier run (recovery).
 SOURCE_WORKFLOW = ".github/workflows/release-module.yml"
+RECOVERY_WORKFLOW = ".github/workflows/recover-module-release.yml"
 
 
 class ProvenanceError(RuntimeError):
@@ -324,6 +326,65 @@ def _require_step_succeeded(
     )
 
 
+class ReleaseAuthorityView(Protocol):
+    """What provenance needs from `release_authority.py`, injectable for tests.
+
+    Authority is decided at EXECUTION time: the digest the ledger at the
+    release run's exact commit marked active. A later authority change can
+    never invalidate an already authorized release, and a release PR can
+    never invent its own historical authority, because the digest must also
+    already sit in the BASE branch's append-only history.
+    """
+
+    def base_history(self) -> set[str]:
+        """The append-only authority history on the pull request's base."""
+
+    def active_at(self, commit: str) -> str | None:
+        """The ledger's active digest at ``commit``, or None if it had none."""
+
+    def reconstruct_at(self, commit: str) -> str:
+        """The digest re-derived from ``commit``'s bytes with its own ledger's
+        declared surface."""
+
+
+def _require_authorized_commit(
+    authority: ReleaseAuthorityView,
+    commit: str,
+    *,
+    digest: str | None,
+    label: str,
+) -> str:
+    """``commit`` executed under an authority the base branch already holds.
+
+    The ledger at ``commit`` must mark a digest active, that digest must be in
+    the base branch's history, and ``commit``'s own bytes must reconstruct it.
+    When ``digest`` is given (the one the tag and row carry) it must be
+    exactly that active digest. Returns the authorized digest.
+    """
+    active = authority.active_at(commit)
+    if active is None:
+        raise ProvenanceError(
+            f"{label} commit {commit} carries no active release authority"
+        )
+    if digest is not None and active != digest:
+        raise ProvenanceError(
+            f"{label} commit {commit} marked {active!r} active, but the tag "
+            f"and row carry {digest!r}"
+        )
+    if active not in authority.base_history():
+        raise ProvenanceError(
+            f"{label} authority {active!r} is not in the base branch's "
+            "append-only authority history"
+        )
+    rebuilt = authority.reconstruct_at(commit)
+    if rebuilt != active:
+        raise ProvenanceError(
+            f"{label} commit {commit} reconstructs authority {rebuilt!r}, not "
+            f"its declared active {active!r}"
+        )
+    return active
+
+
 def verify_row_provenance(
     row: dict,
     *,
@@ -333,6 +394,7 @@ def verify_row_provenance(
     wait_seconds: int,
     poll_seconds: int,
     is_on_main: Callable[[str], bool],
+    authority: ReleaseAuthorityView,
     sleep=time.sleep,
 ) -> None:
     """Prove one ledger row's tag was created by an approved, successful run.
@@ -354,6 +416,21 @@ def verify_row_provenance(
             f"tag {tag} peeled commit {peeled_commit!r} is not on the "
             "first-parent line of refs/remotes/origin/main"
         )
+
+    row_digest = row["release_authority_digest"]
+    if row.get("adopting_run_id") is not None:
+        _verify_adopted_row(
+            row,
+            peeled_commit=peeled_commit,
+            runs=runs,
+            repository=repository,
+            wait_seconds=wait_seconds,
+            poll_seconds=poll_seconds,
+            is_on_main=is_on_main,
+            authority=authority,
+            sleep=sleep,
+        )
+        return
 
     run = runs.get_run(verification_run_id)
     _require_run_identity(
@@ -392,6 +469,10 @@ def verify_row_provenance(
         tag_step_name,
         job_name="verify" if is_release else "recover",
         label="verification",
+    )
+    # The run that wrote the tag executed under the row's authority.
+    _require_authorized_commit(
+        authority, run["head_sha"], digest=row_digest, label="verification run"
     )
 
     if is_release:
@@ -443,6 +524,149 @@ def verify_row_provenance(
         raise ProvenanceError(
             f"recovery source run {source_run_id} succeeded — recovery only "
             "applies to a failed release"
+        )
+
+
+def _verify_adopted_row(
+    row: dict,
+    *,
+    peeled_commit: str,
+    runs: GitHubRuns,
+    repository: str,
+    wait_seconds: int,
+    poll_seconds: int,
+    is_on_main: Callable[[str], bool],
+    authority: ReleaseAuthorityView,
+    sleep,
+) -> None:
+    """A recovery ADOPTED a tag the original release run had written.
+
+    The original run wrote the tag (it is both verification and source run),
+    its publication and tag step succeeded, and it failed only afterwards; its
+    commit authorizes the row's digest. The adopting recovery run is a
+    different, successful, authorized recovery run for the same release.
+    """
+    tag = row.get("tag")
+    distribution = row["distribution"]
+    version = row["version"]
+    original_id = row["verification_run_id"]
+    adopting_id = row["adopting_run_id"]
+    if row["source_run_id"] != original_id:
+        raise ProvenanceError(
+            f"adopted tag {tag} must name the original run as both source and "
+            "verification run"
+        )
+    original = runs.get_run(original_id)
+    _require_run_identity(
+        original,
+        run_id=original_id,
+        expected_paths={SOURCE_WORKFLOW},
+        repository=repository,
+        label="adopted original",
+        distribution=distribution,
+        version=version,
+        runs=runs,
+        is_on_main=is_on_main,
+    )
+    if original.get("head_sha") != peeled_commit:
+        raise ProvenanceError(
+            f"adopted original run {original_id} built "
+            f"{original.get('head_sha')!r}, not the tagged commit {peeled_commit!r}"
+        )
+    if original.get("status") != "completed" or original.get("conclusion") == (
+        "success"
+    ):
+        raise ProvenanceError(
+            f"adopted original run {original_id} must be a completed, failed "
+            "run — a successful run needs no recovery"
+        )
+    _require_job_succeeded(runs, original_id, "publish", label="adopted original")
+    _require_step_succeeded(
+        runs,
+        original_id,
+        "Tag the verified release",
+        job_name="verify",
+        label="adopted original",
+    )
+    _require_authorized_commit(
+        authority,
+        original["head_sha"],
+        digest=row["release_authority_digest"],
+        label="adopted original run",
+    )
+
+    adopting = runs.get_run(adopting_id)
+    _require_run_identity(
+        adopting,
+        run_id=adopting_id,
+        expected_paths={RECOVERY_WORKFLOW},
+        repository=repository,
+        label="adopting recovery",
+        distribution=distribution,
+        version=version,
+        runs=runs,
+        is_on_main=is_on_main,
+    )
+    adopting = _await_completed(
+        runs,
+        adopting,
+        run_id=adopting_id,
+        wait_seconds=wait_seconds,
+        poll_seconds=poll_seconds,
+        sleep=sleep,
+        label="adopting recovery",
+    )
+    if adopting.get("conclusion") != "success":
+        raise ProvenanceError(
+            f"adopting recovery run {adopting_id} did not succeed "
+            f"(conclusion={adopting.get('conclusion')!r})"
+        )
+    _require_step_succeeded(
+        runs,
+        adopting_id,
+        "Tag the recovered release",
+        job_name="recover",
+        label="adopting recovery",
+    )
+    _require_authorized_commit(
+        authority, adopting["head_sha"], digest=None, label="adopting recovery run"
+    )
+
+
+def _require_job_succeeded(
+    runs: GitHubRuns, run_id: str, job_name: str, *, label: str
+) -> None:
+    for job in runs.get_jobs(run_id):
+        if job.get("name") == job_name:
+            if job.get("conclusion") != "success":
+                raise ProvenanceError(
+                    f"{label} run {run_id} job {job_name!r} did not succeed "
+                    f"(conclusion={job.get('conclusion')!r})"
+                )
+            return
+    raise ProvenanceError(f"{label} run {run_id} has no job named {job_name!r}")
+
+
+def refuse_authority_change_with_new_rows(
+    base_ledger_text: str | None, head_ledger_text: str | None, added: list[dict]
+) -> None:
+    """Authority changes and new release rows never share a pull request.
+
+    Any byte change to the authority ledger is an authority change; a base
+    with no ledger has no authority to grant, so it admits no new row either.
+    """
+    if not added:
+        return
+    if base_ledger_text is None:
+        raise ProvenanceError(
+            "the base branch has no release-authority ledger; no release row "
+            "can be authorized in this pull request"
+        )
+    if head_ledger_text != base_ledger_text:
+        raise ProvenanceError(
+            "this change edits the release-authority ledger AND adds release "
+            "rows; authority changes must land in a separate reviewed pull "
+            "request first"
         )
 
 
@@ -519,6 +743,64 @@ def _main_first_parent_line(root: Path) -> frozenset[str]:
     return line
 
 
+class GitReleaseAuthority:
+    """`ReleaseAuthorityView` over this checkout's git objects.
+
+    The base history comes from the base commit's ledger; a commit's active
+    digest from the ledger AT that commit; the reconstruction re-derives the
+    surface from that commit's bytes, requires it to equal the ledger's
+    declared surface there, and digests exactly those bytes.
+    """
+
+    def __init__(self, base_ledger_text: str) -> None:
+        self._base = release_authority.parse_authority_ledger(base_ledger_text)
+
+    def base_history(self) -> set[str]:
+        return set(self._base["history"])
+
+    def _ledger_at(self, commit: str) -> dict | None:
+        if not _COMMIT.fullmatch(commit or ""):
+            raise ProvenanceError(f"not a commit: {commit!r}")
+        shown = _git("show", f"{commit}:{release_authority.LEDGER_PATH}")
+        if shown.returncode != 0:
+            return None
+        try:
+            return release_authority.parse_authority_ledger(shown.stdout)
+        except release_authority.ReleaseAuthorityError as failure:
+            raise ProvenanceError(
+                f"authority ledger at {commit} is malformed: {failure}"
+            ) from failure
+
+    def active_at(self, commit: str) -> str | None:
+        ledger = self._ledger_at(commit)
+        return None if ledger is None else ledger["active"]["digest"]
+
+    def reconstruct_at(self, commit: str) -> str:
+        ledger = self._ledger_at(commit)
+        if ledger is None:
+            raise ProvenanceError(f"no authority ledger at {commit}")
+        declared_files = list(ledger["active"]["files"])
+        declared_external = list(ledger["active"]["external_imports"])
+        try:
+            read = release_authority.commit_reader(REPO_ROOT, commit)
+            files, external = release_authority.derive_surface(read)
+            if (sorted(files), sorted(external)) != (
+                sorted(declared_files),
+                sorted(declared_external),
+            ):
+                raise ProvenanceError(
+                    f"authority surface derived at {commit} differs from the "
+                    "surface its ledger declares"
+                )
+            return release_authority.reconstruct_at(
+                REPO_ROOT, commit, declared_files, declared_external
+            )
+        except release_authority.ReleaseAuthorityError as failure:
+            raise ProvenanceError(
+                f"cannot reconstruct authority at {commit}: {failure}"
+            ) from failure
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -566,11 +848,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"module release provenance REFUSED: {failure}", file=sys.stderr)
         return 1
 
+    base_authority = _git("show", f"{args.base}:{release_authority.LEDGER_PATH}")
+    head_authority = _git("show", f"HEAD:{release_authority.LEDGER_PATH}")
+    base_authority_text = (
+        base_authority.stdout if base_authority.returncode == 0 else None
+    )
+    head_authority_text = (
+        head_authority.stdout if head_authority.returncode == 0 else None
+    )
+    try:
+        refuse_authority_change_with_new_rows(
+            base_authority_text, head_authority_text, rows
+        )
+    except ProvenanceError as failure:
+        print(f"module release provenance REFUSED: {failure}", file=sys.stderr)
+        return 1
+
     if not rows:
         print("no new verified rows")
         return 0
 
     runs = RestGitHubRuns(repository=repository)
+    assert base_authority_text is not None  # refused above when rows exist
+    authority = GitReleaseAuthority(base_authority_text)
 
     for row in rows:
         tag = row["tag"]
@@ -600,6 +900,7 @@ def main(argv: list[str] | None = None) -> int:
                 wait_seconds=args.wait_seconds,
                 poll_seconds=args.poll_seconds,
                 is_on_main=_is_on_main,
+                authority=authority,
             )
         except ProvenanceError as failure:
             print(

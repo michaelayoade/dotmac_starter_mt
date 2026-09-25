@@ -185,6 +185,33 @@ class FakeGitHubRuns:
         return self._workflows[str(workflow_id)]
 
 
+AUTHORITY_DIGEST = "sha256:" + "9" * 64
+
+
+class FakeAuthority:
+    """Every commit executed under AUTHORITY_DIGEST unless overridden."""
+
+    def __init__(
+        self,
+        *,
+        history: set[str] | None = None,
+        active: dict[str, str | None] | None = None,
+        rebuilt: dict[str, str] | None = None,
+    ) -> None:
+        self._history = {AUTHORITY_DIGEST} if history is None else history
+        self._active = active or {}
+        self._rebuilt = rebuilt or {}
+
+    def base_history(self) -> set[str]:
+        return set(self._history)
+
+    def active_at(self, commit: str) -> str | None:
+        return self._active.get(commit, AUTHORITY_DIGEST)
+
+    def reconstruct_at(self, commit: str) -> str:
+        return self._rebuilt.get(commit, self.active_at(commit) or "")
+
+
 def _fake_sleep():
     calls: list[float] = []
 
@@ -228,6 +255,7 @@ def test_accepted_normal_release(provenance) -> None:
         wait_seconds=100,
         poll_seconds=10,
         is_on_main=_on_main_always,
+        authority=FakeAuthority(),
         sleep=sleep,
     )
     assert calls == []
@@ -265,6 +293,7 @@ def test_accepted_recovery(provenance) -> None:
         wait_seconds=100,
         poll_seconds=10,
         is_on_main=_on_main_only(PEELED_COMMIT, recovery_head_sha),
+        authority=FakeAuthority(),
         sleep=sleep,
     )
     assert calls == []
@@ -293,6 +322,7 @@ def test_refuses_a_verification_run_on_the_wrong_workflow(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -318,6 +348,7 @@ def test_refuses_a_verification_run_not_triggered_by_workflow_dispatch(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -341,6 +372,7 @@ def test_refuses_a_verification_run_off_main(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -366,6 +398,7 @@ def test_refuses_a_verification_run_in_another_repository(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -389,6 +422,7 @@ def test_refuses_a_verification_run_that_did_not_succeed(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -419,6 +453,7 @@ def test_refuses_a_release_verification_run_titled_for_a_different_module(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -446,6 +481,7 @@ def test_refuses_a_release_verification_run_titled_for_a_different_version(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -468,6 +504,7 @@ def test_refuses_a_release_verification_run_missing_a_title(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -498,6 +535,7 @@ def test_refuses_a_recovery_verification_run_titled_for_a_different_module(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -523,6 +561,7 @@ def test_refuses_a_recovery_verification_run_missing_a_title(provenance) -> None
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -552,6 +591,7 @@ def test_refuses_a_recovery_source_run_titled_for_a_different_module(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -581,6 +621,7 @@ def test_refuses_a_recovery_source_run_titled_for_a_different_version(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -606,6 +647,7 @@ def test_refuses_a_recovery_source_run_missing_a_title(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -628,6 +670,7 @@ def test_refuses_a_run_missing_the_tag_step(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -649,6 +692,7 @@ def test_refuses_a_run_whose_tag_step_failed(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -673,6 +717,7 @@ def test_refuses_a_release_whose_source_run_id_disagrees_with_verification(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -696,6 +741,7 @@ def test_refuses_a_release_run_built_at_the_wrong_commit(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -740,6 +786,7 @@ def test_refuses_a_recovery_source_run_on_the_wrong_workflow(provenance) -> None
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -768,6 +815,7 @@ def test_refuses_a_recovery_source_run_that_succeeded(provenance) -> None:
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -797,6 +845,7 @@ def test_refuses_a_recovery_source_run_built_at_the_wrong_commit(provenance) -> 
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -824,6 +873,7 @@ def test_refuses_a_recovery_whose_source_equals_the_verification_run(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -864,6 +914,7 @@ def test_refuses_a_verification_run_whose_head_commit_is_not_on_main(
             # PEELED_COMMIT is on main; the run's OWN head_sha (off_main_sha)
             # deliberately is not — proving head_branch=="main" is not enough.
             is_on_main=_on_main_only(PEELED_COMMIT),
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -900,6 +951,7 @@ def test_refuses_a_recovery_source_run_whose_head_commit_is_not_on_main(
             # main, but the SOURCE run's head_sha is refused — the source
             # run's own ancestry must independently be proven.
             is_on_main=_on_main_only(PEELED_COMMIT),
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -924,6 +976,7 @@ def test_refuses_a_tag_whose_peeled_commit_is_not_on_main(provenance) -> None:
             # Nothing is on main — the peeled-commit check fires first,
             # before either run is even fetched.
             is_on_main=_on_main_only(),
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -952,6 +1005,7 @@ def test_refuses_a_verification_run_whose_bound_workflow_path_disagrees(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -986,6 +1040,7 @@ def test_refuses_a_verification_run_whose_bound_workflow_is_not_approved(
             wait_seconds=100,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=_fake_sleep()[0],
         )
 
@@ -1022,6 +1077,7 @@ def test_an_in_progress_run_that_completes_within_the_wait_is_accepted(
         wait_seconds=100,
         poll_seconds=10,
         is_on_main=_on_main_always,
+        authority=FakeAuthority(),
         sleep=sleep,
     )
     assert calls == [10, 10]
@@ -1045,6 +1101,7 @@ def test_an_in_progress_run_beyond_the_wait_is_refused_as_still_running(
             wait_seconds=25,
             poll_seconds=10,
             is_on_main=_on_main_always,
+            authority=FakeAuthority(),
             sleep=sleep,
         )
     assert calls == [10, 10, 10]
@@ -1218,6 +1275,7 @@ def _release_verify_kwargs() -> dict:
         "wait_seconds": 0,
         "poll_seconds": 1,
         "is_on_main": lambda sha: True,
+        "authority": FakeAuthority(),
     }
 
 
@@ -1315,3 +1373,173 @@ def test_the_tag_owning_jobs_keep_github_reporting_their_key_as_name() -> None:
     for path, key in ((RELEASE_WORKFLOW, "verify"), (RECOVER_WORKFLOW, "recover")):
         job = yaml.safe_load(path.read_text())["jobs"][key]
         assert "name" not in job, f"{path.name} job {key!r} gained a name:"
+
+
+# ── Release authority at execution time ─────────────────────────────────────
+
+
+def _release_runs(provenance) -> FakeGitHubRuns:
+    return FakeGitHubRuns(
+        runs={"1001": _run_object(run_id="1001", path=provenance.SOURCE_WORKFLOW)},
+        jobs={"1001": _jobs_with_step("Tag the verified release")},
+    )
+
+
+def _verify_release(provenance, row: dict, authority: FakeAuthority) -> None:
+    kwargs = _release_verify_kwargs()
+    kwargs["authority"] = authority
+    provenance.verify_row_provenance(row, runs=_release_runs(provenance), **kwargs)
+
+
+def test_a_historical_authority_active_at_the_run_commit_authorizes_the_row(
+    provenance,
+) -> None:
+    """Later authority changes cannot invalidate an already authorized run:
+    the base now holds a newer active digest, but the row's digest is in the
+    base history and was active at the run's own commit."""
+    newer = "sha256:" + "7" * 64
+    _verify_release(
+        provenance, _row(), FakeAuthority(history={AUTHORITY_DIGEST, newer})
+    )
+
+
+def test_a_digest_absent_from_the_base_history_is_refused(provenance) -> None:
+    with pytest.raises(provenance.ProvenanceError, match="append-only authority"):
+        _verify_release(
+            provenance, _row(), FakeAuthority(history={"sha256:" + "7" * 64})
+        )
+
+
+def test_a_digest_not_active_at_the_run_commit_is_refused(provenance) -> None:
+    other = "sha256:" + "7" * 64
+    with pytest.raises(provenance.ProvenanceError, match="marked"):
+        _verify_release(
+            provenance,
+            _row(),
+            FakeAuthority(
+                history={AUTHORITY_DIGEST, other}, active={PEELED_COMMIT: other}
+            ),
+        )
+
+
+def test_a_run_commit_without_an_authority_ledger_is_refused(provenance) -> None:
+    with pytest.raises(provenance.ProvenanceError, match="no active release"):
+        _verify_release(provenance, _row(), FakeAuthority(active={PEELED_COMMIT: None}))
+
+
+def test_a_run_commit_whose_bytes_do_not_reconstruct_the_digest_is_refused(
+    provenance,
+) -> None:
+    with pytest.raises(provenance.ProvenanceError, match="reconstructs"):
+        _verify_release(
+            provenance,
+            _row(),
+            FakeAuthority(rebuilt={PEELED_COMMIT: "sha256:" + "6" * 64}),
+        )
+
+
+def test_authority_changes_and_new_rows_never_share_a_pull_request(
+    provenance,
+) -> None:
+    ledger = '{"schema": "ReleaseAuthorityLedger.v1"}\n'
+    row = [_row()]
+    provenance.refuse_authority_change_with_new_rows(ledger, ledger, row)
+    provenance.refuse_authority_change_with_new_rows(None, ledger, [])
+    provenance.refuse_authority_change_with_new_rows(ledger, ledger + " ", [])
+    with pytest.raises(provenance.ProvenanceError, match="separate reviewed"):
+        provenance.refuse_authority_change_with_new_rows(ledger, ledger + " ", row)
+    with pytest.raises(provenance.ProvenanceError, match="no release-authority"):
+        provenance.refuse_authority_change_with_new_rows(None, ledger, row)
+
+
+# ── A recovery that ADOPTED the original run's tag ──────────────────────────
+
+
+RECOVERY_HEAD = "e" * 40
+
+
+def _adopted_row() -> dict:
+    row = _row(verification_run_id="1001", source_run_id="1001")
+    row["adopting_run_id"] = "3003"
+    return row
+
+
+def _adoption_runs(
+    provenance,
+    *,
+    original_conclusion: str = "failure",
+    publish_conclusion: str = "success",
+    original_tag_step: str | None = "success",
+    adopting_path: str = ".github/workflows/recover-module-release.yml",
+    adopting_conclusion: str = "success",
+) -> FakeGitHubRuns:
+    original_jobs = [{"name": "publish", "conclusion": publish_conclusion, "steps": []}]
+    if original_tag_step is not None:
+        original_jobs += _jobs_with_step("Tag the verified release", original_tag_step)
+    return FakeGitHubRuns(
+        runs={
+            "1001": _run_object(
+                run_id="1001",
+                path=provenance.SOURCE_WORKFLOW,
+                conclusion=original_conclusion,
+            ),
+            "3003": _run_object(
+                run_id="3003",
+                path=adopting_path,
+                head_sha=RECOVERY_HEAD,
+                conclusion=adopting_conclusion,
+            ),
+        },
+        jobs={
+            "1001": original_jobs,
+            "3003": _jobs_with_step("Tag the recovered release"),
+        },
+    )
+
+
+def _verify_adopted(provenance, runs: FakeGitHubRuns, authority=None) -> None:
+    kwargs = _release_verify_kwargs()
+    kwargs["authority"] = authority or FakeAuthority()
+    provenance.verify_row_provenance(_adopted_row(), runs=runs, **kwargs)
+
+
+def test_an_adopted_tag_is_accepted_when_both_runs_prove_it(provenance) -> None:
+    _verify_adopted(provenance, _adoption_runs(provenance))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"original_conclusion": "success"}, "completed, failed"),
+        ({"publish_conclusion": "failure"}, "job 'publish'"),
+        ({"original_tag_step": None}, "no step named"),
+        ({"original_tag_step": "failure"}, "did not succeed"),
+        (
+            {"adopting_path": ".github/workflows/release-module.yml"},
+            "approved workflow|display_title",
+        ),
+        ({"adopting_conclusion": "failure"}, "adopting recovery run 3003 did not"),
+    ],
+)
+def test_an_adopted_tag_is_refused_when_either_run_fails_its_proof(
+    provenance, overrides: dict, message: str
+) -> None:
+    with pytest.raises(provenance.ProvenanceError, match=message):
+        _verify_adopted(provenance, _adoption_runs(provenance, **overrides))
+
+
+def test_an_adopting_run_outside_the_base_authority_history_is_refused(
+    provenance,
+) -> None:
+    rogue = "sha256:" + "5" * 64
+    authority = FakeAuthority(active={RECOVERY_HEAD: rogue})
+    with pytest.raises(provenance.ProvenanceError, match="adopting recovery run"):
+        _verify_adopted(provenance, _adoption_runs(provenance), authority)
+
+
+def test_an_adopted_row_must_name_the_original_run_as_its_source(provenance) -> None:
+    row = _adopted_row()
+    row["source_run_id"] = "1000"
+    kwargs = _release_verify_kwargs()
+    with pytest.raises(provenance.ProvenanceError, match="both source"):
+        provenance.verify_row_provenance(row, runs=_adoption_runs(provenance), **kwargs)
