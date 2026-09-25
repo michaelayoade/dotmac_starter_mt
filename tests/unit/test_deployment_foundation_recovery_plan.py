@@ -722,6 +722,12 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "lane3_runner_capability.py": 1,
     "palette_debt_baseline.py": 1,
     "release_artifact_verification.py": 1,
+    # The ReleaseAuthority.v1 canonical digest document; owned by
+    # release_authority.py, stored nowhere but as the ledger's digest.
+    "release_authority.py": 1,
+    # The SmokeDependencyWheels.v1 manifest verify-wheel emits; owned by
+    # release_module.py, carried only as a workflow artifact.
+    "release_module.py": 1,
     # Two documents, neither a Foundation store record: the distribution
     # publication record, and the `ModuleReleaseTagEvidence.v1` annotated-tag
     # message (`render_module_release_tag_evidence`), whose single owner is

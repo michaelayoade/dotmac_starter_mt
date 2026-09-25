@@ -54,6 +54,7 @@ def _base_files(ra) -> dict[str, str]:
         ra.POLICY_PATH: '{"modules": {}}\n',
         ra.AUTHORITY_MODULE_PATH: "# authority module source\n",
         **{path: "# checker source\n" for path in ra.VERIFICATION_ROOTS},
+        **{lock: "poetry==2.0.0 --hash=sha256:00\n" for lock in ra.BOOTSTRAP_LOCKS},
     }
 
 
@@ -221,14 +222,54 @@ def test_derive_surface_raises_when_a_root_workflow_is_missing(ra) -> None:
         ra.derive_surface(_dict_reader(files))
 
 
-def test_authority_module_itself_is_excluded_from_recursive_discovery(ra) -> None:
-    # The authority file is always a member (rule 5) but never appears as a
-    # *discovered* scripts/ reference target from anywhere else — nothing in
-    # this test wires that reference, so this simply proves inclusion does
-    # not depend on any run body naming it.
+def test_the_authority_module_is_walked_so_its_own_imports_are_covered(ra) -> None:
     files = _base_files(ra)
+    files[ra.AUTHORITY_MODULE_PATH] = "import authority_helper\n"
+    files["scripts/authority_helper.py"] = "import json\n"
     derived_files, _ = ra.derive_surface(_dict_reader(files))
-    assert derived_files.count(ra.AUTHORITY_MODULE_PATH) == 1
+    assert ra.AUTHORITY_MODULE_PATH in derived_files
+    assert "scripts/authority_helper.py" in derived_files
+
+
+def test_the_bootstrap_locks_are_always_in_the_surface_and_match_the_directory(
+    ra,
+) -> None:
+    derived, _ = ra.derive_surface(_dict_reader(_base_files(ra)))
+    for lock in ra.BOOTSTRAP_LOCKS:
+        assert lock in derived
+    on_disk = sorted(
+        str(path.relative_to(PROJECT_ROOT))
+        for path in (PROJECT_ROOT / ".github" / "bootstrap").glob(
+            "poetry-requirements-py*.txt"
+        )
+    )
+    assert sorted(ra.BOOTSTRAP_LOCKS) == on_disk
+
+
+def test_history_is_append_only_against_the_base(ra) -> None:
+    def ledger(active: str, history: list[str]) -> str:
+        return json.dumps(
+            {
+                "$comment": "x",
+                "schema": ra.LEDGER_SCHEMA,
+                "active": {"digest": active, "files": [], "external_imports": []},
+                "history": history,
+            }
+        )
+
+    a, b, x = ("sha256:" + c * 64 for c in "abc")
+    ra.require_append_only_history(ledger(a, [a]), ledger(a, [a]))
+    ra.require_append_only_history(ledger(a, [a]), ledger(b, [a, b]))
+    ra.require_append_only_history(None, ledger(a, [a]))
+    for base, head in [
+        (ledger(a, [a]), ledger(b, [a, x, b])),  # an opaque never-active digest
+        (ledger(a, [a]), ledger(b, [b])),  # history rewritten
+        (ledger(a, [a, b]), ledger(b, [b, a])),  # reordered
+        (ledger(a, [a]), ledger(a, [a, x])),  # appended without being active
+        (None, ledger(b, [a, b])),  # bootstrap with invented history
+    ]:
+        with pytest.raises(ra.ReleaseAuthorityError):
+            ra.require_append_only_history(base, head)
 
 
 # ── 2. Digest stability and sensitivity ─────────────────────────────────────

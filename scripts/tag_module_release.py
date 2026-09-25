@@ -319,7 +319,15 @@ def main(argv: list[str] | None = None) -> int:
         # The run acting now must itself be an authorized commit, whether it
         # creates, re-accepts or adopts.
         authority_digest_value = compute_and_check_authority_digest(repo_root=cwd)
-        if args.adopt_original_run is not None:
+        adopt = args.adopt_original_run is not None
+        if adopt:
+            # A rerun of the recovery that CREATED this tag is not an adoption:
+            # the tag names this very run, so it takes the identical-rerun path.
+            state = existing_tag(args.tag, remote=args.remote, cwd=cwd)
+            if state is not None:
+                named = parse_module_release_tag_evidence(state[2])
+                adopt = named["verification_run_id"] != args.run_id
+        if adopt:
             adopt_recovered_tag(
                 tag=args.tag,
                 commit=args.commit,
@@ -333,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"adopted existing {args.tag} written by run {args.adopt_original_run}"
             )
+            print("tag-result=adopted")
             return 0
         if args.smoke_dependencies is None:
             raise ReleaseRecordError(
@@ -361,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
             cwd=cwd,
         ):
             print(f"adopted existing identical {args.tag} from this same run")
+            print("tag-result=rerun")
             return 0
         create_and_push_tag(
             tag=args.tag,
@@ -373,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"module release tag REFUSED: {failure}", file=sys.stderr)
         return 1
     print(f"tagged {args.tag} on {args.commit}")
+    print("tag-result=created")
     return 0
 
 

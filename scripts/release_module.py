@@ -533,6 +533,14 @@ from importlib import metadata
 
 expected = {expected!r}
 checkout = pathlib.Path({checkout!r}).resolve()
+def normal(name):
+    return name.lower().replace("-", "_").replace(".", "_")
+installed = {{
+    normal(d.metadata["Name"]) for d in metadata.distributions()
+    if normal(d.metadata["Name"]).startswith("dotmac")
+}}
+unexpected = installed - {{normal(n) for n in expected}}
+assert not unexpected, f"first-party distributions not from this run: {{unexpected}}"
 for name, wheel in sorted(expected.items()):
     dist = metadata.distribution(name)
     raw = dist.read_text("direct_url.json")
@@ -593,10 +601,12 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
     Needs a kernel ARTIFACT, not just a kernel: the module floors at the release
     that allocated its schema, and that kernel may not be published yet — this
     smoke runs BEFORE any publication, including the kernel's own. So the caller
-    supplies a locally built kernel wheel through `--kernel-dist`, and the
-    module resolves against it via `--find-links`. Any additional first-party
-    distributions permitted by the module's reviewed wheel policy are built by
-    ``build-local-dependencies`` and supplied through ``--dependency-dist``.
+    supplies a locally built kernel wheel through `--kernel-dist`, and any
+    additional first-party distributions permitted by the module's reviewed
+    wheel policy through ``--dependency-dist`` (built by
+    ``build-local-dependencies``). Every first-party wheel is installed by its
+    explicit path — never resolved by name — and an isolated interpreter proves
+    each installed first-party distribution came from exactly that file.
 
     That is a weaker claim than the registry verification deliberately: it
     proves these bytes install and register against the kernel THIS CHECKOUT

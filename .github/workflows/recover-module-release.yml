@@ -285,29 +285,28 @@ jobs:
           # one (it failed AFTER tagging), adopt it after proving its evidence
           # names the original run and matches the recovered artifact;
           # otherwise write the tag the original run never wrote.
+          # Recovery never replaces a tag. If one exists, the helper adopts it
+          # when it names the ORIGINAL run (that run failed after tagging), or
+          # accepts it as this recovery's own identical rerun when it names
+          # THIS run; otherwise it writes the tag the original never wrote.
+          ADOPT=()
           if [ -n "$(git ls-remote --tags origin "refs/tags/${TAG}")" ]; then
-            python scripts/tag_module_release.py \
-              --distribution "$MODULE" \
-              --version "$VERSION" \
-              --tag "$TAG" \
-              --commit "$ORIGIN_SHA" \
-              --artifact-dir "$RECOVERED_DIST" \
-              --run-id "$RUN_ID" \
-              --source-run-id "$ORIGINAL_RUN_ID" \
-              --adopt-original-run "$ORIGINAL_RUN_ID" \
-              --remote origin
+            ADOPT=(--adopt-original-run "$ORIGINAL_RUN_ID")
+          fi
+          python scripts/tag_module_release.py \
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit "$ORIGIN_SHA" \
+            --artifact-dir "$RECOVERED_DIST" \
+            --run-id "$RUN_ID" \
+            --source-run-id "$ORIGINAL_RUN_ID" \
+            --smoke-dependencies "$RECOVERED_SMOKE" \
+            "${ADOPT[@]}" \
+            --remote origin | tee "$RUNNER_TEMP/tag-result.txt"
+          if grep -qx "tag-result=adopted" "$RUNNER_TEMP/tag-result.txt"; then
             echo "TAG_ADOPTED=1" >> "$GITHUB_ENV"
           else
-            python scripts/tag_module_release.py \
-              --distribution "$MODULE" \
-              --version "$VERSION" \
-              --tag "$TAG" \
-              --commit "$ORIGIN_SHA" \
-              --artifact-dir "$RECOVERED_DIST" \
-              --run-id "$RUN_ID" \
-              --source-run-id "$ORIGINAL_RUN_ID" \
-              --smoke-dependencies "$RECOVERED_SMOKE" \
-              --remote origin
             echo "TAG_ADOPTED=0" >> "$GITHUB_ENV"
           fi
 

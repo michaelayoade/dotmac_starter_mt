@@ -99,6 +99,15 @@ LEDGER_PATH = "docs/inventories/release-authority.json"
 AUTHORITY_MODULE_PATH = "scripts/release_authority.py"
 POLICY_PATH = ".github/release-modules.json"
 
+#: The hash-locked Poetry bootstrap `.github/actions/setup-poetry` installs
+#: through a TEMPLATED path (`poetry-requirements-py${py}.txt`) that no token
+#: scan can resolve. Poetry and its plugins execute inside `poetry build`, so
+#: these locks are release control. A test pins this list to the directory.
+BOOTSTRAP_LOCKS: tuple[str, ...] = (
+    ".github/bootstrap/poetry-requirements-py311.txt",
+    ".github/bootstrap/poetry-requirements-py312.txt",
+)
+
 ROOT_WORKFLOWS: tuple[str, ...] = (
     ".github/workflows/release-module.yml",
     ".github/workflows/recover-module-release.yml",
@@ -142,7 +151,9 @@ def worktree_reader(root: Path) -> Reader:
         candidate = root / path
         if not candidate.is_file():
             return None
-        return candidate.read_text(encoding="utf-8")
+        # Exact bytes, decoded without newline translation, so the worktree
+        # digest the tag step computes equals the git-object reconstruction.
+        return candidate.read_bytes().decode("utf-8")
 
     return read
 
@@ -227,9 +238,10 @@ def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
     dependencies)`` — the latter holds non-local Python import names and
     ``action:<owner/repo@sha>`` coordinates for every third-party action.
     """
-    files: set[str] = {POLICY_PATH, AUTHORITY_MODULE_PATH}
+    files: set[str] = {POLICY_PATH, *BOOTSTRAP_LOCKS}
     external: set[str] = set()
-    queue: list[str] = [*ROOT_WORKFLOWS, *VERIFICATION_ROOTS]
+    # This module is walked like any root, so its own imports are covered.
+    queue: list[str] = [*ROOT_WORKFLOWS, *VERIFICATION_ROOTS, AUTHORITY_MODULE_PATH]
     queued: set[str] = set(queue) | files
 
     # Every root must exist and is always in the surface.
@@ -240,6 +252,8 @@ def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
     # Ensure the always-included files actually exist too.
     _require(POLICY_PATH, read)
     _require(AUTHORITY_MODULE_PATH, read)
+    for lock in BOOTSTRAP_LOCKS:
+        _require(lock, read)
 
     def enqueue(path: str) -> None:
         if path not in queued:
@@ -374,7 +388,12 @@ def parse_authority_ledger(text: str) -> dict:
             result[key] = value
         return result
 
-    data = json.loads(text, object_pairs_hook=_no_duplicates)
+    try:
+        data = json.loads(text, object_pairs_hook=_no_duplicates)
+    except json.JSONDecodeError as failure:
+        raise ReleaseAuthorityError(
+            f"authority ledger is not JSON: {failure}"
+        ) from failure
     if seen_duplicate:
         raise ReleaseAuthorityError(
             "duplicate key(s) in release authority ledger: "
@@ -439,11 +458,10 @@ def _write_ledger(
 ) -> None:
     existing_history: list[str] = []
     if path.is_file():
-        try:
-            existing = parse_authority_ledger(path.read_text(encoding="utf-8"))
-            existing_history = list(existing["history"])
-        except (ReleaseAuthorityError, json.JSONDecodeError):
-            existing_history = []
+        # A malformed ledger is refused, never reset: resetting would silently
+        # discard the append-only history historical rows validate against.
+        existing = parse_authority_ledger(path.read_text(encoding="utf-8"))
+        existing_history = list(existing["history"])
 
     history = list(existing_history)
     if digest not in history:
@@ -465,6 +483,31 @@ def _write_ledger(
         "history": history,
     }
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+
+def require_append_only_history(base_text: str | None, head_text: str) -> None:
+    """HEAD's history is the base's, plus at most HEAD's own new active digest.
+
+    A digest can therefore enter history only by being active in a reviewed
+    tree whose surface derives to it (enforced by the ledger test), never as
+    an opaque hash; nothing is ever removed or reordered. A base without a
+    ledger admits exactly ``[head active]``.
+    """
+    head = parse_authority_ledger(head_text)
+    base_history = (
+        [] if base_text is None else list(parse_authority_ledger(base_text)["history"])
+    )
+    head_history = list(head["history"])
+    active = head["active"]["digest"]
+    if head_history == base_history:
+        if active not in base_history:
+            raise ReleaseAuthorityError("active digest is missing from history")
+        return
+    if head_history != [*base_history, active] or active in base_history:
+        raise ReleaseAuthorityError(
+            "release-authority history is append-only: HEAD may only append its "
+            "own new active digest to the base history"
+        )
 
 
 def _diff_lists(expected: list[str], actual: list[str]) -> str:

@@ -525,6 +525,14 @@ def verify_row_provenance(
             f"recovery source run {source_run_id} succeeded — recovery only "
             "applies to a failed release"
         )
+    # The original run built and published the wheel and produced the smoke
+    # manifest the row records, so its own commit must have executed under an
+    # authority the base already holds — a recovery run's authority cannot
+    # launder an unauthorized original.
+    _require_job_succeeded(runs, source_run_id, "publish", label="recovery source")
+    _require_authorized_commit(
+        authority, source_run["head_sha"], digest=None, label="recovery source run"
+    )
 
 
 def _verify_adopted_row(
@@ -776,29 +784,85 @@ class GitReleaseAuthority:
         return None if ledger is None else ledger["active"]["digest"]
 
     def reconstruct_at(self, commit: str) -> str:
+        """Digest the commit's declared bytes, then re-derive with ITS OWN rules.
+
+        1. Digest exactly the files the ledger AT ``commit`` declares, read
+           from that commit (the ``ReleaseAuthority.v1`` canonical form is
+           frozen for the schema). That digest must already be in the base
+           history — until it is, none of the commit's code is executed.
+        2. Re-derive the surface with the commit's own
+           ``scripts/release_authority.py`` (authorized: its bytes are in the
+           digest just checked) and require it to equal the declaration.
+           Using the commit's own rules means a later change to the
+           derivation cannot strand an already authorized release.
+        """
         ledger = self._ledger_at(commit)
         if ledger is None:
             raise ProvenanceError(f"no authority ledger at {commit}")
-        declared_files = list(ledger["active"]["files"])
-        declared_external = list(ledger["active"]["external_imports"])
+        declared_files = sorted(ledger["active"]["files"])
+        declared_external = sorted(ledger["active"]["external_imports"])
         try:
-            read = release_authority.commit_reader(REPO_ROOT, commit)
-            files, external = release_authority.derive_surface(read)
-            if (sorted(files), sorted(external)) != (
-                sorted(declared_files),
-                sorted(declared_external),
-            ):
-                raise ProvenanceError(
-                    f"authority surface derived at {commit} differs from the "
-                    "surface its ledger declares"
-                )
-            return release_authority.reconstruct_at(
+            digest = release_authority.reconstruct_at(
                 REPO_ROOT, commit, declared_files, declared_external
             )
         except release_authority.ReleaseAuthorityError as failure:
             raise ProvenanceError(
-                f"cannot reconstruct authority at {commit}: {failure}"
+                f"cannot read the declared authority surface at {commit}: {failure}"
             ) from failure
+        if digest not in self.base_history():
+            raise ProvenanceError(
+                f"the surface declared at {commit} digests to {digest!r}, which "
+                "is not in the base branch's authority history"
+            )
+        own = _module_at(commit, release_authority.AUTHORITY_MODULE_PATH)
+        try:
+            files, external = own.derive_surface(own.commit_reader(REPO_ROOT, commit))
+            own_digest = own.authority_digest(
+                files, external, own.commit_reader(REPO_ROOT, commit)
+            )
+        except Exception as failure:  # the commit's own code: any failure refuses
+            raise ProvenanceError(
+                f"the authority rules at {commit} could not re-derive its surface: "
+                f"{failure}"
+            ) from failure
+        if (sorted(files), sorted(external)) != (declared_files, declared_external):
+            raise ProvenanceError(
+                f"authority surface derived at {commit} by its own rules differs "
+                "from the surface its ledger declares"
+            )
+        if own_digest != digest:
+            raise ProvenanceError(
+                f"authority rules at {commit} digest its surface to {own_digest!r}, "
+                f"not {digest!r}"
+            )
+        return digest
+
+
+def _module_at(commit: str, path: str):
+    """Load ``path`` exactly as it exists at ``commit`` as a fresh module.
+
+    Only called after that commit's declared surface — which includes this
+    file — digested to an authority already in the base history.
+    """
+    import types
+
+    shown = subprocess.run(
+        ["git", "show", f"{commit}:{path}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if shown.returncode != 0:
+        raise ProvenanceError(f"{path} does not exist at {commit}")
+    name = f"_release_authority_at_{commit}"
+    module = types.ModuleType(name)
+    module.__file__ = str(REPO_ROOT / path)
+    sys.modules[name] = module
+    try:
+        exec(compile(shown.stdout, f"{commit}:{path}", "exec"), module.__dict__)  # noqa: S102
+    finally:
+        sys.modules.pop(name, None)
+    return module
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -856,6 +920,17 @@ def main(argv: list[str] | None = None) -> int:
     head_authority_text = (
         head_authority.stdout if head_authority.returncode == 0 else None
     )
+    try:
+        if head_authority_text is None:
+            if base_authority_text is not None:
+                raise ProvenanceError("the release-authority ledger was removed")
+        else:
+            release_authority.require_append_only_history(
+                base_authority_text, head_authority_text
+            )
+    except (ProvenanceError, release_authority.ReleaseAuthorityError) as failure:
+        print(f"module release provenance REFUSED: {failure}", file=sys.stderr)
+        return 1
     try:
         refuse_authority_change_with_new_rows(
             base_authority_text, head_authority_text, rows

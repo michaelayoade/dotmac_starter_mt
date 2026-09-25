@@ -937,6 +937,7 @@ def test_refuses_a_recovery_source_run_whose_head_commit_is_not_on_main(
                 run_id="1001",
                 path=provenance.SOURCE_WORKFLOW,
                 conclusion="failure",
+                head_sha="a" * 40,
             ),
         },
         jobs={"2002": _jobs_with_step("Tag the recovered release")},
@@ -1548,3 +1549,120 @@ def test_an_adopted_row_must_name_the_original_run_as_its_source(provenance) -> 
     kwargs = _release_verify_kwargs()
     with pytest.raises(provenance.ProvenanceError, match="both source"):
         provenance.verify_row_provenance(row, runs=_adoption_runs(provenance), **kwargs)
+
+
+# ── GitReleaseAuthority against a real git graph ────────────────────────────
+
+
+def _git_in(path: Path, *args: str) -> str:
+    return subprocess.run(  # noqa: S603
+        ["git", *args],  # noqa: S607
+        cwd=path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _authority_repo(provenance, tmp_path: Path) -> tuple[Path, str, str]:
+    """A throwaway repo holding a copy of the real release surface and a
+    ledger generated from it, committed. Returns (repo, commit, digest)."""
+    ra = provenance.release_authority
+    real = json.loads(
+        (PROJECT_ROOT / "docs" / "inventories" / "release-authority.json").read_text()
+    )
+    repo = tmp_path / "repo"
+    for rel in real["active"]["files"]:
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((PROJECT_ROOT / rel).read_bytes())
+    read = ra.worktree_reader(repo)
+    files, external = ra.derive_surface(read)
+    digest = ra.authority_digest(files, external, read)
+    ledger = repo / ra.LEDGER_PATH
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "$comment": "fixture",
+                "schema": ra.LEDGER_SCHEMA,
+                "active": {
+                    "digest": digest,
+                    "files": files,
+                    "external_imports": external,
+                },
+                "history": [digest],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _git_in(repo, "init", "-q", "--initial-branch=main")
+    _git_in(repo, "config", "user.name", "Test")
+    _git_in(repo, "config", "user.email", "test@example.invalid")
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-q", "-m", "authorized surface")
+    return repo, _git_in(repo, "rev-parse", "HEAD"), digest
+
+
+def _base_ledger(provenance, digest: str) -> str:
+    return json.dumps(
+        {
+            "$comment": "base",
+            "schema": provenance.release_authority.LEDGER_SCHEMA,
+            "active": {"digest": digest, "files": [], "external_imports": []},
+            "history": [digest],
+        }
+    )
+
+
+def test_git_authority_reconstructs_an_authorized_commit_with_its_own_rules(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo, commit, digest = _authority_repo(provenance, tmp_path)
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    view = provenance.GitReleaseAuthority(_base_ledger(provenance, digest))
+    assert view.active_at(commit) == digest
+    assert view.reconstruct_at(commit) == digest
+
+
+def test_git_authority_refuses_an_intermediate_commit_with_an_undeclared_surface(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The add-then-revert commit: the workflow gains a step running a new
+    script, but the ledger still claims the authorized digest."""
+    repo, _commit, digest = _authority_repo(provenance, tmp_path)
+    workflow = repo / ".github" / "workflows" / "release-module.yml"
+    workflow.write_text(
+        workflow.read_text() + "\n# run: python scripts/evil.py\n", encoding="utf-8"
+    )
+    (repo / "scripts" / "evil.py").write_text("import os\n", encoding="utf-8")
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-q", "-m", "intermediate")
+    intermediate = _git_in(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    view = provenance.GitReleaseAuthority(_base_ledger(provenance, digest))
+    assert view.active_at(intermediate) == digest  # the ledger LIES
+    with pytest.raises(provenance.ProvenanceError, match="not in the base"):
+        view.reconstruct_at(intermediate)
+
+
+def test_git_authority_refuses_commits_without_or_with_a_malformed_ledger(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo, _commit, digest = _authority_repo(provenance, tmp_path)
+    ledger = repo / provenance.release_authority.LEDGER_PATH
+    ledger.write_text("{not json", encoding="utf-8")
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-q", "-m", "malformed")
+    malformed = _git_in(repo, "rev-parse", "HEAD")
+    ledger.unlink()
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-q", "-m", "removed")
+    removed = _git_in(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    view = provenance.GitReleaseAuthority(_base_ledger(provenance, digest))
+    assert view.active_at(removed) is None
+    with pytest.raises(provenance.ProvenanceError, match="no authority ledger"):
+        view.reconstruct_at(removed)
+    with pytest.raises(provenance.ProvenanceError, match="malformed"):
+        view.active_at(malformed)
