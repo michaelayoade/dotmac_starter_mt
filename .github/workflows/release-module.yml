@@ -302,6 +302,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Carry the exact build-once bytes into the verification/record job. The
+      # recorder hashes this wheel after the annotated tag exists; it never
+      # rebuilds a release or predicts a digest from source.
+      - name: Download exact built bytes for the publication record
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.module }}-dist
+          path: ${{ runner.temp }}/module-release-dist
+
       # The index may lag a few seconds after publish.
       - name: Wait for the release on the Forgejo index
         env:
@@ -316,6 +325,18 @@ jobs:
           done
           echo "::error::${{ inputs.module }} ${{ inputs.version }} did not appear in time"
           exit 1
+
+      # A successful registry installation does not prove that its wheel is
+      # the build-once wheel retained for this run. Compare every published
+      # artifact byte-for-byte before the immutable tag or record can exist.
+      - name: Prove published bytes match the retained build artifact
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python scripts/release_module.py compare-published "${{ inputs.module }}" \
+            --version "${{ inputs.version }}" \
+            --index "${INDEX}" \
+            --dist "${{ runner.temp }}/module-release-dist"
 
       # Install the PUBLISHED release from the index into a clean venv and
       # register it. Requires the kernel at `kernel_floor` to already be
@@ -386,8 +407,10 @@ jobs:
           echo "tagged ${TAG} on ${GITHUB_SHA}"
 
       # The tag makes the publication-ledger row false THE MOMENT it lands, and
-      # any released migration becomes bytes that must not change. Five gates
-      # fail from that instant until the record is written. Leaving that to
+      # any released migration becomes bytes that must not change. The exact
+      # verified wheel and annotated tag also need a producer-owned immutable
+      # coordinate row. Five gates fail from that instant until the record is
+      # written. Leaving that to
       # memory put `main` red four times in two days, so the record PR is
       # opened HERE rather than remembered. `if: always()` is deliberate: the
       # tag is pushed by the step above, so a later failure must not leave a
@@ -409,4 +432,5 @@ jobs:
             --distribution "${{ inputs.module }}" \
             --version "${{ inputs.version }}" \
             --tag "${{ needs.build.outputs.tag }}" \
-            --package-dir "${{ needs.build.outputs.package_dir }}"
+            --package-dir "${{ needs.build.outputs.package_dir }}" \
+            --artifact-dir "${{ runner.temp }}/module-release-dist"

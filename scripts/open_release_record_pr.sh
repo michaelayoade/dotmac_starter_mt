@@ -88,6 +88,7 @@ RELEASE_RUN=""
 VERIFICATION_RECEIPT=""
 TAG_DECISION_RECEIPT=""
 NO_LINEAGE=""
+ARTIFACT_DIR=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -101,6 +102,7 @@ while [ $# -gt 0 ]; do
     --release-run)  RELEASE_RUN="$2";  shift 2 ;;
     --verification-receipt) VERIFICATION_RECEIPT="$2"; shift 2 ;;
     --tag-decision-receipt) TAG_DECISION_RECEIPT="$2"; shift 2 ;;
+    --artifact-dir) ARTIFACT_DIR="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -112,6 +114,23 @@ for required in DISTRIBUTION VERSION TAG; do
   fi
 done
 
+# The governed module lane may not fall through to the general record writer
+# without the retained, registry-compared wheel. Kernel/UI/connector callers
+# remain independent of this artifact contract.
+if ! GOVERNED_MODULE="$(python -c '
+import json, sys
+with open(".github/release-modules.json", encoding="utf-8") as source:
+    modules = json.load(source)["modules"]
+print("1" if sys.argv[1] in modules else "0")
+' "${DISTRIBUTION}")"; then
+  echo "module release allowlist is unreadable" >&2
+  exit 2
+fi
+if [ "${GOVERNED_MODULE}" = "1" ] && [ -z "${ARTIFACT_DIR}" ]; then
+  echo "--artifact-dir is required for governed module ${DISTRIBUTION}" >&2
+  exit 2
+fi
+
 MANUAL="python scripts/write_release_record.py --distribution ${DISTRIBUTION} --version ${VERSION} --tag ${TAG}"
 if [ -n "${PACKAGE_DIR}" ]; then
   MANUAL="${MANUAL} --package-dir ${PACKAGE_DIR}"
@@ -120,6 +139,9 @@ if [ -n "${PACKAGE_DIR}" ]; then
   fi
 elif [ -n "${NO_LINEAGE}" ]; then
   MANUAL="${MANUAL} --no-lineage"
+fi
+if [ -n "${ARTIFACT_DIR}" ]; then
+  MANUAL="${MANUAL} --artifact-dir ${ARTIFACT_DIR}"
 fi
 if [ -n "${MANIFEST_PYTHON}" ]; then
   MANUAL="${MANUAL}
@@ -139,6 +161,10 @@ give_up() {
   echo "::error::"
   echo "::error::Close it by hand, on a branch off main:"
   echo "::error::  ${MANUAL}"
+  if [ "${GOVERNED_MODULE}" = "1" ]; then
+    echo "::error::The artifact directory must hold the exact retained wheel"
+    echo "::error::already compared with the private index; never rebuild it."
+  fi
   echo "::error::then open a pull request titled:"
   echo "::error::  chore(release): record the ${DISTRIBUTION} ${VERSION} publication"
   exit 1
@@ -164,6 +190,9 @@ if [ -n "${PACKAGE_DIR}" ]; then
   fi
 elif [ -n "${NO_LINEAGE}" ]; then
   ARGS+=(--no-lineage)
+fi
+if [ -n "${ARTIFACT_DIR}" ]; then
+  ARGS+=(--artifact-dir "${ARTIFACT_DIR}")
 fi
 
 OUTPUT=""
