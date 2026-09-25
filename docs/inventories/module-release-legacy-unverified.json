@@ -1,0 +1,607 @@
+{
+  "$comment": "Pre-cutover governed module tags without retained registry-byte proof. Historical coordinates only: these rows are not verified, not pinnable evidence, and never substitute for ModuleReleaseVerifications.v1. New tags must receive a verified row.",
+  "schema": "ModuleReleaseLegacyUnverified.v1",
+  "cutover_source_commit": "7281adb1620ae5b5942518a9a01290330e198ec3",
+  "tags": [
+    {
+      "tag": "dotmac-accounting-v0.1.0a1",
+      "tag_object": "3d1d2a7c3234b0506ab53f2700db5cfb2f3a362a",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-ai-operations-v0.1.0a1",
+      "tag_object": "e32b1712c3c1b6704f540bd13986839451a26831",
+      "peeled_commit": "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce"
+    },
+    {
+      "tag": "dotmac-analytics-v0.1.0a1",
+      "tag_object": "6486d19544cccb73ab8cad77956741ccaea75b5b",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-application-directory-v0.1.0a3",
+      "tag_object": "2de00c8893324d52fe74d3e80523dba91802b88f",
+      "peeled_commit": "bbc53bac361a1199e4f32738883d59bd27845253"
+    },
+    {
+      "tag": "dotmac-approvals-v0.1.0a1",
+      "tag_object": "62e2c33b1b8d7bef01b009b46e018bfb6465dad7",
+      "peeled_commit": "221f6868651426397e6e8443ca8b544234648247"
+    },
+    {
+      "tag": "dotmac-approvals-v0.1.0a2",
+      "tag_object": "7b2c2f43b7ede97d9b9423347f2e13f72545a04c",
+      "peeled_commit": "3e1f8012c4f45369b6801a709a270d71c5c95a8d"
+    },
+    {
+      "tag": "dotmac-approvals-v0.1.0a3",
+      "tag_object": "74ef6c48ce5f034ffeeea45e55483bb19c7da7dd",
+      "peeled_commit": "16f11a9ef0df7697558904efa969294bafc3fab3"
+    },
+    {
+      "tag": "dotmac-approvals-v0.1.0a4",
+      "tag_object": "58e4f8e1b4f67c1147831f0b6942752a5006eda3",
+      "peeled_commit": "f013c7e0e0be9f704d3afbc13e233fde8950a1be"
+    },
+    {
+      "tag": "dotmac-approvals-v0.1.0a5",
+      "tag_object": "ec6bc895bd3231bb1cca0b3cea7bfc769d4aceb1",
+      "peeled_commit": "8d4ddfd9e285da06ce1fdd29b59f1b483d6ea38c"
+    },
+    {
+      "tag": "dotmac-approvals-v0.1.0a6",
+      "tag_object": "e848c6fa3cf30c7a376b2fd3eb4105e919b7c0b0",
+      "peeled_commit": "dc94adbb2469ce4b8f75b3e61d9b10cba0e65b77"
+    },
+    {
+      "tag": "dotmac-assets-v0.1.0a1",
+      "tag_object": "5c76640e4bae52bcf986b8579badb764782809da",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-banking-v0.1.0a1",
+      "tag_object": "7e399409147c5538d27ec2c0db58b18e5011c213",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-billing-v0.1.0a1",
+      "tag_object": "3dbb4e171903d954d58cbc90a28069d976e9df1e",
+      "peeled_commit": "92a1626b16d7e068f92536d8cfcb2ef9b6f270c2"
+    },
+    {
+      "tag": "dotmac-brand-profiles-v0.1.0a1",
+      "tag_object": "17e3140170ebcbb9810a67b6b97256cbbf9be6d1",
+      "peeled_commit": "ed69f9dfdeea493dab7d7ba25c04e940f0870545"
+    },
+    {
+      "tag": "dotmac-campaigns-v0.1.0a1",
+      "tag_object": "5700b3f608a5f14056159f104ee0f917dabb6aef",
+      "peeled_commit": "ae5369c0dcc63b9a9daeba9f522f8906b78a997d"
+    },
+    {
+      "tag": "dotmac-collections-v0.1.0a1",
+      "tag_object": "2222e8258317bc66b2ef9b044556fe0d43fc0816",
+      "peeled_commit": "6ecf518a6985b8bf4b163eccb3de2fef171ecccc"
+    },
+    {
+      "tag": "dotmac-commercial-agreements-v0.1.0a1",
+      "tag_object": "0a6cdb3e2ab46edeafcaa2750885e480c7520a73",
+      "peeled_commit": "fead57bc93d6551450f5e6ae1c9de1296e27b0ae"
+    },
+    {
+      "tag": "dotmac-commercial-agreements-v0.1.0a2",
+      "tag_object": "533a2646aabc6b765682e4c08bb2cd26c83e7495",
+      "peeled_commit": "42acc8b30f1bcaed1580d312fd33d7b5ef358817"
+    },
+    {
+      "tag": "dotmac-commercial-agreements-v0.1.0a3",
+      "tag_object": "3562c8fde267a5764963fcf598004639daf51344",
+      "peeled_commit": "5005e998a4cac9b4f7e3ba91f371967b0ee8b2a2"
+    },
+    {
+      "tag": "dotmac-compliance-reporting-v0.1.0a1",
+      "tag_object": "f7fe3e8de9862d5d073034217eebeafacefbc9de",
+      "peeled_commit": "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce"
+    },
+    {
+      "tag": "dotmac-content-v0.1.0a1",
+      "tag_object": "95c64537c2eec98fc55bb9da2a351f3095a90732",
+      "peeled_commit": "8f99413826e5adf3d35379ebc6deb79bcb5c8242"
+    },
+    {
+      "tag": "dotmac-customers-v0.1.0a1",
+      "tag_object": "40537357cd98e98d18d54cbeec45fbd8d5157dcf",
+      "peeled_commit": "2e2e0eff49aafc54a84885007402cd6012073330"
+    },
+    {
+      "tag": "dotmac-document-rendering-v0.1.0a1",
+      "tag_object": "8db9fa3db228c6b6b90b157511879a968cb7de8a",
+      "peeled_commit": "6edaac845f3ced4270bd23edb72c4aa8cf8315e2"
+    },
+    {
+      "tag": "dotmac-documents-v0.1.0a1",
+      "tag_object": "cee5cdfdccbc6da0d4877dbdd6942a56d6bc8d53",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-durable-timers-v0.1.0a1",
+      "tag_object": "8e9d30785079c11ec3d3c82cadba5e2ea893aba6",
+      "peeled_commit": "f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685"
+    },
+    {
+      "tag": "dotmac-entitlement-allocation-v0.1.0a1",
+      "tag_object": "9b7f2c4b21ee3ec379647b6613aafb1c988dbbd9",
+      "peeled_commit": "847ce0b5ea89dabdc34c26029df86173da80a4ab"
+    },
+    {
+      "tag": "dotmac-entitlement-allocation-v0.1.0a2",
+      "tag_object": "5fcb4f0dbb4862deb9b1a5890caae475f1123086",
+      "peeled_commit": "5ded8808e376b2eeaf6150bf095077ba1ba3de5b"
+    },
+    {
+      "tag": "dotmac-entitlement-allocation-v0.1.0a3",
+      "tag_object": "54e72a4b2de1f41a8555e24c97b75660f78703e7",
+      "peeled_commit": "c371b0fdbb22bd3d51fd34d36922b9bc1e9dae68"
+    },
+    {
+      "tag": "dotmac-entitlement-allocation-v0.1.0a4",
+      "tag_object": "ad5a15b0c05cb0cbffed12d777d006680909dc37",
+      "peeled_commit": "67bdfb8b404a92fd455473806a256995bb507524"
+    },
+    {
+      "tag": "dotmac-entitlement-allocation-v0.1.0a6",
+      "tag_object": "aff363f4f28af077eb55c344a23267b02d0b4152",
+      "peeled_commit": "7e0543004864845f0035c9ec325e3f5064c281cc"
+    },
+    {
+      "tag": "dotmac-entitlement-allocation-v0.1.0a7",
+      "tag_object": "b39c709db59c547a9da405572c78caefeeebebde",
+      "peeled_commit": "c9de0a1b65a816e38b13bb6cc892b2a05bd653eb"
+    },
+    {
+      "tag": "dotmac-expenses-v0.1.0a1",
+      "tag_object": "be0804ad5709392c77415c9219e1356f5b8c39e9",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-fiber-plant-v0.1.0a1",
+      "tag_object": "5441e65c9d6fd744d55e1450fe13ac9bf0faae3b",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-files-v0.1.0a2",
+      "tag_object": "3cbc3776bf0a0b47c8046a71c1bfa7ef964f0bfb",
+      "peeled_commit": "b3e47855f14433c626b4ac3e7723414f7834601a"
+    },
+    {
+      "tag": "dotmac-files-v0.1.0a3",
+      "tag_object": "078963b9b94bdd4a5cf65fd43e993e2d1aad4c30",
+      "peeled_commit": "c6ef6cd7b13105bd95c3faf354ffee9032077625"
+    },
+    {
+      "tag": "dotmac-files-v0.1.0a4",
+      "tag_object": "8378d58337f208477ff435eedd451fe4416544fa",
+      "peeled_commit": "df85e47267cd9093d063f93725b0ef2d2c0c6fab"
+    },
+    {
+      "tag": "dotmac-finance-v0.1.0a1",
+      "tag_object": "1701442e9bf8443b74607634d33b946662bb4865",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-forms-v0.1.0a1",
+      "tag_object": "63bf9acc582a79cdf9b6038b9a592329264c869e",
+      "peeled_commit": "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce"
+    },
+    {
+      "tag": "dotmac-fulfillment-v0.1.0a1",
+      "tag_object": "2d7e22f73a24cdf631f945183b65c80bd5351f7c",
+      "peeled_commit": "be02e28d11a0ba849b4974273f5a2d4bd7806a4a"
+    },
+    {
+      "tag": "dotmac-fx-policy-v0.1.0a1",
+      "tag_object": "4ac0e97686f58726184a6503dcc48e8fb9a87aaa",
+      "peeled_commit": "a0901915c6dcc5cd0580cb86d942dd3e91507d76"
+    },
+    {
+      "tag": "dotmac-imports-v0.1.0a2",
+      "tag_object": "7167c9fad24882f0c7e39742c78358897e4e7884",
+      "peeled_commit": "5876ffd0bce17172fa2dc6ac6d09b48d877fadf8"
+    },
+    {
+      "tag": "dotmac-inbox-operations-v0.1.0a3",
+      "tag_object": "3897e51da8778f8c04a01500b5767ef1cef929bc",
+      "peeled_commit": "5b2798b80f6ac903fb132a0b1c205dd1dde3c528"
+    },
+    {
+      "tag": "dotmac-inbox-v0.1.0a1",
+      "tag_object": "101e53f0dd7e88f27c4d7714f5194a101e09266f",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-inbox-v0.1.0a2",
+      "tag_object": "0dd377943958757e6b745018773daa2040416bb6",
+      "peeled_commit": "c3e651cf3e220a64ab3dd51cdf7c98553c0997e8"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a1",
+      "tag_object": "bd00fb743c8853f02b3856289a8a51a0a0b95124",
+      "peeled_commit": "1b1d62bebc4651273b2587fb607c49485fed123a"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a10",
+      "tag_object": "6727543efdc6c54ce52c806e3aeec94194035089",
+      "peeled_commit": "7a5986420881e3e49945efc1dc51c653070e73b3"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a11",
+      "tag_object": "d60872857eae62baa4f438ebadce0e3900350247",
+      "peeled_commit": "f25df1adf7076634abc735546158c374eedd6c31"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a12",
+      "tag_object": "170797182f16e5fd9283e722528d6d6c6615b3c9",
+      "peeled_commit": "9f59d02b47ec9aa6a594705e12b2032a7168ae46"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a13",
+      "tag_object": "232147ed50cf703ce60e3128d7a9c13680169369",
+      "peeled_commit": "46926fa4f4243f7cd0c00230684eef8ab25cf723"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a14",
+      "tag_object": "b5618596a42b4c867259380086f89cccd40e98d5",
+      "peeled_commit": "70459efd468dd2dcc9e31693b9910b04fec21447"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a15",
+      "tag_object": "bb7756b1828f4c92a00924665c12136859985a3e",
+      "peeled_commit": "bd8d2262c26f62041cc22a813916066b9af85c7f"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a16",
+      "tag_object": "2681bb62227261024c9fc0dce67a131972eee84b",
+      "peeled_commit": "dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a17",
+      "tag_object": "95b629bdbcbf48c6363a200e5a140f0eba5f02eb",
+      "peeled_commit": "2cab76b442e6cc6c8ed81a409d943ba250351c3d"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a2",
+      "tag_object": "8e65cf695a0247597b63029f7dd0d62431bd7414",
+      "peeled_commit": "aaa3b5435732f0b1bebdf894778d6615c05e3c12"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a3",
+      "tag_object": "737fa6e588feb61f2e6100acf7b0dace0902403e",
+      "peeled_commit": "b14f66e65642ec636936ea649ad0e86249b6de5a"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a4",
+      "tag_object": "909e5865619e52dc67f244a7529eb7df97befa13",
+      "peeled_commit": "306a40e29da8fa63a6ee9346f29665731b558cc5"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a5",
+      "tag_object": "5d2769c920ee124b09e8fb7f1eac7ddfeb0e0673",
+      "peeled_commit": "7828697ef11fb1ae765a5397dfa7dc221ae6207a"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a6",
+      "tag_object": "2f9718f39e057fc30308f70a7388c9274e038571",
+      "peeled_commit": "7e0543004864845f0035c9ec325e3f5064c281cc"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a7",
+      "tag_object": "df6815b89e45952f718d0c91e439b3c953f90c00",
+      "peeled_commit": "c669b24ee8be09677e92f85b11619f6626ad998d"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a8",
+      "tag_object": "8639bde53b640796bd49ed3ab2142ea1f6932e89",
+      "peeled_commit": "4b1e86753b010a60be38bb5346f89e493936d2f4"
+    },
+    {
+      "tag": "dotmac-integration-v0.1.0a9",
+      "tag_object": "27df7b0a24fef3e8855a957826ae16d2f5d8aefc",
+      "peeled_commit": "92ae7a6f9c8307797704deb615a24e59420a73c4"
+    },
+    {
+      "tag": "dotmac-inventory-v0.1.0a1",
+      "tag_object": "82e200d4fa735c4ccfc6c660bdc587ebaa643f49",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-ipam-v0.1.0a1",
+      "tag_object": "795b367581e6b9d24b0569feebd3adb41ff2138a",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-licensing-v0.1.0a1",
+      "tag_object": "bdbd4076915d82965b5a600ce1546f25a2e4f2f1",
+      "peeled_commit": "fead57bc93d6551450f5e6ae1c9de1296e27b0ae"
+    },
+    {
+      "tag": "dotmac-licensing-v0.1.0a2",
+      "tag_object": "3786595a390ca7ab779a65909f4558aef09a1b10",
+      "peeled_commit": "e88df7915efc3acc27541856f111902b5af6fafb"
+    },
+    {
+      "tag": "dotmac-media-observations-v0.1.0a1",
+      "tag_object": "6412cb58a208cae354b9cbd049af8c6a352b328d",
+      "peeled_commit": "8f99413826e5adf3d35379ebc6deb79bcb5c8242"
+    },
+    {
+      "tag": "dotmac-network-access-v0.1.0a1",
+      "tag_object": "69e6c4064edff2fe022dfc6e982260b7ace3310f",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-network-assurance-v0.1.0a1",
+      "tag_object": "a43be73c26e670db48b84f1379d693d5ae64cf1f",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-network-control-v0.1.0a1",
+      "tag_object": "5c25958372f5b6306de3bd90b83fa0879a0d9333",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-network-inventory-v0.1.0a1",
+      "tag_object": "c69d218882d9840000c6194f831838211b69fe51",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-network-observability-v0.1.0a1",
+      "tag_object": "f2b0c07e4cdfa8baf6ac1050fe43e4481af247f2",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-network-topology-v0.1.0a1",
+      "tag_object": "75cdb6c5651fdad3d9d6ea54ef467f6d88a7ffe6",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-numbering-v0.1.0a2",
+      "tag_object": "caacaf8345ec609f22ca21a5dcb0d0c0a048e2f5",
+      "peeled_commit": "4c282228b53405442effc4159f5db9d50446d335"
+    },
+    {
+      "tag": "dotmac-operational-escalations-v0.1.0a1",
+      "tag_object": "8b22be6ac56fb0d360da0d215246daf5bbee4145",
+      "peeled_commit": "c006da75d4c04eb6e5b2f9fec715edebcbcdea30"
+    },
+    {
+      "tag": "dotmac-party-v0.1.0a1",
+      "tag_object": "330e237c06b25289b456c29e700b56d544881d90",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-payables-v0.1.0a1",
+      "tag_object": "20eadeb94f1f170333dfd52ecf1969ba5068b753",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-payments-v0.1.0a1",
+      "tag_object": "829c58c5ee397a4e9f12c78f9711875fc0a873a9",
+      "peeled_commit": "04b9771320b865b66d1322660fc6d3590605c973"
+    },
+    {
+      "tag": "dotmac-payroll-v0.1.0a1",
+      "tag_object": "0c814478a890da800fdfcb213645a9998c3203ce",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-people-v0.1.0a1",
+      "tag_object": "5db5c2a330ac3f9e935fc228acbd5201a07b818d",
+      "peeled_commit": "459569afdc6df6b78357d10277cee15820142fc9"
+    },
+    {
+      "tag": "dotmac-people-v0.1.0a2",
+      "tag_object": "aa6667380a34c2e61f68e3e1db90a5c0349956ac",
+      "peeled_commit": "636a97f95a2648e5f10a6e945578630a7499a989"
+    },
+    {
+      "tag": "dotmac-platform-health-v0.1.0a1",
+      "tag_object": "4b091719f887c1e451f187aea4d5fd36e3d9759d",
+      "peeled_commit": "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce"
+    },
+    {
+      "tag": "dotmac-pon-access-v0.1.0a1",
+      "tag_object": "b7c1d6184336d1d2ded6f7ed876f0efadb534dd9",
+      "peeled_commit": "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3"
+    },
+    {
+      "tag": "dotmac-positioning-v0.1.0a1",
+      "tag_object": "4b1ce494c477fdf7567cf57da13dfed07fa5d677",
+      "peeled_commit": "75a26abd3f866ebe24c4881a3958439d423034c7"
+    },
+    {
+      "tag": "dotmac-procurement-v0.1.0a1",
+      "tag_object": "f8f468df5d3253bf466fe568484fb0c72b3e524b",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-projects-v0.1.0a1",
+      "tag_object": "08dedc86cae09d2922b57a12c6bc8486a057982b",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-publishing-v0.1.0a1",
+      "tag_object": "e9e4f5f2e03faa480acdc1d1eadc63ebc88b6c09",
+      "peeled_commit": "8f99413826e5adf3d35379ebc6deb79bcb5c8242"
+    },
+    {
+      "tag": "dotmac-qualification-v0.1.0a1",
+      "tag_object": "800e0bcef2726b8b80dce3d6cedc1e9eb3f432de",
+      "peeled_commit": "3922235907ae83ab0d241d07793a7db2830c7366"
+    },
+    {
+      "tag": "dotmac-records-v0.1.0a1",
+      "tag_object": "00d706b911770cf208c9d6665314ba564341b7a1",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-referrals-v0.1.0a1",
+      "tag_object": "5fd41140e28acb00ec62f066924af0e4825069f2",
+      "peeled_commit": "401f000626fb74898d0d6bda4244fee69849bcf2"
+    },
+    {
+      "tag": "dotmac-release-catalog-v0.1.0a1",
+      "tag_object": "451fdd13bd890a9a4b68a14d61fa5e675559464b",
+      "peeled_commit": "fb38ee0fd008f26fd7fd56bb65a6ef076328c2ea"
+    },
+    {
+      "tag": "dotmac-release-catalog-v0.1.0a2",
+      "tag_object": "f7c124420482dbcc82433e82f123e03c9b76f2f5",
+      "peeled_commit": "5a911802e4423d72bb6576fe514d5d4efb23801a"
+    },
+    {
+      "tag": "dotmac-release-catalog-v0.1.0a3",
+      "tag_object": "b7d0a0172eea5dfdb79866ad7c8e6508c41110dd",
+      "peeled_commit": "461aff83d32d73166625be13e5214718f2ade9cf"
+    },
+    {
+      "tag": "dotmac-release-catalog-v0.1.0a4",
+      "tag_object": "3909a14a1242cb0c49fbc8e01b4d4aae994197ca",
+      "peeled_commit": "7556b96e8751d46a8bf3cb014b95a9a64eb03b0c"
+    },
+    {
+      "tag": "dotmac-release-catalog-v0.1.0a5",
+      "tag_object": "1d238d2da3c87ef097a841b433942f53e05da16e",
+      "peeled_commit": "9a9403624a8c21571053e36043f3eeab7ec34480"
+    },
+    {
+      "tag": "dotmac-remote-access-v0.1.0a1",
+      "tag_object": "b59c312545eabeda1cc6fa63bad45982caa43458",
+      "peeled_commit": "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce"
+    },
+    {
+      "tag": "dotmac-reseller-management-v0.1.0a1",
+      "tag_object": "558f63678518698519467fbd27bee31d8e173fc6",
+      "peeled_commit": "401f000626fb74898d0d6bda4244fee69849bcf2"
+    },
+    {
+      "tag": "dotmac-response-obligations-v0.1.0a1",
+      "tag_object": "22c56d54a21b25da7b1a9d063aa5bec5b8ae1e07",
+      "peeled_commit": "8afbd7db7a3c9cdf2b47a54355fd67da4c38f45d"
+    },
+    {
+      "tag": "dotmac-sales-v0.1.0a1",
+      "tag_object": "2e05a7d785e00fe738bb89c8f241e0802b4efd83",
+      "peeled_commit": "1eef66eddcde3cb051886e5a2a61bdb30dc972a5"
+    },
+    {
+      "tag": "dotmac-service-access-policy-v0.1.0a1",
+      "tag_object": "28b3ca7b03888236302c63f4c35a6c921bd75141",
+      "peeled_commit": "1029354b0619fa356cc43651c7f26a4ebaf0ac60"
+    },
+    {
+      "tag": "dotmac-service-catalog-v0.1.0a1",
+      "tag_object": "9b1b58029bba3d274fe11f07ecd2830aa6cd379c",
+      "peeled_commit": "f91253d5e193918507e9f2e0768a76aefe5bbce0"
+    },
+    {
+      "tag": "dotmac-service-changes-v0.1.0a1",
+      "tag_object": "65b556190dd8ae53c9dc97f780438ce093288cdf",
+      "peeled_commit": "c7571b9cbe3ddc9f5687f208a39930001ace8401"
+    },
+    {
+      "tag": "dotmac-service-orders-v0.1.0a1",
+      "tag_object": "177289a11e8ca632aedf38edc227f188c7af1d68",
+      "peeled_commit": "909164420b5a3e14b289af923ddbb13f70ec4020"
+    },
+    {
+      "tag": "dotmac-services-v0.1.0a1",
+      "tag_object": "4e2ba69eb012dc7a9dc0468ab875ae6c3567394f",
+      "peeled_commit": "63169d01bff8a93503100464ca16aaa450fe0557"
+    },
+    {
+      "tag": "dotmac-sites-v0.1.0a1",
+      "tag_object": "76303bc2e07711b30066558c06dc6538ed662f98",
+      "peeled_commit": "8f99413826e5adf3d35379ebc6deb79bcb5c8242"
+    },
+    {
+      "tag": "dotmac-subscriptions-v0.1.0a1",
+      "tag_object": "d922d283f85a3cfa9675de9a77359e3fd0dd0c5f",
+      "peeled_commit": "ffe483fb53f12dd7aee400a39e0c85ecf308470f"
+    },
+    {
+      "tag": "dotmac-subscriptions-v0.1.0a2",
+      "tag_object": "dc18f9840b83435ac428cab3bd7f1af7727984e0",
+      "peeled_commit": "f91253d5e193918507e9f2e0768a76aefe5bbce0"
+    },
+    {
+      "tag": "dotmac-subscriptions-v0.1.0a3",
+      "tag_object": "22c2560d7593dea992621a5b5b5c3da1745ab9b8",
+      "peeled_commit": "ad6c5824086f6f550447caeabe820e860cdfe23c"
+    },
+    {
+      "tag": "dotmac-support-access-v0.1.0a1",
+      "tag_object": "3722190cbd3450c8883b42e5d1906ad746820982",
+      "peeled_commit": "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce"
+    },
+    {
+      "tag": "dotmac-surveys-v0.1.0a1",
+      "tag_object": "d413baee46abcb2ba1a108d774cb5417ed68d06d",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-tax-v0.1.0a1",
+      "tag_object": "5170a63596c46b3148a570ec09ba3287f326304e",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-tax-v0.1.0a2",
+      "tag_object": "77b6e9df075eb0f05fae846f5bdcfb8f9f43d338",
+      "peeled_commit": "bd8d2262c26f62041cc22a813916066b9af85c7f"
+    },
+    {
+      "tag": "dotmac-tax-v0.1.0a3",
+      "tag_object": "b86622b5427b95945583eff55a872c67df1ee6ae",
+      "peeled_commit": "531f7f8c37ce2fdf41ecbf2f9a7a9940264a18f9"
+    },
+    {
+      "tag": "dotmac-tax-v0.1.0a4",
+      "tag_object": "06c39b303a59fd0c907c2d9b968975d2dcd236d8",
+      "peeled_commit": "fb7fb252c6fba8e15d7c39ed18f8057057adfbab"
+    },
+    {
+      "tag": "dotmac-template-studio-v0.2.0a3",
+      "tag_object": "e4032a7fe58dbd276dcbdabbb765b90476dc3930",
+      "peeled_commit": "5777ceb5b41414c389036342ed58262bbfb97f31"
+    },
+    {
+      "tag": "dotmac-template-studio-v0.2.0a4",
+      "tag_object": "6ee8691b7e04bb5f1894f3ccdf27dabf8320e324",
+      "peeled_commit": "ac5e439e622ec5adba94cf52f4f961f2c39a2d30"
+    },
+    {
+      "tag": "dotmac-ticketing-v0.1.0a3",
+      "tag_object": "615ee51037aa1cf7f00c71f8294719dc8dcc54cf",
+      "peeled_commit": "3e1f8012c4f45369b6801a709a270d71c5c95a8d"
+    },
+    {
+      "tag": "dotmac-ticketing-v0.1.0a4",
+      "tag_object": "9b64cbe65061985a7da187e284ffe2699d9eef9c",
+      "peeled_commit": "16f11a9ef0df7697558904efa969294bafc3fab3"
+    },
+    {
+      "tag": "dotmac-web-analytics-v0.1.0a1",
+      "tag_object": "223ad50909a3ec58f5296b60499896e7d0595a24",
+      "peeled_commit": "8b8e3d26f4b344cf1ed7444e9a2e3836c7115f30"
+    },
+    {
+      "tag": "dotmac-work-orders-v0.1.0a1",
+      "tag_object": "c4c4ff766eeee359f1120828183c70fad66c0f20",
+      "peeled_commit": "20d24703e70e4d361de2f406165df4b36cbee507"
+    },
+    {
+      "tag": "dotmac-workflow-runtime-v0.1.0a1",
+      "tag_object": "ea168c4a51df57b801a95d22b4674c68976c1c3f",
+      "peeled_commit": "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce"
+    }
+  ]
+}
