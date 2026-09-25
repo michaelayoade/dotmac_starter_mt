@@ -52,6 +52,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -79,13 +80,22 @@ class ProvenanceError(RuntimeError):
 
 
 class GitHubRuns(Protocol):
-    """The two read-only GitHub Actions calls provenance checking needs."""
+    """The three read-only GitHub Actions calls provenance checking needs."""
 
     def get_run(self, run_id: str) -> dict:
         """The workflow run object for ``run_id``."""
 
     def get_jobs(self, run_id: str) -> list[dict]:
         """Every job (with its steps) belonging to the run ``run_id``."""
+
+    def get_workflow(self, workflow_id: object) -> dict:
+        """The workflow definition object owning ``workflow_id``.
+
+        Binds a run to its workflow BY ID rather than trusting the run
+        object's own ``path`` field in isolation — the run's `path` and the
+        workflow fetched independently by `workflow_id` must name the same
+        file, and that file must be one of the approved ones.
+        """
 
 
 class RestGitHubRuns:
@@ -145,6 +155,43 @@ class RestGitHubRuns:
             raise ProvenanceError(f"GitHub API returned no jobs list for run {run_id}")
         return jobs
 
+    def get_workflow(self, workflow_id: object) -> dict:
+        return self._get(f"/actions/workflows/{workflow_id}")
+
+
+def _require_workflow_binding(
+    runs: GitHubRuns,
+    run: dict,
+    *,
+    run_id: str,
+    expected_paths: set[str],
+    label: str,
+) -> None:
+    """The run's own ``path`` field is not trusted alone.
+
+    A tag-ref `workflow_dispatch` can make GitHub report the dispatched
+    ref's NAME as `head_branch` (see the ancestry check below) — this
+    binding closes the companion gap by re-deriving the workflow's path
+    from `workflow_id` via a second, independent API call, rather than
+    relying solely on the string the run object happens to carry.
+    """
+    workflow_id = run.get("workflow_id")
+    if workflow_id is None:
+        raise ProvenanceError(f"{label} run {run_id} has no workflow_id")
+    workflow = runs.get_workflow(workflow_id)
+    workflow_path = workflow.get("path")
+    if workflow_path != run.get("path"):
+        raise ProvenanceError(
+            f"{label} run {run_id} workflow {workflow_id} path "
+            f"{workflow_path!r} disagrees with the run's own path "
+            f"{run.get('path')!r}"
+        )
+    if workflow_path not in expected_paths:
+        raise ProvenanceError(
+            f"{label} run {run_id} workflow {workflow_id} is not an "
+            f"approved workflow: {workflow_path!r}"
+        )
+
 
 def _require_run_identity(
     run: dict,
@@ -155,11 +202,17 @@ def _require_run_identity(
     label: str,
     distribution: str,
     version: str,
+    runs: GitHubRuns,
+    is_on_main: Callable[[str], bool],
 ) -> None:
-    if run.get("path") not in expected_paths:
-        raise ProvenanceError(
-            f"{label} run {run_id} is not an approved workflow: {run.get('path')!r}"
-        )
+    # The workflow's approval is decided from the INDEPENDENTLY fetched
+    # `get_workflow(workflow_id)` result, not from the run object's own
+    # self-reported `path` — that field is only used to prove agreement
+    # with the fetched workflow (below), never as the source of truth for
+    # which workflow ran.
+    _require_workflow_binding(
+        runs, run, run_id=run_id, expected_paths=expected_paths, label=label
+    )
     expected_title = (
         f"Release module {distribution} {version}"
         if run.get("path") == SOURCE_WORKFLOW
@@ -180,6 +233,18 @@ def _require_run_identity(
         raise ProvenanceError(
             f"{label} run {run_id} did not run on main "
             f"(head_branch={run.get('head_branch')!r})"
+        )
+    # `head_branch == "main"` alone is spoofable: a `workflow_dispatch`
+    # against a REF (e.g. a tag) literally named `main` makes GitHub report
+    # `head_branch: "main"` even though that ref is not the protected
+    # branch and can point at an arbitrary commit. The only real proof is
+    # that the run's actual head commit is an ancestor of the live
+    # `origin/main` tip.
+    head_sha = run.get("head_sha")
+    if not is_on_main(head_sha):
+        raise ProvenanceError(
+            f"{label} run {run_id} head commit {head_sha!r} is not an "
+            "ancestor of origin/main"
         )
     if run.get("repository", {}).get("full_name") != repository:
         raise ProvenanceError(
@@ -239,9 +304,14 @@ def verify_row_provenance(
     repository: str,
     wait_seconds: int,
     poll_seconds: int,
+    is_on_main: Callable[[str], bool],
     sleep=time.sleep,
 ) -> None:
     """Prove one ledger row's tag was created by an approved, successful run.
+
+    ``is_on_main`` decides whether a given commit is an ancestor of the
+    live `origin/main` tip — never `head_branch == "main"` alone, which a
+    `workflow_dispatch` against a ref literally named `main` can spoof.
 
     Raises `ProvenanceError` naming the exact violated rule; never silently
     accepts an unproven row.
@@ -250,6 +320,12 @@ def verify_row_provenance(
     verification_run_id = row["verification_run_id"]
     distribution = row["distribution"]
     version = row["version"]
+
+    if not is_on_main(peeled_commit):
+        raise ProvenanceError(
+            f"tag {tag} peeled commit {peeled_commit!r} is not an ancestor "
+            "of origin/main"
+        )
 
     run = runs.get_run(verification_run_id)
     _require_run_identity(
@@ -260,6 +336,8 @@ def verify_row_provenance(
         label="verification",
         distribution=distribution,
         version=version,
+        runs=runs,
+        is_on_main=is_on_main,
     )
     run = _await_completed(
         runs,
@@ -307,34 +385,17 @@ def verify_row_provenance(
             "as both source and verification"
         )
     source_run = runs.get_run(source_run_id)
-    if source_run.get("path") != SOURCE_WORKFLOW:
-        raise ProvenanceError(
-            f"recovery source run {source_run_id} is not {SOURCE_WORKFLOW}: "
-            f"{source_run.get('path')!r}"
-        )
-    expected_source_title = f"Release module {distribution} {version}"
-    if source_run.get("display_title") != expected_source_title:
-        raise ProvenanceError(
-            f"recovery source run {source_run_id} display_title "
-            f"{source_run.get('display_title')!r} does not bind module "
-            f"{distribution!r} version {version!r} "
-            f"(expected {expected_source_title!r})"
-        )
-    if source_run.get("event") != "workflow_dispatch":
-        raise ProvenanceError(
-            f"recovery source run {source_run_id} was not triggered by "
-            f"workflow_dispatch (event={source_run.get('event')!r})"
-        )
-    if source_run.get("head_branch") != "main":
-        raise ProvenanceError(
-            f"recovery source run {source_run_id} did not run on main "
-            f"(head_branch={source_run.get('head_branch')!r})"
-        )
-    if source_run.get("repository", {}).get("full_name") != repository:
-        raise ProvenanceError(
-            f"recovery source run {source_run_id} is not in {repository!r}: "
-            f"{source_run.get('repository', {}).get('full_name')!r}"
-        )
+    _require_run_identity(
+        source_run,
+        run_id=source_run_id,
+        expected_paths={SOURCE_WORKFLOW},
+        repository=repository,
+        label="recovery source",
+        distribution=distribution,
+        version=version,
+        runs=runs,
+        is_on_main=is_on_main,
+    )
     if source_run.get("head_sha") != peeled_commit:
         raise ProvenanceError(
             f"recovery source run {source_run_id} built commit "
@@ -371,6 +432,23 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=False
     )
+
+
+def _is_on_main(commit: str | None) -> bool:
+    """Is ``commit`` an ancestor of the live ``origin/main`` tip?
+
+    `head_branch == "main"` on a run/tag object only ever reports a REF
+    NAME, which `workflow_dispatch` against a ref literally named `main`
+    can spoof. Ancestry against the real branch tip is the only proof that
+    survives that. The CI job's `actions/checkout` step runs with
+    `fetch-depth: 0`, which fetches `+refs/heads/*:refs/remotes/origin/*`
+    (every branch, not just the checked-out ref) — `origin/main` is always
+    resolvable there without any extra fetch step.
+    """
+    if not commit:
+        return False
+    result = _git("merge-base", "--is-ancestor", commit, "origin/main")
+    return result.returncode == 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -453,6 +531,7 @@ def main(argv: list[str] | None = None) -> int:
                 repository=repository,
                 wait_seconds=args.wait_seconds,
                 poll_seconds=args.poll_seconds,
+                is_on_main=_is_on_main,
             )
         except ProvenanceError as failure:
             print(

@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -49,7 +50,34 @@ def provenance():
 REPOSITORY = "dotmac/dotmac_starter_mt"
 PEELED_COMMIT = "c" * 40
 DISTRIBUTION = "dotmac-approvals"
-WHEEL_NAME = "dotmac_approvals-0.1.0a1-py3-none-any.whl"
+
+# The verified live `workflow_id` for `release-module.yml`. `recover-module
+# -release.yml`'s is not independently verified here — it only needs to be
+# internally consistent within this fake, since nothing asserts the real
+# GitHub-assigned value.
+RELEASE_WORKFLOW_ID = 332879371
+RECOVER_WORKFLOW_ID = 445566778
+
+SOURCE_WORKFLOW_PATH = ".github/workflows/release-module.yml"
+
+DEFAULT_WORKFLOWS: dict[str, dict] = {
+    str(RELEASE_WORKFLOW_ID): {"path": SOURCE_WORKFLOW_PATH},
+    str(RECOVER_WORKFLOW_ID): {"path": ".github/workflows/recover-module-release.yml"},
+}
+
+
+def _on_main_always(_commit: str) -> bool:
+    """A fake `is_on_main` that treats every commit as on `origin/main`.
+
+    Used by every test that is not specifically exercising the ancestry
+    rule — that rule gets its own dedicated fakes below.
+    """
+    return True
+
+
+def _on_main_only(*commits: str) -> Callable[[str], bool]:
+    allowed = set(commits)
+    return lambda commit: commit in allowed
 
 
 def _row(
@@ -59,15 +87,23 @@ def _row(
     source_run_id: str = "1001",
     peeled_commit: str = PEELED_COMMIT,
 ) -> dict:
+    # The wheel filename must bind THIS row's own distribution + version —
+    # `parse_module_release_verifications` refuses a row whose `sha256` key
+    # names a wheel for a different version (`_wheel_filename` in
+    # `write_release_record.py`), so a fixed constant here would only work
+    # for the default tag and silently break every other version a caller
+    # passes.
+    version = tag.removeprefix(f"{DISTRIBUTION}-v")
+    wheel_name = f"{DISTRIBUTION.replace('-', '_')}-{version}-py3-none-any.whl"
     return {
         "distribution": DISTRIBUTION,
-        "version": tag.removeprefix(f"{DISTRIBUTION}-v"),
+        "version": version,
         "tag": tag,
         "tag_object": "a" * 40,
         "peeled_commit": peeled_commit,
         "status": "released",
         "pinnable": True,
-        "sha256": {WHEEL_NAME: "b" * 64},
+        "sha256": {wheel_name: "b" * 64},
         "verification_run_id": verification_run_id,
         "source_run_id": source_run_id,
     }
@@ -88,10 +124,15 @@ def _run_object(
     conclusion: str | None = "success",
     head_sha: str = PEELED_COMMIT,
     display_title: str | None = None,
+    workflow_id: int | None = None,
 ) -> dict:
     if display_title is None:
         verb = "Recover" if path == RECOVERY_WORKFLOW else "Release"
         display_title = f"{verb} module {DISTRIBUTION} {DEFAULT_VERSION}"
+    if workflow_id is None:
+        workflow_id = (
+            RECOVER_WORKFLOW_ID if path == RECOVERY_WORKFLOW else RELEASE_WORKFLOW_ID
+        )
     return {
         "id": int(run_id),
         "path": path,
@@ -102,15 +143,22 @@ def _run_object(
         "conclusion": conclusion,
         "head_sha": head_sha,
         "display_title": display_title,
+        "workflow_id": workflow_id,
     }
 
 
 class FakeGitHubRuns:
     """A dict-backed fake — no network. Values may be a list for polling."""
 
-    def __init__(self, runs: dict[str, object], jobs: dict[str, list[dict]]) -> None:
+    def __init__(
+        self,
+        runs: dict[str, object],
+        jobs: dict[str, list[dict]],
+        workflows: dict[str, dict] | None = None,
+    ) -> None:
         self._runs = runs
         self._jobs = jobs
+        self._workflows = workflows if workflows is not None else DEFAULT_WORKFLOWS
         self.get_run_calls: list[str] = []
 
     def get_run(self, run_id: str) -> dict:
@@ -124,6 +172,9 @@ class FakeGitHubRuns:
 
     def get_jobs(self, run_id: str) -> list[dict]:
         return self._jobs.get(str(run_id), [])
+
+    def get_workflow(self, workflow_id: object) -> dict:
+        return self._workflows[str(workflow_id)]
 
 
 def _fake_sleep():
@@ -162,6 +213,7 @@ def test_accepted_normal_release(provenance) -> None:
         repository=REPOSITORY,
         wait_seconds=100,
         poll_seconds=10,
+        is_on_main=_on_main_always,
         sleep=sleep,
     )
     assert calls == []
@@ -169,14 +221,17 @@ def test_accepted_normal_release(provenance) -> None:
 
 def test_accepted_recovery(provenance) -> None:
     row = _row(verification_run_id="2002", source_run_id="1001")
+    # The recovery/verification run's own head_sha need not equal the tagged
+    # commit — only the SOURCE run's does. It must still be a real commit on
+    # main (proven here via `_on_main_only`, which also proves the verification
+    # run's ancestry IS checked, unlike its equality to the tagged commit).
+    recovery_head_sha = "f" * 40
     runs = FakeGitHubRuns(
         runs={
-            # The recovery/verification run's own head_sha is never checked —
-            # only the SOURCE run's is. Set it to something else to prove that.
             "2002": _run_object(
                 run_id="2002",
                 path=".github/workflows/recover-module-release.yml",
-                head_sha="f" * 40,
+                head_sha=recovery_head_sha,
             ),
             "1001": _run_object(
                 run_id="1001",
@@ -195,6 +250,7 @@ def test_accepted_recovery(provenance) -> None:
         repository=REPOSITORY,
         wait_seconds=100,
         poll_seconds=10,
+        is_on_main=_on_main_only(PEELED_COMMIT, recovery_head_sha),
         sleep=sleep,
     )
     assert calls == []
@@ -205,11 +261,14 @@ def test_accepted_recovery(provenance) -> None:
 
 def test_refuses_a_verification_run_on_the_wrong_workflow(provenance) -> None:
     row = _row()
+    unrelated_path = ".github/workflows/unrelated.yml"
     runs = FakeGitHubRuns(
-        runs={
-            "1001": _run_object(run_id="1001", path=".github/workflows/unrelated.yml")
-        },
+        runs={"1001": _run_object(run_id="1001", path=unrelated_path)},
         jobs={},
+        # The fetched workflow agrees with the run's own path — this test is
+        # about the path not being APPROVED, not about the two disagreeing
+        # (that is a separate test in Rule (e)).
+        workflows={str(RELEASE_WORKFLOW_ID): {"path": unrelated_path}},
     )
     with pytest.raises(provenance.ProvenanceError, match="not an approved workflow"):
         provenance.verify_row_provenance(
@@ -219,6 +278,7 @@ def test_refuses_a_verification_run_on_the_wrong_workflow(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -243,6 +303,7 @@ def test_refuses_a_verification_run_not_triggered_by_workflow_dispatch(
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -265,6 +326,7 @@ def test_refuses_a_verification_run_off_main(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -289,6 +351,7 @@ def test_refuses_a_verification_run_in_another_repository(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -311,6 +374,7 @@ def test_refuses_a_verification_run_that_did_not_succeed(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -340,6 +404,7 @@ def test_refuses_a_release_verification_run_titled_for_a_different_module(
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -366,6 +431,7 @@ def test_refuses_a_release_verification_run_titled_for_a_different_version(
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -387,6 +453,7 @@ def test_refuses_a_release_verification_run_missing_a_title(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -416,6 +483,7 @@ def test_refuses_a_recovery_verification_run_titled_for_a_different_module(
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -440,6 +508,7 @@ def test_refuses_a_recovery_verification_run_missing_a_title(provenance) -> None
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -468,6 +537,7 @@ def test_refuses_a_recovery_source_run_titled_for_a_different_module(
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -496,6 +566,7 @@ def test_refuses_a_recovery_source_run_titled_for_a_different_version(
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -520,6 +591,7 @@ def test_refuses_a_recovery_source_run_missing_a_title(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -541,6 +613,7 @@ def test_refuses_a_run_missing_the_tag_step(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -561,6 +634,7 @@ def test_refuses_a_run_whose_tag_step_failed(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -584,6 +658,7 @@ def test_refuses_a_release_whose_source_run_id_disagrees_with_verification(
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -606,6 +681,7 @@ def test_refuses_a_release_run_built_at_the_wrong_commit(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -615,6 +691,7 @@ def test_refuses_a_release_run_built_at_the_wrong_commit(provenance) -> None:
 
 def test_refuses_a_recovery_source_run_on_the_wrong_workflow(provenance) -> None:
     row = _row(verification_run_id="2002", source_run_id="1001")
+    unrelated_path = ".github/workflows/unrelated.yml"
     runs = FakeGitHubRuns(
         runs={
             "2002": _run_object(
@@ -622,15 +699,24 @@ def test_refuses_a_recovery_source_run_on_the_wrong_workflow(provenance) -> None
             ),
             "1001": _run_object(
                 run_id="1001",
-                path=".github/workflows/unrelated.yml",
+                path=unrelated_path,
                 conclusion="failure",
             ),
         },
         jobs={"2002": _jobs_with_step("Tag the recovered release")},
+        # The fetched workflow agrees with the source run's own path — this
+        # test is about the path not being APPROVED for a source run
+        # (release-module.yml only), not about the two disagreeing.
+        workflows={
+            str(RECOVER_WORKFLOW_ID): {
+                "path": ".github/workflows/recover-module-release.yml"
+            },
+            str(RELEASE_WORKFLOW_ID): {"path": unrelated_path},
+        },
     )
     with pytest.raises(
         provenance.ProvenanceError,
-        match=r"is not \.github/workflows/release-module\.yml",
+        match="is not an approved workflow",
     ):
         provenance.verify_row_provenance(
             row,
@@ -639,6 +725,7 @@ def test_refuses_a_recovery_source_run_on_the_wrong_workflow(provenance) -> None
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -666,6 +753,7 @@ def test_refuses_a_recovery_source_run_that_succeeded(provenance) -> None:
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -694,6 +782,7 @@ def test_refuses_a_recovery_source_run_built_at_the_wrong_commit(provenance) -> 
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -720,6 +809,167 @@ def test_refuses_a_recovery_whose_source_equals_the_verification_run(
             repository=REPOSITORY,
             wait_seconds=100,
             poll_seconds=10,
+            is_on_main=_on_main_always,
+            sleep=_fake_sleep()[0],
+        )
+
+
+# ── Rule (e): ancestry and workflow-identity binding ────────────────────────
+#
+# `head_branch == "main"` alone is spoofable: a `workflow_dispatch` against a
+# REF (e.g. a tag) literally named `main` makes GitHub report
+# `head_branch: "main"` for a commit that is not actually on the protected
+# branch. These tests prove the companion `is_on_main` ancestry check and the
+# independent `get_workflow` identity binding actually bite.
+
+
+def test_refuses_a_verification_run_whose_head_commit_is_not_on_main(
+    provenance,
+) -> None:
+    row = _row()
+    off_main_sha = "e" * 40
+    runs = FakeGitHubRuns(
+        runs={
+            "1001": _run_object(
+                run_id="1001", path=provenance.SOURCE_WORKFLOW, head_sha=off_main_sha
+            )
+        },
+        jobs={},
+    )
+    with pytest.raises(
+        provenance.ProvenanceError, match="not an ancestor of origin/main"
+    ):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            # PEELED_COMMIT is on main; the run's OWN head_sha (off_main_sha)
+            # deliberately is not — proving head_branch=="main" is not enough.
+            is_on_main=_on_main_only(PEELED_COMMIT),
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_recovery_source_run_whose_head_commit_is_not_on_main(
+    provenance,
+) -> None:
+    row = _row(verification_run_id="2002", source_run_id="1001")
+    runs = FakeGitHubRuns(
+        runs={
+            "2002": _run_object(
+                run_id="2002", path=".github/workflows/recover-module-release.yml"
+            ),
+            "1001": _run_object(
+                run_id="1001",
+                path=provenance.SOURCE_WORKFLOW,
+                conclusion="failure",
+            ),
+        },
+        jobs={"2002": _jobs_with_step("Tag the recovered release")},
+    )
+    with pytest.raises(
+        provenance.ProvenanceError, match="not an ancestor of origin/main"
+    ):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            # The verification run's head_sha (PEELED_COMMIT) is allowed on
+            # main, but the SOURCE run's head_sha is refused — the source
+            # run's own ancestry must independently be proven.
+            is_on_main=_on_main_only(PEELED_COMMIT),
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_tag_whose_peeled_commit_is_not_on_main(provenance) -> None:
+    row = _row()
+    runs = FakeGitHubRuns(
+        runs={"1001": _run_object(run_id="1001", path=provenance.SOURCE_WORKFLOW)},
+        jobs={"1001": _jobs_with_step("Tag the verified release")},
+    )
+    with pytest.raises(
+        provenance.ProvenanceError, match="not an ancestor of origin/main"
+    ):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            # Nothing is on main — the peeled-commit check fires first,
+            # before either run is even fetched.
+            is_on_main=_on_main_only(),
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_verification_run_whose_bound_workflow_path_disagrees(
+    provenance,
+) -> None:
+    # Near-miss: the run object's own `path` field claims the approved
+    # release workflow, but the workflow independently fetched by
+    # `workflow_id` names a different file — exactly the gap `get_workflow`
+    # closes, since a run's self-reported `path` is not trusted alone.
+    row = _row()
+    runs = FakeGitHubRuns(
+        runs={"1001": _run_object(run_id="1001", path=provenance.SOURCE_WORKFLOW)},
+        jobs={},
+        workflows={
+            str(RELEASE_WORKFLOW_ID): {"path": ".github/workflows/unrelated.yml"}
+        },
+    )
+    with pytest.raises(provenance.ProvenanceError, match="disagrees with the run"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            is_on_main=_on_main_always,
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_verification_run_whose_bound_workflow_is_not_approved(
+    provenance,
+) -> None:
+    # Near-miss: `run.path` and the fetched workflow's path AGREE, but that
+    # agreed path is not one of the approved workflows — proves the
+    # `expected_paths` membership check inside `_require_workflow_binding`
+    # actually bites, not just the disagreement check above.
+    row = _row()
+    unapproved_path = ".github/workflows/unrelated.yml"
+    runs = FakeGitHubRuns(
+        runs={
+            "1001": _run_object(
+                run_id="1001", path=unapproved_path, workflow_id=RELEASE_WORKFLOW_ID
+            )
+        },
+        jobs={},
+        workflows={str(RELEASE_WORKFLOW_ID): {"path": unapproved_path}},
+    )
+    # The plain `run.path not in expected_paths` check (rule (a)) already
+    # catches this case too — this test proves the SAME plant is caught even
+    # when phrased as a `get_workflow` mismatch, i.e. the two checks overlap
+    # rather than one silently covering for a gap in the other.
+    with pytest.raises(provenance.ProvenanceError, match="not an approved workflow"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=_fake_sleep()[0],
         )
 
@@ -755,6 +1005,7 @@ def test_an_in_progress_run_that_completes_within_the_wait_is_accepted(
         repository=REPOSITORY,
         wait_seconds=100,
         poll_seconds=10,
+        is_on_main=_on_main_always,
         sleep=sleep,
     )
     assert calls == [10, 10]
@@ -777,6 +1028,7 @@ def test_an_in_progress_run_beyond_the_wait_is_refused_as_still_running(
             repository=REPOSITORY,
             wait_seconds=25,
             poll_seconds=10,
+            is_on_main=_on_main_always,
             sleep=sleep,
         )
     assert calls == [10, 10, 10]
