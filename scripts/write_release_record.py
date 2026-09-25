@@ -668,7 +668,12 @@ def _release_authority_history() -> set[str]:
         raise ReleaseRecordError(
             f"release authority ledger is unreadable at {authority.LEDGER_PATH}"
         ) from exc
-    ledger = authority.parse_authority_ledger(ledger_text)
+    try:
+        ledger = authority.parse_authority_ledger(ledger_text)
+    except authority.ReleaseAuthorityError as failure:
+        raise ReleaseRecordError(
+            f"release authority ledger is malformed: {failure}"
+        ) from failure
     return set(ledger["history"])
 
 

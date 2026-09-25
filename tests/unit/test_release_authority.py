@@ -588,3 +588,30 @@ def test_a_script_mentioned_only_in_a_docstring_is_not_in_the_surface(ra) -> Non
     assert "scripts/consumer_boot_check.sh" not in derived
     assert "scripts/other_doc.sh" not in derived
     assert "scripts/really_invoked.sh" in derived
+
+
+def test_the_release_authority_v1_canonical_digest_is_frozen(ra) -> None:
+    """Golden vector, computed independently of `authority_digest`.
+
+    Provenance digests an OLD run commit's declared bytes with the CURRENT
+    function before trusting that commit's own code, so the v1 canonical form
+    must never change; a different form needs a new schema version. The `\\r`
+    byte also pins that digests see exact bytes, never translated newlines.
+    """
+    files = {
+        ".github/workflows/a.yml": "on: push\n",
+        "scripts/b.py": "import os\r\n",
+    }
+    digest = ra.authority_digest(
+        sorted(files), ["action:actions/checkout@" + "a" * 40], _dict_reader(files)
+    )
+    assert digest == (
+        "sha256:40612481fbd6ee44d09349979a9d118099cb3e98bfe66250898e97e52e513aa1"
+    )
+    assert ra.SCHEMA == "ReleaseAuthority.v1"
+
+
+def test_the_worktree_reader_preserves_carriage_returns(ra, tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "b.py").write_bytes(b"import os\r\n")
+    assert ra.worktree_reader(tmp_path)("scripts/b.py") == "import os\r\n"

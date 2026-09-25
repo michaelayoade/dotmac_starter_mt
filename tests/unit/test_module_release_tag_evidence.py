@@ -1435,3 +1435,29 @@ def test_recovery_records_the_original_runs_smoke_manifest() -> None:
         '--smoke-dependencies "$RECOVERED_SMOKE"'
         in (steps["Tag the recovered release"]["run"])
     )
+
+
+def test_a_recovery_rerun_accepts_the_tag_it_created_itself(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Recovery run 900 created the tag (source = original 700) and failed
+    afterwards; its rerun passes --adopt-original-run 700 because the tag
+    exists, but the tag names run 900 itself, so it is an identical rerun."""
+    _, work, commit = _bare_origin_and_work(tmp_path)
+    artifact_dir = tmp_path / "artifact"
+    artifact_dir.mkdir()
+    (artifact_dir / _WHEEL_NAME).write_bytes(b"retained")
+    common = {
+        "work": work,
+        "commit": commit,
+        "artifact_dir": artifact_dir,
+        "run_id": "900",
+        "source_run_id": "700",
+    }
+    assert _run_tagger(monkeypatch, **common) == 0
+    before = _remote_tag_object(work)
+    capsys.readouterr()
+    code = _run_tagger(monkeypatch, **common, extra=["--adopt-original-run", "700"])
+    assert code == 0
+    assert "tag-result=rerun" in capsys.readouterr().out
+    assert _remote_tag_object(work) == before

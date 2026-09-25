@@ -287,7 +287,10 @@ def test_accepted_recovery(provenance) -> None:
                 conclusion="failure",
             ),
         },
-        jobs={"2002": _jobs_with_step("Tag the recovered release")},
+        jobs={
+            "2002": _jobs_with_step("Tag the recovered release"),
+            "1001": [{"name": "publish", "conclusion": "success", "steps": []}],
+        },
     )
     sleep, calls = _fake_sleep()
     provenance.verify_row_provenance(
@@ -1666,3 +1669,117 @@ def test_git_authority_refuses_commits_without_or_with_a_malformed_ledger(
         view.reconstruct_at(removed)
     with pytest.raises(provenance.ProvenanceError, match="malformed"):
         view.active_at(malformed)
+
+
+# ── A recovery that CREATED the tag: the original run must be authorized ────
+
+
+def _recovery_created_runs(provenance, *, publish: str = "success") -> FakeGitHubRuns:
+    return FakeGitHubRuns(
+        runs={
+            "2002": _run_object(
+                run_id="2002",
+                path=".github/workflows/recover-module-release.yml",
+                head_sha=RECOVERY_HEAD,
+            ),
+            "1001": _run_object(
+                run_id="1001",
+                path=provenance.SOURCE_WORKFLOW,
+                conclusion="failure",
+            ),
+        },
+        jobs={
+            "2002": _jobs_with_step("Tag the recovered release"),
+            "1001": [{"name": "publish", "conclusion": publish, "steps": []}],
+        },
+    )
+
+
+def _verify_recovery_created(provenance, runs, authority=None) -> None:
+    kwargs = _release_verify_kwargs()
+    kwargs["authority"] = authority or FakeAuthority()
+    provenance.verify_row_provenance(
+        _row(verification_run_id="2002", source_run_id="1001"), runs=runs, **kwargs
+    )
+
+
+def test_a_recovery_created_row_is_accepted_when_the_original_is_authorized(
+    provenance,
+) -> None:
+    _verify_recovery_created(provenance, _recovery_created_runs(provenance))
+
+
+def test_a_recovery_created_row_needs_the_originals_publication_to_succeed(
+    provenance,
+) -> None:
+    with pytest.raises(provenance.ProvenanceError, match="job 'publish'"):
+        _verify_recovery_created(
+            provenance, _recovery_created_runs(provenance, publish="failure")
+        )
+
+
+def test_a_recovery_cannot_launder_an_unauthorized_original_run(provenance) -> None:
+    rogue = "sha256:" + "5" * 64
+    with pytest.raises(provenance.ProvenanceError, match="recovery source run"):
+        _verify_recovery_created(
+            provenance,
+            _recovery_created_runs(provenance),
+            FakeAuthority(active={PEELED_COMMIT: rogue}),
+        )
+
+
+def test_git_authority_refuses_a_surface_grown_by_a_latent_reference(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Re-derivation, not the digest, must catch this: a declared script
+    already names `scripts/latent.py` (ignored while it does not exist), and an
+    intermediate commit adds only that file. Every declared byte is unchanged,
+    so the declared-list digest still matches; the commit's own rules must see
+    the grown surface and refuse."""
+    ra = provenance.release_authority
+    real = json.loads(
+        (PROJECT_ROOT / "docs" / "inventories" / "release-authority.json").read_text()
+    )
+    repo = tmp_path / "repo"
+    for rel in real["active"]["files"]:
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((PROJECT_ROOT / rel).read_bytes())
+    tagger = repo / "scripts" / "tag_module_release.py"
+    tagger.write_text(
+        tagger.read_text() + '\n_LATENT = "scripts/latent.py"\n', encoding="utf-8"
+    )
+    read = ra.worktree_reader(repo)
+    files, external = ra.derive_surface(read)
+    assert "scripts/latent.py" not in files
+    digest = ra.authority_digest(files, external, read)
+    ledger = repo / ra.LEDGER_PATH
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "$comment": "fixture",
+                "schema": ra.LEDGER_SCHEMA,
+                "active": {
+                    "digest": digest,
+                    "files": files,
+                    "external_imports": external,
+                },
+                "history": [digest],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _git_in(repo, "init", "-q", "--initial-branch=main")
+    _git_in(repo, "config", "user.name", "Test")
+    _git_in(repo, "config", "user.email", "test@example.invalid")
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-q", "-m", "authorized")
+    (repo / "scripts" / "latent.py").write_text("import os\n", encoding="utf-8")
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-q", "-m", "latent file appears")
+    grown = _git_in(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    view = provenance.GitReleaseAuthority(_base_ledger(provenance, digest))
+    with pytest.raises(provenance.ProvenanceError, match="differs from the surface"):
+        view.reconstruct_at(grown)
