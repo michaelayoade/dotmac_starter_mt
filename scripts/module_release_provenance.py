@@ -29,6 +29,16 @@ Two run identities matter, and they may be the same run or different runs:
   `workflow_dispatch` run on `main` in this repository, built at the tagged
   commit, but one that did NOT succeed — recovery only ever applies to a
   release that failed after publishing but before tagging.
+
+The Actions runs API exposes no dispatch inputs, so a real, successful run for
+module A at commit X is otherwise indistinguishable from a forged ledger row
+naming that same run for module B at the same commit. Both release workflows
+therefore declare a top-level ``run-name`` binding the dispatched module and
+version into the run's own ``display_title`` (``Release module <dist>
+<version>`` / ``Recover module <dist> <version>``), and this script checks it
+exactly against every row it verifies. A run dispatched BEFORE this change
+carries no such title and cannot be proven this way — acceptable, since no
+governed module has a verified row yet.
 """
 
 from __future__ import annotations
@@ -137,11 +147,29 @@ class RestGitHubRuns:
 
 
 def _require_run_identity(
-    run: dict, *, run_id: str, expected_paths: set[str], repository: str, label: str
+    run: dict,
+    *,
+    run_id: str,
+    expected_paths: set[str],
+    repository: str,
+    label: str,
+    distribution: str,
+    version: str,
 ) -> None:
     if run.get("path") not in expected_paths:
         raise ProvenanceError(
             f"{label} run {run_id} is not an approved workflow: {run.get('path')!r}"
+        )
+    expected_title = (
+        f"Release module {distribution} {version}"
+        if run.get("path") == SOURCE_WORKFLOW
+        else f"Recover module {distribution} {version}"
+    )
+    if run.get("display_title") != expected_title:
+        raise ProvenanceError(
+            f"{label} run {run_id} display_title {run.get('display_title')!r} "
+            f"does not bind module {distribution!r} version {version!r} "
+            f"(expected {expected_title!r})"
         )
     if run.get("event") != "workflow_dispatch":
         raise ProvenanceError(
@@ -220,6 +248,8 @@ def verify_row_provenance(
     """
     tag = row.get("tag")
     verification_run_id = row["verification_run_id"]
+    distribution = row["distribution"]
+    version = row["version"]
 
     run = runs.get_run(verification_run_id)
     _require_run_identity(
@@ -228,6 +258,8 @@ def verify_row_provenance(
         expected_paths=APPROVED_VERIFICATION_WORKFLOWS,
         repository=repository,
         label="verification",
+        distribution=distribution,
+        version=version,
     )
     run = _await_completed(
         runs,
@@ -279,6 +311,14 @@ def verify_row_provenance(
         raise ProvenanceError(
             f"recovery source run {source_run_id} is not {SOURCE_WORKFLOW}: "
             f"{source_run.get('path')!r}"
+        )
+    expected_source_title = f"Release module {distribution} {version}"
+    if source_run.get("display_title") != expected_source_title:
+        raise ProvenanceError(
+            f"recovery source run {source_run_id} display_title "
+            f"{source_run.get('display_title')!r} does not bind module "
+            f"{distribution!r} version {version!r} "
+            f"(expected {expected_source_title!r})"
         )
     if source_run.get("event") != "workflow_dispatch":
         raise ProvenanceError(

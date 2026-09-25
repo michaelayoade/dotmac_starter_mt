@@ -1,4 +1,5 @@
 name: Release module
+run-name: Release module ${{ inputs.module }} ${{ inputs.version }}
 defaults:
   run:
     shell: bash --noprofile --norc -eo pipefail {0}

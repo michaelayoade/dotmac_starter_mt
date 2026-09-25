@@ -69,6 +69,10 @@ def _row(
     }
 
 
+RECOVERY_WORKFLOW = ".github/workflows/recover-module-release.yml"
+DEFAULT_VERSION = "0.1.0a1"
+
+
 def _run_object(
     *,
     run_id: str,
@@ -79,7 +83,11 @@ def _run_object(
     status: str = "completed",
     conclusion: str | None = "success",
     head_sha: str = PEELED_COMMIT,
+    display_title: str | None = None,
 ) -> dict:
+    if display_title is None:
+        verb = "Recover" if path == RECOVERY_WORKFLOW else "Release"
+        display_title = f"{verb} module {DISTRIBUTION} {DEFAULT_VERSION}"
     return {
         "id": int(run_id),
         "path": path,
@@ -89,6 +97,7 @@ def _run_object(
         "status": status,
         "conclusion": conclusion,
         "head_sha": head_sha,
+        "display_title": display_title,
     }
 
 
@@ -291,6 +300,215 @@ def test_refuses_a_verification_run_that_did_not_succeed(provenance) -> None:
         jobs={},
     )
     with pytest.raises(provenance.ProvenanceError, match="did not succeed"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            sleep=_fake_sleep()[0],
+        )
+
+
+# ── Rule (a2): display_title binds module + version ─────────────────────────
+
+
+def test_refuses_a_release_verification_run_titled_for_a_different_module(
+    provenance,
+) -> None:
+    row = _row()
+    runs = FakeGitHubRuns(
+        runs={
+            "1001": _run_object(
+                run_id="1001",
+                path=provenance.SOURCE_WORKFLOW,
+                display_title=f"Release module dotmac-other {DEFAULT_VERSION}",
+            )
+        },
+        jobs={},
+    )
+    with pytest.raises(provenance.ProvenanceError, match="does not bind module"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_release_verification_run_titled_for_a_different_version(
+    provenance,
+) -> None:
+    row = _row()
+    runs = FakeGitHubRuns(
+        runs={
+            "1001": _run_object(
+                run_id="1001",
+                path=provenance.SOURCE_WORKFLOW,
+                display_title=f"Release module {DISTRIBUTION} 9.9.9",
+            )
+        },
+        jobs={},
+    )
+    with pytest.raises(provenance.ProvenanceError, match="does not bind module"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_release_verification_run_missing_a_title(provenance) -> None:
+    row = _row()
+    runs = FakeGitHubRuns(
+        runs={"1001": _run_object(run_id="1001", path=provenance.SOURCE_WORKFLOW)},
+        jobs={},
+    )
+    # Force no title (as an un-migrated pre-change run would have) — the
+    # helper's default fills one in, so override the dict directly.
+    runs._runs["1001"]["display_title"] = None
+    with pytest.raises(provenance.ProvenanceError, match="does not bind module"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_recovery_verification_run_titled_for_a_different_module(
+    provenance,
+) -> None:
+    row = _row(verification_run_id="2002", source_run_id="1001")
+    runs = FakeGitHubRuns(
+        runs={
+            "2002": _run_object(
+                run_id="2002",
+                path=RECOVERY_WORKFLOW,
+                display_title=f"Recover module dotmac-other {DEFAULT_VERSION}",
+            ),
+            "1001": _run_object(
+                run_id="1001", path=provenance.SOURCE_WORKFLOW, conclusion="failure"
+            ),
+        },
+        jobs={},
+    )
+    with pytest.raises(provenance.ProvenanceError, match="does not bind module"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_recovery_verification_run_missing_a_title(provenance) -> None:
+    row = _row(verification_run_id="2002", source_run_id="1001")
+    runs = FakeGitHubRuns(
+        runs={
+            "2002": _run_object(run_id="2002", path=RECOVERY_WORKFLOW),
+            "1001": _run_object(
+                run_id="1001", path=provenance.SOURCE_WORKFLOW, conclusion="failure"
+            ),
+        },
+        jobs={},
+    )
+    runs._runs["2002"]["display_title"] = None
+    with pytest.raises(provenance.ProvenanceError, match="does not bind module"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_recovery_source_run_titled_for_a_different_module(
+    provenance,
+) -> None:
+    row = _row(verification_run_id="2002", source_run_id="1001")
+    runs = FakeGitHubRuns(
+        runs={
+            "2002": _run_object(run_id="2002", path=RECOVERY_WORKFLOW),
+            "1001": _run_object(
+                run_id="1001",
+                path=provenance.SOURCE_WORKFLOW,
+                conclusion="failure",
+                display_title=f"Release module dotmac-other {DEFAULT_VERSION}",
+            ),
+        },
+        jobs={"2002": _jobs_with_step("Tag the recovered release")},
+    )
+    with pytest.raises(provenance.ProvenanceError, match="does not bind module"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_recovery_source_run_titled_for_a_different_version(
+    provenance,
+) -> None:
+    row = _row(verification_run_id="2002", source_run_id="1001")
+    runs = FakeGitHubRuns(
+        runs={
+            "2002": _run_object(run_id="2002", path=RECOVERY_WORKFLOW),
+            "1001": _run_object(
+                run_id="1001",
+                path=provenance.SOURCE_WORKFLOW,
+                conclusion="failure",
+                display_title=f"Release module {DISTRIBUTION} 9.9.9",
+            ),
+        },
+        jobs={"2002": _jobs_with_step("Tag the recovered release")},
+    )
+    with pytest.raises(provenance.ProvenanceError, match="does not bind module"):
+        provenance.verify_row_provenance(
+            row,
+            peeled_commit=PEELED_COMMIT,
+            runs=runs,
+            repository=REPOSITORY,
+            wait_seconds=100,
+            poll_seconds=10,
+            sleep=_fake_sleep()[0],
+        )
+
+
+def test_refuses_a_recovery_source_run_missing_a_title(provenance) -> None:
+    row = _row(verification_run_id="2002", source_run_id="1001")
+    runs = FakeGitHubRuns(
+        runs={
+            "2002": _run_object(run_id="2002", path=RECOVERY_WORKFLOW),
+            "1001": _run_object(
+                run_id="1001", path=provenance.SOURCE_WORKFLOW, conclusion="failure"
+            ),
+        },
+        jobs={"2002": _jobs_with_step("Tag the recovered release")},
+    )
+    runs._runs["1001"]["display_title"] = None
+    with pytest.raises(provenance.ProvenanceError, match="does not bind module"):
         provenance.verify_row_provenance(
             row,
             peeled_commit=PEELED_COMMIT,

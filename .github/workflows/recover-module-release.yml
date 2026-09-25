@@ -1,4 +1,5 @@
 name: Recover module release
+run-name: Recover module ${{ inputs.module }} ${{ inputs.version }}
 defaults:
   run:
     shell: bash --noprofile --norc -eo pipefail {0}
