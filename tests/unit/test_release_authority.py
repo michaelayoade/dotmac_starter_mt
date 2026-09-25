@@ -494,3 +494,36 @@ def test_sensitivity_plant_against_the_real_repo_appending_one_byte_fails_equali
     )
 
     assert tampered_digest != ledger["active"]["digest"]
+
+
+# ── Third-party actions are acknowledged only at immutable commits ──────────
+
+
+def test_a_sha_pinned_third_party_action_is_recorded_as_a_coordinate(ra) -> None:
+    files = _base_files(ra)
+    pinned = "actions/checkout@" + "a" * 40
+    files[ra.ROOT_WORKFLOWS[0]] = f"jobs:\n  x:\n    steps:\n      - uses: {pinned}\n"
+    _, external = ra.derive_surface(_dict_reader(files))
+    assert ra.ACTION_PREFIX + pinned in external
+
+
+@pytest.mark.parametrize(
+    "ref", ["actions/checkout@v4", "actions/checkout@main", "actions/checkout"]
+)
+def test_a_mutable_third_party_action_reference_is_refused(ra, ref: str) -> None:
+    files = _base_files(ra)
+    files[ra.ROOT_WORKFLOWS[1]] = f"jobs:\n  x:\n    steps:\n      - uses: {ref}\n"
+    with pytest.raises(ra.ReleaseAuthorityError, match="not pinned"):
+        ra.derive_surface(_dict_reader(files))
+
+
+def test_a_third_party_action_inside_a_local_composite_action_is_covered(ra) -> None:
+    files = _base_files(ra)
+    files[ra.ROOT_WORKFLOWS[0]] = (
+        "jobs:\n  x:\n    steps:\n      - uses: ./.github/actions/a\n"
+    )
+    files[".github/actions/a/action.yml"] = (
+        "runs:\n  using: composite\n  steps:\n    - uses: actions/cache@v4\n"
+    )
+    with pytest.raises(ra.ReleaseAuthorityError, match="not pinned"):
+        ra.derive_surface(_dict_reader(files))

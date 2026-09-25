@@ -117,6 +117,12 @@ VERIFICATION_ROOTS: tuple[str, ...] = (
 _SCRIPTS_TOKEN = re.compile(r"scripts/[A-Za-z0-9_./-]+\.(?:py|sh)")
 _GITHUB_TOKEN = re.compile(r"\.github/[A-Za-z0-9_./-]+\.(?:yml|yaml|json)")
 _USES_LOCAL = re.compile(r"uses:\s*(\./[A-Za-z0-9_./-]+)")
+_USES_ANY = re.compile(r"""uses:\s*['"]?([^\s'"#]+)""")
+#: A third-party action is admissible only at an immutable commit:
+#: ``owner/repo[/path]@<40 lowercase hex>``. A tag or branch is mutable and is
+#: refused, because the same reference could later execute different code.
+_PINNED_ACTION = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}\Z")
+ACTION_PREFIX = "action:"
 _DIGEST_PREFIX = "sha256:"
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -168,6 +174,22 @@ def commit_reader(root: Path, sha: str) -> Reader:
     return read
 
 
+def _third_party_actions(text: str, *, path: str) -> list[str]:
+    """Every non-local ``uses:`` as an ``action:<owner/repo@sha>`` coordinate."""
+    found: list[str] = []
+    for match in _USES_ANY.finditer(text):
+        ref = match.group(1)
+        if ref.startswith("./"):
+            continue
+        if not _PINNED_ACTION.fullmatch(ref):
+            raise ReleaseAuthorityError(
+                f"{path} uses {ref!r}, which is not pinned to a 40-hex commit "
+                "SHA; a mutable action reference cannot be release authority"
+            )
+        found.append(ACTION_PREFIX + ref)
+    return found
+
+
 def _local_action_dirs(text: str) -> list[str]:
     return [match.group(1).removeprefix("./") for match in _USES_LOCAL.finditer(text)]
 
@@ -201,7 +223,9 @@ def _require(path: str, read: Reader) -> str:
 def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
     """Walk the release closure starting at the two release workflows.
 
-    Returns ``(sorted repo-relative file paths, sorted external import names)``.
+    Returns ``(sorted repo-relative file paths, sorted acknowledged external
+    dependencies)`` — the latter holds non-local Python import names and
+    ``action:<owner/repo@sha>`` coordinates for every third-party action.
     """
     files: set[str] = {POLICY_PATH, AUTHORITY_MODULE_PATH}
     external: set[str] = set()
@@ -233,6 +257,9 @@ def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
             for action_dir in _local_action_dirs(text):
                 manifest = _action_manifest_path(action_dir, read)
                 enqueue(manifest)
+            # Third-party actions are acknowledged dependencies at immutable
+            # coordinates; they join the digest alongside external imports.
+            external.update(_third_party_actions(text, path=current))
             for token in _existing_tokens(_SCRIPTS_TOKEN, text, read):
                 enqueue(token)
             for token in _existing_tokens(_GITHUB_TOKEN, text, read):
