@@ -305,4 +305,5 @@ jobs:
             --package-dir "$PACKAGE_DIR" \
             --artifact-dir "$RECOVERED_DIST" \
             --expected-run-id "$RUN_ID" \
-            --expected-commit "${ORIGIN_SHA}"
+            --expected-commit "${ORIGIN_SHA}" \
+            --artifact-run-id "$ORIGINAL_RUN_ID"

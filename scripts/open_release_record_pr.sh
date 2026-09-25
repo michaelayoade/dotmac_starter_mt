@@ -91,6 +91,7 @@ NO_LINEAGE=""
 ARTIFACT_DIR=""
 EXPECTED_RUN_ID=""
 EXPECTED_COMMIT=""
+ARTIFACT_RUN_ID=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -107,9 +108,18 @@ while [ $# -gt 0 ]; do
     --artifact-dir) ARTIFACT_DIR="$2"; shift 2 ;;
     --expected-run-id) EXPECTED_RUN_ID="$2"; shift 2 ;;
     --expected-commit) EXPECTED_COMMIT="$2"; shift 2 ;;
+    --artifact-run-id) ARTIFACT_RUN_ID="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# The run whose retained artifact a human should re-download. Defaults to
+# THIS run, which is correct for an ordinary release; recovery passes the
+# ORIGINAL run instead, since that is the run whose `${MODULE}-dist` artifact
+# actually exists — this run built nothing.
+if [ -z "${ARTIFACT_RUN_ID}" ]; then
+  ARTIFACT_RUN_ID="${GITHUB_RUN_ID:-<this-run-id>}"
+fi
 
 for required in DISTRIBUTION VERSION TAG; do
   if [ -z "${!required}" ]; then
@@ -184,7 +194,7 @@ give_up() {
     echo "::error::<fresh-download-dir> is NOT this run's runner-temp path — that"
     echo "::error::directory dies with the runner and no human can reach it."
     echo "::error::Fetch the exact retained wheel instead of rebuilding it:"
-    echo "::error::  gh run download ${GITHUB_RUN_ID:-<this-run-id>} --repo ${GITHUB_REPOSITORY:-michaelayoade/dotmac_starter_mt} \\"
+    echo "::error::  gh run download ${ARTIFACT_RUN_ID} --repo ${GITHUB_REPOSITORY:-michaelayoade/dotmac_starter_mt} \\"
     echo "::error::    --name ${DISTRIBUTION}-dist --dir <fresh-download-dir>"
     echo "::error::write_release_record.py refuses any wheel whose sha256 differs"
     echo "::error::from the digest already embedded in the ${TAG} tag's"
