@@ -637,9 +637,19 @@ def test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
     floor, _allocation = CAPABILITY_RAISED_FLOORS[distribution]
     # A consumer that also imports a LATER public surface floors at the later
     # surface's first tag; every surface's tag is still derived, never typed.
+    later = LATER_SURFACES_RAISING_THE_FLOOR.get(distribution, ())
+    for path in later:
+        # A later surface raises the floor only while it is actually imported;
+        # a dropped import must not keep a needlessly raised floor passing.
+        dotted = path.split("/src/", 1)[1].removesuffix(".py").replace("/", ".")
+        assert any(
+            isinstance(node, ast.ImportFrom) and node.module == dotted
+            for source in package_dir.rglob("*.py")
+            for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+        ), f"{distribution} no longer imports {dotted}; drop it from the map"
     surfaces = (
         "packages/dotmac-kernel/src/dotmac_kernel/transactions.py",
-        *LATER_SURFACES_RAISING_THE_FLOOR.get(distribution, ()),
+        *later,
     )
     expected = max(
         (_first_published_kernel_tag_containing(path) for path in surfaces),

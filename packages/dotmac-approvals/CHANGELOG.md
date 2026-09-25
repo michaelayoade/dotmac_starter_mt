@@ -3,7 +3,7 @@
 All notable changes to the `dotmac-approvals` distribution. This package follows
 [Semantic Versioning](https://semver.org). The `.github/release-modules.json`
 entry landed once the live Postgres migration and catalog gate passed;
-`0.1.0a1` through `0.1.0a5` have since been published.
+`0.1.0a1` through `0.1.0a6` have since been published.
 
 ## 0.1.0a7 — 2026-09-25 — prepared, unreleased (no tag, not on the index)
 
@@ -11,7 +11,6 @@ entry landed once the live Postgres migration and catalog gate passed;
 approved-decision withdrawal surface and `ap_0003_withdrawals`, so it declares
 the newly allocated `0.1.0a7`. Publication happens through a separate
 `workflow_dispatch` of `release-module.yml`.
-
 
 - Add one immutable withdrawal record per completed approval on both selected
   planes. The original APPROVE votes and completion time remain queryable;
@@ -31,7 +30,7 @@ the newly allocated `0.1.0a7`. Publication happens through a separate
 - The `ap_0003` column catalogue declaration is a candidate pending Git-hosted
   PostgreSQL observation and comparison. No publication claim is made here.
 
-## 0.1.0a6 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
+## 0.1.0a6 — 2026-09-19
 
 **Database catalogue contribution.** The manifest now declares
 `database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
