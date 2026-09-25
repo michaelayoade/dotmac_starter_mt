@@ -77,7 +77,7 @@ def _install_withdrawal_guards(*, tenant: bool) -> None:
     # evaluated the immutable votes and this trigger does NOT implement a
     # second policy evaluator. The deferred check sees the COMMITTED standing.
     op.execute(
-        f"CREATE FUNCTION mod_approvals.check_{prefix}_withdrawal_insert() "  # noqa: S608
+        f"CREATE FUNCTION mod_approvals.check_{prefix}_withdrawal_insert() "  # noqa: S608 # nosec B608 -- identifiers are module-owned literals (schema, table, prefix); no input reaches this DDL
         "RETURNS trigger LANGUAGE plpgsql AS $$ "
         "DECLARE v_state text; v_completed timestamptz; BEGIN "
         f"SELECT r.state, r.completed_at INTO v_state, v_completed "
@@ -95,7 +95,7 @@ def _install_withdrawal_guards(*, tenant: bool) -> None:
         f"mod_approvals.check_{prefix}_withdrawal_insert();"
     )
     op.execute(
-        f"CREATE FUNCTION mod_approvals.check_{prefix}_withdrawal_commit() "  # noqa: S608
+        f"CREATE FUNCTION mod_approvals.check_{prefix}_withdrawal_commit() "  # noqa: S608 # nosec B608 -- identifiers are module-owned literals (schema, table, prefix); no input reaches this DDL
         "RETURNS trigger LANGUAGE plpgsql AS $$ "
         "DECLARE v_state text; v_completed timestamptz; BEGIN "
         f"SELECT state, completed_at INTO v_state, v_completed "
@@ -111,7 +111,7 @@ def _install_withdrawal_guards(*, tenant: bool) -> None:
         f"FOR EACH ROW EXECUTE FUNCTION mod_approvals.check_{prefix}_withdrawal_commit();"
     )
     op.execute(
-        f"CREATE FUNCTION mod_approvals.check_{prefix}_withdrawn_transition() "  # noqa: S608
+        f"CREATE FUNCTION mod_approvals.check_{prefix}_withdrawn_transition() "  # noqa: S608 # nosec B608 -- identifiers are module-owned literals (schema, table, prefix); no input reaches this DDL
         "RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE v_count integer; BEGIN "
         "IF NEW.state = 'withdrawn' AND OLD.state IS DISTINCT FROM 'withdrawn' THEN "
         "IF current_user <> 'app_admin' OR OLD.state IS DISTINCT FROM 'approved' "
@@ -151,7 +151,7 @@ def _install_withdrawal_guards(*, tenant: bool) -> None:
     # cannot pair evidence and state while omitting this AFTER trigger. The
     # evidence UUID is the outbox UUID, so one transition has one durable event.
     op.execute(
-        f"CREATE FUNCTION mod_approvals.emit_{prefix}_withdrawal() "  # noqa: S608
+        f"CREATE FUNCTION mod_approvals.emit_{prefix}_withdrawal() "  # noqa: S608 # nosec B608 -- identifiers are module-owned literals (schema, table, prefix); no input reaches this DDL
         "RETURNS trigger LANGUAGE plpgsql AS $$ "
         f"DECLARE v_evidence mod_approvals.{table}%ROWTYPE; "
         "v_approved_at timestamptz; v_effective_at timestamptz; BEGIN "
@@ -193,7 +193,7 @@ def _install_withdrawal_guards(*, tenant: bool) -> None:
     # AFTER trigger above appends the outbox row for EVERY valid transition.
     # Tenant context is checked explicitly even if the owner bypasses RLS.
     op.execute(
-        f"CREATE FUNCTION mod_approvals.record_{prefix}_withdrawal("  # noqa: S608
+        f"CREATE FUNCTION mod_approvals.record_{prefix}_withdrawal("  # noqa: S608 # nosec B608 -- identifiers are module-owned literals (schema, table, prefix); no input reaches this DDL
         f"{tenant_parameter}p_request_id uuid, p_withdrawal_id uuid, "
         "p_actor_id uuid, p_authority_ref text, p_reason text, p_external_ref text) "
         "RETURNS void LANGUAGE plpgsql SECURITY DEFINER "
