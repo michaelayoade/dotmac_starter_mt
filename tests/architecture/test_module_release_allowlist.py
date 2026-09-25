@@ -520,12 +520,27 @@ def test_brand_profiles_local_smoke_dependency_is_derived_from_policy() -> None:
     assert module.local_first_party_dependencies(planted) == []
 
 
-def test_verify_wheel_adds_first_party_artifacts_to_find_links(
+def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The built dependency directory must reach pip, not stop at the workflow."""
+    """The target, kernel and first-party dependency wheels reach pip as exact
+    paths — never as names an index could satisfy — their provenance is proven
+    in an isolated interpreter, and the kernel/dependency wheels are recorded
+    by filename and SHA-256."""
     module = _release_module_script()
     commands: list[list[str]] = []
+
+    dirs = {}
+    for name, wheel in (
+        ("module-dist", "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl"),
+        ("kernel-dist", "dotmac_kernel-0.1.0a105-py3-none-any.whl"),
+        ("first-party-dist", "dotmac_party-0.1.0a3-py3-none-any.whl"),
+    ):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / wheel).write_bytes(wheel.encode())
+        (directory / "ignored.tar.gz").write_bytes(b"sdist")
+        dirs[name] = directory
 
     monkeypatch.setattr(
         module,
@@ -539,19 +554,35 @@ def test_verify_wheel_adds_first_party_artifacts_to_find_links(
         commands.append(command)
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
+    manifest = tmp_path / "out" / "smoke-dependencies.json"
     module.cmd_verify_wheel(
         argparse.Namespace(
             distribution="dotmac-brand-profiles",
-            dist="module-dist",
-            kernel_dist="kernel-dist",
-            dependency_dist=["first-party-dist"],
+            dist=str(dirs["module-dist"]),
+            kernel_dist=str(dirs["kernel-dist"]),
+            dependency_dist=[str(dirs["first-party-dist"])],
+            emit_dependency_manifest=str(manifest),
         )
     )
 
-    assert len(commands) == 1
-    install = commands[0]
-    dependency_link = install.index("first-party-dist")
-    assert install[dependency_link - 1] == "--find-links"
+    install, provenance = commands
+    assert "--find-links" not in install
+    wheels = [arg for arg in install if arg.endswith(".whl")]
+    assert sorted(Path(arg).name for arg in wheels) == [
+        "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl",
+        "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+        "dotmac_party-0.1.0a3-py3-none-any.whl",
+    ]
+    assert provenance[1] == "-I"
+    assert "direct_url.json" in provenance[3]
+
+    recorded = json.loads(manifest.read_text())
+    assert recorded["schema"] == "SmokeDependencyWheels.v1"
+    assert [w["filename"] for w in recorded["wheels"]] == [
+        "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+        "dotmac_party-0.1.0a3-py3-none-any.whl",
+    ]
+    assert all(len(w["sha256"]) == 64 for w in recorded["wheels"])
 
 
 def test_local_dependency_builder_builds_the_discovered_wheel(

@@ -1,4 +1,5 @@
 name: Recover module release
+run-name: Recover module ${{ inputs.module }} ${{ inputs.version }}
 defaults:
   run:
     shell: bash --noprofile --norc -eo pipefail {0}
@@ -197,7 +198,9 @@ jobs:
       # there and GitHub refuses the workflow. Resolve it once, right after checkout, into `GITHUB_ENV` so
       # every later step in this job sees the same `RECOVERED_DIST`.
       - name: Resolve the shared recovered-artifact directory
-        run: echo "RECOVERED_DIST=${RUNNER_TEMP}/recovered-dist" >> "$GITHUB_ENV"
+        run: |
+          echo "RECOVERED_DIST=${RUNNER_TEMP}/recovered-dist" >> "$GITHUB_ENV"
+          echo "RECOVERED_SMOKE=${RUNNER_TEMP}/recovered-smoke/smoke-dependencies.json" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
@@ -222,6 +225,14 @@ jobs:
             --name "${MODULE}-dist" \
             --dir "$RECOVERED_DIST"
           ls -l "$RECOVERED_DIST"
+          # The exact kernel/dependency wheels the ORIGINAL run's smoke
+          # installed; a recovery records the original's tested inputs.
+          mkdir -p "$(dirname "$RECOVERED_SMOKE")"
+          gh run download "$ORIGINAL_RUN_ID" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name "${MODULE}-smoke-dependencies" \
+            --dir "$(dirname "$RECOVERED_SMOKE")"
+          test -s "$RECOVERED_SMOKE"
 
       # The load-bearing check: the bytes on the index are the bytes that run
       # built. `compare-published` refuses on any difference.
@@ -270,6 +281,14 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Recovery never replaces a tag. If one exists, the helper adopts it
+          # when it names the ORIGINAL run (that run failed after tagging), or
+          # accepts it as this recovery's own identical rerun when it names
+          # THIS run; otherwise it writes the tag the original never wrote.
+          ADOPT=()
+          if [ -n "$(git ls-remote --tags origin "refs/tags/${TAG}")" ]; then
+            ADOPT=(--adopt-original-run "$ORIGINAL_RUN_ID")
+          fi
           python scripts/tag_module_release.py \
             --distribution "$MODULE" \
             --version "$VERSION" \
@@ -277,7 +296,15 @@ jobs:
             --commit "$ORIGIN_SHA" \
             --artifact-dir "$RECOVERED_DIST" \
             --run-id "$RUN_ID" \
-            --remote origin
+            --source-run-id "$ORIGINAL_RUN_ID" \
+            --smoke-dependencies "$RECOVERED_SMOKE" \
+            "${ADOPT[@]}" \
+            --remote origin | tee "$RUNNER_TEMP/tag-result.txt"
+          if grep -qx "tag-result=adopted" "$RUNNER_TEMP/tag-result.txt"; then
+            echo "TAG_ADOPTED=1" >> "$GITHUB_ENV"
+          else
+            echo "TAG_ADOPTED=0" >> "$GITHUB_ENV"
+          fi
 
       # Recovery writes the same irreversible tag as an ordinary release and
       # therefore owes the same record. Without this step a successful recovery
@@ -298,12 +325,22 @@ jobs:
           PACKAGE_DIR: ${{ steps.target.outputs.package_dir }}
           ORIGIN_SHA: ${{ steps.origin.outputs.sha }}
         run: |
+          # An adopted tag was written by the ORIGINAL run; this recovery run is
+          # recorded as the adopter. A created tag was written by this run.
+          if [ "${TAG_ADOPTED:-0}" = "1" ]; then
+            EXPECTED_RUN="$ORIGINAL_RUN_ID"
+            ADOPTING=(--adopting-run-id "$RUN_ID")
+          else
+            EXPECTED_RUN="$RUN_ID"
+            ADOPTING=()
+          fi
           bash scripts/open_release_record_pr.sh \
             --distribution "$MODULE" \
             --version "$VERSION" \
             --tag "$TAG" \
             --package-dir "$PACKAGE_DIR" \
             --artifact-dir "$RECOVERED_DIST" \
-            --expected-run-id "$RUN_ID" \
+            --expected-run-id "$EXPECTED_RUN" \
+            "${ADOPTING[@]}" \
             --expected-commit "${ORIGIN_SHA}" \
             --artifact-run-id "$ORIGINAL_RUN_ID"

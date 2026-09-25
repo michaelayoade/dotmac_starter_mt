@@ -160,12 +160,26 @@ _VERSION = re.compile(
 _GIT_OBJECT = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _DECIMAL = re.compile(r"[0-9]+\Z")
+#: The release-authority digest format (``scripts/release_authority.py``'s
+#: ``_DIGEST_RE``), duplicated here rather than imported: this module must
+#: stay independently loadable (``importlib`` loads it standalone in tests
+#: and via ``_local_script``), and the two representations of "a release
+#: authority digest" would drift silently if only one carried the check.
+_AUTHORITY_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 #: The one canonical shape of a governed module release tag's annotated
 #: message. Both `release-module.yml` and `recover-module-release.yml` write
 #: this exact JSON line via `scripts/tag_module_release.py`, which is the
 #: single owner of both rendering and parsing it — a tag body is never free
 #: text again.
+#:
+#: v1 gained ``release_authority_digest`` in place (no tag with this schema
+#: has ever been emitted — no module release has landed since #754 — so this
+#: is an in-place extension of v1, not a v2 migration). It names the exact
+#: release-authority surface (``scripts/release_authority.py``'s closure over
+#: both release workflows) that was active on the checkout which cut this
+#: tag, so a tag minted under a stale or tampered authority is provably
+#: distinguishable from one minted under the reviewed one.
 MODULE_RELEASE_TAG_EVIDENCE_SCHEMA = "ModuleReleaseTagEvidence.v1"
 _TAG_EVIDENCE_KEYS = {
     "schema",
@@ -174,7 +188,43 @@ _TAG_EVIDENCE_KEYS = {
     "wheel_filename",
     "wheel_sha256",
     "verification_run_id",
+    "source_run_id",
+    "release_authority_digest",
+    "smoke_dependency_wheels",
 }
+
+
+def canonical_smoke_dependency_wheels(value: object) -> list[dict[str, str]]:
+    """The exact first-party wheels the pre-publish smoke installed.
+
+    A non-empty list of ``{"filename", "sha256"}`` objects, unique by
+    filename and already sorted by it — the canonical form is required, never
+    repaired, so two renderings of one set cannot differ.
+    """
+    if not isinstance(value, list) or not value:
+        raise ReleaseRecordError("smoke_dependency_wheels must be a non-empty list")
+    wheels: list[dict[str, str]] = []
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"filename", "sha256"}
+            or not isinstance(item["filename"], str)
+            or not item["filename"].endswith(".whl")
+            or "/" in item["filename"]
+            or not isinstance(item["sha256"], str)
+            or not _SHA256.fullmatch(item["sha256"])
+        ):
+            raise ReleaseRecordError(
+                "each smoke dependency wheel needs exactly a .whl filename and a "
+                "lowercase 64-hex sha256"
+            )
+        wheels.append({"filename": item["filename"], "sha256": item["sha256"]})
+    names = [wheel["filename"] for wheel in wheels]
+    if names != sorted(names) or len(set(names)) != len(names):
+        raise ReleaseRecordError(
+            "smoke_dependency_wheels must be unique and sorted by filename"
+        )
+    return wheels
 
 
 def render_module_release_tag_evidence(
@@ -184,6 +234,9 @@ def render_module_release_tag_evidence(
     wheel_filename: str,
     wheel_sha256: str,
     verification_run_id: str,
+    source_run_id: str,
+    release_authority_digest: str,
+    smoke_dependency_wheels: list[dict[str, str]],
 ) -> str:
     """The one line of canonical JSON a governed module release tag carries.
 
@@ -191,6 +244,14 @@ def render_module_release_tag_evidence(
     trailing whitespace or newline — `parse_module_release_tag_evidence` below
     refuses anything that does not reproduce this exact byte string, so
     canonical-ness is enforced by round-trip rather than by convention.
+
+    ``source_run_id`` names the run that BUILT and PUBLISHED the wheel: for a
+    normal release it equals ``verification_run_id``; for a recovery it is the
+    original failed run whose artifact is being retroactively verified.
+
+    ``release_authority_digest`` is the ``sha256:``-prefixed digest of the
+    release-authority surface active on the checkout that cut this tag
+    (``scripts/release_authority.py``'s ``authority_digest``).
     """
     if not _SHA256.fullmatch(wheel_sha256):
         raise ReleaseRecordError(
@@ -199,6 +260,14 @@ def render_module_release_tag_evidence(
     if not _DECIMAL.fullmatch(verification_run_id):
         raise ReleaseRecordError(
             "module release tag evidence requires a decimal verification_run_id"
+        )
+    if not _DECIMAL.fullmatch(source_run_id):
+        raise ReleaseRecordError(
+            "module release tag evidence requires a decimal source_run_id"
+        )
+    if not _AUTHORITY_DIGEST.fullmatch(release_authority_digest):
+        raise ReleaseRecordError(
+            "module release tag evidence requires a sha256: release authority digest"
         )
     if not _wheel_filename(wheel_filename, distribution=distribution, version=version):
         raise ReleaseRecordError(
@@ -212,6 +281,11 @@ def render_module_release_tag_evidence(
         "wheel_filename": wheel_filename,
         "wheel_sha256": wheel_sha256,
         "verification_run_id": verification_run_id,
+        "source_run_id": source_run_id,
+        "release_authority_digest": release_authority_digest,
+        "smoke_dependency_wheels": canonical_smoke_dependency_wheels(
+            smoke_dependency_wheels
+        ),
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -244,8 +318,13 @@ def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
         for key in ("distribution", "version", "wheel_filename", "wheel_sha256")
     }
     run_id = payload["verification_run_id"]
-    if not all(isinstance(value, str) for value in fields.values()) or not isinstance(
-        run_id, str
+    source_run_id = payload["source_run_id"]
+    authority_digest = payload["release_authority_digest"]
+    if (
+        not all(isinstance(value, str) for value in fields.values())
+        or not isinstance(run_id, str)
+        or not isinstance(source_run_id, str)
+        or not isinstance(authority_digest, str)
     ):
         raise ReleaseRecordError(
             "module release tag evidence fields must all be strings"
@@ -256,10 +335,21 @@ def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
         wheel_filename=fields["wheel_filename"],
         wheel_sha256=fields["wheel_sha256"],
         verification_run_id=run_id,
+        source_run_id=source_run_id,
+        release_authority_digest=authority_digest,
+        smoke_dependency_wheels=canonical_smoke_dependency_wheels(
+            payload["smoke_dependency_wheels"]
+        ),
     )
     if canonical != message:
         raise ReleaseRecordError("module release tag evidence is not canonical JSON")
-    return {**fields, "verification_run_id": run_id}
+    return {
+        **fields,
+        "verification_run_id": run_id,
+        "source_run_id": source_run_id,
+        "release_authority_digest": authority_digest,
+        "smoke_dependency_wheels": payload["smoke_dependency_wheels"],
+    }
 
 
 def annotated_tag_message(tag: str) -> str:
@@ -368,6 +458,10 @@ def parse_module_release_verifications(
         "pinnable",
         "sha256",
         "verification_run_id",
+        "source_run_id",
+        "release_authority_digest",
+        "adopting_run_id",
+        "smoke_dependency_wheels",
     }
     for row in document["releases"]:
         if not isinstance(row, dict) or set(row) != keys:
@@ -378,6 +472,34 @@ def parse_module_release_verifications(
             raise ReleaseRecordError(
                 f"module verification {row.get('tag')} has an invalid "
                 "verification_run_id"
+            )
+        if not isinstance(row["source_run_id"], str) or not _DECIMAL.fullmatch(
+            row["source_run_id"]
+        ):
+            raise ReleaseRecordError(
+                f"module verification {row.get('tag')} has an invalid source_run_id"
+            )
+        if not isinstance(
+            row["release_authority_digest"], str
+        ) or not _AUTHORITY_DIGEST.fullmatch(row["release_authority_digest"]):
+            raise ReleaseRecordError(
+                f"module verification {row.get('tag')} has an invalid "
+                "release_authority_digest"
+            )
+        row["smoke_dependency_wheels"] = canonical_smoke_dependency_wheels(
+            row["smoke_dependency_wheels"]
+        )
+        adopting = row["adopting_run_id"]
+        if adopting is not None and (
+            not isinstance(adopting, str)
+            or not _DECIMAL.fullmatch(adopting)
+            or adopting == row["verification_run_id"]
+        ):
+            # null for a tag its own run created; otherwise the DIFFERENT
+            # recovery run that adopted a tag the original run had written.
+            raise ReleaseRecordError(
+                f"module verification {row.get('tag')} has an invalid "
+                "adopting_run_id"
             )
         tag = row["tag"]
         distribution, version = _coordinate(tag, targets=governed)
@@ -531,6 +653,30 @@ def live_module_tag_evidence(
     }
 
 
+def _release_authority_history() -> set[str]:
+    """Every digest the release-authority ledger has ever declared active.
+
+    Read from the checked-in ledger via ``release_authority.py``'s own strict
+    parser, never re-derived here — this module never re-implements the
+    ledger's schema rules.
+    """
+    authority = _local_script("release_authority")
+    ledger_path = REPO_ROOT / authority.LEDGER_PATH
+    try:
+        ledger_text = ledger_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ReleaseRecordError(
+            f"release authority ledger is unreadable at {authority.LEDGER_PATH}"
+        ) from exc
+    try:
+        ledger = authority.parse_authority_ledger(ledger_text)
+    except authority.ReleaseAuthorityError as failure:
+        raise ReleaseRecordError(
+            f"release authority ledger is malformed: {failure}"
+        ) from failure
+    return set(ledger["history"])
+
+
 def validate_module_release_inventory(
     verified_text: str,
     legacy_text: str,
@@ -538,6 +684,7 @@ def validate_module_release_inventory(
     live: dict[str, tuple[str, str]] | None = None,
     evidence: dict[str, dict[str, str]] | None = None,
     targets: set[str] | None = None,
+    authority_history: set[str] | None = None,
 ) -> None:
     """Every governed tag is in exactly one immutable, typed evidence class."""
     governed = module_release_targets() if targets is None else targets
@@ -582,6 +729,32 @@ def validate_module_release_inventory(
             raise ReleaseRecordError(f"module tag {tag} evidence digest mismatch")
         if proof["verification_run_id"] != row["verification_run_id"]:
             raise ReleaseRecordError(f"module tag {tag} evidence run id mismatch")
+        if proof["source_run_id"] != row["source_run_id"]:
+            raise ReleaseRecordError(
+                f"module tag {tag} evidence source run id mismatch"
+            )
+        if proof["smoke_dependency_wheels"] != row["smoke_dependency_wheels"]:
+            raise ReleaseRecordError(
+                f"module tag {tag} evidence smoke dependency wheels mismatch"
+            )
+        if proof["release_authority_digest"] != row["release_authority_digest"]:
+            raise ReleaseRecordError(
+                f"module tag {tag} evidence authority digest mismatch"
+            )
+
+    if verified:
+        history = (
+            _release_authority_history()
+            if authority_history is None
+            else set(authority_history)
+        )
+        for tag, row in verified.items():
+            if row["release_authority_digest"] not in history:
+                raise ReleaseRecordError(
+                    f"module tag {tag} release authority digest "
+                    f"{row['release_authority_digest']!r} is not in the "
+                    "release-authority ledger history"
+                )
 
 
 def module_wheel_digest(
@@ -625,11 +798,30 @@ def add_module_release_verification(
     wheel_filename: str,
     wheel_sha256: str,
     verification_run_id: str,
+    source_run_id: str,
+    release_authority_digest: str,
+    smoke_dependency_wheels: list[dict[str, str]],
+    adopting_run_id: str | None = None,
 ) -> tuple[str, bool]:
     """Append one immutable, producer-owned module publication record."""
+    if adopting_run_id is not None and (
+        not _DECIMAL.fullmatch(adopting_run_id)
+        or adopting_run_id == verification_run_id
+    ):
+        raise ReleaseRecordError(
+            f"module verification {tag} has an invalid adopting_run_id"
+        )
     if not _DECIMAL.fullmatch(verification_run_id):
         raise ReleaseRecordError(
             f"module verification {tag} requires a decimal verification_run_id"
+        )
+    if not _DECIMAL.fullmatch(source_run_id):
+        raise ReleaseRecordError(
+            f"module verification {tag} requires a decimal source_run_id"
+        )
+    if not _AUTHORITY_DIGEST.fullmatch(release_authority_digest):
+        raise ReleaseRecordError(
+            f"module verification {tag} requires a sha256: release authority digest"
         )
     existing_rows = parse_module_release_verifications(text)
     document = cast(
@@ -646,6 +838,12 @@ def add_module_release_verification(
         "pinnable": True,
         "sha256": {wheel_filename: wheel_sha256},
         "verification_run_id": verification_run_id,
+        "source_run_id": source_run_id,
+        "release_authority_digest": release_authority_digest,
+        "adopting_run_id": adopting_run_id,
+        "smoke_dependency_wheels": canonical_smoke_dependency_wheels(
+            smoke_dependency_wheels
+        ),
     }
     for existing in existing_rows.values():
         if (existing["distribution"], existing["version"]) != (
@@ -1296,6 +1494,7 @@ def write_record(
     artifact_dir: str | None = None,
     expected_run_id: str | None = None,
     expected_commit: str | None = None,
+    adopting_run_id: str | None = None,
 ) -> list[str]:
     """Apply both halves of the record. Returns what changed, for the caller."""
     expected_tag = f"{distribution}-v{version}"
@@ -1503,6 +1702,10 @@ def write_record(
             wheel_filename=wheel_filename,
             wheel_sha256=wheel_sha256,
             verification_run_id=evidence["verification_run_id"],
+            source_run_id=evidence["source_run_id"],
+            release_authority_digest=evidence["release_authority_digest"],
+            smoke_dependency_wheels=evidence["smoke_dependency_wheels"],
+            adopting_run_id=adopting_run_id,
         )
         if added:
             changed.append(
@@ -1566,6 +1769,12 @@ def main(argv: list[str] | None = None) -> int:
         help="the exact source SHA this invocation's own run tagged; "
         "mandatory for a governed module with --artifact-dir",
     )
+    parser.add_argument(
+        "--adopting-run-id",
+        default=None,
+        help="recovery only: this recovery run's id when it ADOPTED a tag the "
+        "original run wrote (then --expected-run-id is the original run)",
+    )
     args = parser.parse_args(argv)
 
     # The two always agree in this repository, and threading a second value
@@ -1585,6 +1794,7 @@ def main(argv: list[str] | None = None) -> int:
             artifact_dir=args.artifact_dir,
             expected_run_id=args.expected_run_id,
             expected_commit=args.expected_commit,
+            adopting_run_id=args.adopting_run_id,
         )
     except ReleaseRecordError as failure:
         print(f"release record REFUSED: {failure}", file=sys.stderr)

@@ -33,6 +33,10 @@ APPEND_ONLY_SCRIPT = (
 RECOVER_WORKFLOW = PROJECT_ROOT / ".github/workflows/recover-module-release.yml"
 RELEASE_WORKFLOW = PROJECT_ROOT / ".github/workflows/release-module.yml"
 
+_SMOKE_WHEELS_FIXTURE = [
+    {"filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl", "sha256": "d" * 64}
+]
+
 
 def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -86,6 +90,14 @@ def _commit_all(path: Path, message: str) -> str:
 # ── 1. Canonical round trip and strict refusal ──────────────────────────────
 
 
+#: A syntactically valid release-authority digest for fixtures. This module
+#: never asserts anything about the REAL release-authority surface — that is
+#: `test_release_authority.py`'s subject — so a fixed, made-up digest is the
+#: honest fixture rather than one that happens to match the live ledger today
+#: and silently stops matching it tomorrow.
+_AUTHORITY_DIGEST_FIXTURE = "sha256:" + "9" * 64
+
+
 def test_canonical_render_round_trips_through_the_strict_parser() -> None:
     writer = _writer()
     message = writer.render_module_release_tag_evidence(
@@ -94,9 +106,17 @@ def test_canonical_render_round_trips_through_the_strict_parser() -> None:
         wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
         wheel_sha256="a" * 64,
         verification_run_id="123456789",
+        source_run_id="123456789",
+        release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
     assert message == (
-        '{"distribution":"dotmac-approvals","schema":"ModuleReleaseTagEvidence.v1",'
+        '{"distribution":"dotmac-approvals",'
+        '"release_authority_digest":"' + _AUTHORITY_DIGEST_FIXTURE + '",'
+        '"schema":"ModuleReleaseTagEvidence.v1",'
+        '"smoke_dependency_wheels":[{"filename":'
+        '"dotmac_kernel-0.1.0a105-py3-none-any.whl","sha256":"' + "d" * 64 + '"}],'
+        '"source_run_id":"123456789",'
         '"verification_run_id":"123456789",'
         '"version":"0.1.0a7","wheel_filename":"dotmac_approvals-0.1.0a7-py3-none-any.whl",'
         '"wheel_sha256":"' + "a" * 64 + '"}'
@@ -107,6 +127,9 @@ def test_canonical_render_round_trips_through_the_strict_parser() -> None:
         "wheel_filename": "dotmac_approvals-0.1.0a7-py3-none-any.whl",
         "wheel_sha256": "a" * 64,
         "verification_run_id": "123456789",
+        "source_run_id": "123456789",
+        "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
+        "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
     }
 
 
@@ -117,6 +140,9 @@ def _canonical_message(writer) -> str:
         wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
         wheel_sha256="a" * 64,
         verification_run_id="123456789",
+        source_run_id="123456789",
+        release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
 
 
@@ -186,6 +212,9 @@ def test_parser_refuses_a_non_decimal_run_id() -> None:
             wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
             wheel_sha256="a" * 64,
             verification_run_id="12x",
+            source_run_id="123456789",
+            release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+            smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
         )
     payload = json.loads(_canonical_message(writer))
     payload["verification_run_id"] = "12x"
@@ -276,8 +305,25 @@ def _bare_origin_and_work(tmp_path: Path) -> tuple[Path, Path, str]:
     return origin, work, commit
 
 
+def _smoke_manifest(artifact_dir: Path) -> str:
+    """A SmokeDependencyWheels.v1 manifest beside (never inside) the artifact
+    directory, which must hold exactly the one target wheel."""
+    path = artifact_dir.parent / "smoke-dependencies.json"
+    path.write_text(
+        json.dumps(
+            {"schema": "SmokeDependencyWheels.v1", "wheels": _SMOKE_WHEELS_FIXTURE}
+        ),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
 def _tag_a_release(
-    tmp_path: Path, *, run_id: str, wheel_bytes: bytes
+    tmp_path: Path,
+    *,
+    run_id: str,
+    wheel_bytes: bytes,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[Path, Path, str, Path]:
     """Build the wheel, create+push the tag via the real script, return coordinates."""
     origin, work, commit = _bare_origin_and_work(tmp_path)
@@ -286,6 +332,17 @@ def _tag_a_release(
     (artifact_dir / _WHEEL_NAME).write_bytes(wheel_bytes)
 
     tagger = _tagger()
+    # The real release-authority ledger and surface closure are this
+    # repository's own files, not the throwaway fixture repo `work` — proving
+    # `compute_and_check_authority_digest` against a real checkout is
+    # `test_release_authority.py`'s subject. Here it is stubbed to a fixed,
+    # syntactically valid digest so the tag-creation path under test is
+    # exercised without fabricating an entire release-authority surface.
+    monkeypatch.setattr(
+        tagger,
+        "compute_and_check_authority_digest",
+        lambda **_kwargs: _AUTHORITY_DIGEST_FIXTURE,
+    )
     exit_code = tagger.main(
         [
             "--distribution",
@@ -300,6 +357,10 @@ def _tag_a_release(
             str(artifact_dir),
             "--run-id",
             run_id,
+            "--source-run-id",
+            run_id,
+            "--smoke-dependencies",
+            _smoke_manifest(artifact_dir),
             "--remote",
             "origin",
             "--repo-root",
@@ -314,7 +375,10 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     origin, work, commit, artifact_dir = _tag_a_release(
-        tmp_path, run_id="555000111", wheel_bytes=b"exact build once bytes"
+        tmp_path,
+        run_id="555000111",
+        wheel_bytes=b"exact build once bytes",
+        monkeypatch=monkeypatch,
     )
 
     writer = _writer()
@@ -326,6 +390,7 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
     assert evidence["version"] == _VERSION
     assert evidence["wheel_filename"] == _WHEEL_NAME
     assert evidence["verification_run_id"] == "555000111"
+    assert evidence["source_run_id"] == "555000111"
 
     tag_object = writer.annotated_tag_object(_TAG)
     peeled_commit = writer.tag_commit(_TAG)
@@ -341,6 +406,9 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
         wheel_filename=evidence["wheel_filename"],
         wheel_sha256=evidence["wheel_sha256"],
         verification_run_id=evidence["verification_run_id"],
+        source_run_id=evidence["source_run_id"],
+        release_authority_digest=evidence["release_authority_digest"],
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
     assert added
 
@@ -350,6 +418,7 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
         live={_TAG: (tag_object, peeled_commit)},
         evidence={_TAG: evidence},
         targets={_DISTRIBUTION},
+        authority_history={evidence["release_authority_digest"]},
     )
 
     # The digest half of write_record: the wheel actually on disk must
@@ -373,7 +442,10 @@ def test_full_write_record_records_the_verified_wheel_from_a_real_tag(
     already does for its non-kernel refusal tests.
     """
     origin, work, commit, artifact_dir = _tag_a_release(
-        tmp_path, run_id="555000222", wheel_bytes=b"a different build's bytes"
+        tmp_path,
+        run_id="555000222",
+        wheel_bytes=b"a different build's bytes",
+        monkeypatch=monkeypatch,
     )
 
     writer = _writer()
@@ -411,6 +483,7 @@ def test_full_write_record_records_the_verified_wheel_from_a_real_tag(
     recorded = json.loads(module_verifications.read_text(encoding="utf-8"))
     assert recorded["releases"][0]["tag"] == _TAG
     assert recorded["releases"][0]["verification_run_id"] == "555000222"
+    assert recorded["releases"][0]["source_run_id"] == "555000222"
 
     # Idempotent re-run converges rather than refusing.
     assert (
@@ -440,7 +513,10 @@ def test_write_record_requires_expected_run_id_and_commit_for_a_governed_module(
     still ran.
     """
     origin, work, commit, artifact_dir = _tag_a_release(
-        tmp_path, run_id="555000333", wheel_bytes=b"bytes for the binding guard"
+        tmp_path,
+        run_id="555000333",
+        wheel_bytes=b"bytes for the binding guard",
+        monkeypatch=monkeypatch,
     )
 
     writer = _writer()
@@ -516,7 +592,10 @@ def test_write_record_refuses_a_wheel_that_disagrees_with_the_tags_digest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     origin, work, commit, artifact_dir = _tag_a_release(
-        tmp_path, run_id="555000333", wheel_bytes=b"the retained wheel bytes"
+        tmp_path,
+        run_id="555000333",
+        wheel_bytes=b"the retained wheel bytes",
+        monkeypatch=monkeypatch,
     )
 
     writer = _writer()
@@ -572,6 +651,10 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "pinnable": True,
         "sha256": {"dotmac_approvals-0.1.0a99-py3-none-any.whl": "c" * 64},
         "verification_run_id": "999",
+        "source_run_id": "999",
+        "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
+        "adopting_run_id": None,
+        "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
     }
     evidence = {
         "distribution": "dotmac-approvals",
@@ -579,6 +662,9 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "wheel_filename": "dotmac_approvals-0.1.0a99-py3-none-any.whl",
         "wheel_sha256": "c" * 64,
         "verification_run_id": "999",
+        "source_run_id": "999",
+        "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
+        "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
     }
     return row, evidence
 
@@ -1018,3 +1104,360 @@ def test_compare_step_hardening_detector_is_sensitive_to_a_planted_delete() -> N
     compare_step["run"] = compare_step["run"] + "\ngit push --delete origin sometag\n"
     problems = _hardening_problems(compare_step)
     assert any("push --delete" in problem for problem in problems)
+
+
+# ── Rerun acceptance (identical evidence only) and recovery adoption ────────
+
+
+def _run_tagger(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    work: Path,
+    commit: str,
+    artifact_dir: Path,
+    run_id: str,
+    source_run_id: str | None = None,
+    authority_digest: str = _AUTHORITY_DIGEST_FIXTURE,
+    extra: list[str] | None = None,
+) -> int:
+    tagger = _tagger()
+    monkeypatch.setattr(
+        tagger,
+        "compute_and_check_authority_digest",
+        lambda **_kwargs: authority_digest,
+    )
+    return tagger.main(
+        [
+            "--distribution",
+            _DISTRIBUTION,
+            "--version",
+            _VERSION,
+            "--tag",
+            _TAG,
+            "--commit",
+            commit,
+            "--artifact-dir",
+            str(artifact_dir),
+            "--run-id",
+            run_id,
+            "--source-run-id",
+            source_run_id or run_id,
+            "--smoke-dependencies",
+            _smoke_manifest(artifact_dir),
+            "--remote",
+            "origin",
+            "--repo-root",
+            str(work),
+            *(extra or []),
+        ]
+    )
+
+
+def _remote_tag_object(work: Path) -> str:
+    return _run_git(["ls-remote", "origin", f"refs/tags/{_TAG}"], cwd=work).split()[0]
+
+
+def test_a_rerun_with_identical_evidence_accepts_its_own_tag_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    assert (
+        _run_tagger(
+            monkeypatch,
+            work=work,
+            commit=commit,
+            artifact_dir=artifact_dir,
+            run_id="700",
+        )
+        == 0
+    )
+    assert _remote_tag_object(work) == before
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["run_id", "source_run_id", "authority", "wheel", "commit"],
+)
+def test_a_rerun_with_any_different_evidence_is_refused(
+    change: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    kwargs: dict = {"run_id": "700"}
+    if change == "run_id":
+        kwargs["run_id"] = "701"
+        kwargs["source_run_id"] = "700"
+    elif change == "source_run_id":
+        kwargs["source_run_id"] = "699"
+    elif change == "authority":
+        kwargs["authority_digest"] = "sha256:" + "8" * 64
+    elif change == "wheel":
+        (artifact_dir / _WHEEL_NAME).write_bytes(b"REBUILT")
+    elif change == "commit":
+        (work / "other.txt").write_text("x", encoding="utf-8")
+        commit = _commit_all(work, "another commit")
+    code = _run_tagger(
+        monkeypatch, work=work, commit=commit, artifact_dir=artifact_dir, **kwargs
+    )
+    assert code == 1
+    assert _remote_tag_object(work) == before
+
+
+def test_a_rerun_refuses_when_the_local_tag_differs_from_the_remote(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    # Replace only the LOCAL tag with a different object of the same name.
+    _run_git(["tag", "-d", _TAG], cwd=work)
+    _run_git(["tag", "-a", _TAG, "-m", "a different local tag", commit], cwd=work)
+    code = _run_tagger(
+        monkeypatch, work=work, commit=commit, artifact_dir=artifact_dir, run_id="700"
+    )
+    assert code == 1
+    assert _remote_tag_object(work) == before
+
+
+def test_recovery_adopts_the_original_runs_tag_without_writing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    code = _run_tagger(
+        monkeypatch,
+        work=work,
+        commit=commit,
+        artifact_dir=artifact_dir,
+        run_id="900",
+        source_run_id="700",
+        extra=["--adopt-original-run", "700"],
+    )
+    assert code == 0
+    assert _remote_tag_object(work) == before
+
+
+@pytest.mark.parametrize("defect", ["absent", "other_run", "wheel", "commit"])
+def test_recovery_adoption_is_refused_unless_everything_matches(
+    defect: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if defect == "absent":
+        _, work, commit = _bare_origin_and_work(tmp_path)
+        artifact_dir = tmp_path / "artifact"
+        artifact_dir.mkdir()
+        (artifact_dir / _WHEEL_NAME).write_bytes(b"retained")
+    else:
+        _, work, commit, artifact_dir = _tag_a_release(
+            tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+        )
+    original = "700"
+    if defect == "other_run":
+        original = "701"
+    elif defect == "wheel":
+        (artifact_dir / _WHEEL_NAME).write_bytes(b"REBUILT")
+    elif defect == "commit":
+        (work / "other.txt").write_text("x", encoding="utf-8")
+        commit = _commit_all(work, "another commit")
+    code = _run_tagger(
+        monkeypatch,
+        work=work,
+        commit=commit,
+        artifact_dir=artifact_dir,
+        run_id="900",
+        source_run_id=original,
+        extra=["--adopt-original-run", original],
+    )
+    assert code == 1
+    if defect == "absent":
+        assert _run_git(["ls-remote", "origin", f"refs/tags/{_TAG}"], cwd=work) == ""
+
+
+def test_the_writer_records_the_adopting_recovery_run() -> None:
+    writer = _writer()
+    after, added = writer.add_module_release_verification(
+        _minimal_verified_document(),
+        distribution=_DISTRIBUTION,
+        version=_VERSION,
+        tag=_TAG,
+        tag_object="a" * 40,
+        peeled_commit="b" * 40,
+        wheel_filename=_WHEEL_NAME,
+        wheel_sha256="c" * 64,
+        verification_run_id="700",
+        source_run_id="700",
+        release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        adopting_run_id="900",
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
+    )
+    assert added
+    row = json.loads(after)["releases"][0]
+    assert row["adopting_run_id"] == "900"
+    with pytest.raises(writer.ReleaseRecordError, match="adopting_run_id"):
+        writer.add_module_release_verification(
+            _minimal_verified_document(),
+            distribution=_DISTRIBUTION,
+            version=_VERSION,
+            tag=_TAG,
+            tag_object="a" * 40,
+            peeled_commit="b" * 40,
+            wheel_filename=_WHEEL_NAME,
+            wheel_sha256="c" * 64,
+            verification_run_id="700",
+            source_run_id="700",
+            release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+            adopting_run_id="700",
+            smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
+        )
+
+
+def test_the_recovery_tag_step_adopts_or_creates_and_records_accordingly() -> None:
+    workflow = yaml.safe_load(RECOVER_WORKFLOW.read_text())
+    steps = {s.get("name"): s for s in workflow["jobs"]["recover"]["steps"]}
+    tag_run = steps["Tag the recovered release"]["run"]
+    assert '--adopt-original-run "$ORIGINAL_RUN_ID"' in tag_run
+    assert 'git ls-remote --tags origin "refs/tags/${TAG}"' in tag_run
+    assert "TAG_ADOPTED=1" in tag_run and "TAG_ADOPTED=0" in tag_run
+    record_run = steps["Open the post-release record"]["run"]
+    assert '--adopting-run-id "$RUN_ID"' in record_run
+    assert '--expected-run-id "$EXPECTED_RUN"' in record_run
+
+
+def test_a_rerun_with_different_smoke_dependency_wheels_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    (artifact_dir.parent / "smoke-dependencies.json").write_text(
+        json.dumps(
+            {
+                "schema": "SmokeDependencyWheels.v1",
+                "wheels": [
+                    {
+                        "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+                        "sha256": "e" * 64,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    tagger = _tagger()
+    monkeypatch.setattr(
+        tagger,
+        "compute_and_check_authority_digest",
+        lambda **_k: _AUTHORITY_DIGEST_FIXTURE,
+    )
+    code = tagger.main(
+        [
+            "--distribution",
+            _DISTRIBUTION,
+            "--version",
+            _VERSION,
+            "--tag",
+            _TAG,
+            "--commit",
+            commit,
+            "--artifact-dir",
+            str(artifact_dir),
+            "--run-id",
+            "700",
+            "--source-run-id",
+            "700",
+            "--smoke-dependencies",
+            str(artifact_dir.parent / "smoke-dependencies.json"),
+            "--remote",
+            "origin",
+            "--repo-root",
+            str(work),
+        ]
+    )
+    assert code == 1
+    assert _remote_tag_object(work) == before
+
+
+@pytest.mark.parametrize(
+    "wheels",
+    [
+        [],
+        [
+            {"filename": "b.whl", "sha256": "a" * 64},
+            {"filename": "a.whl", "sha256": "a" * 64},
+        ],
+        [{"filename": "a.whl", "sha256": "A" * 64}],
+        [{"filename": "a.tar.gz", "sha256": "a" * 64}],
+        [{"filename": "a.whl", "sha256": "a" * 64, "extra": "x"}],
+    ],
+)
+def test_smoke_dependency_wheels_must_be_canonical(wheels: list) -> None:
+    writer = _writer()
+    with pytest.raises(writer.ReleaseRecordError):
+        writer.canonical_smoke_dependency_wheels(wheels)
+
+
+def test_the_smoke_installs_exact_wheels_and_their_manifest_reaches_the_tag() -> None:
+    """The kernel and first-party dependencies enter the smoke only as the
+    exact wheels this run built and hashed, and the tag records them."""
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text())
+    build = {s.get("name"): s for s in release["jobs"]["build"]["steps"]}
+    verify = {s.get("name"): s for s in release["jobs"]["verify"]["steps"]}
+    assert "--emit-dependency-manifest" in build["Release wheel smoke"]["run"]
+    assert (
+        build["Upload the smoke dependency manifest"]["with"]["name"]
+        == "${{ inputs.module }}-smoke-dependencies"
+    )
+    assert "Download the smoke dependency manifest" in verify
+    assert (
+        '--smoke-dependencies "${SMOKE_MANIFEST}"'
+        in (verify["Tag the verified release"]["run"])
+    )
+    source = (PROJECT_ROOT / "scripts" / "release_module.py").read_text()
+    smoke = source.split("def cmd_verify_wheel", 1)[1].split("\ndef ", 1)[0]
+    assert "--find-links" not in smoke, "first-party wheels must install by path"
+    assert "direct_url.json" in source and '"-I"' in smoke
+
+
+def test_recovery_records_the_original_runs_smoke_manifest() -> None:
+    recover = yaml.safe_load(RECOVER_WORKFLOW.read_text())
+    steps = {s.get("name"): s for s in recover["jobs"]["recover"]["steps"]}
+    download = steps["Download the original run's build artifacts"]["run"]
+    assert '--name "${MODULE}-smoke-dependencies"' in download
+    assert (
+        '--smoke-dependencies "$RECOVERED_SMOKE"'
+        in (steps["Tag the recovered release"]["run"])
+    )
+
+
+def test_a_recovery_rerun_accepts_the_tag_it_created_itself(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Recovery run 900 created the tag (source = original 700) and failed
+    afterwards; its rerun passes --adopt-original-run 700 because the tag
+    exists, but the tag names run 900 itself, so it is an identical rerun."""
+    _, work, commit = _bare_origin_and_work(tmp_path)
+    artifact_dir = tmp_path / "artifact"
+    artifact_dir.mkdir()
+    (artifact_dir / _WHEEL_NAME).write_bytes(b"retained")
+    common = {
+        "work": work,
+        "commit": commit,
+        "artifact_dir": artifact_dir,
+        "run_id": "900",
+        "source_run_id": "700",
+    }
+    assert _run_tagger(monkeypatch, **common) == 0
+    before = _remote_tag_object(work)
+    capsys.readouterr()
+    code = _run_tagger(monkeypatch, **common, extra=["--adopt-original-run", "700"])
+    assert code == 0
+    assert "tag-result=rerun" in capsys.readouterr().out
+    assert _remote_tag_object(work) == before

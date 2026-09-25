@@ -208,6 +208,38 @@ jobs:
           BASE_SHA: ${{ github.event.before }}
         run: python scripts/check_module_release_verification_append_only.py --base "$BASE_SHA"
 
+  module-release-provenance:
+    # Only NEW rows a PR/push appended are checked — an older row was already
+    # proven when it was appended, and its run may since have expired or been
+    # deleted from GitHub's retention window. `base.sha`/`before` are
+    # immutable commits, never a moving branch ref, exactly like the
+    # append-only job above.
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Prove pull-request module release provenance against the immutable PR base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/module_release_provenance.py --base "$BASE_SHA"
+      - name: Prove main-push module release provenance
+        if: github.event_name == 'push'
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/module_release_provenance.py --base "$BASE_SHA"
+
   unit:
     runs-on: ubuntu-latest
     steps:
