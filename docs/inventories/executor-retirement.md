@@ -469,11 +469,11 @@ a measurement rather than a refusal for the same reason the SSH gate is narrow:
 `scripts/deploy.sh` is unsanctioned today, and refusing it would make an honest
 census impossible on day one. Starter records **6**.
 
-### The roster names Vendor CP
+### The roster names Platform CP
 
 `vendor-cp-prod` retains a rollback credential at Wave 7C and sat outside
 `ADOPTION_TARGETS`, so it would have been silently unmonitored rather than
-reported UNADOPTED. The roster entry is the **repository** that owes the
-inventory (`dotmac_vendor_control_plane`); the host belongs in that product's own
+reported UNADOPTED. The roster entry is the **current repository** that owes
+the inventory (`dotmac_platform_control_plane`); `vendor-cp-prod` is the
+historical host/credential evidence and belongs in that product's own
 inventory. `unadopted` is now three.
-
