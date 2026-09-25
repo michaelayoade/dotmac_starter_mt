@@ -491,14 +491,32 @@ def _is_on_main(commit: str | None) -> bool:
     """
     if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
         return False
-    tip = _git("rev-parse", "--verify", "--quiet", f"{MAIN_REF}^{{commit}}")
+    return commit in _main_first_parent_line(REPO_ROOT)
+
+
+_FIRST_PARENT_CACHE: dict[Path, frozenset[str]] = {}
+
+
+def _main_first_parent_line(root: Path) -> frozenset[str]:
+    """Main's first-parent commits, computed once per repository per process.
+
+    ``show-ref --verify`` matches ONLY the exact ref — unlike ``rev-parse``,
+    it has no fallback to ``refs/tags/<name>`` if the remote-tracking ref were
+    ever missing.
+    """
+    cached = _FIRST_PARENT_CACHE.get(root)
+    if cached is not None:
+        return cached
+    tip = _git("show-ref", "--verify", "--hash", MAIN_REF)
     tip_sha = tip.stdout.strip()
     if tip.returncode != 0 or not _COMMIT.fullmatch(tip_sha):
-        raise ProvenanceError(f"cannot resolve {MAIN_REF} to a commit")
+        raise ProvenanceError(f"cannot resolve {MAIN_REF} exactly")
     first_parent = _git("rev-list", "--first-parent", tip_sha)
     if first_parent.returncode != 0:
         raise ProvenanceError(f"cannot list the first-parent history of {MAIN_REF}")
-    return commit in set(first_parent.stdout.split())
+    line = frozenset(first_parent.stdout.split())
+    _FIRST_PARENT_CACHE[root] = line
+    return line
 
 
 def main(argv: list[str] | None = None) -> int:
