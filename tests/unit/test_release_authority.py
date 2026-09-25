@@ -527,3 +527,23 @@ def test_a_third_party_action_inside_a_local_composite_action_is_covered(ra) -> 
     )
     with pytest.raises(ra.ReleaseAuthorityError, match="not pinned"):
         ra.derive_surface(_dict_reader(files))
+
+
+def test_a_script_mentioned_only_in_a_docstring_is_not_in_the_surface(ra) -> None:
+    files = _base_files(ra)
+    files[ra.ROOT_WORKFLOWS[0]] = (
+        "jobs:\n  x:\n    steps:\n      - run: python scripts/release_module.py\n"
+    )
+    files["scripts/release_module.py"] = (
+        '"""Pairs the flags like scripts/consumer_boot_check.sh does."""\n'
+        "def f():\n"
+        '    """See scripts/other_doc.sh."""\n'
+        '    return "scripts/really_invoked.sh"\n'
+    )
+    files["scripts/consumer_boot_check.sh"] = "echo\n"
+    files["scripts/other_doc.sh"] = "echo\n"
+    files["scripts/really_invoked.sh"] = "echo\n"
+    derived, _ = ra.derive_surface(_dict_reader(files))
+    assert "scripts/consumer_boot_check.sh" not in derived
+    assert "scripts/other_doc.sh" not in derived
+    assert "scripts/really_invoked.sh" in derived

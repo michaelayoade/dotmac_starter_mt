@@ -271,6 +271,20 @@ def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
 
         elif current.endswith(".py"):
             tree = ast.parse(text, filename=current)
+            # Docstrings are documentation, not invocations: a module that
+            # merely MENTIONS a script in prose does not execute it.
+            docstrings = {
+                id(owner.body[0].value)
+                for owner in ast.walk(tree)
+                if isinstance(
+                    owner,
+                    ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+                )
+                and owner.body
+                and isinstance(owner.body[0], ast.Expr)
+                and isinstance(owner.body[0].value, ast.Constant)
+                and isinstance(owner.body[0].value.value, str)
+            }
             top_level_names: list[str] = []
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
@@ -279,7 +293,11 @@ def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
                 elif isinstance(node, ast.ImportFrom):
                     if node.module is not None:
                         top_level_names.append(node.module.split(".")[0])
-                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                elif (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and id(node) not in docstrings
+                ):
                     for token in _existing_tokens(_SCRIPTS_TOKEN, node.value, read):
                         enqueue(token)
 
