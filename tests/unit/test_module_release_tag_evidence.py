@@ -742,9 +742,27 @@ def _recovery_dist_problems(text: str) -> list[str]:
     workflow = yaml.safe_load(text)
     job = workflow["jobs"]["recover"]
     env = job.get("env", {})
-    if env.get("RECOVERED_DIST") != "${{ runner.temp }}/recovered-dist":
-        problems.append("RECOVERED_DIST is not defined under runner.temp in job env")
+    # `runner.temp` is not legal in `jobs.<id>.env` — GitHub only expands
+    # github/needs/strategy/matrix/vars/secrets/inputs there. The directory
+    # is instead resolved once, in a `GITHUB_ENV` step, right after checkout.
+    if "RECOVERED_DIST" in env:
+        problems.append("RECOVERED_DIST must not be a job-level env entry")
+    steps = job["steps"]
+    resolver_bodies = [
+        step.get("run", "")
+        for step in steps
+        if "RECOVERED_DIST=${RUNNER_TEMP}/recovered-dist" in step.get("run", "")
+        and "GITHUB_ENV" in step.get("run", "")
+    ]
+    if not resolver_bodies:
+        problems.append(
+            "no step resolves RECOVERED_DIST via RUNNER_TEMP into GITHUB_ENV"
+        )
     for name, body in _run_bodies(workflow, "recover"):
+        # The one authorized definition site: it legitimately spells the
+        # literal path once, on the right-hand side of the GITHUB_ENV write.
+        if "GITHUB_ENV" in body and "RUNNER_TEMP" in body:
+            continue
         mentions_dist = "recovered-dist" in body or "RECOVERED_DIST" in body
         if not mentions_dist:
             continue
@@ -774,6 +792,63 @@ def test_recovery_dist_detector_is_sensitive_to_a_reintroduced_bare_literal() ->
     assert planted != text, "the fixture string was not found; workflow drifted"
     problems = _recovery_dist_problems(planted)
     assert any("bare literal" in problem for problem in problems)
+
+
+# ── 6b. `runner.*` is never expanded in `jobs.<id>.env` ─────────────────────
+#
+# GitHub expands `jobs.<id>.env` values from only github/needs/strategy/
+# matrix/vars/secrets/inputs — `runner` is a step/job `run:` context object,
+# not an env-expression context, and silently resolves to an empty string
+# there. `runner.temp` at step level (e.g. `actions/download-artifact`'s
+# `with: path:`) is legal and untouched by this check.
+
+
+def _job_env_runner_context_violations(workflow: dict) -> list[str]:
+    violations: list[str] = []
+    for job_name, job in workflow.get("jobs", {}).items():
+        for key, value in (job.get("env") or {}).items():
+            if isinstance(value, str) and "runner." in value:
+                violations.append(f"jobs.{job_name}.env.{key} references runner.*")
+    return violations
+
+
+def test_no_job_level_env_value_references_the_runner_context() -> None:
+    for workflow_path in (RELEASE_WORKFLOW, RECOVER_WORKFLOW):
+        workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        assert _job_env_runner_context_violations(workflow) == []
+
+
+def test_job_env_runner_context_detector_is_sensitive_to_a_reintroduced_violation() -> (
+    None
+):
+    workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    # Plant the exact regression this rule exists to catch.
+    workflow["jobs"]["verify"]["env"]["ARTIFACT_DIR"] = (
+        "${{ runner.temp }}/module-release-dist"
+    )
+    violations = _job_env_runner_context_violations(workflow)
+    assert any("verify.env.ARTIFACT_DIR" in v for v in violations)
+
+
+def test_job_env_runner_context_detector_does_not_flag_a_step_level_runner_temp() -> (
+    None
+):
+    # Near-miss: `runner.temp` used at STEP level (legal) must not trip the
+    # job-level-only detector.
+    workflow = {
+        "jobs": {
+            "build": {
+                "env": {"MODULE": "dotmac-example"},
+                "steps": [
+                    {
+                        "uses": "actions/download-artifact@v8",
+                        "with": {"path": "${{ runner.temp }}/dist"},
+                    }
+                ],
+            }
+        }
+    }
+    assert _job_env_runner_context_violations(workflow) == []
 
 
 # ── 7. Tag/compare steps are hardened against silent force/skip ────────────

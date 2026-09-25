@@ -309,7 +309,6 @@ jobs:
       VERSION: ${{ inputs.version }}
       TAG: ${{ needs.build.outputs.tag }}
       PACKAGE_DIR: ${{ needs.build.outputs.package_dir }}
-      ARTIFACT_DIR: ${{ runner.temp }}/module-release-dist
       RUN_ID: ${{ github.run_id }}
       COMPOSE_WITH: ${{ inputs.compose_with }}
       COMPOSE_KERNEL: ${{ inputs.compose_kernel }}
@@ -317,6 +316,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # `runner.temp` is only available in step/job `run:` context, never in
+      # `jobs.<id>.env:` — GitHub silently leaves that interpolation empty
+      # there. Resolve it once, in the first step, into `GITHUB_ENV` so every
+      # later step in this job sees the same `ARTIFACT_DIR`.
+      - name: Resolve the shared artifact directory
+        run: echo "ARTIFACT_DIR=${RUNNER_TEMP}/module-release-dist" >> "$GITHUB_ENV"
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"

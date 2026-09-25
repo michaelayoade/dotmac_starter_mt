@@ -190,9 +190,15 @@ def test_module_release_workflow_carries_exact_wheel_into_the_recorder() -> None
     assert "Download exact built bytes for the publication record" in verify
     assert "name: ${{ inputs.module }}-dist" in verify
     assert "path: ${{ runner.temp }}/module-release-dist" in verify
-    # The verify job's env block is the single place `runner.temp` is
-    # evaluated; every run: body below references it as $ARTIFACT_DIR.
-    assert "ARTIFACT_DIR: ${{ runner.temp }}/module-release-dist" in verify
+    # `runner.temp` is illegal in `jobs.<id>.env` (only github/needs/strategy/
+    # matrix/vars/secrets/inputs are expanded there); the job instead resolves
+    # it once, in a GITHUB_ENV step right after checkout, and every run: body
+    # below references it as $ARTIFACT_DIR.
+    assert "ARTIFACT_DIR: ${{ runner.temp }}/module-release-dist" not in verify
+    assert (
+        'echo "ARTIFACT_DIR=${RUNNER_TEMP}/module-release-dist" >> "$GITHUB_ENV"'
+        in verify
+    )
     assert '--artifact-dir "${ARTIFACT_DIR}"' in verify
     compare = verify.index("Prove published bytes match the retained build artifact")
     tag = verify.index("Tag the verified release")
@@ -209,7 +215,11 @@ def test_module_release_workflow_carries_exact_wheel_into_the_recorder() -> None
     recovery = (
         PROJECT_ROOT / ".github/workflows/recover-module-release.yml"
     ).read_text()
-    assert "RECOVERED_DIST: ${{ runner.temp }}/recovered-dist" in recovery
+    assert "RECOVERED_DIST: ${{ runner.temp }}/recovered-dist" not in recovery
+    assert (
+        'echo "RECOVERED_DIST=${RUNNER_TEMP}/recovered-dist" >> "$GITHUB_ENV"'
+        in recovery
+    )
     recorder = recovery.split("- name: Open the post-release record", 1)[1]
     assert '--artifact-dir "$RECOVERED_DIST"' in recorder
     assert "release_module.py compare-published" in recovery

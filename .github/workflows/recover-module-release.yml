@@ -154,7 +154,6 @@ jobs:
       ORIGINAL_RUN_ID: ${{ inputs.original_run_id }}
       COMPOSE_KERNEL: ${{ inputs.compose_kernel }}
       COMPOSE_WITH: ${{ inputs.compose_with }}
-      RECOVERED_DIST: ${{ runner.temp }}/recovered-dist
       RUN_ID: ${{ github.run_id }}
     steps:
       - name: Resolve the original run's source SHA
@@ -192,6 +191,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+
+      # `runner.temp` is only available in step/job `run:` context, never in
+      # `jobs.<id>.env:` — GitHub silently leaves that interpolation empty
+      # there. Resolve it once, right after checkout, into `GITHUB_ENV` so
+      # every later step in this job sees the same `RECOVERED_DIST`.
+      - name: Resolve the shared recovered-artifact directory
+        run: echo "RECOVERED_DIST=${RUNNER_TEMP}/recovered-dist" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
