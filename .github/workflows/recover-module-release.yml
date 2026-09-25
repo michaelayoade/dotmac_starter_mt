@@ -281,10 +281,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Recovery never replaces a tag. If the original run already pushed
-          # one (it failed AFTER tagging), adopt it after proving its evidence
-          # names the original run and matches the recovered artifact;
-          # otherwise write the tag the original run never wrote.
           # Recovery never replaces a tag. If one exists, the helper adopts it
           # when it names the ORIGINAL run (that run failed after tagging), or
           # accepts it as this recovery's own identical rerun when it names
