@@ -5,7 +5,13 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 entry landed once the live Postgres migration and catalog gate passed;
 `0.1.0a1` through `0.1.0a5` have since been published.
 
-## Unreleased — approved-decision withdrawal candidate
+## 0.1.0a7 — 2026-09-25 — prepared, unreleased (no tag, not on the index)
+
+**Version prepared.** `0.1.0a6` is published and tagged; this source adds the
+approved-decision withdrawal surface and `ap_0003_withdrawals`, so it declares
+the newly allocated `0.1.0a7`. Publication happens through a separate
+`workflow_dispatch` of `release-module.yml`.
+
 
 - Add one immutable withdrawal record per completed approval on both selected
   planes. The original APPROVE votes and completion time remain queryable;
