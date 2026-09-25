@@ -254,8 +254,14 @@ def require_committed_consumption_v3(
     ):
         raise PreconditionFailed("F2 pair result disagrees with admitted host trace")
     digest = plan.digest()
+    # Control stores bare hex and this facility emits `sha256:`; both spell the
+    # same digest, and every earlier check normalizes. Comparing raw strings
+    # here would refuse a genuine bare-hex authorization at every run.
     if (
-        grant.receipt.execution_plan_digest != digest
+        normalize_digest(
+            grant.receipt.execution_plan_digest, where="receipt execution plan"
+        )
+        != normalize_digest(digest, where="V3 execution plan")
         or grant.receipt.execution_sequence != facts.execution_sequence
         or grant.receipt.attempt_no != facts.attempt_no
         or grant.execution_sequence != facts.execution_sequence

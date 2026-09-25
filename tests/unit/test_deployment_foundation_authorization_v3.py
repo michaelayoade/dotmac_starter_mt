@@ -535,3 +535,29 @@ def test_successful_consume_has_deterministic_recovery_ref_and_effect_boundary(
     evidence = outcome.as_evidence()
     assert evidence["schema"] == "DeploymentEvidence.v2"
     assert evidence["control_consumption_ref"] == expected
+
+
+def test_a_bare_hex_execution_plan_digest_authorizes_like_the_prefixed_one() -> None:
+    """Control stores bare hex; this facility emits `sha256:`. Both spell the
+    same digest, so a genuine bare-hex authorization must reach consumption,
+    not be refused at the last pre-consumption comparison."""
+    spec = load()
+    effects = RecordingEffects()
+    work = build_plan(spec)
+    plan, _ = _plan_and_digest(spec, work, effects=effects)
+    bare = plan.digest().removeprefix("sha256:")
+    assert bare != plan.digest()
+    grant = grant_for_plan(
+        spec, plan, receipt_overrides={"execution_plan_digest": bare}
+    )
+    assert grant.receipt.execution_plan_digest == bare
+    executor = Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=plan,
+        sleep=lambda _: None,
+        admission_provider=accepting_admission_provider(),
+    )
+    executor.run(work, lock=held_lock(spec.product))
+    assert grant.v3_provider.consumed is True

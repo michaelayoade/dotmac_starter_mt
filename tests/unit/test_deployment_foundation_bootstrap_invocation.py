@@ -2,12 +2,10 @@
 
 ## What the widening had to be careful about
 
-`Effects` is implemented by the in-package provider, by five test doubles, and
-by `_PROBE_BINDINGS_SOURCE` inside `scripts/release_facility.py` — **the probe
-wheel the publication gate installs**. A protocol widened without that last one
-makes the gate that publishes this facility non-conforming, which is why the
-widening needed a ruling and why `test_every_effects_implementation_conforms`
-derives the implementer list rather than listing it.
+`Effects` is implemented by the in-package provider and by the test doubles.
+(The release facility's string-embedded probe wheel was retired with V1
+authority.) `test_every_effects_implementation_conforms` derives the implementer
+list rather than listing it, so a widening that misses one fails there.
 
 ## Why the step is not in `plan.steps`
 
@@ -124,12 +122,6 @@ def _effects_implementations() -> set[str]:
                 for b in node.body
             ):
                 found.add(f"{path.name}:{node.name}")
-        # `_PROBE_BINDINGS_SOURCE` is a STRING of Python inside release_facility,
-        # so it is not in that file's own AST. Parse it as the source it is.
-        if path.name == "release_facility.py":
-            text = path.read_text(encoding="utf-8")
-            for marker in ("_PROBE_BINDINGS_SOURCE", "def prune_images"):
-                assert marker in text, marker
     return found
 
 
@@ -137,9 +129,9 @@ def test_every_effects_implementation_conforms_to_the_WIDENED_protocol() -> None
     """The gate this widening needed a ruling for.
 
     Derived, not listed: a hand-maintained list cannot see the implementation
-    added tomorrow, and this protocol's implementers include the probe wheel the
-    PUBLICATION GATE installs. A widening that misses one fails here rather than
-    at a release.
+    added tomorrow. A widening that misses one fails here rather than at a
+    release. (The release facility's string-embedded probe wheel, which this
+    sweep could not see, was retired with V1 authority.)
     """
     implementations = _effects_implementations()
     assert implementations, "the sweep found no implementation at all"
@@ -158,77 +150,8 @@ def test_every_effects_implementation_conforms_to_the_WIDENED_protocol() -> None
             ):
                 missing.append(f"{path.name}:{node.name}")
     assert missing == [], (
-        f"{missing} implement Effects without the widened method. Every real "
-        "and probe implementation must be updated in the same change — the "
-        "probe wheel in scripts/release_facility.py is the one the publication "
-        "gate installs, and a non-conforming fixture there breaks the gate that "
-        "publishes this facility"
-    )
-
-
-def test_the_probe_wheel_specifically_carries_it() -> None:
-    """The compensating check, and it PARSES rather than greps.
-
-    The probe wheel's `ProbeEffects` is a real `Effects` implementation living
-    inside a STRING CONSTANT, so `ast.walk` over `release_facility.py` sees a
-    `Constant` and never a `ClassDef`. The sweep above is structurally unable to
-    reach it — measured, not assumed — and that is worse than a fixture the sweep
-    fails on, because an unreachable one is silently absent from the count.
-
-    So this parses the probe's own source and asks the same question the sweep
-    asks. A substring check would pass on the method name appearing in a comment,
-    which is the shape of a detector that answers without being able to refuse.
-    """
-    import re
-
-    source = (REPO / "scripts" / "release_facility.py").read_text(encoding="utf-8")
-    match = re.search(
-        r'_PROBE_BINDINGS_SOURCE: Final = """\\\n(.*?)\n"""', source, re.S
-    )
-    assert match, "the probe source could not be located"
-    body = match.group(1).replace('\\"\\"\\"', '"""').replace("\\\\", "\\")
-    tree = ast.parse(body)
-    effects = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ClassDef)
-        and any(
-            isinstance(b, ast.FunctionDef) and b.name == "prune_images"
-            for b in node.body
-        )
-    ]
-    assert effects, "the probe wheel defines no Effects implementation"
-    for cls in effects:
-        methods = {b.name for b in cls.body if isinstance(b, ast.FunctionDef)}
-        assert "bootstrap_principal_credential" in methods, (
-            f"the probe wheel's {cls.name} does not implement the widened "
-            "protocol. It is the wheel the PUBLICATION GATE installs, and the "
-            "AST sweep cannot see it because it lives in a string constant"
-        )
-
-
-def test_the_sweep_genuinely_cannot_see_the_probe() -> None:
-    """The premise the test above rests on, asserted rather than believed.
-
-    If the sweep could see `ProbeEffects`, the compensating check would be
-    redundant and the reader should know. It cannot: the class is inside a string
-    constant, so the file's own AST holds no `ClassDef` for it.
-    """
-    tree = ast.parse(
-        (REPO / "scripts" / "release_facility.py").read_text(encoding="utf-8")
-    )
-    visible = [
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ClassDef)
-        and any(
-            isinstance(b, ast.FunctionDef) and b.name == "prune_images"
-            for b in node.body
-        )
-    ]
-    assert visible == [], (
-        f"{visible} are now visible to the sweep, so the probe-wheel check above "
-        "may be redundant — or a second implementation has appeared"
+        f"{missing} implement Effects without the widened method. Every "
+        "implementation must be updated in the same change"
     )
 
 
