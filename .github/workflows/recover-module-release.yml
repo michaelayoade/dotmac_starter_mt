@@ -296,10 +296,13 @@ jobs:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.target.outputs.tag }}
           PACKAGE_DIR: ${{ steps.target.outputs.package_dir }}
+          ORIGIN_SHA: ${{ steps.origin.outputs.sha }}
         run: |
           bash scripts/open_release_record_pr.sh \
             --distribution "$MODULE" \
             --version "$VERSION" \
             --tag "$TAG" \
             --package-dir "$PACKAGE_DIR" \
-            --artifact-dir "$RECOVERED_DIST"
+            --artifact-dir "$RECOVERED_DIST" \
+            --expected-run-id "$RUN_ID" \
+            --expected-commit "${ORIGIN_SHA}"

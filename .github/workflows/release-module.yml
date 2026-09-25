@@ -459,4 +459,6 @@ jobs:
             --version "$VERSION" \
             --tag "$TAG" \
             --package-dir "$PACKAGE_DIR" \
-            --artifact-dir "${ARTIFACT_DIR}"
+            --artifact-dir "${ARTIFACT_DIR}" \
+            --expected-run-id "$RUN_ID" \
+            --expected-commit "${GITHUB_SHA}"

@@ -1294,6 +1294,8 @@ def write_record(
     import_name: str | None,
     no_lineage: bool = False,
     artifact_dir: str | None = None,
+    expected_run_id: str | None = None,
+    expected_commit: str | None = None,
 ) -> list[str]:
     """Apply both halves of the record. Returns what changed, for the caller."""
     expected_tag = f"{distribution}-v{version}"
@@ -1360,6 +1362,24 @@ def write_record(
             f"{tag} is frozen as pre-cutover unverified history; "
             "do not relabel it as a verified new release"
         )
+    # A governed module's recorder must bind to the tag ITS OWN run created —
+    # not any pre-existing tag whose evidence happens to match the wheel. The
+    # tag-refusal step upstream stops a foreign push from landing the tag, but
+    # `if: always()` means this step still runs after that refusal, and would
+    # otherwise silently record whatever tag already exists at this name.
+    if distribution in governed_modules and artifact_dir is not None:
+        if expected_run_id is None or expected_commit is None:
+            raise ReleaseRecordError(
+                f"{distribution} is a governed module: --expected-run-id and "
+                "--expected-commit are both mandatory so the record can only "
+                "bind to the tag this run itself created"
+            )
+        if commit != expected_commit:
+            raise ReleaseRecordError(
+                f"{tag} points at commit {commit}, not the expected "
+                f"{expected_commit} — refusing to record a tag this run did "
+                "not create"
+            )
 
     row = json.loads(ledger_text)["unpublished"].get(distribution)
     if row is not None:
@@ -1463,6 +1483,16 @@ def write_record(
                 "artifact; never rebuild it — download the exact retained "
                 "wheel that compare-published already verified"
             )
+        if (
+            expected_run_id is not None
+            and evidence["verification_run_id"] != expected_run_id
+        ):
+            raise ReleaseRecordError(
+                f"{tag} evidence names verification run "
+                f"{evidence['verification_run_id']!r}, not the expected "
+                f"{expected_run_id!r} — refusing to record a tag this run "
+                "did not create"
+            )
         new_module_verification, added = add_module_release_verification(
             module_verification_text,
             distribution=distribution,
@@ -1526,6 +1556,16 @@ def main(argv: list[str] | None = None) -> int:
         "--artifact-dir",
         help="directory containing the exact build-once module wheel to record",
     )
+    parser.add_argument(
+        "--expected-run-id",
+        help="the run id this invocation's own workflow run created the tag "
+        "under; mandatory for a governed module with --artifact-dir",
+    )
+    parser.add_argument(
+        "--expected-commit",
+        help="the exact source SHA this invocation's own run tagged; "
+        "mandatory for a governed module with --artifact-dir",
+    )
     args = parser.parse_args(argv)
 
     # The two always agree in this repository, and threading a second value
@@ -1543,6 +1583,8 @@ def main(argv: list[str] | None = None) -> int:
             import_name=import_name,
             no_lineage=args.no_lineage,
             artifact_dir=args.artifact_dir,
+            expected_run_id=args.expected_run_id,
+            expected_commit=args.expected_commit,
         )
     except ReleaseRecordError as failure:
         print(f"release record REFUSED: {failure}", file=sys.stderr)

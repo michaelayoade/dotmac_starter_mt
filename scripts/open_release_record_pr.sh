@@ -89,6 +89,8 @@ VERIFICATION_RECEIPT=""
 TAG_DECISION_RECEIPT=""
 NO_LINEAGE=""
 ARTIFACT_DIR=""
+EXPECTED_RUN_ID=""
+EXPECTED_COMMIT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -103,6 +105,8 @@ while [ $# -gt 0 ]; do
     --verification-receipt) VERIFICATION_RECEIPT="$2"; shift 2 ;;
     --tag-decision-receipt) TAG_DECISION_RECEIPT="$2"; shift 2 ;;
     --artifact-dir) ARTIFACT_DIR="$2"; shift 2 ;;
+    --expected-run-id) EXPECTED_RUN_ID="$2"; shift 2 ;;
+    --expected-commit) EXPECTED_COMMIT="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -130,6 +134,11 @@ if [ "${GOVERNED_MODULE}" = "1" ] && [ -z "${ARTIFACT_DIR}" ]; then
   echo "--artifact-dir is required for governed module ${DISTRIBUTION}" >&2
   exit 2
 fi
+if [ "${GOVERNED_MODULE}" = "1" ] \
+  && { [ -z "${EXPECTED_RUN_ID}" ] || [ -z "${EXPECTED_COMMIT}" ]; }; then
+  echo "--expected-run-id and --expected-commit are both required for governed module ${DISTRIBUTION}" >&2
+  exit 2
+fi
 
 MANUAL="python scripts/write_release_record.py --distribution ${DISTRIBUTION} --version ${VERSION} --tag ${TAG}"
 if [ -n "${PACKAGE_DIR}" ]; then
@@ -146,6 +155,12 @@ fi
 # `give_up` below tells the operator to fetch a fresh copy instead.
 if [ -n "${ARTIFACT_DIR}" ]; then
   MANUAL="${MANUAL} --artifact-dir <fresh-download-dir>"
+fi
+if [ -n "${EXPECTED_RUN_ID}" ]; then
+  MANUAL="${MANUAL} --expected-run-id ${EXPECTED_RUN_ID}"
+fi
+if [ -n "${EXPECTED_COMMIT}" ]; then
+  MANUAL="${MANUAL} --expected-commit ${EXPECTED_COMMIT}"
 fi
 if [ -n "${MANIFEST_PYTHON}" ]; then
   MANUAL="${MANUAL}
@@ -204,6 +219,12 @@ elif [ -n "${NO_LINEAGE}" ]; then
 fi
 if [ -n "${ARTIFACT_DIR}" ]; then
   ARGS+=(--artifact-dir "${ARTIFACT_DIR}")
+fi
+if [ -n "${EXPECTED_RUN_ID}" ]; then
+  ARGS+=(--expected-run-id "${EXPECTED_RUN_ID}")
+fi
+if [ -n "${EXPECTED_COMMIT}" ]; then
+  ARGS+=(--expected-commit "${EXPECTED_COMMIT}")
 fi
 
 OUTPUT=""

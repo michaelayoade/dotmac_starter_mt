@@ -403,6 +403,8 @@ def test_full_write_record_records_the_verified_wheel_from_a_real_tag(
         import_name=None,
         no_lineage=True,
         artifact_dir=str(artifact_dir),
+        expected_run_id="555000222",
+        expected_commit=commit,
     )
 
     assert any("recorded the verified" in line for line in changed)
@@ -420,9 +422,94 @@ def test_full_write_record_records_the_verified_wheel_from_a_real_tag(
             import_name=None,
             no_lineage=True,
             artifact_dir=str(artifact_dir),
+            expected_run_id="555000222",
+            expected_commit=commit,
         )
         == []
     )
+
+
+def test_write_record_requires_expected_run_id_and_commit_for_a_governed_module(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A governed module's recorder must bind to the tag ITS OWN run created.
+
+    Before this guard, `write_record` accepted any existing tag whose
+    evidence matched the wheel — including a tag some OTHER run wrote, if
+    the tag step was skipped or refused but the `if: always()` record step
+    still ran.
+    """
+    origin, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="555000333", wheel_bytes=b"bytes for the binding guard"
+    )
+
+    writer = _writer()
+    monkeypatch.setattr(writer, "REPO_ROOT", work)
+
+    released_tags_module = tmp_path / "released_tags.py"
+    released_tags_module.write_text("RELEASED_TAGS: dict = {\n}\n", encoding="utf-8")
+    monkeypatch.setattr(writer, "RELEASED_TAGS_MODULE", released_tags_module)
+
+    module_verifications = tmp_path / "module-release-verifications.json"
+    module_verifications.write_text(_minimal_verified_document(), encoding="utf-8")
+    monkeypatch.setattr(writer, "MODULE_RELEASE_VERIFICATIONS", module_verifications)
+
+    module_legacy = tmp_path / "module-release-legacy-unverified.json"
+    module_legacy.write_text(_minimal_legacy_document(), encoding="utf-8")
+    monkeypatch.setattr(writer, "MODULE_RELEASE_LEGACY", module_legacy)
+
+    ledger = tmp_path / "declared-publication-baseline.json"
+    ledger.write_text(json.dumps({"unpublished": {}}), encoding="utf-8")
+    monkeypatch.setattr(writer, "LEDGER", ledger)
+
+    common_kwargs = {
+        "distribution": _DISTRIBUTION,
+        "version": _VERSION,
+        "tag": _TAG,
+        "package_dir": None,
+        "import_name": None,
+        "no_lineage": True,
+        "artifact_dir": str(artifact_dir),
+    }
+
+    # Neither flag supplied — refused before any file is touched.
+    with pytest.raises(writer.ReleaseRecordError, match="expected-run-id"):
+        writer.write_record(**common_kwargs)
+    assert (
+        json.loads(module_verifications.read_text(encoding="utf-8"))["releases"] == []
+    )
+
+    # Only one of the two supplied — still refused.
+    with pytest.raises(writer.ReleaseRecordError, match="expected-run-id"):
+        writer.write_record(**common_kwargs, expected_commit=commit)
+    with pytest.raises(writer.ReleaseRecordError, match="expected-run-id"):
+        writer.write_record(**common_kwargs, expected_run_id="555000333")
+
+    # A run id that does not name the run that produced this tag's evidence.
+    with pytest.raises(writer.ReleaseRecordError, match="verification run"):
+        writer.write_record(
+            **common_kwargs, expected_run_id="999999999", expected_commit=commit
+        )
+    assert (
+        json.loads(module_verifications.read_text(encoding="utf-8"))["releases"] == []
+    )
+
+    # A commit that is not the tag's own peeled commit.
+    with pytest.raises(writer.ReleaseRecordError, match="expected"):
+        writer.write_record(
+            **common_kwargs,
+            expected_run_id="555000333",
+            expected_commit="0" * 40,
+        )
+    assert (
+        json.loads(module_verifications.read_text(encoding="utf-8"))["releases"] == []
+    )
+
+    # Both correct — the matching, accepted case.
+    changed = writer.write_record(
+        **common_kwargs, expected_run_id="555000333", expected_commit=commit
+    )
+    assert any("recorded the verified" in line for line in changed)
 
 
 def test_write_record_refuses_a_wheel_that_disagrees_with_the_tags_digest(
