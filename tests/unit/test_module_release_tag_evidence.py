@@ -1076,3 +1076,223 @@ def test_compare_step_hardening_detector_is_sensitive_to_a_planted_delete() -> N
     compare_step["run"] = compare_step["run"] + "\ngit push --delete origin sometag\n"
     problems = _hardening_problems(compare_step)
     assert any("push --delete" in problem for problem in problems)
+
+
+# ── Rerun acceptance (identical evidence only) and recovery adoption ────────
+
+
+def _run_tagger(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    work: Path,
+    commit: str,
+    artifact_dir: Path,
+    run_id: str,
+    source_run_id: str | None = None,
+    authority_digest: str = _AUTHORITY_DIGEST_FIXTURE,
+    extra: list[str] | None = None,
+) -> int:
+    tagger = _tagger()
+    monkeypatch.setattr(
+        tagger,
+        "compute_and_check_authority_digest",
+        lambda **_kwargs: authority_digest,
+    )
+    return tagger.main(
+        [
+            "--distribution",
+            _DISTRIBUTION,
+            "--version",
+            _VERSION,
+            "--tag",
+            _TAG,
+            "--commit",
+            commit,
+            "--artifact-dir",
+            str(artifact_dir),
+            "--run-id",
+            run_id,
+            "--source-run-id",
+            source_run_id or run_id,
+            "--remote",
+            "origin",
+            "--repo-root",
+            str(work),
+            *(extra or []),
+        ]
+    )
+
+
+def _remote_tag_object(work: Path) -> str:
+    return _run_git(["ls-remote", "origin", f"refs/tags/{_TAG}"], cwd=work).split()[0]
+
+
+def test_a_rerun_with_identical_evidence_accepts_its_own_tag_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    assert (
+        _run_tagger(
+            monkeypatch,
+            work=work,
+            commit=commit,
+            artifact_dir=artifact_dir,
+            run_id="700",
+        )
+        == 0
+    )
+    assert _remote_tag_object(work) == before
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["run_id", "source_run_id", "authority", "wheel", "commit"],
+)
+def test_a_rerun_with_any_different_evidence_is_refused(
+    change: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    kwargs: dict = {"run_id": "700"}
+    if change == "run_id":
+        kwargs["run_id"] = "701"
+        kwargs["source_run_id"] = "700"
+    elif change == "source_run_id":
+        kwargs["source_run_id"] = "699"
+    elif change == "authority":
+        kwargs["authority_digest"] = "sha256:" + "8" * 64
+    elif change == "wheel":
+        (artifact_dir / _WHEEL_NAME).write_bytes(b"REBUILT")
+    elif change == "commit":
+        (work / "other.txt").write_text("x", encoding="utf-8")
+        commit = _commit_all(work, "another commit")
+    code = _run_tagger(
+        monkeypatch, work=work, commit=commit, artifact_dir=artifact_dir, **kwargs
+    )
+    assert code == 1
+    assert _remote_tag_object(work) == before
+
+
+def test_a_rerun_refuses_when_the_local_tag_differs_from_the_remote(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    # Replace only the LOCAL tag with a different object of the same name.
+    _run_git(["tag", "-d", _TAG], cwd=work)
+    _run_git(["tag", "-a", _TAG, "-m", "a different local tag", commit], cwd=work)
+    code = _run_tagger(
+        monkeypatch, work=work, commit=commit, artifact_dir=artifact_dir, run_id="700"
+    )
+    assert code == 1
+    assert _remote_tag_object(work) == before
+
+
+def test_recovery_adopts_the_original_runs_tag_without_writing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    code = _run_tagger(
+        monkeypatch,
+        work=work,
+        commit=commit,
+        artifact_dir=artifact_dir,
+        run_id="900",
+        source_run_id="700",
+        extra=["--adopt-original-run", "700"],
+    )
+    assert code == 0
+    assert _remote_tag_object(work) == before
+
+
+@pytest.mark.parametrize("defect", ["absent", "other_run", "wheel", "commit"])
+def test_recovery_adoption_is_refused_unless_everything_matches(
+    defect: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if defect == "absent":
+        _, work, commit = _bare_origin_and_work(tmp_path)
+        artifact_dir = tmp_path / "artifact"
+        artifact_dir.mkdir()
+        (artifact_dir / _WHEEL_NAME).write_bytes(b"retained")
+    else:
+        _, work, commit, artifact_dir = _tag_a_release(
+            tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+        )
+    original = "700"
+    if defect == "other_run":
+        original = "701"
+    elif defect == "wheel":
+        (artifact_dir / _WHEEL_NAME).write_bytes(b"REBUILT")
+    elif defect == "commit":
+        (work / "other.txt").write_text("x", encoding="utf-8")
+        commit = _commit_all(work, "another commit")
+    code = _run_tagger(
+        monkeypatch,
+        work=work,
+        commit=commit,
+        artifact_dir=artifact_dir,
+        run_id="900",
+        source_run_id=original,
+        extra=["--adopt-original-run", original],
+    )
+    assert code == 1
+    if defect == "absent":
+        assert _run_git(["ls-remote", "origin", f"refs/tags/{_TAG}"], cwd=work) == ""
+
+
+def test_the_writer_records_the_adopting_recovery_run() -> None:
+    writer = _writer()
+    after, added = writer.add_module_release_verification(
+        _minimal_verified_document(),
+        distribution=_DISTRIBUTION,
+        version=_VERSION,
+        tag=_TAG,
+        tag_object="a" * 40,
+        peeled_commit="b" * 40,
+        wheel_filename=_WHEEL_NAME,
+        wheel_sha256="c" * 64,
+        verification_run_id="700",
+        source_run_id="700",
+        release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        adopting_run_id="900",
+    )
+    assert added
+    row = json.loads(after)["releases"][0]
+    assert row["adopting_run_id"] == "900"
+    with pytest.raises(writer.ReleaseRecordError, match="adopting_run_id"):
+        writer.add_module_release_verification(
+            _minimal_verified_document(),
+            distribution=_DISTRIBUTION,
+            version=_VERSION,
+            tag=_TAG,
+            tag_object="a" * 40,
+            peeled_commit="b" * 40,
+            wheel_filename=_WHEEL_NAME,
+            wheel_sha256="c" * 64,
+            verification_run_id="700",
+            source_run_id="700",
+            release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+            adopting_run_id="700",
+        )
+
+
+def test_the_recovery_tag_step_adopts_or_creates_and_records_accordingly() -> None:
+    workflow = yaml.safe_load(RECOVER_WORKFLOW.read_text())
+    steps = {s.get("name"): s for s in workflow["jobs"]["recover"]["steps"]}
+    tag_run = steps["Tag the recovered release"]["run"]
+    assert '--adopt-original-run "$ORIGINAL_RUN_ID"' in tag_run
+    assert 'git ls-remote --tags origin "refs/tags/${TAG}"' in tag_run
+    assert "TAG_ADOPTED=1" in tag_run and "TAG_ADOPTED=0" in tag_run
+    record_run = steps["Open the post-release record"]["run"]
+    assert '--adopting-run-id "$RUN_ID"' in record_run
+    assert '--expected-run-id "$EXPECTED_RUN"' in record_run
