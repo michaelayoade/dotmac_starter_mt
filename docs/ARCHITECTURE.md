@@ -965,24 +965,38 @@ that binding, over only the rows a PR/push newly appended (an older row was
 already proven when it was appended, and its run may since have expired or
 been deleted from GitHub's retention window). For every new row it requires:
 the named run belongs to an approved workflow (`release-module.yml` or
-`recover-module-release.yml`), was triggered by `workflow_dispatch`, ran on
-`main`, in this repository, at this exact run id; its `display_title`
+`recover-module-release.yml`), re-derived independently from its
+`workflow_id`; was triggered by `workflow_dispatch`; reports `head_branch`
+`main` AND its head commit is an ancestor of `origin/main` (a ref merely
+NAMED `main`, such as a tag, cannot satisfy this); `repository` and
+`head_repository` are this repository; the run id matches exactly; its
+`display_title`
 (rendered from the workflow's top-level `run-name`) equals exactly `Release
 module <distribution> <version>` or `Recover module <distribution>
 <version>`, binding the run to the specific module and version the row
-claims; its "Tag the ..." step succeeded; and the run itself completed
+claims; its "Tag the ..." step succeeded inside the job that owns tag
+creation (`verify` or `recover`); the tag's peeled commit is itself an
+ancestor of `origin/main`; and the run itself completed
 successfully within a bounded wait. A release additionally requires
 `source_run_id == verification_run_id` and that run's `head_sha` to equal the
 tagged commit. A recovery additionally requires a `source_run_id` naming a
-DIFFERENT, `release-module.yml`, `workflow_dispatch`, main, same-repository
-run, titled `Release module <distribution> <version>`, built at the tagged
+DIFFERENT run passing the same identity checks against `release-module.yml`
+(including ancestry of its head commit), titled `Release module <distribution> <version>`, built at the tagged
 commit, that did NOT succeed — recovery only ever applies to a release that
 failed after publishing but before tagging. Runs dispatched before the
 `run-name` binding existed carry no provable title and cannot be checked this
 way; this is acceptable because no governed module has a verified row yet.
-Restricting tag creation itself to a dedicated release App ruleset — closing
-the remaining gap where a human with `contents: write` could push an
-unrelated tag by hand — is accepted future work, pending Michael.
+`ModuleReleaseTagEvidence.v1` gained `source_run_id` in place because no
+tag carrying the earlier shape was ever emitted (no governed module release
+ran between the two changes). Residuals, stated rather than implied: (a) the
+check runs the pull request's own copy of the script, the same class as the
+append-only checker, so a weakening made in the same diff is caught only by
+review; (b) replacing a tag after a legitimate run (delete and re-push with a
+different digest while keeping real run ids) is not bound to anything the run
+itself produced — an availability risk to the record, not to registry
+integrity, since publication is environment-protected; (c) restricting tag
+creation to a dedicated release App ruleset is pending Michael, and no
+blanket GitHub Actions bypass is granted in its place.
 `scripts/module_catalog.py` joins those inputs deterministically, and
 `tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
 refuse drift or an undiscoverable new distribution. An application still owns

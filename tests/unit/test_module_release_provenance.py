@@ -139,6 +139,7 @@ def _run_object(
         "event": event,
         "head_branch": head_branch,
         "repository": {"full_name": full_name},
+        "head_repository": {"full_name": full_name},
         "status": status,
         "conclusion": conclusion,
         "head_sha": head_sha,
@@ -186,8 +187,14 @@ def _fake_sleep():
     return sleep, calls
 
 
-def _jobs_with_step(name: str, conclusion: str = "success") -> list[dict]:
-    return [{"steps": [{"name": name, "conclusion": conclusion}]}]
+def _jobs_with_step(
+    name: str, conclusion: str = "success", *, job_name: str | None = None
+) -> list[dict]:
+    # GitHub reports a job without `name:` by its key: `verify` owns the
+    # release tag step, `recover` the recovery one.
+    if job_name is None:
+        job_name = "recover" if name == "Tag the recovered release" else "verify"
+    return [{"name": job_name, "steps": [{"name": name, "conclusion": conclusion}]}]
 
 
 # ── Accepted paths ───────────────────────────────────────────────────────────
@@ -343,7 +350,7 @@ def test_refuses_a_verification_run_in_another_repository(provenance) -> None:
         },
         jobs={},
     )
-    with pytest.raises(provenance.ProvenanceError, match="is not in"):
+    with pytest.raises(provenance.ProvenanceError, match="repository is not"):
         provenance.verify_row_provenance(
             row,
             peeled_commit=PEELED_COMMIT,
@@ -1116,19 +1123,28 @@ def test_ci_job_checkout_uses_full_history() -> None:
     assert checkout_step["with"]["fetch-depth"] == 0
 
 
+def _interpolating_run_bodies(ci_text: str) -> list[str]:
+    job = yaml.safe_load(ci_text)["jobs"]["module-release-provenance"]
+    return [body for body in _run_bodies(job) if "${{" in body]
+
+
 def test_ci_job_run_bodies_never_interpolate_an_expression() -> None:
-    for body in _run_bodies(_ci_job()):
-        assert "${{" not in body
+    assert _interpolating_run_bodies(CI_WORKFLOW.read_text()) == []
 
 
 def test_ci_job_run_body_sensitivity_plant_catches_an_interpolated_expression() -> None:
-    # Near-miss: a run body that inlines `${{ github.event.before }}` directly
-    # (shell-injectable) instead of going through the `env:` bridge.
-    plant = (
-        "python scripts/module_release_provenance.py "
-        '--base "${{ github.event.before }}"'
+    # The SAME detector, fed the real ci.yml with the env bridge bypassed:
+    # the base SHA inlined straight into the run body (shell-injectable).
+    real = CI_WORKFLOW.read_text()
+    bridged = 'run: python scripts/module_release_provenance.py --base "$BASE_SHA"'
+    assert bridged in real
+    planted = real.replace(
+        bridged,
+        "run: python scripts/module_release_provenance.py "
+        '--base "${{ github.event.before }}"',
+        1,
     )
-    assert "${{" in plant
+    assert _interpolating_run_bodies(planted) != []
 
 
 def test_ci_job_invokes_the_provenance_script_with_the_base_env_var() -> None:
@@ -1150,20 +1166,76 @@ def test_ci_job_invocation_sensitivity_plant_catches_a_missing_base_flag() -> No
 # ── run-name binds the dispatched module + version ──────────────────────────
 
 
+_RELEASE_RUN_NAME = "Release module ${{ inputs.module }} ${{ inputs.version }}"
+_RECOVER_RUN_NAME = "Recover module ${{ inputs.module }} ${{ inputs.version }}"
+
+
+def _run_name_binds(workflow_text: str, expected: str) -> bool:
+    return yaml.safe_load(workflow_text).get("run-name") == expected
+
+
 def test_release_workflow_run_name_binds_module_and_version() -> None:
-    data = yaml.safe_load(RELEASE_WORKFLOW.read_text())
-    expected = "Release module ${{ inputs.module }} ${{ inputs.version }}"
-    assert data["run-name"] == expected
+    assert _run_name_binds(RELEASE_WORKFLOW.read_text(), _RELEASE_RUN_NAME)
 
 
 def test_recover_workflow_run_name_binds_module_and_version() -> None:
-    data = yaml.safe_load(RECOVER_WORKFLOW.read_text())
-    expected = "Recover module ${{ inputs.module }} ${{ inputs.version }}"
-    assert data["run-name"] == expected
+    assert _run_name_binds(RECOVER_WORKFLOW.read_text(), _RECOVER_RUN_NAME)
 
 
 def test_run_name_sensitivity_plant_catches_a_dropped_version() -> None:
-    # Near-miss: title binds the module but drops the version, which is
-    # exactly the forgeable gap this rule closes.
-    plant = "Release module ${{ inputs.module }}"
-    assert plant != "Release module ${{ inputs.module }} ${{ inputs.version }}"
+    # The SAME detector, fed the real workflows with the version dropped from
+    # the title — exactly the forgeable gap this rule closes.
+    for path, expected in (
+        (RELEASE_WORKFLOW, _RELEASE_RUN_NAME),
+        (RECOVER_WORKFLOW, _RECOVER_RUN_NAME),
+    ):
+        real = path.read_text()
+        assert f"run-name: {expected}" in real
+        planted = real.replace(
+            f"run-name: {expected}",
+            f"run-name: {expected.removesuffix(' ${{ inputs.version }}')}",
+            1,
+        )
+        assert not _run_name_binds(planted, expected)
+
+
+# ── Repository, fork and tag-job binding ────────────────────────────────────
+
+
+def _release_verify_kwargs() -> dict:
+    return {
+        "peeled_commit": PEELED_COMMIT,
+        "repository": REPOSITORY,
+        "wait_seconds": 0,
+        "poll_seconds": 1,
+        "is_on_main": lambda sha: True,
+    }
+
+
+def test_refuses_a_run_whose_head_repository_is_a_fork(provenance) -> None:
+    run = _run_object(run_id="1001", path=provenance.SOURCE_WORKFLOW)
+    run["head_repository"] = {"full_name": "someone-else/fork"}
+    runs = FakeGitHubRuns(
+        runs={"1001": run}, jobs={"1001": _jobs_with_step("Tag the verified release")}
+    )
+    with pytest.raises(provenance.ProvenanceError, match="head_repository is not"):
+        provenance.verify_row_provenance(_row(), runs=runs, **_release_verify_kwargs())
+
+
+def test_refuses_a_run_with_a_null_repository_without_crashing(provenance) -> None:
+    run = _run_object(run_id="1001", path=provenance.SOURCE_WORKFLOW)
+    run["repository"] = None
+    runs = FakeGitHubRuns(
+        runs={"1001": run}, jobs={"1001": _jobs_with_step("Tag the verified release")}
+    )
+    with pytest.raises(provenance.ProvenanceError, match="repository is not"):
+        provenance.verify_row_provenance(_row(), runs=runs, **_release_verify_kwargs())
+
+
+def test_refuses_a_tag_step_that_sits_in_a_different_job(provenance) -> None:
+    runs = FakeGitHubRuns(
+        runs={"1001": _run_object(run_id="1001", path=provenance.SOURCE_WORKFLOW)},
+        jobs={"1001": _jobs_with_step("Tag the verified release", job_name="build")},
+    )
+    with pytest.raises(provenance.ProvenanceError, match="in job 'verify'"):
+        provenance.verify_row_provenance(_row(), runs=runs, **_release_verify_kwargs())

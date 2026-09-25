@@ -153,6 +153,14 @@ class RestGitHubRuns:
         jobs = payload.get("jobs")
         if not isinstance(jobs, list):
             raise ProvenanceError(f"GitHub API returned no jobs list for run {run_id}")
+        # One page is the whole run: both approved workflows have at most
+        # three jobs. A count beyond one page means this is not one of them.
+        total = payload.get("total_count")
+        if not isinstance(total, int) or total > len(jobs):
+            raise ProvenanceError(
+                f"GitHub API returned {len(jobs)} of {total!r} jobs for run "
+                f"{run_id}; refusing a partial job list"
+            )
         return jobs
 
     def get_workflow(self, workflow_id: object) -> dict:
@@ -246,11 +254,12 @@ def _require_run_identity(
             f"{label} run {run_id} head commit {head_sha!r} is not an "
             "ancestor of origin/main"
         )
-    if run.get("repository", {}).get("full_name") != repository:
-        raise ProvenanceError(
-            f"{label} run {run_id} is not in {repository!r}: "
-            f"{run.get('repository', {}).get('full_name')!r}"
-        )
+    for field in ("repository", "head_repository"):
+        owner = _full_name(run, field)
+        if owner != repository:
+            raise ProvenanceError(
+                f"{label} run {run_id} {field} is not {repository!r}: {owner!r}"
+            )
     if str(run.get("id")) != str(run_id):
         raise ProvenanceError(
             f"{label} run id mismatch: requested {run_id}, API returned "
@@ -281,10 +290,26 @@ def _await_completed(
     return run
 
 
+def _full_name(run: dict, field: str) -> str | None:
+    """``run[field]["full_name"]``, or None when the field is absent/null —
+    a missing repository is a refusal, never an AttributeError."""
+    value = run.get(field)
+    if not isinstance(value, dict):
+        return None
+    name = value.get("full_name")
+    return name if isinstance(name, str) else None
+
+
 def _require_step_succeeded(
-    runs: GitHubRuns, run_id: str, step_name: str, *, label: str
+    runs: GitHubRuns, run_id: str, step_name: str, *, job_name: str, label: str
 ) -> None:
+    # The step must sit in the ONE job that owns tag creation (`verify` in
+    # release-module.yml, `recover` in recover-module-release.yml — neither
+    # sets `name:`, so GitHub reports the job key). A same-named step in any
+    # other job proves nothing.
     for job in runs.get_jobs(run_id):
+        if job.get("name") != job_name:
+            continue
         for step in job.get("steps", []):
             if step.get("name") == step_name:
                 if step.get("conclusion") != "success":
@@ -293,7 +318,9 @@ def _require_step_succeeded(
                         f"succeed (conclusion={step.get('conclusion')!r})"
                     )
                 return
-    raise ProvenanceError(f"{label} run {run_id} has no step named {step_name!r}")
+    raise ProvenanceError(
+        f"{label} run {run_id} has no step named {step_name!r} in job {job_name!r}"
+    )
 
 
 def verify_row_provenance(
@@ -359,7 +386,11 @@ def verify_row_provenance(
         "Tag the verified release" if is_release else "Tag the recovered release"
     )
     _require_step_succeeded(
-        runs, verification_run_id, tag_step_name, label="verification"
+        runs,
+        verification_run_id,
+        tag_step_name,
+        job_name="verify" if is_release else "recover",
+        label="verification",
     )
 
     if is_release:
