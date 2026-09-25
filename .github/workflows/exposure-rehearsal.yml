@@ -30,7 +30,7 @@ on:
       authorization_run:
         description: "Platform CP authorization run id (the lease references it)"
         required: true
-      # `authorization_doc_digest` WAS an input here and is deliberately gone.
+      # An authorization document-digest input WAS here and is deliberately gone.
       #
       # It was free text that nothing could check: the runner never imported
       # `provenance.py` or `authorization.py`, built no `ExecutionGrant`, and
