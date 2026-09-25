@@ -999,6 +999,40 @@ itself produced — an availability risk to the record, not to registry
 integrity, since publication is environment-protected; (c) restricting tag
 creation to a dedicated release App ruleset is pending Michael, and no
 blanket GitHub Actions bypass is granted in its place.
+**Release authority at execution time (`ReleaseAuthority.v1`).**
+`scripts/release_authority.py` derives the module release control surface
+mechanically — both release workflows, every local composite action and
+script they reach (run bodies, shell references, Python imports and string
+references inside `scripts/`), the release allowlist, the row-deciding
+checkers (`module_release_provenance.py`,
+`check_module_release_verification_append_only.py`) and itself — plus every
+third-party action as an `action:<owner/repo@40-hex>` coordinate (a mutable
+reference is refused). Its canonical digest is the active authority in
+`docs/inventories/release-authority.json`, whose `history` is append-only; a
+test fails whenever the surface changes without the ledger moving. The tag
+step computes the digest from its own checkout, refuses a stale ledger, and
+records it in the tag evidence and the verification row. A new row is
+authorized only when its digest is already in the BASE branch's history, the
+ledger at the exact commit of the run that wrote the tag marked it active,
+that commit's bytes (with the surface re-derived there) reconstruct it, and
+the commit is on main's first-parent line — so a later authority change
+cannot invalidate an authorized release, and a release PR cannot invent
+authority. A pull request that changes the authority ledger and adds a
+release row is refused, as is any row over a base without a ledger.
+Dependency source is tested input, not release control: the smoke installs
+the target, kernel and first-party dependencies only as the exact wheels the
+run built, proves in an isolated interpreter that each installed
+distribution came from exactly that file and has no files under the
+checkout, and records every kernel/dependency wheel's filename and SHA-256
+as `smoke_dependency_wheels` in the tag evidence and row. A rerun of the
+same run may accept an existing tag only when its canonical bytes, tag
+object, peeled commit, run ids, authority digest, smoke wheels and wheel
+digest all match exactly; a recovery never replaces a tag — it adopts one
+only after matching it to the original run and the recovered artifact, and
+the row records the adopting run as `adopting_run_id`, which provenance
+checks as a separate successful, authorized recovery run. Rebase-merge
+configuration is optional hardening and is not part of this proof.
+
 `scripts/module_catalog.py` joins those inputs deterministically, and
 `tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
 refuse drift or an undiscoverable new distribution. An application still owns
