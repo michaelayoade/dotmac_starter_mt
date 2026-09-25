@@ -86,6 +86,14 @@ def _commit_all(path: Path, message: str) -> str:
 # ── 1. Canonical round trip and strict refusal ──────────────────────────────
 
 
+#: A syntactically valid release-authority digest for fixtures. This module
+#: never asserts anything about the REAL release-authority surface — that is
+#: `test_release_authority.py`'s subject — so a fixed, made-up digest is the
+#: honest fixture rather than one that happens to match the live ledger today
+#: and silently stops matching it tomorrow.
+_AUTHORITY_DIGEST_FIXTURE = "sha256:" + "9" * 64
+
+
 def test_canonical_render_round_trips_through_the_strict_parser() -> None:
     writer = _writer()
     message = writer.render_module_release_tag_evidence(
@@ -95,9 +103,12 @@ def test_canonical_render_round_trips_through_the_strict_parser() -> None:
         wheel_sha256="a" * 64,
         verification_run_id="123456789",
         source_run_id="123456789",
+        release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
     )
     assert message == (
-        '{"distribution":"dotmac-approvals","schema":"ModuleReleaseTagEvidence.v1",'
+        '{"distribution":"dotmac-approvals",'
+        '"release_authority_digest":"' + _AUTHORITY_DIGEST_FIXTURE + '",'
+        '"schema":"ModuleReleaseTagEvidence.v1",'
         '"source_run_id":"123456789",'
         '"verification_run_id":"123456789",'
         '"version":"0.1.0a7","wheel_filename":"dotmac_approvals-0.1.0a7-py3-none-any.whl",'
@@ -110,6 +121,7 @@ def test_canonical_render_round_trips_through_the_strict_parser() -> None:
         "wheel_sha256": "a" * 64,
         "verification_run_id": "123456789",
         "source_run_id": "123456789",
+        "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
     }
 
 
@@ -121,6 +133,7 @@ def _canonical_message(writer) -> str:
         wheel_sha256="a" * 64,
         verification_run_id="123456789",
         source_run_id="123456789",
+        release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
     )
 
 
@@ -191,6 +204,7 @@ def test_parser_refuses_a_non_decimal_run_id() -> None:
             wheel_sha256="a" * 64,
             verification_run_id="12x",
             source_run_id="123456789",
+            release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
         )
     payload = json.loads(_canonical_message(writer))
     payload["verification_run_id"] = "12x"
@@ -282,7 +296,11 @@ def _bare_origin_and_work(tmp_path: Path) -> tuple[Path, Path, str]:
 
 
 def _tag_a_release(
-    tmp_path: Path, *, run_id: str, wheel_bytes: bytes
+    tmp_path: Path,
+    *,
+    run_id: str,
+    wheel_bytes: bytes,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[Path, Path, str, Path]:
     """Build the wheel, create+push the tag via the real script, return coordinates."""
     origin, work, commit = _bare_origin_and_work(tmp_path)
@@ -291,6 +309,17 @@ def _tag_a_release(
     (artifact_dir / _WHEEL_NAME).write_bytes(wheel_bytes)
 
     tagger = _tagger()
+    # The real release-authority ledger and surface closure are this
+    # repository's own files, not the throwaway fixture repo `work` — proving
+    # `compute_and_check_authority_digest` against a real checkout is
+    # `test_release_authority.py`'s subject. Here it is stubbed to a fixed,
+    # syntactically valid digest so the tag-creation path under test is
+    # exercised without fabricating an entire release-authority surface.
+    monkeypatch.setattr(
+        tagger,
+        "compute_and_check_authority_digest",
+        lambda **_kwargs: _AUTHORITY_DIGEST_FIXTURE,
+    )
     exit_code = tagger.main(
         [
             "--distribution",
@@ -321,7 +350,10 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     origin, work, commit, artifact_dir = _tag_a_release(
-        tmp_path, run_id="555000111", wheel_bytes=b"exact build once bytes"
+        tmp_path,
+        run_id="555000111",
+        wheel_bytes=b"exact build once bytes",
+        monkeypatch=monkeypatch,
     )
 
     writer = _writer()
@@ -350,6 +382,7 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
         wheel_sha256=evidence["wheel_sha256"],
         verification_run_id=evidence["verification_run_id"],
         source_run_id=evidence["source_run_id"],
+        release_authority_digest=evidence["release_authority_digest"],
     )
     assert added
 
@@ -359,6 +392,7 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
         live={_TAG: (tag_object, peeled_commit)},
         evidence={_TAG: evidence},
         targets={_DISTRIBUTION},
+        authority_history={evidence["release_authority_digest"]},
     )
 
     # The digest half of write_record: the wheel actually on disk must
@@ -382,7 +416,10 @@ def test_full_write_record_records_the_verified_wheel_from_a_real_tag(
     already does for its non-kernel refusal tests.
     """
     origin, work, commit, artifact_dir = _tag_a_release(
-        tmp_path, run_id="555000222", wheel_bytes=b"a different build's bytes"
+        tmp_path,
+        run_id="555000222",
+        wheel_bytes=b"a different build's bytes",
+        monkeypatch=monkeypatch,
     )
 
     writer = _writer()
@@ -450,7 +487,10 @@ def test_write_record_requires_expected_run_id_and_commit_for_a_governed_module(
     still ran.
     """
     origin, work, commit, artifact_dir = _tag_a_release(
-        tmp_path, run_id="555000333", wheel_bytes=b"bytes for the binding guard"
+        tmp_path,
+        run_id="555000333",
+        wheel_bytes=b"bytes for the binding guard",
+        monkeypatch=monkeypatch,
     )
 
     writer = _writer()
@@ -526,7 +566,10 @@ def test_write_record_refuses_a_wheel_that_disagrees_with_the_tags_digest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     origin, work, commit, artifact_dir = _tag_a_release(
-        tmp_path, run_id="555000333", wheel_bytes=b"the retained wheel bytes"
+        tmp_path,
+        run_id="555000333",
+        wheel_bytes=b"the retained wheel bytes",
+        monkeypatch=monkeypatch,
     )
 
     writer = _writer()
@@ -583,6 +626,7 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "sha256": {"dotmac_approvals-0.1.0a99-py3-none-any.whl": "c" * 64},
         "verification_run_id": "999",
         "source_run_id": "999",
+        "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
     }
     evidence = {
         "distribution": "dotmac-approvals",
@@ -591,6 +635,7 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "wheel_sha256": "c" * 64,
         "verification_run_id": "999",
         "source_run_id": "999",
+        "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
     }
     return row, evidence
 

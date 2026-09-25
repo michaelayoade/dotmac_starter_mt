@@ -160,12 +160,26 @@ _VERSION = re.compile(
 _GIT_OBJECT = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _DECIMAL = re.compile(r"[0-9]+\Z")
+#: The release-authority digest format (``scripts/release_authority.py``'s
+#: ``_DIGEST_RE``), duplicated here rather than imported: this module must
+#: stay independently loadable (``importlib`` loads it standalone in tests
+#: and via ``_local_script``), and the two representations of "a release
+#: authority digest" would drift silently if only one carried the check.
+_AUTHORITY_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 #: The one canonical shape of a governed module release tag's annotated
 #: message. Both `release-module.yml` and `recover-module-release.yml` write
 #: this exact JSON line via `scripts/tag_module_release.py`, which is the
 #: single owner of both rendering and parsing it — a tag body is never free
 #: text again.
+#:
+#: v1 gained ``release_authority_digest`` in place (no tag with this schema
+#: has ever been emitted — no module release has landed since #754 — so this
+#: is an in-place extension of v1, not a v2 migration). It names the exact
+#: release-authority surface (``scripts/release_authority.py``'s closure over
+#: both release workflows) that was active on the checkout which cut this
+#: tag, so a tag minted under a stale or tampered authority is provably
+#: distinguishable from one minted under the reviewed one.
 MODULE_RELEASE_TAG_EVIDENCE_SCHEMA = "ModuleReleaseTagEvidence.v1"
 _TAG_EVIDENCE_KEYS = {
     "schema",
@@ -175,6 +189,7 @@ _TAG_EVIDENCE_KEYS = {
     "wheel_sha256",
     "verification_run_id",
     "source_run_id",
+    "release_authority_digest",
 }
 
 
@@ -186,6 +201,7 @@ def render_module_release_tag_evidence(
     wheel_sha256: str,
     verification_run_id: str,
     source_run_id: str,
+    release_authority_digest: str,
 ) -> str:
     """The one line of canonical JSON a governed module release tag carries.
 
@@ -197,6 +213,10 @@ def render_module_release_tag_evidence(
     ``source_run_id`` names the run that BUILT and PUBLISHED the wheel: for a
     normal release it equals ``verification_run_id``; for a recovery it is the
     original failed run whose artifact is being retroactively verified.
+
+    ``release_authority_digest`` is the ``sha256:``-prefixed digest of the
+    release-authority surface active on the checkout that cut this tag
+    (``scripts/release_authority.py``'s ``authority_digest``).
     """
     if not _SHA256.fullmatch(wheel_sha256):
         raise ReleaseRecordError(
@@ -209,6 +229,10 @@ def render_module_release_tag_evidence(
     if not _DECIMAL.fullmatch(source_run_id):
         raise ReleaseRecordError(
             "module release tag evidence requires a decimal source_run_id"
+        )
+    if not _AUTHORITY_DIGEST.fullmatch(release_authority_digest):
+        raise ReleaseRecordError(
+            "module release tag evidence requires a sha256: release authority digest"
         )
     if not _wheel_filename(wheel_filename, distribution=distribution, version=version):
         raise ReleaseRecordError(
@@ -223,6 +247,7 @@ def render_module_release_tag_evidence(
         "wheel_sha256": wheel_sha256,
         "verification_run_id": verification_run_id,
         "source_run_id": source_run_id,
+        "release_authority_digest": release_authority_digest,
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -256,10 +281,12 @@ def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
     }
     run_id = payload["verification_run_id"]
     source_run_id = payload["source_run_id"]
+    authority_digest = payload["release_authority_digest"]
     if (
         not all(isinstance(value, str) for value in fields.values())
         or not isinstance(run_id, str)
         or not isinstance(source_run_id, str)
+        or not isinstance(authority_digest, str)
     ):
         raise ReleaseRecordError(
             "module release tag evidence fields must all be strings"
@@ -271,10 +298,16 @@ def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
         wheel_sha256=fields["wheel_sha256"],
         verification_run_id=run_id,
         source_run_id=source_run_id,
+        release_authority_digest=authority_digest,
     )
     if canonical != message:
         raise ReleaseRecordError("module release tag evidence is not canonical JSON")
-    return {**fields, "verification_run_id": run_id, "source_run_id": source_run_id}
+    return {
+        **fields,
+        "verification_run_id": run_id,
+        "source_run_id": source_run_id,
+        "release_authority_digest": authority_digest,
+    }
 
 
 def annotated_tag_message(tag: str) -> str:
@@ -384,6 +417,7 @@ def parse_module_release_verifications(
         "sha256",
         "verification_run_id",
         "source_run_id",
+        "release_authority_digest",
     }
     for row in document["releases"]:
         if not isinstance(row, dict) or set(row) != keys:
@@ -400,6 +434,13 @@ def parse_module_release_verifications(
         ):
             raise ReleaseRecordError(
                 f"module verification {row.get('tag')} has an invalid source_run_id"
+            )
+        if not isinstance(
+            row["release_authority_digest"], str
+        ) or not _AUTHORITY_DIGEST.fullmatch(row["release_authority_digest"]):
+            raise ReleaseRecordError(
+                f"module verification {row.get('tag')} has an invalid "
+                "release_authority_digest"
             )
         tag = row["tag"]
         distribution, version = _coordinate(tag, targets=governed)
@@ -553,6 +594,25 @@ def live_module_tag_evidence(
     }
 
 
+def _release_authority_history() -> set[str]:
+    """Every digest the release-authority ledger has ever declared active.
+
+    Read from the checked-in ledger via ``release_authority.py``'s own strict
+    parser, never re-derived here — this module never re-implements the
+    ledger's schema rules.
+    """
+    authority = _local_script("release_authority")
+    ledger_path = REPO_ROOT / authority.LEDGER_PATH
+    try:
+        ledger_text = ledger_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ReleaseRecordError(
+            f"release authority ledger is unreadable at {authority.LEDGER_PATH}"
+        ) from exc
+    ledger = authority.parse_authority_ledger(ledger_text)
+    return set(ledger["history"])
+
+
 def validate_module_release_inventory(
     verified_text: str,
     legacy_text: str,
@@ -560,6 +620,7 @@ def validate_module_release_inventory(
     live: dict[str, tuple[str, str]] | None = None,
     evidence: dict[str, dict[str, str]] | None = None,
     targets: set[str] | None = None,
+    authority_history: set[str] | None = None,
 ) -> None:
     """Every governed tag is in exactly one immutable, typed evidence class."""
     governed = module_release_targets() if targets is None else targets
@@ -608,6 +669,24 @@ def validate_module_release_inventory(
             raise ReleaseRecordError(
                 f"module tag {tag} evidence source run id mismatch"
             )
+        if proof["release_authority_digest"] != row["release_authority_digest"]:
+            raise ReleaseRecordError(
+                f"module tag {tag} evidence authority digest mismatch"
+            )
+
+    if verified:
+        history = (
+            _release_authority_history()
+            if authority_history is None
+            else set(authority_history)
+        )
+        for tag, row in verified.items():
+            if row["release_authority_digest"] not in history:
+                raise ReleaseRecordError(
+                    f"module tag {tag} release authority digest "
+                    f"{row['release_authority_digest']!r} is not in the "
+                    "release-authority ledger history"
+                )
 
 
 def module_wheel_digest(
@@ -652,6 +731,7 @@ def add_module_release_verification(
     wheel_sha256: str,
     verification_run_id: str,
     source_run_id: str,
+    release_authority_digest: str,
 ) -> tuple[str, bool]:
     """Append one immutable, producer-owned module publication record."""
     if not _DECIMAL.fullmatch(verification_run_id):
@@ -661,6 +741,10 @@ def add_module_release_verification(
     if not _DECIMAL.fullmatch(source_run_id):
         raise ReleaseRecordError(
             f"module verification {tag} requires a decimal source_run_id"
+        )
+    if not _AUTHORITY_DIGEST.fullmatch(release_authority_digest):
+        raise ReleaseRecordError(
+            f"module verification {tag} requires a sha256: release authority digest"
         )
     existing_rows = parse_module_release_verifications(text)
     document = cast(
@@ -678,6 +762,7 @@ def add_module_release_verification(
         "sha256": {wheel_filename: wheel_sha256},
         "verification_run_id": verification_run_id,
         "source_run_id": source_run_id,
+        "release_authority_digest": release_authority_digest,
     }
     for existing in existing_rows.values():
         if (existing["distribution"], existing["version"]) != (
@@ -1536,6 +1621,7 @@ def write_record(
             wheel_sha256=wheel_sha256,
             verification_run_id=evidence["verification_run_id"],
             source_run_id=evidence["source_run_id"],
+            release_authority_digest=evidence["release_authority_digest"],
         )
         if added:
             changed.append(

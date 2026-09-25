@@ -30,6 +30,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import release_authority  # noqa: E402
 from write_release_record import (  # noqa: E402
     ReleaseRecordError,
     module_wheel_digest,
@@ -37,6 +38,37 @@ from write_release_record import (  # noqa: E402
 )
 
 REPO_ROOT = SCRIPTS_DIR.parent
+
+
+def compute_and_check_authority_digest(*, repo_root: Path) -> str:
+    """The release-authority digest of THIS checkout, refused if stale.
+
+    Computed from the same surface `scripts/release_authority.py check` uses
+    (``derive_surface`` + ``authority_digest``) and required to equal the
+    checked-in ledger's ``active.digest`` at this same checkout: a run whose
+    authority ledger is stale (or was tampered with) is not an authorized
+    commit, and must never mint a tag.
+    """
+    try:
+        read = release_authority.worktree_reader(repo_root)
+        files, external = release_authority.derive_surface(read)
+        digest = release_authority.authority_digest(files, external, read)
+        ledger_path = repo_root / release_authority.LEDGER_PATH
+        ledger = release_authority.parse_authority_ledger(
+            ledger_path.read_text(encoding="utf-8")
+        )
+    except (release_authority.ReleaseAuthorityError, OSError) as failure:
+        raise ReleaseRecordError(
+            f"could not derive or read the release authority: {failure}"
+        ) from failure
+    active_digest = ledger["active"]["digest"]
+    if digest != active_digest:
+        raise ReleaseRecordError(
+            f"this checkout's release authority digest ({digest}) does not "
+            f"match the ledger's active digest ({active_digest}); refusing "
+            "to tag under a stale or tampered release authority"
+        )
+    return digest
 
 
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -122,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         wheel_filename, wheel_sha256 = module_wheel_digest(
             args.artifact_dir, distribution=args.distribution, version=args.version
         )
+        authority_digest_value = compute_and_check_authority_digest(repo_root=cwd)
         message = render_module_release_tag_evidence(
             distribution=args.distribution,
             version=args.version,
@@ -129,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             wheel_sha256=wheel_sha256,
             verification_run_id=args.run_id,
             source_run_id=args.source_run_id,
+            release_authority_digest=authority_digest_value,
         )
         create_and_push_tag(
             tag=args.tag,

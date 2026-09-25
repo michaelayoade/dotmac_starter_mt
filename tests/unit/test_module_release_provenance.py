@@ -107,6 +107,11 @@ def _row(
         "sha256": {wheel_name: "b" * 64},
         "verification_run_id": verification_run_id,
         "source_run_id": source_run_id,
+        # A fixed, syntactically valid release-authority digest. This module's
+        # tests are about run provenance, never about the release-authority
+        # ledger's history — that is `test_write_release_record.py`'s
+        # `validate_module_release_inventory` coverage.
+        "release_authority_digest": "sha256:" + "9" * 64,
     }
 
 
