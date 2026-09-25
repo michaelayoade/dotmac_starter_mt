@@ -33,6 +33,10 @@ APPEND_ONLY_SCRIPT = (
 RECOVER_WORKFLOW = PROJECT_ROOT / ".github/workflows/recover-module-release.yml"
 RELEASE_WORKFLOW = PROJECT_ROOT / ".github/workflows/release-module.yml"
 
+_SMOKE_WHEELS_FIXTURE = [
+    {"filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl", "sha256": "d" * 64}
+]
+
 
 def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -104,11 +108,14 @@ def test_canonical_render_round_trips_through_the_strict_parser() -> None:
         verification_run_id="123456789",
         source_run_id="123456789",
         release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
     assert message == (
         '{"distribution":"dotmac-approvals",'
         '"release_authority_digest":"' + _AUTHORITY_DIGEST_FIXTURE + '",'
         '"schema":"ModuleReleaseTagEvidence.v1",'
+        '"smoke_dependency_wheels":[{"filename":'
+        '"dotmac_kernel-0.1.0a105-py3-none-any.whl","sha256":"' + "d" * 64 + '"}],'
         '"source_run_id":"123456789",'
         '"verification_run_id":"123456789",'
         '"version":"0.1.0a7","wheel_filename":"dotmac_approvals-0.1.0a7-py3-none-any.whl",'
@@ -122,6 +129,7 @@ def test_canonical_render_round_trips_through_the_strict_parser() -> None:
         "verification_run_id": "123456789",
         "source_run_id": "123456789",
         "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
+        "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
     }
 
 
@@ -134,6 +142,7 @@ def _canonical_message(writer) -> str:
         verification_run_id="123456789",
         source_run_id="123456789",
         release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
 
 
@@ -205,6 +214,7 @@ def test_parser_refuses_a_non_decimal_run_id() -> None:
             verification_run_id="12x",
             source_run_id="123456789",
             release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+            smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
         )
     payload = json.loads(_canonical_message(writer))
     payload["verification_run_id"] = "12x"
@@ -295,6 +305,19 @@ def _bare_origin_and_work(tmp_path: Path) -> tuple[Path, Path, str]:
     return origin, work, commit
 
 
+def _smoke_manifest(artifact_dir: Path) -> str:
+    """A SmokeDependencyWheels.v1 manifest beside (never inside) the artifact
+    directory, which must hold exactly the one target wheel."""
+    path = artifact_dir.parent / "smoke-dependencies.json"
+    path.write_text(
+        json.dumps(
+            {"schema": "SmokeDependencyWheels.v1", "wheels": _SMOKE_WHEELS_FIXTURE}
+        ),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
 def _tag_a_release(
     tmp_path: Path,
     *,
@@ -336,6 +359,8 @@ def _tag_a_release(
             run_id,
             "--source-run-id",
             run_id,
+            "--smoke-dependencies",
+            _smoke_manifest(artifact_dir),
             "--remote",
             "origin",
             "--repo-root",
@@ -383,6 +408,7 @@ def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
         verification_run_id=evidence["verification_run_id"],
         source_run_id=evidence["source_run_id"],
         release_authority_digest=evidence["release_authority_digest"],
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
     assert added
 
@@ -628,6 +654,7 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "source_run_id": "999",
         "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
         "adopting_run_id": None,
+        "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
     }
     evidence = {
         "distribution": "dotmac-approvals",
@@ -637,6 +664,7 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "verification_run_id": "999",
         "source_run_id": "999",
         "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
+        "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
     }
     return row, evidence
 
@@ -1114,6 +1142,8 @@ def _run_tagger(
             run_id,
             "--source-run-id",
             source_run_id or run_id,
+            "--smoke-dependencies",
+            _smoke_manifest(artifact_dir),
             "--remote",
             "origin",
             "--repo-root",
@@ -1265,6 +1295,7 @@ def test_the_writer_records_the_adopting_recovery_run() -> None:
         source_run_id="700",
         release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
         adopting_run_id="900",
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
     assert added
     row = json.loads(after)["releases"][0]
@@ -1283,6 +1314,7 @@ def test_the_writer_records_the_adopting_recovery_run() -> None:
             source_run_id="700",
             release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
             adopting_run_id="700",
+            smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
         )
 
 
@@ -1296,3 +1328,110 @@ def test_the_recovery_tag_step_adopts_or_creates_and_records_accordingly() -> No
     record_run = steps["Open the post-release record"]["run"]
     assert '--adopting-run-id "$RUN_ID"' in record_run
     assert '--expected-run-id "$EXPECTED_RUN"' in record_run
+
+
+def test_a_rerun_with_different_smoke_dependency_wheels_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, work, commit, artifact_dir = _tag_a_release(
+        tmp_path, run_id="700", wheel_bytes=b"retained", monkeypatch=monkeypatch
+    )
+    before = _remote_tag_object(work)
+    (artifact_dir.parent / "smoke-dependencies.json").write_text(
+        json.dumps(
+            {
+                "schema": "SmokeDependencyWheels.v1",
+                "wheels": [
+                    {
+                        "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+                        "sha256": "e" * 64,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    tagger = _tagger()
+    monkeypatch.setattr(
+        tagger,
+        "compute_and_check_authority_digest",
+        lambda **_k: _AUTHORITY_DIGEST_FIXTURE,
+    )
+    code = tagger.main(
+        [
+            "--distribution",
+            _DISTRIBUTION,
+            "--version",
+            _VERSION,
+            "--tag",
+            _TAG,
+            "--commit",
+            commit,
+            "--artifact-dir",
+            str(artifact_dir),
+            "--run-id",
+            "700",
+            "--source-run-id",
+            "700",
+            "--smoke-dependencies",
+            str(artifact_dir.parent / "smoke-dependencies.json"),
+            "--remote",
+            "origin",
+            "--repo-root",
+            str(work),
+        ]
+    )
+    assert code == 1
+    assert _remote_tag_object(work) == before
+
+
+@pytest.mark.parametrize(
+    "wheels",
+    [
+        [],
+        [
+            {"filename": "b.whl", "sha256": "a" * 64},
+            {"filename": "a.whl", "sha256": "a" * 64},
+        ],
+        [{"filename": "a.whl", "sha256": "A" * 64}],
+        [{"filename": "a.tar.gz", "sha256": "a" * 64}],
+        [{"filename": "a.whl", "sha256": "a" * 64, "extra": "x"}],
+    ],
+)
+def test_smoke_dependency_wheels_must_be_canonical(wheels: list) -> None:
+    writer = _writer()
+    with pytest.raises(writer.ReleaseRecordError):
+        writer.canonical_smoke_dependency_wheels(wheels)
+
+
+def test_the_smoke_installs_exact_wheels_and_their_manifest_reaches_the_tag() -> None:
+    """The kernel and first-party dependencies enter the smoke only as the
+    exact wheels this run built and hashed, and the tag records them."""
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text())
+    build = {s.get("name"): s for s in release["jobs"]["build"]["steps"]}
+    verify = {s.get("name"): s for s in release["jobs"]["verify"]["steps"]}
+    assert "--emit-dependency-manifest" in build["Release wheel smoke"]["run"]
+    assert (
+        build["Upload the smoke dependency manifest"]["with"]["name"]
+        == "${{ inputs.module }}-smoke-dependencies"
+    )
+    assert "Download the smoke dependency manifest" in verify
+    assert (
+        '--smoke-dependencies "${SMOKE_MANIFEST}"'
+        in (verify["Tag the verified release"]["run"])
+    )
+    source = (PROJECT_ROOT / "scripts" / "release_module.py").read_text()
+    smoke = source.split("def cmd_verify_wheel", 1)[1].split("\ndef ", 1)[0]
+    assert "--find-links" not in smoke, "first-party wheels must install by path"
+    assert "direct_url.json" in source and '"-I"' in smoke
+
+
+def test_recovery_records_the_original_runs_smoke_manifest() -> None:
+    recover = yaml.safe_load(RECOVER_WORKFLOW.read_text())
+    steps = {s.get("name"): s for s in recover["jobs"]["recover"]["steps"]}
+    download = steps["Download the original run's build artifacts"]["run"]
+    assert '--name "${MODULE}-smoke-dependencies"' in download
+    assert (
+        '--smoke-dependencies "$RECOVERED_SMOKE"'
+        in (steps["Tag the recovered release"]["run"])
+    )

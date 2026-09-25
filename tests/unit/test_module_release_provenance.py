@@ -29,6 +29,10 @@ CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-module.yml"
 RECOVER_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "recover-module-release.yml"
 
+_SMOKE_WHEELS_FIXTURE = [
+    {"filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl", "sha256": "d" * 64}
+]
+
 
 def _load_module():
     # `module_release_provenance` does `from write_release_record import ...`
@@ -113,6 +117,7 @@ def _row(
         # `validate_module_release_inventory` coverage.
         "release_authority_digest": "sha256:" + "9" * 64,
         "adopting_run_id": None,
+        "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
     }
 
 

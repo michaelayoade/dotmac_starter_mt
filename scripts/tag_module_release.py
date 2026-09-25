@@ -22,6 +22,7 @@ because splitting them across two tools would let one drift from the other:
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import release_authority  # noqa: E402
 from write_release_record import (  # noqa: E402
     ReleaseRecordError,
+    canonical_smoke_dependency_wheels,
     module_wheel_digest,
     parse_module_release_tag_evidence,
     render_module_release_tag_evidence,
@@ -122,6 +124,24 @@ def create_and_push_tag(
             f"git push of {tag} to {remote} failed: "
             f"{pushed.stderr.strip() or 'no stderr'}"
         )
+
+
+def read_smoke_dependencies(path: str) -> list[dict[str, str]]:
+    """The `SmokeDependencyWheels.v1` manifest `release_module.py verify-wheel`
+    wrote: the exact kernel/dependency wheels the smoke installed."""
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as failure:
+        raise ReleaseRecordError(
+            f"cannot read the smoke dependency manifest {path}: {failure}"
+        ) from failure
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schema", "wheels"}
+        or document["schema"] != "SmokeDependencyWheels.v1"
+    ):
+        raise ReleaseRecordError(f"{path} is not a SmokeDependencyWheels.v1 manifest")
+    return canonical_smoke_dependency_wheels(document["wheels"])
 
 
 def existing_tag(tag: str, *, remote: str, cwd: Path) -> tuple[str, str, str] | None:
@@ -279,6 +299,12 @@ def main(argv: list[str] | None = None) -> int:
         "for a normal release, or the original failed run for a recovery",
     )
     parser.add_argument(
+        "--smoke-dependencies",
+        default=None,
+        help="SmokeDependencyWheels.v1 manifest of the exact kernel/dependency "
+        "wheels the smoke installed; required unless adopting",
+    )
+    parser.add_argument(
         "--adopt-original-run",
         default=None,
         help="recovery only: adopt the existing tag the original run wrote "
@@ -308,6 +334,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"adopted existing {args.tag} written by run {args.adopt_original_run}"
             )
             return 0
+        if args.smoke_dependencies is None:
+            raise ReleaseRecordError(
+                "--smoke-dependencies is required when creating or re-accepting "
+                "a tag"
+            )
+        smoke_wheels = read_smoke_dependencies(args.smoke_dependencies)
         wheel_filename, wheel_sha256 = module_wheel_digest(
             args.artifact_dir, distribution=args.distribution, version=args.version
         )
@@ -319,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
             verification_run_id=args.run_id,
             source_run_id=args.source_run_id,
             release_authority_digest=authority_digest_value,
+            smoke_dependency_wheels=smoke_wheels,
         )
         if accept_identical_rerun_tag(
             tag=args.tag,

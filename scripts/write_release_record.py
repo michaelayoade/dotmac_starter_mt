@@ -190,7 +190,41 @@ _TAG_EVIDENCE_KEYS = {
     "verification_run_id",
     "source_run_id",
     "release_authority_digest",
+    "smoke_dependency_wheels",
 }
+
+
+def canonical_smoke_dependency_wheels(value: object) -> list[dict[str, str]]:
+    """The exact first-party wheels the pre-publish smoke installed.
+
+    A non-empty list of ``{"filename", "sha256"}`` objects, unique by
+    filename and already sorted by it — the canonical form is required, never
+    repaired, so two renderings of one set cannot differ.
+    """
+    if not isinstance(value, list) or not value:
+        raise ReleaseRecordError("smoke_dependency_wheels must be a non-empty list")
+    wheels: list[dict[str, str]] = []
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"filename", "sha256"}
+            or not isinstance(item["filename"], str)
+            or not item["filename"].endswith(".whl")
+            or "/" in item["filename"]
+            or not isinstance(item["sha256"], str)
+            or not _SHA256.fullmatch(item["sha256"])
+        ):
+            raise ReleaseRecordError(
+                "each smoke dependency wheel needs exactly a .whl filename and a "
+                "lowercase 64-hex sha256"
+            )
+        wheels.append({"filename": item["filename"], "sha256": item["sha256"]})
+    names = [wheel["filename"] for wheel in wheels]
+    if names != sorted(names) or len(set(names)) != len(names):
+        raise ReleaseRecordError(
+            "smoke_dependency_wheels must be unique and sorted by filename"
+        )
+    return wheels
 
 
 def render_module_release_tag_evidence(
@@ -202,6 +236,7 @@ def render_module_release_tag_evidence(
     verification_run_id: str,
     source_run_id: str,
     release_authority_digest: str,
+    smoke_dependency_wheels: list[dict[str, str]],
 ) -> str:
     """The one line of canonical JSON a governed module release tag carries.
 
@@ -248,6 +283,9 @@ def render_module_release_tag_evidence(
         "verification_run_id": verification_run_id,
         "source_run_id": source_run_id,
         "release_authority_digest": release_authority_digest,
+        "smoke_dependency_wheels": canonical_smoke_dependency_wheels(
+            smoke_dependency_wheels
+        ),
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -299,6 +337,9 @@ def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
         verification_run_id=run_id,
         source_run_id=source_run_id,
         release_authority_digest=authority_digest,
+        smoke_dependency_wheels=canonical_smoke_dependency_wheels(
+            payload["smoke_dependency_wheels"]
+        ),
     )
     if canonical != message:
         raise ReleaseRecordError("module release tag evidence is not canonical JSON")
@@ -307,6 +348,7 @@ def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
         "verification_run_id": run_id,
         "source_run_id": source_run_id,
         "release_authority_digest": authority_digest,
+        "smoke_dependency_wheels": payload["smoke_dependency_wheels"],
     }
 
 
@@ -419,6 +461,7 @@ def parse_module_release_verifications(
         "source_run_id",
         "release_authority_digest",
         "adopting_run_id",
+        "smoke_dependency_wheels",
     }
     for row in document["releases"]:
         if not isinstance(row, dict) or set(row) != keys:
@@ -443,6 +486,9 @@ def parse_module_release_verifications(
                 f"module verification {row.get('tag')} has an invalid "
                 "release_authority_digest"
             )
+        row["smoke_dependency_wheels"] = canonical_smoke_dependency_wheels(
+            row["smoke_dependency_wheels"]
+        )
         adopting = row["adopting_run_id"]
         if adopting is not None and (
             not isinstance(adopting, str)
@@ -682,6 +728,10 @@ def validate_module_release_inventory(
             raise ReleaseRecordError(
                 f"module tag {tag} evidence source run id mismatch"
             )
+        if proof["smoke_dependency_wheels"] != row["smoke_dependency_wheels"]:
+            raise ReleaseRecordError(
+                f"module tag {tag} evidence smoke dependency wheels mismatch"
+            )
         if proof["release_authority_digest"] != row["release_authority_digest"]:
             raise ReleaseRecordError(
                 f"module tag {tag} evidence authority digest mismatch"
@@ -745,6 +795,7 @@ def add_module_release_verification(
     verification_run_id: str,
     source_run_id: str,
     release_authority_digest: str,
+    smoke_dependency_wheels: list[dict[str, str]],
     adopting_run_id: str | None = None,
 ) -> tuple[str, bool]:
     """Append one immutable, producer-owned module publication record."""
@@ -785,6 +836,9 @@ def add_module_release_verification(
         "source_run_id": source_run_id,
         "release_authority_digest": release_authority_digest,
         "adopting_run_id": adopting_run_id,
+        "smoke_dependency_wheels": canonical_smoke_dependency_wheels(
+            smoke_dependency_wheels
+        ),
     }
     for existing in existing_rows.values():
         if (existing["distribution"], existing["version"]) != (
@@ -1645,6 +1699,7 @@ def write_record(
             verification_run_id=evidence["verification_run_id"],
             source_run_id=evidence["source_run_id"],
             release_authority_digest=evidence["release_authority_digest"],
+            smoke_dependency_wheels=evidence["smoke_dependency_wheels"],
             adopting_run_id=adopting_run_id,
         )
         if added:

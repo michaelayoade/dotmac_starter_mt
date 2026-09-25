@@ -58,6 +58,10 @@ AGREEMENTS_IMPORT_NAME = "dotmac_commercial_agreements"
 #: evidence.py` for why a fixed, made-up digest is the honest fixture here).
 _AUTHORITY_DIGEST_FIXTURE = "sha256:" + "9" * 64
 
+_SMOKE_WHEELS_FIXTURE = [
+    {"filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl", "sha256": "d" * 64}
+]
+
 
 def _writer():
     spec = importlib.util.spec_from_file_location("write_release_record", SCRIPT)
@@ -105,6 +109,7 @@ def test_module_release_verification_appends_exact_immutable_coordinates() -> No
         verification_run_id="123456789",
         source_run_id="123456789",
         release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
     assert added
     document = json.loads(after)
@@ -123,6 +128,7 @@ def test_module_release_verification_appends_exact_immutable_coordinates() -> No
             "source_run_id": "123456789",
             "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
             "adopting_run_id": None,
+            "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
         }
     ]
 
@@ -138,6 +144,7 @@ def test_module_release_verification_appends_exact_immutable_coordinates() -> No
         verification_run_id="123456789",
         source_run_id="123456789",
         release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
     assert not added_again
     assert unchanged == after
@@ -157,6 +164,7 @@ def test_module_release_verification_refuses_coordinate_rewrite() -> None:
         verification_run_id="123456789",
         source_run_id="123456789",
         release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
     )
     with pytest.raises(writer.ReleaseRecordError, match="different coordinates"):
         writer.add_module_release_verification(
@@ -171,6 +179,7 @@ def test_module_release_verification_refuses_coordinate_rewrite() -> None:
             verification_run_id="123456789",
             source_run_id="123456789",
             release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+            smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
         )
 
 
@@ -394,6 +403,7 @@ def _synthetic_module_inventory():
         "source_run_id": "999000111",
         "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
         "adopting_run_id": None,
+        "smoke_dependency_wheels": _SMOKE_WHEELS_FIXTURE,
     }
     verified = {
         "$comment": "verified",
@@ -423,6 +433,7 @@ def test_missing_or_deleted_verified_row_is_refused_by_live_tag() -> None:
             "verification_run_id": row["verification_run_id"],
             "source_run_id": row["source_run_id"],
             "release_authority_digest": row["release_authority_digest"],
+            "smoke_dependency_wheels": row["smoke_dependency_wheels"],
         }
     }
     writer.validate_module_release_inventory(
