@@ -105,9 +105,9 @@ evidence and the refusal it removes.
   protected disposable CP issuer (recommended) or whether a production
   in-place issuer is contractually necessary. That decision must identify the
   signer/trust domain and the distinction between rehearsal and production
-  authorization. He also ratifies CP ADR-0013 A6.4's replacement text before
-  its immutable-reference rule is treated as accepted implementation authority;
-  the current amendment calls that ratification pending. The ADR-0070 versus
+  authorization. Michael ratified the complete CP ADR-0013 A6 amendment,
+  including A6.4's replacement immutable-reference rule, on 2026-09-25. The
+  ADR-0070 versus
   attestation-workflow ordering conflict has since been resolved by ADR-0070's
   2026-09-22 amendment. None of these decisions authorizes SSH or deployment.
 - **Before host work:** Michael supplies the exact SSH endpoint, environment,
@@ -202,9 +202,10 @@ Platform CP's `docs/adr/0013-operator-authorization-issuer-and-its-bootstrap.md`
 It merged as CP PR #196 (`c8ead5a`) with this section as Starter PR #747
 (`ead3b8a`), and Michael Ayoade ratified it separately afterwards, on
 2026-09-24 ("a is ratified"); the ratification is recorded at the head of
-§ A7. Ratification covers § A7 only — CP ADR-0013 A6.4 keeps its own pending
-status (see "Decision and evidence discipline" above). Summary, including
-Starter's own stake in each:
+§ A7. That 2026-09-24 record covers § A7 only. Michael separately ratified the
+complete CP ADR-0013 A6 amendment, including replacement A6.4, on 2026-09-25;
+CP records that later decision at the head of A6. Summary, including Starter's
+own stake in each:
 
 | Packet | Owner | Starter's stake |
 | --- | --- | --- |
