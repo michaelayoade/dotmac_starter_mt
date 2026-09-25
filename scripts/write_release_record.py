@@ -159,6 +159,125 @@ _VERSION = re.compile(
 )
 _GIT_OBJECT = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_DECIMAL = re.compile(r"[0-9]+\Z")
+
+#: The one canonical shape of a governed module release tag's annotated
+#: message. Both `release-module.yml` and `recover-module-release.yml` write
+#: this exact JSON line via `scripts/tag_module_release.py`, which is the
+#: single owner of both rendering and parsing it — a tag body is never free
+#: text again.
+MODULE_RELEASE_TAG_EVIDENCE_SCHEMA = "ModuleReleaseTagEvidence.v1"
+_TAG_EVIDENCE_KEYS = {
+    "schema",
+    "distribution",
+    "version",
+    "wheel_filename",
+    "wheel_sha256",
+    "verification_run_id",
+}
+
+
+def render_module_release_tag_evidence(
+    *,
+    distribution: str,
+    version: str,
+    wheel_filename: str,
+    wheel_sha256: str,
+    verification_run_id: str,
+) -> str:
+    """The one line of canonical JSON a governed module release tag carries.
+
+    Keys sorted, ASCII-only, comma/colon separators with no padding, and no
+    trailing whitespace or newline — `parse_module_release_tag_evidence` below
+    refuses anything that does not reproduce this exact byte string, so
+    canonical-ness is enforced by round-trip rather than by convention.
+    """
+    if not _SHA256.fullmatch(wheel_sha256):
+        raise ReleaseRecordError(
+            "module release tag evidence requires a lowercase 64-hex wheel digest"
+        )
+    if not _DECIMAL.fullmatch(verification_run_id):
+        raise ReleaseRecordError(
+            "module release tag evidence requires a decimal verification_run_id"
+        )
+    if not _wheel_filename(wheel_filename, distribution=distribution, version=version):
+        raise ReleaseRecordError(
+            f"module release tag evidence wheel {wheel_filename!r} does not "
+            f"bind {distribution} {version}"
+        )
+    payload = {
+        "schema": MODULE_RELEASE_TAG_EVIDENCE_SCHEMA,
+        "distribution": distribution,
+        "version": version,
+        "wheel_filename": wheel_filename,
+        "wheel_sha256": wheel_sha256,
+        "verification_run_id": verification_run_id,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def parse_module_release_tag_evidence(message: str) -> dict[str, str]:
+    """Strictly parse a tag's annotated message as canonical evidence.
+
+    Refuses non-canonical bytes (wrong key order, extra whitespace, non-ASCII
+    escapes chosen differently, a trailing newline not already stripped),
+    extra or missing keys, and the wrong schema — by re-rendering the parsed
+    fields and requiring a byte-for-byte match, so there is exactly one way to
+    pass this check rather than a parser that is more lenient than the writer.
+    """
+    if message.endswith("\n"):
+        message = message[: -len("\n")]
+    if "\n" in message:
+        raise ReleaseRecordError("module release tag evidence must be exactly one line")
+    try:
+        payload = json.loads(message)
+    except json.JSONDecodeError as exc:
+        raise ReleaseRecordError(
+            "module release tag evidence is not valid JSON"
+        ) from exc
+    if not isinstance(payload, dict) or set(payload) != _TAG_EVIDENCE_KEYS:
+        raise ReleaseRecordError("module release tag evidence has the wrong keys")
+    if payload.get("schema") != MODULE_RELEASE_TAG_EVIDENCE_SCHEMA:
+        raise ReleaseRecordError("module release tag evidence has the wrong schema")
+    fields = {
+        key: payload[key]
+        for key in ("distribution", "version", "wheel_filename", "wheel_sha256")
+    }
+    run_id = payload["verification_run_id"]
+    if not all(isinstance(value, str) for value in fields.values()) or not isinstance(
+        run_id, str
+    ):
+        raise ReleaseRecordError(
+            "module release tag evidence fields must all be strings"
+        )
+    canonical = render_module_release_tag_evidence(
+        distribution=fields["distribution"],
+        version=fields["version"],
+        wheel_filename=fields["wheel_filename"],
+        wheel_sha256=fields["wheel_sha256"],
+        verification_run_id=run_id,
+    )
+    if canonical != message:
+        raise ReleaseRecordError("module release tag evidence is not canonical JSON")
+    return {**fields, "verification_run_id": run_id}
+
+
+def annotated_tag_message(tag: str) -> str:
+    """The exact annotated-tag body, read from the tag OBJECT, never a ref.
+
+    ``git cat-file tag <object>`` prints headers, a blank line, then the
+    message; git appends exactly one trailing newline to a tag message it
+    stores, which is stripped here exactly once so callers see the bytes the
+    tagger actually supplied.
+    """
+    object_id = annotated_tag_object(tag)
+    body = _git("cat-file", "tag", object_id)
+    _, separator, message = body.partition("\n\n")
+    if not separator:
+        raise ReleaseRecordError(f"{tag} tag object has no message body")
+    if message.endswith("\n"):
+        message = message[: -len("\n")]
+    return message
 
 
 def _json_without_duplicate_keys(text: str, *, name: str) -> object:
@@ -248,10 +367,18 @@ def parse_module_release_verifications(
         "status",
         "pinnable",
         "sha256",
+        "verification_run_id",
     }
     for row in document["releases"]:
         if not isinstance(row, dict) or set(row) != keys:
             raise ReleaseRecordError("module verification row has wrong keys")
+        if not isinstance(row["verification_run_id"], str) or not _DECIMAL.fullmatch(
+            row["verification_run_id"]
+        ):
+            raise ReleaseRecordError(
+                f"module verification {row.get('tag')} has an invalid "
+                "verification_run_id"
+            )
         tag = row["tag"]
         distribution, version = _coordinate(tag, targets=governed)
         if row["distribution"] != distribution or row["version"] != version:
@@ -388,11 +515,28 @@ def live_module_tag_refs(
     return live
 
 
+def live_module_tag_evidence(
+    tags: set[str],
+) -> dict[str, dict[str, str]]:
+    """Read and strictly parse each verified tag's OWN annotated message.
+
+    Never a lightweight/moving ref: ``annotated_tag_message`` reads the tag
+    OBJECT body via ``git cat-file tag``, so a tag whose message was somehow
+    replaced without moving the object id would still be caught by the
+    object-id comparison this function's caller already performs.
+    """
+    return {
+        tag: parse_module_release_tag_evidence(annotated_tag_message(tag))
+        for tag in tags
+    }
+
+
 def validate_module_release_inventory(
     verified_text: str,
     legacy_text: str,
     *,
     live: dict[str, tuple[str, str]] | None = None,
+    evidence: dict[str, dict[str, str]] | None = None,
     targets: set[str] | None = None,
 ) -> None:
     """Every governed tag is in exactly one immutable, typed evidence class."""
@@ -417,6 +561,27 @@ def validate_module_release_inventory(
             raise ReleaseRecordError(
                 f"module tag {tag} object or peeled commit changed"
             )
+
+    # Legacy tags predate the tag-evidence contract and carry only real tag
+    # coordinates (checked above) — never a wheel digest to prove. Every
+    # VERIFIED row must instead be provable against the tag's own embedded
+    # evidence: identity, the single recorded wheel digest, and the run that
+    # performed the registry verification.
+    proofs = live_module_tag_evidence(set(verified)) if evidence is None else evidence
+    for tag, row in verified.items():
+        proof = proofs.get(tag)
+        if proof is None:
+            raise ReleaseRecordError(f"module tag {tag} has no readable evidence")
+        if (
+            proof["distribution"] != row["distribution"]
+            or proof["version"] != row["version"]
+        ):
+            raise ReleaseRecordError(f"module tag {tag} evidence identity mismatch")
+        filename, digest = next(iter(row["sha256"].items()))
+        if proof["wheel_filename"] != filename or proof["wheel_sha256"] != digest:
+            raise ReleaseRecordError(f"module tag {tag} evidence digest mismatch")
+        if proof["verification_run_id"] != row["verification_run_id"]:
+            raise ReleaseRecordError(f"module tag {tag} evidence run id mismatch")
 
 
 def module_wheel_digest(
@@ -459,8 +624,13 @@ def add_module_release_verification(
     peeled_commit: str,
     wheel_filename: str,
     wheel_sha256: str,
+    verification_run_id: str,
 ) -> tuple[str, bool]:
     """Append one immutable, producer-owned module publication record."""
+    if not _DECIMAL.fullmatch(verification_run_id):
+        raise ReleaseRecordError(
+            f"module verification {tag} requires a decimal verification_run_id"
+        )
     existing_rows = parse_module_release_verifications(text)
     document = cast(
         dict[str, object],
@@ -475,6 +645,7 @@ def add_module_release_verification(
         "status": "released",
         "pinnable": True,
         "sha256": {wheel_filename: wheel_sha256},
+        "verification_run_id": verification_run_id,
     }
     for existing in existing_rows.values():
         if (existing["distribution"], existing["version"]) != (
@@ -1170,20 +1341,11 @@ def write_record(
     package_dir, import_name = resolved_dir, resolved_import
     changed: list[str] = []
 
-    row = json.loads(ledger_text)["unpublished"].get(distribution)
-    if row is not None:
-        declared = row.get("declared")
-        if declared != version:
-            raise ReleaseRecordError(
-                f"the ledger excuses {distribution} at {declared!r} but "
-                f"{version!r} was published; the row describes a different "
-                "version and removing it would erase a live exemption"
-            )
-        new_ledger, removed = remove_ledger_row(ledger_text, distribution)
-        if removed:
-            json.loads(new_ledger)  # never leave the ledger unparseable
-            changed.append(f"removed the {distribution} publication-ledger row")
-
+    # Same principle as the lineage validation above, and for the same reason:
+    # a missing or misplaced --artifact-dir is the CALLER's input defect, not
+    # a state problem. Checking it before the ledger read means the refusal
+    # names the actual mistake instead of surfacing whatever unrelated ledger
+    # bookkeeping happens to run first for this distribution.
     if distribution in governed_modules and artifact_dir is None:
         raise ReleaseRecordError(
             f"{distribution} is a governed module: --artifact-dir with the "
@@ -1198,6 +1360,20 @@ def write_record(
             f"{tag} is frozen as pre-cutover unverified history; "
             "do not relabel it as a verified new release"
         )
+
+    row = json.loads(ledger_text)["unpublished"].get(distribution)
+    if row is not None:
+        declared = row.get("declared")
+        if declared != version:
+            raise ReleaseRecordError(
+                f"the ledger excuses {distribution} at {declared!r} but "
+                f"{version!r} was published; the row describes a different "
+                "version and removing it would erase a live exemption"
+            )
+        new_ledger, removed = remove_ledger_row(ledger_text, distribution)
+        if removed:
+            json.loads(new_ledger)  # never leave the ledger unparseable
+            changed.append(f"removed the {distribution} publication-ledger row")
 
     if package_dir and import_name:
         if digests:
@@ -1272,15 +1448,31 @@ def write_record(
         wheel_filename, wheel_sha256 = module_wheel_digest(
             artifact_dir, distribution=distribution, version=version
         )
+        tag_object = annotated_tag_object(tag)
+        evidence = parse_module_release_tag_evidence(annotated_tag_message(tag))
+        if evidence["distribution"] != distribution or evidence["version"] != version:
+            raise ReleaseRecordError(
+                f"{tag} evidence identity does not match the requested release"
+            )
+        if (
+            evidence["wheel_filename"] != wheel_filename
+            or evidence["wheel_sha256"] != wheel_sha256
+        ):
+            raise ReleaseRecordError(
+                f"{tag} evidence wheel digest disagrees with the retained "
+                "artifact; never rebuild it — download the exact retained "
+                "wheel that compare-published already verified"
+            )
         new_module_verification, added = add_module_release_verification(
             module_verification_text,
             distribution=distribution,
             version=version,
             tag=tag,
-            tag_object=annotated_tag_object(tag),
+            tag_object=tag_object,
             peeled_commit=commit,
             wheel_filename=wheel_filename,
             wheel_sha256=wheel_sha256,
+            verification_run_id=evidence["verification_run_id"],
         )
         if added:
             changed.append(

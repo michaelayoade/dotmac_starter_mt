@@ -165,6 +165,9 @@ jobs:
       package_dir: ${{ steps.resolve.outputs.package_dir }}
       tag: ${{ steps.resolve.outputs.tag }}
       kernel_floor: ${{ steps.resolve.outputs.kernel_floor }}
+    env:
+      MODULE: ${{ inputs.module }}
+      VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -189,7 +192,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/release_module.py resolve \
-            "${{ inputs.module }}" --version "${{ inputs.version }}" \
+            "$MODULE" --version "$VERSION" \
             | tee -a "${GITHUB_OUTPUT}"
 
       - name: Build wheel + sdist
@@ -201,9 +204,11 @@ jobs:
       # per-module reviewed set, no secret-shaped files. A stateless module is
       # additionally refused if any migration lineage appears in its wheel.
       - name: Inspect artifacts
+        env:
+          PACKAGE_DIR: ${{ steps.resolve.outputs.package_dir }}
         run: |
-          python scripts/release_module.py inspect "${{ inputs.module }}" \
-            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+          python scripts/release_module.py inspect "$MODULE" \
+            --dist "$PACKAGE_DIR/dist"
 
       # The smoke needs a kernel ARTIFACT. The module floors at the release
       # that allocated its schema, and that kernel may not be published yet —
@@ -223,7 +228,7 @@ jobs:
       - name: Build allowed first-party dependency wheels for the smoke
         run: |
           python scripts/release_module.py build-local-dependencies \
-            "${{ inputs.module }}" \
+            "$MODULE" \
             --output "${GITHUB_WORKSPACE}/dependency-dist"
 
       # Release-artifact smoke: install the freshly built wheel into a clean
@@ -231,9 +236,11 @@ jobs:
       # NamespaceRegistry for stateful members). Proves the bytes about to be
       # published are installable and registrable, not merely well-formed.
       - name: Release wheel smoke
+        env:
+          PACKAGE_DIR: ${{ steps.resolve.outputs.package_dir }}
         run: |
-          python scripts/release_module.py verify-wheel "${{ inputs.module }}" \
-            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+          python scripts/release_module.py verify-wheel "$MODULE" \
+            --dist "$PACKAGE_DIR/dist" \
             --kernel-dist "${GITHUB_WORKSPACE}/kernel-dist" \
             --dependency-dist "${GITHUB_WORKSPACE}/dependency-dist"
 
@@ -250,6 +257,9 @@ jobs:
     environment: registry-release    # main-only release credential boundary; no reviewer wait
     permissions:
       contents: read
+    env:
+      MODULE: ${{ inputs.module }}
+      VERSION: ${{ inputs.version }}
     steps:
       # RE-check freshness at the irreversible boundary. `build` proved this
       # run was main's tip at dispatch time, but a queued job can start after

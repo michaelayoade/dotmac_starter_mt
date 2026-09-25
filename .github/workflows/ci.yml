@@ -185,9 +185,11 @@ jobs:
   module-release-append-only:
     # The tag inventory proves completeness; this separate history gate proves
     # an already accepted wheel hash cannot be edited or deleted by a PR.
-    # `base.sha` and `before` are immutable commits, never moving origin/main.
+    # `base.sha` and `before` are immutable commits, never a moving branch ref.
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

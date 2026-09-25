@@ -21,6 +21,7 @@ from write_release_record import (
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = "docs/inventories/module-release-verifications.json"
+LEGACY = "docs/inventories/module-release-legacy-unverified.json"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
@@ -52,6 +53,28 @@ def check_append_only_base(base: str) -> None:
     if after.returncode != 0:
         raise ReleaseRecordError(f"HEAD has no {LEDGER}")
     require_module_release_verifications_append_only(before.stdout, after.stdout)
+
+    # The 120-row pre-cutover baseline is frozen against the immutable base —
+    # not merely against a test constant a PR can edit in the same diff. A
+    # test constant only proves "this PR agrees with itself"; comparing
+    # against the base revision proves the file a reviewer already accepted
+    # is unchanged, byte for byte, including whitespace-only reformatting
+    # that would otherwise pass an equality-of-meaning check.
+    legacy_before = _git("show", f"{base}:{LEGACY}")
+    if legacy_before.returncode != 0:
+        raise ReleaseRecordError(
+            f"module release base {base} has no accepted {LEGACY}; "
+            "bootstrap requires explicit review"
+        )
+    legacy_after = _git("show", f"HEAD:{LEGACY}")
+    if legacy_after.returncode != 0:
+        raise ReleaseRecordError(f"HEAD has no {LEGACY}")
+    if legacy_after.stdout != legacy_before.stdout:
+        raise ReleaseRecordError(
+            f"{LEGACY} differs from its accepted base revision {base}; the "
+            "pre-cutover unverified baseline is frozen and must stay "
+            "byte-identical to the immutable base — it is never edited by a PR"
+        )
 
 
 def main() -> int:
