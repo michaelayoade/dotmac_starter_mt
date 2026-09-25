@@ -967,21 +967,23 @@ been deleted from GitHub's retention window). For every new row it requires:
 the named run belongs to an approved workflow (`release-module.yml` or
 `recover-module-release.yml`), re-derived independently from its
 `workflow_id`; was triggered by `workflow_dispatch`; reports `head_branch`
-`main` AND its head commit is an ancestor of `origin/main` (a ref merely
-NAMED `main`, such as a tag, cannot satisfy this); `repository` and
+`main` AND its head commit is on the first-parent line of
+`refs/remotes/origin/main` (a ref merely NAMED `main` or `origin/main`, such
+as a tag, cannot satisfy this, and neither can a commit that only entered
+main inside a merged branch); `repository` and
 `head_repository` are this repository; the run id matches exactly; its
 `display_title`
 (rendered from the workflow's top-level `run-name`) equals exactly `Release
 module <distribution> <version>` or `Recover module <distribution>
 <version>`, binding the run to the specific module and version the row
 claims; its "Tag the ..." step succeeded inside the job that owns tag
-creation (`verify` or `recover`); the tag's peeled commit is itself an
-ancestor of `origin/main`; and the run itself completed
+creation (`verify` or `recover`); the tag's peeled commit is itself on that
+same first-parent line; and the run itself completed
 successfully within a bounded wait. A release additionally requires
 `source_run_id == verification_run_id` and that run's `head_sha` to equal the
 tagged commit. A recovery additionally requires a `source_run_id` naming a
 DIFFERENT run passing the same identity checks against `release-module.yml`
-(including ancestry of its head commit), titled `Release module <distribution> <version>`, built at the tagged
+(including the first-parent check on its head commit), titled `Release module <distribution> <version>`, built at the tagged
 commit, that did NOT succeed — recovery only ever applies to a release that
 failed after publishing but before tagging. Runs dispatched before the
 `run-name` binding existed carry no provable title and cannot be checked this

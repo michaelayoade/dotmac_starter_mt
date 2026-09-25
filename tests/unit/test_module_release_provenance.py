@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -844,7 +845,8 @@ def test_refuses_a_verification_run_whose_head_commit_is_not_on_main(
         jobs={},
     )
     with pytest.raises(
-        provenance.ProvenanceError, match="not an ancestor of origin/main"
+        provenance.ProvenanceError,
+        match="first-parent line of refs/remotes/origin/main",
     ):
         provenance.verify_row_provenance(
             row,
@@ -878,7 +880,8 @@ def test_refuses_a_recovery_source_run_whose_head_commit_is_not_on_main(
         jobs={"2002": _jobs_with_step("Tag the recovered release")},
     )
     with pytest.raises(
-        provenance.ProvenanceError, match="not an ancestor of origin/main"
+        provenance.ProvenanceError,
+        match="first-parent line of refs/remotes/origin/main",
     ):
         provenance.verify_row_provenance(
             row,
@@ -902,7 +905,8 @@ def test_refuses_a_tag_whose_peeled_commit_is_not_on_main(provenance) -> None:
         jobs={"1001": _jobs_with_step("Tag the verified release")},
     )
     with pytest.raises(
-        provenance.ProvenanceError, match="not an ancestor of origin/main"
+        provenance.ProvenanceError,
+        match="first-parent line of refs/remotes/origin/main",
     ):
         provenance.verify_row_provenance(
             row,
@@ -964,10 +968,9 @@ def test_refuses_a_verification_run_whose_bound_workflow_is_not_approved(
         jobs={},
         workflows={str(RELEASE_WORKFLOW_ID): {"path": unapproved_path}},
     )
-    # The plain `run.path not in expected_paths` check (rule (a)) already
-    # catches this case too — this test proves the SAME plant is caught even
-    # when phrased as a `get_workflow` mismatch, i.e. the two checks overlap
-    # rather than one silently covering for a gap in the other.
+    # Approval is decided only by `_require_workflow_binding`: the path is
+    # re-derived from `workflow_id` and must be both equal to the run's own
+    # path and one of the approved files.
     with pytest.raises(provenance.ProvenanceError, match="not an approved workflow"):
         provenance.verify_row_provenance(
             row,
@@ -1239,3 +1242,70 @@ def test_refuses_a_tag_step_that_sits_in_a_different_job(provenance) -> None:
     )
     with pytest.raises(provenance.ProvenanceError, match="in job 'verify'"):
         provenance.verify_row_provenance(_row(), runs=runs, **_release_verify_kwargs())
+
+
+# ── The real first-parent check against a real git graph ────────────────────
+
+
+def _git_in(path: Path, *args: str) -> str:
+    return subprocess.run(  # noqa: S603
+        ["git", *args],  # noqa: S607
+        cwd=path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _commit(path: Path, name: str) -> str:
+    (path / name).write_text(name, encoding="utf-8")
+    _git_in(path, "add", name)
+    _git_in(path, "commit", "-q", "-m", name)
+    return _git_in(path, "rev-parse", "HEAD")
+
+
+def test_is_on_main_uses_first_parent_of_the_real_remote_branch(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A tag named `origin/main`, a side-branch commit merged into main, and a
+    commit never merged are all refused; main's first-parent commits pass."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git_in(origin, "init", "-q", "--initial-branch=main")
+    _git_in(origin, "config", "user.name", "Test")
+    _git_in(origin, "config", "user.email", "test@example.invalid")
+    first = _commit(origin, "a")
+    _git_in(origin, "checkout", "-q", "-b", "side")
+    side = _commit(origin, "side")
+    _git_in(origin, "checkout", "-q", "main")
+    _commit(origin, "b")
+    _git_in(origin, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+    tip = _git_in(origin, "rev-parse", "HEAD")
+
+    work = tmp_path / "work"
+    _git_in(tmp_path, "clone", "-q", str(origin), str(work))
+    _git_in(work, "config", "user.name", "Test")
+    _git_in(work, "config", "user.email", "test@example.invalid")
+    _git_in(work, "checkout", "-q", "-b", "forged")
+    forged = _commit(work, "forged")
+    # The shadowing plant: a TAG named `origin/main` pointing at the forged
+    # commit. A short `origin/main` would resolve to it.
+    _git_in(work, "tag", "origin/main", forged)
+    assert _git_in(work, "rev-parse", "origin/main") == forged
+
+    monkeypatch.setattr(provenance, "REPO_ROOT", work)
+    assert provenance._is_on_main(tip) is True
+    assert provenance._is_on_main(first) is True
+    assert provenance._is_on_main(forged) is False
+    assert provenance._is_on_main(side) is False  # ancestor, not first-parent
+    assert provenance._is_on_main("not-a-sha") is False
+    assert provenance._is_on_main(None) is False
+
+
+def test_the_tag_owning_jobs_keep_github_reporting_their_key_as_name() -> None:
+    """GitHub reports a job without `name:` by its key; the provenance check
+    binds the tag step to jobs named `verify` and `recover`. Adding a `name:`
+    to either job would silently refuse every record, so the premise is pinned."""
+    for path, key in ((RELEASE_WORKFLOW, "verify"), (RECOVER_WORKFLOW, "recover")):
+        job = yaml.safe_load(path.read_text())["jobs"][key]
+        assert "name" not in job, f"{path.name} job {key!r} gained a name:"

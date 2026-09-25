@@ -178,10 +178,11 @@ def _require_workflow_binding(
     """The run's own ``path`` field is not trusted alone.
 
     A tag-ref `workflow_dispatch` can make GitHub report the dispatched
-    ref's NAME as `head_branch` (see the ancestry check below) — this
-    binding closes the companion gap by re-deriving the workflow's path
-    from `workflow_id` via a second, independent API call, rather than
-    relying solely on the string the run object happens to carry.
+    ref's NAME as `head_branch`; this binding does NOT close that (a forged
+    run at the approved path has the same `workflow_id`) — the first-parent
+    check on main does. It only ensures the approved path is re-derived from
+    `workflow_id` by a second API call rather than trusted from the run
+    object alone.
     """
     workflow_id = run.get("workflow_id")
     if workflow_id is None:
@@ -245,14 +246,14 @@ def _require_run_identity(
     # `head_branch == "main"` alone is spoofable: a `workflow_dispatch`
     # against a REF (e.g. a tag) literally named `main` makes GitHub report
     # `head_branch: "main"` even though that ref is not the protected
-    # branch and can point at an arbitrary commit. The only real proof is
-    # that the run's actual head commit is an ancestor of the live
-    # `origin/main` tip.
+    # branch and can point at an arbitrary commit. The proof is the commit
+    # graph: the run's head commit must be on main's first-parent line
+    # (see `_is_on_main`).
     head_sha = run.get("head_sha")
     if not is_on_main(head_sha):
         raise ProvenanceError(
-            f"{label} run {run_id} head commit {head_sha!r} is not an "
-            "ancestor of origin/main"
+            f"{label} run {run_id} head commit {head_sha!r} is not on the "
+            "first-parent line of refs/remotes/origin/main"
         )
     for field in ("repository", "head_repository"):
         owner = _full_name(run, field)
@@ -336,8 +337,8 @@ def verify_row_provenance(
 ) -> None:
     """Prove one ledger row's tag was created by an approved, successful run.
 
-    ``is_on_main`` decides whether a given commit is an ancestor of the
-    live `origin/main` tip — never `head_branch == "main"` alone, which a
+    ``is_on_main`` decides whether a commit is on the first-parent line of
+    the real main tip — never `head_branch == "main"` alone, which a
     `workflow_dispatch` against a ref literally named `main` can spoof.
 
     Raises `ProvenanceError` naming the exact violated rule; never silently
@@ -350,8 +351,8 @@ def verify_row_provenance(
 
     if not is_on_main(peeled_commit):
         raise ProvenanceError(
-            f"tag {tag} peeled commit {peeled_commit!r} is not an ancestor "
-            "of origin/main"
+            f"tag {tag} peeled commit {peeled_commit!r} is not on the "
+            "first-parent line of refs/remotes/origin/main"
         )
 
     run = runs.get_run(verification_run_id)
@@ -465,21 +466,39 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _is_on_main(commit: str | None) -> bool:
-    """Is ``commit`` an ancestor of the live ``origin/main`` tip?
+MAIN_REF = "refs/remotes/origin/main"
+_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
-    `head_branch == "main"` on a run/tag object only ever reports a REF
-    NAME, which `workflow_dispatch` against a ref literally named `main`
-    can spoof. Ancestry against the real branch tip is the only proof that
-    survives that. The CI job's `actions/checkout` step runs with
-    `fetch-depth: 0`, which fetches `+refs/heads/*:refs/remotes/origin/*`
-    (every branch, not just the checked-out ref) — `origin/main` is always
-    resolvable there without any extra fetch step.
+
+def _is_on_main(commit: str | None) -> bool:
+    """Is ``commit`` on the FIRST-PARENT line of the real ``main`` tip?
+
+    `head_branch == "main"` only reports a REF NAME, which a dispatch against
+    a tag literally named `main` can spoof, so the proof is the commit graph.
+    Three details carry the weight:
+
+    - The tip is resolved from the fully qualified ``refs/remotes/origin/main``
+      (fetched by `actions/checkout` with `fetch-depth: 0`). A short
+      ``origin/main`` would resolve a TAG named ``origin/main`` first
+      (gitrevisions(7): ``refs/tags/<name>`` precedes ``refs/remotes/<name>``),
+      and checkout fetches every tag.
+    - Membership is on the FIRST-PARENT line, not mere ancestry: the ruleset
+      allows merge and rebase merges, so a commit added and reverted inside a
+      merged branch is an ancestor of main without ever having BEEN main. A
+      release runs on main's tip (`assert_current_main.sh`), so every
+      legitimate run commit is a first-parent commit.
+    - Every commit is validated as 40 lowercase hex before it reaches git.
     """
-    if not commit:
+    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
         return False
-    result = _git("merge-base", "--is-ancestor", commit, "origin/main")
-    return result.returncode == 0
+    tip = _git("rev-parse", "--verify", "--quiet", f"{MAIN_REF}^{{commit}}")
+    tip_sha = tip.stdout.strip()
+    if tip.returncode != 0 or not _COMMIT.fullmatch(tip_sha):
+        raise ProvenanceError(f"cannot resolve {MAIN_REF} to a commit")
+    first_parent = _git("rev-list", "--first-parent", tip_sha)
+    if first_parent.returncode != 0:
+        raise ProvenanceError(f"cannot list the first-parent history of {MAIN_REF}")
+    return commit in set(first_parent.stdout.split())
 
 
 def main(argv: list[str] | None = None) -> int:
