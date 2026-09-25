@@ -894,3 +894,17 @@ replay/refusal proof, Lane 3 runner capability, and the real ten-step recovery
 and roles-fail/objects-succeed adjudication test) must both be reviewed and
 green before a successor is allocated at all, and `0.4.0a1` remains spent and
 is never reused.
+
+## Amendment — 2026-09-25: first executor cutover is Control Plane bootstrap
+
+The original Consequences section names ERP as the first full adopter. For
+executor cutover, that sequence is narrowed: `dotmac_platform_control_plane`
+is the first Foundation executor cutover and control-plane bootstrap. It must
+compose Control's authenticated host admission, current execution standing,
+single-use dispatch consumption and commit-before-effect boundary before a
+data-plane product can depend on that authority. ERP remains the first **full
+data-plane adopter**, after that bootstrap; its existing exact pin, descriptor
+inputs and CI conformance are not proof that its deployment executor has been
+replaced. This amendment records ordering only. It does not claim either
+product has completed executor cutover, production adoption or retirement of
+its prior execution path.

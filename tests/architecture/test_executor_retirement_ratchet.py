@@ -1402,7 +1402,7 @@ def test_the_census_digest_is_ratcheted_not_merely_recorded() -> None:
 # which a tree cannot answer.
 
 
-def test_vendor_cp_is_on_the_roster() -> None:
+def test_platform_cp_is_on_the_roster() -> None:
     """A named production host retaining a rollback credential sat outside the
     roster, so it would have been SILENTLY UNMONITORED rather than reported
     UNADOPTED — the roster reproducing the failure the code prevents.
@@ -1412,8 +1412,16 @@ def test_vendor_cp_is_on_the_roster() -> None:
     identity here would name a file nobody can ever write.
     """
     sweep = _sweep()
-    assert "dotmac_vendor_control_plane" in sweep.ADOPTION_TARGETS
-    assert "dotmac_vendor_control_plane" in _baseline()["unadopted"]
+    assert "dotmac_platform_control_plane" in sweep.ADOPTION_TARGETS
+    assert "dotmac_platform_control_plane" in _baseline()["unadopted"]
+    assert "dotmac_vendor_control_plane" not in sweep.ADOPTION_TARGETS
+    roster_prose = (
+        PROSE.read_text(encoding="utf-8")
+        .split("### The roster names Platform CP", 1)[1]
+        .split("\n### ", 1)[0]
+    )
+    assert "`dotmac_platform_control_plane`" in roster_prose
+    assert "`dotmac_vendor_control_plane`" not in roster_prose
     assert not any("-prod" in target for target in sweep.ADOPTION_TARGETS)
 
 

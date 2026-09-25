@@ -287,9 +287,10 @@ What was measured, and how:
 - `dotmac-deploy exposure-apply` likewise. `cli.py` DOES exist at that tag and
   the subcommand is absent from it, so this is a subcommand added after the
   last tag rather than a tagged surface withdrawn.
-- `0.2.0a2` is in any case not a published baseline. Its own changelog heading
-  AT THAT TAG reads `## 0.2.0a2 — unreleased`, and **no version of this
-  facility has ever been published**.
+- `0.2.0a2` **was published and tagged** by release run `33171027470`.
+  The `## 0.2.0a2 — unreleased` changelog heading at that tag is stale release
+  prose, not evidence that publication failed. Neither retired API appears in
+  the published tag, so this correction does not make its withdrawal breaking.
 
 So the accurate record is a **declared surface retired before it ever shipped**.
 It was written down here, in this document, as something consumers would be
