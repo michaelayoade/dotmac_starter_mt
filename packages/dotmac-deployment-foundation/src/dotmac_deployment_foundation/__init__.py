@@ -25,8 +25,8 @@ inside one of the deployments it builds.
 public CLI and Lane 3 rehearsal invoking a second transaction class directly
 against a host provider, outside `Executor`'s grant and execution-plan checks —
 is CLOSED. Exposure is a typed effect the executor performs from
-`FoundationExecutionPlanV2.exposure_reconciliations`, under the caller's
-deployment lock; `exposure.py` keeps the seam and the measurement and orders
+`FoundationExecutionPlanV3` (carrying V2's exposure reconciliations), under the
+caller's deployment lock; `exposure.py` keeps the seam and measurement and orders
 nothing. `dotmac-deploy exposure-apply` observes and reports, and can no longer
 apply: an `--execute` with no `--authorization` to offer was a mutation
 authorized by whoever typed it.
@@ -55,6 +55,12 @@ from .application_profile import (
     WriterClaim,
 )
 from .authorization import OPERATIONS, ExecutionGrant, authorize
+from .authorization_v3 import (
+    ControlConsumptionRequestV3,
+    ExecutionAuthorityV3Provider,
+    ExecutionContextV3,
+    authorize_v3,
+)
 from .backup import (
     ArtefactClass,
     Assurance,
@@ -113,7 +119,9 @@ from .database_structure import (
 )
 from .deployment_evidence import (
     DEPLOYMENT_EVIDENCE_SCHEMA,
+    DEPLOYMENT_EVIDENCE_V2_SCHEMA,
     DeploymentEvidenceV1,
+    DeploymentEvidenceV2,
     RunStanding,
     StepEvidenceV1,
     StepStanding,
@@ -182,6 +190,13 @@ from .execution_plan_v2 import (
     execution_plan_v2_digest,
     render_execution_plan_v2,
     require_execution_plan_v2_digest,
+)
+from .execution_plan_v3 import (
+    EXECUTION_PLAN_V3_SCHEMA,
+    FoundationExecutionPlanV3,
+    canonical_execution_plan_v3_bytes,
+    render_execution_plan_v3,
+    require_execution_plan_v3_digest,
 )
 from .exposure import (
     OWNERSHIP_PREFIX,
@@ -568,7 +583,9 @@ __all__ = [
     "lease_digest",
     "require_release_before_destruction",
     "DEPLOYMENT_EVIDENCE_SCHEMA",
+    "DEPLOYMENT_EVIDENCE_V2_SCHEMA",
     "DeploymentEvidenceV1",
+    "DeploymentEvidenceV2",
     "RunStanding",
     "StepEvidenceV1",
     "StepStanding",
@@ -580,6 +597,15 @@ __all__ = [
     "execution_plan_v2_digest",
     "render_execution_plan_v2",
     "require_execution_plan_v2_digest",
+    "EXECUTION_PLAN_V3_SCHEMA",
+    "FoundationExecutionPlanV3",
+    "canonical_execution_plan_v3_bytes",
+    "render_execution_plan_v3",
+    "require_execution_plan_v3_digest",
+    "ExecutionAuthorityV3Provider",
+    "ControlConsumptionRequestV3",
+    "ExecutionContextV3",
+    "authorize_v3",
     "RECOVERY_PLAN_DIGEST_SCHEMA",
     "RECOVERY_PLAN_SCHEMA",
     "CapturedPrestateV1",

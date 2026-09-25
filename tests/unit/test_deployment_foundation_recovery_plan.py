@@ -511,6 +511,9 @@ CANONICALIZING_MODULES: dict[str, int] = {
     # a descriptor transition, database structure facts, an application profile,
     # and the CLI's and provider's own record writing.
     "application_profile.py": 1,
+    # Not a plan document: an immutable snapshot of Control's authorization
+    # and dispatch material, frozen so a caller cannot swap it after issuance.
+    "authorization_v3.py": 1,
     "cli.py": 1,
     "compose_host.py": 2,
     "database_structure.py": 2,

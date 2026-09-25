@@ -199,7 +199,7 @@ def _executor_for(spec: ProductDeploymentSpec, effects: Any, **kwargs: Any) -> A
     return plan, Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         now_epoch=NOW,

@@ -64,11 +64,33 @@ from dotmac_deployment_foundation.host_source_admission import (
     HostSourceAdmissionProvider,
     HostSourceAdmissionTrace,
 )
+from dotmac_deployment_foundation.trusted_host_source import (
+    AttestationPairVerificationResultV1,
+    AttestationVerifiedRootV1,
+)
+
+from tests.unit.foundation_v3_support import (
+    HOST_ENROLMENT_REF,
+    HOST_ID,
+    HOST_INCARNATION,
+)
 
 #: A syntactically valid sha256 hex digest, reused wherever this module needs
 #: a placeholder digest — the value is never compared against a real
 #: artifact, so any correctly-shaped 64 hex character string does.
 _DIGEST = "b" * 64
+
+
+def _verified_root(*, fingerprint: str, version: str) -> AttestationVerifiedRootV1:
+    return AttestationVerifiedRootV1(
+        public_key_fingerprint=fingerprint,
+        trust_root_version=version,
+        key_id="synthetic-test-key",
+        algorithm="ed25519",
+        purpose="synthetic-test-purpose",
+        custody_domain="synthetic-test-custody",
+        issuer="synthetic-test-issuer",
+    )
 
 
 @dataclasses.dataclass(slots=True)
@@ -99,12 +121,29 @@ class AcceptingHostSourceAdmissionProvider:
     trace: HostSourceAdmissionTrace = dataclasses.field(
         default_factory=lambda: HostSourceAdmissionTrace(
             candidate_subject_digest=Digest.parse(_DIGEST, where="test fixture"),
-            host_observation_id="observation-1",
-            host_identity="test-host-1",
+            host_observation_id="dispatch-test-1",
+            host_identity=HOST_ID,
             candidate_signer_fingerprint="candidate-signer-1",
             candidate_trust_root_version="v1",
-            installed_signer_fingerprint="installed-signer-1",
-            installed_trust_root_version="v1",
+            installed_signer_fingerprint=HOST_INCARNATION,
+            installed_trust_root_version=HOST_ENROLMENT_REF,
+            pair_verification_result=AttestationPairVerificationResultV1(
+                candidate_attestation_envelope_digest="sha256:" + "c" * 64,
+                installed_attestation_envelope_digest="sha256:" + "d" * 64,
+                verification_context_digest="sha256:" + "e" * 64,
+                expected_host_identity=HOST_ID,
+                expected_observation_id="dispatch-test-1",
+                expected_package="dotmac-deployment-foundation",
+                candidate_audience="synthetic-test-candidate",
+                installed_audience=HOST_ID,
+                candidate_root=_verified_root(
+                    fingerprint="candidate-signer-1", version="v1"
+                ),
+                installed_root=_verified_root(
+                    fingerprint=HOST_INCARNATION, version=HOST_ENROLMENT_REF
+                ),
+            ),
+            opaque_finalization=object(),
         )
     )
     calls: int = 0

@@ -30,7 +30,7 @@ on:
       authorization_run:
         description: "Platform CP authorization run id (the lease references it)"
         required: true
-      # `authorization_doc_digest` WAS an input here and is deliberately gone.
+      # An authorization document-digest input WAS here and is deliberately gone.
       #
       # It was free text that nothing could check: the runner never imported
       # `provenance.py` or `authorization.py`, built no `ExecutionGrant`, and
@@ -247,8 +247,7 @@ jobs:
         run: |
           .lane3-foundation/bin/python -E -P scripts/lane3_authorization.py \
             --descriptor scripts/exposure-rehearsal/product.toml \
-            --target "${{ inputs.target }}" \
-            --authorization-document "${HOME}/.dotmac/authorization-${AUTHZ}.json"
+            --target "${{ inputs.target }}"
 
       # The external half. Collected BEFORE the controller runs so the vantage
       # is qualified against its own interfaces and routes rather than trusted,
@@ -302,7 +301,6 @@ jobs:
               "${{ steps.candidate.outputs.candidate_source_sha }}" \
             --foundation-artifact "${{ steps.candidate.outputs.candidate_sha256 }}" \
             --authorization-run "${AUTHZ}" \
-            --authorization-document "${HOME}/.dotmac/authorization-${AUTHZ}.json" \
             --controller-identity "${{ inputs.controller_identity }}" \
             --controller-key "${HOME}/.dotmac/controller-${AUTHZ}" \
             --target "${{ inputs.target }}" \

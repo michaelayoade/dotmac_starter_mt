@@ -21,10 +21,8 @@ one. These do.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 
 import pytest
-from dotmac_deployment_foundation.authorization import authorize
 from dotmac_deployment_foundation.deployment_evidence import StepStanding
 from dotmac_deployment_foundation.engine.plan import (
     Strategy,
@@ -51,13 +49,10 @@ from dotmac_deployment_foundation.execution_plan import (
     HostPrestateV1,
     render_execution_plan,
 )
-from dotmac_deployment_foundation.provenance import (
-    AuthorizationReceipt,
-    verify_authorization,
-)
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
 from tests.unit.deployment_lock_harness import held_lock
+from tests.unit.foundation_v3_support import grant_for_plan, v3_plan
 from tests.unit.host_source_stance import valid_host_source_kwargs
 
 GOOD_DIGEST = "sha256:" + "a" * 64
@@ -214,54 +209,15 @@ class AcceptingVerifier:
 TEST_TARGET = "failure-injection-target"
 
 
-class _StubVerifier:
-    """Stands in for the assembly's verifier; attests what it is given. These
-    tests inject FAILURES, not forged authorizations."""
-
-    def attest(self, material: object) -> object:
-        return dict(material)  # type: ignore[call-overload]
-
-
 def grant_for(  # type: ignore[no-untyped-def]
     spec: ProductDeploymentSpec,
     operation: str = "deploy",
     *,
-    execution_plan_digest: str = "",
+    execution_plan,
 ):
-    """A real grant for a test executor.
-
-    Built through `authorize()` rather than by constructing `ExecutionGrant`
-    directly, deliberately: these tests are about failure injection, not about
-    the authorization seam, and a test helper that reached past the issuer
-    would be the first example of the bypass that seam exists to prevent.
-    """
-    digest = spec.to_canonical_document().sha256_digest()
-    receipt = AuthorizationReceipt(
-        plan_id="00000000-0000-4000-8000-000000000001",
-        target_ref=TEST_TARGET,
-        descriptor_digest=digest,
-        # The frozen middle term. Defaulted only so callers that never build an
-        # executor stay short; every executor here goes through `_bound`, which
-        # supplies the digest of the plan it is about to hand over.
-        execution_plan_digest=execution_plan_digest or ("sha256:" + "e" * 64),
-        control_plan_digest="f" * 64,
-        execution_sequence=7,
-        attempt_no=1,
-        policy_code="deployment.test",
-        policy_version=1,
-        decision_ref="approvals:decision:test",
-        approved_at="2026-08-30T00:00:00Z",
-        expires_at="2026-08-31T00:00:00Z",
-        control_version="0.1.0a4",
-        operation=operation,
-    )
-    return authorize(
-        verified=verify_authorization(receipt.as_document(), verifier=_StubVerifier()),
-        operation=operation,
-        descriptor_digest=digest,
-        target=TEST_TARGET,
-        now=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
-    )
+    """Issue through the synthetic trusted V3 composition, never V1."""
+    assert execution_plan.operation == operation
+    return grant_for_plan(spec, execution_plan)
 
 
 def _bound(
@@ -275,7 +231,7 @@ def _bound(
     the other from somewhere that does not agree, which is the state this
     binding exists to make unreachable.
     """
-    execution_plan = render_execution_plan(
+    base_plan = render_execution_plan(
         spec,
         plan,
         target=TEST_TARGET,
@@ -291,7 +247,8 @@ def _bound(
         ),
         application_profile_digest="",
     )
-    grant = grant_for(spec, operation, execution_plan_digest=execution_plan.digest())
+    execution_plan = v3_plan(base_plan)
+    grant = grant_for(spec, operation, execution_plan=execution_plan)
     return grant, execution_plan
 
 

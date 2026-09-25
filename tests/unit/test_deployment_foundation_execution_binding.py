@@ -44,13 +44,13 @@ importing this repository can only ever prove this repository.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from dotmac_deployment_foundation.authorization import authorize
 from dotmac_deployment_foundation.engine.plan import build_plan
 from dotmac_deployment_foundation.engine.run import (
     Executor,
@@ -62,11 +62,11 @@ from dotmac_deployment_foundation.execution_plan import (
 )
 from dotmac_deployment_foundation.provenance import (
     AuthorizationReceipt,
-    verify_authorization,
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
 from tests.unit.deployment_lock_harness import held_lock
+from tests.unit.foundation_v3_support import grant_for_plan, v3_plan
 from tests.unit.host_source_stance import valid_host_source_kwargs
 from tests.unit.test_deployment_foundation_failure_injection import (
     DESCRIPTOR,
@@ -82,16 +82,6 @@ from tests.unit.test_deployment_foundation_failure_injection import (
 TARGET = "execution-binding-target"
 NOW = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
 CONTROL_PLAN_DIGEST = "f" * 64
-WRONG_DIGEST = "sha256:" + "9" * 64
-
-
-class _StubVerifier:
-    """Stands in for the verifier the ASSEMBLY supplies. Attests what it is
-    given: these tests exercise the binding, not the cryptography, which this
-    facility deliberately does not own."""
-
-    def attest(self, material: Mapping[str, Any]) -> Mapping[str, Any]:
-        return dict(material)
 
 
 class RecordingEffects(FakeEffects):  # type: ignore[misc]
@@ -201,15 +191,22 @@ def _receipt(spec: ProductDeploymentSpec, **overrides: object) -> AuthorizationR
     return AuthorizationReceipt(**fields)  # type: ignore[arg-type]
 
 
-def _grant(spec: ProductDeploymentSpec, *, now: datetime = NOW, **overrides: object):  # type: ignore[no-untyped-def]
-    return authorize(
-        verified=verify_authorization(
-            _receipt(spec, **overrides).as_document(), verifier=_StubVerifier()
-        ),
-        operation=str(overrides.get("operation", "deploy")),
-        descriptor_digest=spec.to_canonical_document().sha256_digest(),
-        target=TARGET,
+def _grant(
+    spec: ProductDeploymentSpec,
+    *,
+    execution_plan=None,
+    now: datetime = NOW,
+    **overrides: object,
+):  # type: ignore[no-untyped-def]
+    if execution_plan is None:
+        execution_plan, _ = _plan_and_digest(
+            spec, build_plan(spec), operation=str(overrides.get("operation", "deploy"))
+        )
+    return grant_for_plan(
+        spec,
+        execution_plan,
         now=now,
+        receipt_overrides=dict(overrides),
     )
 
 
@@ -221,7 +218,7 @@ def _plan_and_digest(
         if effects is not None
         else HostPrestateV1.first_deploy()
     )
-    execution_plan = render_execution_plan(
+    base_plan = render_execution_plan(
         spec,
         plan,
         target=TARGET,
@@ -230,6 +227,7 @@ def _plan_and_digest(
         prestate=prestate,
         application_profile_digest="",
     )
+    execution_plan = v3_plan(base_plan)
     return execution_plan, execution_plan.digest()
 
 
@@ -309,10 +307,11 @@ def test_an_unfrozen_plan_produces_zero_effects() -> None:
     spec, plan, effects = _fixture()
     before = effects.snapshot()
     execution_plan, _ = _plan_and_digest(spec, plan, effects=effects)
+    frozen = dataclasses.replace(execution_plan, host_id="different-host")
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=WRONG_DIGEST),
+        _grant(spec, execution_plan=frozen),
         execution_plan=execution_plan,
         **valid_host_source_kwargs(),
     )
@@ -348,7 +347,7 @@ def test_a_plan_for_an_unauthorized_image_produces_zero_effects() -> None:
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=frozen_digest),
+        _grant(other, execution_plan=frozen),
         execution_plan=running,
         **valid_host_source_kwargs(),
     )
@@ -372,7 +371,7 @@ def test_a_host_that_moved_after_authorization_refuses_with_zero_effects() -> No
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
@@ -399,7 +398,7 @@ def test_an_empty_prestate_is_a_claim_a_populated_host_fails() -> None:
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         **valid_host_source_kwargs(),
@@ -424,7 +423,7 @@ def test_migration_family_work_runs_in_the_candidate_image() -> None:
     outcome = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
@@ -464,7 +463,7 @@ def test_a_role_that_never_becomes_ready_fails_the_deployment() -> None:
     outcome = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=clock.sleep,
         clock=clock.read,
@@ -497,7 +496,7 @@ def test_evidence_that_does_not_read_back_fails_the_deployment() -> None:
     outcome = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
@@ -529,7 +528,7 @@ def test_the_replay_coordinate_reaches_the_execution_report() -> None:
     spec, plan, effects = _fixture()
     execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
     grant = _grant(
-        spec, execution_plan_digest=digest, execution_sequence=42, attempt_no=3
+        spec, execution_plan=execution_plan, execution_sequence=42, attempt_no=3
     )
     assert grant.execution_sequence == 42
     assert grant.attempt_no == 3
@@ -580,7 +579,7 @@ def test_controls_plan_digest_supplied_as_the_descriptor_digest_refuses() -> Non
     silently accepted as the value it is not.
     """
     spec, _plan, _effects = _fixture()
-    with pytest.raises(PreconditionFailed, match="not an approval for this"):
+    with pytest.raises(PreconditionFailed, match="descriptor_digest"):
         _grant(spec, descriptor_digest=CONTROL_PLAN_DIGEST)
 
 
@@ -616,7 +615,7 @@ def test_the_exact_authorized_tuple_mutates_once() -> None:
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
@@ -643,35 +642,21 @@ def test_the_exact_authorized_tuple_mutates_once() -> None:
 # ── 8. the replay rule ─────────────────────────────────────────────────────
 
 
-def test_a_second_execution_of_one_authorization_switches_again_not_silently() -> None:
-    """The typed replay rule, stated as what it IS rather than as what would be
-    convenient.
-
-    This facility owns no idempotency ledger — `AGENTS.md` rule 23 puts
-    at-most-once execution behind one owner, and it is not this one. So a
-    second run of the same authorized tuple is a second DEPLOYMENT, and it says
-    so: it mutates again and records again, rather than returning a cached
-    success that would let an operator believe a re-run was a no-op.
-
-    Asserted because the alternative is worse in the direction that matters: a
-    silent replay makes two deployments indistinguishable from one in the
-    evidence, and the evidence is the only account of what happened.
-    """
+def test_a_second_execution_of_one_control_dispatch_refuses_without_effects() -> None:
+    """Control owns one-shot consumption; Foundation has no replay ledger."""
     spec, plan, effects = _fixture()
     execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
-
-    def run_once() -> Any:
-        executor = Executor(
-            spec,
-            effects,
-            _grant(spec, execution_plan_digest=digest),
-            execution_plan=execution_plan,
-            sleep=lambda _: None,
-            evidence_policy=evidence_policy(),
-            evidence_verifier=AcceptingVerifier(),
-            **valid_host_source_kwargs(),
-        )
-        return executor.run(plan, lock=held_lock(spec.product))
+    grant = _grant(spec, execution_plan=execution_plan)
+    executor = Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
+    )
 
     def counts() -> tuple[int, int]:
         return (
@@ -679,23 +664,13 @@ def test_a_second_execution_of_one_authorization_switches_again_not_silently() -
             len([c for c in effects.mutations if c[0] == "write_evidence"]),
         )
 
-    first = run_once()
+    first = executor.run(plan, lock=held_lock(spec.product))
     after_first = counts()
-    second = run_once()
+    with pytest.raises(PreconditionFailed, match="already consumed"):
+        executor.run(plan, lock=held_lock(spec.product))
     after_second = counts()
 
-    assert (
-        first.succeeded and second.succeeded
-    ), f"{first.failure or ''} {second.failure or ''}".strip()
-    # Measured as a DOUBLING rather than against a literal: how many evidence
-    # records one deployment writes is the engine's business and it writes more
-    # than one, so a hard-coded count would be asserting an unrelated fact and
-    # would break the day that changes.
-    assert after_second == (after_first[0] * 2, after_first[1] * 2), (
-        f"a second run of the same authorized tuple did not repeat the "
-        f"deployment: {after_first} then {after_second}. A silent replay makes "
-        "two deployments indistinguishable from one in the only account of "
-        "what happened"
-    )
+    assert first.succeeded, first.failure
+    assert after_second == after_first
     assert after_first[0] >= 1, "the fixture never switched, so this proves nothing"
-    assert first.execution_plan_digest == second.execution_plan_digest == digest
+    assert first.execution_plan_digest == digest

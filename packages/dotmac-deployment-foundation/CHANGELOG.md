@@ -2,6 +2,36 @@
 
 ## Unreleased — successor not allocated
 
+### Gate-3 successor execution authority (candidate; not released)
+
+`FoundationExecutionPlanV3` binds the candidate wheel, exact target,
+controller SSH fingerprint and Control/Fleet host incarnation/enrolment to the
+existing `ExecutionPlanDigestV1`. The sole new grant issuer consumes the
+unchanged Control V2 authorization+dispatch pair through a startup-fixed
+assembly provider and rechecks independent local/Control facts before effects.
+That recheck now exact-binds F2's authenticated installed host identity,
+installed signer fingerprint and installed root-version UUID to the V3 plan
+and fresh provider observation for both deploy and rollback. `Effects` cannot
+claim an authenticated target on its own; trusted CP composition owns the
+provider/admission/effects bundle.
+The fixed provider now also owns an explicit pre-effect Control transaction:
+Foundation checks F2 trace, fresh context, sequence/attempt and expiry before
+passing the frozen original V2 pair and exact V3 coordinates. The provider
+must refuse before commit or atomically spend the exact dispatch and return
+`None` after commit; Foundation performs no fallible post-commit check. Replay,
+revoked standing and failed consumption refuse before effects. The deterministic
+`control-dispatch:<dispatch_id>` key is stored in Control's committed ledger
+for crash recovery and in successful local `DeploymentEvidence.v2`; V1 evidence
+bytes remain unchanged. The external CP
+implementation and its conformance evidence remain outstanding.
+The public V2 attestation function remains non-admitting alone. Historical V1
+`authorize()` now refuses; CLI, Lane 3 and release probes cannot promote a
+single V1 receipt. Lane 3 remains non-admitting until trusted CP provider and
+V3 plan composition exist. Standalone installed-wheel release smoke can pass
+by proving V3 render/digest behavior and CLI refusal without that provider;
+publication is not adoption or authorization. This is a
+candidate source contract, not evidence of a passed hosted test or release.
+
 ### ADR-0073 redesign step 1 + step 2: `verify_attestation_pair` returns typed, non-authorizing evidence, widened to report everything verified
 
 **Breaking**: `verify_attestation_pair()` now returns `AttestationPairVerificationResultV1`

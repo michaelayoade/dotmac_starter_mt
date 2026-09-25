@@ -1,4 +1,4 @@
-"""``ExecutionGrant.v1`` — a controller may not execute on an argument.
+"""ExecutionGrant — a controller may not execute on an argument.
 
 Before this module, `dotmac-deploy deploy --execute` ran a real deployment
 against a real host. The entire distance between "print a plan" and "mutate
@@ -15,12 +15,11 @@ placed next to the flag is convention: it holds until someone adds a second
 entry point, calls `Executor` directly from a script, or writes a helper that
 forgets. All three have happened in this codebase's history.
 
-Instead the seam itself is closed. :class:`~.engine.run.Executor` cannot be
-CONSTRUCTED without an :class:`ExecutionGrant`, and an `ExecutionGrant` cannot
-be constructed without the module-private witness that only :func:`authorize`
-holds. So there is no path from a flag to a mutation that does not pass through
-verification — not because every caller remembers to check, but because a
-caller who skips it has nothing to pass.
+The executor requires an :class:`ExecutionGrant` issued by the V3 authority
+path. The former V1 ``authorize`` function is historical and always refuses.
+The module-private witness is a review convention, not an unforgeable Python
+capability; the real authority boundary is the installed assembly's fixed V2
+pair provider, Control consumption, and Foundation's independent checks.
 
 The witness is deliberately crude. It does not stop a determined caller from
 importing `_ISSUED`; nothing in Python can. What it does is make the bypass
@@ -58,10 +57,17 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import datetime
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from .errors import PreconditionFailed, SpecError
-from .provenance import AuthorizationReceipt, VerifiedAuthorization, normalize_digest
+from .provenance import (
+    AuthorizationReceiptV2,
+    VerifiedAuthorization,
+    normalize_digest,
+)
+
+if TYPE_CHECKING:
+    from .authorization_v3 import ExecutionAuthorityV3Provider
 
 __all__ = [
     "OPERATIONS",
@@ -187,12 +193,18 @@ class ExecutionGrant:
     #: consumption and the execution report cannot source it anywhere else.
     execution_sequence: int
     attempt_no: int
-    receipt: AuthorizationReceipt
+    receipt: AuthorizationReceiptV2
+    v3_provider: ExecutionAuthorityV3Provider
+    #: Canonical immutable snapshots of the exact Control pair presented at
+    #: issue time. The fixed provider receives these same bytes at consumption,
+    #: not caller-supplied replacement documents.
+    authorization_material_json: bytes
+    dispatch_material_json: bytes
 
     def __post_init__(self) -> None:
         if self.witness is not _ISSUED:
             raise PreconditionFailed(
-                "an ExecutionGrant may only be produced by authorize(). A "
+                "an ExecutionGrant may only be produced by authorize_v3(). A "
                 "hand-built grant is an execution that authorized itself, "
                 "which is the exact failure this type exists to make "
                 "impossible to write by accident"
@@ -201,6 +213,22 @@ class ExecutionGrant:
             raise SpecError(
                 f"unknown operation {self.operation!r}; expected one of "
                 f"{list(OPERATIONS)}"
+            )
+        if not isinstance(self.receipt, AuthorizationReceiptV2):
+            raise PreconditionFailed(
+                "ExecutionGrant requires an attested Control V2 pair; "
+                "a V1 receipt cannot authorize execution"
+            )
+        if self.v3_provider is None:
+            raise PreconditionFailed("ExecutionGrant requires its fixed V3 provider")
+        if (
+            not isinstance(self.authorization_material_json, bytes)
+            or not self.authorization_material_json
+            or not isinstance(self.dispatch_material_json, bytes)
+            or not self.dispatch_material_json
+        ):
+            raise PreconditionFailed(
+                "ExecutionGrant requires the original Control pair"
             )
 
     def require(self, *, operation: str, descriptor_digest: str) -> None:
@@ -216,7 +244,7 @@ class ExecutionGrant:
         an injected `Effects` — so a target comparison at this point could only
         compare the grant against itself and would pass unconditionally. That
         is worse than no check: it reads in a diff exactly like a real one. The
-        target binding is made once, in :func:`authorize`, against a target the
+        target binding is made in :func:`authorize_v3`, against a target the
         CALLER states independently of the receipt.
         """
         wanted = normalize_digest(
@@ -248,61 +276,12 @@ def authorize(
     target: str,
     now: datetime,
 ) -> ExecutionGrant:
-    """Turn ATTESTED terms into permission to run, or refuse.
+    """Historical V1 seam; deliberately cannot issue execution authority.
 
-    Takes a :class:`~.provenance.VerifiedAuthorization`, never a bare
-    `AuthorizationReceipt`. A receipt is a structurally complete document; it
-    becomes verified terms only by passing through an injected
-    `AuthorizationVerifier`, and requiring the verified type here is what stops
-    a caller parsing a JSON file straight into an execution.
-
-    The ONLY issuer of :class:`ExecutionGrant`. Every refusal below is a
-    mismatch between what Control authorized and what the caller is holding —
-    never a judgement about whether the approval should have been granted,
-    which belongs to Control and is not re-litigated here.
-
-    `target` must be stated by the caller INDEPENDENTLY of the receipt — the
-    CLI takes it from `--target`, not from `receipt.target_ref`. Deriving it
-    from the receipt would make the comparison below compare the receipt with
-    itself and pass for every input, which is the shape of a check that has
-    stopped checking.
+    V1 parsing remains available for evidence inspection.  Only the V3 path,
+    with a Control V2 signed pair and fixed trusted provider, issues grants.
     """
-    if operation not in OPERATIONS:
-        raise SpecError(
-            f"unknown operation {operation!r}; expected one of {list(OPERATIONS)}"
-        )
-    wanted = normalize_digest(descriptor_digest, where="authorize.descriptor_digest")
-    receipt = verified.receipt
-    # Time first, before any equality check. An expired approval is refused for
-    # being expired rather than for whichever digest happens to disagree — and
-    # if every digest agrees, an expired approval must still refuse. `now` is
-    # supplied by the caller because nothing in this facility reads a clock.
-    receipt.require_live(now=now)
-
-    if receipt.operation != operation:
-        raise PreconditionFailed(
-            f"Control authorized {receipt.operation!r} but {operation!r} was "
-            "requested. Ask Control for a receipt naming this operation — a "
-            "deploy approval is not a rollback approval, and neither is a "
-            "recovery approval"
-        )
-    if receipt.descriptor_digest_normalized != wanted:
-        raise PreconditionFailed(
-            f"the receipt authorizes descriptor "
-            f"{receipt.descriptor_digest_normalized} but the descriptor in "
-            f"hand is {wanted}. This is not an approval for this deployment"
-        )
-    if receipt.target_ref != target:
-        raise PreconditionFailed(
-            f"the receipt authorizes target {receipt.target_ref!r}, not " f"{target!r}"
-        )
-    return ExecutionGrant(
-        _ISSUED,
-        operation=operation,
-        descriptor_digest=wanted,
-        target=target,
-        execution_plan_digest=receipt.execution_plan_digest_normalized,
-        execution_sequence=int(receipt.execution_sequence),
-        attempt_no=int(receipt.attempt_no),
-        receipt=receipt,
+    raise PreconditionFailed(
+        "V1 authorization is historical and non-authorizing; provide a "
+        "FoundationExecutionPlanV3 and Control AuthorizationReceiptV2 pair"
     )
