@@ -922,6 +922,33 @@ proof was not retained;
 they are debt/history, never verified or pinnable evidence. A consumer may pin
 a checked-in verification row and independently recheck registry bytes, but
 the legacy baseline cannot satisfy that check.
+
+The annotated tag itself carries the canonical evidence, not free text: its
+message is exactly one line of `ModuleReleaseTagEvidence.v1` JSON —
+`distribution`, `version`, `wheel_filename`, `wheel_sha256` and
+`verification_run_id` — produced by the single renderer
+`render_module_release_tag_evidence` and read back only by its paired
+`parse_module_release_tag_evidence` (both in `scripts/write_release_record.py`).
+`scripts/tag_module_release.py` is the one fail-closed writer of that tag:
+it refuses an already-existing tag, local or remote, and never force-tags,
+deletes or recreates one — a release that needs a new tag ships a new
+version instead. The recorder's validator proves a row against the tag
+object it names by re-deriving `ModuleReleaseTagEvidence.v1` from the tag
+message and checking the row's wheel filename, SHA-256 and
+`verification_run_id` against it field-for-field; a row whose
+`verification_run_id` disagrees with its own tag's embedded run id fails
+the gate. The legacy `module-release-legacy-unverified.json` inventory is
+frozen byte-identical to its accepted source base and carries no
+`verification_run_id` — it is bootstrap history, not evidence, and the
+gate never asks it to prove anything. `recover-module-release.yml`'s
+artifacts (the downloaded original build and the record-PR's manual-fallback
+guidance) live under the runner's own temp directory for the duration of
+that run only; nothing persists there past the job, and the manual fallback
+in `scripts/open_release_record_pr.sh` never prints that path to an
+operator — it tells them to `gh run download` a fresh copy instead, which
+`write_release_record.py` will refuse unless its digest matches the one
+already embedded in the tag.
+
 Separately, hosted CI compares the complete verification ledger at each PR's
 immutable `pull_request.base.sha` (and each main push's `before` SHA) with the
 new tree: accepted rows must remain identical and in order; only append is

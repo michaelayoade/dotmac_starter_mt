@@ -185,12 +185,16 @@ def test_module_release_workflow_carries_exact_wheel_into_the_recorder() -> None
     assert "Download exact built bytes for the publication record" in verify
     assert "name: ${{ inputs.module }}-dist" in verify
     assert "path: ${{ runner.temp }}/module-release-dist" in verify
-    assert '--artifact-dir "${{ runner.temp }}/module-release-dist"' in verify
+    # The verify job's env block is the single place `runner.temp` is
+    # evaluated; every run: body below references it as $ARTIFACT_DIR.
+    assert "ARTIFACT_DIR: ${{ runner.temp }}/module-release-dist" in verify
+    assert '--artifact-dir "${ARTIFACT_DIR}"' in verify
     compare = verify.index("Prove published bytes match the retained build artifact")
     tag = verify.index("Tag the verified release")
     assert compare < tag
-    assert 'release_module.py compare-published "${{ inputs.module }}"' in verify
-    assert '--dist "${{ runner.temp }}/module-release-dist"' in verify
+    assert 'release_module.py compare-published "$MODULE"' in verify
+    assert '--dist "${ARTIFACT_DIR}"' in verify
+    assert "python scripts/tag_module_release.py" in verify
 
     wrapper = (PROJECT_ROOT / "scripts/open_release_record_pr.sh").read_text()
     assert '--artifact-dir) ARTIFACT_DIR="$2"' in wrapper
@@ -200,9 +204,11 @@ def test_module_release_workflow_carries_exact_wheel_into_the_recorder() -> None
     recovery = (
         PROJECT_ROOT / ".github/workflows/recover-module-release.yml"
     ).read_text()
+    assert "RECOVERED_DIST: ${{ runner.temp }}/recovered-dist" in recovery
     recorder = recovery.split("- name: Open the post-release record", 1)[1]
-    assert "--artifact-dir recovered-dist" in recorder
+    assert '--artifact-dir "$RECOVERED_DIST"' in recorder
     assert "release_module.py compare-published" in recovery
+    assert "python scripts/tag_module_release.py" in recovery
 
 
 def test_normal_compare_and_recovery_forwarding_detectors_are_sensitive() -> None:
@@ -215,14 +221,14 @@ def test_normal_compare_and_recovery_forwarding_detectors_are_sensitive() -> Non
         verify = source.split("  verify:", 1)[1]
         return (
             "release_module.py compare-published" in verify
-            and '--dist "${{ runner.temp }}/module-release-dist"' in verify
+            and '--dist "${ARTIFACT_DIR}"' in verify
             and verify.index("release_module.py compare-published")
             < verify.index("Tag the verified release")
         )
 
     def forwards_recovery_artifact(source: str) -> bool:
         return (
-            "--artifact-dir recovered-dist"
+            '--artifact-dir "$RECOVERED_DIST"'
             in source.split("- name: Open the post-release record", 1)[1]
         )
 
@@ -232,7 +238,7 @@ def test_normal_compare_and_recovery_forwarding_detectors_are_sensitive() -> Non
     )
     assert forwards_recovery_artifact(recovery)
     assert not forwards_recovery_artifact(
-        recovery.replace("--artifact-dir recovered-dist", "")
+        recovery.replace('--artifact-dir "$RECOVERED_DIST"', "")
     )
 
 

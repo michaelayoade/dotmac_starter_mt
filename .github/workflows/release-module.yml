@@ -279,7 +279,7 @@ jobs:
       - name: Re-assert the target is allowlisted
         run: |
           python scripts/release_module.py resolve \
-            "${{ inputs.module }}" --version "${{ inputs.version }}" >/dev/null
+            "$MODULE" --version "$VERSION" >/dev/null
 
       - name: Download the exact built bytes
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -304,6 +304,15 @@ jobs:
     environment: registry-release
     permissions:
       contents: write                # create the post-verification tag
+    env:
+      MODULE: ${{ inputs.module }}
+      VERSION: ${{ inputs.version }}
+      TAG: ${{ needs.build.outputs.tag }}
+      PACKAGE_DIR: ${{ needs.build.outputs.package_dir }}
+      ARTIFACT_DIR: ${{ runner.temp }}/module-release-dist
+      RUN_ID: ${{ github.run_id }}
+      COMPOSE_WITH: ${{ inputs.compose_with }}
+      COMPOSE_KERNEL: ${{ inputs.compose_kernel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -328,12 +337,12 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             if INDEX_PAGE="$(curl -sf "$IDX")" \
-              && grep -q "${{ inputs.version }}" <<<"${INDEX_PAGE}"; then
+              && grep -q "$VERSION" <<<"${INDEX_PAGE}"; then
               echo "available on the Forgejo index"; exit 0
             fi
             echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
           done
-          echo "::error::${{ inputs.module }} ${{ inputs.version }} did not appear in time"
+          echo "::error::$MODULE $VERSION did not appear in time"
           exit 1
 
       # A successful registry installation does not prove that its wheel is
@@ -343,10 +352,10 @@ jobs:
         env:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
         run: |
-          python scripts/release_module.py compare-published "${{ inputs.module }}" \
-            --version "${{ inputs.version }}" \
+          python scripts/release_module.py compare-published "$MODULE" \
+            --version "$VERSION" \
             --index "${INDEX}" \
-            --dist "${{ runner.temp }}/module-release-dist"
+            --dist "${ARTIFACT_DIR}"
 
       # Install the PUBLISHED release from the index into a clean venv and
       # register it. Requires the kernel at `kernel_floor` to already be
@@ -358,7 +367,7 @@ jobs:
         run: |
           python scripts/release_module.py verify-registry \
             --index "${INDEX}" \
-            --pin "${{ inputs.module }}==${{ inputs.version }}"
+            --pin "${MODULE}==${VERSION}"
 
       # LEVEL 2 — composition, when this release completes a set.
       #
@@ -385,36 +394,36 @@ jobs:
         env:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
         run: |
-          if [ -z "${{ inputs.compose_kernel }}" ]; then
+          if [ -z "${COMPOSE_KERNEL}" ]; then
             echo "::error::compose_with is set but compose_kernel is empty — the"
             echo "::error::composition must pin an EXACT published kernel, or it"
             echo "::error::proves the set against whatever pip happens to resolve."
             exit 1
           fi
           ARGS=""
-          for pin in ${{ inputs.compose_with }}; do ARGS="${ARGS} --pin ${pin}"; done
+          for pin in ${COMPOSE_WITH}; do ARGS="${ARGS} --pin ${pin}"; done
           python scripts/release_module.py verify-registry \
             --index "${INDEX}" \
-            --kernel "${{ inputs.compose_kernel }}" \
-            --pin "${{ inputs.module }}==${{ inputs.version }}" ${ARGS}
+            --kernel "${COMPOSE_KERNEL}" \
+            --pin "${MODULE}==${VERSION}" ${ARGS}
 
-      # Only AFTER registry verification: tag the published SHA.
+      # Only AFTER registry verification: tag the published SHA. The tag
+      # message is canonical `ModuleReleaseTagEvidence.v1` evidence, computed
+      # from the SAME retained artifact directory `compare-published` just
+      # verified — never a free-text NOTE. Fail-closed: refuses an existing
+      # tag rather than force/recreate.
       - name: Tag the verified release
         run: |
-          TAG="${{ needs.build.outputs.tag }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          COMPOSED="${{ inputs.compose_with }}"
-          if [ -n "${COMPOSED}" ]; then
-            NOTE="verified on the Forgejo registry; composes with ${COMPOSED} on kernel ${{ inputs.compose_kernel }}"
-          else
-            NOTE="verified on the Forgejo registry (installed and registered alone)"
-          fi
-          git tag -a "${TAG}" \
-            -m "${{ inputs.module }} ${{ inputs.version }} (${NOTE})" \
-            "${GITHUB_SHA}"
-          git push origin "${TAG}"
-          echo "tagged ${TAG} on ${GITHUB_SHA}"
+          python scripts/tag_module_release.py \
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit "${GITHUB_SHA}" \
+            --artifact-dir "${ARTIFACT_DIR}" \
+            --run-id "$RUN_ID" \
+            --remote origin
 
       # The tag makes the publication-ledger row false THE MOMENT it lands, and
       # any released migration becomes bytes that must not change. The exact
@@ -439,8 +448,8 @@ jobs:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/open_release_record_pr.sh \
-            --distribution "${{ inputs.module }}" \
-            --version "${{ inputs.version }}" \
-            --tag "${{ needs.build.outputs.tag }}" \
-            --package-dir "${{ needs.build.outputs.package_dir }}" \
-            --artifact-dir "${{ runner.temp }}/module-release-dist"
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --package-dir "$PACKAGE_DIR" \
+            --artifact-dir "${ARTIFACT_DIR}"

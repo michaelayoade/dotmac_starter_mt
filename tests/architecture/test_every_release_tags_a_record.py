@@ -23,6 +23,15 @@ PINNED_TOKEN_ACTION = (
 PINNED_CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 
 
+def _writes_a_tag(run: str) -> bool:
+    """A tag-writing step, whether it shells `git tag` directly or delegates
+    to the shared fail-closed writer `scripts/tag_module_release.py` (which
+    runs `git tag -a` internally, never force/recreate). Detection follows
+    the behavior, not one literal spelling, so a lane that adopts the shared
+    writer does not silently drop out of this guard's coverage."""
+    return "git tag" in run or "tag_module_release.py" in run
+
+
 def _tagging_jobs(root: Path = WORKFLOWS) -> list[tuple[Path, str, dict]]:
     found: list[tuple[Path, str, dict]] = []
     paths = sorted((*root.glob("*.yml"), *root.glob("*.yaml")))
@@ -30,7 +39,7 @@ def _tagging_jobs(root: Path = WORKFLOWS) -> list[tuple[Path, str, dict]]:
         workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
         for job_name, job in workflow.get("jobs", {}).items():
             steps = job.get("steps", [])
-            if any("git tag" in str(step.get("run", "")) for step in steps):
+            if any(_writes_a_tag(str(step.get("run", ""))) for step in steps):
                 found.append((path, job_name, job))
     return found
 
@@ -52,7 +61,7 @@ def _coverage_problems(
     for path, job_name, job in tagging_jobs:
         steps = job.get("steps", [])
         tag_at = max(
-            i for i, step in enumerate(steps) if "git tag" in str(step.get("run", ""))
+            i for i, step in enumerate(steps) if _writes_a_tag(str(step.get("run", "")))
         )
         record_steps = [
             (i, step)

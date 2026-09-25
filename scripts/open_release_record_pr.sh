@@ -140,8 +140,12 @@ if [ -n "${PACKAGE_DIR}" ]; then
 elif [ -n "${NO_LINEAGE}" ]; then
   MANUAL="${MANUAL} --no-lineage"
 fi
+# The value ARTIFACT_DIR carries here is this RUNNER's temp path
+# (`${{ runner.temp }}/...`) — real for this job, meaningless to a human
+# typing the command by hand later. The manual fallback never prints it;
+# `give_up` below tells the operator to fetch a fresh copy instead.
 if [ -n "${ARTIFACT_DIR}" ]; then
-  MANUAL="${MANUAL} --artifact-dir ${ARTIFACT_DIR}"
+  MANUAL="${MANUAL} --artifact-dir <fresh-download-dir>"
 fi
 if [ -n "${MANIFEST_PYTHON}" ]; then
   MANUAL="${MANUAL}
@@ -162,8 +166,15 @@ give_up() {
   echo "::error::Close it by hand, on a branch off main:"
   echo "::error::  ${MANUAL}"
   if [ "${GOVERNED_MODULE}" = "1" ]; then
-    echo "::error::The artifact directory must hold the exact retained wheel"
-    echo "::error::already compared with the private index; never rebuild it."
+    echo "::error::<fresh-download-dir> is NOT this run's runner-temp path — that"
+    echo "::error::directory dies with the runner and no human can reach it."
+    echo "::error::Fetch the exact retained wheel instead of rebuilding it:"
+    echo "::error::  gh run download ${GITHUB_RUN_ID:-<this-run-id>} --repo ${GITHUB_REPOSITORY:-michaelayoade/dotmac_starter_mt} \\"
+    echo "::error::    --name ${DISTRIBUTION}-dist --dir <fresh-download-dir>"
+    echo "::error::write_release_record.py refuses any wheel whose sha256 differs"
+    echo "::error::from the digest already embedded in the ${TAG} tag's"
+    echo "::error::ModuleReleaseTagEvidence.v1 message — a rebuilt wheel will not"
+    echo "::error::pass, only the artifact this run actually published will."
   fi
   echo "::error::then open a pull request titled:"
   echo "::error::  chore(release): record the ${DISTRIBUTION} ${VERSION} publication"

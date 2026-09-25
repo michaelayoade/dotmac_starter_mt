@@ -1,5 +1,5 @@
 {
-  "$comment": "Producer-owned immutable coordinates for verified module publications. Rows are appended mechanically by the release recorder from the annotated tag and the exact build-once wheel carried into registry verification; source changes never predict future release hashes.",
+  "$comment": "Producer-owned immutable coordinates for verified module publications. Rows are appended mechanically by the release recorder from the annotated tag and the exact build-once wheel carried into registry verification; source changes never predict future release hashes. Every row carries a verification_run_id and is proven against its annotated tag's ModuleReleaseTagEvidence.v1 message (rendered/parsed by scripts/write_release_record.py), never trusted from the row alone.",
   "schema": "ModuleReleaseVerifications.v1",
   "releases": []
 }

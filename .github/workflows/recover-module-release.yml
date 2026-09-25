@@ -148,6 +148,14 @@ jobs:
     environment: registry-release
     permissions:
       contents: write
+    env:
+      MODULE: ${{ inputs.module }}
+      VERSION: ${{ inputs.version }}
+      ORIGINAL_RUN_ID: ${{ inputs.original_run_id }}
+      COMPOSE_KERNEL: ${{ inputs.compose_kernel }}
+      COMPOSE_WITH: ${{ inputs.compose_with }}
+      RECOVERED_DIST: ${{ runner.temp }}/recovered-dist
+      RUN_ID: ${{ github.run_id }}
     steps:
       - name: Resolve the original run's source SHA
         id: origin
@@ -155,16 +163,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${{ inputs.original_run_id }}" -q .head_sha)"
-          CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${{ inputs.original_run_id }}" -q .conclusion)"
+          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ORIGINAL_RUN_ID}" -q .head_sha)"
+          CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ORIGINAL_RUN_ID}" -q .conclusion)"
           if [ -z "${SHA}" ]; then
-            echo "::error::could not resolve a head SHA for run ${{ inputs.original_run_id }}"
+            echo "::error::could not resolve a head SHA for run ${ORIGINAL_RUN_ID}"
             exit 1
           fi
           # A SUCCESSFUL run needs no recovery, and pointing this at one would
           # write a second tag for an already-tagged release.
           if [ "${CONCLUSION}" = "success" ]; then
-            echo "::error::run ${{ inputs.original_run_id }} succeeded — there is nothing to recover"
+            echo "::error::run ${ORIGINAL_RUN_ID} succeeded — there is nothing to recover"
             exit 1
           fi
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
@@ -194,7 +202,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/release_module.py resolve \
-            "${{ inputs.module }}" --version "${{ inputs.version }}" \
+            "$MODULE" --version "$VERSION" \
             | tee -a "${GITHUB_OUTPUT}"
 
       - name: Download the original run's build artifacts
@@ -202,12 +210,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p recovered-dist
-          gh run download "${{ inputs.original_run_id }}" \
+          mkdir -p "$RECOVERED_DIST"
+          gh run download "$ORIGINAL_RUN_ID" \
             --repo "${GITHUB_REPOSITORY}" \
-            --name "${{ inputs.module }}-dist" \
-            --dir recovered-dist
-          ls -l recovered-dist
+            --name "${MODULE}-dist" \
+            --dir "$RECOVERED_DIST"
+          ls -l "$RECOVERED_DIST"
 
       # The load-bearing check: the bytes on the index are the bytes that run
       # built. `compare-published` refuses on any difference.
@@ -215,10 +223,10 @@ jobs:
         env:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
         run: |
-          python scripts/release_module.py compare-published "${{ inputs.module }}" \
-            --version "${{ inputs.version }}" \
+          python scripts/release_module.py compare-published "$MODULE" \
+            --version "$VERSION" \
             --index "${INDEX}" \
-            --dist recovered-dist
+            --dist "$RECOVERED_DIST"
 
       # The verification the original run never completed — now with the public
       # index available, which is what #124 fixed.
@@ -227,40 +235,43 @@ jobs:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
         run: |
           set -euo pipefail
-          PINS=(--pin "${{ inputs.module }}==${{ inputs.version }}")
-          for sibling in ${{ inputs.compose_with }}; do
+          PINS=(--pin "${MODULE}==${VERSION}")
+          for sibling in ${COMPOSE_WITH}; do
             PINS+=(--pin "${sibling}")
           done
           python scripts/release_module.py verify-registry \
             --index "${INDEX}" \
-            --kernel "${{ inputs.compose_kernel }}" \
+            --kernel "${COMPOSE_KERNEL}" \
             "${PINS[@]}"
 
       # Only after every check: write the tag the failed run never wrote, on the
-      # ORIGINAL SHA.
+      # ORIGINAL SHA. Same canonical `ModuleReleaseTagEvidence.v1` evidence and
+      # fail-closed refusal as an ordinary release — no separate "RECOVERED"
+      # free-text message.
       - name: Tag the recovered release
+        env:
+          ORIGIN_SHA: ${{ steps.origin.outputs.sha }}
         run: |
           set -euo pipefail
           # `resolve` emits key=value lines, and its `tag=` line already pairs
           # the allowlisted prefix with the PACKAGE's own version — so a
           # dispatched version that disagrees with the tree has already been
           # refused by the resolve gate above.
-          TAG="$(python scripts/release_module.py resolve "${{ inputs.module }}" --version "${{ inputs.version }}" | sed -n 's/^tag=//p')"
+          TAG="$(python scripts/release_module.py resolve "$MODULE" --version "$VERSION" | sed -n 's/^tag=//p')"
           if [ -z "${TAG}" ]; then
             echo "::error::could not resolve a tag name"
             exit 1
           fi
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            echo "::error::${TAG} already exists — this release is not unrecovered"
-            exit 1
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" \
-            -m "${{ inputs.module }} ${{ inputs.version }} (RECOVERED: published by run ${{ inputs.original_run_id }}, verified afterwards)" \
-            "${{ steps.origin.outputs.sha }}"
-          git push origin "${TAG}"
-          echo "tagged ${TAG} on ${{ steps.origin.outputs.sha }}"
+          python scripts/tag_module_release.py \
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit "$ORIGIN_SHA" \
+            --artifact-dir "$RECOVERED_DIST" \
+            --run-id "$RUN_ID" \
+            --remote origin
 
       # Recovery writes the same irreversible tag as an ordinary release and
       # therefore owes the same record. Without this step a successful recovery
@@ -277,10 +288,12 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
+          PACKAGE_DIR: ${{ steps.target.outputs.package_dir }}
         run: |
           bash scripts/open_release_record_pr.sh \
-            --distribution "${{ inputs.module }}" \
-            --version "${{ inputs.version }}" \
-            --tag "${{ steps.target.outputs.tag }}" \
-            --package-dir "${{ steps.target.outputs.package_dir }}" \
-            --artifact-dir recovered-dist
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --package-dir "$PACKAGE_DIR" \
+            --artifact-dir "$RECOVERED_DIST"
