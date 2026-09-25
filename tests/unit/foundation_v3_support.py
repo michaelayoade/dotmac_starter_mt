@@ -37,7 +37,9 @@ HOST_ID = "fleet-host-1"
 HOST_INCARNATION = "sha256:" + "b" * 64
 HOST_ENROLMENT_REF = "00000000-0000-4000-8000-000000000001"
 CONTROLLER = "SHA256:test-controller"
-CONTROL_PLAN = "sha256:" + "f" * 64
+# Control stores its plan digest as bare hex; the fixture holds that spelling
+# so evidence that must persist it verbatim is actually tested.
+CONTROL_PLAN = "f" * 64
 NOW = datetime(2026, 8, 30, 12, tzinfo=UTC)
 
 

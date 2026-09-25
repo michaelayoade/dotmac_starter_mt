@@ -457,13 +457,16 @@ def _standalone_v2_renders(source: str) -> list[int]:
         ):
             for argument in [*node.args, *(k.value for k in node.keywords)]:
                 wrapped.add(id(argument))
+    # Even when wrapped, the V2 render may take ONLY the base plan: one
+    # positional argument and no keywords, so the CLI cannot add acts
+    # (bootstraps, exposure) to the plan it renders.
     return [
         node.lineno
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "render_execution_plan_v2"
-        and id(node) not in wrapped
+        and (id(node) not in wrapped or len(node.args) != 1 or node.keywords)
     ]
 
 
@@ -484,6 +487,13 @@ def test_the_standalone_v2_detector_is_sensitive() -> None:
         "    return render_execution_plan_v3(render_execution_plan_v2(base))\n"
     )
     assert _standalone_v2_renders(planted) == [2]
+    with_acts = (
+        "def f(base, acts):\n"
+        "    return render_execution_plan_v3(\n"
+        "        render_execution_plan_v2(base, principal_bootstraps=acts)\n"
+        "    )\n"
+    )
+    assert _standalone_v2_renders(with_acts) == [3]
 
 
 def test_the_operation_vocabulary_did_not_widen() -> None:
