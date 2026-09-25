@@ -27,7 +27,10 @@ from dotmac_deployment_foundation.execution_plan_v3 import (
     render_execution_plan_v3,
 )
 from dotmac_deployment_foundation.host_source_admission import HostSourceAdmissionTrace
-from dotmac_deployment_foundation.provenance import AuthorizationReceiptV2
+from dotmac_deployment_foundation.provenance import (
+    AuthorizationReceiptV2,
+    normalize_digest,
+)
 
 WHEEL = "sha256:" + "a" * 64
 HOST_ID = "fleet-host-1"
@@ -68,6 +71,10 @@ class SyntheticV3Provider:
     commit_fails: bool = False
     last_consumption_ref: str = ""
     last_trace: HostSourceAdmissionTrace | None = None
+    #: Raw fields a test makes the attested Control document carry verbatim —
+    #: e.g. Control's bare-hex digest spelling, which `as_document()` would
+    #: otherwise normalize away before the grant ever sees it.
+    attested_overrides: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @property
     def attester(self) -> SyntheticV3Provider:
@@ -83,7 +90,7 @@ class SyntheticV3Provider:
             "kind": "dispatch"
         }:
             raise ValueError("synthetic Control pair disagrees")
-        return self.receipt.as_document()
+        return {**self.receipt.as_document(), **self.attested_overrides}
 
     def observe(self) -> ExecutionContextV3:
         return self.context
@@ -103,7 +110,9 @@ class SyntheticV3Provider:
             request.host_source_trace.pair_verification_result is None
         ):
             raise PreconditionFailed("Control did not receive F2 continuation")
-        if request.expected_execution_plan_digest != self.receipt.execution_plan_digest:
+        if normalize_digest(
+            request.expected_execution_plan_digest, where="request"
+        ) != normalize_digest(self.receipt.execution_plan_digest, where="receipt"):
             raise PreconditionFailed("Control plan digest changed before consumption")
         if (
             request.control_consumption_ref
@@ -185,8 +194,10 @@ def grant_for_plan(
     *,
     now: datetime = NOW,
     receipt_overrides: dict[str, Any] | None = None,
+    attested_overrides: dict[str, Any] | None = None,
 ):
     provider = provider_for(spec, plan, now=now, receipt_overrides=receipt_overrides)
+    provider.attested_overrides = dict(attested_overrides or {})
     bindings = ExecutionBindings(
         provider="synthetic-test-host", authorization_v3_provider=provider
     )

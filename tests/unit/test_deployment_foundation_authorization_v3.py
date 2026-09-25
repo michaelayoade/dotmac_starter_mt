@@ -547,8 +547,11 @@ def test_a_bare_hex_execution_plan_digest_authorizes_like_the_prefixed_one() -> 
     plan, _ = _plan_and_digest(spec, work, effects=effects)
     bare = plan.digest().removeprefix("sha256:")
     assert bare != plan.digest()
+    # The ATTESTED document carries Control's bare-hex spelling verbatim, so
+    # the grant's receipt really holds bare hex; reverting the normalization in
+    # require_committed_consumption_v3 makes this run refuse before consuming.
     grant = grant_for_plan(
-        spec, plan, receipt_overrides={"execution_plan_digest": bare}
+        spec, plan, attested_overrides={"execution_plan_digest": bare}
     )
     assert grant.receipt.execution_plan_digest == bare
     executor = Executor(
