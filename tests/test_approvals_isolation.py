@@ -398,49 +398,138 @@ def test_one_tenant_cannot_read_or_write_another_tenants_rows(
         engine.dispose()
 
 
-def test_withdrawal_evidence_obeys_tenant_rls_on_insert_and_read(
+def _approved_tenant_request(
+    db: Session, tenant_id: uuid.UUID, *, key: str
+) -> uuid.UUID:
+    """A genuinely approved tenant request, through the public owner."""
+    approver, requester = uuid.uuid4(), uuid.uuid4()
+    db.execute(
+        text("SELECT set_config('app.current_tenant', :t, true)"),
+        {"t": str(tenant_id)},
+    )
+    revision = PolicyRevision(
+        policy_code=f"fleet.{key}",
+        version=1,
+        levels=(
+            ApprovalLevel(
+                sequence=1,
+                approver_kind=ApproverKind.USER,
+                approver_id=str(approver),
+                quorum=1,
+            ),
+        ),
+    )
+    publish_tenant_policy_version(db, tenant_id=tenant_id, revision=revision)
+    request_id = request_tenant_approval(
+        db,
+        tenant_id=tenant_id,
+        policy_code=f"fleet.{key}",
+        policy_version=1,
+        subject_type="fleet.plan",
+        subject_id=key,
+        content_digest=DIGEST,
+        requested_by=requester,
+        idempotency_key=key,
+    ).request_id
+    record_tenant_decision(
+        db,
+        tenant_id=tenant_id,
+        request_id=request_id,
+        actor=Actor(actor_id=approver),
+        action=DecisionAction.APPROVE,
+        content_digest=DIGEST,
+    )
+    return request_id
+
+
+def test_withdrawal_evidence_and_the_definer_function_obey_tenant_isolation(
     migrated_scratch: tuple[str, str, str],
 ) -> None:
+    """Real evidence exists in tenant B: tenant A reads none of it, B reads it,
+    and the SECURITY DEFINER withdrawal function refuses both cross-tenant
+    shapes without writing evidence or an outbox row."""
+    from dotmac_approvals.outbox import withdraw_tenant_approval
+
     admin_url, app_user_url, _ = migrated_scratch
     tenant_a, tenant_b = _seed_two_tenants(admin_url)
     admin = create_engine(admin_url)
-    with admin.connect() as conn:
-        request_b = conn.execute(
-            text("SELECT id FROM mod_approvals.approval_requests WHERE tenant_id = :t"),
-            {"t": tenant_b},
-        ).scalar_one()
-    admin.dispose()
-    runtime = create_engine(app_user_url)
     try:
-        with runtime.connect() as conn:
-            conn.execute(
-                text("SELECT set_config('app.current_tenant', :t, false)"),
-                {"t": str(tenant_a)},
+        with Session(admin) as db, db.begin():
+            withdrawn_b = _approved_tenant_request(db, tenant_b, key="b-withdrawn")
+            withdraw_tenant_approval(
+                db,
+                tenant_id=tenant_b,
+                request_id=withdrawn_b,
+                actor=Actor(actor_id=uuid.uuid4()),
+                authority_ref="cp-review",
+                reason="isolation proof",
+                external_ref="b-withdrawal",
             )
-            assert (
-                conn.execute(
+        with Session(admin) as db, db.begin():
+            target_b = _approved_tenant_request(db, tenant_b, key="b-target")
+
+        def counts() -> tuple[int, int]:
+            with admin.connect() as conn:
+                evidence = conn.execute(
                     text("SELECT count(*) FROM mod_approvals.approval_withdrawals")
                 ).scalar_one()
-                == 0
-            )
-            with pytest.raises(DBAPIError):
+                events = conn.execute(
+                    text("SELECT count(*) FROM public.outbox_events")
+                ).scalar_one()
+            return evidence, events
+
+        before = counts()
+        assert before[0] == 1
+    finally:
+        admin.dispose()
+
+    runtime = create_engine(app_user_url)
+    try:
+        for tenant, expected in ((tenant_a, 0), (tenant_b, 1)):
+            with runtime.connect() as conn:
                 conn.execute(
-                    text(
-                        "INSERT INTO mod_approvals.approval_withdrawals "
-                        "(id, tenant_id, request_id, actor_id, authority_ref, reason, "
-                        "effective_at, external_ref, approved_at) VALUES "
-                        "(:id, :tenant, :request, :actor, 'review-1', 'invalid', "
-                        "now(), 'revoke-1', now())"
-                    ),
-                    {
-                        "id": uuid.uuid4(),
-                        "tenant": tenant_b,
-                        "request": request_b,
-                        "actor": uuid.uuid4(),
-                    },
+                    text("SELECT set_config('app.current_tenant', :t, false)"),
+                    {"t": str(tenant)},
                 )
+                seen = conn.execute(
+                    text("SELECT count(*) FROM mod_approvals.approval_withdrawals")
+                ).scalar_one()
+                assert seen == expected, (tenant, seen)
+
+        call = text(
+            "SELECT mod_approvals.record_tenant_withdrawal("
+            ":tenant_id, :request_id, :withdrawal_id, :actor_id, "
+            "'cp-review', 'cross-tenant', :external_ref)"
+        )
+        for claimed_tenant, ref in (
+            (tenant_b, "forged-other-tenant"),
+            (tenant_a, "forged-own-tenant"),
+        ):
+            with runtime.connect() as conn:
+                conn.execute(
+                    text("SELECT set_config('app.current_tenant', :t, false)"),
+                    {"t": str(tenant_a)},
+                )
+                with pytest.raises(DBAPIError):
+                    conn.execute(
+                        call,
+                        {
+                            "tenant_id": claimed_tenant,
+                            "request_id": target_b,
+                            "withdrawal_id": uuid.uuid4(),
+                            "actor_id": uuid.uuid4(),
+                            "external_ref": ref,
+                        },
+                    )
+                conn.rollback()
     finally:
         runtime.dispose()
+
+    admin = create_engine(admin_url)
+    try:
+        assert counts() == before
+    finally:
+        admin.dispose()
 
 
 def test_platform_tables_are_unreadable_by_the_tenant_role(
@@ -1592,3 +1681,50 @@ def test_the_relay_refusals_are_not_refusing_everything(
         ) as conn,
     ):
         require_prerequisites(conn, _relay_requires())
+
+
+def test_the_declared_database_catalog_matches_the_live_migrated_schema(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """The manifest's catalogue contribution — including the ap_0003 tables —
+    is observed against the migrated PostgreSQL schema (both planes) and must
+    show zero drift; a declared fact is never trusted as hand-derived."""
+    import dotmac_approvals
+    from dotmac_approvals.manifest import module
+    from dotmac_kernel import (
+        ComposedDatabaseLineageHeadV1,
+        DatabaseCatalogOwnerKind,
+        DatabaseCatalogOwnerV1,
+        ModuleDatabaseCatalogSnapshot,
+        compare_module_database_catalog,
+        observe_postgres_tables_columns,
+    )
+
+    admin_url, _, _ = migrated_scratch
+    snapshot = ModuleDatabaseCatalogSnapshot.from_manifest(
+        module,
+        distribution_name="dotmac-approvals",
+        distribution_version=dotmac_approvals.__version__,
+        composed_lineage_head=ComposedDatabaseLineageHeadV1(
+            DatabaseCatalogOwnerV1(DatabaseCatalogOwnerKind.MODULE, module.code),
+            "ap_0003_withdrawals",
+        ),
+    )
+    engine = create_engine(admin_url)
+    try:
+        with engine.connect() as conn:
+            observation = observe_postgres_tables_columns(
+                conn, schemas=("mod_approvals",)
+            )
+    finally:
+        engine.dispose()
+    comparison = compare_module_database_catalog(snapshot, observation)
+    drifts = [
+        f"{d.table}.{d.column} {d.attribute.value} {d.direction.value}: "
+        f"declared={d.declared!r} observed={d.observed!r}"
+        for d in comparison.drifts
+    ]
+    assert drifts == [], "\n".join(drifts)
+    assert comparison.measurement_issues == ()
+    declared_tables = {table.name for table in snapshot.tables}
+    assert {"approval_withdrawals", "platform_approval_withdrawals"} <= declared_tables
