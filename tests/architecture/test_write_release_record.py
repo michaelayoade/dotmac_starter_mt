@@ -27,15 +27,20 @@ from __future__ import annotations
 
 import ast
 import difflib
+import hashlib
 import importlib.util
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = PROJECT_ROOT / "scripts" / "write_release_record.py"
+LEGACY_MODULE_BASELINE_SHA256 = (
+    "fd5568c0f8f7eb511534a10e692de7cb43bcadb5a451c8f534973357f9534bd9"
+)
 
 #: A real, published, already-recorded release — the oracle for the digest path.
 KNOWN_TAG = "dotmac-integration-v0.1.0a12"
@@ -67,6 +72,459 @@ def _recorded_entry(writer, tag: str):
 
 def _ledger_text(writer) -> str:
     return writer.LEDGER.read_text(encoding="utf-8")
+
+
+def _module_release_verification_text(writer) -> str:
+    return writer.MODULE_RELEASE_VERIFICATIONS.read_text(encoding="utf-8")
+
+
+def _legacy_module_text(writer) -> str:
+    return writer.MODULE_RELEASE_LEGACY.read_text(encoding="utf-8")
+
+
+# ── Module artifact coordinates ─────────────────────────────────────────────────────
+
+
+def test_module_release_verification_appends_exact_immutable_coordinates() -> None:
+    writer = _writer()
+    before = _module_release_verification_text(writer)
+    after, added = writer.add_module_release_verification(
+        before,
+        distribution="dotmac-approvals",
+        version="0.1.0a7",
+        tag="dotmac-approvals-v0.1.0a7",
+        tag_object="1" * 40,
+        peeled_commit="2" * 40,
+        wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
+        wheel_sha256="3" * 64,
+        verification_run_id="123456789",
+    )
+    assert added
+    document = json.loads(after)
+    assert document["schema"] == "ModuleReleaseVerifications.v1"
+    assert document["releases"] == [
+        {
+            "distribution": "dotmac-approvals",
+            "version": "0.1.0a7",
+            "tag": "dotmac-approvals-v0.1.0a7",
+            "tag_object": "1" * 40,
+            "peeled_commit": "2" * 40,
+            "status": "released",
+            "pinnable": True,
+            "sha256": {"dotmac_approvals-0.1.0a7-py3-none-any.whl": "3" * 64},
+            "verification_run_id": "123456789",
+        }
+    ]
+
+    unchanged, added_again = writer.add_module_release_verification(
+        after,
+        distribution="dotmac-approvals",
+        version="0.1.0a7",
+        tag="dotmac-approvals-v0.1.0a7",
+        tag_object="1" * 40,
+        peeled_commit="2" * 40,
+        wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
+        wheel_sha256="3" * 64,
+        verification_run_id="123456789",
+    )
+    assert not added_again
+    assert unchanged == after
+
+
+def test_module_release_verification_refuses_coordinate_rewrite() -> None:
+    writer = _writer()
+    after, _ = writer.add_module_release_verification(
+        _module_release_verification_text(writer),
+        distribution="dotmac-approvals",
+        version="0.1.0a7",
+        tag="dotmac-approvals-v0.1.0a7",
+        tag_object="1" * 40,
+        peeled_commit="2" * 40,
+        wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
+        wheel_sha256="3" * 64,
+        verification_run_id="123456789",
+    )
+    with pytest.raises(writer.ReleaseRecordError, match="different coordinates"):
+        writer.add_module_release_verification(
+            after,
+            distribution="dotmac-approvals",
+            version="0.1.0a7",
+            tag="dotmac-approvals-v0.1.0a7",
+            tag_object="1" * 40,
+            peeled_commit="2" * 40,
+            wheel_filename="dotmac_approvals-0.1.0a7-py3-none-any.whl",
+            wheel_sha256="4" * 64,
+            verification_run_id="123456789",
+        )
+
+
+def test_module_wheel_digest_requires_the_exact_single_build_once_wheel(
+    tmp_path: Path,
+) -> None:
+    writer = _writer()
+    wheel = tmp_path / "dotmac_approvals-0.1.0a7-py3-none-any.whl"
+    wheel.write_bytes(b"exact build once bytes")
+    assert writer.module_wheel_digest(
+        str(tmp_path), distribution="dotmac-approvals", version="0.1.0a7"
+    ) == (
+        wheel.name,
+        "554a5f552ff0125cc889363a77f316bd6f0234f47238916516cc6a4e1191ba46",
+    )
+    (tmp_path / "other-1.0-py3-none-any.whl").write_bytes(b"other")
+    with pytest.raises(writer.ReleaseRecordError, match="exactly one wheel"):
+        writer.module_wheel_digest(
+            str(tmp_path), distribution="dotmac-approvals", version="0.1.0a7"
+        )
+
+
+def test_only_the_governed_module_lane_can_append_module_release_evidence() -> None:
+    writer = _writer()
+    writer.require_module_release_target("dotmac-approvals")
+    with pytest.raises(writer.ReleaseRecordError, match="not governed"):
+        writer.require_module_release_target("dotmac-kernel")
+
+
+def test_module_release_workflow_carries_exact_wheel_into_the_recorder() -> None:
+    workflow = (PROJECT_ROOT / ".github/workflows/release-module.yml").read_text()
+    verify = workflow.split("  verify:", 1)[1]
+    assert "Download exact built bytes for the publication record" in verify
+    assert "name: ${{ inputs.module }}-dist" in verify
+    assert "path: ${{ runner.temp }}/module-release-dist" in verify
+    # `runner.temp` is illegal in `jobs.<id>.env` (only github/needs/strategy/
+    # matrix/vars/secrets/inputs are expanded there); the job instead resolves
+    # it once, in a GITHUB_ENV step right after checkout, and every run: body
+    # below references it as $ARTIFACT_DIR.
+    assert "ARTIFACT_DIR: ${{ runner.temp }}/module-release-dist" not in verify
+    assert (
+        'echo "ARTIFACT_DIR=${RUNNER_TEMP}/module-release-dist" >> "$GITHUB_ENV"'
+        in verify
+    )
+    assert '--artifact-dir "${ARTIFACT_DIR}"' in verify
+    compare = verify.index("Prove published bytes match the retained build artifact")
+    tag = verify.index("Tag the verified release")
+    assert compare < tag
+    assert 'release_module.py compare-published "$MODULE"' in verify
+    assert '--dist "${ARTIFACT_DIR}"' in verify
+    assert "python scripts/tag_module_release.py" in verify
+
+    wrapper = (PROJECT_ROOT / "scripts/open_release_record_pr.sh").read_text()
+    assert '--artifact-dir) ARTIFACT_DIR="$2"' in wrapper
+    assert 'ARGS+=(--artifact-dir "${ARTIFACT_DIR}")' in wrapper
+    assert '[ "${GOVERNED_MODULE}" = "1" ] && [ -z "${ARTIFACT_DIR}" ]' in wrapper
+
+    recovery = (
+        PROJECT_ROOT / ".github/workflows/recover-module-release.yml"
+    ).read_text()
+    assert "RECOVERED_DIST: ${{ runner.temp }}/recovered-dist" not in recovery
+    assert (
+        'echo "RECOVERED_DIST=${RUNNER_TEMP}/recovered-dist" >> "$GITHUB_ENV"'
+        in recovery
+    )
+    recorder = recovery.split("- name: Open the post-release record", 1)[1]
+    assert '--artifact-dir "$RECOVERED_DIST"' in recorder
+    assert "release_module.py compare-published" in recovery
+    assert "python scripts/tag_module_release.py" in recovery
+
+
+def test_normal_compare_and_recovery_forwarding_detectors_are_sensitive() -> None:
+    normal = (PROJECT_ROOT / ".github/workflows/release-module.yml").read_text()
+    recovery = (
+        PROJECT_ROOT / ".github/workflows/recover-module-release.yml"
+    ).read_text()
+
+    def compares_before_tag(source: str) -> bool:
+        verify = source.split("  verify:", 1)[1]
+        return (
+            "release_module.py compare-published" in verify
+            and '--dist "${ARTIFACT_DIR}"' in verify
+            and verify.index("release_module.py compare-published")
+            < verify.index("Tag the verified release")
+        )
+
+    def forwards_recovery_artifact(source: str) -> bool:
+        return (
+            '--artifact-dir "$RECOVERED_DIST"'
+            in source.split("- name: Open the post-release record", 1)[1]
+        )
+
+    assert compares_before_tag(normal)
+    assert not compares_before_tag(
+        normal.replace("release_module.py compare-published", "verify-registry")
+    )
+    assert forwards_recovery_artifact(recovery)
+    assert not forwards_recovery_artifact(
+        recovery.replace('--artifact-dir "$RECOVERED_DIST"', "")
+    )
+
+
+def test_every_governed_module_tag_has_one_typed_evidence_class() -> None:
+    """Tag-backed CI gate: deleting a new verification row is not a pass."""
+    writer = _writer()
+    writer.validate_module_release_inventory(
+        _module_release_verification_text(writer), _legacy_module_text(writer)
+    )
+
+
+def test_pre_cutover_unverified_baseline_cannot_silently_grow() -> None:
+    """Adding a future tag as 'legacy' requires an explicit guard change."""
+    writer = _writer()
+    source = writer.MODULE_RELEASE_LEGACY.read_bytes()
+    assert hashlib.sha256(source).hexdigest() == LEGACY_MODULE_BASELINE_SHA256
+
+
+def test_append_only_guard_refuses_valid_hash_mutation_deletion_and_reordering() -> (
+    None
+):
+    writer = _writer()
+    _, first, base, _ = _synthetic_module_inventory()
+    second = dict(first)
+    second.update(
+        version="0.1.0a100",
+        tag="dotmac-approvals-v0.1.0a100",
+        sha256={"dotmac_approvals-0.1.0a100-py3-none-any.whl": "d" * 64},
+    )
+    base["releases"] = [first, second]
+    before = json.dumps(base)
+
+    appended = json.loads(before)
+    third = dict(first)
+    third.update(
+        version="0.1.0a101",
+        tag="dotmac-approvals-v0.1.0a101",
+        sha256={"dotmac_approvals-0.1.0a101-py3-none-any.whl": "e" * 64},
+    )
+    appended["releases"].append(third)
+    writer.require_module_release_verifications_append_only(
+        before, json.dumps(appended), targets={"dotmac-approvals"}
+    )
+
+    changed_hash = json.loads(before)
+    changed_hash["releases"][0]["sha256"] = {
+        "dotmac_approvals-0.1.0a99-py3-none-any.whl": "f" * 64
+    }
+    for damaged in (
+        changed_hash,
+        {**base, "releases": [second]},
+        {**base, "releases": [second, first]},
+    ):
+        with pytest.raises(
+            writer.ReleaseRecordError, match="deleted, reordered or mutated"
+        ):
+            writer.require_module_release_verifications_append_only(
+                before, json.dumps(damaged), targets={"dotmac-approvals"}
+            )
+
+
+def test_append_only_ci_uses_immutable_event_shas_and_full_history() -> None:
+    workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text()
+    job = workflow.split("  module-release-append-only:", 1)[1].split("\n  unit:", 1)[0]
+    assert "fetch-depth: 0" in job
+    assert "github.event.pull_request.base.sha" in job
+    assert "github.event.before" in job
+    assert job.count("check_module_release_verification_append_only.py --base") == 2
+    assert "origin/main" not in job
+
+
+def test_append_only_gate_refuses_missing_base_shallow_and_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(PROJECT_ROOT / "scripts"))
+    path = PROJECT_ROOT / "scripts/check_module_release_verification_append_only.py"
+    spec = importlib.util.spec_from_file_location("module_release_append_only", path)
+    assert spec is not None and spec.loader is not None
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    base = "a" * 40
+
+    def git_response(*args: str, fault: str):
+        if args == ("rev-parse", "--is-shallow-repository"):
+            return subprocess.CompletedProcess(
+                args, 0, "true\n" if fault == "shallow" else "false\n", ""
+            )
+        if args[0:2] == ("rev-parse", "--verify"):
+            return subprocess.CompletedProcess(
+                args, 128 if fault == "unresolvable" else 0, base + "\n", ""
+            )
+        if args[0:2] == ("merge-base", "--is-ancestor"):
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(
+            args, 128 if fault == "missing" else 0, "", ""
+        )
+
+    for fault, refusal in (
+        ("shallow", "shallow/unavailable"),
+        ("unresolvable", "unresolvable"),
+        ("missing", "no accepted"),
+    ):
+        monkeypatch.setattr(
+            checker, "_git", lambda *args, fault=fault: git_response(*args, fault=fault)
+        )
+        with pytest.raises(checker.ReleaseRecordError, match=refusal):
+            checker.check_append_only_base(base)
+
+
+def _synthetic_module_inventory():
+    tag = "dotmac-approvals-v0.1.0a99"
+    row = {
+        "distribution": "dotmac-approvals",
+        "version": "0.1.0a99",
+        "tag": tag,
+        "tag_object": "a" * 40,
+        "peeled_commit": "b" * 40,
+        "status": "released",
+        "pinnable": True,
+        "sha256": {"dotmac_approvals-0.1.0a99-py3-none-any.whl": "c" * 64},
+        "verification_run_id": "999000111",
+    }
+    verified = {
+        "$comment": "verified",
+        "schema": "ModuleReleaseVerifications.v1",
+        "releases": [row],
+    }
+    legacy = {
+        "$comment": "historical, not verified",
+        "schema": "ModuleReleaseLegacyUnverified.v1",
+        "cutover_source_commit": "d" * 40,
+        "tags": [],
+    }
+    return tag, row, verified, legacy
+
+
+def test_missing_or_deleted_verified_row_is_refused_by_live_tag() -> None:
+    writer = _writer()
+    tag, row, verified, legacy = _synthetic_module_inventory()
+    live = {tag: (row["tag_object"], row["peeled_commit"])}
+    filename, digest = next(iter(row["sha256"].items()))
+    evidence = {
+        tag: {
+            "distribution": row["distribution"],
+            "version": row["version"],
+            "wheel_filename": filename,
+            "wheel_sha256": digest,
+            "verification_run_id": row["verification_run_id"],
+        }
+    }
+    writer.validate_module_release_inventory(
+        json.dumps(verified),
+        json.dumps(legacy),
+        live=live,
+        evidence=evidence,
+        targets={"dotmac-approvals"},
+    )
+    verified["releases"] = []
+    with pytest.raises(writer.ReleaseRecordError, match="missing"):
+        writer.validate_module_release_inventory(
+            json.dumps(verified),
+            json.dumps(legacy),
+            live=live,
+            targets={"dotmac-approvals"},
+        )
+
+
+def test_corrupt_duplicate_and_overlapping_module_rows_are_refused() -> None:
+    writer = _writer()
+    tag, row, verified, legacy = _synthetic_module_inventory()
+    live = {tag: (row["tag_object"], row["peeled_commit"])}
+    verified["releases"].append(dict(row))
+    with pytest.raises(writer.ReleaseRecordError, match="duplicate"):
+        writer.validate_module_release_inventory(
+            json.dumps(verified),
+            json.dumps(legacy),
+            live=live,
+            targets={"dotmac-approvals"},
+        )
+    verified["releases"] = [dict(row)]
+    verified["releases"][0]["unknown"] = "silently dropped?"
+    with pytest.raises(writer.ReleaseRecordError, match="wrong keys"):
+        writer.parse_module_release_verifications(
+            json.dumps(verified), targets={"dotmac-approvals"}
+        )
+    verified["releases"] = [row]
+    legacy["tags"] = [
+        {
+            "tag": tag,
+            "tag_object": row["tag_object"],
+            "peeled_commit": row["peeled_commit"],
+        }
+    ]
+    with pytest.raises(writer.ReleaseRecordError, match="overlap"):
+        writer.validate_module_release_inventory(
+            json.dumps(verified),
+            json.dumps(legacy),
+            live=live,
+            targets={"dotmac-approvals"},
+        )
+
+
+def test_module_schema_refuses_duplicate_json_keys_and_noncanonical_wheel() -> None:
+    writer = _writer()
+    _, row, verified, _ = _synthetic_module_inventory()
+    with pytest.raises(writer.ReleaseRecordError, match="repeats JSON key"):
+        writer.parse_module_release_verifications(
+            '{"schema":"ModuleReleaseVerifications.v1",'
+            '"schema":"ModuleReleaseVerifications.v1","releases":[],"$comment":"x"}',
+            targets={"dotmac-approvals"},
+        )
+    row["sha256"] = {"wrong-0.1.0a99-py3-none-any.whl": "c" * 64}
+    with pytest.raises(writer.ReleaseRecordError, match="invalid wheel digest"):
+        writer.parse_module_release_verifications(
+            json.dumps(verified), targets={"dotmac-approvals"}
+        )
+    row["sha256"] = {"dotmac_approvals-0.1.0a99-py3-none-any.whl": "c" * 64}
+    row["tag"] = "dotmac-approvals-v0.01.0a99"
+    row["version"] = "0.01.0a99"
+    with pytest.raises(writer.ReleaseRecordError, match="noncanonical"):
+        writer.parse_module_release_verifications(
+            json.dumps(verified), targets={"dotmac-approvals"}
+        )
+
+
+def test_lightweight_module_tag_is_not_accepted_as_annotated_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _writer()
+
+    def fake_git(*args: str) -> str:
+        if args[0] == "rev-parse":
+            return "false\n"
+        return "dotmac-approvals-v0.1.0a99|commit|" + "a" * 40 + "|\n"
+
+    monkeypatch.setattr(writer, "_git", fake_git)
+    with pytest.raises(writer.ReleaseRecordError, match="not an annotated"):
+        writer.live_module_tag_refs(targets={"dotmac-approvals"})
+
+
+def test_annotated_tag_object_or_peeled_commit_mutation_is_refused() -> None:
+    writer = _writer()
+    tag, row, verified, legacy = _synthetic_module_inventory()
+    for live in (
+        {tag: ("e" * 40, row["peeled_commit"])},
+        {tag: (row["tag_object"], "f" * 40)},
+    ):
+        with pytest.raises(writer.ReleaseRecordError, match="object or peeled"):
+            writer.validate_module_release_inventory(
+                json.dumps(verified),
+                json.dumps(legacy),
+                live=live,
+                targets={"dotmac-approvals"},
+            )
+
+
+def test_manual_governed_module_record_requires_retained_artifact() -> None:
+    source = SCRIPT.read_text()
+    assert "distribution in governed_modules and artifact_dir is None" in source
+    assert "--artifact-dir with the" in source
+    wrapper = (PROJECT_ROOT / "scripts/open_release_record_pr.sh").read_text()
+    assert "--artifact-dir is required for governed module" in wrapper
+    writer = _writer()
+    with pytest.raises(writer.ReleaseRecordError, match="--artifact-dir"):
+        writer.write_record(
+            distribution=KNOWN_DISTRIBUTION,
+            version="0.1.0a12",
+            tag=KNOWN_TAG,
+            package_dir=KNOWN_PACKAGE_DIR,
+            import_name=KNOWN_IMPORT_NAME,
+        )
 
 
 def _mapping_keys(source: str, name: str) -> set[str]:

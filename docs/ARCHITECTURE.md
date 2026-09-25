@@ -904,6 +904,58 @@ every repository-local distribution named by that module's reviewed
 `module -> dotmac-ui` direction stays installable without giving the build job a
 registry credential. The post-publish smoke separately installs from the
 registry, so local dependency artifacts cannot substitute for publication.
+The verify job also downloads the same immutable build artifact that the
+publish job uploaded and invokes `compare-published` against the private index
+before any tag. After registry verification and annotated tagging, the
+post-release recorder hashes that exact wheel and appends its filename,
+SHA-256, annotated tag object and peeled source commit to
+`docs/inventories/module-release-verifications.json`. The row is producer-owned,
+append-only and refuses coordinate rewrites; source work never predicts a
+future release hash. The CI architecture gate validates every row and compares
+the disjoint verification and legacy-unverified inventories with the complete
+local annotated-tag oracle. Deleting a post-cutover verification row, changing
+a tag object or peeled commit, or leaving a new tag unrecorded fails. The 120
+pre-cutover governed tags in `module-release-legacy-unverified.json` retain
+only real tag coordinates as of accepted source base
+`7281adb1620ae5b5942518a9a01290330e198ec3`, because their registry-byte
+proof was not retained;
+they are debt/history, never verified or pinnable evidence. A consumer may pin
+a checked-in verification row and independently recheck registry bytes, but
+the legacy baseline cannot satisfy that check.
+
+The annotated tag itself carries the canonical evidence, not free text: its
+message is exactly one line of `ModuleReleaseTagEvidence.v1` JSON —
+`distribution`, `version`, `wheel_filename`, `wheel_sha256` and
+`verification_run_id` — produced by the single renderer
+`render_module_release_tag_evidence` and read back only by its paired
+`parse_module_release_tag_evidence` (both in `scripts/write_release_record.py`).
+`scripts/tag_module_release.py` is the one fail-closed writer of that tag:
+it refuses an already-existing tag, local or remote, and never force-tags,
+deletes or recreates one — a release that needs a new tag ships a new
+version instead. The recorder's validator proves a row against the tag
+object it names by re-deriving `ModuleReleaseTagEvidence.v1` from the tag
+message and checking the row's wheel filename, SHA-256 and
+`verification_run_id` against it field-for-field; a row whose
+`verification_run_id` disagrees with its own tag's embedded run id fails
+the gate. The legacy `module-release-legacy-unverified.json` inventory is
+frozen byte-identical to its accepted source base and carries no
+`verification_run_id` — it is bootstrap history, not evidence, and the
+gate never asks it to prove anything. `recover-module-release.yml`'s
+artifacts (the downloaded original build and the record-PR's manual-fallback
+guidance) live under the runner's own temp directory for the duration of
+that run only; nothing persists there past the job, and the manual fallback
+in `scripts/open_release_record_pr.sh` never prints that path to an
+operator — it tells them to `gh run download` a fresh copy instead, which
+`write_release_record.py` will refuse unless its digest matches the one
+already embedded in the tag.
+
+Separately, hosted CI compares the complete verification ledger at each PR's
+immutable `pull_request.base.sha` (and each main push's `before` SHA) with the
+new tree: accepted rows must remain identical and in order; only append is
+allowed. A shallow checkout, unresolved base, or missing base ledger is a
+refusal, not an implicit empty ledger. The initial inventory therefore needs
+its own reviewed bootstrap commit before the append-only implementation gate
+can run against it.
 `scripts/module_catalog.py` joins those inputs deterministically, and
 `tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
 refuse drift or an undiscoverable new distribution. An application still owns
