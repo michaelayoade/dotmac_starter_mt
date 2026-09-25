@@ -890,7 +890,7 @@ class Executor:
         trace = self._host_source_admission_trace
         if not isinstance(trace, HostSourceAdmissionTrace):
             raise PreconditionFailed("F2 supplied no typed installed-host trace")
-        for name, admitted, planned, observed in (
+        for name, admitted, planned, current in (
             (
                 "host_id",
                 trace.host_identity,
@@ -910,7 +910,7 @@ class Executor:
                 facts.host_enrolment_ref,
             ),
         ):
-            if admitted != planned or admitted != observed:
+            if admitted != planned or admitted != current:
                 raise PreconditionFailed(
                     f"F2 admitted {name} disagrees with the V3 execution subject"
                 )
