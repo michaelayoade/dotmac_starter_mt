@@ -593,10 +593,38 @@ Every host MUTATION is now routed through `engine/run.py`'s `Executor`. The
 invoke a second transaction class directly over the composed host effects,
 outside `Executor`'s grant and execution-plan checks; that class is deleted.
 Exposure is a typed effect the executor performs from an authorized
-`FoundationExecutionPlanV2`, and `exposure-apply` observes without applying.
-The residue is stated rather than hidden: Lane 3's two exposure items are
-`blocked`, because Control issues no V2 plan carrying a reconciliation yet, so
-the act has an owner and no authorization naming it. The
+`FoundationExecutionPlanV3`, and `exposure-apply` observes without applying.
+The V3 plan fixes the candidate's recorded wheel digest, target ID/ref,
+controller SSH fingerprint, Fleet/Control host ID, host-key incarnation and
+immutable enrolment/root-version reference. Foundation alone issues an
+`ExecutionGrant` after a startup-fixed trusted assembly provider attests
+Control's V2 authorization+dispatch pair and reobserves those independent
+facts. V1 authority is retired; V1/V2 documents remain historical only.
+The CLI/Lane 3/release path has no concrete CP provider composition yet and
+therefore refuses execution; a request-selected verifier cannot bridge that
+gap. F2 host-source admission remains the independent installed-source gate
+before effects; the PEP610 wheel digest is source-artifact evidence, not a
+fresh byte-integrity attestation.
+F2's authenticated installed host ID, signer fingerprint and root-version
+UUID are compared exactly to the V3 plan and fresh provider observation before
+either deploy or rollback effects. `Effects` exposes no authenticated target
+identity, so the CP adapter must compose its Effects, F2 admission provider
+and V3 provider as one trusted in-process bundle; request fields cannot select
+those independently. The V3 provider's pre-effect Control seam takes the
+frozen original authorization+dispatch pair and a deterministic
+`control-dispatch:<dispatch_id>` ledger key. Foundation compares the receipt,
+V3 plan, fresh context, F2 trace, sequence/attempt and expiry before the call.
+CP atomically revalidates current approval standing and consumes the exact
+dispatch, refusing before commit or returning `None` only after commit.
+Foundation performs no fallible post-commit check before effects. Control's
+committed ledger is the recovery source if Foundation crashes before local
+`DeploymentEvidence.v2` can record the same key; V1 evidence bytes are
+unchanged. This source defines the seam; an external CP implementation
+and its conformance proof are not present here. Installed-wheel release smoke
+checks V3 render/digest bytes and an honest standalone CLI refusal; it may
+pass without CP adoption, while the actual execution path still cannot.
+Lane 3's two exposure items remain
+`blocked` until the trusted pair and V3 plan name their act. The
 `ApplicationFoundationProfile.v1` verifier is likewise report-only: this
 assembly does not compose it into boot or deploy. No Foundation `HostSource`
 provider is composed here, and failed-production recovery is deliberately

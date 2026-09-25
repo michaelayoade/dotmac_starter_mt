@@ -9,14 +9,41 @@
   are public contract exactly as the rendered assets are: a change to the
   document's shape changes every consumer's digest at once, which is the
   intended behaviour and makes it a MINOR bump at least.
-- `FoundationExecutionPlanV1` and `ExecutionPlanDigestV1` — the document, its
+- `FoundationExecutionPlanV1` and `ExecutionPlanDigestV1` — the historical document, its
   ten canonicalization rules, and the digest over it. The BYTES are the
   contract and two other systems bind to them: Platform CP submits the digest
   and Control freezes it, so a change to the document's shape, key set, key
   names, or any of the ten rules invalidates every frozen digest at once and is
-  a MINOR bump at least. `dotmac-deploy execution-plan --format digest` is the
-  only supported way to produce the value; re-implementing the canonicalization
-  is what this contract exists to stop.
+  a MINOR bump at least. V1 remains readable but is non-authorizing.
+- `FoundationExecutionPlanV3` and `authorize_v3()` — the active execution
+  authority contract. The V3 document binds the exact recorded candidate
+  wheel digest, target ID/ref, controller SSH fingerprint, Fleet/Control host
+  ID, host-key incarnation fingerprint and immutable enrolment/root-version
+  reference. Its canonical digest is still `ExecutionPlanDigestV1` and must
+  equal Control's signed V2 pair value. `dotmac-deploy execution-plan` renders
+  it only with a startup-installed provider; a V1/V2 plan cannot issue a grant.
+  The Control V2 receipt schema is unchanged. The trusted in-process assembly
+  fixes the attester, clock and host observer; request material cannot choose
+  them. Host-source admission remains the separate F2 owner of installed-source
+  integrity, not a claim made by the recorded wheel digest. Its authenticated
+  `host_identity` equals the V3 Fleet `host_id`; installed signer fingerprint
+  and installed trust-root version equal the V3 host incarnation and canonical
+  enrolment UUID. The executor compares all three before effects. `Effects`
+  carries no authenticated target identity, so the trusted CP composition must
+  construct the V3 provider, F2 admission provider and Effects as one bundle.
+  `ExecutionAuthorityV3Provider.consume_dispatch()` receives immutable
+  canonical copies of the exact attested authorization+dispatch material and
+  expected V3 coordinates and deterministic `control-dispatch:<dispatch_id>`
+  recovery key. It returns `None` only after CP atomically revalidates current
+  standing, spends that exact dispatch and commits; otherwise it raises before
+  commit. Foundation checks the live receipt, fresh host context and F2 trace
+  before calling it, with no fallible post-commit gate. Successful local run
+  evidence uses `DeploymentEvidence.v2` to carry the recovery key; V1 bytes
+  remain unchanged. Control's committed ledger is authoritative if Foundation
+  crashes before that local evidence can be written. This is a required trust contract for the external CP adapter, not
+  a claim that the adapter is already implemented or conformance-proven.
+  Installed-wheel release smoke proves V3 rendering and honest standalone CLI
+  refusal only; publication never grants deployment authority.
 - `IngressPolicy.v1`: the exposure vocabulary, the provider capability
   matrix, the derived endpoint-token format and the firewall rule shape.
 - The `dotmac-deploy` CLI: its subcommands, its flags, and its **exit codes**
@@ -322,9 +349,9 @@ can be defaulted:
 
 | was | is | why it cannot be defaulted |
 |---|---|---|
-| `ExposureTransaction(spec=..., effects=...)` | `Executor(spec, effects, grant, execution_plan=..., exposure_effects=...)` | the grant is positional and only `authorize()` can issue one, from a `VerifiedAuthorization` |
+| `ExposureTransaction(spec=..., effects=...)` | `Executor(spec, effects, grant, execution_plan=..., exposure_effects=...)` | the grant is positional and only `authorize_v3()` can issue one, from the exact Control V2 authorization-and-dispatch pair through the startup-fixed V3 provider; historical `authorize()` always refuses |
 | `.run()` | `Executor.run(plan, lock=held)` | `lock` is a `DeploymentLockHeld`, obtainable only inside `deployment_lock`'s `with` block |
-| implicit — any transaction could apply | `FoundationExecutionPlanV2.exposure_reconciliations` must name the address families | the act is inside the frozen plan digest, so Control authorizes THIS deployment's exposure and not exposure in general |
+| implicit — any transaction could apply | `FoundationExecutionPlanV3.exposure_reconciliations` must name the address families | V1/V2 plans are historical and non-authorizing; the act is inside the V3 frozen plan digest, so Control authorizes THIS deployment's exposure and not exposure in general |
 | `.rolled_back` | the `restore_exposure` record on `DeploymentOutcome` | compensation is evidence on the run, not state on a caller's object |
 
 A caller that constructed the transaction has **no in-package direct

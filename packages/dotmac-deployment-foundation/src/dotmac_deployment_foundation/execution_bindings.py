@@ -46,6 +46,7 @@ import dataclasses
 from collections.abc import Callable, Iterable
 from typing import Any, Final
 
+from .authorization_v3 import ExecutionAuthorityV3Provider
 from .discovery import declared_names, discover_one
 from .errors import SpecError
 from .evidence import SignatureVerifier, TrustPolicy
@@ -84,6 +85,9 @@ class ExecutionBindings:
     #: verifiers only and keeps the in-package provider.
     build_effects: Callable[..., Any] | None = None
     authorization_verifier: AuthorizationVerifier | None = None
+    #: Fixed at assembly installation/discovery; never selected from request
+    #: material.  The V1 verifier above remains historical/non-authorizing.
+    authorization_v3_provider: ExecutionAuthorityV3Provider | None = None
     evidence_policy: TrustPolicy | None = None
     evidence_verifier: SignatureVerifier | None = None
     recovery_verifier: SignatureVerifier | None = None
@@ -162,6 +166,13 @@ class ExecutionBindings:
                 "AuthorizationVerifier (an `attest(material)` method); got "
                 f"{type(self.authorization_verifier).__name__}"
             )
+        if self.authorization_v3_provider is not None and not isinstance(
+            self.authorization_v3_provider, ExecutionAuthorityV3Provider
+        ):
+            raise SpecError(
+                "ExecutionBindings.authorization_v3_provider must provide a "
+                "V2 pair attester, fresh execution observations and a clock"
+            )
         if self.evidence_policy is not None and not isinstance(
             self.evidence_policy, TrustPolicy
         ):
@@ -182,6 +193,7 @@ class ExecutionBindings:
             and self.build_exposure_effects is None
             and self.build_recovery_session is None
             and self.authorization_verifier is None
+            and self.authorization_v3_provider is None
             and self.evidence_policy is None
             and self.evidence_verifier is None
             and self.recovery_verifier is None

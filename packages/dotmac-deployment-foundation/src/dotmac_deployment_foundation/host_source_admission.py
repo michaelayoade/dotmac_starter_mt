@@ -128,7 +128,9 @@ class HostSourceAdmissionTrace:
     The dataclass is publicly constructible, however, so its TYPE alone does
     not prove that the function ran. An executor handed an arbitrary provider
     cannot treat a returned trace as authenticated until trusted composition
-    establishes the provider's implementation. Nothing consumes it yet.
+    establishes the provider's implementation. The V3 executor compares its
+    installed-host identity/root coordinates to the independently observed
+    execution subject before effects; type alone is not authentication.
     """
 
     candidate_subject_digest: Digest

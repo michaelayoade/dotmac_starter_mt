@@ -3,16 +3,14 @@
 `ExposureTransaction` used to be constructible in one line, which is exactly
 what made it dangerous: applying a product's firewall rules to a live host cost
 a test — and an operator — no more ceremony than reading one. The act now lives
-on `Executor`, and reaching it requires what reaching any other host mutation
-requires: a Control receipt, an `ExecutionGrant` only `authorize()` can issue,
-and a `FoundationExecutionPlanV2` whose digest covers the reconciliation.
+on `Executor`. Production reaches it only through an `ExecutionGrant` issued by
+`authorize_v3()`, a `FoundationExecutionPlanV3`, and committed consumption of
+the exact Control V2 dispatch.
 
-That ceremony is the point, so this helper does not shortcut it. It builds the
-real chain and hands back a real executor. What it does NOT do is take a
-deployment lock: `_reconcile_exposure` is called from inside `run()`, which has
-already required the caller's `DeploymentLockHeld`, and the lock requirement is
-proven in `test_deployment_foundation_lock_capability.py` rather than re-proven
-in every file that touches exposure.
+This focused helper does not claim to reproduce that production chain: it calls
+the private reconciliation method directly to test the exposure algorithm with
+historical V2 act data. V3 authorization, dispatch consumption, host admission,
+lock ordering, and the real `run()` path are proved in their dedicated tests.
 """
 
 from __future__ import annotations

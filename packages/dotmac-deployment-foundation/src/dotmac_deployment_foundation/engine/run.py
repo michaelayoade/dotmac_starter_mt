@@ -44,10 +44,15 @@ from pathlib import Path
 from typing import Final, Protocol, runtime_checkable
 
 from ..authorization import ExecutionGrant
+from ..authorization_v3 import (
+    require_committed_consumption_v3,
+    require_current_subject_v3,
+)
 from ..backup import BackupRecord
 from ..canonical_plan import EXECUTION_PLAN_WRONG_TYPE
 from ..deployment_evidence import (
     DeploymentEvidenceV1,
+    DeploymentEvidenceV2,
     RunStanding,
     StepEvidenceV1,
     StepStanding,
@@ -60,15 +65,15 @@ from ..evidence import (
     accept_release_evidence,
 )
 from ..execution_plan import (
-    FoundationExecutionPlanV1,
     HostPrestateV1,
-    require_execution_plan_digest,
 )
 from ..execution_plan_v2 import (
     ExposureReconciliationV1,
-    FoundationExecutionPlanV2,
     PostgresPrincipalCredentialBootstrapV1,
-    require_execution_plan_v2_digest,
+)
+from ..execution_plan_v3 import (
+    FoundationExecutionPlanV3,
+    require_execution_plan_v3_digest,
 )
 from ..exposure import (
     ExposureEffects,
@@ -319,9 +324,11 @@ class DeploymentOutcome:
     control_plan_digest: str = ""
     #: Control's replay coordinate, echoed onto the report so Control can place
     #: this execution against its target's high-water mark. Zero means "not
-    #: carried", which `authorize()` makes unreachable on a real run.
+    #: carried", which `authorize_v3()` makes unreachable on a real run.
     execution_sequence: int = 0
     attempt_no: int = 0
+    #: Deterministic Control ledger coordinate, set only after consume returns.
+    control_consumption_ref: str = ""
     operation: str = ""
     #: The run's outcome as ONE CLOSED WORD, replacing the free-text `failure`
     #: field in the persisted record. `failure` still exists here, still holds
@@ -342,7 +349,7 @@ class DeploymentOutcome:
 
         `DeploymentEvidenceV1` has no field any of them could be written to.
         """
-        return DeploymentEvidenceV1(
+        evidence = DeploymentEvidenceV1(
             product=self.plan.product,
             image_reference=self.plan.image,
             image_digest=self.plan.image_digest,
@@ -368,7 +375,12 @@ class DeploymentOutcome:
                 )
                 for record in self.records
             ),
-        ).as_document()
+        )
+        if self.control_consumption_ref:
+            return DeploymentEvidenceV2(
+                base=evidence, control_consumption_ref=self.control_consumption_ref
+            ).as_document()
+        return evidence.as_document()
 
 
 #: Refused: the provider cannot be moved into stage two.
@@ -380,7 +392,7 @@ STAGE_TWO_REFUSED: Final = "execution_plan.stage_two_refused"
 
 def bind_authorized_effects(
     effects: Effects,
-    plan: FoundationExecutionPlanV1 | FoundationExecutionPlanV2,
+    plan: FoundationExecutionPlanV3,
 ) -> None:
     """Move effects into stage two, from the AUTHORIZED plan. Foundation owns this.
 
@@ -426,7 +438,7 @@ def bind_authorized_effects(
     for the same reason: collapsing them would label the previous release's own
     bytes a first deployment, and that is visible only during a restore.
     """
-    if not isinstance(plan, FoundationExecutionPlanV1 | FoundationExecutionPlanV2):
+    if not isinstance(plan, FoundationExecutionPlanV3):
         raise PreconditionFailed(
             f"stage two takes the typed execution plan, not a "
             f"{type(plan).__name__}. A mapping with the right keys is not the "
@@ -481,7 +493,7 @@ class Executor:
         recovery_records: Mapping[str, Sequence[BackupRecord]] | None = None,
         now_epoch: int = 0,
         exposure_effects: ExposureEffects | None = None,
-        execution_plan: FoundationExecutionPlanV1,
+        execution_plan: FoundationExecutionPlanV3,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -490,7 +502,7 @@ class Executor:
         required POSITIONAL parameter means a caller cannot forget it, cannot
         default it, and cannot be given one by a helper that quietly passes
         `None`. A caller with no grant has nothing to construct this with, and
-        `ExecutionGrant` cannot be built outside `authorize()` — so "execute on
+        `ExecutionGrant` cannot be built outside `authorize_v3()` — so "execute on
         a flag" stops being expressible rather than merely being discouraged.
         """
         self._spec = spec
@@ -562,12 +574,11 @@ class Executor:
         # and replaces a diagnosis with a type name. Two different faults, two
         # different sentences, and the wrong-type one must not eat the other.
         if execution_plan is not None and not isinstance(
-            execution_plan, FoundationExecutionPlanV1 | FoundationExecutionPlanV2
+            execution_plan, FoundationExecutionPlanV3
         ):
             raise PreconditionFailed(
                 f"Executor was given a {type(execution_plan).__name__} as its "
-                f"execution plan, not a {FoundationExecutionPlanV1.__name__} or "
-                f"{FoundationExecutionPlanV2.__name__}. "
+                f"execution plan, not a {FoundationExecutionPlanV3.__name__}. "
                 "This executor mutates a product host under a deployment "
                 "authorization, and a plan of another kind describes another "
                 "act that nothing this class holds authorizes",
@@ -741,11 +752,9 @@ class Executor:
         self._grant.require(
             operation="deploy", descriptor_digest=self._descriptor_digest()
         )
-        digest = self._require_execution_plan("deploy")
         outcome = DeploymentOutcome(
             plan=plan,
             notes=list(plan.notes),
-            execution_plan_digest=digest,
             # Each from the side that OWNS it: the descriptor digest re-derived
             # from the spec in hand, Control's plan digest copied verbatim off
             # the receipt and never recomputed here.
@@ -755,6 +764,9 @@ class Executor:
             attempt_no=int(self._grant.attempt_no),
             operation="deploy",
         )
+        digest, consumption_ref = self._require_execution_plan("deploy")
+        outcome.execution_plan_digest = digest
+        outcome.control_consumption_ref = consumption_ref
         # The first question about any graph that turned bad at 14:32 is what
         # changed at 14:32. No product in the fleet emits this today, and the
         # annotation is worth almost nothing after the fact — it has to be sent
@@ -799,8 +811,8 @@ class Executor:
             self._persist_evidence(outcome)
         return outcome
 
-    def _require_execution_plan(self, operation: str) -> str:
-        """Step 4: RECOMPUTE the plan digest before executing. Returns it.
+    def _require_execution_plan(self, operation: str) -> tuple[str, str]:
+        """Step 4: recompute the plan digest and consume the Control dispatch.
 
         Nothing here reconstructs Control's document and nothing normalizes it.
         Control froze a digest the Foundation produced; this re-derives that
@@ -862,16 +874,70 @@ class Executor:
                 "separately, for the same reason they are authorized separately: "
                 "one decision must not both make a change and erase it"
             )
-        # Each plan kind through its OWN gate. Both refuse the other's type
-        # before computing anything, so a wrong kind reaching here is a typed
-        # refusal rather than a digest mismatch that reads as a changed plan.
-        if isinstance(self._execution_plan, FoundationExecutionPlanV2):
-            return require_execution_plan_v2_digest(
-                self._execution_plan, authorized=authorized
+        # Re-read interpreter wheel provenance and Control/Fleet-resolved host
+        # identity at the last pre-effect boundary.  A matching signed digest
+        # alone cannot admit a changed wheel or re-enrolled host.
+        facts = require_current_subject_v3(
+            plan=self._execution_plan, provider=self._grant.v3_provider
+        )
+        # F2's authenticated installed-host subject is a separate reading from
+        # the V3 provider's Control/Fleet subject. ADR-0073 defines its
+        # host_identity as the same Fleet host_id, its installed signer as the
+        # host-key incarnation, and its root version as the enrolment UUID.
+        # Compare exact strings; neither Foundation nor Effects translates a
+        # host grammar. This follows F2's first-after-lock admission and still
+        # precedes every annotation or mutation for deploy and rollback.
+        trace = self._host_source_admission_trace
+        if not isinstance(trace, HostSourceAdmissionTrace):
+            raise PreconditionFailed("F2 supplied no typed installed-host trace")
+        for name, admitted, planned, observed in (
+            (
+                "host_id",
+                trace.host_identity,
+                self._execution_plan.host_id,
+                facts.host_id,
+            ),
+            (
+                "host_incarnation",
+                trace.installed_signer_fingerprint,
+                self._execution_plan.host_incarnation,
+                facts.host_incarnation,
+            ),
+            (
+                "host_enrolment_ref",
+                trace.installed_trust_root_version,
+                self._execution_plan.host_enrolment_ref,
+                facts.host_enrolment_ref,
+            ),
+        ):
+            if admitted != planned or admitted != observed:
+                raise PreconditionFailed(
+                    f"F2 admitted {name} disagrees with the V3 execution subject"
+                )
+        if facts.operation != operation or facts.target_ref != self._grant.target:
+            raise PreconditionFailed("execution subject moved after authorization")
+        if (
+            facts.execution_sequence != self._grant.execution_sequence
+            or facts.attempt_no != self._grant.attempt_no
+        ):
+            raise PreconditionFailed(
+                "Control dispatch coordinate moved after authorization"
             )
-        return require_execution_plan_digest(
+        self._grant.receipt._require_live(now=self._grant.v3_provider.now())
+        digest = require_execution_plan_v3_digest(
             self._execution_plan, authorized=authorized
         )
+        # The startup-fixed CP provider owns current-standing validation and
+        # atomic dispatch consumption in its external transaction. It refuses
+        # before COMMIT or returns normally after it. Every Foundation check
+        # has already run; no fallible check follows before the first effect.
+        consumption_ref = require_committed_consumption_v3(
+            grant=self._grant,
+            plan=self._execution_plan,
+            facts=facts,
+            trace=trace,
+        )
+        return digest, consumption_ref
 
     def _bootstrap_principals(self, outcome: DeploymentOutcome) -> None:
         """Install the credentials this plan was authorized to install.
@@ -1241,22 +1307,24 @@ class Executor:
         self._grant.require(
             operation="rollback", descriptor_digest=self._descriptor_digest()
         )
+        steps = steps_for_rollback(plan)
         outcome = DeploymentOutcome(
             plan=plan,
             notes=list(plan.notes),
-            execution_plan_digest=self._require_execution_plan("rollback"),
             descriptor_digest=self._descriptor_digest(),
             control_plan_digest=str(self._grant.receipt.control_plan_digest),
             execution_sequence=int(self._grant.execution_sequence),
             attempt_no=int(self._grant.attempt_no),
             operation="rollback",
         )
-        steps = steps_for_rollback(plan)
         if not steps:
             outcome.failure = plan.rollback_reason
             outcome.notes.append(f"ROLLBACK REFUSED — {plan.rollback_reason}")
             self._persist_evidence(outcome)
             raise PreconditionFailed(f"rollback refused: {plan.rollback_reason}")
+        digest, consumption_ref = self._require_execution_plan("rollback")
+        outcome.execution_plan_digest = digest
+        outcome.control_consumption_ref = consumption_ref
         self._rolling_back = True
         # `plan.rollback_reason` is descriptor-derived prose, not an exception
         # — but it is still free text crossing the same seam, and the type now

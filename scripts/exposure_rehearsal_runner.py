@@ -1430,16 +1430,15 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     # This is deliberately not `if args.authorization_doc_digest == something`.
     # The dispatch inputs are not parameters of `establish_authorization` at
     # all, so there is no path through it that promotes caller-supplied text
-    # into permission by forgetting a comparison. Either an installed
-    # `AuthorizationVerifier` attested a signed document and `authorize()`
-    # bound its terms to THIS descriptor, THIS target and the deploy operation,
-    # or there is no grant and no rehearsal. The refusal names what is missing;
-    # `PRECONDITIONS` in `lane3_authorization.py` names what would have to exist.
+    # into permission by forgetting a comparison. The V3 authority path
+    # requires a trusted CP-rendered plan and Control V2
+    # authorization+dispatch pair. This workflow has no such composition, so
+    # this call refuses before the lease or any host contact. V1 material is
+    # never upgraded by comparing descriptor or target text with itself.
     grant = establish_authorization(
         descriptor_digest=descriptor_digest,
         target=args.target,
         authorization_document=args.authorization_document,
-        now=datetime.now(UTC),
     )
 
     # ── the lease, which cannot be self-granted ─────────────────────────────
@@ -1536,12 +1535,10 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     #
     # This item drove `ExposureTransaction`, which no longer exists: applying a
     # product's exposure is now `Executor._reconcile_exposure`, performed from
-    # `FoundationExecutionPlanV2.exposure_reconciliations` under an
-    # `ExecutionGrant`. Lane 3 already reaches a real grant through
-    # `establish_authorization`, so the missing prerequisite is NOT
-    # authorization in general — it is narrower and it is somebody else's:
-    # **Control does not yet issue a V2 plan carrying an exposure
-    # reconciliation**, so no grant in existence names this act.
+    # `FoundationExecutionPlanV3.exposure_reconciliations` under an
+    # `ExecutionGrant`. This workflow does not yet receive the trusted
+    # CP-rendered V3 plan and exact Control V2 authorization-and-dispatch pair,
+    # so `establish_authorization` refuses above before this phase is reached.
     #
     # The three things this must not do, in the order they were tempting:
     #
@@ -1560,7 +1557,8 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     # CONSEQUENCE, stated here rather than discovered at the publication gate:
     # a Lane 3 receipt from this runner can no longer be all-`executed_passed`
     # while this holds, so it cannot satisfy `verify_publication`. Closing it
-    # needs a Control-issued V2 plan, which is a cross-repository dependency.
+    # needs the trusted CP V3 provider composition, which is a cross-repository
+    # dependency.
     #
     # The host is NOT mutated by this phase any more, so the flag stays false
     # and `precondition_unfit` remains claimable — the opposite of what the
@@ -1569,8 +1567,9 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         "apply_under_lock",
         BLOCKED,
         "the exposure apply moved to `Executor._reconcile_exposure`, driven "
-        "from `FoundationExecutionPlanV2.exposure_reconciliations`. Control "
-        "issues no V2 plan carrying one, so no ExecutionGrant names this act. "
+        "from `FoundationExecutionPlanV3.exposure_reconciliations`. This lane "
+        "has no trusted CP-rendered V3 plan and Control V2 pair, so no "
+        "ExecutionGrant names this act. "
         "Foundation cannot mint one and this runner will not order the effects "
         "itself: either would rebuild the second executor boundary 1 removed",
         f"project={spec.product}",
@@ -1785,9 +1784,9 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     # and compensate, then prove the bystanders survived. Every part of that is
     # still the right rehearsal. What is gone is the thing that performed it —
     # the compensation now lives in `Executor._restore_exposure`, reached only
-    # through an authorized V2 plan that Control does not yet issue (see the
-    # `apply_under_lock` block above for why this runner may neither mint one
-    # nor order the effects itself).
+    # through an authorized V3 plan and consumed Control V2 dispatch that this
+    # workflow does not yet receive (see the `apply_under_lock` block above for
+    # why this runner may neither mint one nor order the effects itself).
     #
     # THE SEEDING DOES NOT RUN, and that ordering is the whole care in this
     # edit. `seed_foreign_rules` writes real rules into `DOCKER-USER` and
@@ -1805,8 +1804,9 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         "provoked_rollback",
         BLOCKED,
         "the compensation moved to `Executor._restore_exposure` and is reached "
-        "only through an authorized `FoundationExecutionPlanV2` carrying an "
-        "exposure reconciliation, which Control does not yet issue. No foreign "
+        "only through an authorized `FoundationExecutionPlanV3` carrying an "
+        "exposure reconciliation and a consumed Control V2 dispatch, which "
+        "this workflow does not yet receive. No foreign "
         "rule was seeded: a blocked item must not dirty a shared host to "
         "rehearse something that will not run",
         "Executor._reconcile_exposure -> verify_exposure -> _restore_exposure",
@@ -1837,7 +1837,8 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         foundation_revision=args.foundation_revision,
         foundation_artifact_digest=args.foundation_artifact,
         authorization_run_id=args.authorization_run,
-        # OUT OF THE ATTESTED RECEIPT, never off the command line. `authorize()`
+        # OUT OF THE ATTESTED CONTROL V2 PAIR, never off the command line.
+        # `authorize_v3()`
         # already proved this equals `descriptor_digest`, so item 9 does not get
         # a new fact from it — what it gets is provenance: the term came from a
         # document a verifier vouched for, rather than from a dispatch field.
@@ -1847,7 +1848,7 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         # `build_receipt` cannot carry it while `require_same_digest` forces all
         # three terms equal. Enumerated as the `middle_term_is_the_execution_
         # plan_digest` precondition rather than quietly substituted here.
-        authorization_document_digest=grant.receipt.descriptor_digest_normalized,
+        authorization_document_digest=grant.receipt.descriptor_digest,
         descriptor_digest=descriptor_digest,
         execution_report_digest=execution_report,
         fixture_digest=str(Digest.of(fixture_bytes)),

@@ -79,7 +79,7 @@ def _deploy_executor(*, admission_provider):  # type: ignore[no-untyped-def]
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
@@ -129,7 +129,7 @@ def test_valid_host_source_kwargs_itself_admits_the_deployment_executor() -> Non
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),

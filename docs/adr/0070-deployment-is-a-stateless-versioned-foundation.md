@@ -403,6 +403,73 @@ admission. Its successful return establishes agreement only relative to the
 supplied policy and verifier; those inputs become authority only when a trusted
 composition sources them from Control.
 
+### Amendment, 2026-09-25: Gate-3 execution authority successor and host ownership correction
+
+This amendment supersedes the 2026-09-07 claim above that host identity's
+authoritative owner and grammar are unresolved, and the 2026-09-08 statement
+below that Fleet has no usable incarnation coordinate. Accepted ADR-0073 now
+assigns canonical `host_id` grammar to Fleet; Control owns authenticated
+presenter → target → current host association, enrolled-root standing and
+atomic dispatch consumption; Foundation verifies supplied evidence; CP fixes
+the provider, clock and commit-before-launch composition at startup. Neither
+a request field nor an environment-only mode chooses the verifier, observer or
+clock. Python objects/private witnesses do not constitute an unforgeable trust
+boundary: installed, reviewed in-process assembly code is trusted as code.
+
+`FoundationExecutionPlanV3` is the successor document whose digest remains
+`ExecutionPlanDigestV1`. It binds the exact candidate Foundation wheel digest,
+target ID and reference, controller SSH fingerprint, Fleet host ID, immutable
+host-key incarnation and enrolment coordinate, in addition to V2's complete
+acts and host prestate. Control signs precisely this digest in its unchanged
+`AuthorizationReceiptV2` authorization+dispatch pair. Foundation's sole grant
+issuer checks that pair with the startup-fixed provider, compares fresh
+Control/Fleet-resolved facts and installed artifact metadata independently of
+the pair, and rechecks before effects. F2 host-source admission remains the
+separate installed-source verification owner; this amendment does not pretend
+that PEP 610's recorded wheel hash verifies current installed file bytes.
+
+Gate-3 host binding is exact, not an inferred translation: ADR-0073 defines
+F2's authenticated installed `host_identity` as the Fleet `host_id`, the
+installed signer fingerprint as the host-key incarnation, and the installed
+trust-root version as the immutable enrolment UUID. After F2 admission and
+before any effect, Foundation compares all three to the V3 plan and fresh
+provider observation. The `Effects` protocol exposes no authenticated target
+identity; therefore only trusted CP assembly code may construct the matching
+V3 provider, F2 admission provider and Effects bundle. Separately injecting
+those components from request fields is not an authority path, and Foundation
+does not claim an Effects object proves which remote host it can mutate.
+
+The historical V1 `authorize()` and V1/V2 plan parsing remain non-authorizing.
+CLI, Lane 3 and release probes must not convert a single V1 document into an
+execution grant. Lane 3 has no ratified CP provider/typed V3 plan coordinate
+today, so its workflow refuses rather than deriving host facts from its
+request fields. Publication's installed-wheel smoke may pass by proving V3
+render/digest behavior and the standalone CLI's honest refusal; that is not
+Gate-3 adoption or authorization. The external CP execution composition
+remains a visible held prerequisite, not an invented local provider.
+
+### Amendment, 2026-09-25: current standing and dispatch consumption are pre-effect
+
+The V3 grant freezes canonical copies of the exact Control V2 authorization
+and dispatch documents it attested. After F2 admission and independent
+plan/host rechecks, but before any deploy or rollback effect, Foundation calls
+the same startup-fixed provider with those documents and exact expected
+receipt, context and plan digest. CP owns the external transaction: it must
+revalidate current approval standing, atomically consume the dispatch and
+commit before `consume_dispatch(...) -> None` returns normally. A replay,
+withdrawn standing, failed transaction, changed host/attempt or expired pair
+must refuse before commit. Foundation checks every receipt, V3 plan, fresh
+provider observation and F2 host trace fact before that call; no fallible
+Foundation check follows it. The request carries a deterministic
+`control-dispatch:<dispatch_id>` coordinate. Control's committed consumption
+ledger is the recovery source if the process crashes on the next instruction;
+local `DeploymentEvidence.v2` carries the same coordinate only when execution
+continues and evidence is written. V1 evidence bytes remain unchanged. Python
+values cannot independently prove CP's commit; the trusted in-process provider implementation and its conformance evidence are
+therefore part of the composition gate. This slice defines and uses that
+provider contract; the real CP adapter and conformance proof are external and
+not claimed here.
+
 ## What this ADR does not decide
 
 ### Amendment — 2026-09-07: successor Control receipt is a Foundation value, not admission

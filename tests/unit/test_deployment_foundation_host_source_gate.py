@@ -132,7 +132,7 @@ def test_a_bare_executor_refuses_by_default() -> None:
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         admission_provider=RefusingHostSourceAdmissionProvider(),
@@ -158,7 +158,7 @@ def test_a_bare_executor_refuses_on_rollback_too() -> None:
     executor = Executor(
         spec,
         effects,
-        _grant(spec, operation="rollback", execution_plan_digest=digest),
+        _grant(spec, operation="rollback", execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         admission_provider=RefusingHostSourceAdmissionProvider(),
@@ -193,7 +193,7 @@ def test_mutually_agreeing_receipt_and_metadata_cannot_admit_the_executor() -> N
 
     spec, plan, effects = _fixture()
     execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
-    grant = _grant(spec, execution_plan_digest=digest)
+    grant = _grant(spec, execution_plan=execution_plan)
 
     with pytest.raises(TypeError):
         Executor(  # type: ignore[call-arg]
@@ -242,7 +242,7 @@ def test_the_gate_fires_before_grant_revalidation(monkeypatch) -> None:  # type:
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         admission_provider=RefusingHostSourceAdmissionProvider(),
@@ -287,7 +287,7 @@ def test_the_verification_call_happens_exactly_once_on_the_refusal_path(
     executor = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         admission_provider=RefusingHostSourceAdmissionProvider(),
@@ -318,7 +318,7 @@ def test_rollback_also_reaches_the_verification_call_on_the_refusal_path(
     executor = Executor(
         spec,
         effects,
-        _grant(spec, operation="rollback", execution_plan_digest=digest),
+        _grant(spec, operation="rollback", execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         admission_provider=RefusingHostSourceAdmissionProvider(),

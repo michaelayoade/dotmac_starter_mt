@@ -65,6 +65,12 @@ from dotmac_deployment_foundation.host_source_admission import (
     HostSourceAdmissionTrace,
 )
 
+from tests.unit.foundation_v3_support import (
+    HOST_ENROLMENT_REF,
+    HOST_ID,
+    HOST_INCARNATION,
+)
+
 #: A syntactically valid sha256 hex digest, reused wherever this module needs
 #: a placeholder digest — the value is never compared against a real
 #: artifact, so any correctly-shaped 64 hex character string does.
@@ -99,12 +105,12 @@ class AcceptingHostSourceAdmissionProvider:
     trace: HostSourceAdmissionTrace = dataclasses.field(
         default_factory=lambda: HostSourceAdmissionTrace(
             candidate_subject_digest=Digest.parse(_DIGEST, where="test fixture"),
-            host_observation_id="observation-1",
-            host_identity="test-host-1",
+            host_observation_id="dispatch-test-1",
+            host_identity=HOST_ID,
             candidate_signer_fingerprint="candidate-signer-1",
             candidate_trust_root_version="v1",
-            installed_signer_fingerprint="installed-signer-1",
-            installed_trust_root_version="v1",
+            installed_signer_fingerprint=HOST_INCARNATION,
+            installed_trust_root_version=HOST_ENROLMENT_REF,
         )
     )
     calls: int = 0

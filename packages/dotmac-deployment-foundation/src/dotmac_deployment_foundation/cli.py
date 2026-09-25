@@ -24,7 +24,6 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -155,15 +154,12 @@ def _application_profile_digest() -> str:
 
 
 def _load_bindings(args: argparse.Namespace) -> ExecutionBindings | None:
-    """Discover the assembly's bindings, once, on the execute path only.
+    """Discover fixed installed assembly bindings, never from request fields.
 
-    An embedder that already set `args.execution_bindings` wins — it IS the
-    assembly, and discovering around it would let an installed distribution
-    shadow the very thing that is embedding us.
+    The CLI parser exposes no provider/attester/clock selector for authority.
+    In-process embedders instead call the typed V3 library API with their own
+    startup-fixed bindings; a Python object is not an unforgeable capability.
     """
-    supplied = getattr(args, "execution_bindings", None)
-    if supplied is not None:
-        return supplied
     from .execution_bindings import discover_bindings
 
     return discover_bindings()
@@ -398,6 +394,7 @@ def _require_grant(
     spec: ProductDeploymentSpec,
     operation: str,
     *,
+    execution_plan,
     bindings=None,
 ) -> ExecutionGrant:
     """Turn `--authorization` into an :class:`ExecutionGrant`, or refuse.
@@ -411,9 +408,46 @@ def _require_grant(
     Raises `PreconditionFailed` rather than returning a sentinel so a caller
     cannot accidentally treat "refused" as "granted" by forgetting to check.
     """
-    from .authorization import authorize
-    from .provenance import verify_authorization
+    from .authorization_v3 import authorize_v3
 
+    target, path = _require_execution_arguments(args, operation)
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise PreconditionFailed(
+            f"cannot read the authorization receipt {path}: {exc}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise PreconditionFailed(
+            f"the authorization receipt {path} is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(document, dict) or set(document) != {
+        "authorization_material",
+        "dispatch_material",
+    }:
+        raise PreconditionFailed(
+            "--authorization must contain exactly the Control V2 authorization "
+            "and dispatch material; a V1 receipt is non-authorizing"
+        )
+    if not isinstance(document["authorization_material"], dict) or not isinstance(
+        document["dispatch_material"], dict
+    ):
+        raise PreconditionFailed("Control V2 pair members must be objects")
+    return authorize_v3(
+        bindings=bindings,
+        authorization_material=document["authorization_material"],
+        dispatch_material=document["dispatch_material"],
+        plan=execution_plan,
+        operation=operation,
+        descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        target=target,
+    )
+
+
+def _require_execution_arguments(
+    args: argparse.Namespace, operation: str
+) -> tuple[str, str]:
+    """Refuse missing execution inputs before even observing a target host."""
     target = getattr(args, "target", "") or ""
     if not target:
         raise PreconditionFailed(
@@ -431,55 +465,31 @@ def _require_grant(
             "they meant it, which is not the same as being permitted, and this "
             "facility never authorizes its own deployments"
         )
-    try:
-        document = json.loads(Path(path).read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise PreconditionFailed(
-            f"cannot read the authorization receipt {path}: {exc}"
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise PreconditionFailed(
-            f"the authorization receipt {path} is not valid JSON: {exc}"
-        ) from exc
-    # RAW MATERIAL ONLY THROUGH A VERIFIER, and this facility ships none.
-    #
-    # The same line `recovery_receipts` already draws, one layer up and for the
-    # same reason: a zero-dependency build runner (ADR-0009/ADR-0070) must not
-    # ship a weak stdlib signature substitute, because a weak verifier reads as
-    # coverage. What stood here was
-    # `AuthorizationReceipt.from_document(document)` — a public classmethod
-    # over a JSON file, which proves the document has the right KEYS and says
-    # nothing about whether Control signed it. Parsing is not attestation.
-    #
-    # So the CLI refuses rather than self-attesting, and an assembly embedding
-    # `Executor` supplies the verifier its trust roots live in. A `--execute`
-    # that quietly accepted an unsigned receipt would be the bypass this whole
-    # contract exists to close.
-    verifier = getattr(args, "authorization_verifier", None)
-    if verifier is None and bindings is not None:
-        verifier = bindings.authorization_verifier
-    if verifier is None:
-        from .execution_bindings import ENTRY_POINT_GROUP
+    return target, path
 
-        raise PreconditionFailed(
-            f"the authorization receipt {path} was read but nothing can attest "
-            "it: this facility declares zero runtime dependencies and ships no "
-            "signature verifier, and parsing a JSON document is not "
-            "verification. Install the assembly's bindings distribution (one "
-            f"{ENTRY_POINT_GROUP!r} entry point) or embed Executor from an "
-            "assembly that supplies an AuthorizationVerifier directly. "
-            "Refusing to execute on material this process cannot authenticate"
-        )
-    verified = verify_authorization(document, verifier=verifier)
-    return authorize(
-        verified=verified,
-        operation=operation,
-        descriptor_digest=spec.to_canonical_document().sha256_digest(),
-        target=target,
-        # The clock is read HERE, at the adapter, and nowhere below it. An
-        # expiry check whose `now` came from inside the library could not be
-        # moved by a test, and an expiry nobody can test is a field.
-        now=datetime.now(UTC),
+
+def _render_local_execution_plan_v3(base_plan, *, bindings):
+    """Render from fresh installed/Control facts, never receipt fields."""
+    from .execution_plan_v2 import render_execution_plan_v2
+    from .execution_plan_v3 import render_execution_plan_v3
+    from .host_source import read_installed_artifact
+
+    if bindings is None:
+        raise PreconditionFailed("no startup-fixed V3 authority is installed")
+    provider = bindings.authorization_v3_provider
+    if provider is None:
+        raise PreconditionFailed("no trusted V2 authorization provider is installed")
+    facts = provider.observe()
+    if facts.target_ref != base_plan.target or facts.operation != base_plan.operation:
+        raise PreconditionFailed("observed target or operation differs from the plan")
+    return render_execution_plan_v3(
+        render_execution_plan_v2(base_plan),
+        candidate_wheel_digest=str(read_installed_artifact().artifact_digest),
+        target_id=facts.target_id,
+        controller_ssh_fingerprint=facts.controller_ssh_fingerprint,
+        host_id=facts.host_id,
+        host_incarnation=facts.host_incarnation,
+        host_enrolment_ref=facts.host_enrolment_ref,
     )
 
 
@@ -524,13 +534,14 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         print("\nDRY RUN. Nothing was executed. Re-run with --execute to deploy.")
         return EXIT_OK
 
+    _require_execution_arguments(args, "deploy")
+
     from .engine.lock import deployment_lock
     from .engine.run import Executor
     from .execution_plan import HostPrestateV1, render_execution_plan
     from .host_source_admission import RefusingHostSourceAdmissionProvider
 
     bindings = _load_bindings(args)
-    grant = _require_grant(args, spec, "deploy", bindings=bindings)
     effects = _build_effects(spec, args, bindings=bindings)
     # THE MIDDLE TERM, RENDERED AND HANDED OVER. Nothing here chooses the
     # authorized digest -- that rides on the grant, which took it from the
@@ -538,7 +549,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     # `_require_execution_plan` compares what will run against what Control
     # froze. Before this, `cmd_deploy` passed neither and every deployment ran
     # unbound with an empty digest in its evidence.
-    execution_plan = render_execution_plan(
+    base_plan = render_execution_plan(
         spec,
         plan,
         target=args.target,
@@ -549,6 +560,10 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         # mutation and refuses a host that moved in between.
         prestate=HostPrestateV1.from_observations(effects.observe_roles()),
         application_profile_digest=_application_profile_digest(),
+    )
+    execution_plan = _render_local_execution_plan_v3(base_plan, bindings=bindings)
+    grant = _require_grant(
+        args, spec, "deploy", execution_plan=execution_plan, bindings=bindings
     )
     executor = Executor(
         spec,
@@ -648,7 +663,7 @@ def cmd_observe_prestate(args: argparse.Namespace) -> int:
 
 
 def cmd_execution_plan(args: argparse.Namespace) -> int:
-    """Render `FoundationExecutionPlanV1` and print its `ExecutionPlanDigestV1`.
+    """Render `FoundationExecutionPlanV3` and print its `ExecutionPlanDigestV1`.
 
     This is step 1 of the controlled-deployment flow and the only place the
     digest is produced. Platform CP submits what `--format digest` prints,
@@ -668,7 +683,7 @@ def cmd_execution_plan(args: argparse.Namespace) -> int:
         skip_backup=args.skip_backup,
         skip_backup_reason=args.skip_backup_reason or "",
     )
-    rendered = render_execution_plan(
+    base_plan = render_execution_plan(
         spec,
         plan,
         target=args.target,
@@ -685,24 +700,32 @@ def cmd_execution_plan(args: argparse.Namespace) -> int:
         prestate=_load_prestate(args.prestate),
         application_profile_digest=_application_profile_digest(),
     )
+    rendered = _render_local_execution_plan_v3(base_plan, bindings=_load_bindings(args))
     if args.format == "digest":
         print(rendered.digest())
         return EXIT_OK
     if args.format == "json":
         sys.stdout.write(rendered.canonical_bytes().decode("ascii") + "\n")
         return EXIT_OK
-    print(f"execution plan for {rendered.product} -> {rendered.target}")
-    print(f"  operation        {rendered.operation}")
-    print(f"  foundation       {rendered.foundation_version}")
-    print(f"  image            {rendered.image_reference}")
-    print(f"  image digest     {rendered.image_digest}")
-    print(f"  source revision  {rendered.source_revision}")
-    print(f"  manifest digest  {rendered.manifest_digest}")
-    print(f"  descriptor       {rendered.descriptor_digest}")
-    print(f"  strategy         {rendered.strategy}")
-    print(f"  prestate         {rendered.host_prestate.as_document()['roles']}")
-    print(f"  materials        {list(rendered.environment_inventory)} (NAMES only)")
-    print(f"  steps            {len(rendered.steps)}")
+    shown = rendered.base
+    print(f"execution plan for {shown.product} -> {shown.target}")
+    print(f"  operation        {shown.operation}")
+    print(f"  foundation       {shown.foundation_version}")
+    print(f"  image            {shown.image_reference}")
+    print(f"  image digest     {shown.image_digest}")
+    print(f"  source revision  {shown.source_revision}")
+    print(f"  manifest digest  {shown.manifest_digest}")
+    print(f"  descriptor       {shown.descriptor_digest}")
+    print(f"  strategy         {shown.strategy}")
+    print(f"  prestate         {shown.host_prestate.as_document()['roles']}")
+    print(f"  materials        {list(shown.environment_inventory)} (NAMES only)")
+    print(f"  steps            {len(shown.steps)}")
+    print(f"  candidate wheel  {rendered.candidate_wheel_digest}")
+    print(f"  target id        {rendered.target_id}")
+    print(f"  controller key   {rendered.controller_ssh_fingerprint}")
+    print(f"  host id          {rendered.host_id}")
+    print(f"  incarnation      {rendered.host_incarnation}")
+    print(f"  enrolment        {rendered.host_enrolment_ref}")
     print(f"  ExecutionPlanDigestV1  {rendered.digest()}")
     return EXIT_OK
 
@@ -1023,7 +1046,7 @@ def cmd_exposure_apply(args: argparse.Namespace) -> int:
     a complete deployment procedure against a production host, reached through
     a subcommand with **no `--authorization` flag in its parser at all**. Every
     other mutating path in this facility requires a Control receipt, an
-    `ExecutionGrant` that only `authorize()` can issue, and a frozen plan
+    `ExecutionGrant` that only `authorize_v3()` can issue, and a frozen plan
     digest recomputed before the first effect. This one required a boolean the
     operator supplied to themselves, which is precisely the advisory
     authorization `authorization.py` was written to abolish.
@@ -1164,6 +1187,8 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         print("\nDRY RUN. Nothing was executed. Re-run with --execute to roll back.")
         return EXIT_OK
 
+    _require_execution_arguments(args, "rollback")
+
     from .engine.lock import deployment_lock
     from .engine.run import Executor
     from .execution_plan import HostPrestateV1, render_execution_plan
@@ -1172,12 +1197,11 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     # A SEPARATE grant from the deploy's. One approval that covered both would
     # let a single decision make a change and then erase it.
     bindings = _load_bindings(args)
-    grant = _require_grant(args, spec, "rollback", bindings=bindings)
     effects = _build_effects(spec, args, bindings=bindings)
     # A SEPARATE plan too, and for the same reason: one descriptor yields a
     # different plan per operation, so a deploy's frozen digest must not
     # recompute equal to a rollback's.
-    execution_plan = render_execution_plan(
+    base_plan = render_execution_plan(
         spec,
         plan,
         target=args.target,
@@ -1185,6 +1209,10 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
         prestate=HostPrestateV1.from_observations(effects.observe_roles()),
         application_profile_digest=_application_profile_digest(),
+    )
+    execution_plan = _render_local_execution_plan_v3(base_plan, bindings=bindings)
+    grant = _require_grant(
+        args, spec, "rollback", execution_plan=execution_plan, bindings=bindings
     )
     executor = Executor(
         spec,
@@ -1347,7 +1375,7 @@ def build_parser() -> argparse.ArgumentParser:
     execution = add(
         "execution-plan",
         cmd_execution_plan,
-        "render FoundationExecutionPlanV1 and print its ExecutionPlanDigestV1",
+        "render FoundationExecutionPlanV3 and print its ExecutionPlanDigestV1",
     )
     execution.add_argument(
         "--target",

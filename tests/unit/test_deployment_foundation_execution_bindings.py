@@ -1,36 +1,16 @@
-"""Discovery makes the ADMIT representable — and every ambiguous shape refuses.
+"""Execution bindings fix V3 trust at assembly installation, not per request.
 
-## The defect this closes, and the symmetric trap it must not open
-
-a4's installed CLI could never admit: `authorization_verifier` was an
-argparse-namespace attribute nothing ever set, and `_build_effects` a closed
-switch over the one in-package provider. Every injection seam was real for an
-embedder and decorative for the console script.
-
-Discovery closes that — and a mechanism that makes the admit representable can
-also make an UNINTENDED admit representable. So the refusals here get equal
-weight with the admit: a second distribution declaring the same group is a
-loud stop naming BOTH declarers, never a pick; a declaration that fails to
-import or resolves to a look-alike refuses rather than being skipped; and a
-bindings object that claims the in-package provider's own name is refused at
-construction, because shadowing the built-in swaps effects under an unchanged
-command line.
-
-## What is unit-level here and what is not
-
-These tests drive the discovery seam through its injectable `entries`
-parameter with fake entry points, so every shape is exercisable. What they
-deliberately do NOT prove is that a REAL installed distribution's metadata
-reaches this seam — that is the installed end-to-end test's job (item 11),
-which installs a real bindings wheel into a venv for the ADMIT half and
-removes it for the refusal half, so the same mechanism is shown doing both.
+Discovery keeps its ambiguity and provider-name refusals. These unit tests
+prove the CLI consumes a discovered V3 provider while ignoring an argparse
+verifier/provider field. The installed wheel's positive execution remains
+held until a ratified CP pair-provider composition exists; a V1 receipt or
+test-only verifier cannot make the release lane admit.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -183,22 +163,13 @@ def test_a_provider_removed_after_install_refuses_naming_discovery(
 
 
 def _receipt_file(tmp_path: Path, spec: Any) -> Path:
-    from tests.unit.test_deployment_foundation_execution_seam import _receipt
-
-    now = datetime.now(UTC)
-    receipt = tmp_path / "receipt.json"
+    receipt = tmp_path / "control-v2-pair.json"
     receipt.write_text(
         json.dumps(
-            _receipt(
-                target_ref=TARGET,
-                descriptor_digest=spec.to_canonical_document().sha256_digest(),
-                approved_at=(now - timedelta(hours=1))
-                .isoformat()
-                .replace("+00:00", "Z"),
-                expires_at=(now + timedelta(hours=1))
-                .isoformat()
-                .replace("+00:00", "Z"),
-            ).as_document()
+            {
+                "authorization_material": {"kind": "authorization"},
+                "dispatch_material": {"kind": "dispatch"},
+            }
         ),
         encoding="utf-8",
     )
@@ -206,53 +177,81 @@ def _receipt_file(tmp_path: Path, spec: Any) -> Path:
 
 
 def test_the_discovered_verifier_makes_the_grant_reachable(tmp_path: Path) -> None:
-    """The ADMIT the a4 CLI could not represent, at the unit level: the same
-    `_require_grant` that refuses with no bindings issues a grant when
-    discovery supplies the verifier. Nothing else differs."""
+    """Only startup-installed V3 provider composition makes the pair usable."""
     from dotmac_deployment_foundation.cli import _require_grant
     from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
-    from tests.unit.test_deployment_foundation_execution_seam import _descriptor
+    from tests.unit.foundation_v3_support import provider_for
+    from tests.unit.test_deployment_foundation_execution_seam import (
+        _descriptor,
+        _subject,
+    )
 
     descriptor = _descriptor(tmp_path)
     spec = ProductDeploymentSpec.load(descriptor)
+    _, plan = _subject(tmp_path)
     receipt = _receipt_file(tmp_path, spec)
-    args = argparse.Namespace(
-        target=TARGET, authorization=str(receipt), authorization_verifier=None
-    )
+    args = argparse.Namespace(target=plan.target, authorization=str(receipt))
 
-    with pytest.raises(PreconditionFailed) as caught:
-        _require_grant(args, spec, "deploy", bindings=None)
-    assert ENTRY_POINT_GROUP in str(caught.value), (
-        "the refusal must say what was looked for, or an operator cannot know "
-        "the fix is to install the assembly's bindings distribution"
-    )
+    with pytest.raises(PreconditionFailed, match="startup-fixed"):
+        _require_grant(args, spec, "deploy", execution_plan=plan, bindings=None)
 
-    grant = _require_grant(args, spec, "deploy", bindings=_bindings())
+    grant = _require_grant(
+        args,
+        spec,
+        "deploy",
+        execution_plan=plan,
+        bindings=_bindings(authorization_v3_provider=provider_for(spec, plan)),
+    )
     assert grant.operation == "deploy"
-    assert grant.target == TARGET
+    assert grant.target == plan.target
 
 
-def test_an_embedders_verifier_wins_over_discovery(tmp_path: Path) -> None:
-    """An embedder that set the namespace attribute IS the assembly; a
-    discovered distribution must not shadow it."""
+def test_request_selected_verifier_cannot_replace_fixed_provider(
+    tmp_path: Path,
+) -> None:
+    """An argparse namespace cannot select the V3 attester or clock."""
     from dotmac_deployment_foundation.cli import _require_grant
     from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
-    from tests.unit.test_deployment_foundation_execution_seam import _descriptor
+    from tests.unit.foundation_v3_support import provider_for
+    from tests.unit.test_deployment_foundation_execution_seam import (
+        _descriptor,
+        _subject,
+    )
 
     class Refusing:
         def attest(self, material: Any) -> Any:
-            raise PreconditionFailed("the embedder's verifier ran")
+            raise AssertionError("request-selected verifier ran")
 
     descriptor = _descriptor(tmp_path)
     spec = ProductDeploymentSpec.load(descriptor)
+    _, plan = _subject(tmp_path)
     receipt = _receipt_file(tmp_path, spec)
     args = argparse.Namespace(
-        target=TARGET, authorization=str(receipt), authorization_verifier=Refusing()
+        target=plan.target,
+        authorization=str(receipt),
+        authorization_verifier=Refusing(),
     )
-    with pytest.raises(PreconditionFailed, match="the embedder's verifier ran"):
-        _require_grant(args, spec, "deploy", bindings=_bindings())
+    grant = _require_grant(
+        args,
+        spec,
+        "deploy",
+        execution_plan=plan,
+        bindings=_bindings(authorization_v3_provider=provider_for(spec, plan)),
+    )
+    assert grant.target == plan.target
+
+
+def test_cli_load_bindings_ignores_request_selected_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmac_deployment_foundation import cli, execution_bindings
+
+    fixed = _bindings()
+    monkeypatch.setattr(execution_bindings, "discover_bindings", lambda: fixed)
+    args = argparse.Namespace(bindings=object(), authorization_v3_provider=object())
+    assert cli._load_bindings(args) is fixed
 
 
 def test_a_discovered_provider_builds_the_assemblys_effects(tmp_path: Path) -> None:

@@ -43,6 +43,7 @@ from dotmac_deployment_foundation.execution_plan_v2 import (
 )
 
 from tests.unit.deployment_lock_harness import held_lock
+from tests.unit.foundation_v3_support import v3_plan
 from tests.unit.host_source_stance import valid_host_source_kwargs
 from tests.unit.test_deployment_foundation_execution_binding import (
     AcceptingVerifier,
@@ -67,10 +68,11 @@ def _bootstrap(principal: str = "platform_outbox_dispatcher"):
 
 
 def _run_v2(bootstraps=(), standing=StepStanding.INSTALLED, raises=None):
-    """A real Executor on a real V2 plan, authorized by the V2 digest."""
+    """A V3 executor carrying V2's approved bootstrap acts."""
     spec, plan, effects = _fixture()
-    v1, _ = _plan_and_digest(spec, plan, effects=effects)
-    v2 = render_execution_plan_v2(v1, principal_bootstraps=bootstraps)
+    baseline, _ = _plan_and_digest(spec, plan, effects=effects)
+    v2 = render_execution_plan_v2(baseline.base, principal_bootstraps=bootstraps)
+    execution_plan = v3_plan(v2)
     effects.bootstrap_standing = standing
     if raises is not None:
 
@@ -78,12 +80,12 @@ def _run_v2(bootstraps=(), standing=StepStanding.INSTALLED, raises=None):
             raise raises
 
         effects.bootstrap_principal_credential = refusing  # type: ignore[method-assign]
-    grant = _grant(spec, execution_plan_digest=v2.digest())
+    grant = _grant(spec, execution_plan=execution_plan)
     outcome = Executor(
         spec,
         effects,
         grant,
-        execution_plan=v2,
+        execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
@@ -251,14 +253,14 @@ def test_build_plan_does_not_emit_the_bootstrap_step() -> None:
     assert StepKind.BOOTSTRAP_PRINCIPALS not in [s.kind for s in build_plan(spec).steps]
 
 
-def test_a_v1_plan_bootstraps_nothing_and_records_nothing() -> None:
+def test_a_v3_plan_without_bootstraps_records_none() -> None:
     spec, plan, effects = _fixture()
-    v1, digest = _plan_and_digest(spec, plan, effects=effects)
+    execution_plan, _ = _plan_and_digest(spec, plan, effects=effects)
     outcome = Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
-        execution_plan=v1,
+        _grant(spec, execution_plan=execution_plan),
+        execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         **valid_host_source_kwargs(),
@@ -387,29 +389,41 @@ def test_the_compose_host_provider_refuses_rather_than_lacking_the_method() -> N
 # ── the third acceptance point completes the 3x3 matrix ────────────────────
 
 
-def test_the_executor_accepts_v2_and_still_refuses_a_recovery_plan() -> None:
-    """`Executor` is the acceptance point that only became reachable for V2 with
-    this change. Deploy V1 and deploy V2 admit; recovery refuses, typed."""
+def test_the_executor_accepts_only_v3_and_refuses_historical_plans() -> None:
+    """V1/V2/recovery plans cannot issue V3 execution authority."""
     from tests.unit.test_deployment_foundation_execution_plan_v2 import _recovery
 
     spec, plan, effects = _fixture()
-    v1, _ = _plan_and_digest(spec, plan, effects=effects)
-    v2 = render_execution_plan_v2(v1, principal_bootstraps=(_bootstrap(),))
-    for accepted in (v1, v2):
-        Executor(
-            spec,
-            effects,
-            _grant(spec, execution_plan_digest=accepted.digest()),
-            execution_plan=accepted,
-            sleep=lambda _: None,
-            evidence_policy=evidence_policy(),
-            **valid_host_source_kwargs(),
-        )
+    v3, _ = _plan_and_digest(spec, plan, effects=effects)
+    v2 = render_execution_plan_v2(v3.base, principal_bootstraps=(_bootstrap(),))
+    accepted = v3_plan(v2)
+    grant = _grant(spec, execution_plan=accepted)
+    Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=accepted,
+        sleep=lambda _: None,
+        evidence_policy=evidence_policy(),
+        **valid_host_source_kwargs(),
+    )
+    for historical in (v3.base, v2):
+        with pytest.raises(PreconditionFailed) as exc:
+            Executor(
+                spec,
+                effects,
+                grant,
+                execution_plan=historical,  # type: ignore[arg-type]
+                sleep=lambda _: None,
+                evidence_policy=evidence_policy(),
+                **valid_host_source_kwargs(),
+            )
+        assert exc.value.code == EXECUTION_PLAN_WRONG_TYPE
     with pytest.raises(PreconditionFailed) as exc:
         Executor(
             spec,
             effects,
-            _grant(spec, execution_plan_digest=v2.digest()),
+            grant,
             execution_plan=_recovery(),  # type: ignore[arg-type]
             sleep=lambda _: None,
             **valid_host_source_kwargs(),
