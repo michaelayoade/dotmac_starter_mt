@@ -122,6 +122,7 @@ def test_module_release_verification_appends_exact_immutable_coordinates() -> No
             "verification_run_id": "123456789",
             "source_run_id": "123456789",
             "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
+            "adopting_run_id": None,
         }
     ]
 
@@ -392,6 +393,7 @@ def _synthetic_module_inventory():
         "verification_run_id": "999000111",
         "source_run_id": "999000111",
         "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
+        "adopting_run_id": None,
     }
     verified = {
         "$comment": "verified",

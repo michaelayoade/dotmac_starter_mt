@@ -271,15 +271,34 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          python scripts/tag_module_release.py \
-            --distribution "$MODULE" \
-            --version "$VERSION" \
-            --tag "$TAG" \
-            --commit "$ORIGIN_SHA" \
-            --artifact-dir "$RECOVERED_DIST" \
-            --run-id "$RUN_ID" \
-            --source-run-id "$ORIGINAL_RUN_ID" \
-            --remote origin
+          # Recovery never replaces a tag. If the original run already pushed
+          # one (it failed AFTER tagging), adopt it after proving its evidence
+          # names the original run and matches the recovered artifact;
+          # otherwise write the tag the original run never wrote.
+          if [ -n "$(git ls-remote --tags origin "refs/tags/${TAG}")" ]; then
+            python scripts/tag_module_release.py \
+              --distribution "$MODULE" \
+              --version "$VERSION" \
+              --tag "$TAG" \
+              --commit "$ORIGIN_SHA" \
+              --artifact-dir "$RECOVERED_DIST" \
+              --run-id "$RUN_ID" \
+              --source-run-id "$ORIGINAL_RUN_ID" \
+              --adopt-original-run "$ORIGINAL_RUN_ID" \
+              --remote origin
+            echo "TAG_ADOPTED=1" >> "$GITHUB_ENV"
+          else
+            python scripts/tag_module_release.py \
+              --distribution "$MODULE" \
+              --version "$VERSION" \
+              --tag "$TAG" \
+              --commit "$ORIGIN_SHA" \
+              --artifact-dir "$RECOVERED_DIST" \
+              --run-id "$RUN_ID" \
+              --source-run-id "$ORIGINAL_RUN_ID" \
+              --remote origin
+            echo "TAG_ADOPTED=0" >> "$GITHUB_ENV"
+          fi
 
       # Recovery writes the same irreversible tag as an ordinary release and
       # therefore owes the same record. Without this step a successful recovery
@@ -300,12 +319,22 @@ jobs:
           PACKAGE_DIR: ${{ steps.target.outputs.package_dir }}
           ORIGIN_SHA: ${{ steps.origin.outputs.sha }}
         run: |
+          # An adopted tag was written by the ORIGINAL run; this recovery run is
+          # recorded as the adopter. A created tag was written by this run.
+          if [ "${TAG_ADOPTED:-0}" = "1" ]; then
+            EXPECTED_RUN="$ORIGINAL_RUN_ID"
+            ADOPTING=(--adopting-run-id "$RUN_ID")
+          else
+            EXPECTED_RUN="$RUN_ID"
+            ADOPTING=()
+          fi
           bash scripts/open_release_record_pr.sh \
             --distribution "$MODULE" \
             --version "$VERSION" \
             --tag "$TAG" \
             --package-dir "$PACKAGE_DIR" \
             --artifact-dir "$RECOVERED_DIST" \
-            --expected-run-id "$RUN_ID" \
+            --expected-run-id "$EXPECTED_RUN" \
+            "${ADOPTING[@]}" \
             --expected-commit "${ORIGIN_SHA}" \
             --artifact-run-id "$ORIGINAL_RUN_ID"

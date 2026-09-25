@@ -34,6 +34,7 @@ import release_authority  # noqa: E402
 from write_release_record import (  # noqa: E402
     ReleaseRecordError,
     module_wheel_digest,
+    parse_module_release_tag_evidence,
     render_module_release_tag_evidence,
 )
 
@@ -123,6 +124,138 @@ def create_and_push_tag(
         )
 
 
+def existing_tag(tag: str, *, remote: str, cwd: Path) -> tuple[str, str, str] | None:
+    """``(tag_object, peeled_commit, message)`` of the REMOTE tag, or None.
+
+    The remote is the authority: the tag is fetched without force, so a
+    DIFFERENT local tag of the same name makes the fetch fail and is refused,
+    and the local tag object must then equal the remote one. A tag that
+    exists only locally is refused outright — it was never published.
+    """
+    listed = _git("ls-remote", remote, f"refs/tags/{tag}", cwd=cwd)
+    if listed.returncode != 0:
+        raise ReleaseRecordError(
+            f"could not query {remote} for tag {tag}: "
+            f"{listed.stderr.strip() or 'no stderr'}"
+        )
+    remote_object = ""
+    for line in listed.stdout.splitlines():
+        sha, _, ref = line.partition("\t")
+        if ref == f"refs/tags/{tag}":
+            remote_object = sha
+    if not remote_object:
+        local = _git("rev-parse", "-q", "--verify", f"refs/tags/{tag}", cwd=cwd)
+        if local.returncode == 0:
+            raise ReleaseRecordError(
+                f"{tag} exists only locally, never on {remote}; refusing"
+            )
+        return None
+    fetched = _git(
+        "fetch", "--no-tags", remote, f"refs/tags/{tag}:refs/tags/{tag}", cwd=cwd
+    )
+    if fetched.returncode != 0:
+        raise ReleaseRecordError(
+            f"could not fetch {tag} from {remote} without force (a different "
+            f"local tag?): {fetched.stderr.strip() or 'no stderr'}"
+        )
+    local_object = _git("rev-parse", f"refs/tags/{tag}", cwd=cwd).stdout.strip()
+    if local_object != remote_object:
+        raise ReleaseRecordError(
+            f"{tag} local tag object {local_object} differs from {remote}'s "
+            f"{remote_object}; refusing"
+        )
+    if _git("cat-file", "-t", local_object, cwd=cwd).stdout.strip() != "tag":
+        raise ReleaseRecordError(f"{tag} is not an annotated tag; refusing")
+    peeled = _git("rev-parse", f"refs/tags/{tag}^{{commit}}", cwd=cwd).stdout.strip()
+    body = _git("cat-file", "tag", local_object, cwd=cwd).stdout
+    _, separator, message = body.partition("\n\n")
+    if not separator:
+        raise ReleaseRecordError(f"{tag} tag object has no message body")
+    if message.endswith("\n"):
+        message = message[: -len("\n")]
+    return local_object, peeled, message
+
+
+def accept_identical_rerun_tag(
+    *, tag: str, commit: str, message: str, remote: str, cwd: Path
+) -> bool:
+    """A rerun of the SAME run may accept the tag its earlier attempt pushed.
+
+    Only when the tag's canonical bytes equal exactly what this run would
+    write (which binds run id, source run id, authority digest, wheel
+    filename and wheel digest), the tag object is the same locally and on the
+    remote, and the peeled commit is this run's commit. Returns False when no
+    tag exists; raises on any mismatch. Never forces, deletes or recreates.
+    """
+    state = existing_tag(tag, remote=remote, cwd=cwd)
+    if state is None:
+        return False
+    _tag_object, peeled, existing_message = state
+    if existing_message != message:
+        raise ReleaseRecordError(
+            f"{tag} already exists with different evidence; refusing — only a "
+            "rerun of the run that wrote it, with byte-identical evidence, may "
+            "accept an existing tag"
+        )
+    if peeled != commit:
+        raise ReleaseRecordError(
+            f"{tag} already exists at {peeled}, not {commit}; refusing"
+        )
+    return True
+
+
+def adopt_recovered_tag(
+    *,
+    tag: str,
+    commit: str,
+    distribution: str,
+    version: str,
+    artifact_dir: str,
+    original_run_id: str,
+    remote: str,
+    cwd: Path,
+) -> None:
+    """Recovery never replaces a tag; it may ADOPT one the original run wrote.
+
+    The tag must exist; its canonical evidence must name the original run as
+    both verification and source run, bind this distribution and version,
+    carry exactly the recovered artifact's wheel filename and digest, and
+    peel to the original run's commit. Whether that original run's tag step
+    and publication actually succeeded is proven from the Actions API by
+    `module_release_provenance.py`, not here.
+    """
+    state = existing_tag(tag, remote=remote, cwd=cwd)
+    if state is None:
+        raise ReleaseRecordError(f"{tag} does not exist; there is nothing to adopt")
+    _tag_object, peeled, message = state
+    evidence = parse_module_release_tag_evidence(message)
+    if evidence["verification_run_id"] != original_run_id or (
+        evidence["source_run_id"] != original_run_id
+    ):
+        raise ReleaseRecordError(
+            f"{tag} evidence names runs {evidence['verification_run_id']!r}/"
+            f"{evidence['source_run_id']!r}, not the original run "
+            f"{original_run_id!r}; refusing to adopt"
+        )
+    if evidence["distribution"] != distribution or evidence["version"] != version:
+        raise ReleaseRecordError(f"{tag} evidence names a different release")
+    wheel_filename, wheel_sha256 = module_wheel_digest(
+        artifact_dir, distribution=distribution, version=version
+    )
+    if (evidence["wheel_filename"], evidence["wheel_sha256"]) != (
+        wheel_filename,
+        wheel_sha256,
+    ):
+        raise ReleaseRecordError(
+            f"{tag} evidence wheel digest differs from the recovered artifact; "
+            "refusing to adopt"
+        )
+    if peeled != commit:
+        raise ReleaseRecordError(
+            f"{tag} peels to {peeled}, not the original run's {commit}; refusing"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--distribution", required=True)
@@ -145,16 +278,39 @@ def main(argv: list[str] | None = None) -> int:
         help="the run id that BUILT and PUBLISHED the wheel: equal to --run-id "
         "for a normal release, or the original failed run for a recovery",
     )
+    parser.add_argument(
+        "--adopt-original-run",
+        default=None,
+        help="recovery only: adopt the existing tag the original run wrote "
+        "instead of creating one; never creates or replaces a tag",
+    )
     parser.add_argument("--remote", default="origin")
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
     args = parser.parse_args(argv)
 
     cwd = Path(args.repo_root)
     try:
+        # The run acting now must itself be an authorized commit, whether it
+        # creates, re-accepts or adopts.
+        authority_digest_value = compute_and_check_authority_digest(repo_root=cwd)
+        if args.adopt_original_run is not None:
+            adopt_recovered_tag(
+                tag=args.tag,
+                commit=args.commit,
+                distribution=args.distribution,
+                version=args.version,
+                artifact_dir=args.artifact_dir,
+                original_run_id=args.adopt_original_run,
+                remote=args.remote,
+                cwd=cwd,
+            )
+            print(
+                f"adopted existing {args.tag} written by run {args.adopt_original_run}"
+            )
+            return 0
         wheel_filename, wheel_sha256 = module_wheel_digest(
             args.artifact_dir, distribution=args.distribution, version=args.version
         )
-        authority_digest_value = compute_and_check_authority_digest(repo_root=cwd)
         message = render_module_release_tag_evidence(
             distribution=args.distribution,
             version=args.version,
@@ -164,6 +320,15 @@ def main(argv: list[str] | None = None) -> int:
             source_run_id=args.source_run_id,
             release_authority_digest=authority_digest_value,
         )
+        if accept_identical_rerun_tag(
+            tag=args.tag,
+            commit=args.commit,
+            message=message,
+            remote=args.remote,
+            cwd=cwd,
+        ):
+            print(f"adopted existing identical {args.tag} from this same run")
+            return 0
         create_and_push_tag(
             tag=args.tag,
             commit=args.commit,

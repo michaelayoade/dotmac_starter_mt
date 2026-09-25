@@ -627,6 +627,7 @@ def _synthetic_verified_row_and_evidence() -> tuple[dict, dict]:
         "verification_run_id": "999",
         "source_run_id": "999",
         "release_authority_digest": _AUTHORITY_DIGEST_FIXTURE,
+        "adopting_run_id": None,
     }
     evidence = {
         "distribution": "dotmac-approvals",

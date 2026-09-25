@@ -418,6 +418,7 @@ def parse_module_release_verifications(
         "verification_run_id",
         "source_run_id",
         "release_authority_digest",
+        "adopting_run_id",
     }
     for row in document["releases"]:
         if not isinstance(row, dict) or set(row) != keys:
@@ -441,6 +442,18 @@ def parse_module_release_verifications(
             raise ReleaseRecordError(
                 f"module verification {row.get('tag')} has an invalid "
                 "release_authority_digest"
+            )
+        adopting = row["adopting_run_id"]
+        if adopting is not None and (
+            not isinstance(adopting, str)
+            or not _DECIMAL.fullmatch(adopting)
+            or adopting == row["verification_run_id"]
+        ):
+            # null for a tag its own run created; otherwise the DIFFERENT
+            # recovery run that adopted a tag the original run had written.
+            raise ReleaseRecordError(
+                f"module verification {row.get('tag')} has an invalid "
+                "adopting_run_id"
             )
         tag = row["tag"]
         distribution, version = _coordinate(tag, targets=governed)
@@ -732,8 +745,16 @@ def add_module_release_verification(
     verification_run_id: str,
     source_run_id: str,
     release_authority_digest: str,
+    adopting_run_id: str | None = None,
 ) -> tuple[str, bool]:
     """Append one immutable, producer-owned module publication record."""
+    if adopting_run_id is not None and (
+        not _DECIMAL.fullmatch(adopting_run_id)
+        or adopting_run_id == verification_run_id
+    ):
+        raise ReleaseRecordError(
+            f"module verification {tag} has an invalid adopting_run_id"
+        )
     if not _DECIMAL.fullmatch(verification_run_id):
         raise ReleaseRecordError(
             f"module verification {tag} requires a decimal verification_run_id"
@@ -763,6 +784,7 @@ def add_module_release_verification(
         "verification_run_id": verification_run_id,
         "source_run_id": source_run_id,
         "release_authority_digest": release_authority_digest,
+        "adopting_run_id": adopting_run_id,
     }
     for existing in existing_rows.values():
         if (existing["distribution"], existing["version"]) != (
@@ -1413,6 +1435,7 @@ def write_record(
     artifact_dir: str | None = None,
     expected_run_id: str | None = None,
     expected_commit: str | None = None,
+    adopting_run_id: str | None = None,
 ) -> list[str]:
     """Apply both halves of the record. Returns what changed, for the caller."""
     expected_tag = f"{distribution}-v{version}"
@@ -1622,6 +1645,7 @@ def write_record(
             verification_run_id=evidence["verification_run_id"],
             source_run_id=evidence["source_run_id"],
             release_authority_digest=evidence["release_authority_digest"],
+            adopting_run_id=adopting_run_id,
         )
         if added:
             changed.append(
@@ -1685,6 +1709,12 @@ def main(argv: list[str] | None = None) -> int:
         help="the exact source SHA this invocation's own run tagged; "
         "mandatory for a governed module with --artifact-dir",
     )
+    parser.add_argument(
+        "--adopting-run-id",
+        default=None,
+        help="recovery only: this recovery run's id when it ADOPTED a tag the "
+        "original run wrote (then --expected-run-id is the original run)",
+    )
     args = parser.parse_args(argv)
 
     # The two always agree in this repository, and threading a second value
@@ -1704,6 +1734,7 @@ def main(argv: list[str] | None = None) -> int:
             artifact_dir=args.artifact_dir,
             expected_run_id=args.expected_run_id,
             expected_commit=args.expected_commit,
+            adopting_run_id=args.adopting_run_id,
         )
     except ReleaseRecordError as failure:
         print(f"release record REFUSED: {failure}", file=sys.stderr)

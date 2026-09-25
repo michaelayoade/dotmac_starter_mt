@@ -112,6 +112,7 @@ def _row(
         # ledger's history — that is `test_write_release_record.py`'s
         # `validate_module_release_inventory` coverage.
         "release_authority_digest": "sha256:" + "9" * 64,
+        "adopting_run_id": None,
     }
 
 

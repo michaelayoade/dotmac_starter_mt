@@ -92,6 +92,7 @@ ARTIFACT_DIR=""
 EXPECTED_RUN_ID=""
 EXPECTED_COMMIT=""
 ARTIFACT_RUN_ID=""
+ADOPTING_RUN_ID=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -109,6 +110,7 @@ while [ $# -gt 0 ]; do
     --expected-run-id) EXPECTED_RUN_ID="$2"; shift 2 ;;
     --expected-commit) EXPECTED_COMMIT="$2"; shift 2 ;;
     --artifact-run-id) ARTIFACT_RUN_ID="$2"; shift 2 ;;
+    --adopting-run-id) ADOPTING_RUN_ID="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -168,6 +170,9 @@ if [ -n "${ARTIFACT_DIR}" ]; then
 fi
 if [ -n "${EXPECTED_RUN_ID}" ]; then
   MANUAL="${MANUAL} --expected-run-id ${EXPECTED_RUN_ID}"
+fi
+if [ -n "${ADOPTING_RUN_ID}" ]; then
+  MANUAL="${MANUAL} --adopting-run-id ${ADOPTING_RUN_ID}"
 fi
 if [ -n "${EXPECTED_COMMIT}" ]; then
   MANUAL="${MANUAL} --expected-commit ${EXPECTED_COMMIT}"
@@ -232,6 +237,9 @@ if [ -n "${ARTIFACT_DIR}" ]; then
 fi
 if [ -n "${EXPECTED_RUN_ID}" ]; then
   ARGS+=(--expected-run-id "${EXPECTED_RUN_ID}")
+fi
+if [ -n "${ADOPTING_RUN_ID}" ]; then
+  ARGS+=(--adopting-run-id "${ADOPTING_RUN_ID}")
 fi
 if [ -n "${EXPECTED_COMMIT}" ]; then
   ARGS+=(--expected-commit "${EXPECTED_COMMIT}")
