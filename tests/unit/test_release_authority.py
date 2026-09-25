@@ -53,7 +53,20 @@ def _base_files(ra) -> dict[str, str]:
         ra.ROOT_WORKFLOWS[1]: "on: workflow_dispatch\njobs: {}\n",
         ra.POLICY_PATH: '{"modules": {}}\n',
         ra.AUTHORITY_MODULE_PATH: "# authority module source\n",
+        **{path: "# checker source\n" for path in ra.VERIFICATION_ROOTS},
     }
+
+
+def test_derive_surface_walks_the_verification_checkers_and_their_imports(
+    ra,
+) -> None:
+    files = _base_files(ra)
+    files[ra.VERIFICATION_ROOTS[0]] = "from write_release_record import X\n"
+    files["scripts/write_release_record.py"] = "# writer\n"
+    derived_files, _ = ra.derive_surface(_dict_reader(files))
+    for path in ra.VERIFICATION_ROOTS:
+        assert path in derived_files
+    assert "scripts/write_release_record.py" in derived_files
 
 
 # ── 1. Closure: run bodies, composite actions, shell refs, python imports ───

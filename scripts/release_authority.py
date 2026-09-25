@@ -104,6 +104,16 @@ ROOT_WORKFLOWS: tuple[str, ...] = (
     ".github/workflows/recover-module-release.yml",
 )
 
+#: The checkers that decide whether a release row is accepted. They are not
+#: executed by the release workflows, but changing one changes what a row
+#: must prove, so it is an authority change like any release-path edit — and
+#: so may not share a pull request with a new release row. They are walked as
+#: roots, so their own local imports are covered too.
+VERIFICATION_ROOTS: tuple[str, ...] = (
+    "scripts/module_release_provenance.py",
+    "scripts/check_module_release_verification_append_only.py",
+)
+
 _SCRIPTS_TOKEN = re.compile(r"scripts/[A-Za-z0-9_./-]+\.(?:py|sh)")
 _GITHUB_TOKEN = re.compile(r"\.github/[A-Za-z0-9_./-]+\.(?:yml|yaml|json)")
 _USES_LOCAL = re.compile(r"uses:\s*(\./[A-Za-z0-9_./-]+)")
@@ -195,11 +205,11 @@ def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
     """
     files: set[str] = {POLICY_PATH, AUTHORITY_MODULE_PATH}
     external: set[str] = set()
-    queue: list[str] = list(ROOT_WORKFLOWS)
+    queue: list[str] = [*ROOT_WORKFLOWS, *VERIFICATION_ROOTS]
     queued: set[str] = set(queue) | files
 
-    # The two roots must exist and are always in the surface.
-    for root in ROOT_WORKFLOWS:
+    # Every root must exist and is always in the surface.
+    for root in (*ROOT_WORKFLOWS, *VERIFICATION_ROOTS):
         _require(root, read)
         files.add(root)
 
