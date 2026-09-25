@@ -19,9 +19,13 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = PROJECT_ROOT / "scripts" / "module_release_provenance.py"
+CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-module.yml"
+RECOVER_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "recover-module-release.yml"
 
 
 def _load_module():
@@ -807,3 +811,107 @@ def test_new_rows_returns_nothing_when_head_equals_base(provenance) -> None:
     base_row = _row(tag="dotmac-approvals-v0.1.0a1")
     text = _wrap([base_row])
     assert provenance.new_rows(text, text) == []
+
+
+# ── ci.yml: the module-release-provenance job ───────────────────────────────
+
+
+def _ci_job() -> dict:
+    data = yaml.safe_load(CI_WORKFLOW.read_text())
+    return data["jobs"]["module-release-provenance"]
+
+
+def _job_permissions_exactly(job: dict, expected: dict[str, str]) -> bool:
+    return job.get("permissions") == expected
+
+
+def _run_bodies(job: dict) -> list[str]:
+    return [step["run"] for step in job.get("steps", []) if "run" in step]
+
+
+def test_ci_has_a_module_release_provenance_job() -> None:
+    data = yaml.safe_load(CI_WORKFLOW.read_text())
+    assert "module-release-provenance" in data["jobs"]
+
+
+def test_ci_job_permissions_are_exactly_contents_and_actions_read() -> None:
+    job = _ci_job()
+    assert _job_permissions_exactly(job, {"contents": "read", "actions": "read"})
+
+
+def test_ci_job_permissions_sensitivity_plant_catches_an_added_write_scope() -> None:
+    # Near-miss: broaden `contents` to `write` and the same check must reject
+    # it — a check that only ever sees the real, correct file proves nothing.
+    job = _ci_job()
+    polluted = dict(job)
+    polluted["permissions"] = {**job["permissions"], "contents": "write"}
+    assert not _job_permissions_exactly(
+        polluted, {"contents": "read", "actions": "read"}
+    )
+
+
+def test_ci_job_has_a_thirty_minute_timeout() -> None:
+    assert _ci_job()["timeout-minutes"] == 30
+
+
+def test_ci_job_checkout_uses_full_history() -> None:
+    job = _ci_job()
+    checkout_step = next(
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("actions/checkout")
+    )
+    assert checkout_step["with"]["fetch-depth"] == 0
+
+
+def test_ci_job_run_bodies_never_interpolate_an_expression() -> None:
+    for body in _run_bodies(_ci_job()):
+        assert "${{" not in body
+
+
+def test_ci_job_run_body_sensitivity_plant_catches_an_interpolated_expression() -> None:
+    # Near-miss: a run body that inlines `${{ github.event.before }}` directly
+    # (shell-injectable) instead of going through the `env:` bridge.
+    plant = (
+        "python scripts/module_release_provenance.py "
+        '--base "${{ github.event.before }}"'
+    )
+    assert "${{" in plant
+
+
+def test_ci_job_invokes_the_provenance_script_with_the_base_env_var() -> None:
+    bodies = _run_bodies(_ci_job())
+    assert any(
+        'python scripts/module_release_provenance.py --base "$BASE_SHA"' in body
+        for body in bodies
+    )
+
+
+def test_ci_job_invocation_sensitivity_plant_catches_a_missing_base_flag() -> None:
+    plant_bodies = ["python scripts/module_release_provenance.py"]
+    assert not any(
+        'python scripts/module_release_provenance.py --base "$BASE_SHA"' in body
+        for body in plant_bodies
+    )
+
+
+# ── run-name binds the dispatched module + version ──────────────────────────
+
+
+def test_release_workflow_run_name_binds_module_and_version() -> None:
+    data = yaml.safe_load(RELEASE_WORKFLOW.read_text())
+    expected = "Release module ${{ inputs.module }} ${{ inputs.version }}"
+    assert data["run-name"] == expected
+
+
+def test_recover_workflow_run_name_binds_module_and_version() -> None:
+    data = yaml.safe_load(RECOVER_WORKFLOW.read_text())
+    expected = "Recover module ${{ inputs.module }} ${{ inputs.version }}"
+    assert data["run-name"] == expected
+
+
+def test_run_name_sensitivity_plant_catches_a_dropped_version() -> None:
+    # Near-miss: title binds the module but drops the version, which is
+    # exactly the forgeable gap this rule closes.
+    plant = "Release module ${{ inputs.module }}"
+    assert plant != "Release module ${{ inputs.module }} ${{ inputs.version }}"
