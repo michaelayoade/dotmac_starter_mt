@@ -431,6 +431,12 @@ def test_policy_codes_are_data_and_subject_types_are_opaque_strings() -> None:
         # configuration an operator invents and no document class a consuming
         # module declares, which are the two things the premise above forbids.
         "RequestAction",
+        # 0.1.0a8. Why a hold refused to vouch for a request: a closed set of
+        # failed PREMISES (malformed digest, not found, subject, digest,
+        # withdrawn, not approved, no approve decision), fixed by this module's
+        # own logic. Not a policy code and not a subject type, for the same
+        # reason as RequestAction above.
+        "ApprovalHoldRefusal",
     }, enum_names
     assert models.ApprovalPolicy.__table__.c["policy_code"].type.python_type is str
     assert models.ApprovalRequest.__table__.c["subject_type"].type.python_type is str

@@ -1820,9 +1820,9 @@ def test_a_withdrawal_waits_for_a_held_approval_to_commit(
         try:
             assert held.wait(timeout=20), "the holder never took the SHARE lock"
             with Session(engine) as db:
-                db.execute(text("SET lock_timeout = '500ms'"))
                 with pytest.raises(DBAPIError, match="lock timeout"):
                     with db.begin():
+                        db.execute(text("SET LOCAL lock_timeout = '500ms'"))
                         _withdraw(db, request_id, "hold-first-blocked")
         finally:
             release.set()
@@ -1876,8 +1876,8 @@ def test_two_holds_on_one_approval_proceed_concurrently(
         try:
             assert held.wait(timeout=20), "the first holder never took its lock"
             with Session(engine) as db:
-                db.execute(text("SET lock_timeout = '500ms'"))
                 with db.begin():
+                    db.execute(text("SET LOCAL lock_timeout = '500ms'"))
                     second = hold_platform_approval(
                         db,
                         request_id=request_id,
