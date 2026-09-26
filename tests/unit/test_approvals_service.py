@@ -810,6 +810,8 @@ def test_a_hold_refuses_a_request_that_does_not_bind_this_subject(
     with pytest.raises(ApprovalNotHeld) as refused:
         hold_platform_approval(db, **arguments)  # type: ignore[arg-type]
     assert refused.value.code is code
+    if code is ApprovalHoldRefusal.MALFORMED_DIGEST:
+        assert isinstance(refused.value.__cause__, ContentChanged)
 
 
 def test_a_pending_request_is_not_held(db: Session) -> None:
