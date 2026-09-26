@@ -18,11 +18,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from dotmac_approvals.contracts import (
     Actor,
+    ApprovalHoldRefusal,
     ApprovalLevel,
+    ApprovalNotHeld,
     ApprovalState,
     ApproverKind,
     ContentChanged,
     DecisionAction,
+    HeldPlatformApproval,
     NotRequester,
     PolicyNotFound,
     PolicyRevision,
@@ -55,6 +58,7 @@ from dotmac_approvals.service import (
     evaluate_tenant_approval,
     get_platform_request,
     get_tenant_request,
+    hold_platform_approval,
     policy_document_digest,
     publish_platform_policy_version,
     publish_tenant_policy_version,
@@ -733,3 +737,140 @@ def test_withdrawal_contract_refuses_backdating_and_inconsistent_detail(
     assert detail is not None and detail.withdrawal is not None
     with pytest.raises(ValueError, match="required exactly"):
         replace(detail, withdrawal=None)
+
+
+# ── hold_platform_approval: the synchronous barrier a dependent transition holds ─
+
+
+def _approved_platform(db: Session, *, subject_id: str = "plan-hold") -> uuid.UUID:
+    publish_platform_policy_version(db, revision=_revision())
+    request_id = request_platform_approval(
+        db,
+        policy_code="payment.release",
+        policy_version=1,
+        subject_type="fleet.plan",
+        subject_id=subject_id,
+        content_digest=DIGEST,
+        requested_by=REQUESTER,
+        idempotency_key=subject_id,
+    ).request_id
+    record_platform_decision(
+        db,
+        request_id=request_id,
+        actor=_actor(ALICE),
+        action=DecisionAction.APPROVE,
+        content_digest=DIGEST,
+    )
+    return request_id
+
+
+def test_a_standing_platform_approval_is_held_with_its_evidence(db: Session) -> None:
+    """POSITIVE CONTROL for every refusal below."""
+    request_id = _approved_platform(db)
+    held = hold_platform_approval(
+        db,
+        request_id=request_id,
+        subject_type="fleet.plan",
+        subject_id="plan-hold",
+        content_digest=DIGEST,
+    )
+    assert isinstance(held, HeldPlatformApproval)
+    assert held.request_id == request_id
+    assert held.content_digest == DIGEST
+    assert held.policy_code == "payment.release"
+    assert held.policy_version == 1
+    assert held.approver_ids == (ALICE,)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "code"),
+    [
+        ({"request_id": uuid.UUID(int=7)}, ApprovalHoldRefusal.REQUEST_NOT_FOUND),
+        ({"subject_type": "other.plan"}, ApprovalHoldRefusal.SUBJECT_MISMATCH),
+        ({"subject_id": "plan-other"}, ApprovalHoldRefusal.SUBJECT_MISMATCH),
+        ({"content_digest": OTHER_DIGEST}, ApprovalHoldRefusal.DIGEST_MISMATCH),
+        ({"content_digest": "not-a-digest"}, ApprovalHoldRefusal.MALFORMED_DIGEST),
+        (
+            {"content_digest": "sha256:" + "A" * 64},
+            ApprovalHoldRefusal.MALFORMED_DIGEST,
+        ),
+    ],
+)
+def test_a_hold_refuses_a_request_that_does_not_bind_this_subject(
+    db: Session, overrides: dict[str, object], code: ApprovalHoldRefusal
+) -> None:
+    request_id = _approved_platform(db)
+    arguments: dict[str, object] = {
+        "request_id": request_id,
+        "subject_type": "fleet.plan",
+        "subject_id": "plan-hold",
+        "content_digest": DIGEST,
+        **overrides,
+    }
+    with pytest.raises(ApprovalNotHeld) as refused:
+        hold_platform_approval(db, **arguments)  # type: ignore[arg-type]
+    assert refused.value.code is code
+    if code is ApprovalHoldRefusal.MALFORMED_DIGEST:
+        assert isinstance(refused.value.__cause__, ContentChanged)
+
+
+def test_a_pending_request_is_not_held(db: Session) -> None:
+    publish_platform_policy_version(db, revision=_revision())
+    request_id = request_platform_approval(
+        db,
+        policy_code="payment.release",
+        policy_version=1,
+        subject_type="fleet.plan",
+        subject_id="plan-pending",
+        content_digest=DIGEST,
+        requested_by=REQUESTER,
+        idempotency_key="plan-pending",
+    ).request_id
+    with pytest.raises(ApprovalNotHeld) as refused:
+        hold_platform_approval(
+            db,
+            request_id=request_id,
+            subject_type="fleet.plan",
+            subject_id="plan-pending",
+            content_digest=DIGEST,
+        )
+    assert refused.value.code is ApprovalHoldRefusal.NOT_APPROVED
+
+
+def test_a_withdrawn_approval_is_not_held(db: Session) -> None:
+    """Withdrawn is its own code, distinct from never-approved."""
+    request_id = _approved_platform(db)
+    withdraw_platform_approval(
+        db,
+        request_id=request_id,
+        actor=_actor(BOB),
+        authority_ref="cp-review-hold",
+        reason="plan invalidated",
+        external_ref="control-revoke-hold",
+    )
+    with pytest.raises(ApprovalNotHeld) as refused:
+        hold_platform_approval(
+            db,
+            request_id=request_id,
+            subject_type="fleet.plan",
+            subject_id="plan-hold",
+            content_digest=DIGEST,
+        )
+    assert refused.value.code is ApprovalHoldRefusal.WITHDRAWN
+
+
+def test_an_approved_row_without_an_approve_decision_is_not_held(db: Session) -> None:
+    """A standing claim needs a vote behind it; the row alone is not evidence."""
+    request_id = _approved_platform(db)
+    for decision in db.execute(select(PlatformApprovalDecision)).scalars():
+        db.delete(decision)
+    db.flush()
+    with pytest.raises(ApprovalNotHeld) as refused:
+        hold_platform_approval(
+            db,
+            request_id=request_id,
+            subject_type="fleet.plan",
+            subject_id="plan-hold",
+            content_digest=DIGEST,
+        )
+    assert refused.value.code is ApprovalHoldRefusal.NO_APPROVE_DECISION

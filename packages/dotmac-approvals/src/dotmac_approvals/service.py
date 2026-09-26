@@ -47,12 +47,15 @@ from dotmac_approvals.contracts import (
     Actor,
     ApprovalError,
     ApprovalEvent,
+    ApprovalHoldRefusal,
     ApprovalLevel,
+    ApprovalNotHeld,
     ApprovalState,
     ContentChanged,
     DecisionAction,
     DecisionView,
     Evaluation,
+    HeldPlatformApproval,
     NotRequester,
     PolicyNotFound,
     PolicyRevision,
@@ -1351,6 +1354,105 @@ def get_tenant_request(
     )
 
 
+def hold_platform_approval(
+    db: Session,
+    *,
+    request_id: UUID,
+    subject_type: str,
+    subject_id: str,
+    content_digest: str,
+) -> HeldPlatformApproval:
+    """Vouch that a platform approval stands, and keep it standing until commit.
+
+    Locks the request row FOR SHARE and validates, under that lock, that it names
+    exactly this subject and digest, is APPROVED (not withdrawn), was completed,
+    and carries at least one approve decision. The lock is released only when the
+    CALLER's transaction ends; this function never commits.
+
+    It is the synchronous barrier for any transition that depends on the
+    approval (plan approval, rollout, dispatch in `dotmac-deployment-control`).
+    `withdraw_platform_approval` locks the same row FOR UPDATE, so a composing
+    caller that holds this, performs its transition, and commits in ONE
+    transaction gets exactly two orderings: the withdrawal committed first and
+    this refuses (`WITHDRAWN`), or the withdrawal waits until the dependent
+    transition has committed and is then delivered as an event. A check made
+    without the lock, however late, leaves a window between reading "approved"
+    and committing the transition.
+
+    Refuses with `ApprovalNotHeld` carrying an `ApprovalHoldRefusal` code, and
+    only with that: a malformed digest is `MALFORMED_DIGEST`, not the generic
+    `ContentChanged` the digest validator raises elsewhere, so a composing
+    transition can branch on one closed vocabulary.
+
+    The returned `HeldPlatformApproval` is EVIDENCE, not the lock. The lock lives
+    only in the caller's open transaction: carrying the value past a commit, or
+    into another session, carries no protection at all.
+    """
+    try:
+        validate_digest(content_digest)
+    except ContentChanged as malformed:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.MALFORMED_DIGEST, str(malformed)
+        ) from malformed
+    row = db.execute(
+        select(PlatformApprovalRequest)
+        .where(PlatformApprovalRequest.id == request_id)
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if row is None:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.REQUEST_NOT_FOUND,
+            f"no platform approval request {request_id}",
+        )
+    if row.subject_type != subject_type or row.subject_id != subject_id:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.SUBJECT_MISMATCH,
+            f"platform approval request {request_id} does not name this subject",
+        )
+    if row.content_digest != content_digest:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.DIGEST_MISMATCH,
+            f"platform approval request {request_id} approved different content",
+        )
+    if row.state == str(ApprovalState.WITHDRAWN):
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.WITHDRAWN,
+            f"platform approval request {request_id} was withdrawn",
+        )
+    if row.state != str(ApprovalState.APPROVED) or row.completed_at is None:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.NOT_APPROVED,
+            f"platform approval request {request_id} is {row.state}, not approved",
+        )
+    approvers = tuple(
+        db.scalars(
+            select(PlatformApprovalDecision.actor_id)
+            .where(
+                PlatformApprovalDecision.request_id == request_id,
+                PlatformApprovalDecision.action == str(DecisionAction.APPROVE),
+            )
+            .order_by(PlatformApprovalDecision.decided_at, PlatformApprovalDecision.id)
+        )
+    )
+    if not approvers:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.NO_APPROVE_DECISION,
+            f"platform approval request {request_id} is approved without an "
+            "approve decision",
+        )
+    return HeldPlatformApproval(
+        request_id=row.id,
+        subject_type=row.subject_type,
+        subject_id=row.subject_id,
+        content_digest=row.content_digest,
+        policy_code=row.policy_code,
+        policy_version=row.policy_version,
+        decided_at=row.completed_at,
+        approver_ids=approvers,
+    )
+
+
 def get_platform_request(
     db: Session, *, request_id: UUID, viewer: Actor | None = None
 ) -> RequestDetail | None:
@@ -1473,6 +1575,7 @@ __all__ = [
     "evaluate_tenant_approval",
     "get_platform_policy",
     "get_platform_request",
+    "hold_platform_approval",
     "get_platform_withdrawal",
     "get_tenant_policy",
     "get_tenant_request",

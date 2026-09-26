@@ -431,6 +431,12 @@ def test_policy_codes_are_data_and_subject_types_are_opaque_strings() -> None:
         # configuration an operator invents and no document class a consuming
         # module declares, which are the two things the premise above forbids.
         "RequestAction",
+        # 0.1.0a8. Why a hold refused to vouch for a request: a closed set of
+        # failed PREMISES (malformed digest, not found, subject, digest,
+        # withdrawn, not approved, no approve decision), fixed by this module's
+        # own logic. Not a policy code and not a subject type, for the same
+        # reason as RequestAction above.
+        "ApprovalHoldRefusal",
     }, enum_names
     assert models.ApprovalPolicy.__table__.c["policy_code"].type.python_type is str
     assert models.ApprovalRequest.__table__.c["subject_type"].type.python_type is str
@@ -558,3 +564,51 @@ def test_the_dossier_records_the_production_adopter() -> None:
     assert by_kind["pinned_at"]["expected"] == "0.1.0a4"
     assert by_kind["live_observation"]["subject"] == "mod_approvals"
     assert "v013_approvals_authority_switch" in by_kind["live_observation"]["observed"]
+
+
+def _for_update_calls(function_name: str) -> list[ast.Call]:
+    """Every `.with_for_update(...)` call inside one top-level service function."""
+    tree = _tree(Path(inspect.getfile(service)))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+    return [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "with_for_update"
+    ]
+
+
+def _keyword(call: ast.Call, name: str) -> object:
+    for keyword in call.keywords:
+        if keyword.arg == name and isinstance(keyword.value, ast.Constant):
+            return keyword.value.value
+    return None
+
+
+def test_the_hold_barrier_lock_modes_are_pinned() -> None:
+    """The hold is only a barrier because of TWO lock modes together.
+
+    `hold_platform_approval` takes the request row FOR SHARE (`read=True`), and
+    `_withdraw_platform_approval` takes it FOR UPDATE (no `read`, no
+    `key_share`). FOR UPDATE conflicts with every row lock, so a withdrawal waits
+    for every holder. Weaken either side and the barrier silently dissolves:
+    FOR NO KEY UPDATE on the withdrawal would not wait for a FOR KEY SHARE hold,
+    and an exclusive hold would serialize concurrent dependent transitions. The
+    PostgreSQL race tests cannot see every such weakening, so the modes are
+    pinned here.
+    """
+    hold = _for_update_calls("hold_platform_approval")
+    assert len(hold) == 1, hold
+    assert _keyword(hold[0], "read") is True
+    assert _keyword(hold[0], "key_share") in (None, False)
+
+    withdraw = _for_update_calls("_withdraw_platform_approval")
+    assert withdraw, "the platform withdrawal no longer locks its request row"
+    request_lock = withdraw[0]
+    assert _keyword(request_lock, "read") in (None, False)
+    assert _keyword(request_lock, "key_share") in (None, False)

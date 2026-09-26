@@ -36,7 +36,9 @@ from dotmac_approvals.contracts import (
     Actor,
     ApprovalError,
     ApprovalEvent,
+    ApprovalHoldRefusal,
     ApprovalLevel,
+    ApprovalNotHeld,
     ApprovalState,
     ApproverKind,
     ContentChanged,
@@ -44,6 +46,7 @@ from dotmac_approvals.contracts import (
     DecisionView,
     DuplicateDecision,
     Evaluation,
+    HeldPlatformApproval,
     InvalidPolicy,
     MFARequired,
     NotEligible,
@@ -73,14 +76,16 @@ from dotmac_approvals.outbox import (
     withdraw_tenant_approval,
 )
 
-__version__ = "0.1.0a7"
+__version__ = "0.1.0a8"
 
 __all__ = [
     "ActionRefusal",
     "Actor",
     "ApprovalError",
     "ApprovalEvent",
+    "ApprovalHoldRefusal",
     "ApprovalLevel",
+    "ApprovalNotHeld",
     "ApprovalState",
     "ApproverKind",
     "ContentChanged",
@@ -88,6 +93,7 @@ __all__ = [
     "DecisionView",
     "DuplicateDecision",
     "Evaluation",
+    "HeldPlatformApproval",
     "InvalidPolicy",
     "MFARequired",
     "NotEligible",

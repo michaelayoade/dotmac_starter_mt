@@ -167,7 +167,56 @@ class WithdrawalReferenceConflict(ApprovalError):
     """A withdrawal reference was reused for different evidence."""
 
 
+class ApprovalHoldRefusal(StrEnum):
+    """Why `hold_platform_approval` refused to vouch for a request.
+
+    A closed vocabulary, so a composing transition can say exactly which
+    premise failed instead of reading an approval failure as one thing.
+    """
+
+    MALFORMED_DIGEST = "malformed_digest"
+    REQUEST_NOT_FOUND = "request_not_found"
+    SUBJECT_MISMATCH = "subject_mismatch"
+    DIGEST_MISMATCH = "digest_mismatch"
+    WITHDRAWN = "withdrawn"
+    NOT_APPROVED = "not_approved"
+    NO_APPROVE_DECISION = "no_approve_decision"
+
+
+class ApprovalNotHeld(ApprovalError):
+    """The request does not stand as approved for this exact subject and digest."""
+
+    def __init__(self, code: ApprovalHoldRefusal, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 # ── Values ──────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class HeldPlatformApproval:
+    """A platform approval that stands, observed under its request's SHARE lock.
+
+    Returned by `hold_platform_approval`. The lock it was read under lasts until
+    the CALLER's transaction ends; that is the whole point of the value. A
+    consumer performs its dependent transition in the same transaction and
+    commits while still holding it, so a concurrent withdrawal (which locks the
+    same row FOR UPDATE) either committed first — and the hold refused — or waits
+    until the dependent transition has committed.
+
+    This value is evidence, NOT the lock: once the caller's transaction ends the
+    lock is gone, whatever still refers to this object.
+    """
+
+    request_id: UUID
+    subject_type: str
+    subject_id: str
+    content_digest: str
+    policy_code: str
+    policy_version: int
+    decided_at: datetime
+    approver_ids: tuple[UUID, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -651,6 +700,9 @@ def validate_digest(digest: str) -> str:
 
 
 __all__ = [
+    "ApprovalHoldRefusal",
+    "ApprovalNotHeld",
+    "HeldPlatformApproval",
     "DIGEST_LENGTH",
     "DIGEST_PREFIX",
     "EVENT_APPROVED",
