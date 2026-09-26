@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-approvals"
-version = "0.1.0a7"
+version = "0.1.0a8"
 description = "DotMac dual-plane approval policy revisions, content-bound requests and decisions"
 authors = ["DotMac"]
 readme = "README.md"

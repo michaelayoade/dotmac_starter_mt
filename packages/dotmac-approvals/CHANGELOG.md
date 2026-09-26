@@ -5,7 +5,33 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 entry landed once the live Postgres migration and catalog gate passed;
 `0.1.0a1` through `0.1.0a6` have since been published.
 
-## 0.1.0a7 — 2026-09-25 — prepared, unreleased (no tag, not on the index)
+## 0.1.0a8 — 2026-09-26 — prepared, unreleased (no tag, not on the index)
+
+**Version prepared.** `0.1.0a7` is published and tagged; this source adds a
+public read barrier, so it declares the newly allocated `0.1.0a8`. Publication
+happens through a separate `workflow_dispatch` of `release-module.yml`.
+
+- Add `hold_platform_approval(db, *, request_id, subject_type, subject_id,
+  content_digest) -> HeldPlatformApproval` (in `dotmac_approvals.service`). It
+  locks the platform request row `FOR SHARE` and validates, under that lock, the
+  exact subject and digest, APPROVED standing (not withdrawn), completion, and at
+  least one approve decision. The lock lasts until the caller's transaction
+  ends; the function never commits.
+- Why: `withdraw_platform_approval` locks the same row `FOR UPDATE`, so a caller
+  that holds the approval, performs a dependent transition (Control plan
+  approval, rollout or dispatch) and commits in one transaction sees exactly two
+  orderings — the withdrawal committed first and the hold refuses, or the
+  withdrawal waits until the dependent transition committed. A check made
+  without the lock leaves a window between reading "approved" and committing.
+- New contracts: `HeldPlatformApproval`, `ApprovalNotHeld` (an `ApprovalError`)
+  and the closed `ApprovalHoldRefusal` vocabulary (`request_not_found`,
+  `subject_mismatch`, `digest_mismatch`, `withdrawn`, `not_approved`,
+  `no_approve_decision`), exported from the package root.
+- No migration, no schema change, no new privilege: `SELECT … FOR SHARE` needs
+  the UPDATE privilege the platform runtime role already holds on
+  `mod_approvals.platform_approval_requests`.
+
+## 0.1.0a7 — 2026-09-25 — published (tag `dotmac-approvals-v0.1.0a7`)
 
 **Version prepared.** `0.1.0a6` is published and tagged; this source adds the
 approved-decision withdrawal surface and `ap_0003_withdrawals`, so it declares
