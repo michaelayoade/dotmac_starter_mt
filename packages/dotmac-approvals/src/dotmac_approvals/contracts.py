@@ -174,6 +174,7 @@ class ApprovalHoldRefusal(StrEnum):
     premise failed instead of reading an approval failure as one thing.
     """
 
+    MALFORMED_DIGEST = "malformed_digest"
     REQUEST_NOT_FOUND = "request_not_found"
     SUBJECT_MISMATCH = "subject_mismatch"
     DIGEST_MISMATCH = "digest_mismatch"
@@ -203,6 +204,9 @@ class HeldPlatformApproval:
     commits while still holding it, so a concurrent withdrawal (which locks the
     same row FOR UPDATE) either committed first — and the hold refused — or waits
     until the dependent transition has committed.
+
+    This value is evidence, NOT the lock: once the caller's transaction ends the
+    lock is gone, whatever still refers to this object.
     """
 
     request_id: UUID

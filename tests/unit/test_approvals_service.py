@@ -789,6 +789,11 @@ def test_a_standing_platform_approval_is_held_with_its_evidence(db: Session) -> 
         ({"subject_type": "other.plan"}, ApprovalHoldRefusal.SUBJECT_MISMATCH),
         ({"subject_id": "plan-other"}, ApprovalHoldRefusal.SUBJECT_MISMATCH),
         ({"content_digest": OTHER_DIGEST}, ApprovalHoldRefusal.DIGEST_MISMATCH),
+        ({"content_digest": "not-a-digest"}, ApprovalHoldRefusal.MALFORMED_DIGEST),
+        (
+            {"content_digest": "sha256:" + "A" * 64},
+            ApprovalHoldRefusal.MALFORMED_DIGEST,
+        ),
     ],
 )
 def test_a_hold_refuses_a_request_that_does_not_bind_this_subject(

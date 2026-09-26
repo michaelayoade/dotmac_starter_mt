@@ -1379,9 +1379,21 @@ def hold_platform_approval(
     without the lock, however late, leaves a window between reading "approved"
     and committing the transition.
 
-    Refuses with `ApprovalNotHeld` carrying an `ApprovalHoldRefusal` code.
+    Refuses with `ApprovalNotHeld` carrying an `ApprovalHoldRefusal` code, and
+    only with that: a malformed digest is `MALFORMED_DIGEST`, not the generic
+    `ContentChanged` the digest validator raises elsewhere, so a composing
+    transition can branch on one closed vocabulary.
+
+    The returned `HeldPlatformApproval` is EVIDENCE, not the lock. The lock lives
+    only in the caller's open transaction: carrying the value past a commit, or
+    into another session, carries no protection at all.
     """
-    validate_digest(content_digest)
+    try:
+        validate_digest(content_digest)
+    except ContentChanged as malformed:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.MALFORMED_DIGEST, str(malformed)
+        ) from malformed
     row = db.execute(
         select(PlatformApprovalRequest)
         .where(PlatformApprovalRequest.id == request_id)

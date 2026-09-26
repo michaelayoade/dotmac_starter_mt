@@ -1839,6 +1839,61 @@ def test_a_withdrawal_waits_for_a_held_approval_to_commit(
         engine.dispose()
 
 
+def test_two_holds_on_one_approval_proceed_concurrently(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """The lock is SHARED, not exclusive: while one transaction holds the
+    approval, a second hold on the same request succeeds at once instead of
+    queueing. This is the property only FOR SHARE has.
+
+    Sensitivity: an exclusive hold (FOR UPDATE) would make the second hold time
+    out on the lock, and this test would fail. The withdrawal tests alone
+    cannot tell the two apart, because both block a FOR UPDATE withdrawal.
+    """
+    _, _, platform_url = migrated_scratch
+    engine = create_engine(platform_url)
+    try:
+        request_id = _approved_platform_request(engine, subject_id="plan-two-holds")
+        held, release, failures = Event(), Event(), []
+
+        def first_holder() -> None:
+            try:
+                with Session(engine) as db, db.begin():
+                    hold_platform_approval(
+                        db,
+                        request_id=request_id,
+                        subject_type="fleet.plan",
+                        subject_id="plan-two-holds",
+                        content_digest=DIGEST,
+                    )
+                    held.set()
+                    assert release.wait(timeout=30)
+            except BaseException as exc:
+                failures.append(exc)
+
+        thread = Thread(target=first_holder)
+        thread.start()
+        try:
+            assert held.wait(timeout=20), "the first holder never took its lock"
+            with Session(engine) as db:
+                db.execute(text("SET lock_timeout = '500ms'"))
+                with db.begin():
+                    second = hold_platform_approval(
+                        db,
+                        request_id=request_id,
+                        subject_type="fleet.plan",
+                        subject_id="plan-two-holds",
+                        content_digest=DIGEST,
+                    )
+                    assert second.request_id == request_id
+        finally:
+            release.set()
+            thread.join(timeout=30)
+        assert not thread.is_alive() and failures == [], failures
+    finally:
+        engine.dispose()
+
+
 def test_a_committed_withdrawal_makes_the_hold_refuse(
     migrated_scratch: tuple[str, str, str],
 ) -> None:
@@ -1870,7 +1925,12 @@ def test_the_online_role_can_take_the_share_lock(
     migrated_scratch: tuple[str, str, str],
 ) -> None:
     """FOR SHARE needs UPDATE on the table; the platform runtime role holds it,
-    so the barrier is usable by the role that performs the transitions."""
+    so the barrier is usable by the role that performs the transitions.
+
+    This proves the PRIVILEGE (a row-lock table mode is taken without an error),
+    not the lock's MODE: the table-level RowShareLock is identical for FOR SHARE
+    and FOR UPDATE. `test_two_holds_on_one_approval_proceed_concurrently` is
+    what proves the lock is shared."""
     _, _, platform_url = migrated_scratch
     engine = create_engine(platform_url)
     try:

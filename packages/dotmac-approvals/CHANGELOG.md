@@ -24,9 +24,15 @@ happens through a separate `workflow_dispatch` of `release-module.yml`.
   withdrawal waits until the dependent transition committed. A check made
   without the lock leaves a window between reading "approved" and committing.
 - New contracts: `HeldPlatformApproval`, `ApprovalNotHeld` (an `ApprovalError`)
-  and the closed `ApprovalHoldRefusal` vocabulary (`request_not_found`,
-  `subject_mismatch`, `digest_mismatch`, `withdrawn`, `not_approved`,
-  `no_approve_decision`), exported from the package root.
+  and the closed `ApprovalHoldRefusal` vocabulary (`malformed_digest`,
+  `request_not_found`, `subject_mismatch`, `digest_mismatch`, `withdrawn`,
+  `not_approved`, `no_approve_decision`), exported from the package root. The
+  hold refuses only with `ApprovalNotHeld`; a malformed digest is
+  `malformed_digest`, not the generic `ContentChanged`.
+- The returned `HeldPlatformApproval` is evidence, not the lock: the lock lives
+  only in the caller's open transaction. The lock is SHARED — two concurrent
+  holds on one approval both proceed — while a withdrawal waits for every
+  holder to commit.
 - No migration, no schema change, no new privilege: `SELECT … FOR SHARE` needs
   the UPDATE privilege the platform runtime role already holds on
   `mod_approvals.platform_approval_requests`.
