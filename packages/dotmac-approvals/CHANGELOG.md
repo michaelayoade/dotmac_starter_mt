@@ -3,9 +3,9 @@
 All notable changes to the `dotmac-approvals` distribution. This package follows
 [Semantic Versioning](https://semver.org). The `.github/release-modules.json`
 entry landed once the live Postgres migration and catalog gate passed;
-`0.1.0a1` through `0.1.0a6` have since been published.
+`0.1.0a1` through `0.1.0a8` have since been published.
 
-## 0.1.0a8 — 2026-09-26 — prepared, unreleased (no tag, not on the index)
+## 0.1.0a8 — 2026-09-26 — published (tag `dotmac-approvals-v0.1.0a8`)
 
 **Version prepared.** `0.1.0a7` is published and tagged; this source adds a
 public read barrier, so it declares the newly allocated `0.1.0a8`. Publication
