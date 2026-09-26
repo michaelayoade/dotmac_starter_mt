@@ -23,13 +23,15 @@ import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event, Thread
 
 import pytest
 from dotmac_approvals.contracts import (
     Actor,
     ApprovalEvent,
+    ApprovalHoldRefusal,
     ApprovalLevel,
+    ApprovalNotHeld,
     ApprovalState,
     ApproverKind,
     DecisionAction,
@@ -40,6 +42,7 @@ from dotmac_approvals.outbox import withdraw_platform_approval
 from dotmac_approvals.service import (
     get_platform_request,
     get_tenant_request,
+    hold_platform_approval,
     publish_platform_policy_version,
     publish_tenant_policy_version,
     record_platform_decision,
@@ -1728,3 +1731,168 @@ def test_the_declared_database_catalog_matches_the_live_migrated_schema(
     assert comparison.measurement_issues == ()
     declared_tables = {table.name for table in snapshot.tables}
     assert {"approval_withdrawals", "platform_approval_withdrawals"} <= declared_tables
+
+
+# ── hold_platform_approval: the SHARE lock is a real barrier under PostgreSQL ──
+
+
+def _approved_platform_request(engine, *, subject_id: str) -> uuid.UUID:
+    approver, requester = uuid.uuid4(), uuid.uuid4()
+    revision = PolicyRevision(
+        policy_code=f"hold.{subject_id}",
+        version=1,
+        levels=(
+            ApprovalLevel(
+                sequence=1,
+                approver_kind=ApproverKind.USER,
+                approver_id=str(approver),
+                quorum=1,
+            ),
+        ),
+    )
+    with Session(engine) as db, db.begin():
+        publish_platform_policy_version(db, revision=revision)
+        request_id = request_platform_approval(
+            db,
+            policy_code=f"hold.{subject_id}",
+            policy_version=1,
+            subject_type="fleet.plan",
+            subject_id=subject_id,
+            content_digest=DIGEST,
+            requested_by=requester,
+            idempotency_key=subject_id,
+        ).request_id
+        record_platform_decision(
+            db,
+            request_id=request_id,
+            actor=Actor(actor_id=approver),
+            action=DecisionAction.APPROVE,
+            content_digest=DIGEST,
+        )
+    return request_id
+
+
+def _withdraw(db: Session, request_id: uuid.UUID, ref: str) -> None:
+    withdraw_platform_approval(
+        db,
+        request_id=request_id,
+        actor=Actor(actor_id=uuid.uuid4()),
+        authority_ref="cp-review",
+        reason="plan invalidated",
+        external_ref=ref,
+    )
+
+
+def test_a_withdrawal_waits_for_a_held_approval_to_commit(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """Hold first: while a transaction holds the approval, the withdrawal cannot
+    take its FOR UPDATE lock (it times out), and once the holder commits the
+    same withdrawal succeeds. The dependent transition therefore always commits
+    before the withdrawal can.
+
+    Sensitivity: a hold made WITHOUT the lock would let the withdrawal commit
+    immediately, and the lock-timeout assertion below would fail.
+    """
+    _, _, platform_url = migrated_scratch
+    engine = create_engine(platform_url)
+    try:
+        request_id = _approved_platform_request(engine, subject_id="plan-hold-first")
+        held, release, failures = Event(), Event(), []
+
+        def holder() -> None:
+            try:
+                with Session(engine) as db, db.begin():
+                    hold_platform_approval(
+                        db,
+                        request_id=request_id,
+                        subject_type="fleet.plan",
+                        subject_id="plan-hold-first",
+                        content_digest=DIGEST,
+                    )
+                    held.set()
+                    assert release.wait(timeout=30)
+            except BaseException as exc:
+                failures.append(exc)
+
+        thread = Thread(target=holder)
+        thread.start()
+        try:
+            assert held.wait(timeout=20), "the holder never took the SHARE lock"
+            with Session(engine) as db:
+                db.execute(text("SET lock_timeout = '500ms'"))
+                with pytest.raises(DBAPIError, match="lock timeout"):
+                    with db.begin():
+                        _withdraw(db, request_id, "hold-first-blocked")
+        finally:
+            release.set()
+            thread.join(timeout=30)
+        assert not thread.is_alive() and failures == [], failures
+
+        with Session(engine) as db, db.begin():
+            _withdraw(db, request_id, "hold-first-after-commit")
+        with Session(engine) as db:
+            detail = get_platform_request(db, request_id=request_id)
+            assert detail is not None
+            assert detail.evaluation.state is ApprovalState.WITHDRAWN
+    finally:
+        engine.dispose()
+
+
+def test_a_committed_withdrawal_makes_the_hold_refuse(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """Withdrawal first: the hold observes the committed withdrawal under its
+    lock and refuses with WITHDRAWN, so no dependent transition can commit."""
+    _, _, platform_url = migrated_scratch
+    engine = create_engine(platform_url)
+    try:
+        request_id = _approved_platform_request(
+            engine, subject_id="plan-withdraw-first"
+        )
+        with Session(engine) as db, db.begin():
+            _withdraw(db, request_id, "withdraw-first")
+        with Session(engine) as db, db.begin():
+            with pytest.raises(ApprovalNotHeld) as refused:
+                hold_platform_approval(
+                    db,
+                    request_id=request_id,
+                    subject_type="fleet.plan",
+                    subject_id="plan-withdraw-first",
+                    content_digest=DIGEST,
+                )
+        assert refused.value.code is ApprovalHoldRefusal.WITHDRAWN
+    finally:
+        engine.dispose()
+
+
+def test_the_online_role_can_take_the_share_lock(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """FOR SHARE needs UPDATE on the table; the platform runtime role holds it,
+    so the barrier is usable by the role that performs the transitions."""
+    _, _, platform_url = migrated_scratch
+    engine = create_engine(platform_url)
+    try:
+        request_id = _approved_platform_request(engine, subject_id="plan-online-role")
+        with Session(engine) as db, db.begin():
+            held = hold_platform_approval(
+                db,
+                request_id=request_id,
+                subject_type="fleet.plan",
+                subject_id="plan-online-role",
+                content_digest=DIGEST,
+            )
+            assert held.request_id == request_id
+            locks = db.execute(
+                text(
+                    "SELECT count(*) FROM pg_locks l "
+                    "JOIN pg_class c ON c.oid = l.relation "
+                    "WHERE l.pid = pg_backend_pid() "
+                    "AND c.relname = 'platform_approval_requests' "
+                    "AND l.mode = 'RowShareLock'"
+                )
+            ).scalar_one()
+            assert locks >= 1
+    finally:
+        engine.dispose()
