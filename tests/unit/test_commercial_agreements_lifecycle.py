@@ -1081,6 +1081,131 @@ class TestApprovalWithdrawalIsRecordedAsStandingNotAsATransition:
         assert rows == []
 
 
+class TestWithdrawalRefusalsAreDecidedFreshUnderTheLock:
+    """Review of #759: a refusal is decided under the row lock, on every
+    delivery — it writes nothing, so it cannot be memoized under the command
+    id the way a `RECORDED` outcome is. These pin the decisions the fix in
+    HEAD makes, each one a case the pre-fix code got wrong."""
+
+    def test_a_refusal_is_not_memoized_and_the_same_command_id_later_records(
+        self, db, catalogue
+    ) -> None:
+        """The exact bug in review #759: `content_not_bound` while the row was
+        a draft, replayed forever by the ledger once the row was proposed with
+        a matching digest. If the refusal were still memoized under
+        `process_once_platform`, this second call would report
+        `content_not_bound` again instead of `recorded`."""
+        view = _draft(db, catalogue)
+        first_command = _withdrawal_command(
+            view, decision_ref="apr-never-approved", content_hash="0" * 64
+        )
+        first = record_approval_withdrawal(db, first_command)
+        assert first.outcome == ApprovalWithdrawalOutcome.CONTENT_NOT_BOUND
+
+        proposed = _propose(db, catalogue, view.id)
+        second_command = _replay(
+            first_command,
+            command_id=first_command.command_id,
+            content_hash=proposed.content_hash,
+        )
+        second = record_approval_withdrawal(db, second_command)
+        assert second.outcome == ApprovalWithdrawalOutcome.RECORDED
+        assert second.approval_carried is False
+
+    def test_a_carried_withdrawal_with_a_contradicting_digest_is_an_evidence_conflict(
+        self, db, catalogue
+    ) -> None:
+        """Check 3's digest guard: the decision matches the row's own, but the
+        command's digest contradicts the one this module froze — refused
+        rather than written into append-only evidence."""
+        view = _approved_with_decision(db, catalogue, "apr-digest-conflict")
+        result = record_approval_withdrawal(
+            db,
+            _withdrawal_command(
+                view, decision_ref="apr-digest-conflict", content_hash="f" * 64
+            ),
+        )
+        assert result.outcome == ApprovalWithdrawalOutcome.EVIDENCE_CONFLICT
+        assert result.withdrawal_id is None
+        rows = (
+            db.query(AgreementApprovalWithdrawal)
+            .filter(AgreementApprovalWithdrawal.agreement_id == view.id)
+            .all()
+        )
+        assert rows == []
+
+    def test_a_withdrawal_recorded_on_a_terminated_agreement_is_carried(
+        self, db, catalogue
+    ) -> None:
+        """Never a transition: a terminal agreement is recorded historically,
+        never refused, and its status does not move."""
+        view = _approved_with_decision(db, catalogue, "apr-terminal")
+        activated = _activate_under_decision(db, view, "apr-terminal")
+        terminated = terminate(
+            db,
+            TerminateCommand(
+                command_id="cmd-t",
+                agreement_id=activated.id,
+                effective_date=date(2026, 12, 31),
+                impact_acknowledged=True,
+                reason="counterparty exit",
+            ),
+        )
+        result = record_approval_withdrawal(
+            db, _withdrawal_command(terminated, decision_ref="apr-terminal")
+        )
+        assert result.outcome == ApprovalWithdrawalOutcome.RECORDED
+        assert result.approval_carried is True
+        assert result.status == AgreementStatus.TERMINATED.value
+
+    def test_a_suspended_agreement_with_a_withdrawal_excludes_reinstate(
+        self, db, catalogue
+    ) -> None:
+        view = _approved_with_decision(db, catalogue, "apr-suspended-reinstate")
+        activated = _activate_under_decision(db, view, "apr-suspended-reinstate")
+        suspended = suspend(
+            db, TransitionCommand("cmd-s", activated.id, reason="billing hold")
+        )
+        record_approval_withdrawal(
+            db,
+            _withdrawal_command(suspended, decision_ref="apr-suspended-reinstate"),
+        )
+        agreement_detail = detail(db, suspended.id)
+        assert agreement_detail is not None
+        assert AgreementAction.REINSTATE not in agreement_detail.permitted_actions
+        with pytest.raises(TransitionRefusedError):
+            reinstate(db, TransitionCommand("cmd-r", suspended.id))
+
+    def test_a_command_id_reused_from_another_command_is_an_expected_state_error(
+        self, db, catalogue
+    ) -> None:
+        """The kernel's platform ledger keys on `command_id` alone, across
+        every command type — a `suspend` and a `record_approval_withdrawal`
+        sharing one id collide in the SAME ledger row. A replay is trusted
+        only when it is THIS command's own record; the `suspend` record
+        `process_once_platform` finds instead names neither an `outcome` nor a
+        `withdrawal_ref`, so this raises rather than reporting `recorded`."""
+        view = _approved_with_decision(db, catalogue, "apr-shared-command")
+        activated = _activate_under_decision(db, view, "apr-shared-command")
+        suspend(
+            db, TransitionCommand("cmd-shared", activated.id, reason="billing hold")
+        )
+
+        withdrawal_command = _replay(
+            _withdrawal_command(activated, decision_ref="apr-shared-command"),
+            command_id="cmd-shared",
+        )
+        with pytest.raises(ExpectedStateError):
+            record_approval_withdrawal(db, withdrawal_command)
+
+        rows = (
+            db.query(AgreementApprovalWithdrawal)
+            .filter(AgreementApprovalWithdrawal.agreement_id == activated.id)
+            .all()
+        )
+        assert rows == [], "the collision must not be reported as a record"
+
+
 class TestAWithdrawalBlocksReapprovalNeverOtherTransitions:
     def test_approve_is_refused_once_a_withdrawal_is_recorded(
         self, db, catalogue
