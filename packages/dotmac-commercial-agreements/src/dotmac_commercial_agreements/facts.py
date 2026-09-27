@@ -290,11 +290,11 @@ class RecordApprovalWithdrawalCommand:
     Idempotently binds `approval_request_ref`, `approval_decision_ref`,
     `policy_code`/`policy_version`, `subject_ref` and `content_hash` — every
     field `service.record_approval_withdrawal` checks the evidence against
-    before writing anything. There is no `expected_version`: this command does
-    not compete with a lifecycle transition for the same optimistic-concurrency
-    slot, because it never advances `agreements.status` or `record_version` for
-    the reason a transition does — it locks the row FOR UPDATE and reasons from
-    the evidence bound to it instead.
+    before writing anything. There is no `expected_version`: the command takes
+    the agreement row FOR UPDATE and decides from the evidence bound to it, not
+    from a version the caller last saw. It never changes `agreements.status`;
+    when it records, it bumps `record_version` once so a stale form holding the
+    old version is refused by the next transition.
     """
 
     command_id: str

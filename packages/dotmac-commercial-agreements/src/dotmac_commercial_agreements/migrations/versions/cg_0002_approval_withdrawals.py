@@ -140,6 +140,15 @@ def upgrade() -> None:
         FOR EACH ROW EXECUTE FUNCTION mod_agreements.refuse_withdrawal_rewrite();
         """
     )
+    # TRUNCATE bypasses row triggers; a statement trigger closes that path for
+    # every role that could otherwise empty the table in one statement.
+    op.execute(
+        """
+        CREATE TRIGGER refuse_withdrawal_truncate
+        BEFORE TRUNCATE ON mod_agreements.agreement_approval_withdrawals
+        FOR EACH STATEMENT EXECUTE FUNCTION mod_agreements.refuse_withdrawal_rewrite();
+        """
+    )
 
     op.execute(
         "GRANT SELECT, INSERT ON mod_agreements.agreement_approval_withdrawals "
@@ -155,6 +164,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER IF EXISTS refuse_withdrawal_truncate "
+        "ON mod_agreements.agreement_approval_withdrawals;"
+    )
     op.execute(
         "DROP TRIGGER IF EXISTS refuse_withdrawal_rewrite "
         "ON mod_agreements.agreement_approval_withdrawals;"

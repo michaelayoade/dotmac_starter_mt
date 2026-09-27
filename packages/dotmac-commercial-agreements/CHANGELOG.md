@@ -17,9 +17,10 @@ changes, each called out here.
 "`0.1.0a2` is declared and unreleased" — that was stale; the tag above already
 existed on `main`.)
 
-`0.1.0a3` is also published. The release workflow verified it on the registry
-and wrote the annotated tag `dotmac-commercial-agreements-v0.1.0a3`, which peels
-to exact revision `5005e998a4cac9b4f7e3ba91f371967b0ee8b2a2`. (This section
+`0.1.0a3` is also published. Its annotated tag
+`dotmac-commercial-agreements-v0.1.0a3` (written by the release workflow, whose
+tag message reads "verified on the Forgejo registry (installed and registered
+alone)") peels to exact revision `5005e998a4cac9b4f7e3ba91f371967b0ee8b2a2`. (This section
 previously read "`0.1.0a3` is declared and unreleased" — stale in the same way
 the a2 note once was. Its oracle-backed release record is not yet in
 `docs/inventories/module-release-verifications.json`.)
@@ -39,7 +40,8 @@ transition** (Gate-0 C2 S4, Michael 2026-09-27).
   digest — and records the withdrawal reference, reason and time in the new
   append-only `mod_agreements.agreement_approval_withdrawals` table
   (`cg_0002_approval_withdrawals`, rewrite-refusing trigger, `platform_api`/
-  `app_admin` SELECT+INSERT only). It appends one history row with
+  `app_admin` SELECT+INSERT only; UPDATE, DELETE and TRUNCATE are refused by
+  trigger). It appends one history row with
   `from_status == to_status`, one audit event under the NEW action
   `commercial_agreement.approval_withdrawal_recorded`, and one
   `agreement.approval_withdrawn.v1` platform-outbox fact, in one transaction and
@@ -48,7 +50,10 @@ transition** (Gate-0 C2 S4, Michael 2026-09-27).
   `already_recorded` (identical replay), `decision_not_carried` (the agreement
   is bound to a different decision), `content_not_bound` (no decision bound and
   the digest no longer matches), `evidence_conflict` (subject, policy or a
-  same-reference/same-decision contradiction). Only `recorded` writes.
+  same-reference/same-decision contradiction, or a digest contradicting the
+  one frozen on the agreement). Only `recorded` writes; every refusal is
+  decided under the row lock and writes nothing, not even an idempotency entry,
+  so a refusal that depends on current state is re-decided on redelivery.
 - Recorded standing BLOCKS `approve`, `activate` and `reinstate`, which now take
   the agreement row `FOR UPDATE` and consult the table under that lock, so a
   transition can never slip past a withdrawal committing concurrently.
