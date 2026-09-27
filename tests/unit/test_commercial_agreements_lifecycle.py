@@ -203,11 +203,17 @@ def _propose(db: Session, catalogue: FakeCatalogue, agreement_id: uuid.UUID):
     )
 
 
-def _evidence(digest: str, *, policy: str = "commercial.oem", version: int = 3):
+def _evidence(
+    digest: str,
+    *,
+    policy: str = "commercial.oem",
+    version: int = 3,
+    decision_ref: str | None = None,
+):
     return ApprovalEvidence(
         policy_code=policy,
         policy_version=version,
-        decision_ref=f"apr-{uuid.uuid4().hex[:10]}",
+        decision_ref=decision_ref or f"apr-{uuid.uuid4().hex[:10]}",
         content_digest=digest,
         decided_at=datetime(2026, 8, 20, 9, 0, tzinfo=UTC),
     )
@@ -230,7 +236,10 @@ def _activate(db: Session, view):
         ActivateCommand(
             command_id=f"cmd-{uuid.uuid4().hex[:12]}",
             agreement_id=view.id,
-            approval_evidence=_evidence(view.content_hash or ""),
+            # Activation must present the SAME decision that carried approval.
+            approval_evidence=_evidence(
+                view.content_hash or "", decision_ref=view.approval_decision_ref
+            ),
             activation_evidence=ActivationEvidence(
                 rule="countersignature",
                 reference="doc-4471",

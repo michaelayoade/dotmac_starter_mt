@@ -499,17 +499,40 @@ class TestTheApprovalWithdrawalMigrationStatesItsWholeAccessSurface:
     def sql(self) -> str:
         return self._WITHDRAWALS_MIGRATION.read_text()
 
-    def test_the_table_is_revoked_from_the_tenant_app_role(self, sql: str) -> None:
-        assert (
-            "REVOKE ALL ON mod_agreements.agreement_approval_withdrawals "
-            "FROM app_user;" in sql
+    @pytest.fixture
+    def statements(self) -> str:
+        """Every string literal in the migration, each on its own line.
+
+        Read through the AST rather than as raw text: Python merges implicitly
+        concatenated literals (`"GRANT ... " "TO platform_api;"`) into ONE
+        constant, so a statement split across source lines by the formatter is
+        still matched whole. Raw-text matching silently found nothing, which
+        left the no-UPDATE/DELETE check below passing over an empty set.
+        """
+        import ast
+
+        tree = ast.parse(self._WITHDRAWALS_MIGRATION.read_text())
+        return "\n".join(
+            " ".join(node.value.split())
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
         )
 
-    def test_the_online_platform_role_can_insert_and_select(self, sql: str) -> None:
+    def test_the_table_is_revoked_from_the_tenant_app_role(
+        self, statements: str
+    ) -> None:
+        assert (
+            "REVOKE ALL ON mod_agreements.agreement_approval_withdrawals "
+            "FROM app_user;" in statements
+        )
+
+    def test_the_online_platform_role_can_insert_and_select(
+        self, statements: str
+    ) -> None:
         grants = re.findall(
             r"GRANT ([A-Z, ]+) ON mod_agreements\."
             r"agreement_approval_withdrawals TO (\w+);",
-            sql,
+            statements,
         )
         privileges_by_role = {role: privileges for privileges, role in grants}
         assert "platform_api" in privileges_by_role
@@ -517,13 +540,18 @@ class TestTheApprovalWithdrawalMigrationStatesItsWholeAccessSurface:
             p.strip() for p in privileges_by_role["platform_api"].split(",")
         }
 
-    def test_the_table_grants_no_update_or_delete_to_any_role(self, sql: str) -> None:
+    def test_the_table_grants_no_update_or_delete_to_any_role(
+        self, statements: str
+    ) -> None:
         """The property that makes a withdrawal evidence rather than a log."""
-        for grant in re.findall(
+        grants = re.findall(
             r"GRANT ([A-Z, ]+) ON mod_agreements\.agreement_approval_withdrawals "
             r"TO (\w+);",
-            sql,
-        ):
+            statements,
+        )
+        # Non-vacuity: a check over an empty set passes for the wrong reason.
+        assert {role for _, role in grants} >= {"platform_api", "app_admin"}, grants
+        for grant in grants:
             privileges, role = grant
             assert "UPDATE" not in privileges, role
             assert "DELETE" not in privileges, role

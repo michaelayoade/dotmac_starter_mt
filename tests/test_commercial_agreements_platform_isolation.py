@@ -732,8 +732,9 @@ class TestTheApprovalWithdrawalsTableIsReachableAndAppendOnly:
         self, migrated_scratch
     ) -> None:
         """`platform_api` holds INSERT/SELECT (hard rule 27's reachability
-        half), never UPDATE/DELETE — the trigger is the backstop even for the
-        role the module's own writes run as."""
+        half), never UPDATE/DELETE — so PostgreSQL refuses the rewrite on
+        privilege (42501) before the trigger is reached; the trigger is the
+        backstop for roles that do hold the privilege (app_admin, above)."""
         admin_url, platform_url, _ = migrated_scratch
         admin_engine = create_engine(admin_url)
         try:
@@ -746,9 +747,7 @@ class TestTheApprovalWithdrawalsTableIsReachableAndAppendOnly:
         try:
             with (
                 engine.begin() as conn,
-                pytest.raises(
-                    DBAPIError, match="agreement_approval_withdrawals is append-only"
-                ),
+                pytest.raises(DBAPIError, match="permission denied"),
             ):
                 conn.execute(
                     text(
@@ -775,9 +774,7 @@ class TestTheApprovalWithdrawalsTableIsReachableAndAppendOnly:
         try:
             with (
                 engine.begin() as conn,
-                pytest.raises(
-                    DBAPIError, match="agreement_approval_withdrawals is append-only"
-                ),
+                pytest.raises(DBAPIError, match="permission denied"),
             ):
                 conn.execute(
                     text(
@@ -1056,6 +1053,18 @@ class TestTheWithdrawalLockRaceAgainstApprove:
     confirms, via `pg_stat_activity`, that B is GENUINELY blocked — with no
     timeout on B's side to race against — before A ever commits.
     """
+
+    @pytest.fixture(autouse=True)
+    def _installed_module_audit_actions(self) -> None:
+        """Drive the service as an adopter does: the module's manifest, and so
+        its audit actions, are installed (the unit suite's same fixture)."""
+        from dotmac_commercial_agreements import module
+        from dotmac_kernel.audit_actions import (
+            AuditActionRegistry,
+            install_audit_actions,
+        )
+
+        install_audit_actions(AuditActionRegistry.from_manifests([module]))
 
     def test_an_in_flight_withdrawal_blocks_approve_until_it_commits(
         self, migrated_scratch
