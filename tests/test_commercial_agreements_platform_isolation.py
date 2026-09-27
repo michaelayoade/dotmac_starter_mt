@@ -25,11 +25,14 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, date, datetime
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
+from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -43,7 +46,15 @@ AGREEMENT_VERSIONS = (
 )
 
 SCHEMA = "mod_agreements"
-TABLES = ("agreements", "agreement_lines", "agreement_events")
+#: a4 adds `agreement_approval_withdrawals` (`cg_0002_approval_withdrawals`) as
+#: a fourth table on the same platform plane — the parametrised checks below
+#: that iterate this tuple extend to it automatically.
+TABLES = (
+    "agreements",
+    "agreement_lines",
+    "agreement_events",
+    "agreement_approval_withdrawals",
+)
 
 #: The seven table privileges. A revoke that covers six is not a revoke.
 ALL_PRIVILEGES = (
@@ -155,7 +166,7 @@ def _has_privilege(url: str, table: str, privilege: str, *, role: str) -> bool:
 
 
 class TestTheLineageBuildsFromAnEmptyDatabase:
-    def test_the_schema_and_all_three_tables_exist(self, migrated_scratch) -> None:
+    def test_the_schema_and_all_four_tables_exist(self, migrated_scratch) -> None:
         admin_url, _, _ = migrated_scratch
         engine = create_engine(admin_url)
         try:
@@ -586,5 +597,507 @@ class TestTheConstraintsHoldWithoutTheService:
                     ),
                     {"id": uuid.uuid4(), "aid": agreement_id},
                 )
+        finally:
+            engine.dispose()
+
+
+# ── The approval-withdrawals table: append-only, its own message ────────────
+
+
+def _seed_agreement(conn) -> uuid.UUID:
+    agreement_id = uuid.uuid4()
+    conn.execute(
+        text(
+            "INSERT INTO mod_agreements.agreements ("
+            " id, reference, agreement_family_id, agreement_version,"
+            " counterparty_ref, agreement_type, status,"
+            " effective_date, expiry_date, record_version"
+            ") VALUES (:id, :ref, :fam, 1, 'acme', 'oem', 'draft',"
+            " DATE '2026-09-01', DATE '2027-08-31', 1)"
+        ),
+        {"id": agreement_id, "ref": f"AGR-{uuid.uuid4().hex[:8]}", "fam": uuid.uuid4()},
+    )
+    return agreement_id
+
+
+def _seed_withdrawal(conn, agreement_id: uuid.UUID, **overrides: object) -> uuid.UUID:
+    params: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "aid": agreement_id,
+        "req": f"req-{uuid.uuid4().hex[:8]}",
+        "dec": f"apr-{uuid.uuid4().hex[:8]}",
+        "policy": "commercial.oem",
+        "version": 3,
+        "subject": str(agreement_id),
+        "digest": "0" * 64,
+        "wref": f"wd-{uuid.uuid4().hex[:10]}",
+        "reason": "policy compliance issue",
+    }
+    params.update(overrides)
+    conn.execute(
+        text(
+            "INSERT INTO mod_agreements.agreement_approval_withdrawals ("
+            " id, agreement_id, approval_request_ref, approval_decision_ref,"
+            " approval_policy_code, approval_policy_version, subject_ref,"
+            " content_hash, withdrawal_ref, reason, withdrawn_at,"
+            " status_at_record, approval_carried, command_id"
+            ") VALUES (:id, :aid, :req, :dec, :policy, :version, :subject,"
+            " :digest, :wref, CAST(:reason AS text), now(), 'approved', false,"
+            " 'cmd-seed')"
+        ),
+        params,
+    )
+    return params["id"]  # type: ignore[return-value]
+
+
+class TestTheApprovalWithdrawalsTableIsReachableAndAppendOnly:
+    """The same two-halved proof `agreement_events` gets — grants that actually
+    work, and a rewrite refusal that names the right table — applied to the
+    table `cg_0002_approval_withdrawals` adds."""
+
+    def test_platform_api_can_insert_and_select_a_withdrawal_row(
+        self, migrated_scratch
+    ) -> None:
+        admin_url, platform_url, _ = migrated_scratch
+        admin_engine = create_engine(admin_url)
+        try:
+            with admin_engine.begin() as conn:
+                agreement_id = _seed_agreement(conn)
+        finally:
+            admin_engine.dispose()
+
+        platform_engine = create_engine(platform_url)
+        try:
+            with platform_engine.begin() as conn:
+                withdrawal_id = _seed_withdrawal(conn, agreement_id)
+                found = conn.execute(
+                    text(
+                        "SELECT reason FROM mod_agreements."
+                        "agreement_approval_withdrawals WHERE id = :id"
+                    ),
+                    {"id": withdrawal_id},
+                ).scalar()
+            assert found == "policy compliance issue"
+        finally:
+            platform_engine.dispose()
+
+    def test_app_admin_cannot_update_a_withdrawal_row(self, migrated_scratch) -> None:
+        admin_url, _, _ = migrated_scratch
+        engine = create_engine(admin_url)
+        try:
+            with engine.begin() as conn:
+                agreement_id = _seed_agreement(conn)
+                withdrawal_id = _seed_withdrawal(conn, agreement_id)
+            with (
+                engine.begin() as conn,
+                pytest.raises(
+                    DBAPIError, match="agreement_approval_withdrawals is append-only"
+                ),
+            ):
+                conn.execute(
+                    text(
+                        "UPDATE mod_agreements.agreement_approval_withdrawals "
+                        "SET reason = 'edited' WHERE id = :id"
+                    ),
+                    {"id": withdrawal_id},
+                )
+        finally:
+            engine.dispose()
+
+    def test_app_admin_cannot_delete_a_withdrawal_row(self, migrated_scratch) -> None:
+        admin_url, _, _ = migrated_scratch
+        engine = create_engine(admin_url)
+        try:
+            with engine.begin() as conn:
+                agreement_id = _seed_agreement(conn)
+                withdrawal_id = _seed_withdrawal(conn, agreement_id)
+            with (
+                engine.begin() as conn,
+                pytest.raises(
+                    DBAPIError, match="agreement_approval_withdrawals is append-only"
+                ),
+            ):
+                conn.execute(
+                    text(
+                        "DELETE FROM mod_agreements.agreement_approval_withdrawals "
+                        "WHERE id = :id"
+                    ),
+                    {"id": withdrawal_id},
+                )
+        finally:
+            engine.dispose()
+
+    def test_platform_api_cannot_update_a_withdrawal_row(
+        self, migrated_scratch
+    ) -> None:
+        """`platform_api` holds INSERT/SELECT (hard rule 27's reachability
+        half), never UPDATE/DELETE — the trigger is the backstop even for the
+        role the module's own writes run as."""
+        admin_url, platform_url, _ = migrated_scratch
+        admin_engine = create_engine(admin_url)
+        try:
+            with admin_engine.begin() as conn:
+                agreement_id = _seed_agreement(conn)
+                withdrawal_id = _seed_withdrawal(conn, agreement_id)
+        finally:
+            admin_engine.dispose()
+        engine = create_engine(platform_url)
+        try:
+            with (
+                engine.begin() as conn,
+                pytest.raises(
+                    DBAPIError, match="agreement_approval_withdrawals is append-only"
+                ),
+            ):
+                conn.execute(
+                    text(
+                        "UPDATE mod_agreements.agreement_approval_withdrawals "
+                        "SET reason = 'edited' WHERE id = :id"
+                    ),
+                    {"id": withdrawal_id},
+                )
+        finally:
+            engine.dispose()
+
+    def test_platform_api_cannot_delete_a_withdrawal_row(
+        self, migrated_scratch
+    ) -> None:
+        admin_url, platform_url, _ = migrated_scratch
+        admin_engine = create_engine(admin_url)
+        try:
+            with admin_engine.begin() as conn:
+                agreement_id = _seed_agreement(conn)
+                withdrawal_id = _seed_withdrawal(conn, agreement_id)
+        finally:
+            admin_engine.dispose()
+        engine = create_engine(platform_url)
+        try:
+            with (
+                engine.begin() as conn,
+                pytest.raises(
+                    DBAPIError, match="agreement_approval_withdrawals is append-only"
+                ),
+            ):
+                conn.execute(
+                    text(
+                        "DELETE FROM mod_agreements.agreement_approval_withdrawals "
+                        "WHERE id = :id"
+                    ),
+                    {"id": withdrawal_id},
+                )
+        finally:
+            engine.dispose()
+
+
+class TestTheApprovalWithdrawalConstraintsHoldWithoutTheService:
+    """Every rule below is also enforced in `service.record_approval_
+    withdrawal`. These prove the database enforces them too."""
+
+    def test_a_duplicate_withdrawal_ref_across_different_agreements_is_refused(
+        self, migrated_scratch
+    ) -> None:
+        admin_url, _, _ = migrated_scratch
+        engine = create_engine(admin_url)
+        try:
+            withdrawal_ref = f"wd-{uuid.uuid4().hex[:10]}"
+            with engine.begin() as conn:
+                first_agreement = _seed_agreement(conn)
+                _seed_withdrawal(conn, first_agreement, wref=withdrawal_ref)
+            with engine.begin() as conn:
+                second_agreement = _seed_agreement(conn)
+            with engine.begin() as conn, pytest.raises(DBAPIError):
+                _seed_withdrawal(conn, second_agreement, wref=withdrawal_ref)
+        finally:
+            engine.dispose()
+
+    def test_a_duplicate_agreement_and_decision_ref_is_refused(
+        self, migrated_scratch
+    ) -> None:
+        """One withdrawal per decision — the defence in depth the service's
+        own `evidence_conflict` outcome relies on never being reached by a race
+        it did not itself serialize."""
+        admin_url, _, _ = migrated_scratch
+        engine = create_engine(admin_url)
+        try:
+            with engine.begin() as conn:
+                agreement_id = _seed_agreement(conn)
+                decision_ref = f"apr-{uuid.uuid4().hex[:8]}"
+                _seed_withdrawal(conn, agreement_id, dec=decision_ref)
+            with engine.begin() as conn, pytest.raises(DBAPIError):
+                _seed_withdrawal(conn, agreement_id, dec=decision_ref)
+        finally:
+            engine.dispose()
+
+    def test_a_blank_reason_is_refused_by_the_check_constraint(
+        self, migrated_scratch
+    ) -> None:
+        admin_url, _, _ = migrated_scratch
+        engine = create_engine(admin_url)
+        try:
+            with engine.begin() as conn:
+                agreement_id = _seed_agreement(conn)
+            with engine.begin() as conn, pytest.raises(DBAPIError):
+                _seed_withdrawal(conn, agreement_id, reason="")
+        finally:
+            engine.dispose()
+
+
+def test_the_declared_database_catalog_matches_the_live_migrated_schema(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """The manifest's catalogue contribution — all four tables, including the
+    `agreement_approval_withdrawals` contract that was DRAFTED from its
+    migration rather than transcribed from a live observation like the
+    original three (see `manifest.py`'s module docstring) — is observed
+    against the migrated PostgreSQL schema and must show zero drift. This test
+    IS the verification that draft depends on, per `manifest.py`'s own
+    comment: "verified against a live observation by
+    `tests/test_commercial_agreements_platform_isolation.py` in CI"."""
+    import dotmac_commercial_agreements
+    from dotmac_commercial_agreements.manifest import module
+    from dotmac_kernel import (
+        ComposedDatabaseLineageHeadV1,
+        DatabaseCatalogOwnerKind,
+        DatabaseCatalogOwnerV1,
+        ModuleDatabaseCatalogSnapshot,
+        compare_module_database_catalog,
+        observe_postgres_tables_columns,
+    )
+
+    admin_url, _, _ = migrated_scratch
+    snapshot = ModuleDatabaseCatalogSnapshot.from_manifest(
+        module,
+        distribution_name="dotmac-commercial-agreements",
+        distribution_version=dotmac_commercial_agreements.__version__,
+        composed_lineage_head=ComposedDatabaseLineageHeadV1(
+            DatabaseCatalogOwnerV1(DatabaseCatalogOwnerKind.MODULE, module.code),
+            "cg_0002_approval_withdrawals",
+        ),
+    )
+    engine = create_engine(admin_url)
+    try:
+        with engine.connect() as conn:
+            observation = observe_postgres_tables_columns(
+                conn, schemas=("mod_agreements",)
+            )
+    finally:
+        engine.dispose()
+    comparison = compare_module_database_catalog(snapshot, observation)
+    drifts = [
+        f"{d.table}.{d.column} {d.attribute.value} {d.direction.value}: "
+        f"declared={d.declared!r} observed={d.observed!r}"
+        for d in comparison.drifts
+    ]
+    assert drifts == [], "\n".join(drifts)
+    assert comparison.measurement_issues == ()
+    declared_tables = {table.name for table in snapshot.tables}
+    assert declared_tables == set(TABLES)
+
+
+# ── The lock race: a withdrawal and an approve on one agreement ─────────────
+
+
+class _AlwaysDeclaredCatalogue:
+    """A capability reader that never refuses — the lock-race tests are about
+    the row lock, not about catalogue validation."""
+
+    def require_declared(self, product_code: str, codes: tuple[str, ...]) -> None:
+        return None
+
+
+def _proposed_agreement(engine):
+    """A `proposed` agreement, built through the service's own draft → propose
+    path against real Postgres, exactly as the unit tests build one against
+    SQLite."""
+    from dotmac_commercial_agreements import (
+        AgreementPeriod,
+        CommercialTerms,
+        DraftCommand,
+        LineInput,
+        ProposeCommand,
+        open_draft,
+        propose,
+    )
+
+    with Session(engine) as db, db.begin():
+        drafted = open_draft(
+            db,
+            DraftCommand(
+                command_id=f"cmd-{uuid.uuid4().hex[:12]}",
+                reference=f"AGR-{uuid.uuid4().hex[:8]}",
+                counterparty_ref="acme-operator",
+                agreement_type="oem_reseller",
+                period=AgreementPeriod(date(2026, 9, 1), date(2027, 8, 31)),
+                lines=(
+                    LineInput(
+                        product_code="dotmac_sub",
+                        capability_code="subscriber.manage",
+                        quantity=500,
+                        terms=CommercialTerms("12.50", "NGN"),
+                    ),
+                ),
+            ),
+            catalogue=_AlwaysDeclaredCatalogue(),
+        )
+    with Session(engine) as db, db.begin():
+        proposed = propose(
+            db,
+            ProposeCommand(
+                command_id=f"cmd-{uuid.uuid4().hex[:12]}",
+                agreement_id=drafted.id,
+                approval_policy_code="commercial.oem",
+                approval_policy_version=3,
+            ),
+            catalogue=_AlwaysDeclaredCatalogue(),
+        )
+    return proposed
+
+
+def _withdrawal_command(
+    agreement_id: uuid.UUID, *, decision_ref: str, content_hash: str
+):
+    from dotmac_commercial_agreements import RecordApprovalWithdrawalCommand
+
+    return RecordApprovalWithdrawalCommand(
+        command_id=f"cmd-{uuid.uuid4().hex[:12]}",
+        agreement_id=agreement_id,
+        approval_request_ref=f"req-{uuid.uuid4().hex[:8]}",
+        approval_decision_ref=decision_ref,
+        policy_code="commercial.oem",
+        policy_version=3,
+        subject_ref=str(agreement_id),
+        content_hash=content_hash,
+        withdrawal_ref=f"wd-{uuid.uuid4().hex[:10]}",
+        reason="policy compliance issue",
+        withdrawn_at=datetime(2026, 9, 5, 12, 0, tzinfo=UTC),
+    )
+
+
+def _approve_command(agreement_id: uuid.UUID, *, decision_ref: str, content_hash: str):
+    from dotmac_commercial_agreements import ApprovalEvidence, ApproveCommand
+
+    return ApproveCommand(
+        command_id=f"cmd-{uuid.uuid4().hex[:12]}",
+        agreement_id=agreement_id,
+        evidence=ApprovalEvidence(
+            policy_code="commercial.oem",
+            policy_version=3,
+            decision_ref=decision_ref,
+            content_digest=content_hash,
+            decided_at=datetime(2026, 8, 20, 9, 0, tzinfo=UTC),
+        ),
+    )
+
+
+class TestTheWithdrawalLockRaceAgainstApprove:
+    """`_load_locked`'s `FOR UPDATE` is what makes `record_approval_withdrawal`
+    and `approve` serialize on one agreement row — proven here against real
+    Postgres, because SQLite's coarser locking cannot show a genuine block."""
+
+    def test_an_in_flight_withdrawal_blocks_approve_until_it_commits(
+        self, migrated_scratch
+    ) -> None:
+        from dotmac_commercial_agreements import (
+            TransitionRefusedError,
+            approve,
+            record_approval_withdrawal,
+        )
+
+        _, platform_url, _ = migrated_scratch
+        engine = create_engine(platform_url)
+        try:
+            proposed = _proposed_agreement(engine)
+            decision_ref = f"apr-{uuid.uuid4().hex[:8]}"
+            digest = proposed.content_hash or ""
+            held, release, failures = Event(), Event(), []
+
+            def withdraw_in_flight() -> None:
+                try:
+                    with Session(engine) as db, db.begin():
+                        record_approval_withdrawal(
+                            db,
+                            _withdrawal_command(
+                                proposed.id,
+                                decision_ref=decision_ref,
+                                content_hash=digest,
+                            ),
+                        )
+                        held.set()
+                        assert release.wait(timeout=30)
+                except BaseException as exc:
+                    failures.append(exc)
+
+            thread = Thread(target=withdraw_in_flight)
+            thread.start()
+            try:
+                assert held.wait(timeout=20), "the withdrawal never took its lock"
+                with Session(engine) as db:
+                    with pytest.raises(DBAPIError, match="lock timeout"):
+                        with db.begin():
+                            db.execute(text("SET LOCAL lock_timeout = '500ms'"))
+                            approve(
+                                db,
+                                _approve_command(
+                                    proposed.id,
+                                    decision_ref=decision_ref,
+                                    content_hash=digest,
+                                ),
+                            )
+            finally:
+                release.set()
+                thread.join(timeout=30)
+            assert not thread.is_alive() and failures == [], failures
+
+            # A committed; B's approve now observes the withdrawal and refuses
+            # — never a lost update that overwrites what A just recorded.
+            with Session(engine) as db, db.begin():
+                with pytest.raises(TransitionRefusedError):
+                    approve(
+                        db,
+                        _approve_command(
+                            proposed.id, decision_ref=decision_ref, content_hash=digest
+                        ),
+                    )
+        finally:
+            engine.dispose()
+
+    def test_when_approve_commits_first_the_withdrawal_still_records_as_carried(
+        self, migrated_scratch
+    ) -> None:
+        """The reverse order: nothing here needs the lock to be contested — the
+        withdrawal simply observes the now-committed approval's decision_ref
+        and records `approval_carried=True`, and the status stays `approved`."""
+        from dotmac_commercial_agreements import (
+            ApprovalWithdrawalOutcome,
+            approve,
+            record_approval_withdrawal,
+        )
+
+        _, platform_url, _ = migrated_scratch
+        engine = create_engine(platform_url)
+        try:
+            proposed = _proposed_agreement(engine)
+            decision_ref = f"apr-{uuid.uuid4().hex[:8]}"
+            digest = proposed.content_hash or ""
+
+            with Session(engine) as db, db.begin():
+                approved = approve(
+                    db,
+                    _approve_command(
+                        proposed.id, decision_ref=decision_ref, content_hash=digest
+                    ),
+                )
+            assert approved.status == "approved"
+
+            with Session(engine) as db, db.begin():
+                result = record_approval_withdrawal(
+                    db,
+                    _withdrawal_command(
+                        proposed.id, decision_ref=decision_ref, content_hash=digest
+                    ),
+                )
+            assert result.outcome == ApprovalWithdrawalOutcome.RECORDED
+            assert result.approval_carried is True
+            assert result.status == "approved"
         finally:
             engine.dispose()
