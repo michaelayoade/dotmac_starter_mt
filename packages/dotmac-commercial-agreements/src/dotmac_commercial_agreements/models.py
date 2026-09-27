@@ -238,6 +238,14 @@ class Agreement(Base, TimestampMixin):
         back_populates="agreement",
         order_by=lambda: AgreementEvent.sequence,
     )
+    #: Recorded withdrawals. Never cascades on delete (RESTRICT, like `events`)
+    #: and never empty-checked by anything but `bool(...)` — a withdrawal is a
+    #: standing fact, not a lifecycle state, so nothing here reads WHICH one.
+    approval_withdrawals: Mapped[list[AgreementApprovalWithdrawal]] = relationship(
+        lambda: AgreementApprovalWithdrawal,
+        back_populates="agreement",
+        order_by=lambda: AgreementApprovalWithdrawal.created_at,
+    )
 
 
 class AgreementLine(Base, TimestampMixin):
@@ -404,6 +412,10 @@ class AgreementApprovalWithdrawal(Base, TimestampMixin):
 
     command_id: Mapped[str] = mapped_column(String(200), nullable=False)
     actor_ref: Mapped[str | None] = mapped_column(String(200))
+
+    agreement: Mapped[Agreement] = relationship(
+        lambda: Agreement, back_populates="approval_withdrawals"
+    )
 
 
 __all__ = [

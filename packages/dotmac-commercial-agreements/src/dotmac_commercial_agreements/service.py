@@ -70,6 +70,7 @@ from dotmac_commercial_agreements import facts
 from dotmac_commercial_agreements.models import (
     TERMINAL_STATUSES,
     Agreement,
+    AgreementApprovalWithdrawal,
     AgreementEvent,
     AgreementLine,
     AgreementStatus,
@@ -97,6 +98,15 @@ from dotmac_commercial_agreements.ports import (
 #: vocabulary, not to encourage a code per verb.
 AUDIT_ACTION_TRANSITIONED: str = "commercial_agreement.transitioned"
 
+#: A SECOND, distinct audit action — deliberately not a member of the same
+#: vocabulary as `AUDIT_ACTION_TRANSITIONED`. A withdrawal is not a transition
+#: (it never advances `agreements.status`), and folding it into "transitioned"
+#: would make an auditor's search for actual transitions return a row that was
+#: never one.
+AUDIT_ACTION_APPROVAL_WITHDRAWAL_RECORDED: str = (
+    "commercial_agreement.approval_withdrawal_recorded"
+)
+
 #: Idempotency scopes name the OPERATION, never an HTTP route (ADR-0014).
 SCOPE_DRAFT = "commercial_agreement.draft"
 SCOPE_PROPOSE = "commercial_agreement.propose"
@@ -109,6 +119,7 @@ SCOPE_TERMINATE = "commercial_agreement.terminate"
 SCOPE_EXPIRE = "commercial_agreement.expire"
 SCOPE_CANCEL = "commercial_agreement.cancel"
 SCOPE_AMEND = "commercial_agreement.amend"
+SCOPE_RECORD_APPROVAL_WITHDRAWAL = "commercial_agreement.record_approval_withdrawal"
 
 _ENTITY = "commercial_agreement"
 
@@ -402,6 +413,24 @@ def _require_bound_approval(row: Agreement, evidence: ApprovalEvidence) -> None:
         )
 
 
+def _require_no_withdrawal(row: Agreement) -> None:
+    """Refuse approve, activate and reinstate once ANY withdrawal is recorded.
+
+    A withdrawal never changes `agreements.status`, so it is invisible to
+    `_PERMITTED_FROM` — this is the one place those three transitions consult a
+    table their own status-based guard knows nothing about. It fires
+    regardless of WHICH withdrawal row exists or what it bound to: recording
+    one blocks re-approval outright, and the only supported path back is an
+    amended successor (`amend`), never a second approval on this row.
+    """
+    if row.approval_withdrawals:
+        raise TransitionRefusedError(
+            f"agreement {row.id} has a recorded approval withdrawal; approve, "
+            "activate and reinstate are refused — obtain a new approval "
+            "through an amended successor, never on the withdrawn row"
+        )
+
+
 def _next_sequence(session: Session, agreement_id: UUID) -> int:
     """The next dense per-agreement history sequence.
 
@@ -431,12 +460,20 @@ def _record(
     reason: str | None = None,
     evidence: Mapping[str, Any] | None = None,
     extra: Mapping[str, Any] | None = None,
+    audit_action: str = AUDIT_ACTION_TRANSITIONED,
 ) -> None:
     """The atomic consequence of a transition: history, audit, and outbox fact.
 
     All three, in the caller's transaction, or none. Writing the state change
     without the fact would leave a consumer permanently unaware; writing the
     fact without the history would leave an auditor unable to say why.
+
+    `audit_action` defaults to the one lifecycle-transition action every
+    transition writes. Recording an approval withdrawal is deliberately NOT a
+    transition (`from_status == to_status`, `agreements.status` never changes)
+    and writes `AUDIT_ACTION_APPROVAL_WITHDRAWAL_RECORDED` instead, so an
+    auditor searching for actual transitions never sees a withdrawal counted
+    as one.
     """
     actor_ref = str(actor_admin_id) if actor_admin_id is not None else None
     session.add(
@@ -470,7 +507,7 @@ def _record(
     write_platform_audit_event(
         session,
         actor_admin_id=actor_admin_id,
-        action=AUDIT_ACTION_TRANSITIONED,
+        action=audit_action,
         entity_type=_ENTITY,
         entity_id=str(row.id),
         details=details,
@@ -517,6 +554,7 @@ def _view(row: Agreement) -> facts.AgreementView:
         activated_at=row.activated_at,
         supersedes_id=row.supersedes_id,
         superseded_by_id=row.superseded_by_id,
+        approval_withdrawn=bool(row.approval_withdrawals),
         lines=tuple(
             facts.PromisedLine(
                 line_no=line.line_no,
@@ -694,6 +732,7 @@ def approve(db: Session, command: ApproveCommand) -> facts.AgreementView:
             expected_status=_sole_from(facts.AgreementAction.APPROVE),
             expected_version=command.expected_version,
         )
+        _require_no_withdrawal(row)
         _require_bound_approval(row, command.evidence)
         row.approval_decision_ref = command.evidence.decision_ref
         row.approved_at = command.evidence.decided_at
