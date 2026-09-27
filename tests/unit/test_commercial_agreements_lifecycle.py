@@ -912,9 +912,9 @@ class TestApprovalWithdrawalOutcomes:
         view = _approved_with_decision(db, catalogue, "apr-replay")
         command = _withdrawal_command(view, decision_ref="apr-replay")
         first = record_approval_withdrawal(db, command)
-        second = record_approval_withdrawal(
-            db, _replay(command, reason="a different sentence, same withdrawal")
-        )
+        # Identical payload under a new command id. (A different reason under the
+        # same reference is a conflict — see the replay-identity tests below.)
+        second = record_approval_withdrawal(db, _replay(command))
         assert second.outcome == ApprovalWithdrawalOutcome.ALREADY_RECORDED
         assert second.withdrawal_id == first.withdrawal_id
         assert second.approval_carried == first.approval_carried
