@@ -1148,6 +1148,15 @@ _WITHDRAWAL_BOUND_FIELDS: Final[tuple[str, ...]] = (
 )
 
 
+def _same_instant(stored: datetime, supplied: datetime) -> bool:
+    """Compare two times as instants. The command guarantees `supplied` is
+    timezone-aware; a driver that returns `timestamptz` naive (SQLite) is read
+    as UTC, the zone every stored value is written in."""
+    if stored.tzinfo is None:
+        stored = stored.replace(tzinfo=UTC)
+    return stored == supplied
+
+
 def record_approval_withdrawal(
     db: Session, command: facts.RecordApprovalWithdrawalCommand
 ) -> facts.ApprovalWithdrawalResult:
@@ -1235,7 +1244,7 @@ def record_approval_withdrawal(
             # Approvals' withdrawal record is immutable, so the same reference
             # with a different reason or time is contradictory evidence too.
             and existing.reason == command.reason
-            and existing.withdrawn_at == command.withdrawn_at
+            and _same_instant(existing.withdrawn_at, command.withdrawn_at)
         )
         if not identical:
             return _result(conflict)
