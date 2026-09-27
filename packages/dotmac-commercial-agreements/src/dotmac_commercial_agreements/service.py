@@ -1341,7 +1341,7 @@ def record_approval_withdrawal(
         or result.get("agreement_id") != str(row.id)
         or result.get("withdrawal_ref") != command.withdrawal_ref
     ):
-        raise ExpectedStateError(
+        raise TransitionRefusedError(
             f"command id {command.command_id!r} was already used for a different "
             "command; an approval withdrawal needs its own command id"
         )

@@ -1204,7 +1204,7 @@ class TestWithdrawalRefusalsAreDecidedFreshUnderTheLock:
             _withdrawal_command(activated, decision_ref="apr-shared-command"),
             command_id="cmd-shared",
         )
-        with pytest.raises(ExpectedStateError):
+        with pytest.raises(TransitionRefusedError, match="already used"):
             record_approval_withdrawal(db, withdrawal_command)
 
         rows = (

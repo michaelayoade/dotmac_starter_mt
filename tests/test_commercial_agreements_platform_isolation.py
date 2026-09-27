@@ -1055,16 +1055,31 @@ class TestTheWithdrawalLockRaceAgainstApprove:
     """
 
     @pytest.fixture(autouse=True)
-    def _installed_module_audit_actions(self) -> None:
+    def _installed_module_audit_actions(self) -> Iterator[None]:
         """Drive the service as an adopter does: the module's manifest, and so
-        its audit actions, are installed (the unit suite's same fixture)."""
+        its audit actions, are installed — and the process-wide registry this
+        replaces is RESTORED afterwards, so no later test in the session sees a
+        registry holding only this module's actions."""
         from dotmac_commercial_agreements import module
         from dotmac_kernel.audit_actions import (
             AuditActionRegistry,
+            AuditActionsNotInstalledError,
+            active_audit_actions,
             install_audit_actions,
         )
 
+        try:
+            previous = active_audit_actions()
+        except AuditActionsNotInstalledError:
+            previous = None
+        # Swap in this module's registry for the class, then put back whatever
+        # the session had, so a composed app's registry survives these tests.
         install_audit_actions(AuditActionRegistry.from_manifests([module]))
+        try:
+            yield
+        finally:
+            if previous is not None:
+                install_audit_actions(previous)
 
     def test_an_in_flight_withdrawal_blocks_approve_until_it_commits(
         self, migrated_scratch
