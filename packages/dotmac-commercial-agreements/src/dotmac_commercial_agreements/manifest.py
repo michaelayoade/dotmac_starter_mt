@@ -347,7 +347,7 @@ database_catalog = ModuleDatabaseCatalogContributionV1(
 
 module = ModuleManifest(
     code="commercial_agreements",
-    version="0.1.0a3",
+    version="0.1.0a4",
     core=False,
     short_code="agreements",
     migration_prefix="cg",
