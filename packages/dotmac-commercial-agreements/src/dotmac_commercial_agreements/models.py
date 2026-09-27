@@ -66,6 +66,7 @@ from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -94,6 +95,7 @@ SCHEMA: str = module_schema("agreements")
 _AGREEMENTS = "agreements"
 _LINES = "agreement_lines"
 _EVENTS = "agreement_events"
+_APPROVAL_WITHDRAWALS = "agreement_approval_withdrawals"
 
 
 class AgreementStatus(StrEnum):
@@ -336,10 +338,79 @@ class AgreementEvent(Base, TimestampMixin):
     )
 
 
+class AgreementApprovalWithdrawal(Base, TimestampMixin):
+    """One recorded withdrawal of an approval decision, as STANDING — never a
+    lifecycle transition.
+
+    Distinct from `AgreementEvent` on purpose: an approval withdrawal is a fact
+    about the APPROVAL, not a transition of the agreement's own status, and it
+    must never appear in the append-only history that records what the
+    agreement's status did. Recording one here BLOCKS a later approve, activate
+    or reinstate (`service._require_no_withdrawal`); it never cancels,
+    suspends or terminates, and it never rewrites `agreements.status`.
+
+    Append-only, enforced by its own trigger with its own message
+    (`refuse_withdrawal_rewrite`) — reusing `agreement_events`'s trigger would
+    raise an exception naming the wrong table.
+    """
+
+    __tablename__ = _APPROVAL_WITHDRAWALS
+    __table_args__ = (
+        UniqueConstraint(
+            "withdrawal_ref", name="uq_agreement_approval_withdrawals_ref"
+        ),
+        UniqueConstraint(
+            "agreement_id",
+            "approval_decision_ref",
+            name="uq_agreement_approval_withdrawals_decision",
+        ),
+        CheckConstraint(
+            "reason <> ''", name="ck_agreement_approval_withdrawals_reason"
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    agreement_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.{_AGREEMENTS}.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    #: The idempotency binding this command locks to. Every field here is
+    #: checked, in order, before a withdrawal is recorded (`service.
+    #: record_approval_withdrawal`).
+    approval_request_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    approval_decision_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    approval_policy_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    approval_policy_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    subject_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    #: Bare hex, the form CA already stores on `Agreement.content_hash`.
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    withdrawal_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    withdrawn_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    #: The agreement's status at the moment this was recorded. Historical
+    #: colour only — recording never changes `agreements.status`.
+    status_at_record: Mapped[str] = mapped_column(String(24), nullable=False)
+    #: True when the withdrawn decision matched the agreement's OWN
+    #: `approval_decision_ref` — the case where the decision this withdrawal
+    #: names actually carried the agreement's approval.
+    approval_carried: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    command_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    actor_ref: Mapped[str | None] = mapped_column(String(200))
+
+
 __all__ = [
     "SCHEMA",
     "TERMINAL_STATUSES",
     "Agreement",
+    "AgreementApprovalWithdrawal",
     "AgreementEvent",
     "AgreementLine",
     "AgreementStatus",
