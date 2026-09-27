@@ -356,6 +356,22 @@ def _load(session: Session, agreement_id: UUID) -> Agreement:
     return row
 
 
+def _load_locked(session: Session, agreement_id: UUID) -> Agreement:
+    """The agreement row under FOR UPDATE, refreshed from the database.
+
+    Recording a withdrawal and the three transitions it blocks (approve,
+    activate, reinstate) serialize on this lock, so a transition can never
+    pass its no-withdrawal guard while a withdrawal for the same agreement is
+    committing. Without it both could read "no withdrawal" and both commit.
+    """
+    row = session.get(
+        Agreement, agreement_id, with_for_update=True, populate_existing=True
+    )
+    if row is None:
+        raise TransitionRefusedError(f"agreement {agreement_id} not found")
+    return row
+
+
 def _require_expected(
     row: Agreement, *, expected_status: str | None, expected_version: int | None
 ) -> None:
@@ -744,7 +760,7 @@ def approve(db: Session, command: ApproveCommand) -> facts.AgreementView:
     """
 
     def handler(session: Session) -> Mapping[str, object]:
-        row = _load(session, command.agreement_id)
+        row = _load_locked(session, command.agreement_id)
         _require_expected(
             row,
             expected_status=_sole_from(facts.AgreementAction.APPROVE),
@@ -834,13 +850,21 @@ def activate(db: Session, command: ActivateCommand) -> facts.AgreementView:
     """
 
     def handler(session: Session) -> Mapping[str, object]:
-        row = _load(session, command.agreement_id)
+        row = _load_locked(session, command.agreement_id)
         _require_expected(
             row,
             expected_status=_sole_from(facts.AgreementAction.ACTIVATE),
             expected_version=command.expected_version,
         )
+        _require_no_withdrawal(session, row)
         _require_bound_approval(row, command.approval_evidence)
+        if command.approval_evidence.decision_ref != row.approval_decision_ref:
+            raise EvidenceRefusedError(
+                f"activation evidence names decision "
+                f"{command.approval_evidence.decision_ref!r} but agreement "
+                f"{row.id} was approved under {row.approval_decision_ref!r}; "
+                "activation requires the SAME decision that carried approval"
+            )
         if not command.activation_evidence.rule.strip():
             raise EvidenceRefusedError(
                 f"agreement {row.id} cannot activate without a named activation "
@@ -914,6 +938,7 @@ def reinstate(db: Session, command: TransitionCommand) -> facts.AgreementView:
         allowed=_from_states(facts.AgreementAction.REINSTATE),
         to=AgreementStatus.ACTIVE,
         event_type=facts.AGREEMENT_REINSTATED_V1,
+        requires_approval_standing=True,
     )
 
 
@@ -1157,7 +1182,7 @@ def record_approval_withdrawal(
     """
 
     def handler(session: Session) -> Mapping[str, object]:
-        row = _load(session, command.agreement_id)
+        row = _load_locked(session, command.agreement_id)
 
         def _refused(outcome: facts.ApprovalWithdrawalOutcome) -> dict[str, object]:
             return {
@@ -1205,6 +1230,20 @@ def record_approval_withdrawal(
                     "approval_carried": existing.approval_carried,
                     "withdrawal_id": str(existing.id),
                 }
+            return _refused(facts.ApprovalWithdrawalOutcome.EVIDENCE_CONFLICT)
+
+        # 2b. One withdrawal per (agreement, decision): Approvals records exactly
+        # one withdrawal per request, so a second reference for the same
+        # decision is contradictory evidence, refused rather than left to the
+        # unique constraint as an IntegrityError a caller would retry forever.
+        same_decision = session.execute(
+            select(AgreementApprovalWithdrawal.id).where(
+                AgreementApprovalWithdrawal.agreement_id == row.id,
+                AgreementApprovalWithdrawal.approval_decision_ref
+                == command.approval_decision_ref,
+            )
+        ).first()
+        if same_decision is not None:
             return _refused(facts.ApprovalWithdrawalOutcome.EVIDENCE_CONFLICT)
 
         # 3-5. Decide whether the withdrawn decision carried this row's approval.
@@ -1509,17 +1548,26 @@ def _simple(
     to: AgreementStatus,
     event_type: str,
     reason_field: str | None = None,
+    requires_approval_standing: bool = False,
 ) -> facts.AgreementView:
-    """A transition whose only guard is the status it comes from."""
+    """A transition whose only guard is the status it comes from — plus, for
+    `reinstate`, standing approval: `requires_approval_standing` locks the row
+    and refuses once a withdrawal is recorded."""
 
     def handler(session: Session) -> Mapping[str, object]:
-        row = _load(session, command.agreement_id)
+        row = (
+            _load_locked(session, command.agreement_id)
+            if requires_approval_standing
+            else _load(session, command.agreement_id)
+        )
         _require_expected(
             row,
             expected_status=command.expected_status,
             expected_version=command.expected_version,
         )
         _require_status(row, allowed)
+        if requires_approval_standing:
+            _require_no_withdrawal(session, row)
         if reason_field is not None:
             setattr(row, reason_field, command.reason)
         row.last_reason = command.reason
