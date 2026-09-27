@@ -1185,7 +1185,7 @@ class TestWithdrawalRefusalsAreDecidedFreshUnderTheLock:
         with pytest.raises(TransitionRefusedError):
             reinstate(db, TransitionCommand("cmd-r", suspended.id))
 
-    def test_a_command_id_reused_from_another_command_is_an_expected_state_error(
+    def test_a_command_id_reused_from_another_command_is_refused(
         self, db, catalogue
     ) -> None:
         """The kernel's platform ledger keys on `command_id` alone, across
