@@ -23,11 +23,12 @@ cannot enforce a grant, so none of this belongs in `tests/unit`.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
-from threading import Event, Thread
+from threading import Thread
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -1015,10 +1016,46 @@ def _approve_command(agreement_id: uuid.UUID, *, decision_ref: str, content_hash
     )
 
 
+def _wait_until_blocked_on_a_lock(
+    engine, *, deadline_seconds: float = 20.0, poll_seconds: float = 0.1
+) -> bool:
+    """Poll `pg_stat_activity` for a backend genuinely waiting on a lock.
+
+    A join timeout alone cannot tell "blocked on the row lock" apart from
+    "slow for some other reason" — this looks at Postgres's own view of why
+    the backend hasn't returned. Bounded so a caller that never observes the
+    wait does not hang CI.
+    """
+    deadline = time.monotonic() + deadline_seconds
+    with engine.connect() as conn:
+        while time.monotonic() < deadline:
+            waiting = conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE wait_event_type = 'Lock' AND datname = current_database() "
+                    "AND pid <> pg_backend_pid()"
+                )
+            ).scalar()
+            if waiting:
+                return True
+            time.sleep(poll_seconds)
+    return False
+
+
 class TestTheWithdrawalLockRaceAgainstApprove:
     """`_load_locked`'s `FOR UPDATE` is what makes `record_approval_withdrawal`
     and `approve` serialize on one agreement row — proven here against real
-    Postgres, because SQLite's coarser locking cannot show a genuine block."""
+    Postgres, because SQLite's coarser locking cannot show a genuine block.
+
+    The lock proof must be NON-VACUOUS: `record_approval_withdrawal`'s own
+    write (`row.record_version += 1`) also takes a row lock, so if session A
+    simply ran to completion before B tried, B would block on THAT lock
+    whether or not `_load_locked` used `FOR UPDATE` at all — the previous
+    version of this test (a `SET LOCAL lock_timeout` + a `DBAPIError` match on
+    "lock timeout") could not tell the two apart. This version instead
+    confirms, via `pg_stat_activity`, that B is GENUINELY blocked — with no
+    timeout on B's side to race against — before A ever commits.
+    """
 
     def test_an_in_flight_withdrawal_blocks_approve_until_it_commits(
         self, migrated_scratch
@@ -1035,55 +1072,61 @@ class TestTheWithdrawalLockRaceAgainstApprove:
             proposed = _proposed_agreement(engine)
             decision_ref = f"apr-{uuid.uuid4().hex[:8]}"
             digest = proposed.content_hash or ""
-            held, release, failures = Event(), Event(), []
 
-            def withdraw_in_flight() -> None:
+            session_a = Session(engine)
+            session_a.begin()
+            record_approval_withdrawal(
+                session_a,
+                _withdrawal_command(
+                    proposed.id, decision_ref=decision_ref, content_hash=digest
+                ),
+            )
+            # Session A stays open, uncommitted, holding the row lock.
+
+            failures: list[BaseException] = []
+
+            def approve_in_thread() -> None:
                 try:
                     with Session(engine) as db, db.begin():
-                        record_approval_withdrawal(
+                        approve(
                             db,
-                            _withdrawal_command(
+                            _approve_command(
                                 proposed.id,
                                 decision_ref=decision_ref,
                                 content_hash=digest,
                             ),
                         )
-                        held.set()
-                        assert release.wait(timeout=30)
                 except BaseException as exc:
                     failures.append(exc)
 
-            thread = Thread(target=withdraw_in_flight)
+            thread = Thread(target=approve_in_thread)
             thread.start()
             try:
-                assert held.wait(timeout=20), "the withdrawal never took its lock"
-                with Session(engine) as db:
-                    with pytest.raises(DBAPIError, match="lock timeout"):
-                        with db.begin():
-                            db.execute(text("SET LOCAL lock_timeout = '500ms'"))
-                            approve(
-                                db,
-                                _approve_command(
-                                    proposed.id,
-                                    decision_ref=decision_ref,
-                                    content_hash=digest,
-                                ),
-                            )
+                assert _wait_until_blocked_on_a_lock(
+                    engine
+                ), "approve never blocked on the withdrawal's row lock"
+                session_a.commit()
             finally:
-                release.set()
-                thread.join(timeout=30)
-            assert not thread.is_alive() and failures == [], failures
+                session_a.close()
+                thread.join(timeout=10)
+            assert not thread.is_alive(), "approve did not unblock once A committed"
+            assert len(failures) == 1, failures
+            assert isinstance(failures[0], TransitionRefusedError), failures
 
-            # A committed; B's approve now observes the withdrawal and refuses
-            # — never a lost update that overwrites what A just recorded.
-            with Session(engine) as db, db.begin():
-                with pytest.raises(TransitionRefusedError):
-                    approve(
-                        db,
-                        _approve_command(
-                            proposed.id, decision_ref=decision_ref, content_hash=digest
-                        ),
-                    )
+            with Session(engine) as db:
+                row = db.execute(
+                    text("SELECT status FROM mod_agreements.agreements WHERE id = :id"),
+                    {"id": proposed.id},
+                ).scalar_one()
+                withdrawal_count = db.execute(
+                    text(
+                        "SELECT count(*) FROM mod_agreements."
+                        "agreement_approval_withdrawals WHERE agreement_id = :id"
+                    ),
+                    {"id": proposed.id},
+                ).scalar_one()
+            assert row == "proposed"
+            assert withdrawal_count == 1
         finally:
             engine.dispose()
 
