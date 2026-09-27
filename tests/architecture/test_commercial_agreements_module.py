@@ -603,6 +603,16 @@ class TestTheApprovalWithdrawalMigrationStatesItsWholeAccessSurface:
         assert 'revision = "cg_0002_approval_withdrawals"' in sql
         assert 'down_revision = "cg_0001_agreements"' in sql
 
+    def test_the_downgrade_refuses_evidence_before_any_drop(self, sql: str) -> None:
+        """Withdrawal rows block approve/activate/reinstate; dropping them would
+        silently re-enable every withdrawn agreement (the `ap_0003` guard)."""
+        downgrade = sql[sql.index("def downgrade") :]
+        lock = downgrade.index("IN ACCESS EXCLUSIVE MODE")
+        check = downgrade.index("SELECT EXISTS")
+        refuse = downgrade.index("contains immutable withdrawal evidence")
+        first_drop = downgrade.index("DROP ")
+        assert lock < check < refuse < first_drop
+
     def test_the_revision_id_fits_the_alembic_column(self) -> None:
         assert len("cg_0002_approval_withdrawals") <= 32
 

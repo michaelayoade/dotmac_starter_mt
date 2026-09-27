@@ -326,6 +326,22 @@ class RecordApprovalWithdrawalCommand:
             raise AgreementError(
                 "approval withdrawal withdrawn_at must be timezone-aware"
             )
+        # The column bounds, checked here so an over-long value is a typed
+        # refusal at construction rather than a DataError at flush that would
+        # fail identically on every redelivery.
+        for field, value, limit in (
+            ("command_id", self.command_id, 200),
+            ("approval_request_ref", self.approval_request_ref, 200),
+            ("approval_decision_ref", self.approval_decision_ref, 200),
+            ("policy_code", self.policy_code, 120),
+            ("subject_ref", self.subject_ref, 200),
+            ("content_hash", self.content_hash, 64),
+            ("withdrawal_ref", self.withdrawal_ref, 200),
+        ):
+            if len(value) > limit:
+                raise AgreementError(
+                    f"approval withdrawal {field} exceeds {limit} characters"
+                )
 
 
 class ApprovalWithdrawalOutcome(StrEnum):

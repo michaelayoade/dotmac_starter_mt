@@ -1382,3 +1382,60 @@ class TestTheModuleOwnsNoTransaction:
         view = _draft(db, catalogue)
         db.rollback()
         assert get(db, view.id) is None
+
+
+class TestWithdrawalReplayNeverDependsOnMutableRowState:
+    """Opus acceptance of #759: the replay lookup runs FIRST, against the stored
+    withdrawal only, so an identical redelivery replays even after the row's
+    frozen policy has changed; reason and time are part of the identity."""
+
+    def test_replay_after_reject_and_repropose_under_a_new_policy(
+        self, db: Session, catalogue: FakeCatalogue
+    ) -> None:
+        view = _propose(db, catalogue, _draft(db, catalogue).id)
+        command = _withdrawal_command(view, decision_ref="apr-before-reject")
+        first = record_approval_withdrawal(db, command)
+        assert first.outcome is ApprovalWithdrawalOutcome.RECORDED
+
+        drafted = reject(db, TransitionCommand("cmd-r1", view.id, reason="terms"))
+        propose(
+            db,
+            ProposeCommand(
+                command_id="cmd-p2",
+                agreement_id=drafted.id,
+                approval_policy_code="commercial.direct",
+                approval_policy_version=9,
+            ),
+            catalogue=catalogue,
+        )
+
+        again = record_approval_withdrawal(db, _replay(command))
+        assert again.outcome is ApprovalWithdrawalOutcome.ALREADY_RECORDED
+        assert again.withdrawal_id == first.withdrawal_id
+
+    def test_the_same_reference_with_a_different_reason_is_a_conflict(
+        self, db: Session, catalogue: FakeCatalogue
+    ) -> None:
+        view = _propose(db, catalogue, _draft(db, catalogue).id)
+        command = _withdrawal_command(view, decision_ref="apr-reason")
+        record_approval_withdrawal(db, command)
+        changed = record_approval_withdrawal(
+            db, _replay(command, reason="a different reason")
+        )
+        assert changed.outcome is ApprovalWithdrawalOutcome.EVIDENCE_CONFLICT
+
+    def test_an_over_long_reference_is_refused_at_construction(self) -> None:
+        with pytest.raises(AgreementError, match="withdrawal_ref exceeds 200"):
+            RecordApprovalWithdrawalCommand(
+                command_id="cmd-long",
+                agreement_id=uuid.uuid4(),
+                approval_request_ref="req",
+                approval_decision_ref="apr",
+                policy_code="commercial.oem",
+                policy_version=3,
+                subject_ref="subject",
+                content_hash="a" * 64,
+                withdrawal_ref="w" * 201,
+                reason="reason",
+                withdrawn_at=datetime(2026, 9, 5, 12, 0, tzinfo=UTC),
+            )

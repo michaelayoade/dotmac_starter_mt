@@ -3,9 +3,9 @@
 Withdrawing an approval is not suspension, cancellation or termination. It is a
 fact about the APPROVAL: the decision that was recorded no longer stands. This
 table exists precisely so that fact can be recorded, checked and blocked on
-without ever writing to `agreements.status` or `agreement_events` — a
-withdrawal is not one of this module's lifecycle transitions, and it must never
-look like one in the append-only history that IS the lifecycle record.
+without ever writing to `agreements.status`. The service appends ONE history row
+to `agreement_events` for it, with `from_status == to_status`, so the history
+shows the withdrawal without it ever looking like a lifecycle transition.
 
 ## Platform catalog grants, not RLS — same reasoning as `cg_0001`
 
@@ -164,6 +164,30 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Withdrawal rows are immutable evidence that BLOCKS approve, activate and
+    # reinstate. Dropping them would silently make every withdrawn agreement
+    # approvable again, so the downgrade refuses while any exist (the same
+    # guard as `ap_0003`'s). Lock first so no row can be inserted between the
+    # check and the drop.
+    op.execute(
+        "LOCK TABLE mod_agreements.agreement_approval_withdrawals "
+        "IN ACCESS EXCLUSIVE MODE;"
+    )
+    has_evidence = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT EXISTS "
+                "(SELECT 1 FROM mod_agreements.agreement_approval_withdrawals)"
+            )
+        )
+        .scalar_one()
+    )
+    if has_evidence:
+        raise RuntimeError(
+            "cannot downgrade cg_0002: mod_agreements.agreement_approval_withdrawals "
+            "contains immutable withdrawal evidence"
+        )
     op.execute(
         "DROP TRIGGER IF EXISTS refuse_withdrawal_truncate "
         "ON mod_agreements.agreement_approval_withdrawals;"

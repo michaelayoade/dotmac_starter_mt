@@ -1172,11 +1172,12 @@ def record_approval_withdrawal(
 
     Checks, in order:
 
-    1. `subject_ref` must name this agreement, and a policy code/version frozen
+    1. A withdrawal already recorded under the same `withdrawal_ref`: an
+       identical binding (and the same reason and time) is `ALREADY_RECORDED`,
+       any difference is `EVIDENCE_CONFLICT`. Checked FIRST, against the stored
+       withdrawal only, so a replay never depends on mutable row state.
+    2. `subject_ref` must name this agreement, and a policy code/version frozen
        on the row must match — otherwise `EVIDENCE_CONFLICT`.
-    2. A withdrawal already recorded under the same `withdrawal_ref`: an
-       identical binding is `ALREADY_RECORDED`, any difference is
-       `EVIDENCE_CONFLICT`.
     2b. A withdrawal already recorded for the same (agreement, decision) under a
        DIFFERENT reference is `EVIDENCE_CONFLICT` (Approvals records one
        withdrawal per request).
@@ -1207,19 +1208,10 @@ def record_approval_withdrawal(
 
     conflict = facts.ApprovalWithdrawalOutcome.EVIDENCE_CONFLICT
 
-    # 1. Subject and frozen-policy binding.
-    if command.subject_ref != str(row.id):
-        return _result(conflict)
-    if (
-        row.approval_policy_code is not None
-        and row.approval_policy_code != command.policy_code
-    ) or (
-        row.approval_policy_version is not None
-        and row.approval_policy_version != command.policy_version
-    ):
-        return _result(conflict)
-
-    # 2. A prior withdrawal under the same reference: replay or conflict.
+    # 1. A prior withdrawal under the same reference: replay or conflict.
+    # First, and against the STORED withdrawal only — never against mutable
+    # row state (reject + re-propose can change the row's policy), so an
+    # identical redelivery always replays as `already_recorded`.
     existing = db.execute(
         select(AgreementApprovalWithdrawal).where(
             AgreementApprovalWithdrawal.withdrawal_ref == command.withdrawal_ref
@@ -1234,9 +1226,16 @@ def record_approval_withdrawal(
             "subject_ref": command.subject_ref,
             "content_hash": command.content_hash,
         }
-        identical = existing.agreement_id == row.id and all(
-            getattr(existing, field) == bound_command[field]
-            for field in _WITHDRAWAL_BOUND_FIELDS
+        identical = (
+            existing.agreement_id == row.id
+            and all(
+                getattr(existing, field) == bound_command[field]
+                for field in _WITHDRAWAL_BOUND_FIELDS
+            )
+            # Approvals' withdrawal record is immutable, so the same reference
+            # with a different reason or time is contradictory evidence too.
+            and existing.reason == command.reason
+            and existing.withdrawn_at == command.withdrawn_at
         )
         if not identical:
             return _result(conflict)
@@ -1245,6 +1244,18 @@ def record_approval_withdrawal(
             approval_carried=existing.approval_carried,
             withdrawal_id=existing.id,
         )
+
+    # 2. Subject and frozen-policy binding.
+    if command.subject_ref != str(row.id):
+        return _result(conflict)
+    if (
+        row.approval_policy_code is not None
+        and row.approval_policy_code != command.policy_code
+    ) or (
+        row.approval_policy_version is not None
+        and row.approval_policy_version != command.policy_version
+    ):
+        return _result(conflict)
 
     # 2b. One withdrawal per (agreement, decision).
     same_decision = db.execute(
