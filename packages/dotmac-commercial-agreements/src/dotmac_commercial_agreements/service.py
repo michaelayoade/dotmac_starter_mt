@@ -63,7 +63,7 @@ from uuid import UUID, uuid4
 
 from dotmac_kernel.audit import write_platform_audit_event
 from dotmac_kernel.messaging import enqueue_platform_event, process_once_platform
-from sqlalchemy import select
+from sqlalchemy import literal, select
 from sqlalchemy.orm import Session, selectinload
 
 from dotmac_commercial_agreements import facts
@@ -413,7 +413,25 @@ def _require_bound_approval(row: Agreement, evidence: ApprovalEvidence) -> None:
         )
 
 
-def _require_no_withdrawal(row: Agreement) -> None:
+def _has_withdrawal(session: Session, agreement_id: UUID) -> bool:
+    """Whether ANY withdrawal has been recorded for this agreement.
+
+    An explicit `EXISTS`-shaped query in the CALLER's own session, never the
+    ORM `approval_withdrawals` collection — after a `FOR UPDATE` lock that
+    collection can be a stale cached list from before the lock was taken, and
+    a guard that trusted it could let a concurrent withdrawal go unseen.
+    """
+    return (
+        session.execute(
+            select(literal(1))
+            .where(AgreementApprovalWithdrawal.agreement_id == agreement_id)
+            .limit(1)
+        ).first()
+        is not None
+    )
+
+
+def _require_no_withdrawal(session: Session, row: Agreement) -> None:
     """Refuse approve, activate and reinstate once ANY withdrawal is recorded.
 
     A withdrawal never changes `agreements.status`, so it is invisible to
@@ -423,7 +441,7 @@ def _require_no_withdrawal(row: Agreement) -> None:
     one blocks re-approval outright, and the only supported path back is an
     amended successor (`amend`), never a second approval on this row.
     """
-    if row.approval_withdrawals:
+    if _has_withdrawal(session, row.id):
         raise TransitionRefusedError(
             f"agreement {row.id} has a recorded approval withdrawal; approve, "
             "activate and reinstate are refused — obtain a new approval "
@@ -533,7 +551,7 @@ def _advance(row: Agreement, to: AgreementStatus) -> str:
     return previous
 
 
-def _view(row: Agreement) -> facts.AgreementView:
+def _view(session: Session, row: Agreement) -> facts.AgreementView:
     return facts.AgreementView(
         id=row.id,
         reference=row.reference,
@@ -554,7 +572,7 @@ def _view(row: Agreement) -> facts.AgreementView:
         activated_at=row.activated_at,
         supersedes_id=row.supersedes_id,
         superseded_by_id=row.superseded_by_id,
-        approval_withdrawn=bool(row.approval_withdrawals),
+        approval_withdrawn=_has_withdrawal(session, row.id),
         lines=tuple(
             facts.PromisedLine(
                 line_no=line.line_no,
@@ -650,7 +668,7 @@ def open_draft(
         command_type=SCOPE_DRAFT,
         handler=handler,
     )
-    return _view(_load(db, UUID(str(outcome.result["id"]))))
+    return _view(db, _load(db, UUID(str(outcome.result["id"]))))
 
 
 def propose(
@@ -714,7 +732,7 @@ def propose(
         command_type=SCOPE_PROPOSE,
         handler=handler,
     )
-    return _view(_load(db, command.agreement_id))
+    return _view(db, _load(db, command.agreement_id))
 
 
 def approve(db: Session, command: ApproveCommand) -> facts.AgreementView:
@@ -732,7 +750,7 @@ def approve(db: Session, command: ApproveCommand) -> facts.AgreementView:
             expected_status=_sole_from(facts.AgreementAction.APPROVE),
             expected_version=command.expected_version,
         )
-        _require_no_withdrawal(row)
+        _require_no_withdrawal(session, row)
         _require_bound_approval(row, command.evidence)
         row.approval_decision_ref = command.evidence.decision_ref
         row.approved_at = command.evidence.decided_at
@@ -755,7 +773,7 @@ def approve(db: Session, command: ApproveCommand) -> facts.AgreementView:
         command_type=SCOPE_APPROVE,
         handler=handler,
     )
-    return _view(_load(db, command.agreement_id))
+    return _view(db, _load(db, command.agreement_id))
 
 
 def reject(db: Session, command: TransitionCommand) -> facts.AgreementView:
@@ -799,7 +817,7 @@ def reject(db: Session, command: TransitionCommand) -> facts.AgreementView:
         command_type=SCOPE_REJECT,
         handler=handler,
     )
-    return _view(_load(db, command.agreement_id))
+    return _view(db, _load(db, command.agreement_id))
 
 
 def activate(db: Session, command: ActivateCommand) -> facts.AgreementView:
@@ -866,7 +884,7 @@ def activate(db: Session, command: ActivateCommand) -> facts.AgreementView:
         command_type=SCOPE_ACTIVATE,
         handler=handler,
     )
-    return _view(_load(db, command.agreement_id))
+    return _view(db, _load(db, command.agreement_id))
 
 
 def suspend(db: Session, command: TransitionCommand) -> facts.AgreementView:
@@ -953,7 +971,7 @@ def terminate(db: Session, command: TerminateCommand) -> facts.AgreementView:
         command_type=SCOPE_TERMINATE,
         handler=handler,
     )
-    return _view(_load(db, command.agreement_id))
+    return _view(db, _load(db, command.agreement_id))
 
 
 def expire(
@@ -1004,7 +1022,7 @@ def expire(
         command_type=SCOPE_EXPIRE,
         handler=handler,
     )
-    return _view(_load(db, command.agreement_id))
+    return _view(db, _load(db, command.agreement_id))
 
 
 def amend(
@@ -1089,7 +1107,7 @@ def amend(
         command_type=SCOPE_AMEND,
         handler=handler,
     )
-    return _view(_load(db, UUID(str(outcome.result["id"]))))
+    return _view(db, _load(db, UUID(str(outcome.result["id"]))))
 
 
 # ── Reads ───────────────────────────────────────────────────────────────────
@@ -1097,7 +1115,7 @@ def amend(
 
 def get(db: Session, agreement_id: UUID) -> facts.AgreementView | None:
     row = db.get(Agreement, agreement_id)
-    return _view(row) if row is not None else None
+    return _view(db, row) if row is not None else None
 
 
 def history(db: Session, agreement_id: UUID) -> tuple[facts.TransitionRecord, ...]:
@@ -1137,10 +1155,12 @@ def family(db: Session, agreement_family_id: UUID) -> tuple[facts.AgreementView,
         .scalars()
         .all()
     )
-    return tuple(_view(row) for row in rows)
+    return tuple(_view(db, row) for row in rows)
 
 
-def _permitted_actions(row: Agreement) -> tuple[facts.AgreementAction, ...]:
+def _permitted_actions(
+    session: Session, row: Agreement
+) -> tuple[facts.AgreementAction, ...]:
     """What may legally be done to this agreement next, decided by the owner.
 
     Read from `_PERMITTED_FROM`, the SAME table the write guards enforce, plus
@@ -1154,7 +1174,13 @@ def _permitted_actions(row: Agreement) -> tuple[facts.AgreementAction, ...]:
     to. Reaching `proposed` is what freezes it, so the check is defensive rather
     than load-bearing — but a row that somehow lacked one would otherwise be
     offered an approval `_require_bound_approval` must then refuse.
+
+    `APPROVE`, `ACTIVATE` and `REINSTATE` are additionally withdrawn once
+    `_has_withdrawal` is true — the same condition `_require_no_withdrawal`
+    refuses on, read here instead of enforced, so a screen never offers a
+    button the write path would reject.
     """
+    withdrawn = _has_withdrawal(session, row.id)
     actions: list[facts.AgreementAction] = []
     for action, sources in _PERMITTED_FROM.items():
         if row.status not in sources:
@@ -1164,6 +1190,16 @@ def _permitted_actions(row: Agreement) -> tuple[facts.AgreementAction, ...]:
         if action is facts.AgreementAction.APPROVE and not row.content_hash:
             continue
         if action is facts.AgreementAction.AMEND and row.superseded_by_id is not None:
+            continue
+        if (
+            action
+            in (
+                facts.AgreementAction.APPROVE,
+                facts.AgreementAction.ACTIVATE,
+                facts.AgreementAction.REINSTATE,
+            )
+            and withdrawn
+        ):
             continue
         actions.append(action)
     return tuple(actions)
@@ -1182,11 +1218,12 @@ def detail(db: Session, agreement_id: UUID) -> facts.AgreementDetail | None:
     if row is None:
         return None
     return facts.AgreementDetail(
-        agreement=_view(row),
+        agreement=_view(db, row),
         timeline=history(db, agreement_id),
-        permitted_actions=_permitted_actions(row),
+        permitted_actions=_permitted_actions(db, row),
         expected_version=row.record_version,
         expected_status=row.status,
+        approval_withdrawn=_has_withdrawal(db, row.id),
     )
 
 
@@ -1253,7 +1290,7 @@ def list_agreements(
     rows = tuple(db.execute(statement).scalars().all())
     page_rows = rows[:limit]
     return facts.AgreementPage(
-        items=tuple(_view(row) for row in page_rows),
+        items=tuple(_view(db, row) for row in page_rows),
         next_after=page_rows[-1].id if len(rows) > limit else None,
     )
 
@@ -1324,7 +1361,7 @@ def _simple(
     process_once_platform(
         db, command_id=command.command_id, command_type=scope, handler=handler
     )
-    return _view(_load(db, command.agreement_id))
+    return _view(db, _load(db, command.agreement_id))
 
 
 #: Kept for callers that want the module's clock in one place rather than

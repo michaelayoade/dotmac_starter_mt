@@ -238,14 +238,12 @@ class Agreement(Base, TimestampMixin):
         back_populates="agreement",
         order_by=lambda: AgreementEvent.sequence,
     )
-    #: Recorded withdrawals. Never cascades on delete (RESTRICT, like `events`)
-    #: and never empty-checked by anything but `bool(...)` — a withdrawal is a
-    #: standing fact, not a lifecycle state, so nothing here reads WHICH one.
-    approval_withdrawals: Mapped[list[AgreementApprovalWithdrawal]] = relationship(
-        lambda: AgreementApprovalWithdrawal,
-        back_populates="agreement",
-        order_by=lambda: AgreementApprovalWithdrawal.created_at,
-    )
+    #: Deliberately NO `approval_withdrawals` relationship. Every read of "does
+    #: a withdrawal exist" goes through `service._has_withdrawal`'s explicit
+    #: `EXISTS`-shaped query in the CALLER's own session, taken after the row's
+    #: FOR-UPDATE lock — an ORM collection populated before that lock can be a
+    #: stale cached list, and a guard that trusted it could approve a row a
+    #: concurrent withdrawal had just recorded.
 
 
 class AgreementLine(Base, TimestampMixin):
@@ -413,9 +411,9 @@ class AgreementApprovalWithdrawal(Base, TimestampMixin):
     command_id: Mapped[str] = mapped_column(String(200), nullable=False)
     actor_ref: Mapped[str | None] = mapped_column(String(200))
 
-    agreement: Mapped[Agreement] = relationship(
-        lambda: Agreement, back_populates="approval_withdrawals"
-    )
+    #: Deliberately no `agreement` relationship. Nothing joins from a
+    #: withdrawal row back to its agreement in this module — the check runs
+    #: the other direction, `service._has_withdrawal(session, agreement_id)`.
 
 
 __all__ = [
