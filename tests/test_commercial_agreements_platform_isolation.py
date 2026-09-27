@@ -788,6 +788,32 @@ class TestTheApprovalWithdrawalsTableIsReachableAndAppendOnly:
         finally:
             engine.dispose()
 
+    def test_app_admin_cannot_truncate_the_withdrawals_table(
+        self, migrated_scratch
+    ) -> None:
+        """TRUNCATE bypasses row triggers (`refuse_withdrawal_rewrite`'s
+        `BEFORE UPDATE OR DELETE` never fires for it) — `cg_0002`'s SECOND,
+        statement-level trigger (`refuse_withdrawal_truncate`) is the only
+        thing that closes this path, and even `app_admin`, which legitimately
+        owns full DML on this table, is refused by it."""
+        admin_url, _, _ = migrated_scratch
+        engine = create_engine(admin_url)
+        try:
+            with engine.begin() as conn:
+                agreement_id = _seed_agreement(conn)
+                _seed_withdrawal(conn, agreement_id)
+            with (
+                engine.begin() as conn,
+                pytest.raises(
+                    DBAPIError, match="agreement_approval_withdrawals is append-only"
+                ),
+            ):
+                conn.execute(
+                    text("TRUNCATE mod_agreements.agreement_approval_withdrawals")
+                )
+        finally:
+            engine.dispose()
+
 
 class TestTheApprovalWithdrawalConstraintsHoldWithoutTheService:
     """Every rule below is also enforced in `service.record_approval_
