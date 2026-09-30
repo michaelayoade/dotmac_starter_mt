@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import subprocess
@@ -514,7 +515,57 @@ print("kernel", dotmac_kernel.__version__, "registered:",
 
 
 def _verify_installed(python: Path, targets: list[tuple[str, str, str | None]]) -> None:
-    subprocess.run([str(python), "-c", _REGISTER.format(names=targets)], check=True)
+    # `-I`: isolated mode — no user site, no PYTHON* environment, and the
+    # current directory never on sys.path, so nothing can resolve from a
+    # checkout by accident.
+    subprocess.run(
+        [str(python), "-I", "-c", _REGISTER.format(names=targets)], check=True
+    )
+
+
+#: Proves each first-party distribution in the smoke venv was installed from
+#: EXACTLY the wheel file this run hashed (pip records the file URL in
+#: `direct_url.json` for an explicit-path install) and that none of its files
+#: live under the checkout.
+_PROVENANCE = """
+import json, pathlib
+from importlib import metadata
+
+expected = {expected!r}
+checkout = pathlib.Path({checkout!r}).resolve()
+def normal(name):
+    return name.lower().replace("-", "_").replace(".", "_")
+installed = {{
+    normal(d.metadata["Name"]) for d in metadata.distributions()
+    if normal(d.metadata["Name"]).startswith("dotmac")
+}}
+unexpected = installed - {{normal(n) for n in expected}}
+assert not unexpected, f"first-party distributions not from this run: {{unexpected}}"
+for name, wheel in sorted(expected.items()):
+    dist = metadata.distribution(name)
+    raw = dist.read_text("direct_url.json")
+    assert raw, f"{{name}} was not installed from an explicit wheel file"
+    url = json.loads(raw).get("url", "")
+    want = pathlib.Path(wheel).resolve().as_uri()
+    assert url == want, f"{{name}} installed from {{url}}, not {{want}}"
+    for record in dist.files or []:
+        located = pathlib.Path(dist.locate_file(record)).resolve()
+        assert not located.is_relative_to(checkout), f"{{name}}: {{located}}"
+print("smoke provenance OK:", ", ".join(sorted(expected)))
+"""
+
+
+def _wheels(directory: str) -> list[Path]:
+    return sorted(Path(directory).resolve().glob("*.whl"))
+
+
+def _wheel_distribution(wheel: Path) -> str:
+    """The distribution name a wheel filename declares (PEP 427 first field)."""
+    return wheel.name.split("-", 1)[0]
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def cmd_build_local_dependencies(args: argparse.Namespace) -> None:
@@ -550,10 +601,12 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
     Needs a kernel ARTIFACT, not just a kernel: the module floors at the release
     that allocated its schema, and that kernel may not be published yet — this
     smoke runs BEFORE any publication, including the kernel's own. So the caller
-    supplies a locally built kernel wheel through `--kernel-dist`, and the
-    module resolves against it via `--find-links`. Any additional first-party
-    distributions permitted by the module's reviewed wheel policy are built by
-    ``build-local-dependencies`` and supplied through ``--dependency-dist``.
+    supplies a locally built kernel wheel through `--kernel-dist`, and any
+    additional first-party distributions permitted by the module's reviewed
+    wheel policy through ``--dependency-dist`` (built by
+    ``build-local-dependencies``). Every first-party wheel is installed by its
+    explicit path — never resolved by name — and an isolated interpreter proves
+    each installed first-party distribution came from exactly that file.
 
     That is a weaker claim than the registry verification deliberately: it
     proves these bytes install and register against the kernel THIS CHECKOUT
@@ -563,21 +616,66 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
     entry = resolve(args.distribution)
     import tempfile
 
-    links = ["--find-links", args.dist]
+    # Every first-party wheel is installed by explicit PATH, never resolved by
+    # name, so no index can substitute a different artifact for the target,
+    # the kernel or a first-party dependency.
+    targets = _wheels(args.dist)
+    if len(targets) != 1:
+        raise SystemExit(f"expected exactly one target wheel in {args.dist}")
+    dependencies: list[Path] = []
     if args.kernel_dist:
-        links += ["--find-links", args.kernel_dist]
+        dependencies += _wheels(args.kernel_dist)
     for dependency_dist in args.dependency_dist:
-        links += ["--find-links", dependency_dist]
+        dependencies += _wheels(dependency_dist)
+    first_party = [*targets, *dependencies]
+    names = [_wheel_distribution(wheel) for wheel in first_party]
+    if len(set(names)) != len(names):
+        raise SystemExit(
+            f"duplicate first-party distributions in smoke inputs: {names}"
+        )
 
     with tempfile.TemporaryDirectory() as tmp:
         python, pip = _venv(Path(tmp) / "venv")
         subprocess.run(
-            [str(pip), "install", "--quiet", *links, entry["distribution"]],
+            [str(pip), "install", "--quiet", *[str(wheel) for wheel in first_party]],
             check=True,
+            cwd=tmp,
+        )
+        subprocess.run(
+            [
+                str(python),
+                "-I",
+                "-c",
+                _PROVENANCE.format(
+                    expected={
+                        _wheel_distribution(wheel): str(wheel) for wheel in first_party
+                    },
+                    checkout=str(REPO_ROOT),
+                ),
+            ],
+            check=True,
+            cwd=tmp,
         )
         _verify_installed(
             python,
             [(entry["import_name"], entry["manifest_attr"], entry["db_schema"])],
+        )
+
+    if args.emit_dependency_manifest:
+        # The exact tested inputs, recorded as immutable coordinates. Their
+        # source stays outside ReleaseAuthority.v1: it is tested input, not
+        # release-control code.
+        manifest = {
+            "schema": "SmokeDependencyWheels.v1",
+            "wheels": [
+                {"filename": wheel.name, "sha256": _sha256(wheel)}
+                for wheel in sorted(dependencies, key=lambda path: path.name)
+            ],
+        }
+        out = Path(args.emit_dependency_manifest)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
     print(f"{entry['distribution']}: wheel smoke OK")
 
@@ -763,6 +861,12 @@ def main() -> int:
         action="append",
         default=[],
         help="directory holding locally built, policy-permitted dependency wheels",
+    )
+    p.add_argument(
+        "--emit-dependency-manifest",
+        default="",
+        help="write the exact kernel/dependency wheel filenames and SHA-256 "
+        "the smoke installed (SmokeDependencyWheels.v1)",
     )
     p.set_defaults(func=cmd_verify_wheel)
 

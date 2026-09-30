@@ -44,10 +44,15 @@ from pathlib import Path
 from typing import Final, Protocol, runtime_checkable
 
 from ..authorization import ExecutionGrant
+from ..authorization_v3 import (
+    require_committed_consumption_v3,
+    require_current_subject_v3,
+)
 from ..backup import BackupRecord
 from ..canonical_plan import EXECUTION_PLAN_WRONG_TYPE
 from ..deployment_evidence import (
     DeploymentEvidenceV1,
+    DeploymentEvidenceV2,
     RunStanding,
     StepEvidenceV1,
     StepStanding,
@@ -60,15 +65,15 @@ from ..evidence import (
     accept_release_evidence,
 )
 from ..execution_plan import (
-    FoundationExecutionPlanV1,
     HostPrestateV1,
-    require_execution_plan_digest,
 )
 from ..execution_plan_v2 import (
     ExposureReconciliationV1,
-    FoundationExecutionPlanV2,
     PostgresPrincipalCredentialBootstrapV1,
-    require_execution_plan_v2_digest,
+)
+from ..execution_plan_v3 import (
+    FoundationExecutionPlanV3,
+    require_execution_plan_v3_digest,
 )
 from ..exposure import (
     ExposureEffects,
@@ -79,11 +84,16 @@ from ..exposure import (
     verify_exposure,
 )
 from ..external_recovery import (
+    EXTERNAL_BACKUP_PATH_PREFIX,
     accept_external_recovery_receipt,
     backup_record_from_receipt,
     require_restore_proof,
 )
-from ..host_source import HostSource, require_host_source
+from ..host_source import HostSource
+from ..host_source_admission import (
+    HostSourceAdmissionProvider,
+    HostSourceAdmissionTrace,
+)
 from ..policy import build_firewall_plan
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
@@ -188,6 +198,12 @@ class Effects(Protocol):
     def backup(self, dataset_code: str, *, timeout_seconds: int) -> BackupResult: ...
 
     def verify_backup(self, result: BackupResult) -> bool: ...
+
+    def run_support_job(
+        self, code: str, *, timeout_seconds: int, image: str
+    ) -> CommandResult:
+        """Run and verify the descriptor's profile-gated support job."""
+        ...
 
     # ── candidate-image injected work (item 7 of the a5 audit) ──
     #
@@ -309,9 +325,11 @@ class DeploymentOutcome:
     control_plan_digest: str = ""
     #: Control's replay coordinate, echoed onto the report so Control can place
     #: this execution against its target's high-water mark. Zero means "not
-    #: carried", which `authorize()` makes unreachable on a real run.
+    #: carried", which `authorize_v3()` makes unreachable on a real run.
     execution_sequence: int = 0
     attempt_no: int = 0
+    #: Deterministic Control ledger coordinate, set only after consume returns.
+    control_consumption_ref: str = ""
     operation: str = ""
     #: The run's outcome as ONE CLOSED WORD, replacing the free-text `failure`
     #: field in the persisted record. `failure` still exists here, still holds
@@ -332,7 +350,7 @@ class DeploymentOutcome:
 
         `DeploymentEvidenceV1` has no field any of them could be written to.
         """
-        return DeploymentEvidenceV1(
+        evidence = DeploymentEvidenceV1(
             product=self.plan.product,
             image_reference=self.plan.image,
             image_digest=self.plan.image_digest,
@@ -358,7 +376,12 @@ class DeploymentOutcome:
                 )
                 for record in self.records
             ),
-        ).as_document()
+        )
+        if self.control_consumption_ref:
+            return DeploymentEvidenceV2(
+                base=evidence, control_consumption_ref=self.control_consumption_ref
+            ).as_document()
+        return evidence.as_document()
 
 
 #: Refused: the provider cannot be moved into stage two.
@@ -370,7 +393,7 @@ STAGE_TWO_REFUSED: Final = "execution_plan.stage_two_refused"
 
 def bind_authorized_effects(
     effects: Effects,
-    plan: FoundationExecutionPlanV1 | FoundationExecutionPlanV2,
+    plan: FoundationExecutionPlanV3,
 ) -> None:
     """Move effects into stage two, from the AUTHORIZED plan. Foundation owns this.
 
@@ -416,7 +439,7 @@ def bind_authorized_effects(
     for the same reason: collapsing them would label the previous release's own
     bytes a first deployment, and that is visible only during a restore.
     """
-    if not isinstance(plan, FoundationExecutionPlanV1 | FoundationExecutionPlanV2):
+    if not isinstance(plan, FoundationExecutionPlanV3):
         raise PreconditionFailed(
             f"stage two takes the typed execution plan, not a "
             f"{type(plan).__name__}. A mapping with the right keys is not the "
@@ -465,12 +488,13 @@ class Executor:
         deployment_id: str = "",
         evidence_policy: TrustPolicy | None = None,
         evidence_verifier: SignatureVerifier | None = None,
+        admission_provider: HostSourceAdmissionProvider,
         recovery_receipts: Mapping[str, object] | None = None,
         recovery_verifier: SignatureVerifier | None = None,
         recovery_records: Mapping[str, Sequence[BackupRecord]] | None = None,
         now_epoch: int = 0,
         exposure_effects: ExposureEffects | None = None,
-        execution_plan: FoundationExecutionPlanV1,
+        execution_plan: FoundationExecutionPlanV3,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -479,7 +503,7 @@ class Executor:
         required POSITIONAL parameter means a caller cannot forget it, cannot
         default it, and cannot be given one by a helper that quietly passes
         `None`. A caller with no grant has nothing to construct this with, and
-        `ExecutionGrant` cannot be built outside `authorize()` — so "execute on
+        `ExecutionGrant` cannot be built outside `authorize_v3()` — so "execute on
         a flag" stops being expressible rather than merely being discouraged.
         """
         self._spec = spec
@@ -491,6 +515,14 @@ class Executor:
         # neither of which verifies anything.
         self._evidence_policy = evidence_policy
         self._evidence_verifier = evidence_verifier
+        # HANDED OVER, never discovered — the same rule as `recovery_receipts`
+        # just below, applied to the host-source admission seam. REQUIRED, no
+        # default: a caller that wants today's unconditional refusal passes
+        # `RefusingHostSourceAdmissionProvider()` explicitly, so "no real
+        # admission was wired in" is a visible decision at every call site
+        # rather than a silent fallback. See `host_source_admission.py` for why
+        # this is a constructor parameter and never an ambient registry.
+        self._admission_provider: HostSourceAdmissionProvider = admission_provider
         # HANDED OVER, never discovered. There is no directory scan and no
         # `Effects.find_receipt()`: the caller passes the exact envelope for
         # each dataset, exactly as `--authorization` passes an
@@ -543,12 +575,11 @@ class Executor:
         # and replaces a diagnosis with a type name. Two different faults, two
         # different sentences, and the wrong-type one must not eat the other.
         if execution_plan is not None and not isinstance(
-            execution_plan, FoundationExecutionPlanV1 | FoundationExecutionPlanV2
+            execution_plan, FoundationExecutionPlanV3
         ):
             raise PreconditionFailed(
                 f"Executor was given a {type(execution_plan).__name__} as its "
-                f"execution plan, not a {FoundationExecutionPlanV1.__name__} or "
-                f"{FoundationExecutionPlanV2.__name__}. "
+                f"execution plan, not a {FoundationExecutionPlanV3.__name__}. "
                 "This executor mutates a product host under a deployment "
                 "authorization, and a plan of another kind describes another "
                 "act that nothing this class holds authorizes",
@@ -599,8 +630,8 @@ class Executor:
         # rather than Optional-with-a-default-path: a value invented at
         # construction would be a lock path for a lock nobody took.
         self._lock_path: Path | str = ""
-        # NO HOST SOURCE INGREDIENTS ARE ACCEPTED HERE AT ALL, DELIBERATELY,
-        # and this is the SECOND time this comment has had to say so.
+        # NO HOST SOURCE PARSING INGREDIENTS ARE ACCEPTED HERE, DELIBERATELY,
+        # and this is the THIRD time this comment has had to say so.
         #
         # The first repair (`host_source_receipt`/`host_source_metadata` as
         # the only accepted parameters, `host_source_installed`/
@@ -612,38 +643,41 @@ class Executor:
         # could still state the SAME digest on both sides of the comparison
         # `require_host_source` makes — byte-for-byte the admission
         # `host_source_installed=` produced, with a `json.dumps` in between.
-        # `valid_host_source_kwargs()` (removed from `tests/unit/
-        # host_source_stance.py`) WAS this exploit, shipped as a convenience
-        # fixture every "admitted executor" test used.
+        # `valid_host_source_kwargs()` (`tests/unit/host_source_stance.py`)
+        # WAS this exploit, shipped as a convenience fixture every "admitted
+        # executor" test used. `CandidateReceipt` and `InstalledMetadata` are
+        # PARSING interfaces — either half, alone or together, is
+        # caller-authored data, and no combination of "verify the receipt's
+        # shape" and "verify the metadata's shape" turns it into proof of
+        # what a trusted third party attested.
         #
-        # There is no seam left to close it with, because `CandidateReceipt`
-        # and `InstalledMetadata` are PARSING interfaces — either half, alone
-        # or together, is authored data a caller controls, and no
-        # combination of "verify the receipt's shape" and "verify the
-        # metadata's shape" turns caller-authored data into proof of what a
-        # trusted third party attested. Trusted provenance (an externally
-        # committed/signed candidate attestation, an independently signed
-        # installed-host observation, checked inside this method against
-        # DISTINCT trust roots) is a separate piece of work, not started
-        # here and not hooked for here: this class holds no field, accepts
-        # no parameter, and exposes no attribute that a future patch could
-        # quietly wire up to skip the read.
+        # The seam this class DOES accept now is `admission_provider`: one
+        # argument-free method returning a HostSource and trace. This type is
+        # NOT proof of provenance. An arbitrary in-process constructor caller
+        # can supply a method returning invented values; the executor does not
+        # authenticate the provider or its result. A real provider therefore
+        # requires a trusted, non-request-selectable assembly binding and
+        # fresh Control-backed verification before it can be used in a
+        # mutating deployment. The shipped CLI passes
+        # `RefusingHostSourceAdmissionProvider()` explicitly, and an
+        # architecture test guards that refusal-only call-site premise. This
+        # parameter is REQUIRED, with no default: a caller that wants today's
+        # unconditional refusal constructs `RefusingHostSourceAdmissionProvider()`
+        # itself — which calls exactly `require_host_source(receipt=None)` and
+        # always refuses, with the exact typed refusal (`NO_RECEIPT`, or
+        # `ABSENT`/`WRONG_KIND` if the interpreter itself has nothing
+        # installed) `require_host_source` already produces today. `run` and
+        # `rollback` call `_verify_host_source` themselves, which calls the
+        # provider; a caller explicitly supplying the refusing provider
+        # observes no behavior change from before this seam existed.
         #
-        # So: NOTHING is held. `_verify_host_source` always calls
-        # `require_host_source(receipt=None)` — no receipt exists that this
-        # class could have gotten from anywhere authenticated, so it always
-        # refuses, with the exact typed refusal (`NO_RECEIPT`, or `ABSENT` if
-        # the interpreter itself has nothing installed) `require_host_source`
-        # already produces for "no receipt" today. `run` and `rollback` call
-        # it THEMSELVES; nothing else in this class can make that call
-        # satisfied, because there is no longer anything TO supply.
-        #
-        # The bound identity, once verified. `None` until `_verify_host_source`
-        # runs; held so a caller inspecting a completed run can see which
-        # Foundation performed it, never read before that point. In practice
-        # this is never reached today: every call to `_verify_host_source`
-        # refuses.
+        # The provider's reported identity and trace. Both remain `None`
+        # until `_verify_host_source` runs, but their types alone do not prove
+        # verification: only a trusted composition can establish that the
+        # provider actually invoked the authenticated admission function.
+        # Neither is branched on or persisted by this class.
         self._host_source: HostSource | None = None
+        self._host_source_admission_trace: HostSourceAdmissionTrace | None = None
 
     # ── entry point ─────────────────────────────────────────────────────────
 
@@ -659,30 +693,35 @@ class Executor:
     def _verify_host_source(self) -> None:
         """THE MANDATORY PREREQUISITE every mutating entry point calls.
 
-        This is a SAFETY-ONLY gate today, not an admission path: there is no
-        receipt this class could have gotten from anywhere authenticated
-        (see the constructor's comment for why that is deliberate, not an
-        oversight), so `receipt=None` always, and `require_host_source`
-        always refuses — `NO_RECEIPT` if the interpreter has a genuine
-        installed artifact and no receipt behind it, `ABSENT`/`WRONG_KIND` if
-        it does not even have that. Both are typed refusals with zero
-        effects: nothing between the caller's lock and this call has
-        mutated anything.
+        Delegates to `self._admission_provider.admit_host_source()` — a
+        FRESH call every time, never cached across `run`/`rollback`
+        invocations on the same instance. `admission_provider` is a required
+        constructor argument with no default; a caller that wants today's
+        unconditional refusal constructs `RefusingHostSourceAdmissionProvider`
+        explicitly, which itself calls exactly `require_host_source(receipt=None)`
+        and always refuses —
+        `NO_RECEIPT` if the interpreter has a genuine installed artifact and
+        no receipt behind it, `ABSENT`/`WRONG_KIND` if it does not even have
+        that. Both are typed refusals with zero effects: nothing between the
+        caller's lock and this call has mutated anything.
 
-        Boundary 4's ruling, verbatim: "the executor must call
-        `require_host_source` itself" — not be handed a `HostSource`, which
-        proves nothing because anyone can construct one. Ordering is the
-        other half: called after the lock is proven held (so there is
+        This changes Boundary 4's earlier call-shape ruling: the executor
+        invokes a handed-over provider rather than `require_host_source`
+        directly. The protocol alone cannot enforce that the provider used
+        the verifier; only trusted assembly composition can make a positive
+        result admissible. A supplied provider's own
+        `PreconditionFailed`/`SpecError` propagates
+        unchanged: this method catches nothing, retries nothing, and never
+        falls back to the refusing default once a real provider has been
+        supplied. Ordering is the other half, unchanged from before this
+        seam existed: called after the lock is proven held (so there is
         something to serialise against) and before EVERYTHING else — grant
         revalidation, plan-digest recomputation, annotations, principal
-        bootstrap, every step. Preserved from the prior repair because it was
-        correct; what was wrong was what fed the call, not when it ran.
-
-        There is no way to make this admit. That is the point until trusted
-        provenance (see the constructor's comment) lands as its own,
-        separate piece of work.
+        bootstrap, every step.
         """
-        self._host_source = require_host_source(receipt=None)
+        self._host_source, self._host_source_admission_trace = (
+            self._admission_provider.admit_host_source()
+        )
 
     def run(
         self, plan: DeploymentPlan, *, lock: DeploymentLockHeld
@@ -714,11 +753,9 @@ class Executor:
         self._grant.require(
             operation="deploy", descriptor_digest=self._descriptor_digest()
         )
-        digest = self._require_execution_plan("deploy")
         outcome = DeploymentOutcome(
             plan=plan,
             notes=list(plan.notes),
-            execution_plan_digest=digest,
             # Each from the side that OWNS it: the descriptor digest re-derived
             # from the spec in hand, Control's plan digest copied verbatim off
             # the receipt and never recomputed here.
@@ -728,6 +765,9 @@ class Executor:
             attempt_no=int(self._grant.attempt_no),
             operation="deploy",
         )
+        digest, consumption_ref = self._require_execution_plan("deploy")
+        outcome.execution_plan_digest = digest
+        outcome.control_consumption_ref = consumption_ref
         # The first question about any graph that turned bad at 14:32 is what
         # changed at 14:32. No product in the fleet emits this today, and the
         # annotation is worth almost nothing after the fact — it has to be sent
@@ -772,8 +812,8 @@ class Executor:
             self._persist_evidence(outcome)
         return outcome
 
-    def _require_execution_plan(self, operation: str) -> str:
-        """Step 4: RECOMPUTE the plan digest before executing. Returns it.
+    def _require_execution_plan(self, operation: str) -> tuple[str, str]:
+        """Step 4: recompute the plan digest and consume the Control dispatch.
 
         Nothing here reconstructs Control's document and nothing normalizes it.
         Control froze a digest the Foundation produced; this re-derives that
@@ -835,16 +875,70 @@ class Executor:
                 "separately, for the same reason they are authorized separately: "
                 "one decision must not both make a change and erase it"
             )
-        # Each plan kind through its OWN gate. Both refuse the other's type
-        # before computing anything, so a wrong kind reaching here is a typed
-        # refusal rather than a digest mismatch that reads as a changed plan.
-        if isinstance(self._execution_plan, FoundationExecutionPlanV2):
-            return require_execution_plan_v2_digest(
-                self._execution_plan, authorized=authorized
+        # Re-read interpreter wheel provenance and Control/Fleet-resolved host
+        # identity at the last pre-effect boundary.  A matching signed digest
+        # alone cannot admit a changed wheel or re-enrolled host.
+        facts = require_current_subject_v3(
+            plan=self._execution_plan, provider=self._grant.v3_provider
+        )
+        # F2's authenticated installed-host subject is a separate reading from
+        # the V3 provider's Control/Fleet subject. ADR-0073 defines its
+        # host_identity as the same Fleet host_id, its installed signer as the
+        # host-key incarnation, and its root version as the enrolment UUID.
+        # Compare exact strings; neither Foundation nor Effects translates a
+        # host grammar. This follows F2's first-after-lock admission and still
+        # precedes every annotation or mutation for deploy and rollback.
+        trace = self._host_source_admission_trace
+        if not isinstance(trace, HostSourceAdmissionTrace):
+            raise PreconditionFailed("F2 supplied no typed installed-host trace")
+        for name, admitted, planned, current in (
+            (
+                "host_id",
+                trace.host_identity,
+                self._execution_plan.host_id,
+                facts.host_id,
+            ),
+            (
+                "host_incarnation",
+                trace.installed_signer_fingerprint,
+                self._execution_plan.host_incarnation,
+                facts.host_incarnation,
+            ),
+            (
+                "host_enrolment_ref",
+                trace.installed_trust_root_version,
+                self._execution_plan.host_enrolment_ref,
+                facts.host_enrolment_ref,
+            ),
+        ):
+            if admitted != planned or admitted != current:
+                raise PreconditionFailed(
+                    f"F2 admitted {name} disagrees with the V3 execution subject"
+                )
+        if facts.operation != operation or facts.target_ref != self._grant.target:
+            raise PreconditionFailed("execution subject moved after authorization")
+        if (
+            facts.execution_sequence != self._grant.execution_sequence
+            or facts.attempt_no != self._grant.attempt_no
+        ):
+            raise PreconditionFailed(
+                "Control dispatch coordinate moved after authorization"
             )
-        return require_execution_plan_digest(
+        self._grant.receipt._require_live(now=self._grant.v3_provider.now())
+        digest = require_execution_plan_v3_digest(
             self._execution_plan, authorized=authorized
         )
+        # The startup-fixed CP provider owns current-standing validation and
+        # atomic dispatch consumption in its external transaction. It refuses
+        # before COMMIT or returns normally after it. Every Foundation check
+        # has already run; no fallible check follows before the first effect.
+        consumption_ref = require_committed_consumption_v3(
+            grant=self._grant,
+            plan=self._execution_plan,
+            facts=facts,
+            trace=trace,
+        )
+        return digest, consumption_ref
 
     def _bootstrap_principals(self, outcome: DeploymentOutcome) -> None:
         """Install the credentials this plan was authorized to install.
@@ -1214,22 +1308,24 @@ class Executor:
         self._grant.require(
             operation="rollback", descriptor_digest=self._descriptor_digest()
         )
+        steps = steps_for_rollback(plan)
         outcome = DeploymentOutcome(
             plan=plan,
             notes=list(plan.notes),
-            execution_plan_digest=self._require_execution_plan("rollback"),
             descriptor_digest=self._descriptor_digest(),
             control_plan_digest=str(self._grant.receipt.control_plan_digest),
             execution_sequence=int(self._grant.execution_sequence),
             attempt_no=int(self._grant.attempt_no),
             operation="rollback",
         )
-        steps = steps_for_rollback(plan)
         if not steps:
             outcome.failure = plan.rollback_reason
             outcome.notes.append(f"ROLLBACK REFUSED — {plan.rollback_reason}")
             self._persist_evidence(outcome)
             raise PreconditionFailed(f"rollback refused: {plan.rollback_reason}")
+        digest, consumption_ref = self._require_execution_plan("rollback")
+        outcome.execution_plan_digest = digest
+        outcome.control_consumption_ref = consumption_ref
         self._rolling_back = True
         # `plan.rollback_reason` is descriptor-derived prose, not an exception
         # — but it is still free text crossing the same seam, and the type now
@@ -1485,7 +1581,7 @@ class Executor:
             *self._recovery_records.get(step.target, ()),
             backup_record_from_receipt(
                 receipt,
-                path=f"external:{receipt.executor.identifier}",
+                path=f"{EXTERNAL_BACKUP_PATH_PREFIX}{receipt.executor.identifier}",
                 size_bytes=max(1, receipt.restore_duration_seconds),
             ),
         ]
@@ -1585,6 +1681,27 @@ class Executor:
                 exit_code=result.exit_code,
             )
         return "migration role verified"
+
+    def _do_support_job(
+        self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
+    ) -> str:
+        topology = self._spec.compose_topology
+        if topology is None:
+            raise StepFailed(step.kind.value, "support job has no v3 topology")
+        job = next((item for item in topology.jobs if item.code == step.target), None)
+        if job is None or not job.run_during_deploy:
+            raise StepFailed(step.kind.value, "support job is not deploy-authorized")
+        result = self._effects.run_support_job(
+            job.code, timeout_seconds=step.timeout_seconds, image=plan.image
+        )
+        if not result.ok:
+            raise StepFailed(
+                step.kind.value,
+                f"support job {job.code!r} or its postcondition failed; "
+                "command output withheld",
+                exit_code=result.exit_code,
+            )
+        return f"{job.code} postcondition verified"
 
     def _do_stop_for_maintenance(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome

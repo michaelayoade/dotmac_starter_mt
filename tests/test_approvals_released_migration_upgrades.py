@@ -41,11 +41,13 @@ TENANT_TABLES = (
     "approval_policies",
     "approval_requests",
     "approval_decisions",
+    "approval_withdrawals",
 )
 PLATFORM_TABLES = (
     "platform_approval_policies",
     "platform_approval_requests",
     "platform_approval_decisions",
+    "platform_approval_withdrawals",
 )
 DIGEST = "sha256:" + "a" * 64
 
@@ -254,7 +256,7 @@ def test_each_released_approvals_shape_upgrades_without_rewriting_history(
         engine = create_engine(admin_url)
         with engine.connect() as conn:
             heads = set(conn.execute(text("SELECT version_num FROM alembic_version")))
-            assert ("ap_0002_outbox_relay",) in heads
+            assert ("ap_0003_withdrawals",) in heads
             for table in TENANT_TABLES:
                 exists = conn.execute(
                     text("SELECT to_regclass(:table) IS NOT NULL"),

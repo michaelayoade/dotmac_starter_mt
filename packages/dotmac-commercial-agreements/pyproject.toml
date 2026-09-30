@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-commercial-agreements"
-version = "0.1.0a2+dev"
+version = "0.1.0a4"
 description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0057 § 1)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -29,7 +29,15 @@ python = ">=3.11,<3.14"
 # a capability, which is a worse error message for the same defect — the
 # manifest raises while it is being CONSTRUCTED, before any composition check
 # a reader could interpret.
-dotmac-kernel = ">=0.1.0a77"
+#
+# Bumped to a100 for the manifest's new `database_catalog=` contribution
+# (verified, live-observed against `cg_0001_agreements`): the contribution
+# type and its `dotmac_kernel.product_database_catalog` module were first
+# published in a100, a new capability that now outranks the a74 allocation.
+# (a104 later fixed a DROP-COLUMN physical-ordinal-gap false positive in the
+# separate comparator module that VERIFIES this declaration, kernel PR #715,
+# but nothing this manifest imports needs a104 to load.)
+dotmac-kernel = ">=0.1.0a100"
 sqlalchemy = "^2.0"
 
 [build-system]

@@ -82,7 +82,8 @@ BASELINE_PATH: Final[pathlib.Path] = (
 SELF_REPOSITORY: Final[str] = "dotmac_starter_mt"
 
 #: The products that OWE an inventory, named so that not having one is a
-#: reported state rather than silence. ERP is the named first adopter: its
+#: reported state rather than silence. Platform CP is the first executor
+#: cutover/bootstrap target; ERP is the first full data-plane adopter. ERP's
 #: `scripts/deploy.sh`, its direct GitHub deployment workflow, its host-side
 #: source synchronization and the credentials those hold are the shape this
 #: contract was built against. Sub follows with `deploy_production.sh`. Naming
@@ -103,8 +104,10 @@ ADOPTION_TARGETS: Final[tuple[str, ...]] = (
     # identity here would name a file nobody can ever write and would report
     # UNADOPTED forever for the wrong reason. `vendor-cp-prod` belongs in this
     # product's own inventory, as the `host` on the credential's row and as a
-    # `production_targets` entry.
-    "dotmac_vendor_control_plane",
+    # `production_targets` entry. The inventory owner is now the current
+    # `dotmac_platform_control_plane` repository; the historical host name
+    # above is retained as evidence, not used as a repository identity.
+    "dotmac_platform_control_plane",
 )
 
 INVENTORY_SCHEMA: Final[str] = "ExecutorInventory.v1"

@@ -9,14 +9,46 @@
   are public contract exactly as the rendered assets are: a change to the
   document's shape changes every consumer's digest at once, which is the
   intended behaviour and makes it a MINOR bump at least.
-- `FoundationExecutionPlanV1` and `ExecutionPlanDigestV1` — the document, its
+- `FoundationExecutionPlanV1` and `ExecutionPlanDigestV1` — the historical document, its
   ten canonicalization rules, and the digest over it. The BYTES are the
   contract and two other systems bind to them: Platform CP submits the digest
   and Control freezes it, so a change to the document's shape, key set, key
   names, or any of the ten rules invalidates every frozen digest at once and is
-  a MINOR bump at least. `dotmac-deploy execution-plan --format digest` is the
-  only supported way to produce the value; re-implementing the canonicalization
-  is what this contract exists to stop.
+  a MINOR bump at least. V1 remains readable but is non-authorizing.
+- `FoundationExecutionPlanV3` and `authorize_v3()` — the active execution
+  authority contract. The V3 document binds the exact recorded candidate
+  wheel digest, target ID/ref, controller SSH fingerprint, Fleet/Control host
+  ID, host-key incarnation fingerprint and immutable enrolment/root-version
+  reference. Its canonical digest is still `ExecutionPlanDigestV1` and must
+  equal Control's signed V2 pair value. `dotmac-deploy execution-plan` renders
+  it only with a startup-installed provider; a V1/V2 plan cannot issue a grant.
+  The Control V2 receipt schema is unchanged. The trusted in-process assembly
+  fixes the attester, clock and host observer; request material cannot choose
+  them. Host-source admission remains the separate F2 owner of installed-source
+  integrity, not a claim made by the recorded wheel digest. Its authenticated
+  `host_identity` equals the V3 Fleet `host_id`; installed signer fingerprint
+  and installed trust-root version equal the V3 host incarnation and canonical
+  enrolment UUID. The executor compares all three before effects. `Effects`
+  carries no authenticated target identity, so the trusted CP composition must
+  construct the V3 provider, F2 admission provider and Effects as one bundle.
+  `ExecutionAuthorityV3Provider.consume_dispatch()` receives immutable
+  canonical copies of the exact attested authorization+dispatch material, the
+  exact F2 admission trace, the execution-plan digest and deterministic
+  `control-dispatch:<dispatch_id>` recovery key. The trace retains Foundation's
+  actual pair-verification result and a transient opaque CP continuation;
+  Foundation checks its presence and pair/host coordinates but neither
+  interprets nor persists the continuation. CP passes both to Control's one
+  host-admission-and-execution finalizer, which freshly rederives both standings
+  and stages one dispatch marker. The provider returns `None` only after CP
+  commits; otherwise it raises before commit. Foundation checks the live
+  receipt and independently observed context before calling it, with no
+  fallible post-commit gate. Successful local run
+  evidence uses `DeploymentEvidence.v2` to carry the recovery key; V1 bytes
+  remain unchanged. Control's committed ledger is authoritative if Foundation
+  crashes before that local evidence can be written. This is a required trust contract for the external CP adapter, not
+  a claim that the adapter is already implemented or conformance-proven.
+  Installed-wheel release smoke proves V3 rendering and honest standalone CLI
+  refusal only; publication never grants deployment authority.
 - `IngressPolicy.v1`: the exposure vocabulary, the provider capability
   matrix, the derived endpoint-token format and the firewall rule shape.
 - The `dotmac-deploy` CLI: its subcommands, its flags, and its **exit codes**
@@ -44,12 +76,17 @@
   not production authority, and product-vocabulary mapping remains a later
   Platform adapter responsibility.
 - `TrustedHostAttestation.v2`: `AttestationEnvelopeV2`,
-  `AttestationTrustPolicy`, `AttestationTrustRootV2`,
+  `AttestationTrustPolicy`, `AttestationTrustRootV2`, `AttestationVerifiedRootV1`,
   `CandidateAttestationSubjectV2`, `InstalledHostAttestationSubjectV2`,
-  `AttestationVerifier`, `verify_attestation_pair()`,
+  `AttestationVerifier`, `attestation_envelope_digest()`,
+  `verify_attestation_pair()`,
   `verify_candidate_attestation()` and the exported schema, purpose and
-  refusal-code constants, including `SAME_KEY_SIGNED_BOTH`. The signed
-  canonical bytes and refusal codes are public contract. The verifier
+  refusal-code constants, including `SAME_KEY_SIGNED_BOTH`,
+  `OBSERVATION_ID_MISMATCH` and `PACKAGE_MISMATCH`. The parsed envelope's
+  complete mapping is public through `AttestationEnvelopeV2.canonical_document()`;
+  `attestation_envelope_digest()` hashes its exact canonical JSON mapping,
+  including `signature`. The signed canonical bytes and refusal codes are
+  public contract. The verifier
   identifies a signing key by `public_key_fingerprint`, never by the reusable
   `key_id` label, and remains a non-admitting composition seam: neither
   executor accepts these values in this contract revision.
@@ -61,6 +98,106 @@
   envelope to authenticate plus Control-resolved trust configuration
   (`verifier`, `trust_policy`, `now`); there is no parameter for a
   preconstructed subject, receipt, digest, or ad hoc root.
+- **Breaking (ADR-0073 redesign step 1)**: `verify_attestation_pair()` now
+  returns `AttestationPairVerificationResultV1` on success instead of bare
+  `None`, and requires one new keyword-only parameter,
+  `verification_context_digest: str`. That parameter is Foundation's opaque —
+  Control's own digest over its resolved admission context, validated only for
+  non-emptiness and echoed back unchanged in the result on success; Foundation
+  never computes, interprets, or reproduces it. This result is explicitly
+  non-authorizing: never a `HostSource` or execution token; only Control
+  decides consequence from it.
+- **Breaking (ADR-0073 redesign step 2, result widening)**:
+  `AttestationPairVerificationResultV1` now carries ten fields —
+  `candidate_attestation_envelope_digest`, `installed_attestation_envelope_digest`,
+  `verification_context_digest`, `expected_host_identity`,
+  `expected_observation_id`, `expected_package`, `candidate_audience`,
+  `installed_audience`, `candidate_root`, `installed_root` — reporting
+  EVERYTHING actually verified, not only digests. The two envelope digests
+  are computed from the actual parsed `candidate`/`installed` objects this
+  call verified, identically to `attestation_envelope_digest()` — never
+  copied from a caller-supplied value. `expected_host_identity`,
+  `expected_observation_id` and `expected_package` are this call's own
+  validated local values (the exact strings checked against the
+  authenticated subjects), not an unchecked echo of caller input.
+  `candidate_audience`/`installed_audience` are `trust_policy`'s own
+  declared audiences. `candidate_root`/`installed_root` are a new frozen
+  dataclass, `AttestationVerifiedRootV1` (`public_key_fingerprint`,
+  `trust_root_version`, `key_id`, `algorithm`, `purpose`, `custody_domain`,
+  `issuer`) — the specific trust root from `trust_policy` that actually
+  matched and authenticated each half, not the whole `AttestationTrustRootV2`
+  (which also carries `public_key_base64`/`not_before`/`not_after`/`revoked`,
+  policy configuration Control already has from its own resolution). This is
+  what lets a later Control change compare its own resolution against what
+  Foundation actually verified against, instead of trusting a caller-supplied
+  echo of its own input back at it unchanged.
+  `AttestationPairVerificationResultV1` has never appeared in a published
+  release, so this widens the type in place; there is no V2.
+- `admit_host_source()` and `HostSourceAdmissionTrace`
+  (`host_source_admission.py`). `admit_host_source(*, candidate, installed,
+  verifier, trust_policy, expected_host_identity, expected_observation_id,
+  expected_package, verification_context_digest, now)` returns
+  `tuple[HostSource, HostSourceAdmissionTrace]` or raises: every existing
+  `SpecError`/`PreconditionFailed` from `verify_attestation_pair()` /
+  `verify_candidate_attestation()` propagates unchanged, plus distinct
+  coordinate refusals for a mismatched Control dispatch observation or
+  expected package, and one disagreement refusal using `host_source.DISAGREES`
+  when the interpreter's
+  own installed-artifact reading (taken only after the attestation pair is
+  verified) disagrees with the authenticated installed-host subject's
+  `package`/`version`/`wheel_sha256`. The nine-parameter signature has no
+  parameter for a receipt, a pre-parsed subject, an installed artifact, a
+  metadata reader, a distribution selector, or any preverified result — the
+  same inexpressible-bypass shape as `verify_candidate_attestation()`.
+  `verification_context_digest` is threaded through to `verify_attestation_pair()`
+  unread; `admit_host_source()` retains that call's actual typed
+  `AttestationPairVerificationResultV1` in the trace, without treating it as
+  caller-constructible authority.
+  `HostSourceAdmissionTrace` is a frozen, slotted record populated from
+  authenticated fields by `admit_host_source()` (`candidate_subject_digest`,
+  `host_observation_id`, `host_identity`, both signer fingerprints, both
+  trust-root versions, and the actual pair-verification result). A trusted CP
+  F2 provider may attach a transient `opaque_finalization` continuation;
+  Foundation checks only its presence, excludes it from repr/equality and
+  never persists or interprets it. The publicly constructible trace type
+  alone proves no authentication. The V3 pre-effect check is its only
+  consumption path: it compares the trace and pair-result host, signed
+  dispatch-observation and root coordinates against independently observed V3
+  facts, then passes the exact trace to the startup-fixed provider for one
+  Control host-admission-and-execution finalizer. Non-V3 callers retain the
+  historical host-source behavior without making this trace a grant.
+  `trusted_host_source.py` remains zero-I/O; `require_host_source()`'s
+  signature and behavior are unchanged and it remains the constructor a
+  receipt-only caller uses. Neither executor accepts a directly supplied
+  `HostSource` or trace; each accepts the return of a handed-over provider,
+  whose trust must be established by the composing assembly.
+- `HostSourceAdmissionProvider` and `RefusingHostSourceAdmissionProvider`
+  (`host_source_admission.py`), plus the keyword-only `admission_provider`
+  parameter on `engine/run.py`'s `Executor` and `recovery_execution.py`'s
+  `RecoveryExecutor` constructors. `HostSourceAdmissionProvider` is a
+  `runtime_checkable` Protocol with one argument-free method,
+  `admit_host_source() -> tuple[HostSource, HostSourceAdmissionTrace]` — no
+  parameter for a receipt, an envelope, a subject, a trust policy, a
+  verifier, or any preverified result. This shape does not force an
+  implementation to reach Control: an arbitrary constructor caller can hand
+  over a provider returning invented values. Positive use therefore requires
+  trusted, startup-fixed, non-request-selectable assembly composition and
+  current Control verification. `admission_provider` is keyword-only and
+  **required** on both executor constructors, with no implicit fallback. The
+  shipped CLI explicitly passes `RefusingHostSourceAdmissionProvider()`,
+  which calls exactly `require_host_source(receipt=None)` and preserves the
+  historical refusal-only behavior and typed codes
+  (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`) with zero effects; it cannot authorize
+  V3. Both
+  executors' `_verify_host_source` calls
+  `self._admission_provider.admit_host_source()` fresh on every `run`/
+  `rollback` invocation — never cached, never memoized across calls on the
+  same instance — and a supplied provider's own
+  `PreconditionFailed`/`SpecError` propagates unchanged. Neither executor
+  discovers a provider from an ambient registry or module-level global; the
+  provider is HANDED OVER at construction only. A provider that composes
+  `admit_host_source()` above against real Control-resolved attestations to
+  genuinely admit a `HostSource` is later, separate, cross-repo work.
 - `ExposureEffects`, plus `OWNERSHIP_PREFIX`, `ownership_comment()`,
   `foreign_rules()`, `foreign_rule_arguments()`, `managed_ports()` and
   `require_preserved_foreign_rules()`. Ownership is part of the CONTRACT rather
@@ -192,9 +329,10 @@ What was measured, and how:
 - `dotmac-deploy exposure-apply` likewise. `cli.py` DOES exist at that tag and
   the subcommand is absent from it, so this is a subcommand added after the
   last tag rather than a tagged surface withdrawn.
-- `0.2.0a2` is in any case not a published baseline. Its own changelog heading
-  AT THAT TAG reads `## 0.2.0a2 — unreleased`, and **no version of this
-  facility has ever been published**.
+- `0.2.0a2` **was published and tagged** by release run `33171027470`.
+  The `## 0.2.0a2 — unreleased` changelog heading at that tag is stale release
+  prose, not evidence that publication failed. Neither retired API appears in
+  the published tag, so this correction does not make its withdrawal breaking.
 
 So the accurate record is a **declared surface retired before it ever shipped**.
 It was written down here, in this document, as something consumers would be
@@ -226,9 +364,9 @@ can be defaulted:
 
 | was | is | why it cannot be defaulted |
 |---|---|---|
-| `ExposureTransaction(spec=..., effects=...)` | `Executor(spec, effects, grant, execution_plan=..., exposure_effects=...)` | the grant is positional and only `authorize()` can issue one, from a `VerifiedAuthorization` |
+| `ExposureTransaction(spec=..., effects=...)` | `Executor(spec, effects, grant, execution_plan=..., exposure_effects=...)` | the grant is positional and only `authorize_v3()` can issue one, from the exact Control V2 authorization-and-dispatch pair through the startup-fixed V3 provider; historical `authorize()` always refuses |
 | `.run()` | `Executor.run(plan, lock=held)` | `lock` is a `DeploymentLockHeld`, obtainable only inside `deployment_lock`'s `with` block |
-| implicit — any transaction could apply | `FoundationExecutionPlanV2.exposure_reconciliations` must name the address families | the act is inside the frozen plan digest, so Control authorizes THIS deployment's exposure and not exposure in general |
+| implicit — any transaction could apply | `FoundationExecutionPlanV3.exposure_reconciliations` must name the address families | V1/V2 plans are historical and non-authorizing; the act is inside the V3 frozen plan digest, so Control authorizes THIS deployment's exposure and not exposure in general |
 | `.rolled_back` | the `restore_exposure` record on `DeploymentOutcome` | compensation is evidence on the run, not state on a caller's object |
 
 A caller that constructed the transaction has **no in-package direct

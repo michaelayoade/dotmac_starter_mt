@@ -65,6 +65,10 @@ class AttestationKind(StrEnum):
     * `PRODUCT_MANIFEST` — which product and capabilities the exact product
       assembly declares. Its document schema is owned by
       `dotmac_kernel.product_manifest`; this enum classifies the attestation.
+    * `MODULE_DATABASE_CATALOG` — the exact tables-and-columns declaration for
+      one module distribution release.
+    * `PRODUCT_DATABASE_CATALOG` — the complete tables-and-columns declaration
+      for one product release.
 
     An artifact can have any subset. Having none is a legal state and an
     informative one; it is the reason attestations are rows rather than columns
@@ -76,6 +80,8 @@ class AttestationKind(StrEnum):
     PROVENANCE = "provenance"
     SIGNATURE = "signature"
     PRODUCT_MANIFEST = "product_manifest"
+    MODULE_DATABASE_CATALOG = "module_database_catalog"
+    PRODUCT_DATABASE_CATALOG = "product_database_catalog"
 
 
 #: Every member, for exhaustiveness checks in consumers and in tests.

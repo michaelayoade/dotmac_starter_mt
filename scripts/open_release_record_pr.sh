@@ -88,6 +88,11 @@ RELEASE_RUN=""
 VERIFICATION_RECEIPT=""
 TAG_DECISION_RECEIPT=""
 NO_LINEAGE=""
+ARTIFACT_DIR=""
+EXPECTED_RUN_ID=""
+EXPECTED_COMMIT=""
+ARTIFACT_RUN_ID=""
+ADOPTING_RUN_ID=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -101,9 +106,22 @@ while [ $# -gt 0 ]; do
     --release-run)  RELEASE_RUN="$2";  shift 2 ;;
     --verification-receipt) VERIFICATION_RECEIPT="$2"; shift 2 ;;
     --tag-decision-receipt) TAG_DECISION_RECEIPT="$2"; shift 2 ;;
+    --artifact-dir) ARTIFACT_DIR="$2"; shift 2 ;;
+    --expected-run-id) EXPECTED_RUN_ID="$2"; shift 2 ;;
+    --expected-commit) EXPECTED_COMMIT="$2"; shift 2 ;;
+    --artifact-run-id) ARTIFACT_RUN_ID="$2"; shift 2 ;;
+    --adopting-run-id) ADOPTING_RUN_ID="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# The run whose retained artifact a human should re-download. Defaults to
+# THIS run, which is correct for an ordinary release; recovery passes the
+# ORIGINAL run instead, since that is the run whose `${MODULE}-dist` artifact
+# actually exists — this run built nothing.
+if [ -z "${ARTIFACT_RUN_ID}" ]; then
+  ARTIFACT_RUN_ID="${GITHUB_RUN_ID:-<this-run-id>}"
+fi
 
 for required in DISTRIBUTION VERSION TAG; do
   if [ -z "${!required}" ]; then
@@ -111,6 +129,28 @@ for required in DISTRIBUTION VERSION TAG; do
     exit 2
   fi
 done
+
+# The governed module lane may not fall through to the general record writer
+# without the retained, registry-compared wheel. Kernel/UI/connector callers
+# remain independent of this artifact contract.
+if ! GOVERNED_MODULE="$(python -c '
+import json, sys
+with open(".github/release-modules.json", encoding="utf-8") as source:
+    modules = json.load(source)["modules"]
+print("1" if sys.argv[1] in modules else "0")
+' "${DISTRIBUTION}")"; then
+  echo "module release allowlist is unreadable" >&2
+  exit 2
+fi
+if [ "${GOVERNED_MODULE}" = "1" ] && [ -z "${ARTIFACT_DIR}" ]; then
+  echo "--artifact-dir is required for governed module ${DISTRIBUTION}" >&2
+  exit 2
+fi
+if [ "${GOVERNED_MODULE}" = "1" ] \
+  && { [ -z "${EXPECTED_RUN_ID}" ] || [ -z "${EXPECTED_COMMIT}" ]; }; then
+  echo "--expected-run-id and --expected-commit are both required for governed module ${DISTRIBUTION}" >&2
+  exit 2
+fi
 
 MANUAL="python scripts/write_release_record.py --distribution ${DISTRIBUTION} --version ${VERSION} --tag ${TAG}"
 if [ -n "${PACKAGE_DIR}" ]; then
@@ -120,6 +160,22 @@ if [ -n "${PACKAGE_DIR}" ]; then
   fi
 elif [ -n "${NO_LINEAGE}" ]; then
   MANUAL="${MANUAL} --no-lineage"
+fi
+# The value ARTIFACT_DIR carries here is this RUNNER's temp path
+# (`${{ runner.temp }}/...`) — real for this job, meaningless to a human
+# typing the command by hand later. The manual fallback never prints it;
+# `give_up` below tells the operator to fetch a fresh copy instead.
+if [ -n "${ARTIFACT_DIR}" ]; then
+  MANUAL="${MANUAL} --artifact-dir <fresh-download-dir>"
+fi
+if [ -n "${EXPECTED_RUN_ID}" ]; then
+  MANUAL="${MANUAL} --expected-run-id ${EXPECTED_RUN_ID}"
+fi
+if [ -n "${ADOPTING_RUN_ID}" ]; then
+  MANUAL="${MANUAL} --adopting-run-id ${ADOPTING_RUN_ID}"
+fi
+if [ -n "${EXPECTED_COMMIT}" ]; then
+  MANUAL="${MANUAL} --expected-commit ${EXPECTED_COMMIT}"
 fi
 if [ -n "${MANIFEST_PYTHON}" ]; then
   MANUAL="${MANUAL}
@@ -139,6 +195,17 @@ give_up() {
   echo "::error::"
   echo "::error::Close it by hand, on a branch off main:"
   echo "::error::  ${MANUAL}"
+  if [ "${GOVERNED_MODULE}" = "1" ]; then
+    echo "::error::<fresh-download-dir> is NOT this run's runner-temp path — that"
+    echo "::error::directory dies with the runner and no human can reach it."
+    echo "::error::Fetch the exact retained wheel instead of rebuilding it:"
+    echo "::error::  gh run download ${ARTIFACT_RUN_ID} --repo ${GITHUB_REPOSITORY:-michaelayoade/dotmac_starter_mt} \\"
+    echo "::error::    --name ${DISTRIBUTION}-dist --dir <fresh-download-dir>"
+    echo "::error::write_release_record.py refuses any wheel whose sha256 differs"
+    echo "::error::from the digest already embedded in the ${TAG} tag's"
+    echo "::error::ModuleReleaseTagEvidence.v1 message — a rebuilt wheel will not"
+    echo "::error::pass, only the artifact this run actually published will."
+  fi
   echo "::error::then open a pull request titled:"
   echo "::error::  chore(release): record the ${DISTRIBUTION} ${VERSION} publication"
   exit 1
@@ -164,6 +231,18 @@ if [ -n "${PACKAGE_DIR}" ]; then
   fi
 elif [ -n "${NO_LINEAGE}" ]; then
   ARGS+=(--no-lineage)
+fi
+if [ -n "${ARTIFACT_DIR}" ]; then
+  ARGS+=(--artifact-dir "${ARTIFACT_DIR}")
+fi
+if [ -n "${EXPECTED_RUN_ID}" ]; then
+  ARGS+=(--expected-run-id "${EXPECTED_RUN_ID}")
+fi
+if [ -n "${ADOPTING_RUN_ID}" ]; then
+  ARGS+=(--adopting-run-id "${ADOPTING_RUN_ID}")
+fi
+if [ -n "${EXPECTED_COMMIT}" ]; then
+  ARGS+=(--expected-commit "${EXPECTED_COMMIT}")
 fi
 
 OUTPUT=""

@@ -89,16 +89,19 @@ from .secrets_guard import require_no_secrets
 
 __all__ = [
     "DEPLOYMENT_EVIDENCE_SCHEMA",
+    "DEPLOYMENT_EVIDENCE_V2_SCHEMA",
     "EVIDENCE_BAD_KIND",
     "EVIDENCE_BAD_STANDING",
     "EVIDENCE_NOT_A_STEP",
     "DeploymentEvidenceV1",
+    "DeploymentEvidenceV2",
     "RunStanding",
     "StepEvidenceV1",
     "StepStanding",
 ]
 
 DEPLOYMENT_EVIDENCE_SCHEMA: Final = "DeploymentEvidence.v1"
+DEPLOYMENT_EVIDENCE_V2_SCHEMA: Final = "DeploymentEvidence.v2"
 
 #: Stable identifiers for this module's refusals. Assert these; read the prose.
 EVIDENCE_BAD_KIND: Final = "deployment_evidence.bad_kind"
@@ -261,4 +264,35 @@ class DeploymentEvidenceV1:
         # substitutes for the other, and running it here rather than at each
         # write site means no write path can be the one that forgot.
         require_no_secrets(document, source="deployment evidence")
+        return document
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DeploymentEvidenceV2:
+    """Successor evidence adds the committed Control recovery coordinate.
+
+    V1's closed canonical document remains unchanged. This wrapper adds one
+    typed field only for a run whose dispatch consumption returned normally;
+    a crash before local evidence is written is recovered from Control's own
+    committed ledger by the same deterministic coordinate.
+    """
+
+    base: DeploymentEvidenceV1
+    control_consumption_ref: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.base, DeploymentEvidenceV1):
+            raise SpecError("DeploymentEvidenceV2 requires V1 base evidence")
+        if (
+            not isinstance(self.control_consumption_ref, str)
+            or not self.control_consumption_ref.startswith("control-dispatch:")
+            or len(self.control_consumption_ref) <= len("control-dispatch:")
+        ):
+            raise SpecError("DeploymentEvidenceV2 requires a Control dispatch ref")
+
+    def as_document(self) -> dict[str, Any]:
+        document = self.base.as_document()
+        document["schema"] = DEPLOYMENT_EVIDENCE_V2_SCHEMA
+        document["control_consumption_ref"] = self.control_consumption_ref
+        require_no_secrets(document, source="deployment evidence v2")
         return document

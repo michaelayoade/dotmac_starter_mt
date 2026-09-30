@@ -102,6 +102,33 @@ from app.features.licensing import models as licensing_models  # noqa: F401
 _SHARED_TEST_SCHEMAS = {"mod_appdir", "mod_tstudio"}
 
 
+@pytest.fixture(autouse=True)
+def foundation_v3_installed_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+    """V3 unit authority sees a synthetic wheel provenance reading.
+
+    Host-source/F2 tests still exercise their own real reader. This patch
+    replaces only the imported C1 boundary; focused negative tests can
+    override it within the test to prove wheel-digest refusal.
+    """
+    from dotmac_deployment_foundation import authorization_v3
+    from dotmac_deployment_foundation.digest import Digest
+    from dotmac_deployment_foundation.host_source import InstalledArtifact
+
+    from tests.unit.foundation_v3_support import WHEEL
+
+    monkeypatch.setattr(
+        authorization_v3,
+        "read_installed_artifact",
+        lambda: InstalledArtifact(
+            distribution="dotmac-deployment-foundation",
+            version="test",
+            artifact_digest=Digest.parse(WHEEL),
+            installed_content_digest=Digest.parse("sha256:" + "9" * 64),
+            read_from="test synthetic PEP 610",
+        ),
+    )
+
+
 def _unit_tables():
     return tuple(
         table

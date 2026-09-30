@@ -11,12 +11,68 @@ changes, each called out here.
 `dotmac-commercial-agreements-v0.1.0a1` resolves to exact revision
 `fead57bc93d6551450f5e6ae1c9de1296e27b0ae`.
 
-`0.1.0a2` is declared and unreleased. Source presence is not registry evidence;
-Vendor remains authoritative on its exact a1 pin until a2 has passed the
-protected release workflow and Vendor deliberately adopts that immutable
-artifact.
+`0.1.0a2` is also published. Its peeled tag
+`dotmac-commercial-agreements-v0.1.0a2` resolves to exact revision
+`42acc8b30f1bcaed1580d312fd33d7b5ef358817`. (This section previously read
+"`0.1.0a2` is declared and unreleased" — that was stale; the tag above already
+existed on `main`.)
 
-## Unreleased — `0.1.0a2+dev`
+`0.1.0a3` is also published. Its annotated tag
+`dotmac-commercial-agreements-v0.1.0a3` (written by the release workflow, whose
+tag message reads "verified on the Forgejo registry (installed and registered
+alone)") peels to exact revision `5005e998a4cac9b4f7e3ba91f371967b0ee8b2a2`. (This section
+previously read "`0.1.0a3` is declared and unreleased" — stale in the same way
+the a2 note once was. Its oracle-backed release record is not yet in
+`docs/inventories/module-release-verifications.json`.)
+
+`0.1.0a4` is also published. Release run 36306297621 built, published and
+verified it; its annotated tag `dotmac-commercial-agreements-v0.1.0a4` (tag
+object `01e371750b64588904d2542e280ea21322c1dce7`) peels to
+`9a5e433d7b22efc5d21a6f8a1ead0c73effaca6d`, wheel sha256
+`4f71041baa02b9959360f091b83d9e4d420ad5f77749fc625a843b04499c29bc`, recorded in
+`docs/inventories/module-release-verifications.json`. Vendor adopts it only
+through its own protected lock workflow.
+
+## 0.1.0a4 — 2026-09-27 — published (tag `dotmac-commercial-agreements-v0.1.0a4`)
+
+**An approval withdrawal is recorded as approval STANDING, never as a lifecycle
+transition** (Gate-0 C2 S4, Michael 2026-09-27).
+
+- `record_approval_withdrawal(db, RecordApprovalWithdrawalCommand) ->
+  ApprovalWithdrawalResult` binds the withdrawal to the evidence this module
+  froze — request, decision reference, policy code/version, subject and content
+  digest — and records the withdrawal reference, reason and time in the new
+  append-only `mod_agreements.agreement_approval_withdrawals` table
+  (`cg_0002_approval_withdrawals`, rewrite-refusing trigger, `platform_api`/
+  `app_admin` SELECT+INSERT only; UPDATE, DELETE and TRUNCATE are refused by
+  trigger). It appends one history row with
+  `from_status == to_status`, one audit event under the NEW action
+  `commercial_agreement.approval_withdrawal_recorded`, and one
+  `agreement.approval_withdrawn.v1` platform-outbox fact, in one transaction and
+  through the kernel's at-most-once owner.
+- The closed `ApprovalWithdrawalOutcome` vocabulary: `recorded`,
+  `already_recorded` (identical replay), `decision_not_carried` (the agreement
+  is bound to a different decision), `content_not_bound` (no decision bound and
+  the digest no longer matches), `evidence_conflict` (subject, policy or a
+  same-reference/same-decision contradiction, or a digest contradicting the
+  one frozen on the agreement). Only `recorded` writes; every refusal is
+  decided under the row lock and writes nothing, not even an idempotency entry,
+  so a refusal that depends on current state is re-decided on redelivery.
+- Recorded standing BLOCKS `approve`, `activate` and `reinstate`, which now take
+  the agreement row `FOR UPDATE` and consult the table under that lock, so a
+  transition can never slip past a withdrawal committing concurrently.
+  `permitted_actions` drops the three actions and views carry
+  `approval_withdrawn`. Nothing is ever cancelled, suspended or terminated:
+  approved and active remain historical facts, and re-approval happens only on
+  an amended successor.
+- **Fix:** `activate` now refuses approval evidence whose `decision_ref` differs
+  from the decision that carried approval. Previously only the digest and policy
+  were compared.
+- No change to existing tables. The manifest declares the new platform table,
+  its audit action, lineage head `cg_0002_approval_withdrawals`, and a catalog
+  entry drafted from the migration and verified by the live catalog test.
+
+## 0.1.0a3 — 2026-09-19 — published (tag `dotmac-commercial-agreements-v0.1.0a3`)
 
 **Public typed READ contracts.** `detail()` returns an `AgreementDetail` — the
 agreement and its lines, the lifecycle timeline, the owner-derived
@@ -43,11 +99,26 @@ click.
 `facts` can bound the filter without importing `service`. Both modules still
 re-export them; no caller's import changes.
 
-**The declared version now carries a PEP 440 local development marker.**
-`0.1.0a2` is published and tagged; `src/` has moved since, and one version may
-not name two sets of importable bytes.
+**The manifest now carries a `database_catalog=` contribution**
+(`ModuleDatabaseCatalogContributionV1`, lineage head `cg_0001_agreements`,
+covering all three platform tables in sorted order). Every column, ordinal,
+PostgreSQL type and generation fact was transcribed verbatim from
+`observe_postgres_tables_columns` against a disposable PostgreSQL 16 database
+composed from the kernel lineage, this assembly and `cg_0001_agreements` at
+that exact head — never hand-typed from the migration source — and
+self-verified against a fresh observation of the same database with
+`compare_module_database_catalog(...).matched is True` and zero drifts before
+teardown.
 
-## 0.1.0a2 — 2026-08-25 (unreleased)
+The `dotmac-kernel` floor moves to `>=0.1.0a100` for this: the contribution
+type and `dotmac_kernel.product_database_catalog` were first published in
+a100, above the a74 allocation floor this module previously declared.
+
+## 0.1.0a2 — 2026-08-25
+
+Published; peeled tag `dotmac-commercial-agreements-v0.1.0a2` resolves to
+`42acc8b30f1bcaed1580d312fd33d7b5ef358817`. (Previously marked "unreleased" in
+this file — stale; see "Release state" above.)
 
 ### Added
 

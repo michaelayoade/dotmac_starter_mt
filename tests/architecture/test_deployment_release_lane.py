@@ -41,9 +41,11 @@ heuristic that has to remember to strip it.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import copy
 import json
+import subprocess
 import tomllib
 from dataclasses import fields
 from pathlib import Path
@@ -122,7 +124,7 @@ def _execution_plan_probe_keywords(source: str) -> set[str]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "FoundationExecutionPlanV1"
+        and node.func.id == "FoundationExecutionPlanV3"
     ]
     assert len(calls) == 1
     return {keyword.arg for keyword in calls[0].keywords if keyword.arg is not None}
@@ -219,29 +221,103 @@ def test_release_facility_reasserts_freshness_before_publish_and_before_verify()
 
 def test_the_installed_wheel_probe_rebuilds_every_execution_plan_field() -> None:
     """A required plan field must fail CI before it fails a candidate build."""
-    from dotmac_deployment_foundation.execution_plan import (
-        FoundationExecutionPlanV1,
-    )
+    from dotmac_deployment_foundation.execution_plan_v3 import FoundationExecutionPlanV3
 
     facility = _load_release_facility()
-    expected = {field.name for field in fields(FoundationExecutionPlanV1)}
-    observed = _execution_plan_probe_keywords(facility._EXECUTION_PLAN_PROBE)
+    expected = {field.name for field in fields(FoundationExecutionPlanV3)}
+    observed = _execution_plan_probe_keywords(facility._EXECUTION_PLAN_V3_PROBE)
     assert observed == expected
 
 
 def test_the_execution_plan_probe_field_guard_detects_an_omission() -> None:
     """Sensitivity proof for the omission that stopped candidate run 33917635417."""
-    from dotmac_deployment_foundation.execution_plan import (
-        FoundationExecutionPlanV1,
-    )
+    from dotmac_deployment_foundation.execution_plan_v3 import FoundationExecutionPlanV3
 
     facility = _load_release_facility()
-    planted = facility._EXECUTION_PLAN_PROBE.replace(
-        '    application_profile_digest=document["application_profile_digest"],\n',
+    planted = facility._EXECUTION_PLAN_V3_PROBE.replace(
+        '    host_enrolment_ref="00000000-0000-4000-8000-000000000001",\n',
         "",
     )
-    expected = {field.name for field in fields(FoundationExecutionPlanV1)}
+    expected = {field.name for field in fields(FoundationExecutionPlanV3)}
     assert _execution_plan_probe_keywords(planted) != expected
+
+
+def test_standalone_wheel_smoke_can_pass_without_claiming_v3_admission() -> None:
+    facility = _load_release_facility()
+    source = Path(facility.__file__).read_text(encoding="utf-8")
+    assert "Publication checks these bytes and an honest standalone refusal" in source
+    assert "Gate 3 release is held:" not in source
+    assert "_installed_admit_smoke(" not in source
+
+
+def test_cli_smoke_succeeds_on_v3_probe_and_honest_standalone_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facility = _load_release_facility()
+    python = tmp_path / "python"
+    script = tmp_path / "dotmac-deploy"
+    script.write_text("synthetic console script\n", encoding="utf-8")
+    calls: list[str] = []
+
+    def synthetic_run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        rendered = " ".join(str(item) for item in argv)
+        calls.append(rendered)
+        if "execution-plan" in argv:
+            return subprocess.CompletedProcess(
+                argv, 1, stdout="", stderr="no startup-fixed V3 authority is installed"
+            )
+        return subprocess.CompletedProcess(
+            argv, 0, stdout="sha256:" + "a" * 64 + "\n", stderr=""
+        )
+
+    monkeypatch.setattr(facility.subprocess, "run", synthetic_run)
+    facility._cli_smoke(python, "dotmac-deploy", tmp_path / "product.toml")
+    assert any("execution-plan" in call for call in calls)
+    assert any("execution_plan_v3_probe.py" in call for call in calls)
+    assert any("execution_binding_probe.py" in call for call in calls)
+
+    def unguarded(argv, **kwargs):  # type: ignore[no-untyped-def]
+        result = synthetic_run(argv, **kwargs)
+        if "execution-plan" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "a" * 64)
+        return result
+
+    monkeypatch.setattr(facility.subprocess, "run", unguarded)
+    with pytest.raises(facility.ReleaseRefused, match="without a startup-fixed V3"):
+        facility._cli_smoke(python, "dotmac-deploy", tmp_path / "product.toml")
+
+
+def test_verify_wheel_reaches_successful_standalone_cli_smoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facility = _load_release_facility()
+    entry = {
+        "distribution": "dotmac-deployment-foundation",
+        "entry_point": "dotmac-deploy",
+    }
+    monkeypatch.setattr(facility, "resolve", lambda distribution: entry)
+    monkeypatch.setattr(facility, "_declared", lambda selected: None)
+    monkeypatch.setattr(
+        facility, "_venv", lambda directory: (tmp_path / "python", tmp_path / "pip")
+    )
+    called: list[tuple[Path, str, Path]] = []
+    monkeypatch.setattr(
+        facility,
+        "_cli_smoke",
+        lambda python, script, descriptor: called.append((python, script, descriptor)),
+    )
+    monkeypatch.setattr(
+        facility.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0),
+    )
+    descriptor = tmp_path / "product.toml"
+    facility.cmd_verify_wheel(
+        argparse.Namespace(
+            distribution=entry["distribution"], dist=tmp_path, descriptor=descriptor
+        )
+    )
+    assert called == [(tmp_path / "python", "dotmac-deploy", descriptor)]
 
 
 # ── the lane consumes a candidate and cannot build one ──────────────────────

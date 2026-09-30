@@ -108,7 +108,11 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Final, Protocol, runtime_checkable
 
 from .errors import PreconditionFailed, StepFailed
-from .host_source import HostSource, require_host_source
+from .host_source import HostSource
+from .host_source_admission import (
+    HostSourceAdmissionProvider,
+    HostSourceAdmissionTrace,
+)
 from .recovery import (
     RESTORE_PROCEDURE,
     Adjudication,
@@ -250,6 +254,8 @@ class RecoveryOutcome:
     target: RestoreTarget | None = None
     steps_completed: tuple[str, ...] = ()
     attempt: RestoreAttempt | None = None
+    roles_attempt: RestoreAttempt | None = None
+    objects_attempt: RestoreAttempt | None = None
     adjudication: Adjudication | None = None
     findings: tuple[str, ...] = ()
     destroyed: bool = False
@@ -295,6 +301,7 @@ class RecoveryExecutor:
         *,
         source_evidence: CatalogEvidence,
         product_image: str,
+        admission_provider: HostSourceAdmissionProvider,
     ) -> None:
         self._spec = spec
         self._manifest = manifest
@@ -307,36 +314,47 @@ class RecoveryExecutor:
                 "restore nothing has started the real application against is a "
                 "database that was copied rather than a system that recovered"
             )
-        # NO HOST SOURCE INGREDIENTS ARE ACCEPTED HERE, for the identical
-        # reason `engine.run.Executor.__init__` accepts none — see that
-        # class's constructor comment for the full account of why a prior
-        # repair (`host_source_metadata` plus a receipt resolved from an
-        # operator-named directory) was itself a live bypass, not a closure
-        # of one: `CandidateReceipt` and `InstalledMetadata` are both
+        # NO HOST SOURCE PARSING INGREDIENTS ARE ACCEPTED HERE, for the
+        # identical reason `engine.run.Executor.__init__` accepts none — see
+        # that class's constructor comment for the full account of why a
+        # prior repair (`host_source_metadata` plus a receipt resolved from
+        # an operator-named directory) was itself a live bypass, not a
+        # closure of one: `CandidateReceipt` and `InstalledMetadata` are both
         # caller-authored data, and a caller supplying mutually agreeing
         # values for both stated the same digest on both sides of the
         # comparison exactly as the original `host_source_installed=` did.
         #
-        # `_do_fresh_target` (below) is this class's first effect — creating
-        # a cluster — and Boundary 4's ruling ("the same prerequisite covers
-        # every mutating executor path") applies to it exactly as it applies
-        # to `Executor.run`/`rollback`. `_verify_host_source` always calls
-        # `require_host_source(receipt=None)`: there is no receipt this class
-        # could have gotten from anywhere authenticated, so it always
-        # refuses, with a typed refusal and zero effects.
+        # `admission_provider` is the one host-source-related parameter this
+        # class DOES accept, HANDED OVER never discovered, uniform with
+        # `engine.run.Executor` (Boundary 4: "the same prerequisite covers
+        # every mutating executor path"). It is not an authority proof: a
+        # constructor caller can return invented values from its method, so
+        # positive admission awaits a trusted, non-request-selectable assembly
+        # binding and fresh Control verification. REQUIRED, with no default: a
+        # caller that wants today's unconditional refusal constructs
+        # `RefusingHostSourceAdmissionProvider()` itself — which calls exactly
+        # `require_host_source(receipt=None)` and always refuses — so a caller
+        # explicitly supplying the refusing provider observes no behavior
+        # change. The shipped CLI does exactly that. `_do_fresh_target`
+        # (below) is this class's first effect — creating a cluster — and the
+        # provider is consulted before it, never after.
+        self._admission_provider: HostSourceAdmissionProvider = admission_provider
         self._host_source: HostSource | None = None
+        self._host_source_admission_trace: HostSourceAdmissionTrace | None = None
 
     def _verify_host_source(self) -> None:
         """THE MANDATORY PREREQUISITE, called before this class's first effect.
 
-        Same shape as `engine.run.Executor._verify_host_source`, and the same
-        posture: SAFETY-ONLY. There is no seam by which a caller supplies a
-        receipt or an installed-artifact reading, so this always refuses —
-        `NO_RECEIPT` against a genuine installed artifact, `ABSENT`/
-        `WRONG_KIND` otherwise. Trusted provenance is a separate piece of
-        work, not started here.
+        Same shape as `engine.run.Executor._verify_host_source`: delegates to
+        `self._admission_provider.admit_host_source()`, a FRESH call every
+        time. With an explicitly supplied `RefusingHostSourceAdmissionProvider`,
+        this always refuses — `NO_RECEIPT` against a genuine installed
+        artifact, `ABSENT`/`WRONG_KIND` otherwise. A supplied provider's own
+        `PreconditionFailed`/`SpecError` propagates unchanged.
         """
-        self._host_source = require_host_source(receipt=None)
+        self._host_source, self._host_source_admission_trace = (
+            self._admission_provider.admit_host_source()
+        )
 
     def run(self, bundle: Mapping[str, Any]) -> RecoveryOutcome:
         """Restore, adjudicate, prove — or destroy and say why."""
@@ -396,14 +414,14 @@ class RecoveryExecutor:
     def _do_restore_roles(
         self, bundle: Mapping[str, Any], outcome: RecoveryOutcome
     ) -> None:
-        outcome.attempt = self._effects.restore_roles(
+        outcome.roles_attempt = self._effects.restore_roles(
             self._require_target(outcome), bundle=bundle
         )
 
     def _do_restore_objects(
         self, bundle: Mapping[str, Any], outcome: RecoveryOutcome
     ) -> None:
-        outcome.attempt = self._effects.restore_objects(
+        outcome.objects_attempt = self._effects.restore_objects(
             self._require_target(outcome), bundle=bundle
         )
 
@@ -418,10 +436,42 @@ class RecoveryExecutor:
         behind after exiting 1, and the next reader would have found a database
         that passes a table count.
         """
-        attempt = outcome.attempt
-        if attempt is None:  # pragma: no cover - ordering canary
+        attempts: tuple[tuple[str, RestoreAttempt | None], ...] = (
+            ("roles", outcome.roles_attempt),
+            ("objects", outcome.objects_attempt),
+        )
+        if all(attempt is None for _, attempt in attempts) and outcome.attempt:
+            # Preserve the direct-handler seam used by callers that prepare a
+            # single legacy attempt explicitly; the real procedure always
+            # fills both step-specific slots above.
+            attempts = (("restore", outcome.attempt),)
+        if any(attempt is None for _, attempt in attempts):  # pragma: no cover
             raise PreconditionFailed("nothing was restored, so nothing can be judged")
-        outcome.adjudication = adjudicate_restore(attempt)
+        for name, attempt in attempts:
+            if attempt is None:  # pragma: no cover - ordering canary
+                raise PreconditionFailed(
+                    "nothing was restored, so nothing can be judged"
+                )
+            adjudication = adjudicate_restore(attempt)
+            if adjudication.must_destroy:
+                outcome.attempt = attempt
+                outcome.adjudication = dataclasses.replace(
+                    adjudication,
+                    reasons=tuple(
+                        f"{name} restore: {reason}" for reason in adjudication.reasons
+                    ),
+                )
+                break
+        else:
+            # Keep the final successful result available through the legacy
+            # aggregate field while retaining both step-specific results above.
+            final_attempt = attempts[-1][1]
+            if final_attempt is None:  # pragma: no cover - ordering canary
+                raise PreconditionFailed(
+                    "nothing was restored, so nothing can be judged"
+                )
+            outcome.attempt = final_attempt
+            outcome.adjudication = adjudicate_restore(final_attempt)
         if outcome.adjudication.must_destroy:
             self._effects.destroy_target(self._require_target(outcome))
             outcome.destroyed = True

@@ -68,6 +68,7 @@ from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     BigInteger,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -179,6 +180,25 @@ class ArtifactAttestation(Base, TimestampMixin):
             "attestation_kind",
             "digest",
             name="uq_artifact_attestations_artifact_kind_digest",
+        ),
+        # A database-catalogue declaration is one exact contract for this
+        # artifact and scope. Unlike signatures, recording two competing
+        # declarations would make the artifact's persistence contract
+        # ambiguous. These partial uniques also close the concurrent-insert
+        # race that a service-side existence check cannot close.
+        Index(
+            "uq_artifact_attestations_module_database_catalog",
+            "artifact_id",
+            unique=True,
+            postgresql_where=sa.text("attestation_kind = 'module_database_catalog'"),
+            sqlite_where=sa.text("attestation_kind = 'module_database_catalog'"),
+        ),
+        Index(
+            "uq_artifact_attestations_product_database_catalog",
+            "artifact_id",
+            unique=True,
+            postgresql_where=sa.text("attestation_kind = 'product_database_catalog'"),
+            sqlite_where=sa.text("attestation_kind = 'product_database_catalog'"),
         ),
         schema_table_args(SCHEMA),
     )

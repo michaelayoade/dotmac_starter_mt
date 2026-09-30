@@ -24,8 +24,8 @@ vendor-assembly-only, and the composed migration gate correctly refuses a
 lineage whose owner is not in the assembly's composition. So `mod_rel` is not in
 this repository's `alembic.ini` and `make test-db-up` does not create it.
 
-The fixture therefore runs `rl_0001`'s own `upgrade()` against the admin
-connection, which is exactly how a vendor assembly will run it. That makes this
+The fixture therefore runs `rl_0001` and `rl_0002` in order against the admin
+connection, which is exactly how a vendor assembly will run them. That makes this
 a stronger test than riding on the assembly's migration chain would have been:
 it proves the lineage stands alone, which is the property a separate consuming
 repository actually depends on.
@@ -88,7 +88,10 @@ def app_user_session() -> Generator[Session, None, None]:
 def catalogue_schema(admin_engine) -> Generator[None, None, None]:
     """Apply the module's own lineage, standalone, as a vendor assembly would."""
     from dotmac_release_catalog.migrations.versions import (  # type: ignore[import-not-found]
-        rl_0001_release_artifacts as lineage,
+        rl_0001_release_artifacts as first_lineage,
+    )
+    from dotmac_release_catalog.migrations.versions import (
+        rl_0002_db_catalog_attestations as second_lineage,
     )
 
     from alembic.migration import MigrationContext
@@ -97,12 +100,64 @@ def catalogue_schema(admin_engine) -> Generator[None, None, None]:
     with admin_engine.begin() as connection:
         context = MigrationContext.configure(connection)
         with Operations.context(context):
-            lineage.upgrade()
+            first_lineage.upgrade()
+            second_lineage.upgrade()
     yield
     with admin_engine.begin() as connection:
         context = MigrationContext.configure(connection)
         with Operations.context(context):
-            lineage.downgrade()
+            second_lineage.downgrade()
+            first_lineage.downgrade()
+
+
+@pytest.mark.parametrize(
+    "kind,index_name",
+    (
+        (
+            "module_database_catalog",
+            "uq_artifact_attestations_module_database_catalog",
+        ),
+        (
+            "product_database_catalog",
+            "uq_artifact_attestations_product_database_catalog",
+        ),
+    ),
+)
+def test_database_catalogue_migration_refuses_competing_claims_on_postgres(
+    admin_session: Session,
+    published: uuid.UUID,
+    kind: str,
+    index_name: str,
+) -> None:
+    """The actual rl_0002 indexes, not ORM metadata, enforce singularity."""
+    insert = text(
+        "INSERT INTO mod_rel.artifact_attestations "
+        "(id, artifact_id, attestation_kind, uri, digest) "
+        "VALUES (:id, :artifact_id, :kind, :uri, :digest)"
+    )
+    admin_session.execute(
+        insert,
+        {
+            "id": uuid.uuid4(),
+            "artifact_id": published,
+            "kind": kind,
+            "uri": "held://first.json",
+            "digest": "sha256:" + "a" * 64,
+        },
+    )
+    admin_session.commit()
+    with pytest.raises(IntegrityError, match=index_name):
+        admin_session.execute(
+            insert,
+            {
+                "id": uuid.uuid4(),
+                "artifact_id": published,
+                "kind": kind,
+                "uri": "held://second.json",
+                "digest": "sha256:" + "b" * 64,
+            },
+        )
+    admin_session.rollback()
 
 
 @pytest.fixture

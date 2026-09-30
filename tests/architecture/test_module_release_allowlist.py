@@ -520,12 +520,27 @@ def test_brand_profiles_local_smoke_dependency_is_derived_from_policy() -> None:
     assert module.local_first_party_dependencies(planted) == []
 
 
-def test_verify_wheel_adds_first_party_artifacts_to_find_links(
+def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The built dependency directory must reach pip, not stop at the workflow."""
+    """The target, kernel and first-party dependency wheels reach pip as exact
+    paths — never as names an index could satisfy — their provenance is proven
+    in an isolated interpreter, and the kernel/dependency wheels are recorded
+    by filename and SHA-256."""
     module = _release_module_script()
     commands: list[list[str]] = []
+
+    dirs = {}
+    for name, wheel in (
+        ("module-dist", "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl"),
+        ("kernel-dist", "dotmac_kernel-0.1.0a105-py3-none-any.whl"),
+        ("first-party-dist", "dotmac_party-0.1.0a3-py3-none-any.whl"),
+    ):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / wheel).write_bytes(wheel.encode())
+        (directory / "ignored.tar.gz").write_bytes(b"sdist")
+        dirs[name] = directory
 
     monkeypatch.setattr(
         module,
@@ -539,19 +554,35 @@ def test_verify_wheel_adds_first_party_artifacts_to_find_links(
         commands.append(command)
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
+    manifest = tmp_path / "out" / "smoke-dependencies.json"
     module.cmd_verify_wheel(
         argparse.Namespace(
             distribution="dotmac-brand-profiles",
-            dist="module-dist",
-            kernel_dist="kernel-dist",
-            dependency_dist=["first-party-dist"],
+            dist=str(dirs["module-dist"]),
+            kernel_dist=str(dirs["kernel-dist"]),
+            dependency_dist=[str(dirs["first-party-dist"])],
+            emit_dependency_manifest=str(manifest),
         )
     )
 
-    assert len(commands) == 1
-    install = commands[0]
-    dependency_link = install.index("first-party-dist")
-    assert install[dependency_link - 1] == "--find-links"
+    install, provenance = commands
+    assert "--find-links" not in install
+    wheels = [arg for arg in install if arg.endswith(".whl")]
+    assert sorted(Path(arg).name for arg in wheels) == [
+        "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl",
+        "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+        "dotmac_party-0.1.0a3-py3-none-any.whl",
+    ]
+    assert provenance[1] == "-I"
+    assert "direct_url.json" in provenance[3]
+
+    recorded = json.loads(manifest.read_text())
+    assert recorded["schema"] == "SmokeDependencyWheels.v1"
+    assert [w["filename"] for w in recorded["wheels"]] == [
+        "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+        "dotmac_party-0.1.0a3-py3-none-any.whl",
+    ]
+    assert all(len(w["sha256"]) == 64 for w in recorded["wheels"])
 
 
 def test_local_dependency_builder_builds_the_discovered_wheel(
@@ -821,11 +852,12 @@ def test_the_release_sequence_matches_the_kernel_workflow() -> None:
     ), "the build must precede the upload in the same file order"
     # Publication happens once, in the publish job.
     assert source.count("twine upload") == 1
-    # The tag is written only in the verify job, after registry verification.
+    # The tag is written only in the verify job, after registry verification,
+    # via the one fail-closed writer both the release and recovery paths share.
     verify = source.split("verify:", 1)[1]
-    assert "git tag" in verify
+    assert "tag_module_release.py" in verify
     assert "verify-registry" in verify
-    assert verify.index("verify-registry") < verify.index("git tag")
+    assert verify.index("verify-registry") < verify.index("tag_module_release.py")
 
 
 def test_publish_re_asserts_the_allowlist_after_approval() -> None:
@@ -902,7 +934,9 @@ def test_composition_runs_before_the_tag_and_is_optional() -> None:
     verify = _executable(WORKFLOW).split("verify:", 1)[1]
     assert "Verify the published composition" in verify
     assert "if: inputs.compose_with != ''" in verify
-    assert verify.index("Verify the published composition") < verify.index("git tag")
+    assert verify.index("Verify the published composition") < verify.index(
+        "tag_module_release.py"
+    )
 
 
 def test_composition_requires_an_exact_published_kernel() -> None:
@@ -917,12 +951,22 @@ def test_composition_requires_an_exact_published_kernel() -> None:
     )
 
 
-def test_the_tag_message_states_what_was_verified() -> None:
-    """A tag reading "verified" without saying verified HOW invites the reader
-    to assume the stronger claim."""
+def test_the_tag_message_is_canonical_evidence_not_free_text() -> None:
+    """A hand-written NOTE can drift from what was actually verified; the tag
+    message is instead exactly one line of `ModuleReleaseTagEvidence.v1`
+    JSON, rendered by `render_module_release_tag_evidence` from the wheel
+    `compare-published` just verified and this run's own id — never a
+    composed-or-alone sentence a later edit could get wrong. (Composition
+    detail lives in the dispatch inputs and the run's own logs, not in the
+    tag: the canonical evidence identifies the verified WHEEL, not the set it
+    was proved alongside.)"""
     source = WORKFLOW.read_text(encoding="utf-8")
-    assert "installed and registered alone" in source
-    assert "composes with" in source
+    assert "python scripts/tag_module_release.py" in source
+    assert "--run-id" in source
+    assert "--artifact-dir" in source
+    verify = source.split("verify:", 1)[1]
+    assert "installed and registered alone" not in verify
+    assert "(${NOTE})" not in verify
 
 
 def test_the_composition_check_cannot_publish_or_tag() -> None:
@@ -932,5 +976,5 @@ def test_the_composition_check_cannot_publish_or_tag() -> None:
         PROJECT_ROOT / ".github" / "workflows" / "verify-module-composition.yml"
     )
     assert "twine upload" not in composition
-    assert "git tag" not in composition
+    assert "tag_module_release.py" not in composition
     assert "contents: write" not in composition

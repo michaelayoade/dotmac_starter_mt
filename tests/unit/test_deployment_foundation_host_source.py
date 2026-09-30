@@ -50,6 +50,7 @@ from dotmac_deployment_foundation.host_source import (
     MALFORMED_SOURCE_REVISION,
     NO_RECEIPT,
     WRONG_KIND,
+    WRONG_SUBJECT,
     CandidateReceipt,
     HostSource,
     InstalledArtifact,
@@ -248,6 +249,65 @@ def test_a_receipt_about_another_facility_does_not_bind_these_bytes() -> None:
 
     assert refusal.value.code == DISAGREES
     assert "dotmac-deployment-control" in str(refusal.value)
+
+
+def test_an_internally_consistent_other_distribution_cannot_bind_foundation() -> None:
+    """PLANTED. A caller who supplies `distribution="dotmac-kernel"` alongside
+    a receipt whose `facility` is also `"dotmac-kernel"`, and an installed
+    reading that (via the `distribution` parameter) reports that same
+    distribution, is internally self-consistent end to end — every existing
+    comparison here is between two "dotmac-kernel" values and agrees. None of
+    that makes this module's own subject `dotmac-kernel`: `DISTRIBUTION` names
+    exactly one package, and no self-consistent triple about a DIFFERENT
+    package may bind it."""
+    document = _receipt_document()
+    document["facility"] = "dotmac-kernel"
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(
+            receipt=candidate_receipt_from_mapping(document),
+            distribution="dotmac-kernel",
+            metadata=FakeInstall(),
+            source_tree_digest=_source_tree_digest,
+        )
+
+    assert refusal.value.code == WRONG_SUBJECT
+    message = str(refusal.value)
+    assert "dotmac-kernel" in message, message
+    assert DISTRIBUTION in message, message
+
+
+def test_an_injected_installed_reading_for_another_distribution_is_refused() -> None:
+    """PLANTED, on the `installed=` seam rather than the `distribution=` one.
+
+    `distribution` is left at its DEFAULT here — never mentions
+    `"dotmac-kernel"` anywhere — so this proves the check fires from
+    `reading.distribution`, not from echoing the caller's own `distribution`
+    argument back at itself. A check that compared the raw `distribution`
+    parameter instead would let this exact planted reading straight through,
+    because the parameter never named the wrong subject; only the injected
+    `InstalledArtifact` does."""
+    planted = InstalledArtifact(
+        distribution="dotmac-kernel",
+        version=VERSION,
+        artifact_digest=Digest.parse(WHEEL_SHA256),
+        installed_content_digest=Digest.of(b"unrelated"),
+        read_from="a planted installed reading for another distribution",
+    )
+    document = _receipt_document()
+    document["facility"] = "dotmac-kernel"
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(
+            receipt=candidate_receipt_from_mapping(document),
+            installed=planted,
+            source_tree_digest=_source_tree_digest,
+        )
+
+    assert refusal.value.code == WRONG_SUBJECT
+    message = str(refusal.value)
+    assert "dotmac-kernel" in message, message
+    assert DISTRIBUTION in message, message
 
 
 def test_a_matching_digest_with_the_wrong_version_is_refused() -> None:
@@ -449,8 +509,15 @@ def test_absent_and_disagreeing_are_different_refusals() -> None:
     'no digest' is repaired by installing from an artifact, 'wrong digest' by
     working out which of two records is stale. One code for both would send
     every reader to one of those and be wrong half the time."""
-    codes = {ABSENT, WRONG_KIND, DISAGREES, NO_RECEIPT}
-    assert len(codes) == 4, (
+    codes = {
+        ABSENT,
+        WRONG_KIND,
+        DISAGREES,
+        NO_RECEIPT,
+        MALFORMED_SOURCE_REVISION,
+        WRONG_SUBJECT,
+    }
+    assert len(codes) == 6, (
         "two refusal codes collided. Distinct causes sharing a code is exactly "
         "the conflation this file was written to prevent"
     )

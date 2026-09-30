@@ -53,11 +53,9 @@ make the intent unambiguous and unable to mean anything else.
 ## Foundation only PLANS this — and half of that is not here yet
 
 There is deliberately no ``StepKind`` for the act and no ``Effects`` method to
-invoke it. Adding one widens a protocol whose implementers include
-``_PROBE_BINDINGS_SOURCE`` in `scripts/release_facility.py` — the probe wheel the
-publication gate installs — so a widening makes the gate's own fixture
-non-conforming until updated. That is held pending a ruling, and this module is
-the half that does not depend on it.
+invoke it. Adding one widens the ``Effects`` protocol for every implementation,
+so it is held pending a ruling, and this module is the half that does not depend
+on it.
 
 Same staging as `RecoveryExecutionPlanV1` and `ApplicationFoundationProfile.v1`:
 the type refuses first, reachability comes later, so a half-built chain cannot

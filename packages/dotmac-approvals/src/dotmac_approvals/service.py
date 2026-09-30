@@ -20,9 +20,10 @@ caller unable to compose an approval with its own state change atomically — th
 exact property a consuming domain needs when it records "approved" alongside
 whatever it does next.
 
-**This module never performs the approved transition.** It returns events; the
-subject's owner reacts to them and runs its own guarded transition (§ 6). See
-`outbox.py` for the optional adapter that writes them to the kernel outbox.
+**This module never performs the subject's approved transition.** It returns
+events; the subject's owner runs its own guarded transition (§ 6). Withdrawal
+mutation is private: `outbox.py` owns the public command and atomically enqueues
+its revocation event. Other lifecycle events retain the generic adapter.
 """
 
 from __future__ import annotations
@@ -32,9 +33,11 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import ColumnElement, func, select
+from dotmac_kernel.transactions import conflict_savepoint
+from sqlalchemy import ColumnElement, func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_approvals import policy as rules
@@ -44,12 +47,15 @@ from dotmac_approvals.contracts import (
     Actor,
     ApprovalError,
     ApprovalEvent,
+    ApprovalHoldRefusal,
     ApprovalLevel,
+    ApprovalNotHeld,
     ApprovalState,
     ContentChanged,
     DecisionAction,
     DecisionView,
     Evaluation,
+    HeldPlatformApproval,
     NotRequester,
     PolicyNotFound,
     PolicyRevision,
@@ -62,15 +68,20 @@ from dotmac_approvals.contracts import (
     RequestNotPending,
     RequestPage,
     RequestView,
+    WithdrawalEvidence,
+    WithdrawalReferenceConflict,
+    WithdrawalRefused,
     validate_digest,
 )
 from dotmac_approvals.models import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    ApprovalWithdrawal,
     PlatformApprovalDecision,
     PlatformApprovalPolicy,
     PlatformApprovalRequest,
+    PlatformApprovalWithdrawal,
 )
 
 
@@ -461,6 +472,323 @@ def _state_event(request: ApprovalRequest | PlatformApprovalRequest) -> Approval
         policy_code=request.policy_code,
         policy_version=request.policy_version,
         content_digest=request.content_digest,
+    )
+
+
+def _utc(value: datetime) -> datetime:
+    """SQLite drops timezone metadata; the module's timestamps are UTC."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _withdrawal_evidence(
+    row: ApprovalWithdrawal | PlatformApprovalWithdrawal,
+) -> WithdrawalEvidence:
+    return WithdrawalEvidence(
+        withdrawal_id=row.id,
+        approved_at=_utc(row.approved_at),
+        actor_id=row.actor_id,
+        authority_ref=row.authority_ref,
+        reason=row.reason,
+        effective_at=_utc(row.effective_at),
+        external_ref=row.external_ref,
+    )
+
+
+def _withdrawal_event(
+    request: ApprovalRequest | PlatformApprovalRequest,
+    row: ApprovalWithdrawal | PlatformApprovalWithdrawal,
+) -> ApprovalEvent:
+    return ApprovalEvent(
+        event_type=EVENT_FOR_STATE[ApprovalState.WITHDRAWN],
+        subject_type=request.subject_type,
+        subject_id=request.subject_id,
+        request_id=request.id,
+        policy_code=request.policy_code,
+        policy_version=request.policy_version,
+        content_digest=request.content_digest,
+        state=ApprovalState.WITHDRAWN,
+        withdrawal=_withdrawal_evidence(row),
+    )
+
+
+def _validate_withdrawal_fields(
+    *, authority_ref: str, reason: str, external_ref: str
+) -> None:
+    for name, value in (
+        ("authority_ref", authority_ref),
+        ("reason", reason),
+        ("external_ref", external_ref),
+    ):
+        if not value or not value.strip():
+            raise WithdrawalRefused(f"{name} must be non-empty")
+    if len(authority_ref) > 200 or len(external_ref) > 200:
+        raise WithdrawalRefused("withdrawal references must fit 200 characters")
+
+
+def _check_withdrawal_replay(
+    request: ApprovalRequest | PlatformApprovalRequest,
+    row: ApprovalWithdrawal | PlatformApprovalWithdrawal | None,
+    *,
+    actor: Actor,
+    authority_ref: str,
+    reason: str,
+    external_ref: str,
+) -> bool:
+    if row is None:
+        return False
+    if (
+        row.request_id != request.id
+        or row.external_ref != external_ref
+        or row.actor_id != actor.actor_id
+        or row.authority_ref != authority_ref
+        or row.reason != reason
+    ):
+        raise WithdrawalReferenceConflict("withdrawal reference or evidence differs")
+    return True
+
+
+def _withdrawal_unique_conflict(exc: IntegrityError) -> bool:
+    """Distinguish expected reference races from unrelated DB corruption."""
+    constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", "")
+    if constraint in {
+        "uq_approval_withdrawals_external_ref",
+        "uq_approval_withdrawals_request",
+        "uq_platform_approval_withdrawals_external_ref",
+        "uq_platform_approval_withdrawals_request",
+    }:
+        return True
+    return "UNIQUE constraint failed" in str(exc.orig) and "withdrawals" in str(
+        exc.orig
+    )
+
+
+def _withdraw_tenant_approval(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    request_id: UUID,
+    actor: Actor,
+    authority_ref: str,
+    reason: str,
+    external_ref: str,
+) -> ApprovalOutcome:
+    """Withdraw a completed tenant approval once, recording immutable evidence.
+
+    The caller owns authorization. This service obtains its effective time from
+    its UTC clock; callers cannot backdate or schedule a withdrawal. The request
+    lock serializes competing writers on PostgreSQL. This is a private mutation
+    helper: the public outbox command enqueues its event in the same transaction.
+    """
+    _validate_withdrawal_fields(
+        authority_ref=authority_ref, reason=reason, external_ref=external_ref
+    )
+    request = db.execute(
+        select(ApprovalRequest)
+        .where(ApprovalRequest.tenant_id == tenant_id, ApprovalRequest.id == request_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if request is None:
+        raise PolicyNotFound(f"no tenant approval request {request_id}")
+    by_ref = db.execute(
+        select(ApprovalWithdrawal).where(
+            ApprovalWithdrawal.tenant_id == tenant_id,
+            ApprovalWithdrawal.external_ref == external_ref,
+        )
+    ).scalar_one_or_none()
+    by_request = db.execute(
+        select(ApprovalWithdrawal).where(
+            ApprovalWithdrawal.tenant_id == tenant_id,
+            ApprovalWithdrawal.request_id == request_id,
+        )
+    ).scalar_one_or_none()
+    if by_ref is not None and by_ref.request_id != request_id:
+        raise WithdrawalReferenceConflict(
+            "withdrawal reference belongs to another request"
+        )
+    existing = by_request or by_ref
+    if _check_withdrawal_replay(
+        request,
+        existing,
+        actor=actor,
+        authority_ref=authority_ref,
+        reason=reason,
+        external_ref=external_ref,
+    ):
+        if request.state != str(ApprovalState.WITHDRAWN):
+            raise WithdrawalRefused("withdrawal row and request standing disagree")
+        revision = _tenant_policy(
+            db, tenant_id, request.policy_code, request.policy_version
+        )
+        return _tenant_outcome(db, tenant_id, request, revision, events=())
+    if request.state != str(ApprovalState.APPROVED) or request.completed_at is None:
+        raise WithdrawalRefused("only a completed approval may be withdrawn")
+    revision = _tenant_policy(
+        db, tenant_id, request.policy_code, request.policy_version
+    )
+    decisions = _recorded(_tenant_decisions(db, tenant_id, request_id))
+    if not rules.evaluate(
+        revision,
+        state=ApprovalState.APPROVED,
+        current_level=request.current_level,
+        decisions=decisions,
+    ).is_approved:
+        raise WithdrawalRefused("request has no complete approval decision")
+    try:
+        with conflict_savepoint(db):
+            if db.get_bind().dialect.name == "postgresql":
+                db.execute(
+                    text(
+                        "SELECT mod_approvals.record_tenant_withdrawal("
+                        ":tenant_id, :request_id, :withdrawal_id, "
+                        ":actor_id, "
+                        ":authority_ref, :reason, :external_ref)"
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "request_id": request_id,
+                        "withdrawal_id": uuid4(),
+                        "actor_id": actor.actor_id,
+                        "authority_ref": authority_ref,
+                        "reason": reason,
+                        "external_ref": external_ref,
+                    },
+                )
+                db.refresh(request)
+                row = db.execute(
+                    select(ApprovalWithdrawal).where(
+                        ApprovalWithdrawal.tenant_id == tenant_id,
+                        ApprovalWithdrawal.request_id == request_id,
+                    )
+                ).scalar_one()
+            else:
+                row = ApprovalWithdrawal(
+                    tenant_id=tenant_id,
+                    request_id=request_id,
+                    actor_id=actor.actor_id,
+                    authority_ref=authority_ref,
+                    reason=reason,
+                    external_ref=external_ref,
+                    effective_at=datetime.now(UTC),
+                    approved_at=request.completed_at,
+                )
+                db.add(row)
+                request.state = str(ApprovalState.WITHDRAWN)
+                db.flush()
+    except IntegrityError as exc:
+        if _withdrawal_unique_conflict(exc):
+            raise WithdrawalReferenceConflict(
+                "withdrawal reference or request was concurrently consumed"
+            ) from exc
+        raise
+    return _tenant_outcome(
+        db, tenant_id, request, revision, events=(_withdrawal_event(request, row),)
+    )
+
+
+def _withdraw_platform_approval(
+    db: Session,
+    *,
+    request_id: UUID,
+    actor: Actor,
+    authority_ref: str,
+    reason: str,
+    external_ref: str,
+) -> ApprovalOutcome:
+    """Withdraw a completed platform approval under the same lifecycle rules."""
+    _validate_withdrawal_fields(
+        authority_ref=authority_ref, reason=reason, external_ref=external_ref
+    )
+    request = db.execute(
+        select(PlatformApprovalRequest)
+        .where(PlatformApprovalRequest.id == request_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if request is None:
+        raise PolicyNotFound(f"no platform approval request {request_id}")
+    by_ref = db.execute(
+        select(PlatformApprovalWithdrawal).where(
+            PlatformApprovalWithdrawal.external_ref == external_ref
+        )
+    ).scalar_one_or_none()
+    by_request = db.execute(
+        select(PlatformApprovalWithdrawal).where(
+            PlatformApprovalWithdrawal.request_id == request_id
+        )
+    ).scalar_one_or_none()
+    if by_ref is not None and by_ref.request_id != request_id:
+        raise WithdrawalReferenceConflict(
+            "withdrawal reference belongs to another request"
+        )
+    existing = by_request or by_ref
+    if _check_withdrawal_replay(
+        request,
+        existing,
+        actor=actor,
+        authority_ref=authority_ref,
+        reason=reason,
+        external_ref=external_ref,
+    ):
+        if request.state != str(ApprovalState.WITHDRAWN):
+            raise WithdrawalRefused("withdrawal row and request standing disagree")
+        revision = _platform_policy(db, request.policy_code, request.policy_version)
+        return _platform_outcome(db, request, revision, events=())
+    if request.state != str(ApprovalState.APPROVED) or request.completed_at is None:
+        raise WithdrawalRefused("only a completed approval may be withdrawn")
+    revision = _platform_policy(db, request.policy_code, request.policy_version)
+    decisions = _recorded(_platform_decisions(db, request_id))
+    if not rules.evaluate(
+        revision,
+        state=ApprovalState.APPROVED,
+        current_level=request.current_level,
+        decisions=decisions,
+    ).is_approved:
+        raise WithdrawalRefused("request has no complete approval decision")
+    try:
+        with conflict_savepoint(db):
+            if db.get_bind().dialect.name == "postgresql":
+                db.execute(
+                    text(
+                        "SELECT mod_approvals.record_platform_withdrawal("
+                        ":request_id, :withdrawal_id, :actor_id, "
+                        ":authority_ref, "
+                        ":reason, :external_ref)"
+                    ),
+                    {
+                        "request_id": request_id,
+                        "withdrawal_id": uuid4(),
+                        "actor_id": actor.actor_id,
+                        "authority_ref": authority_ref,
+                        "reason": reason,
+                        "external_ref": external_ref,
+                    },
+                )
+                db.refresh(request)
+                row = db.execute(
+                    select(PlatformApprovalWithdrawal).where(
+                        PlatformApprovalWithdrawal.request_id == request_id
+                    )
+                ).scalar_one()
+            else:
+                row = PlatformApprovalWithdrawal(
+                    request_id=request_id,
+                    actor_id=actor.actor_id,
+                    authority_ref=authority_ref,
+                    reason=reason,
+                    external_ref=external_ref,
+                    effective_at=datetime.now(UTC),
+                    approved_at=request.completed_at,
+                )
+                db.add(row)
+                request.state = str(ApprovalState.WITHDRAWN)
+                db.flush()
+    except IntegrityError as exc:
+        if _withdrawal_unique_conflict(exc):
+            raise WithdrawalReferenceConflict(
+                "withdrawal reference or request was concurrently consumed"
+            ) from exc
+        raise
+    return _platform_outcome(
+        db, request, revision, events=(_withdrawal_event(request, row),)
     )
 
 
@@ -934,11 +1262,36 @@ def tenant_decision_history(
     )
 
 
+def get_tenant_withdrawal(
+    db: Session, *, tenant_id: UUID, request_id: UUID
+) -> WithdrawalEvidence | None:
+    """Read the immutable withdrawal record, if an approval was withdrawn."""
+    row = db.execute(
+        select(ApprovalWithdrawal).where(
+            ApprovalWithdrawal.tenant_id == tenant_id,
+            ApprovalWithdrawal.request_id == request_id,
+        )
+    ).scalar_one_or_none()
+    return _withdrawal_evidence(row) if row is not None else None
+
+
 def platform_decision_history(
     db: Session, *, request_id: UUID
 ) -> tuple[DecisionView, ...]:
     """Every decision on one control-plane request, oldest first."""
     return tuple(_decision_view(row) for row in _platform_decisions(db, request_id))
+
+
+def get_platform_withdrawal(
+    db: Session, *, request_id: UUID
+) -> WithdrawalEvidence | None:
+    """Read the immutable platform withdrawal record, if present."""
+    row = db.execute(
+        select(PlatformApprovalWithdrawal).where(
+            PlatformApprovalWithdrawal.request_id == request_id
+        )
+    ).scalar_one_or_none()
+    return _withdrawal_evidence(row) if row is not None else None
 
 
 def get_tenant_request(
@@ -995,6 +1348,108 @@ def get_tenant_request(
         evaluation=evaluation,
         permitted_actions=actions,
         refusals=refusals,
+        withdrawal=get_tenant_withdrawal(
+            db, tenant_id=tenant_id, request_id=request_id
+        ),
+    )
+
+
+def hold_platform_approval(
+    db: Session,
+    *,
+    request_id: UUID,
+    subject_type: str,
+    subject_id: str,
+    content_digest: str,
+) -> HeldPlatformApproval:
+    """Vouch that a platform approval stands, and keep it standing until commit.
+
+    Locks the request row FOR SHARE and validates, under that lock, that it names
+    exactly this subject and digest, is APPROVED (not withdrawn), was completed,
+    and carries at least one approve decision. The lock is released only when the
+    CALLER's transaction ends; this function never commits.
+
+    It is the synchronous barrier for any transition that depends on the
+    approval (plan approval, rollout, dispatch in `dotmac-deployment-control`).
+    `withdraw_platform_approval` locks the same row FOR UPDATE, so a composing
+    caller that holds this, performs its transition, and commits in ONE
+    transaction gets exactly two orderings: the withdrawal committed first and
+    this refuses (`WITHDRAWN`), or the withdrawal waits until the dependent
+    transition has committed and is then delivered as an event. A check made
+    without the lock, however late, leaves a window between reading "approved"
+    and committing the transition.
+
+    Refuses with `ApprovalNotHeld` carrying an `ApprovalHoldRefusal` code, and
+    only with that: a malformed digest is `MALFORMED_DIGEST`, not the generic
+    `ContentChanged` the digest validator raises elsewhere, so a composing
+    transition can branch on one closed vocabulary.
+
+    The returned `HeldPlatformApproval` is EVIDENCE, not the lock. The lock lives
+    only in the caller's open transaction: carrying the value past a commit, or
+    into another session, carries no protection at all.
+    """
+    try:
+        validate_digest(content_digest)
+    except ContentChanged as malformed:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.MALFORMED_DIGEST, str(malformed)
+        ) from malformed
+    row = db.execute(
+        select(PlatformApprovalRequest)
+        .where(PlatformApprovalRequest.id == request_id)
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if row is None:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.REQUEST_NOT_FOUND,
+            f"no platform approval request {request_id}",
+        )
+    if row.subject_type != subject_type or row.subject_id != subject_id:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.SUBJECT_MISMATCH,
+            f"platform approval request {request_id} does not name this subject",
+        )
+    if row.content_digest != content_digest:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.DIGEST_MISMATCH,
+            f"platform approval request {request_id} approved different content",
+        )
+    if row.state == str(ApprovalState.WITHDRAWN):
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.WITHDRAWN,
+            f"platform approval request {request_id} was withdrawn",
+        )
+    if row.state != str(ApprovalState.APPROVED) or row.completed_at is None:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.NOT_APPROVED,
+            f"platform approval request {request_id} is {row.state}, not approved",
+        )
+    approvers = tuple(
+        db.scalars(
+            select(PlatformApprovalDecision.actor_id)
+            .where(
+                PlatformApprovalDecision.request_id == request_id,
+                PlatformApprovalDecision.action == str(DecisionAction.APPROVE),
+            )
+            .order_by(PlatformApprovalDecision.decided_at, PlatformApprovalDecision.id)
+        )
+    )
+    if not approvers:
+        raise ApprovalNotHeld(
+            ApprovalHoldRefusal.NO_APPROVE_DECISION,
+            f"platform approval request {request_id} is approved without an "
+            "approve decision",
+        )
+    return HeldPlatformApproval(
+        request_id=row.id,
+        subject_type=row.subject_type,
+        subject_id=row.subject_id,
+        content_digest=row.content_digest,
+        policy_code=row.policy_code,
+        policy_version=row.policy_version,
+        decided_at=row.completed_at,
+        approver_ids=approvers,
     )
 
 
@@ -1041,6 +1496,7 @@ def get_platform_request(
         evaluation=evaluation,
         permitted_actions=actions,
         refusals=refusals,
+        withdrawal=get_platform_withdrawal(db, request_id=request_id),
     )
 
 
@@ -1119,8 +1575,11 @@ __all__ = [
     "evaluate_tenant_approval",
     "get_platform_policy",
     "get_platform_request",
+    "hold_platform_approval",
+    "get_platform_withdrawal",
     "get_tenant_policy",
     "get_tenant_request",
+    "get_tenant_withdrawal",
     "list_platform_policy_versions",
     "list_platform_requests",
     "list_tenant_policy_versions",

@@ -370,6 +370,68 @@ def test_structured_identifiers_preserve_quoted_postgres_spelling() -> None:
     assert table.columns[0].name == "payload.value"
 
 
+def test_dropped_column_attnum_gap_is_preserved_not_renumbered() -> None:
+    owner = DatabaseCatalogOwnerV1(DatabaseCatalogOwnerKind.KERNEL, "kernel")
+    columns = (
+        DatabaseColumnContractV1("id", 1, _type(), False),
+        DatabaseColumnContractV1("later", 3, _type(), True),
+    )
+    declared = DatabaseTableContractV1(
+        schema="public",
+        name="gap_fixture",
+        owner=owner,
+        plane=DatabasePersistencePlane.HOST,
+        relation_kind=DatabaseRelationKind.TABLE,
+        columns=columns,
+    )
+    observed = ObservedDatabaseTableV1(
+        schema="public",
+        name="gap_fixture",
+        relation_kind=DatabaseRelationKind.TABLE,
+        columns=columns,
+    )
+
+    assert [column.ordinal for column in declared.columns] == [1, 3]
+    assert [column.ordinal for column in observed.columns] == [1, 3]
+    observation = PostgresTablesColumnsObservationV1(
+        postgres_major=16,
+        covered_schemas=("public",),
+        present_schemas=("public",),
+        tables=(observed,),
+        database_extent_complete=True,
+    )
+    retained = PostgresTablesColumnsObservationV1.from_json_bytes(
+        observation.to_json_bytes(), expected_digest=observation.digest
+    )
+    assert [column.ordinal for column in retained.tables[0].columns] == [1, 3]
+
+
+@pytest.mark.parametrize("ordinals", [(2, 1), (1, 1)])
+def test_dropped_column_gap_still_refuses_reordered_or_duplicate_ordinals(
+    ordinals: tuple[int, int],
+) -> None:
+    columns = (
+        DatabaseColumnContractV1("id", ordinals[0], _type(), False),
+        DatabaseColumnContractV1("later", ordinals[1], _type(), True),
+    )
+    with pytest.raises(ProductDatabaseCatalogError, match="strictly increasing"):
+        DatabaseTableContractV1(
+            schema="public",
+            name="gap_fixture",
+            owner=DatabaseCatalogOwnerV1(DatabaseCatalogOwnerKind.KERNEL, "kernel"),
+            plane=DatabasePersistencePlane.HOST,
+            relation_kind=DatabaseRelationKind.TABLE,
+            columns=columns,
+        )
+    with pytest.raises(ProductDatabaseCatalogError, match="strictly increasing"):
+        ObservedDatabaseTableV1(
+            schema="public",
+            name="gap_fixture",
+            relation_kind=DatabaseRelationKind.TABLE,
+            columns=columns,
+        )
+
+
 def test_module_detail_cannot_invent_or_omit_a_manifest_table() -> None:
     contribution = ModuleDatabaseCatalogContributionV1(
         lineage_head="dc_0002_canonical_plan_digest",

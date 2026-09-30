@@ -593,10 +593,38 @@ Every host MUTATION is now routed through `engine/run.py`'s `Executor`. The
 invoke a second transaction class directly over the composed host effects,
 outside `Executor`'s grant and execution-plan checks; that class is deleted.
 Exposure is a typed effect the executor performs from an authorized
-`FoundationExecutionPlanV2`, and `exposure-apply` observes without applying.
-The residue is stated rather than hidden: Lane 3's two exposure items are
-`blocked`, because Control issues no V2 plan carrying a reconciliation yet, so
-the act has an owner and no authorization naming it. The
+`FoundationExecutionPlanV3`, and `exposure-apply` observes without applying.
+The V3 plan fixes the candidate's recorded wheel digest, target ID/ref,
+controller SSH fingerprint, Fleet/Control host ID, host-key incarnation and
+immutable enrolment/root-version reference. Foundation alone issues an
+`ExecutionGrant` after a startup-fixed trusted assembly provider attests
+Control's V2 authorization+dispatch pair and reobserves those independent
+facts. V1 authority is retired; V1/V2 documents remain historical only.
+The CLI/Lane 3/release path has no concrete CP provider composition yet and
+therefore refuses execution; a request-selected verifier cannot bridge that
+gap. F2 host-source admission remains the independent installed-source gate
+before effects; the PEP610 wheel digest is source-artifact evidence, not a
+fresh byte-integrity attestation.
+F2's authenticated installed host ID, signer fingerprint and root-version
+UUID are compared exactly to the V3 plan and fresh provider observation before
+either deploy or rollback effects. `Effects` exposes no authenticated target
+identity, so the CP adapter must compose its Effects, F2 admission provider
+and V3 provider as one trusted in-process bundle; request fields cannot select
+those independently. The V3 provider's pre-effect Control seam takes the
+frozen original authorization+dispatch pair and a deterministic
+`control-dispatch:<dispatch_id>` ledger key. Foundation compares the receipt,
+V3 plan, fresh context, F2 trace, sequence/attempt and expiry before the call.
+CP atomically revalidates current approval standing and consumes the exact
+dispatch, refusing before commit or returning `None` only after commit.
+Foundation performs no fallible post-commit check before effects. Control's
+committed ledger is the recovery source if Foundation crashes before local
+`DeploymentEvidence.v2` can record the same key; V1 evidence bytes are
+unchanged. This source defines the seam; an external CP implementation
+and its conformance proof are not present here. Installed-wheel release smoke
+checks V3 render/digest bytes and an honest standalone CLI refusal; it may
+pass without CP adoption, while the actual execution path still cannot.
+Lane 3's two exposure items remain
+`blocked` until the trusted pair and V3 plan name their act. The
 `ApplicationFoundationProfile.v1` verifier is likewise report-only: this
 assembly does not compose it into boot or deploy. No Foundation `HostSource`
 provider is composed here, and failed-production recovery is deliberately
@@ -634,6 +662,18 @@ The sidecar is a
 typed migration seam, not a v1 descriptor fact. `ProductDeploymentSpec.v2` is
 the explicit successor: when it declares `[database]`, it requires and
 digest-covers those coordinates while the v1 reader continues to refuse them.
+`ProductDeploymentSpec.v3` retains that v2 database binding and adds a
+digest-covered `compose_topology` for multi-network placement, typed mounts,
+and profile-gated support jobs. The renderer derives the Compose services
+from this field; the host provider validates descriptor-bound bind-source
+hashes before mutating,
+requires a byte-checked retained Compose asset, and requires an exact-output
+postcondition for a deploy-time support job. A V3 plan does not promise
+rollback from a previous image digest alone, even after an online migration;
+the provider also refuses switching without a separately retained, authorized
+old asset. This
+schema is an implementation surface, not evidence that a product has adopted
+it or retired its handwritten deployment asset.
 
 Foundation does not parse those bytes or redefine their grammar. A separately
 owned typed comparator and live observer must be invoked by an integrated
@@ -685,12 +725,18 @@ filesystem walk is a failed evidence collection: the gate preserves its
 partial listing and diagnostics, then refuses instead of truncating the input
 and auditing an empty file.
 
-**Adoption status.** Version `0.2.0a1` is published, registry-install-verified
-and tagged; `0.2.0a2` is declared for the strict image-collector repair and is
-not published yet. No product has completed adoption or retired its existing
-engine. ERP is the first candidate and may pin a2 only after its protected
-release oracle succeeds; Integrator and Sub remain later candidates. Decision:
-ADR-0070. Sources and the eighteen defects deliberately not extracted:
+**Adoption status (repository baseline, 2026-09-20).** The latest published
+Foundation version is `0.2.0a2`; `0.4.0a1` was built once, then its candidate
+artifact was left unrecorded and its source drifted, so it is not an eligible
+publication or rehearsal coordinate. No product has completed the Foundation
+executor cutover or retired its previous writer. Platform CP is the current
+control-plane bootstrap and first executor-cutover target; ERP remains the first
+full data-plane adopter, followed by Sub. That distinction reconciles the
+programme sequence with ADR-0070's original "ERP first full adopter" wording;
+it does not amend the ADR. The measured gates and next work are in
+`docs/BUILD_ONCE_CUTOVER_ROADMAP.md`; the publication baseline is
+`docs/inventories/declared-publication-baseline.json`. Decision: ADR-0070.
+Sources and the eighteen defects deliberately not extracted:
 `docs/inventories/deployment-foundation-sources.md`.
 
 ### Target tenant lifecycle and global commercial foundations
@@ -886,6 +932,135 @@ every repository-local distribution named by that module's reviewed
 `module -> dotmac-ui` direction stays installable without giving the build job a
 registry credential. The post-publish smoke separately installs from the
 registry, so local dependency artifacts cannot substitute for publication.
+The verify job also downloads the same immutable build artifact that the
+publish job uploaded and invokes `compare-published` against the private index
+before any tag. After registry verification and annotated tagging, the
+post-release recorder hashes that exact wheel and appends its filename,
+SHA-256, annotated tag object and peeled source commit to
+`docs/inventories/module-release-verifications.json`. The row is producer-owned,
+append-only and refuses coordinate rewrites; source work never predicts a
+future release hash. The CI architecture gate validates every row and compares
+the disjoint verification and legacy-unverified inventories with the complete
+local annotated-tag oracle. Deleting a post-cutover verification row, changing
+a tag object or peeled commit, or leaving a new tag unrecorded fails. The 120
+pre-cutover governed tags in `module-release-legacy-unverified.json` retain
+only real tag coordinates as of accepted source base
+`7281adb1620ae5b5942518a9a01290330e198ec3`, because their registry-byte
+proof was not retained;
+they are debt/history, never verified or pinnable evidence. A consumer may pin
+a checked-in verification row and independently recheck registry bytes, but
+the legacy baseline cannot satisfy that check.
+
+The annotated tag itself carries the canonical evidence, not free text: its
+message is exactly one line of `ModuleReleaseTagEvidence.v1` JSON —
+`distribution`, `version`, `wheel_filename`, `wheel_sha256` and
+`verification_run_id` — produced by the single renderer
+`render_module_release_tag_evidence` and read back only by its paired
+`parse_module_release_tag_evidence` (both in `scripts/write_release_record.py`).
+`scripts/tag_module_release.py` is the one fail-closed writer of that tag:
+it refuses an already-existing tag, local or remote, and never force-tags,
+deletes or recreates one — a release that needs a new tag ships a new
+version instead. The recorder's validator proves a row against the tag
+object it names by re-deriving `ModuleReleaseTagEvidence.v1` from the tag
+message and checking the row's wheel filename, SHA-256 and
+`verification_run_id` against it field-for-field; a row whose
+`verification_run_id` disagrees with its own tag's embedded run id fails
+the gate. The legacy `module-release-legacy-unverified.json` inventory is
+frozen byte-identical to its accepted source base and carries no
+`verification_run_id` — it is bootstrap history, not evidence, and the
+gate never asks it to prove anything. `recover-module-release.yml`'s
+artifacts (the downloaded original build and the record-PR's manual-fallback
+guidance) live under the runner's own temp directory for the duration of
+that run only; nothing persists there past the job, and the manual fallback
+in `scripts/open_release_record_pr.sh` never prints that path to an
+operator — it tells them to `gh run download` a fresh copy instead, which
+`write_release_record.py` will refuse unless its digest matches the one
+already embedded in the tag.
+
+Separately, hosted CI compares the complete verification ledger at each PR's
+immutable `pull_request.base.sha` (and each main push's `before` SHA) with the
+new tree: accepted rows must remain identical and in order; only append is
+allowed. A shallow checkout, unresolved base, or missing base ledger is a
+refusal, not an implicit empty ledger. The initial inventory therefore needs
+its own reviewed bootstrap commit before the append-only implementation gate
+can run against it.
+A row's `verification_run_id` and `source_run_id` name Actions runs, and the
+Actions runs API exposes no dispatch inputs — so a real, successful run for
+one module at a given commit is otherwise indistinguishable from a forged
+ledger row naming that same run for a different module or version.
+`scripts/module_release_provenance.py` is the single CI-invoked prover of
+that binding, over only the rows a PR/push newly appended (an older row was
+already proven when it was appended, and its run may since have expired or
+been deleted from GitHub's retention window). For every new row it requires:
+the named run belongs to an approved workflow (`release-module.yml` or
+`recover-module-release.yml`), re-derived independently from its
+`workflow_id`; was triggered by `workflow_dispatch`; reports `head_branch`
+`main` AND its head commit is on the first-parent line of
+`refs/remotes/origin/main` (a ref merely NAMED `main` or `origin/main`, such
+as a tag, cannot satisfy this, and neither can a commit that only entered
+main inside a merged branch); `repository` and
+`head_repository` are this repository; the run id matches exactly; its
+`display_title`
+(rendered from the workflow's top-level `run-name`) equals exactly `Release
+module <distribution> <version>` or `Recover module <distribution>
+<version>`, binding the run to the specific module and version the row
+claims; its "Tag the ..." step succeeded inside the job that owns tag
+creation (`verify` or `recover`); the tag's peeled commit is itself on that
+same first-parent line; and the run itself completed
+successfully within a bounded wait. A release additionally requires
+`source_run_id == verification_run_id` and that run's `head_sha` to equal the
+tagged commit. A recovery additionally requires a `source_run_id` naming a
+DIFFERENT run passing the same identity checks against `release-module.yml`
+(including the first-parent check on its head commit), titled `Release module <distribution> <version>`, built at the tagged
+commit, that did NOT succeed — recovery only ever applies to a release that
+failed after publishing but before tagging. Runs dispatched before the
+`run-name` binding existed carry no provable title and cannot be checked this
+way; this is acceptable because no governed module has a verified row yet.
+`ModuleReleaseTagEvidence.v1` gained `source_run_id` in place because no
+tag carrying the earlier shape was ever emitted (no governed module release
+ran between the two changes). Residuals, stated rather than implied: (a) the
+check runs the pull request's own copy of the script, the same class as the
+append-only checker, so a weakening made in the same diff is caught only by
+review; (b) replacing a tag after a legitimate run (delete and re-push with a
+different digest while keeping real run ids) is not bound to anything the run
+itself produced — an availability risk to the record, not to registry
+integrity, since publication is environment-protected; (c) restricting tag
+creation to a dedicated release App ruleset is pending Michael, and no
+blanket GitHub Actions bypass is granted in its place.
+**Release authority at execution time (`ReleaseAuthority.v1`).**
+`scripts/release_authority.py` derives the module release control surface
+mechanically — both release workflows, every local composite action and
+script they reach (run bodies, shell references, Python imports and string
+references inside `scripts/`), the release allowlist, the row-deciding
+checkers (`module_release_provenance.py`,
+`check_module_release_verification_append_only.py`) and itself — plus every
+third-party action as an `action:<owner/repo@40-hex>` coordinate (a mutable
+reference is refused). Its canonical digest is the active authority in
+`docs/inventories/release-authority.json`, whose `history` is append-only; a
+test fails whenever the surface changes without the ledger moving. The tag
+step computes the digest from its own checkout, refuses a stale ledger, and
+records it in the tag evidence and the verification row. A new row is
+authorized only when its digest is already in the BASE branch's history, the
+ledger at the exact commit of the run that wrote the tag marked it active,
+that commit's bytes (with the surface re-derived there) reconstruct it, and
+the commit is on main's first-parent line — so a later authority change
+cannot invalidate an authorized release, and a release PR cannot invent
+authority. A pull request that changes the authority ledger and adds a
+release row is refused, as is any row over a base without a ledger.
+Dependency source is tested input, not release control: the smoke installs
+the target, kernel and first-party dependencies only as the exact wheels the
+run built, proves in an isolated interpreter that each installed
+distribution came from exactly that file and has no files under the
+checkout, and records every kernel/dependency wheel's filename and SHA-256
+as `smoke_dependency_wheels` in the tag evidence and row. A rerun of the
+same run may accept an existing tag only when its canonical bytes, tag
+object, peeled commit, run ids, authority digest, smoke wheels and wheel
+digest all match exactly; a recovery never replaces a tag — it adopts one
+only after matching it to the original run and the recovered artifact, and
+the row records the adopting run as `adopting_run_id`, which provenance
+checks as a separate successful, authorized recovery run. Rebase-merge
+configuration is optional hardening and is not part of this proof.
+
 `scripts/module_catalog.py` joins those inputs deterministically, and
 `tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
 refuse drift or an undiscoverable new distribution. An application still owns
@@ -1291,6 +1466,7 @@ local copy and no cross-application or sibling-module foreign key is implied.
 
 | Package | Persisted model classes | Owned tables | Decision source |
 |---|---|---|---|
+| `dotmac-approvals` | `ApprovalPolicy`, `ApprovalRequest`, `ApprovalDecision`, `ApprovalWithdrawal`, `PlatformApprovalPolicy`, `PlatformApprovalRequest`, `PlatformApprovalDecision`, `PlatformApprovalWithdrawal` | `approval_policies`, `approval_requests`, `approval_decisions`, `approval_withdrawals`, `platform_approval_policies`, `platform_approval_requests`, `platform_approval_decisions`, `platform_approval_withdrawals` | ERP product-first plus Vendor CP control-plane delta; ADR-0026. Withdrawal evidence is append-only; request standing moves to `withdrawn` while the original APPROVE decision and completion time remain. The DB-owned withdrawal operation pairs approved parent, exact `completed_at` evidence and terminal standing; the standing-transition trigger writes one complete `approval.withdrawn` outbox row for every valid transition, even paired raw owner DML. Direct online-role table DML cannot forge either side. Public withdrawal commands use that operation in the caller transaction through the required `outbox_relay.v1` prerequisite. Downgrade refuses any selected plane holding withdrawal evidence before dropping either plane. Generic approval event delivery remains an adapter. |
 | `dotmac-accounting` | `AccountCategory`, `Account`, `FiscalYear`, `FiscalPeriod`, `AccountingDimension`, `AccountingDimensionValue`, `JournalEntry`, `JournalLine`, `JournalLineDimension`, `PostedLedgerLine`, `PostedLedgerDimension`, `PeriodEvent` | `account_categories`, `accounts`, `fiscal_years`, `fiscal_periods`, `accounting_dimensions`, `accounting_dimension_values`, `journal_entries`, `journal_lines`, `journal_line_dimensions`, `posted_ledger_lines`, `posted_ledger_dimensions`, `period_events` | ERP product-first; ADR-0041 |
 | `dotmac-analytics` | `MetricCatalogEntry`, `MetricIngestReceipt`, `MetricObservation`, `MetricPoint`, `MetricProjectionRebuild` | `metric_catalog_entries`, `metric_ingest_receipts`, `metric_observations`, `metric_points`, `metric_projection_rebuilds` | ERP product-first; ADR-0043 |
 | `dotmac-banking` | `BankInstitution`, `BankAccount`, `BankStatement`, `BankStatementLine`, `CashAccountObservation`, `MatchPolicy`, `MatchDecision`, `MatchAllocation`, `Reconciliation` | `bank_institutions`, `bank_accounts`, `bank_statements`, `bank_statement_lines`, `cash_account_observations`, `match_policies`, `match_decisions`, `match_allocations`, `reconciliations` | ERP product-first; ADR-0044 |
@@ -1314,6 +1490,7 @@ authorize and translate typed facts but never maintain a parallel writer.
 
 | State surface | Canonical writer and non-owner boundary |
 |---|---|
+| Approval policy revisions, votes and effective standing | `dotmac_approvals.service` is the single writer on each selected plane. A caller's guarded adapter authorizes a withdrawal and supplies actor, authority, reason and external reference; Approvals records one immutable withdrawal, generates the effective UTC time, and emits a typed event. The subject owner projects a revocation through its own guarded transition. |
 | Accounting chart, periods, dimensions, journals and ledger evidence | `dotmac_accounting.service`; producers submit typed facts, while Approvals, Numbering and each subledger retain their separate decisions. |
 | Analytical declaration snapshots, receipts, observations and winning points | `dotmac_analytics.service.record_batch`; `rebuild_projection` is the sole repair writer for `metric_points`; domain owners retain calculations. |
 | Banking masters, observations, match allocations and reconciliations | `dotmac_banking.service`; Integrator owns provider transport and Accounting owns cash-ledger projection. |
@@ -2808,6 +2985,12 @@ kind, persistence plane, ordered columns, PostgreSQL type identity and
 modifier, nullability, default/identity/generated state, and collation. Its
 digest is the digest of those exact bytes.
 
+Column ordinals are PostgreSQL `pg_attribute.attnum`, not a renumbered display
+position. Dropping a column leaves a gap in later ordinals; declarations and
+observations retain that gap and require only positive, unique, strictly
+increasing ordinals. Renumbering surviving columns would conceal physical
+drift and prevent a catalogue from describing an existing product lineage.
+
 Schema v1 says `scope=tables_and_columns`. It makes no claim about constraints,
 indexes, triggers, privileges or policies; those require an explicit later
 contract rather than interpreting absence as agreement.
@@ -2824,14 +3007,16 @@ The ownership chain has no live-database authoring path:
   registry and explicit plane selections, derives module schema/owner/plane,
   composes explicit kernel/assembly/extension host fragments, and refuses any
   missing, extra or duplicate relation;
-- `dotmac-release-catalog` will associate a typed module snapshot or complete
-  product snapshot with exact artifact bytes as a distinct, singular
-  attestation — NOT YET, and deliberately not in the change that adds this
-  contract. That module is a released distribution whose declared
-  `dotmac-kernel` floor is proved both sufficient and necessary by
-  `scripts/module_floor_check.sh`, and a floor may only name a PUBLISHED
-  kernel. Its adoption follows the kernel release that carries
-  `product_database_catalog`, together with the floor bump; and
+- `dotmac-release-catalog` provides distinct, singular module and
+  product database-catalogue attestation writers. They parse held canonical
+  bytes, check the expected digest and snapshot subject/version against the
+  release artifact, and persist a digest/URI pointer without fetching the URI.
+  This does not itself prove that artifact bytes produced those tables or that
+  a product assembly is complete; the release producer must independently
+  retain artifact provenance and construct the product snapshot with
+  `from_assembly`. The module's declared kernel floor names the earliest
+  published kernel with
+  `product_database_catalog`; `scripts/module_floor_check.sh` proves it; and
 - `dotmac_kernel.database_catalog_comparator` owns the read-only PostgreSQL
   observation and pure, digest-bound verifier. Its stable IDs are
   `dotmac.postgresql-tables-columns-observation/v1` and

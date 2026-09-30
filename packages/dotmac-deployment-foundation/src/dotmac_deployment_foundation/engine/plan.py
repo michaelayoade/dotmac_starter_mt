@@ -105,6 +105,7 @@ class StepKind(str, Enum):
     PRODUCT_PREFLIGHT = "product_preflight"
     BACKUP = "backup"
     VERIFY_BACKUP = "verify_backup"
+    SUPPORT_JOB = "support_job"
     MIGRATION_PREFLIGHT = "migration_preflight"
     STOP_FOR_MAINTENANCE = "stop_for_maintenance"
     MIGRATE = "migrate"
@@ -168,6 +169,7 @@ _PHASE_OF: Final[Mapping[StepKind, Phase]] = {
     StepKind.PRODUCT_PREFLIGHT: Phase.GATE,
     StepKind.BACKUP: Phase.MUTATE,
     StepKind.VERIFY_BACKUP: Phase.MUTATE,
+    StepKind.SUPPORT_JOB: Phase.MUTATE,
     StepKind.MIGRATION_PREFLIGHT: Phase.MUTATE,
     StepKind.STOP_FOR_MAINTENANCE: Phase.MUTATE,
     StepKind.MIGRATE: Phase.MUTATE,
@@ -458,6 +460,19 @@ def build_plan(
                 )
             )
 
+    if spec.compose_topology is not None:
+        for job in sorted(spec.compose_topology.jobs, key=lambda item: item.code):
+            if job.run_during_deploy:
+                steps.append(
+                    Step(
+                        StepKind.SUPPORT_JOB,
+                        f"Run and verify support job {job.code!r} under the held lock",
+                        command=job.command,
+                        timeout_seconds=job.timeout_seconds,
+                        target=job.code,
+                    )
+                )
+
     steps.append(
         Step(
             StepKind.MIGRATION_PREFLIGHT,
@@ -639,6 +654,12 @@ def _rollback_decision(
             "the release declares migration compatibility 'maintenance_required', "
             "so the previous image cannot read the schema now in place. Recovery "
             "is a restore from the pre-migration backup, not an image swap"
+        )
+    if spec.compose_topology is not None:
+        return False, (
+            "the previous V3 deployment has no separately authorized, retained "
+            "Compose asset bound to its descriptor and release receipt; an image "
+            "digest alone cannot restore its topology"
         )
     return True, (
         "the release declares migration compatibility 'online', so the previous "

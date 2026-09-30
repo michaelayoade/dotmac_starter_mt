@@ -668,6 +668,36 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ap_0001 was edited in place twice before this guard enrolled the module.
     # The exact three historical byte sets are recorded here; the explicit
     # grandfathered-divergence ledger below decides which one the tree retains.
+    "dotmac-approvals-v0.1.0a8": (
+        "dotmac-approvals",
+        "9e2d69f4913474d9504cfaeca81a9105919b8555",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+            "ap_0002_outbox_relay.py": (
+                "6aace60a4925ad5f5c693b81a356807c1ad2b9ffe1664fdfcd1417429d127e2d"
+            ),
+            "ap_0003_withdrawals.py": (
+                "6446e2301fbe4ca0401835a320cee8948fbc9912e7d8c3ddd294d90854e78c36"
+            ),
+        },
+    ),
+    "dotmac-approvals-v0.1.0a7": (
+        "dotmac-approvals",
+        "7cab65c56272c1d8e3a2784ce5b91ce601dd9b05",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+            "ap_0002_outbox_relay.py": (
+                "6aace60a4925ad5f5c693b81a356807c1ad2b9ffe1664fdfcd1417429d127e2d"
+            ),
+            "ap_0003_withdrawals.py": (
+                "6446e2301fbe4ca0401835a320cee8948fbc9912e7d8c3ddd294d90854e78c36"
+            ),
+        },
+    ),
     "dotmac-approvals-v0.1.0a1": (
         "dotmac-approvals",
         "221f6868651426397e6e8443ca8b544234648247",
@@ -707,6 +737,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     "dotmac-approvals-v0.1.0a5": (
         "dotmac-approvals",
         "8d4ddfd9e285da06ce1fdd29b59f1b483d6ea38c",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+            "ap_0002_outbox_relay.py": (
+                "6aace60a4925ad5f5c693b81a356807c1ad2b9ffe1664fdfcd1417429d127e2d"
+            ),
+        },
+    ),
+    "dotmac-approvals-v0.1.0a6": (
+        # a6's migration bytes are identical to a5, but the recorded commit is
+        # THIS tag's own peeled commit, per test_each_recorded_commit_is_the_
+        # exact_peeled_tag — never a prior release's commit.
+        "dotmac-approvals",
+        "dc94adbb2469ce4b8f75b3e61d9b10cba0e65b77",
         {
             "ap_0001_approvals.py": (
                 "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
@@ -1400,10 +1445,41 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-entitlement-allocation-v0.1.0a7": (
+        # a7 adds only a database_catalog= manifest declaration; the migration
+        # lineage is byte-identical to a6, so the same digests apply. Commit
+        # is this tag's own peeled commit, per
+        # test_each_recorded_commit_is_the_exact_peeled_tag.
+        "dotmac-entitlement-allocation",
+        "c9de0a1b65a816e38b13bb6cc892b2a05bd653eb",
+        {
+            "ea_0001_allocations.py": (
+                "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            ),
+            "ea_0002_idempotency_ledger.py": (
+                "56076edb3f086b6e00b510df95d7af3b35153e8795f7b66754c89a2ad90032c2"
+            ),
+            "ea_0003_platform_audit_log.py": (
+                "63027541404d7f9c824cade44c247098aa5f19bdb6d70cf321c1452974e0e072"
+            ),
+        },
+    ),
     # ── dotmac-files ────────────────────────────────────────────────────────
     # a2's root is the published atomic catalogue. a3 adds fi_0002 rather than
     # changing this digest, so an existing a2 installation and a fresh a3
     # installation converge through an ordinary Alembic upgrade.
+    "dotmac-files-v0.1.0a5": (
+        "dotmac-files",
+        "895ce0e482cc00a04690838ea5f12e73e5f00a97",
+        {
+            "fi_0001_stored_files.py": (
+                "58976eab44ccfaaa77af255c52f92ef333e650e89ee3f6808211820b3c3b4fd0"
+            ),
+            "fi_0002_selectable_planes.py": (
+                "9cdaf0da282402777d6c2e694c60d29f8078a0d48c64211e9a6a67dc1ac05581"
+            ),
+        },
+    ),
     "dotmac-files-v0.1.0a4": (
         "dotmac-files",
         "df85e47267cd9093d063f93725b0ef2d2c0c6fab",
@@ -1789,6 +1865,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-commercial-agreements ──
+    "dotmac-commercial-agreements-v0.1.0a4": (
+        "dotmac-commercial-agreements",
+        "9a5e433d7b22efc5d21a6f8a1ead0c73effaca6d",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            ),
+            "cg_0002_approval_withdrawals.py": (
+                "bdf4bd7743454681c218728afdb664fa3eb69f6c6e9ecf9eacb670a1a789e2f2"
+            ),
+        },
+    ),
     "dotmac-commercial-agreements-v0.1.0a1": (
         "dotmac-commercial-agreements",
         "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
@@ -1801,6 +1889,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     "dotmac-commercial-agreements-v0.1.0a2": (
         "dotmac-commercial-agreements",
         "42acc8b30f1bcaed1580d312fd33d7b5ef358817",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            ),
+        },
+    ),
+    "dotmac-commercial-agreements-v0.1.0a3": (
+        # a3's migration bytes are identical to a2, but the recorded commit is
+        # THIS tag's own peeled commit, per test_each_recorded_commit_is_the_
+        # exact_peeled_tag — never a prior release's commit.
+        "dotmac-commercial-agreements",
+        "5005e998a4cac9b4f7e3ba91f371967b0ee8b2a2",
         {
             "cg_0001_agreements.py": (
                 "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
@@ -1855,6 +1955,96 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # fleet pins one, so an in-place edit to any file here reaches more
     # databases this repository cannot inspect than every module lineage
     # combined.
+    "dotmac-kernel-v0.1.0a104": (
+        "dotmac-kernel",
+        "bf16e30efc3321ca9a495de31570bb5f9a02e9e3",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+            "20260824_0028_machine_attribution.py": (
+                "baa27e0134ae97ac5b6f10c7d0f47e391187589fa8a7cb8ee70f81eaa8b3e01c"
+            ),
+        },
+    ),
     "dotmac-kernel-v0.1.0a103": (
         "dotmac-kernel",
         "2e6613322c386e996565c8449b6c3672c9efd956",
@@ -6497,6 +6687,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-licensing ──
+    "dotmac-licensing-v0.1.0a2": (
+        "dotmac-licensing",
+        "e88df7915efc3acc27541856f111902b5af6fafb",
+        {
+            "li_0001_licensing.py": (
+                "3c6e610e75016fd652b678674bca4d50c01beb7d9f9c15450a4b1bebf43b2e4d"
+            ),
+        },
+    ),
     "dotmac-licensing-v0.1.0a1": (
         "dotmac-licensing",
         "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
@@ -6686,6 +6885,22 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-release-catalog-v0.1.0a5": (
+        # a5 adds rl_0002_db_catalog_attestations.py (new migration, #716) plus
+        # a database_catalog= manifest declaration; rl_0001 is byte-identical
+        # to a4. Commit is this tag's own peeled commit, per
+        # test_each_recorded_commit_is_the_exact_peeled_tag.
+        "dotmac-release-catalog",
+        "9a9403624a8c21571053e36043f3eeab7ec34480",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+            "rl_0002_db_catalog_attestations.py": (
+                "e05f9ec0f7cced74f184b0fdbdc30997f0f9aa83b7384856c6250db2f1ca46ce"
+            ),
+        },
+    ),
     "dotmac-release-catalog-v0.1.0a3": (
         "dotmac-release-catalog",
         "461aff83d32d73166625be13e5214718f2ade9cf",
@@ -6861,6 +7076,9 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
                         "dotmac-approvals-v0.1.0a3",
                         "dotmac-approvals-v0.1.0a4",
                         "dotmac-approvals-v0.1.0a5",
+                        "dotmac-approvals-v0.1.0a6",
+                        "dotmac-approvals-v0.1.0a7",
+                        "dotmac-approvals-v0.1.0a8",
                     }
                 ),
             ),
@@ -6926,6 +7144,8 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-numbering": frozenset(),
+    # `ap_0003` records approved-decision withdrawals; still editable until
+    # `dotmac-approvals` 0.1.0a7 is tagged.
     "dotmac-approvals": frozenset(),
     "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
@@ -7622,7 +7842,7 @@ def test_the_guard_catches_an_edit_to_the_second_distributions_bytes(
     victim.write_bytes(victim.read_bytes() + b"\n# a formatter ran\n")
 
     shipped_in = _shipping_tags("ea_0001_allocations.py")
-    assert len(shipped_in) == 5, shipped_in
+    assert len(shipped_in) == 6, shipped_in
     problems = _drift(copy, distribution)
     assert len(problems) == len(shipped_in), problems
     for problem, tag in zip(problems, shipped_in, strict=True):

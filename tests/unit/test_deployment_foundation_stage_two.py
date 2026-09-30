@@ -46,6 +46,8 @@ from dotmac_deployment_foundation.execution_plan import (
 from dotmac_deployment_foundation.execution_plan_v2 import render_execution_plan_v2
 from dotmac_deployment_foundation.version import VERSION
 
+from tests.unit.foundation_v3_support import v3_plan
+
 PACKAGE = (
     Path(__file__).resolve().parents[2]
     / "packages"
@@ -134,22 +136,29 @@ def _plan(**over) -> FoundationExecutionPlanV1:
     return FoundationExecutionPlanV1(**kwargs)
 
 
+def _active_plan(**over):  # type: ignore[no-untyped-def]
+    return v3_plan(_plan(**over))
+
+
 # ── it is CALLED, not matched ──────────────────────────────────────────────
 
 
 def test_the_caller_reaches_the_published_seam() -> None:
     """The assertion the original defect would have failed: the facility's own
     call shape reaches the provider's own signature."""
-    effects, plan = _PublishedStageTwo(), _plan()
+    effects, plan = _PublishedStageTwo(), _active_plan()
     bind_authorized_effects(effects, plan)
     assert effects.target == "prod-lagos-01"
     assert effects.incumbent == (("app", C), ("worker", D))
     assert effects.binds == 1
 
 
-def test_it_works_for_a_v2_plan_too() -> None:
+def test_v2_is_historical_and_v3_carries_its_acts() -> None:
     effects = _PublishedStageTwo()
-    bind_authorized_effects(effects, render_execution_plan_v2(_plan()))
+    v2 = render_execution_plan_v2(_plan())
+    with pytest.raises(PreconditionFailed):
+        bind_authorized_effects(effects, v2)
+    bind_authorized_effects(effects, v3_plan(v2))
     assert effects.target == "prod-lagos-01"
 
 
@@ -158,7 +167,7 @@ def test_the_projection_is_the_IDENTITY() -> None:
     provider applies the same rules, refusing an unsorted sequence rather than
     repairing it. So the frozen tuple passes through unchanged — a sort or a
     rebuild here would be a second opinion about a fact the plan froze."""
-    plan = _plan()
+    plan = _active_plan()
     effects = _PublishedStageTwo()
     bind_authorized_effects(effects, plan)
     assert effects.incumbent == plan.host_prestate.roles
@@ -173,7 +182,9 @@ def test_an_empty_prestate_is_a_POSITIVE_claim_not_unbound() -> None:
     first deployment, and that is visible only during a restore."""
     effects = _PublishedStageTwo()
     assert isinstance(effects.incumbent, _Unbound)
-    bind_authorized_effects(effects, _plan(host_prestate=HostPrestateV1.first_deploy()))
+    bind_authorized_effects(
+        effects, _active_plan(host_prestate=HostPrestateV1.first_deploy())
+    )
     assert effects.incumbent == ()
     assert not isinstance(effects.incumbent, _Unbound)
 
@@ -258,13 +269,13 @@ def test_a_provider_without_the_seam_is_refused_by_name() -> None:
         def prune_images(self, *, retain: int) -> None: ...
 
     with pytest.raises(PreconditionFailed) as exc:
-        bind_authorized_effects(NoStageTwo(), _plan())  # type: ignore[arg-type]
+        bind_authorized_effects(NoStageTwo(), _active_plan())  # type: ignore[arg-type]
     assert exc.value.code == STAGE_TWO_ABSENT
 
 
 def test_rebinding_IDENTICAL_facts_is_accepted() -> None:
     """A retry within one authorized run is not a contradiction."""
-    effects, plan = _PublishedStageTwo(), _plan()
+    effects, plan = _PublishedStageTwo(), _active_plan()
     bind_authorized_effects(effects, plan)
     bind_authorized_effects(effects, plan)
     assert effects.binds == 2
@@ -274,9 +285,9 @@ def test_rebinding_DIFFERENT_facts_is_refused() -> None:
     """The drift the frozen prestate exists to catch, arriving from inside the
     process rather than from the host."""
     effects = _PublishedStageTwo()
-    bind_authorized_effects(effects, _plan())
+    bind_authorized_effects(effects, _active_plan())
     with pytest.raises(PreconditionFailed) as exc:
-        bind_authorized_effects(effects, _plan(target="prod-abuja-02"))
+        bind_authorized_effects(effects, _active_plan(target="prod-abuja-02"))
     assert exc.value.code == STAGE_TWO_REFUSED
 
 
@@ -289,7 +300,7 @@ def test_a_provider_ValueError_is_surfaced_as_a_TYPED_refusal() -> None:
             raise ValueError("the host-identity file names another machine")
 
     with pytest.raises(PreconditionFailed) as exc:
-        bind_authorized_effects(Rejecting(), _plan())
+        bind_authorized_effects(Rejecting(), _active_plan())
     assert exc.value.code == STAGE_TWO_REFUSED
 
 

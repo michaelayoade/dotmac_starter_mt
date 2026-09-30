@@ -3,9 +3,78 @@
 All notable changes to the `dotmac-approvals` distribution. This package follows
 [Semantic Versioning](https://semver.org). The `.github/release-modules.json`
 entry landed once the live Postgres migration and catalog gate passed;
-`0.1.0a1` through `0.1.0a5` have since been published.
+`0.1.0a1` through `0.1.0a8` have since been published.
 
-## Unreleased — `0.1.0a5+dev`
+## 0.1.0a8 — 2026-09-26 — published (tag `dotmac-approvals-v0.1.0a8`)
+
+**Version prepared.** `0.1.0a7` is published and tagged; this source adds a
+public read barrier, so it declares the newly allocated `0.1.0a8`. Publication
+happens through a separate `workflow_dispatch` of `release-module.yml`.
+
+- Add `hold_platform_approval(db, *, request_id, subject_type, subject_id,
+  content_digest) -> HeldPlatformApproval` (in `dotmac_approvals.service`). It
+  locks the platform request row `FOR SHARE` and validates, under that lock, the
+  exact subject and digest, APPROVED standing (not withdrawn), completion, and at
+  least one approve decision. The lock lasts until the caller's transaction
+  ends; the function never commits.
+- Why: `withdraw_platform_approval` locks the same row `FOR UPDATE`, so a caller
+  that holds the approval, performs a dependent transition (Control plan
+  approval, rollout or dispatch) and commits in one transaction sees exactly two
+  orderings — the withdrawal committed first and the hold refuses, or the
+  withdrawal waits until the dependent transition committed. A check made
+  without the lock leaves a window between reading "approved" and committing.
+- New contracts: `HeldPlatformApproval`, `ApprovalNotHeld` (an `ApprovalError`)
+  and the closed `ApprovalHoldRefusal` vocabulary (`malformed_digest`,
+  `request_not_found`, `subject_mismatch`, `digest_mismatch`, `withdrawn`,
+  `not_approved`, `no_approve_decision`), exported from the package root. The
+  hold refuses only with `ApprovalNotHeld`; a malformed digest is
+  `malformed_digest`, not the generic `ContentChanged`.
+- The returned `HeldPlatformApproval` is evidence, not the lock: the lock lives
+  only in the caller's open transaction. The lock is SHARED — two concurrent
+  holds on one approval both proceed — while a withdrawal waits for every
+  holder to commit.
+- No migration, no schema change, no new privilege: `SELECT … FOR SHARE` needs
+  the UPDATE privilege the platform runtime role already holds on
+  `mod_approvals.platform_approval_requests`.
+
+## 0.1.0a7 — 2026-09-25 — published (tag `dotmac-approvals-v0.1.0a7`)
+
+**Version prepared.** `0.1.0a6` is published and tagged; this source adds the
+approved-decision withdrawal surface and `ap_0003_withdrawals`, so it declares
+the newly allocated `0.1.0a7`. Publication happens through a separate
+`workflow_dispatch` of `release-module.yml`.
+
+- Add one immutable withdrawal record per completed approval on both selected
+  planes. The original APPROVE votes and completion time remain queryable;
+  effective standing becomes `withdrawn`, distinct from rejection and cancellation.
+- Add typed tenant/platform withdrawal APIs with actor, authority, reason and
+  stable external reference. The public outbox-owned command persists one
+  `approval.withdrawn` row atomically with the terminal standing; exact retries
+  produce no second event. Typed read
+  and event values refuse missing, blank, naive-time or backdated withdrawal
+  evidence rather than representing an internally contradictory standing.
+- Add `ap_0003_withdrawals` with tenant RLS, platform role isolation, restrictive
+  request references, a DB-owned withdrawal operation and triggers enforcing
+  approved-parent evidence, paired terminal standing and append-only history.
+  The state-transition trigger also writes the complete typed outbox payload
+  atomically, including for direct paired owner DML; downgrade refuses any selected plane with
+  withdrawal evidence before dropping either plane.
+- The `ap_0003` column catalogue declaration is a candidate pending Git-hosted
+  PostgreSQL observation and comparison. No publication claim is made here.
+
+## 0.1.0a6 — 2026-09-19
+
+**Database catalogue contribution.** The manifest now declares
+`database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
+`ap_0002_outbox_relay`, covering all six tables across both planes. Every
+column fact (Postgres type identity, nullability, generation, default
+expression) was captured from an actual PostgreSQL 16 observation
+(`dotmac_kernel.database_catalog_comparator.observe_postgres_tables_columns`)
+against this module's real composed migration graph, then self-verified with
+`compare_module_database_catalog` (zero drift) before being frozen here — none
+of it was hand-derived from reading the migration source. The `dotmac-kernel`
+floor moves to `>=0.1.0a100`, the release that first published
+`dotmac_kernel.product_database_catalog`, which this manifest now imports.
 
 **Public typed READ contracts.** `list_tenant_requests` / `list_platform_requests`
 over a closed, page-bounded `RequestFilter`; `get_tenant_request` /
@@ -31,9 +100,10 @@ attribution is the actor this module authorised and its timestamp is this
 module's own clock. `cancelled_by` is not an exception: it is compared against
 the stored `requested_by` and refused when it differs.
 
-**The declared version now carries a PEP 440 local development marker.**
-`0.1.0a5` is published and tagged; `src/` has moved since, and one version may
-not name two sets of importable bytes.
+**Version prepared.** The `0.1.0a5+dev` local-development marker is removed;
+the package now declares `0.1.0a6`. This is a prepared release candidate only —
+publication happens through a separate, later `workflow_dispatch` of
+`release-module.yml`.
 
 ## 0.1.0a5 — 2026-08-16
 

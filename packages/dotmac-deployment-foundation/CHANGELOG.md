@@ -2,6 +2,265 @@
 
 ## Unreleased — successor not allocated
 
+### Corrected: backup evidence origin for transition receipts
+
+`BackupRecord.evidence_origin` is a closed caller attestation with an
+`UNSPECIFIED` default for legacy records. External receipt conversion marks
+`EXTERNAL_RECEIPT`; transition verification requires `LOCAL_ARTEFACT`, even
+when an external record is rewrapped with an ordinary path. The `external:`
+path convention remains an additional refusal. This pure verifier does not
+authenticate local bytes: Control's future producer must independently read
+and hash the local bundle and bind its manifest and database dump before
+calling it. The receipt still makes no restore claim.
+
+### Added: `transition_receipt` — the Foundation's half of D16's two-sided recovery receipt
+
+New module, `DeploymentTransitionReceipt.v1`: a closed schema
+(`TransitionReceiptV1`, `TransitionSide`, `TargetSide`, `TransitionBackup`)
+and a pure verifier, `verify_transition_receipt`, for the receipt that binds
+a source-to-target deployment hop — descriptor, migration heads, the image
+running on the target, the backup taken of the source before migration, and
+the run that performed it. The receipt claims no restore. `dotmac-deployment-control` produces the receipt in a later
+change; this package verifies it independently.
+
+`verify_transition_receipt(receipt, *, spec, observed_target_heads,
+previous_receipt, backup_record, bundle_manifest, observed_image_digest,
+expected_run_id, expected_target, genesis_source=None)` never raises: every
+disagreement becomes one of the closed `TransitionFinding` codes rather than an
+exception, including `INPUT_NOT_CANONICALIZABLE` for an input that cannot
+itself be canonicalized. `genesis_source` and `previous_receipt` are
+mutually exclusive and one is required (`CHAIN_ANCHOR_AMBIGUOUS` otherwise),
+anchoring a chain's first receipt to a caller-named source instead of
+trusting the receipt's own claim. A chain is scoped to one product,
+environment and target (`CHAIN_SCOPE_MISMATCH`); the run that produced a
+receipt must match what the caller actually launched and must not repeat a
+predecessor's run id (`RUN_ID_MISMATCH`/`RUN_ID_REUSED`).
+
+The target image must match the descriptor (`IMAGE_DESCRIPTOR_MISMATCH`),
+the caller's own observation (`IMAGE_DIGEST_MISMATCH`), and the caller's
+observation must itself already be canonical (`OBSERVED_IMAGE_MALFORMED` for
+a bare-hex, uppercase or padded spelling — never normalized). The image's
+source revision must be well-formed 40-lowercase-hex (`IMAGE_REVISION_INVALID`)
+AND match the descriptor's own `source_revision` (`IMAGE_REVISION_DESCRIPTOR_MISMATCH`)
+— a receipt is not evidence about which commit is running unless both hold.
+
+A backup must be a `RECOVERY_BUNDLE` at assurance `VERIFIED` or higher
+(`BACKUP_ASSURANCE_TOO_LOW`). Completeness — that the artefact is a whole
+recovery bundle, not merely intact bytes — is established separately, by
+BINDING the receipt to the bundle's own manifest: the verifier calls
+`recovery.load_manifest(bundle_manifest)` (a new required keyword; pure, no
+I/O — `SpecError` becomes `BACKUP_MANIFEST_NOT_A_BUNDLE`).
+
+**Michael's 2026-09-28 correction of an earlier ruling here:** `bundle_digest`
+stays exactly what it always was — the artefact's own write-time checksum,
+bound to `BackupRecord.checksum` (`BACKUP_DIGEST_MISMATCH`) — and is NOT
+compared with the manifest's identity. The prior ruling bound `bundle_digest`
+to the manifest digest, which made a real backup (whose recorded checksum is
+the artefact checksum, never a manifest digest) unverifiable. A `sha512`
+dataset still cannot verify a bundle-backed receipt: the manifest's component
+digests are `sha256`-only, so such a record is refused by name
+(`BACKUP_ALGORITHM_NOT_BUNDLE_COMPATIBLE`). A new field, `TransitionBackup.manifest_digest` — a canonical
+`sha256:` digest, validated like every other canonical digest on this
+receipt, and now REQUIRED by `parse` — carries the manifest's own identity,
+compared against `RecoveryBundleManifestV1.sha256_digest()`
+(`BACKUP_MANIFEST_DIGEST_MISMATCH`). The artefact is linked to that manifest
+through the manifest's own `database_dump` component digest:
+`BackupRecord.checksum` must equal
+`manifest.component_digest(BundleComponent.DATABASE_DUMP).hex`
+(`BACKUP_ARTEFACT_NOT_IN_MANIFEST`). For a RECOVERY_BUNDLE, the record's
+`path` and `checksum` therefore name the `database_dump` archive file. No
+producer in this package writes such a record yet. Every component digest this Foundation
+can express is `sha256` (`digest.ALGORITHMS` has exactly one entry), so that
+link can only hold when the record's own `checksum_algorithm` is `sha256`; a
+`sha512` (or any other) dataset is refused outright and by name
+(`BACKUP_ALGORITHM_NOT_BUNDLE_COMPATIBLE`) rather than compared and silently
+never matching. The manifest's `product` and sorted, de-duplicated
+`migration_heads` must still agree with `receipt.product` and
+`receipt.source.migration_heads` (the backup is of the SOURCE database,
+before migration — `BACKUP_MANIFEST_SCOPE_MISMATCH`). `VERIFIED` is then
+exactly the remaining claim that level is for: the bytes are intact. A
+disposable restore (`RESTORABLE` and above) is a separate, stronger proof
+this receipt does not claim, and this receipt makes no restore-rehearsal
+claim at all.
+A backup's `bundle_id` binds to `BackupRecord.path` (`BACKUP_ID_MISMATCH`);
+its `checksum_algorithm` is restricted to `BackupDataset.CHECKSUMS`
+(`{sha256, sha512}`, imported directly from `spec.py` — `BACKUP_ALGORITHM_UNSUPPORTED`
+for anything else) and its `bundle_digest` must be lowercase hex of the
+length that algorithm implies, 64 or 128 (`BACKUP_DIGEST_MALFORMED`) — bare
+hex, unprefixed, matching the spelling every existing producer already uses.
+A record shaped like one built by `external_recovery
+.backup_record_from_receipt` (an executor identifier and a restore duration
+standing in for a real artefact id and byte count) is refused outright
+(`BACKUP_RECORD_NOT_ARTEFACT_BOUND`) rather than accepted on those stand-in
+values. The refusal uses the explicit evidence origin; the path prefix is an
+additional guard against a mislabelled record.
+
+A backup's `dataset` must name a dataset the descriptor's own
+`backup_datasets` actually declares (`BACKUP_DATASET_NOT_DECLARED`), and its
+`checksum_algorithm` must match that specific dataset's declared `checksum`
+— not merely the global allow-list — or `BACKUP_ALGORITHM_NOT_DECLARED`.
+
+Every digest-shaped field (`descriptor_sha256`, `image_digest`,
+`previous_receipt_digest`, `manifest_digest`) and every migration head — DECLARED and OBSERVED
+alike — must already be canonical: `sha256:` plus 64 lowercase hex for a
+digest, no leading/trailing whitespace and non-empty for a head. `parse()`
+refuses rather than normalizes a differently-spelled input, and the verifier
+also attempts the RECEIPT's own canonicalization (`receipt.canonical_bytes()`)
+so a receipt built directly rather than through `parse()` cannot carry an
+undetected secret-shaped field.
+
+Never raises, made concrete: every `BackupRecord` field the verifier reads
+(`path`, `checksum`, `dataset` as strings; `assurance` as an `Assurance`;
+`artefact_class` as an `ArtefactClass`; `size_bytes` as a non-bool `int`) is
+type-checked before use, and a malformed one is `INPUT_NOT_CANONICALIZABLE`
+rather than an `AttributeError`/`TypeError` — the same rule
+`observed_target_heads` and a receipt/spec that cannot itself be hashed were
+already held to. A check that does not need the malformed field keeps
+running rather than an early return silencing every finding after it: an
+operator sees every way a receipt is wrong in one pass, not one refusal per
+re-run.
+
+### Gate-3 successor execution authority (candidate; not released)
+
+`FoundationExecutionPlanV3` binds the candidate wheel, exact target,
+controller SSH fingerprint and Control/Fleet host incarnation/enrolment to the
+existing `ExecutionPlanDigestV1`. The sole new grant issuer consumes the
+unchanged Control V2 authorization+dispatch pair through a startup-fixed
+assembly provider and rechecks independent local/Control facts before effects.
+That recheck now exact-binds F2's authenticated installed host identity,
+installed signer fingerprint and installed root-version UUID to the V3 plan
+and fresh provider observation for both deploy and rollback. `Effects` cannot
+claim an authenticated target on its own; trusted CP composition owns the
+provider/admission/effects bundle.
+The fixed provider now also owns an explicit pre-effect Control transaction:
+Foundation checks F2 trace, fresh context, sequence/attempt and expiry before
+passing the frozen original V2 pair and exact V3 coordinates. The provider
+must refuse before commit or atomically spend the exact dispatch and return
+`None` after commit; Foundation performs no fallible post-commit check. Replay,
+revoked standing and failed consumption refuse before effects. The deterministic
+`control-dispatch:<dispatch_id>` key is stored in Control's committed ledger
+for crash recovery and in successful local `DeploymentEvidence.v2`; V1 evidence
+bytes remain unchanged. The external CP
+implementation and its conformance evidence remain outstanding.
+The public V2 attestation function remains non-admitting alone. Historical V1
+`authorize()` now refuses; CLI, Lane 3 and release probes cannot promote a
+single V1 receipt. Lane 3 remains non-admitting until trusted CP provider and
+V3 plan composition exist. Standalone installed-wheel release smoke can pass
+by proving V3 render/digest behavior and CLI refusal without that provider;
+publication is not adoption or authorization. This is a
+candidate source contract, not evidence of a passed hosted test or release.
+
+### ADR-0073 redesign step 1 + step 2: `verify_attestation_pair` returns typed, non-authorizing evidence, widened to report everything verified
+
+**Breaking**: `verify_attestation_pair()` now returns `AttestationPairVerificationResultV1`
+on success instead of bare `None`, and requires one new keyword-only parameter,
+`verification_context_digest: str`. This is step 1 of a 3-step cross-repo
+redesign (Foundation → Control → CP adapter) closing an availability hazard in
+the merged ADR-0073 host-admission protocol: the current design holds Control
+locks across this out-of-process verification call, which can block emergency
+root revocation if the call stalls. The redesign moves to a resolve →
+transaction-free-verify → revalidate/consume shape; this typed result is what
+lets Control's later revalidation step bind Foundation's actual verification
+outcome without either package importing the other's types.
+
+`verification_context_digest` is Foundation's **opaque**: it is Control's own
+digest over its resolved admission context, carried through this function
+unread and unvalidated beyond a non-empty check, and returned unchanged in the
+result only on success. Foundation does not compute, interpret, or reproduce
+it — digest ownership stays singular per repository (Foundation owns the two
+attestation-envelope digests it already computes; Control owns the context
+digest). `admit_host_source()` carries the same new parameter through
+unchanged in spirit, for nine keyword-only parameters total, still discarding
+`verify_attestation_pair`'s return value since it only needs pass/fail.
+
+**Step 2 (result widening)**: `AttestationPairVerificationResultV1` gained
+seven more fields — `expected_host_identity`, `expected_observation_id`,
+`expected_package`, `candidate_audience`, `installed_audience`,
+`candidate_root`, `installed_root` (the last two a new small frozen
+dataclass, `AttestationVerifiedRootV1`) — closing half of a real
+security-boundary gap an independent review found on
+`dotmac_platform_control_plane`#192: today, Control's CP adapter caller
+supplies `expected_host_identity`/`expected_observation_id`/
+`expected_package`/`trust_policy` with NO downstream comparison against what
+Control itself resolved. Foundation now reports EVERYTHING it actually
+verified — the caller-supplied expectations that were checked, the audiences
+the trust policy declared, and the specific root that matched each half —
+so a later Control change can compare its own resolution against what
+Foundation actually verified against, instead of trusting a caller-supplied
+echo of its own input back at it unchanged. `AttestationPairVerificationResultV1`
+has never been published in any real release (`0.4.0a1`, which introduced it,
+was never tagged), so this widens the type in place rather than adding a V2.
+Control's comparison and the CP adapter's simplification are separate,
+later, cross-repository tasks.
+
+The successor remains unallocated and this is source-only, unreleased
+Foundation contract work. No Control implementation or CP adapter exists yet.
+
+### ADR-0073: admission coordinates and full attestation-envelope digest
+
+`AttestationEnvelopeV2.canonical_document()` now exposes the exact parsed full
+envelope mapping, including `signature`; `attestation_envelope_digest()` hashes
+that mapping with the package's canonical JSON rules. This is additive to the
+existing `signed_bytes()` method: it does not change that method's return type
+or wire meaning.
+
+`verify_attestation_pair()` now requires the Control-derived
+`expected_observation_id` (the signed dispatch coordinate) and
+`expected_package`, refusing mismatches with the distinct public constants
+`OBSERVATION_ID_MISMATCH` and `PACKAGE_MISMATCH`. `admit_host_source()` carries
+the same two keyword-only inputs, for eight keyword-only parameters total, and
+checks them before reading the installed artifact from the host.
+
+The successor remains unallocated and this is source-only, unreleased
+Foundation contract work. No Control implementation, signer, or positive
+executor admission path is claimed here.
+
+### Both mutating executors accept a host-source admission provider, handed over at construction
+
+`host_source_admission.py` adds `HostSourceAdmissionProvider` (a Protocol
+with one argument-free method, `admit_host_source() -> tuple[HostSource,
+HostSourceAdmissionTrace]`) and `RefusingHostSourceAdmissionProvider`, the
+reference implementation that delegates to
+`require_host_source(receipt=None)` and therefore always refuses.
+`engine/run.py`'s `Executor` and `recovery_execution.py`'s
+`RecoveryExecutor` each gain a keyword-only `admission_provider` constructor
+parameter defaulting to `RefusingHostSourceAdmissionProvider()`, so a caller
+that supplies nothing observes exactly today's refusal behavior. Both
+executors' `_verify_host_source` now delegates to
+`self._admission_provider.admit_host_source()` — called fresh on every
+`run`/`rollback` invocation, never cached across calls on the same instance —
+and a supplied provider's `PreconditionFailed`/`SpecError` propagates
+unchanged.
+
+This is additive API under the current unreleased version; no successor is
+allocated by this change. A provider that actually reaches Control's
+trust-root/revocation/replay-consumption state to admit a real `HostSource`
+is later, separate, cross-repo work — this change only wires the seam. The
+protocol is not proof of that future provider: the shipped CLI supplies none,
+and its three executor callsites remain refusal-only.
+
+### `admit_host_source()` composes the v2 attestation seams into a `HostSource` — synthetic and UNWIRED
+
+`host_source_admission.py` adds `admit_host_source()` and
+`HostSourceAdmissionTrace`: the first function that turns a verified pair of
+`AttestationEnvelopeV2` values into a real, checked `HostSource`. It calls
+`verify_attestation_pair()` first (letting every existing refusal propagate
+unchanged), then `verify_candidate_attestation()` again against the same
+`candidate` object to obtain the authenticated subject, reads the
+interpreter's own installed artifact only after the pair check succeeds, and
+refuses with `host_source.DISAGREES` if that real reading disagrees with the
+authenticated installed-host subject. `trusted_host_source.py` remains
+zero-I/O; its additive canonical mapping and digest surface are preserved by
+doing the one host I/O read here instead, and `require_host_source`'s
+signature and behavior are untouched.
+
+This is exercised today only against SYNTHETIC, non-secret attestation
+envelopes built in the unit test suite. No executor calls this function:
+`engine/run.py`'s `Executor` and `recovery_execution.py`'s `RecoveryExecutor`
+are unmodified, and `HostSourceAdmissionTrace` is consumed by nothing in this
+package. Wiring either executor to this function is later, separate work,
+blocked on a delivery-seam decision that has not been made.
+
 ### A trusted host workload authenticates a candidate instead of trusting a parsed value
 
 `verify_candidate_attestation()` is the one seam that turns a signed

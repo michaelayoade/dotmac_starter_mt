@@ -144,9 +144,11 @@ class ObservedDatabaseTableV1:
         if len(names) != len(set(names)):
             raise ProductDatabaseCatalogError("observed table column names repeat")
         ordinals = tuple(column.ordinal for column in self.columns)
-        if ordinals != tuple(range(1, len(self.columns) + 1)):
+        # pg_attribute.attnum leaves a hole when a column is dropped. Keep
+        # those physical numbers so comparison can detect real ordinal drift.
+        if ordinals != tuple(sorted(set(ordinals))):
             raise ProductDatabaseCatalogError(
-                "observed table columns must be in contiguous ordinal order"
+                "observed table column ordinals must be unique and strictly increasing"
             )
 
     @property

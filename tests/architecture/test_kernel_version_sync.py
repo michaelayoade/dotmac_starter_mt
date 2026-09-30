@@ -255,29 +255,23 @@ CAPABILITY_RAISED_FLOORS = {
     # Ticketing passed through a56 (`requires`) and a60 (`tenant_requires`) on
     # the way here. The floor is always the highest capability the module
     # actually consumes, not the first one that moved it.
-    # ADR-0023: release-catalog declares `platform_tables` and owns no tenant
-    # tables. The field was INTRODUCED in a53, but a53 was never published —
-    # the tags jump a50 to a56 — so a56 is the earliest kernel a consumer can
-    # actually install with it. A floor naming an unpublished version is
-    # unresolvable, which is why "earliest PUBLISHED" is the operative test,
-    # not "earliest".
-    #
-    # It declares no `requires` and calls no prerequisite helper, so a56 here
-    # is set by `platform_tables` alone and not by the a56 prerequisite
-    # contract that raised the modules above. `dotmac-entitlement-allocation`
-    # sat beside it on exactly that reasoning until `0.1.0a5`; see its own
-    # entry below for why it no longer does.
-    #
-    # `supported_plane_sets` is deliberately OMITTED rather than written as an
-    # explicit `()`. Writing it would consume an a61 constructor field for a
-    # value the default already supplies, raising the floor to a61 for
-    # nothing. Absence already means atomic.
-    "dotmac-release-catalog": ("0.1.0a56", "0.1.0a44"),
+    # Release Catalog's typed module/product database-catalogue attestation
+    # writers import the snapshot parsers first published in Kernel a100.
+    # The older a56 platform_tables floor remains historically true, but it
+    # is no longer sufficient for this distribution's runtime API imports.
+    # supported_plane_sets remains omitted because the module is atomic. The
+    # manifest's own new `database_catalog=` (`ModuleDatabaseCatalogContributionV1`)
+    # import is the SAME a100 module the attestation writers already required,
+    # so a100 still suffices — no further move.
+    "dotmac-release-catalog": ("0.1.0a100", "0.1.0a44"),
     "dotmac-ticketing": ("0.1.0a61", "0.1.0a39"),
     # a61 (`supported_plane_sets`) held until a67 published `outbox_relay.v1`,
     # which this module's `ap_0002` verifies and its manifest declares. The
     # floor is always the HIGHEST capability actually consumed.
-    "dotmac-approvals": ("0.1.0a67", "0.1.0a59"),
+    # a67 held until a100: this module's own manifest now declares
+    # `database_catalog=` (`ModuleDatabaseCatalogContributionV1`), importing
+    # `dotmac_kernel.product_database_catalog`, first published in a100.
+    "dotmac-approvals": ("0.1.0a100", "0.1.0a59"),
     # Numbering's own ledger row is a65, and for one release that WAS its floor
     # — every other capability it consumes (`platform_tables` a53,
     # `requires`/`tenant_requires` a56/a60, `supported_plane_sets` a61) predates
@@ -327,7 +321,20 @@ CAPABILITY_RAISED_FLOORS = {
     # excludes a66/a67. Every one
     # of those four runs against a kernel whose ledger it silently requires
     # and cannot state.
-    "dotmac-entitlement-allocation": ("0.1.0a68", "0.1.0a45"),
+    # a68 held until a100: this module's own manifest now declares
+    # `database_catalog=` (`ModuleDatabaseCatalogContributionV1`), importing
+    # `dotmac_kernel.product_database_catalog`, first published in a100.
+    "dotmac-entitlement-allocation": ("0.1.0a100", "0.1.0a45"),
+    # Both moved OUT of UNPUBLISHED_ALLOCATION_FLOORS below: that map's rule is
+    # "the allocation itself is the highest thing needed, rounded up to the
+    # first PUBLISHED kernel" (a74/a75 were never published; a77 is the first
+    # installable kernel carrying either). That rule no longer describes these
+    # two — each module's manifest now declares `database_catalog=`
+    # (`ModuleDatabaseCatalogContributionV1`), importing
+    # `dotmac_kernel.product_database_catalog`, first published in a100, a real
+    # CAPABILITY above the rounded-up a77 allocation floor.
+    "dotmac-commercial-agreements": ("0.1.0a100", "0.1.0a74"),
+    "dotmac-licensing": ("0.1.0a100", "0.1.0a75"),
 }
 
 # The third rule, and the one the other two maps cannot state: a module whose
@@ -394,8 +401,6 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
     "dotmac-pon-access": ("0.1.0a83", "0.1.0a82"),
     "dotmac-referrals": ("0.1.0a85", "0.1.0a84"),
     "dotmac-reseller-management": ("0.1.0a85", "0.1.0a84"),
-    "dotmac-commercial-agreements": ("0.1.0a77", "0.1.0a74"),
-    "dotmac-licensing": ("0.1.0a77", "0.1.0a75"),
     "dotmac-deployment-control": ("0.1.0a77", "0.1.0a76"),
     "dotmac-media-observations": ("0.1.0a81", "0.1.0a78"),
     "dotmac-content": ("0.1.0a81", "0.1.0a79"),
@@ -630,9 +635,42 @@ def test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
     )
     assert imports_surface, f"{distribution} no longer consumes the transaction surface"
     floor, _allocation = CAPABILITY_RAISED_FLOORS[distribution]
-    assert floor == _first_published_kernel_tag_containing(
-        "packages/dotmac-kernel/src/dotmac_kernel/transactions.py"
-    ), f"{distribution} must floor at the first published transaction-surface tag"
+    # A consumer that also imports a LATER public surface floors at the later
+    # surface's first tag; every surface's tag is still derived, never typed.
+    later = LATER_SURFACES_RAISING_THE_FLOOR.get(distribution, ())
+    for path in later:
+        # A later surface raises the floor only while it is actually imported;
+        # a dropped import must not keep a needlessly raised floor passing.
+        dotted = path.split("/src/", 1)[1].removesuffix(".py").replace("/", ".")
+        assert any(
+            isinstance(node, ast.ImportFrom) and node.module == dotted
+            for source in package_dir.rglob("*.py")
+            for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+        ), f"{distribution} no longer imports {dotted}; drop it from the map"
+    surfaces = (
+        "packages/dotmac-kernel/src/dotmac_kernel/transactions.py",
+        *later,
+    )
+    expected = max(
+        (_first_published_kernel_tag_containing(path) for path in surfaces),
+        key=lambda version: int(version.rsplit("a", 1)[1]),
+    )
+    assert floor == expected, (
+        f"{distribution} must floor at the first published tag of the latest "
+        f"kernel surface it imports ({expected}), not {floor}"
+    )
+
+
+#: Consumers of the transaction surface whose floor another, later public
+#: kernel surface raises. Each entry is a path whose first published tag is
+#: derived from the tags themselves.
+LATER_SURFACES_RAISING_THE_FLOOR: dict[str, tuple[str, ...]] = {
+    # The manifest's `database_catalog=` imports
+    # `dotmac_kernel.product_database_catalog` (first published in a100).
+    "dotmac-approvals": (
+        "packages/dotmac-kernel/src/dotmac_kernel/product_database_catalog.py",
+    ),
+}
 
 
 @pytest.mark.parametrize(

@@ -40,8 +40,8 @@
     "`ModuleManifest.platform_tables` entered kernel SOURCE at a53, but a53-a55",
     "were never published, so a56 is the first installable kernel carrying it.",
     "a56 is therefore the floor of a module whose HIGHEST consumed capability",
-    "is `platform_tables` \u2014 dotmac-release-catalog and",
-    "dotmac-entitlement-allocation, which are platform-only and stop there.",
+    "is `platform_tables`. dotmac-release-catalog once stopped there, but its",
+    "database-catalogue writers now consume Kernel a100 snapshot parsers.",
     "",
     "It is NOT the floor of every dual-plane module. One consuming a LATER",
     "capability floors at that one instead: dotmac-ticketing consumes ADR-0028",
@@ -329,7 +329,7 @@
       "package_dir": "packages/dotmac-approvals",
       "import_name": "dotmac_approvals",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a67",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_approvals",
       "tag_prefix": "dotmac-approvals-v",
       "wheel_contents": {
@@ -343,7 +343,8 @@
           "dotmac_approvals/outbox.py",
           "dotmac_approvals/migrations/__init__.py",
           "dotmac_approvals/migrations/versions/ap_0001_approvals.py",
-          "dotmac_approvals/migrations/versions/ap_0002_outbox_relay.py"
+          "dotmac_approvals/migrations/versions/ap_0002_outbox_relay.py",
+          "dotmac_approvals/migrations/versions/ap_0003_withdrawals.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -676,7 +677,7 @@
       "package_dir": "packages/dotmac-commercial-agreements",
       "import_name": "dotmac_commercial_agreements",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a77",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_agreements",
       "tag_prefix": "dotmac-commercial-agreements-v",
       "wheel_contents": {
@@ -688,7 +689,8 @@
           "dotmac_commercial_agreements/ports.py",
           "dotmac_commercial_agreements/service.py",
           "dotmac_commercial_agreements/migrations/__init__.py",
-          "dotmac_commercial_agreements/migrations/versions/cg_0001_agreements.py"
+          "dotmac_commercial_agreements/migrations/versions/cg_0001_agreements.py",
+          "dotmac_commercial_agreements/migrations/versions/cg_0002_approval_withdrawals.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -918,7 +920,7 @@
       "package_dir": "packages/dotmac-entitlement-allocation",
       "import_name": "dotmac_entitlement_allocation",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a68",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_ealloc",
       "tag_prefix": "dotmac-entitlement-allocation-v",
       "wheel_contents": {
@@ -1894,7 +1896,7 @@
       "package_dir": "packages/dotmac-licensing",
       "import_name": "dotmac_licensing",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a77",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_licensing",
       "tag_prefix": "dotmac-licensing-v",
       "wheel_contents": {
@@ -2713,7 +2715,7 @@
       "package_dir": "packages/dotmac-release-catalog",
       "import_name": "dotmac_release_catalog",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a56",
+      "kernel_floor": "0.1.0a100",
       "db_schema": "mod_rel",
       "tag_prefix": "dotmac-release-catalog-v",
       "wheel_contents": {
@@ -2721,7 +2723,8 @@
           "dotmac_release_catalog/py.typed",
           "dotmac_release_catalog/manifest.py",
           "dotmac_release_catalog/migrations/__init__.py",
-          "dotmac_release_catalog/migrations/versions/rl_0001_release_artifacts.py"
+          "dotmac_release_catalog/migrations/versions/rl_0001_release_artifacts.py",
+          "dotmac_release_catalog/migrations/versions/rl_0002_db_catalog_attestations.py"
         ],
         "forbidden_prefixes": [
           "app/",

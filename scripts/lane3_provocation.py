@@ -9,9 +9,11 @@ only one triggered by a verification that genuinely failed proves the path.**
 
 STATUS, 2026-09-06: item 8 is BLOCKED and this module's provocation is not
 currently driven. The compensation moved to `Executor._restore_exposure`, which
-is reachable only through an authorized `FoundationExecutionPlanV2` carrying an
-exposure reconciliation, and Control issues none yet. This file is kept rather
-than deleted for the reason `exposure_rehearsal_runner` states at its import:
+is reachable only through an authorized `FoundationExecutionPlanV3` carrying an
+exposure reconciliation after the exact Control V2 dispatch is consumed. The
+Lane 3 workflow receives neither the trusted CP-rendered plan nor that pair yet.
+This file is kept rather than deleted for the reason
+`exposure_rehearsal_runner` states at its import:
 the rehearsal is right and only its driver is missing, and a provocation
 re-derived from incident notes later is a measurement paid for twice.
 

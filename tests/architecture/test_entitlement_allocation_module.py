@@ -728,11 +728,13 @@ def test_the_platform_audit_write_is_declared_and_verified() -> None:
 
 
 def test_the_floor_is_the_highest_prerequisite_release() -> None:
-    """a68 publishes the audit prerequisite after the a66 ledger name."""
+    """a100 publishes `dotmac_kernel.product_database_catalog`, which this
+    module's new database_catalog= contribution imports, after the a68 audit
+    prerequisite and the a66 ledger name."""
     manifest = tomllib.loads(
         (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
-    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a68"
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a100"
 
 
 def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
@@ -742,7 +744,7 @@ def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
     entry = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]["dotmac-entitlement-allocation"]
-    assert entry["kernel_floor"] == "0.1.0a68"
+    assert entry["kernel_floor"] == "0.1.0a100"
     required = set(entry["wheel_contents"]["required"])
     on_disk = {
         f"dotmac_entitlement_allocation/migrations/versions/{path.name}"

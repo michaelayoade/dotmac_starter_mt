@@ -95,9 +95,12 @@ from dotmac_release_catalog.models import (
     ReleaseArtifact,
 )
 from dotmac_release_catalog.service import (
+    DatabaseCatalogArtifactMismatchError,
     UnknownArtifactError,
     artifact_attestations,
     attest_artifact,
+    attest_module_database_catalog,
+    attest_product_database_catalog,
     get_artifact,
     list_artifacts,
     preview_publication,
@@ -110,7 +113,7 @@ from dotmac_release_catalog.vocabulary import (
     AttestationKind,
 )
 
-__version__ = "0.1.0a4+dev"
+__version__ = "0.1.0a5"
 
 __all__ = [
     "ARTIFACT_KINDS",
@@ -129,6 +132,7 @@ __all__ = [
     "AttestationView",
     "Digest",
     "DigestError",
+    "DatabaseCatalogArtifactMismatchError",
     "EvidenceState",
     "PublicationPreview",
     "PublicationRefusal",
@@ -138,6 +142,8 @@ __all__ = [
     "__version__",
     "artifact_attestations",
     "attest_artifact",
+    "attest_module_database_catalog",
+    "attest_product_database_catalog",
     "get_artifact",
     "list_artifacts",
     "module",

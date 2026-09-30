@@ -15,7 +15,20 @@ audit dependencies.
 
 Nothing in this file is a publication claim except this section.
 
-## Unreleased — `0.1.0a6+dev`
+## 0.1.0a7 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
+
+**Database catalogue contribution.** The manifest now declares
+`database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head
+`ea_0003_platform_audit_log`, covering both tables. Every column fact (Postgres
+type identity, nullability, generation, default expression) was captured from
+an actual PostgreSQL 16 observation
+(`dotmac_kernel.database_catalog_comparator.observe_postgres_tables_columns`)
+against this module's real composed migration graph — including the two
+no-DDL prerequisite-verification revisions, `ea_0002` and `ea_0003` — then
+self-verified with `compare_module_database_catalog` (zero drift) before being
+frozen here. The `dotmac-kernel` floor moves to `>=0.1.0a100`, the release
+that first published `dotmac_kernel.product_database_catalog`, which this
+manifest now imports.
 
 **Public typed READ contracts** (`dotmac_entitlement_allocation.facts`):
 `get_allocation`, `allocations_for_contract`, `list_allocations` over a closed
@@ -45,9 +58,10 @@ is how an operator finds the row that needs repairing.
 `AllocationStatus`, `STAGED` and `AllocatedCapability` now live in `facts` and
 are re-exported from `models` and `service`; no caller's import changes.
 
-**The declared version now carries a PEP 440 local development marker.**
-`0.1.0a6` is published and tagged; `src/` has moved since, and one version may
-not name two sets of importable bytes.
+**Version prepared.** The `0.1.0a6+dev` local-development marker is removed;
+the package now declares `0.1.0a7`. This is a prepared release candidate only —
+publication happens through a separate, later `workflow_dispatch` of
+`release-module.yml`.
 
 ## 0.1.0a6 — released 2026-08-17
 

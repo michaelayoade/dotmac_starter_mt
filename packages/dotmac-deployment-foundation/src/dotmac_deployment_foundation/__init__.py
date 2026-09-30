@@ -25,8 +25,8 @@ inside one of the deployments it builds.
 public CLI and Lane 3 rehearsal invoking a second transaction class directly
 against a host provider, outside `Executor`'s grant and execution-plan checks —
 is CLOSED. Exposure is a typed effect the executor performs from
-`FoundationExecutionPlanV2.exposure_reconciliations`, under the caller's
-deployment lock; `exposure.py` keeps the seam and the measurement and orders
+`FoundationExecutionPlanV3` (carrying V2's exposure reconciliations), under the
+caller's deployment lock; `exposure.py` keeps the seam and measurement and orders
 nothing. `dotmac-deploy exposure-apply` observes and reports, and can no longer
 apply: an `--execute` with no `--authorization` to offer was a mutation
 authorized by whoever typed it.
@@ -55,9 +55,16 @@ from .application_profile import (
     WriterClaim,
 )
 from .authorization import OPERATIONS, ExecutionGrant, authorize
+from .authorization_v3 import (
+    ControlConsumptionRequestV3,
+    ExecutionAuthorityV3Provider,
+    ExecutionContextV3,
+    authorize_v3,
+)
 from .backup import (
     ArtefactClass,
     Assurance,
+    BackupEvidenceOrigin,
     BackupHealth,
     BackupRecord,
     assess,
@@ -113,7 +120,9 @@ from .database_structure import (
 )
 from .deployment_evidence import (
     DEPLOYMENT_EVIDENCE_SCHEMA,
+    DEPLOYMENT_EVIDENCE_V2_SCHEMA,
     DeploymentEvidenceV1,
+    DeploymentEvidenceV2,
     RunStanding,
     StepEvidenceV1,
     StepStanding,
@@ -183,6 +192,13 @@ from .execution_plan_v2 import (
     render_execution_plan_v2,
     require_execution_plan_v2_digest,
 )
+from .execution_plan_v3 import (
+    EXECUTION_PLAN_V3_SCHEMA,
+    FoundationExecutionPlanV3,
+    canonical_execution_plan_v3_bytes,
+    render_execution_plan_v3,
+    require_execution_plan_v3_digest,
+)
 from .exposure import (
     OWNERSHIP_PREFIX,
     ExposureEffects,
@@ -204,6 +220,7 @@ from .exposure import (
     verify_exposure,
 )
 from .external_recovery import (
+    EXTERNAL_BACKUP_PATH_PREFIX,
     EXTERNAL_RECEIPT_SCHEMA,
     VERIFICATION_EVIDENCE,
     ExternalRecoveryReceiptV1,
@@ -218,6 +235,12 @@ from .host_source import (
     candidate_receipt_from_mapping,
     read_installed_artifact,
     require_host_source,
+)
+from .host_source_admission import (
+    HostSourceAdmissionProvider,
+    HostSourceAdmissionTrace,
+    RefusingHostSourceAdmissionProvider,
+    admit_host_source,
 )
 from .image import AuditReport, audit_image
 from .ingress import (
@@ -360,6 +383,7 @@ from .spec import (
     SCHEMA,
     SCHEMA_V1,
     SCHEMA_V2,
+    SCHEMA_V3,
     SCHEMAS,
     DatabaseContract,
     DatabaseRole,
@@ -393,17 +417,33 @@ from .transition import (
     recover_database_promotion,
     require_database_precondition,
 )
+from .transition_receipt import (
+    TRANSITION_RECEIPT_SCHEMA,
+    TargetSide,
+    TransitionBackup,
+    TransitionFinding,
+    TransitionOutcome,
+    TransitionReceiptV1,
+    TransitionSide,
+    TransitionVerdict,
+    verify_transition_receipt,
+)
 from .trusted_host_source import (
     ATTESTATION_SCHEMA,
     CANDIDATE_ATTESTATION_PURPOSE,
     INSTALLED_OBSERVATION_PURPOSE,
+    OBSERVATION_ID_MISMATCH,
+    PACKAGE_MISMATCH,
     SAME_KEY_SIGNED_BOTH,
     AttestationEnvelopeV2,
+    AttestationPairVerificationResultV1,
     AttestationTrustPolicy,
     AttestationTrustRootV2,
+    AttestationVerifiedRootV1,
     AttestationVerifier,
     CandidateAttestationSubjectV2,
     InstalledHostAttestationSubjectV2,
+    attestation_envelope_digest,
     verify_attestation_pair,
     verify_candidate_attestation,
 )
@@ -422,6 +462,7 @@ __all__ = [
     "Annotation",
     "ArtefactClass",
     "Assurance",
+    "BackupEvidenceOrigin",
     "AuditReport",
     "AUTHORIZATION_RECEIPT_V2_SCHEMA",
     "AuthorizationReceipt",
@@ -492,6 +533,7 @@ __all__ = [
     "EXECUTION_PLAN_SCHEMA",
     "EXECUTOR_KINDS",
     "EXPOSURES",
+    "EXTERNAL_BACKUP_PATH_PREFIX",
     "EXTERNAL_RECEIPT_SCHEMA",
     "EdgeEndpoint",
     "EffectivePrivilegeAuditUniverse",
@@ -556,7 +598,9 @@ __all__ = [
     "lease_digest",
     "require_release_before_destruction",
     "DEPLOYMENT_EVIDENCE_SCHEMA",
+    "DEPLOYMENT_EVIDENCE_V2_SCHEMA",
     "DeploymentEvidenceV1",
+    "DeploymentEvidenceV2",
     "RunStanding",
     "StepEvidenceV1",
     "StepStanding",
@@ -568,6 +612,15 @@ __all__ = [
     "execution_plan_v2_digest",
     "render_execution_plan_v2",
     "require_execution_plan_v2_digest",
+    "EXECUTION_PLAN_V3_SCHEMA",
+    "FoundationExecutionPlanV3",
+    "canonical_execution_plan_v3_bytes",
+    "render_execution_plan_v3",
+    "require_execution_plan_v3_digest",
+    "ExecutionAuthorityV3Provider",
+    "ControlConsumptionRequestV3",
+    "ExecutionContextV3",
+    "authorize_v3",
     "RECOVERY_PLAN_DIGEST_SCHEMA",
     "RECOVERY_PLAN_SCHEMA",
     "CapturedPrestateV1",
@@ -632,6 +685,7 @@ __all__ = [
     "SCHEMAS",
     "SCHEMA_V1",
     "SCHEMA_V2",
+    "SCHEMA_V3",
     "SecretValueError",
     "Severity",
     "SignatureVerifier",
@@ -642,7 +696,15 @@ __all__ = [
     "Strategy",
     "StructureFactDimension",
     "StructureFactDirection",
+    "TRANSITION_RECEIPT_SCHEMA",
     "TUNNEL_KINDS",
+    "TargetSide",
+    "TransitionBackup",
+    "TransitionFinding",
+    "TransitionOutcome",
+    "TransitionReceiptV1",
+    "TransitionSide",
+    "TransitionVerdict",
     "TrustPolicy",
     "UnknownFieldError",
     "UnknownSchemaError",
@@ -718,23 +780,33 @@ __all__ = [
     "require_rehearsed_artifact",
     "verify_publication",
     "verify_recovery",
+    "verify_transition_receipt",
     "write_lease",
     "CandidateReceipt",
     "HostSource",
+    "HostSourceAdmissionProvider",
+    "HostSourceAdmissionTrace",
     "InstalledArtifact",
+    "RefusingHostSourceAdmissionProvider",
+    "admit_host_source",
     "candidate_receipt_from_mapping",
     "read_installed_artifact",
     "require_host_source",
     "ATTESTATION_SCHEMA",
+    "OBSERVATION_ID_MISMATCH",
+    "PACKAGE_MISMATCH",
     "CANDIDATE_ATTESTATION_PURPOSE",
     "INSTALLED_OBSERVATION_PURPOSE",
     "SAME_KEY_SIGNED_BOTH",
     "AttestationEnvelopeV2",
+    "AttestationPairVerificationResultV1",
     "AttestationTrustPolicy",
     "AttestationTrustRootV2",
+    "AttestationVerifiedRootV1",
     "AttestationVerifier",
     "CandidateAttestationSubjectV2",
     "InstalledHostAttestationSubjectV2",
+    "attestation_envelope_digest",
     "verify_attestation_pair",
     "verify_candidate_attestation",
     "attest_authorization_receipt_v2",

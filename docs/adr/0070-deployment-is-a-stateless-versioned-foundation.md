@@ -403,6 +403,83 @@ admission. Its successful return establishes agreement only relative to the
 supplied policy and verifier; those inputs become authority only when a trusted
 composition sources them from Control.
 
+### Amendment, 2026-09-25: Gate-3 execution authority successor and host ownership correction
+
+This amendment supersedes the 2026-09-07 claim above that host identity's
+authoritative owner and grammar are unresolved, and the 2026-09-08 statement
+below that Fleet has no usable incarnation coordinate. Accepted ADR-0073 now
+assigns canonical `host_id` grammar to Fleet; Control owns authenticated
+presenter → target → current host association, enrolled-root standing and
+atomic dispatch consumption; Foundation verifies supplied evidence; CP fixes
+the provider, clock and commit-before-launch composition at startup. Neither
+a request field nor an environment-only mode chooses the verifier, observer or
+clock. Python objects/private witnesses do not constitute an unforgeable trust
+boundary: installed, reviewed in-process assembly code is trusted as code.
+
+`FoundationExecutionPlanV3` is the successor document whose digest remains
+`ExecutionPlanDigestV1`. It binds the exact candidate Foundation wheel digest,
+target ID and reference, controller SSH fingerprint, Fleet host ID, immutable
+host-key incarnation and enrolment coordinate, in addition to V2's complete
+acts and host prestate. Control signs precisely this digest in its unchanged
+`AuthorizationReceiptV2` authorization+dispatch pair. Foundation's sole grant
+issuer checks that pair with the startup-fixed provider, compares fresh
+Control/Fleet-resolved facts and installed artifact metadata independently of
+the pair, and rechecks before effects. F2 host-source admission remains the
+separate installed-source verification owner; this amendment does not pretend
+that PEP 610's recorded wheel hash verifies current installed file bytes.
+
+Gate-3 host binding is exact, not an inferred translation: ADR-0073 defines
+F2's authenticated installed `host_identity` as the Fleet `host_id`, the
+installed signer fingerprint as the host-key incarnation, and the installed
+trust-root version as the immutable enrolment UUID. After F2 admission and
+before any effect, Foundation compares all three to the V3 plan and fresh
+provider observation. The `Effects` protocol exposes no authenticated target
+identity; therefore only trusted CP assembly code may construct the matching
+V3 provider, F2 admission provider and Effects bundle. Separately injecting
+those components from request fields is not an authority path, and Foundation
+does not claim an Effects object proves which remote host it can mutate.
+
+The historical V1 `authorize()` and V1/V2 plan parsing remain non-authorizing.
+CLI, Lane 3 and release probes must not convert a single V1 document into an
+execution grant. Lane 3 has no ratified CP provider/typed V3 plan coordinate
+today, so its workflow refuses rather than deriving host facts from its
+request fields. Publication's installed-wheel smoke may pass by proving V3
+render/digest behavior and the standalone CLI's honest refusal; that is not
+Gate-3 adoption or authorization. The external CP execution composition
+remains a visible held prerequisite, not an invented local provider.
+
+### Amendment, 2026-09-25: current standing and dispatch consumption are pre-effect
+
+The V3 grant freezes canonical copies of the exact Control V2 authorization
+and dispatch documents it attested. After F2 admission and independent
+plan/host rechecks, but before any deploy or rollback effect, Foundation calls
+the same startup-fixed provider with those documents and exact expected
+receipt, context and plan digest. CP owns the external transaction: it must
+revalidate current approval standing, atomically consume the dispatch and
+commit before `consume_dispatch(...) -> None` returns normally. A replay,
+withdrawn standing, failed transaction, changed host/attempt or expired pair
+must refuse before commit. Foundation checks every receipt, V3 plan, fresh
+provider observation and F2 host trace fact before that call; no fallible
+Foundation check follows it. The request carries a deterministic
+`control-dispatch:<dispatch_id>` coordinate. Control's committed consumption
+ledger is the recovery source if the process crashes on the next instruction;
+local `DeploymentEvidence.v2` carries the same coordinate only when execution
+continues and evidence is written. V1 evidence bytes remain unchanged. Python
+values cannot independently prove CP's commit; the trusted in-process provider implementation and its conformance evidence are
+therefore part of the composition gate. This slice defines and uses that
+provider contract; the real CP adapter and conformance proof are external and
+not claimed here.
+
+Correction, 2026-09-25: the Control-facing request does not carry the receipt
+or observed execution context as separately trusted claims. Foundation checks
+both before the call, then passes exact signed-pair bytes, the F2 trace
+(including its actual pair-verification result and transient opaque CP
+continuation), the execution-plan digest and deterministic recovery coordinate.
+CP submits these to one Control host-admission-and-execution finalizer, which
+freshly rederives both standings and stages one dispatch consumption in its
+caller-owned transaction. Foundation neither interprets nor persists the
+continuation.
+
 ## What this ADR does not decide
 
 ### Amendment — 2026-09-07: successor Control receipt is a Foundation value, not admission
@@ -579,3 +656,332 @@ amendment records and does not implement.
 - It does not name a target for any environment.
 - It does not retire any product's existing deployment path. Retirement is a
   separate change per product, gated on proven parity.
+
+## Amendment — 2026-09-17: typed Compose topology for deployment assets
+
+Platform CP's production Compose topology requires separate front/back
+networks, profile-gated support jobs, named volumes, a repository-sourced
+initialization script, and a host-held signing-material mount. A generic
+single-network render silently drops those facts; a hand-written Compose file
+beside it would preserve a second deployment writer. `ProductDeploymentSpec.v3`
+therefore makes topology an explicit, digest-covered descriptor field. It
+requires a placement for every rendered runtime role, managed dependency,
+migration service and collector; it names networks and mounts through typed
+fields rather than accepting arbitrary Compose YAML. Host and repository bind
+mounts carry justification and a named approver. The host provider rechecks
+repository confinement, descriptor-bound repository file hashes, and
+host-material paths immediately before mutation. Repository-source binds are
+read-only; a container cannot rewrite the file whose digest was admitted.
+
+A deploy-time support job is profile-gated, uses an exact dependency image,
+has a bounded timeout, executes under the normal deployment lock, and has an
+explicit command and exact-output postcondition. Its output is not included
+in deployment failure records. A support job cannot receive the migration
+owner material through either its environment or a mount. Runtime roles may
+omit an implicit Compose
+dependency on `migrate` only when the migration service is profile-gated;
+Foundation's migration plan remains the DDL authority. V1 and V2 canonical
+documents and rendering are unchanged by an absent V3 field. V3 inherits V2's
+database-catalog binding, not V1's sidecar-only limitation.
+
+This amendment describes an implementation path, not proof of adoption.
+For V3, the host provider requires a retained Compose file and its recorded
+SHA-256, checks those bytes against the descriptor's deterministic render, and
+installs the retained bytes. Candidate operations use a short-lived private
+copy of those verified bytes, not the previous release's on-disk Compose file.
+This local path-and-digest pair is not itself a release receipt or proof that
+CI retained the bytes; the Platform CP release producer and Control binding
+must supply that provenance before adoption.
+It refuses to synthesize rollback configuration
+from the candidate descriptor; a previous-release asset and separate
+authorization are still needed for a proven rollback.
+The V3 plan itself therefore reports rollback as unavailable even when the
+migration is online and a previous image digest is known. The old image is
+insufficient to reconstruct the old topology; this refusal must be lifted only
+with a typed, release-receipted old asset and its own rollback authorization.
+Platform CP's accepted descriptor, source/render hashes, host asset,
+authorization binding, rehearsed rollback, and old-writer retirement require
+separate evidence before any full cutover can be claimed. No deployment or
+release is authorized by the V3 schema alone.
+
+## Amendment — 2026-09-19: Platform CP topology admission boundary
+
+The CP-shaped V3 diagnostic fixture models structural features observed at
+`dotmac_platform_control_plane` commit
+`1524580f43549a5804134131d4d9ed3b2237edef`: separate app, platform and
+relay-dispatcher credentials; a backend-only relay without a misleading
+container healthcheck; both first-cluster PostgreSQL init mounts; the
+network-isolated manifest initializer with exact owner and mode verification;
+read-only app/relay and read-write ops manifest mounts; and the one-shot
+Foundation migration owner. Its image and mounted-source bytes are synthetic;
+it is not a render of CP's accepted descriptor. V3's explicit `command = []`
+on a role inherits the exact-digest image's default CMD and omits Compose's
+`command`; an absent key still refuses, and V1/V2 still require a nonempty
+array. This keeps CP's container-local bind address in its pinned image, not
+as a host-address literal in the signed deployment descriptor. Existing
+nonempty-command V3 canonical documents gain no field or changed bytes. CP
+still uses one `ops` service with the migration credential, whereas V3 renders
+a separate migration service that alone holds the owner material. That split
+remains an adoption decision, not a proven equivalence.
+The relay's existing `dotmac-platform relay health`
+CLI exits successfully even for an unhealthy verdict, so a Foundation worker
+ping must check its machine-readable `data.verdict` for `relay_draining` rather
+than trust the CLI exit status alone. A fixture demonstrates that contract; CP's
+accepted product descriptor has not yet adopted it.
+
+Foundation runs deploy-time support jobs **after a verified backup and before
+migration preflight**. CP's current script runs `manifest-init` before backup.
+The existing Foundation order remains the safety boundary: no generic job is
+authorized to mutate a volume before the snapshot. CP must reconcile this
+order in its adoption workflow, or a separate narrowly typed volume-init
+contract with its own containment proof must be reviewed before changing the
+Foundation plan. A render test is not evidence that CP's workflow consumes the
+retained bytes, that its descriptor is accepted, or that a release/cutover has
+occurred.
+
+Michael approved the adoption direction on 2026-09-19: Platform CP will move
+manifest initialization after the verified backup and use Foundation's
+separate one-shot migration service as the sole DDL owner. This is a contract
+for the subsequent CP adoption change, not a claim that CP's current script or
+descriptor has already changed. A pre-backup mutation path is not part of this
+Foundation source slice.
+
+## Amendment — 2026-09-20: the admission-provider seam is wired, real admission is not
+
+`host_source_admission.py` adds `HostSourceAdmissionProvider`, a Protocol
+with one argument-free method, `admit_host_source()`, and
+`RefusingHostSourceAdmissionProvider`, the shipped reference implementation
+that delegates to `require_host_source(receipt=None)` and therefore always
+refuses. `engine/run.py`'s `Executor` and `recovery_execution.py`'s
+`RecoveryExecutor` each now accept the provider as a keyword-only
+constructor parameter, defaulting to `RefusingHostSourceAdmissionProvider`,
+and each class's `_verify_host_source` calls
+`self._admission_provider.admit_host_source()` fresh on every `run`/
+`rollback` invocation rather than caching a result across calls on the same
+instance.
+
+The provider is HANDED OVER at construction, the same rule this ADR and
+`host_source_admission.py` already apply to every other host-source
+ingredient (`recovery_receipts`, `evidence_policy`, `evidence_verifier`):
+Foundation owns no installation mechanism of its own, and there is no
+ambient registry, module-level global, or discovery path either executor
+consults instead. An executor that went looking for a provider could not
+distinguish "no provider was installed" from "the wrong provider was
+installed", and a mutating executor is exactly where that distinction has
+to stay visible at the call site. Argument-free is deliberate on the
+Protocol method itself: a real provider implementation reaches Control and
+evidence entirely inside its own method body, so this amendment does not
+invent a request/context parameter schema for Control before Control has
+one.
+
+The one implementation this package ships, `RefusingHostSourceAdmissionProvider`,
+reproduces the prior unconditional refusal byte-for-byte — same typed
+codes (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`), zero effects — so a caller
+supplying no provider observes no behavior change from before this seam
+existed. A REAL provider, one that actually reaches Control's trust-root,
+revocation, and replay-consumption state and Foundation's own
+attestation-verification seam (`admit_host_source()`, `verify_attestation_pair()`,
+`verify_candidate_attestation()`) to produce a genuinely admitted
+`HostSource`, remains separate, later, cross-repo work. This amendment
+records the seam a provider is handed through, not a claim that real
+admission works end-to-end.
+
+### Correction, 2026-09-20: a provider protocol does not prove its provider
+
+The constructor parameter is a trusted-composition extension point, not a
+new security boundary. An in-process caller can supply a structurally valid
+provider that returns invented `HostSource` and trace values without ever
+calling `admit_host_source()` or Control. The synthetic accepting provider in
+unit tests demonstrates this reachability; those tests prove executor and
+recovery sequencing only, not trusted provenance. This corrects the preceding
+amendment wherever "provider" could be read as "verified provider".
+
+The installed `dotmac-deploy` CLI currently passes no admission provider to
+any of its three direct mutating executor construction sites. A
+sensitivity-tested architecture guard checks those sites and rejects explicit
+`admission_provider=` or dynamic keyword expansion anywhere in that CLI; it
+does not prove a future indirect factory safe. It also does not cover an
+external embedder or Platform CP. Before either may pass a positive provider,
+the assembly must fix its selection at trusted installation/startup, prove
+that requests and operators cannot replace it, and obtain fresh authenticated
+Control trust-root/revocation, enrolled-host identity and replay-consumption
+state for each invocation. Absence or failure refuses before effects. A
+real positive admission still belongs first in the protected exact-wheel
+artifact rehearsal; neither a passing unit test nor this PR retires that gate.
+
+## Amendment — 2026-09-22: three distinct immutable candidate-provenance artifacts, and the record/signing order they fix
+
+Decision 2 of the 2026-09-08 amendment ("six admission decisions") states the
+ordering as "build once, sign the exact bytes, commit the receipt, rehearse,
+then publish" — one word, "receipt", carrying two different meanings across
+that sentence and the paragraph following it: `CandidateArtifact.v1`
+(decision 1's committed, non-authorizing binding of source revision,
+wheel/sdist digest, build run and artifact IDs) and whatever record binds a
+SIGNED envelope back to that artifact. Read literally, the sentence orders
+signing before any commit — which, followed literally, would let a signer
+produce a signed envelope against bytes nobody has yet durably recorded,
+reopening exactly the non-repudiation gap `CandidateArtifact.v1` exists to
+close: a record built or adjusted AFTER signing can always be made to agree
+with whatever was signed. `scripts/candidate_attestation_signer.py` already
+implements the correct order in practice — it "reads an already-committed-shape
+`CandidateArtifact.v1` receipt" and signs from it, never the reverse — but the
+ADR text never stated that as a rule, and never named the POST-sign record as
+its own distinct type. This amendment corrects both omissions.
+
+**Three artifacts, not two, each immutable and append-only, each with a
+single writer:**
+
+1. **`CandidateArtifact.v1`** — committed FIRST, before any signature exists.
+   Non-authorizing (decision 1: it shapes how admission is eventually built,
+   it does not itself admit anything). Binds source revision, the final
+   wheel/sdist digest(s), the build run ID and artifact ID, and an expiry.
+   Written once, by the build workflow, from the exact bytes the build
+   produced — never recomputed by a later re-hash, re-read, or a fresh API
+   call (already decision 2's own rule; restated here because it is the
+   property the ordering fix depends on). A `CandidateArtifact.v1` record is
+   never edited after it is committed.
+
+2. **The signed candidate-attestation envelope** (`TrustedHostAttestation.v2`,
+   already specified by the 2026-09-07 "trusted host provenance v2" amendment)
+   — produced only AFTER verifying that a committed `CandidateArtifact.v1`
+   record exists and that the artifact being signed matches it exactly (same
+   digest, same run and artifact IDs). The signer never signs from a fresh
+   build, a fresh hash, or an unrecorded artifact; it signs from the committed
+   record and nothing else. This is decision 2's "sign the exact bytes"
+   restated with its precondition made explicit: the bytes being signed are
+   the bytes the ALREADY-COMMITTED record names, not bytes the signer
+   independently trusts.
+
+3. **`CandidateAttestationReceipt.v1`** — committed AFTER the signed envelope
+   exists, in the SAME reviewed commit that lands the envelope itself (the
+   shape `scripts/candidate_attestation_signer.py`'s own docstring already
+   describes: "A human commits the signed envelope (and the bound receipt)
+   under `docs/inventories/` in a follow-up, reviewed change" — this
+   amendment names the vocabulary that docstring already assumed). It binds,
+   BY VALUE, never by path alone:
+   - the committed `CandidateArtifact.v1` record's revision identifier and
+     the canonical SHA-256 of the record's OWN bytes (not the wheel digest
+     the record itself names);
+   - the signed envelope's own canonical SHA-256 and the immutable artifact
+     coordinate (`CandidateArtifact.v1`'s build run ID and artifact ID) it
+     was produced from;
+   - the candidate's facility name and version;
+   - the identity of the one process that wrote it — the protected Starter
+     release-workflow signing step, the same identity decision 1 names as
+     the signer, and the ONLY writer this record ever has.
+
+   A record naming a FILE PATH to the artifact record or the envelope,
+   without also carrying that record's or envelope's own canonical digest,
+   is not a binding: a path can be repointed at a different file without
+   changing the receipt, a digest cannot. Duplicating the envelope's own
+   already-signed fields (package, version, wheel digest) without ALSO
+   carrying `CandidateArtifact.v1`'s OWN canonical digest closes nothing
+   either — that leaves no verifiable link back to the specific committed
+   record the signer actually read, only to facts the envelope already
+   separately asserts about itself. Without both digests present, a reader
+   cannot distinguish "this envelope was signed from this exact committed
+   record" from "this envelope happens to name the same package and version
+   as some record." This is the type the ADR text previously left unnamed.
+   It exists so a reader (or a later admission decision) can answer "which
+   committed artifact record does this signed envelope attest to" from a
+   durable, append-only pointer, rather than from the signer's own
+   now-unverifiable claim or from re-deriving the binding out-of-band.
+   Foundation's existing 2026-09-07 "successor Control receipt is a
+   Foundation value, not admission" amendment already establishes the
+   pattern of Foundation retaining a minimal, import-free consumer receipt
+   after cross-validating separately signed documents;
+   `CandidateAttestationReceipt.v1` is the SAME shape of thing, one step
+   earlier in the pipeline, for the candidate's own signed envelope rather
+   than for Control's authorization pair.
+
+**The fixed order, restated precisely**: freeze source → allocate → build once
+→ commit `CandidateArtifact.v1` → sign the exact recorded bytes → commit
+`CandidateAttestationReceipt.v1` → rehearse → publish. Reordering any step —
+signing before the artifact record is committed, committing the receipt before
+the envelope is actually signed, or rehearsing/publishing against anything
+other than the exact bytes both records name — reopens the same gap decision
+2 already named and this amendment now makes unambiguous.
+
+**Three distinct revisions, not one.** "Freeze source" — the first step of
+the fixed order — fixes the CANDIDATE SOURCE REVISION: the exact commit of
+`packages/dotmac-deployment-foundation` the build was taken from. Neither the
+`CandidateArtifact.v1` record's own commit, nor the
+`CandidateAttestationReceipt.v1` commit that lands afterward, IS that source
+revision, and neither is required to be — they are evidence ABOUT a frozen
+source revision, committed later, in the starter monorepo's own history, not
+inside the facility's source tree itself. A later evidence commit (fixing a
+typo in the receipt, recording a rehearsal result, or any change that does
+not touch `packages/dotmac-deployment-foundation` itself) does NOT by itself
+spend the candidate. What spends it is a change to the FACILITY SOURCE TREE
+or its declared version under the same candidate identity: if
+`packages/dotmac-deployment-foundation`'s tree, or its `pyproject.toml`
+version, no longer matches the frozen source revision `CandidateArtifact.v1`
+names, the candidate is spent — full stop, regardless of how many or how few
+evidence commits followed it. Unrelated evidence, runner, or documentation
+commits elsewhere in the monorepo never spend a candidate on their own.
+
+**A failed or drifted candidate is spent.** If a build fails, if the recorded
+digest does not match what actually got produced, or if a `CandidateArtifact.v1`
+record is found to disagree with the bytes it names at any later check, that
+candidate identity is spent: no `CandidateAttestationReceipt.v1` may bind to
+it, and the version it was allocated against is never reused (the existing
+rule that `0.4.0a1` remains "spent/drifted" and must never be reused for a
+real release is this same rule, applied once already, ahead of it being
+written down as a general one here). A fresh attempt allocates a fresh
+version and starts a fresh `CandidateArtifact.v1`, never resurrects a spent
+one.
+
+**Records are append-only, and a correction is never a same-identity
+replacement.** None of the three artifacts is ever edited in place once
+committed. A DEFECT discovered in a committed record — the build failed, a
+digest was wrong, rehearsal found a mismatch — is recorded as an APPENDED
+DISPOSITION: a new, separate record marking the existing
+`CandidateArtifact.v1` (and any `CandidateAttestationReceipt.v1` bound to it)
+spent, stating why. It is never a corrected `CandidateArtifact.v1` committed
+under the same candidate version — that would be exactly the same-identity
+edit this rule forbids, only routed through a second record instead of an
+in-place rewrite. A REPLACEMENT candidate — one meant to actually supersede
+the defective one and proceed to rehearsal and publication — requires a
+NEWLY ALLOCATED version and starts its own fresh `CandidateArtifact.v1`, per
+"a failed or drifted candidate is spent" above; it does not reference the
+spent record as something it supersedes, because a provenance record is
+never superseded under its own identity, only disposed of and left in place.
+The general append-only discipline this restates is the same one
+`AGENTS.md` rule 34 already requires of a published connector manifest,
+applied here to a candidate's own provenance chain before it ever reaches
+publication.
+
+**Publication may use only the exact rehearsed bytes.** The artifact that is
+eventually published must be bit-for-bit the same artifact the committed
+`CandidateArtifact.v1` names, the same artifact the signed envelope attests to,
+and the same artifact the protected rehearsal workflow (decision 5) actually
+exercised — never a rebuild, even an ostensibly-identical one. This restates
+decision 2's ordering as an invariant that holds continuously from commit
+through publication, not only at the moment each record is written.
+
+This amendment resolves the record/signing ordering conflict only. It does
+not allocate a Foundation successor version, does not build or sign a real
+`0.4.0a2` candidate, does not activate a production rehearsal issuer, and does
+not change `dotmac-deployment-control`'s pin. Those remain separately gated —
+Gate 0 (the protected disposable rehearsal-issuer contract, including
+ADR-0013 A6.4 immutable-reference derivation, signer custody, lease and
+controller identity) and Gate 1 (real CP `build_trust_policy` binding,
+applicable follow-ups closed before that binding becomes reachable,
+replay/refusal proof, Lane 3 runner capability, and the real ten-step recovery
+and roles-fail/objects-succeed adjudication test) must both be reviewed and
+green before a successor is allocated at all, and `0.4.0a1` remains spent and
+is never reused.
+
+## Amendment — 2026-09-25: first executor cutover is Control Plane bootstrap
+
+The original Consequences section names ERP as the first full adopter. For
+executor cutover, that sequence is narrowed: `dotmac_platform_control_plane`
+is the first Foundation executor cutover and control-plane bootstrap. It must
+compose Control's authenticated host admission, current execution standing,
+single-use dispatch consumption and commit-before-effect boundary before a
+data-plane product can depend on that authority. ERP remains the first **full
+data-plane adopter**, after that bootstrap; its existing exact pin, descriptor
+inputs and CI conformance are not proof that its deployment executor has been
+replaced. This amendment records ordering only. It does not claim either
+product has completed executor cutover, production adoption or retirement of
+its prior execution path.

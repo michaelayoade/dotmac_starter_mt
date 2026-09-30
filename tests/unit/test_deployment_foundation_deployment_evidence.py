@@ -41,10 +41,12 @@ import json
 import pytest
 from dotmac_deployment_foundation.deployment_evidence import (
     DEPLOYMENT_EVIDENCE_SCHEMA,
+    DEPLOYMENT_EVIDENCE_V2_SCHEMA,
     EVIDENCE_BAD_KIND,
     EVIDENCE_BAD_STANDING,
     EVIDENCE_NOT_A_STEP,
     DeploymentEvidenceV1,
+    DeploymentEvidenceV2,
     RunStanding,
     StepEvidenceV1,
     StepStanding,
@@ -147,6 +149,19 @@ def _evidence(**over) -> DeploymentEvidenceV1:
 
 def test_the_document_key_set_is_exactly_this_and_nothing_else() -> None:
     assert set(_evidence().as_document()) == DOCUMENT_KEYS
+
+
+def test_v2_adds_only_the_control_ledger_coordinate_without_mutating_v1() -> None:
+    base = _evidence()
+    original = base.as_document()
+    successor = DeploymentEvidenceV2(
+        base=base, control_consumption_ref="control-dispatch:dispatch-test-1"
+    ).as_document()
+    assert original["schema"] == DEPLOYMENT_EVIDENCE_SCHEMA
+    assert successor["schema"] == DEPLOYMENT_EVIDENCE_V2_SCHEMA
+    assert set(successor) == DOCUMENT_KEYS | {"control_consumption_ref"}
+    assert successor["control_consumption_ref"] == "control-dispatch:dispatch-test-1"
+    assert base.as_document() == original
 
 
 def test_the_step_key_set_is_exactly_this_and_nothing_else() -> None:
@@ -367,7 +382,7 @@ def _refused_run():  # type: ignore[no-untyped-def]
     spec, plan, effects = _fixture()
     effects.present = False  # the image is not on the host
     execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
-    grant = _grant(spec, execution_plan_digest=digest)
+    grant = _grant(spec, execution_plan=execution_plan)
     executor = Executor(
         spec,
         effects,
@@ -390,7 +405,8 @@ def test_a_refused_run_records_a_standing_and_no_exception_text() -> None:
     assert outcome.succeeded is False
     assert outcome.failure, "the in-process diagnostic must still exist"
     document = outcome.as_evidence()
-    assert set(document) == DOCUMENT_KEYS
+    assert set(document) == DOCUMENT_KEYS | {"control_consumption_ref"}
+    assert document["schema"] == DEPLOYMENT_EVIDENCE_V2_SCHEMA
     assert document["standing"] in {"refused", "failed"}
     assert document["succeeded"] is False
     flat = json.dumps(document, sort_keys=True)

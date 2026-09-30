@@ -359,11 +359,13 @@ def _validate_columns(columns: object, context: str) -> None:
     if duplicates:
         raise ProductDatabaseCatalogError(f"{context} repeats columns {duplicates}")
     ordinals = tuple(column.ordinal for column in columns)
-    expected = tuple(range(1, len(columns) + 1))
-    if ordinals != expected:
+    # PostgreSQL attnum is stable across DROP COLUMN. A live table may have
+    # holes where dropped columns once lived; renumbering would hide physical
+    # drift from a retained catalogue. Only order and uniqueness are required.
+    if ordinals != tuple(sorted(set(ordinals))):
         raise ProductDatabaseCatalogError(
-            f"{context} column ordinals must be contiguous and ordered "
-            f"{expected}, got {ordinals}"
+            f"{context} column ordinals must be unique and strictly increasing, "
+            f"got {ordinals}"
         )
 
 

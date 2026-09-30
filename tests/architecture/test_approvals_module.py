@@ -10,6 +10,7 @@ correction with no gate behind it is a sentence that regresses.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import inspect
 import tomllib
 from pathlib import Path
@@ -17,10 +18,12 @@ from pathlib import Path
 from dotmac_approvals import contracts, models, policy, service
 from dotmac_approvals.manifest import module
 from dotmac_kernel.namespaces import APPROVALS_MIGRATION_OWNER, MIGRATION_OWNER_LEDGER
+from dotmac_kernel.planes import ModulePlane
 
 MODULE_ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = MODULE_ROOT / "migrations/versions/ap_0001_approvals.py"
 RELAY_MIGRATION = MODULE_ROOT / "migrations/versions/ap_0002_outbox_relay.py"
+WITHDRAWAL_MIGRATION = MODULE_ROOT / "migrations/versions/ap_0003_withdrawals.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -69,13 +72,89 @@ def test_both_planes_are_declared_and_disjoint() -> None:
         "approval_policies",
         "approval_requests",
         "approval_decisions",
+        "approval_withdrawals",
     )
     assert tuple(module.platform_tables) == (
         "platform_approval_policies",
         "platform_approval_requests",
         "platform_approval_decisions",
+        "platform_approval_withdrawals",
     )
     assert not set(module.tables) & set(module.platform_tables)
+
+
+def test_withdrawal_evidence_is_append_only_on_both_planes() -> None:
+    source = WITHDRAWAL_MIGRATION.read_text(encoding="utf-8")
+    assert "selected_module_planes(MODULE_CODE)" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert (
+        "REVOKE ALL ON mod_approvals.platform_approval_withdrawals FROM app_user"
+        in source
+    )
+    assert "BEFORE UPDATE OR DELETE" in source
+    assert "refuse_withdrawal_mutation" in source
+    assert source.count("effective_at >= approved_at") == 2
+    assert 'ondelete="CASCADE"' not in source
+    assert module.database_catalog is not None
+    assert module.database_catalog.lineage_head == "ap_0003_withdrawals"
+
+
+def test_withdrawal_sql_identifiers_come_only_from_literal_plane_choices() -> None:
+    """Machine-check the premise of the migration's narrow S608 exemption."""
+    calls = [
+        node
+        for node in ast.walk(_tree(WITHDRAWAL_MIGRATION))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_install_withdrawal_guards"
+    ]
+    assert len(calls) == 2
+    assert {call.keywords[0].value.value for call in calls} == {True, False}
+    assert all(
+        len(call.keywords) == 1
+        and call.keywords[0].arg == "tenant"
+        and isinstance(call.keywords[0].value, ast.Constant)
+        for call in calls
+    )
+
+
+def test_withdrawal_downgrade_touches_only_the_selected_plane() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "approvals_ap_0003_probe", WITHDRAWAL_MIGRATION
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    class Recorder:
+        def __init__(self) -> None:
+            self.actions: list[str] = []
+
+        def execute(self, statement: object) -> Recorder:
+            self.actions.append(str(statement))
+            return self
+
+        def get_bind(self) -> Recorder:
+            return self
+
+        def scalar_one(self) -> bool:
+            return False
+
+        def drop_table(self, name: str, *, schema: str) -> None:
+            assert schema == "mod_approvals"
+            self.actions.append(f"DROP TABLE {name}")
+
+    for selection, present, absent in (
+        (ModulePlane.TENANT, "approval_withdrawals", "platform_approval_withdrawals"),
+        (ModulePlane.PLATFORM, "platform_approval_withdrawals", "approval_withdrawals"),
+    ):
+        recorder = Recorder()
+        migration.op = recorder
+        migration.selected_module_planes = lambda _code, plane=selection: (plane,)
+        migration.downgrade()
+        assert f"DROP TABLE {present}" in recorder.actions
+        assert f"DROP TABLE {absent}" not in recorder.actions
+        assert all("IF EXISTS" not in action for action in recorder.actions)
 
 
 def test_the_migration_declares_the_same_prerequisites_as_the_manifest() -> None:
@@ -236,14 +315,31 @@ def test_the_module_imports_no_consuming_domain() -> None:
 
 
 def test_the_outbox_adapter_is_the_only_file_touching_kernel_messaging() -> None:
-    """Keeping it out of `service` means a consumer with its own delivery — or
-    none — is not forced to install the kernel's outbox tables."""
+    """The outbox owner imports kernel messaging only at the delivery seam."""
     for source in MODULE_ROOT.rglob("*.py"):
         if source.name == "outbox.py":
             continue
         assert not any(
             "messaging" in name for name in _imported_names(source)
         ), source.name
+
+
+def test_withdrawal_has_no_public_state_only_bypass() -> None:
+    """The public withdrawal command always pairs mutation with delivery."""
+    import dotmac_approvals
+    from dotmac_approvals import outbox
+
+    for name in ("withdraw_tenant_approval", "withdraw_platform_approval"):
+        assert name not in service.__all__
+        assert not hasattr(service, name)
+        assert getattr(dotmac_approvals, name) is getattr(outbox, name)
+        assert name in outbox.__all__
+    source = Path(inspect.getfile(outbox)).read_text(encoding="utf-8")
+    assert "with conflict_savepoint(db):" in source
+    assert (
+        "emit_tenant_events(db, tenant_id=tenant_id, events=outcome.events)" in source
+    )
+    assert "emit_platform_events(db, events=outcome.events)" in source
 
 
 def test_importing_the_package_never_builds_a_database_engine() -> None:
@@ -335,6 +431,12 @@ def test_policy_codes_are_data_and_subject_types_are_opaque_strings() -> None:
         # configuration an operator invents and no document class a consuming
         # module declares, which are the two things the premise above forbids.
         "RequestAction",
+        # 0.1.0a8. Why a hold refused to vouch for a request: a closed set of
+        # failed PREMISES (malformed digest, not found, subject, digest,
+        # withdrawn, not approved, no approve decision), fixed by this module's
+        # own logic. Not a policy code and not a subject type, for the same
+        # reason as RequestAction above.
+        "ApprovalHoldRefusal",
     }, enum_names
     assert models.ApprovalPolicy.__table__.c["policy_code"].type.python_type is str
     assert models.ApprovalRequest.__table__.c["subject_type"].type.python_type is str
@@ -419,7 +521,7 @@ def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     assert entry["db_schema"] == module.db_schema
     assert entry["import_name"] == "dotmac_approvals"
     assert entry["tag_prefix"] == "dotmac-approvals-v"
-    assert entry["kernel_floor"] == "0.1.0a67"
+    assert entry["kernel_floor"] == "0.1.0a100"
     # The lineage is a REQUIRED wheel content: this repository does not compose
     # the module, so a wheel that shipped the manifest and dropped the migration
     # would fail first in an adopter's deployment rather than here.
@@ -462,3 +564,51 @@ def test_the_dossier_records_the_production_adopter() -> None:
     assert by_kind["pinned_at"]["expected"] == "0.1.0a4"
     assert by_kind["live_observation"]["subject"] == "mod_approvals"
     assert "v013_approvals_authority_switch" in by_kind["live_observation"]["observed"]
+
+
+def _for_update_calls(function_name: str) -> list[ast.Call]:
+    """Every `.with_for_update(...)` call inside one top-level service function."""
+    tree = _tree(Path(inspect.getfile(service)))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+    return [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "with_for_update"
+    ]
+
+
+def _keyword(call: ast.Call, name: str) -> object:
+    for keyword in call.keywords:
+        if keyword.arg == name and isinstance(keyword.value, ast.Constant):
+            return keyword.value.value
+    return None
+
+
+def test_the_hold_barrier_lock_modes_are_pinned() -> None:
+    """The hold is only a barrier because of TWO lock modes together.
+
+    `hold_platform_approval` takes the request row FOR SHARE (`read=True`), and
+    `_withdraw_platform_approval` takes it FOR UPDATE (no `read`, no
+    `key_share`). FOR UPDATE conflicts with every row lock, so a withdrawal waits
+    for every holder. Weaken either side and the barrier silently dissolves:
+    FOR NO KEY UPDATE on the withdrawal would not wait for a FOR KEY SHARE hold,
+    and an exclusive hold would serialize concurrent dependent transitions. The
+    PostgreSQL race tests cannot see every such weakening, so the modes are
+    pinned here.
+    """
+    hold = _for_update_calls("hold_platform_approval")
+    assert len(hold) == 1, hold
+    assert _keyword(hold[0], "read") is True
+    assert _keyword(hold[0], "key_share") in (None, False)
+
+    withdraw = _for_update_calls("_withdraw_platform_approval")
+    assert withdraw, "the platform withdrawal no longer locks its request row"
+    request_lock = withdraw[0]
+    assert _keyword(request_lock, "read") in (None, False)
+    assert _keyword(request_lock, "key_share") in (None, False)

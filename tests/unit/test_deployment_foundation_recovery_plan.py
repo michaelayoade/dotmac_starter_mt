@@ -370,6 +370,9 @@ def test_the_executor_refuses_a_recovery_plan_at_CONSTRUCTION() -> None:
     attribute 'operation'` — after the executor had been built, and presented to
     an operator as a traceback rather than a refusal."""
     from dotmac_deployment_foundation.engine.run import Executor
+    from dotmac_deployment_foundation.host_source_admission import (
+        RefusingHostSourceAdmissionProvider,
+    )
 
     with pytest.raises(PreconditionFailed) as exc:
         Executor(
@@ -377,6 +380,7 @@ def test_the_executor_refuses_a_recovery_plan_at_CONSTRUCTION() -> None:
             object(),  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
             execution_plan=_recovery(),  # type: ignore[arg-type]
+            admission_provider=RefusingHostSourceAdmissionProvider(),
         )
     assert exc.value.code == EXECUTION_PLAN_WRONG_TYPE
 
@@ -507,6 +511,9 @@ CANONICALIZING_MODULES: dict[str, int] = {
     # a descriptor transition, database structure facts, an application profile,
     # and the CLI's and provider's own record writing.
     "application_profile.py": 1,
+    # Not a plan document: an immutable snapshot of Control's authorization
+    # and dispatch material, frozen so a caller cannot swap it after issuance.
+    "authorization_v3.py": 1,
     "cli.py": 1,
     "compose_host.py": 2,
     "database_structure.py": 2,
@@ -521,6 +528,11 @@ CANONICALIZING_MODULES: dict[str, int] = {
     "run.py": 2,
     "telemetry.py": 1,
     "transition.py": 1,
+    # Not a plan document: a DeploymentTransitionReceipt.v1 is a two-sided
+    # source→target receipt whose canonical bytes are digested and chained into
+    # the next receipt's previous_receipt_digest, so it owns its canonical form
+    # exactly as external_recovery.py's receipt does.
+    "transition_receipt.py": 1,
     # A TrustedHostAttestation.v2 envelope/subject is signed evidence, not a
     # deployment plan. Its canonical bytes must be stable across producers
     # and verifiers, so this document kind owns one canonicalizer.
@@ -718,7 +730,17 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "lane3_runner_capability.py": 1,
     "palette_debt_baseline.py": 1,
     "release_artifact_verification.py": 1,
-    "write_release_record.py": 1,
+    # The ReleaseAuthority.v1 canonical digest document; owned by
+    # release_authority.py, stored nowhere but as the ledger's digest.
+    "release_authority.py": 1,
+    # The SmokeDependencyWheels.v1 manifest verify-wheel emits; owned by
+    # release_module.py, carried only as a workflow artifact.
+    "release_module.py": 1,
+    # Two documents, neither a Foundation store record: the distribution
+    # publication record, and the `ModuleReleaseTagEvidence.v1` annotated-tag
+    # message (`render_module_release_tag_evidence`), whose single owner is
+    # this release-record tooling and whose only store is the git tag object.
+    "write_release_record.py": 2,
 }
 
 

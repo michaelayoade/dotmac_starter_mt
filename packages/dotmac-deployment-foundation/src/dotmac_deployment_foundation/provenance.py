@@ -743,8 +743,9 @@ class AuthorizationReceiptV2Attester(Protocol):
     deliberately receives opaque mappings: it neither imports Control nor
     grows a second parser for Control-owned envelopes. This port is a
     composition seam, not an authority selector: a caller-supplied
-    implementation has no production authority while no executor accepts the
-    resulting value.
+    implementation has no production authority. Only the startup-fixed V3
+    provider in trusted assembly composition may use the attested value toward
+    an execution grant; this public function alone remains non-admitting.
     """
 
     def attest_pair(
@@ -764,8 +765,8 @@ class AttestedAuthorizationReceiptV2:
     same process; its purpose is to make ordinary public-field reconstruction
     and ``dataclasses.replace`` structurally unavailable.
 
-    The value is deliberately non-admitting.  No Foundation executor accepts
-    it until trusted verifier composition and host enrolment are implemented.
+    The value is deliberately non-admitting on its own. A trusted V3 grant
+    issuer may consume its checked terms only through fixed composition.
     """
 
     __slots__ = ("__receipt",)
@@ -818,6 +819,10 @@ class AttestedAuthorizationReceiptV2:
             attempt_no=attempt_no,
         )
 
+    def _receipt_for_foundation_grant(self) -> AuthorizationReceiptV2:
+        """Internal handoff after the successor authority has checked inputs."""
+        return self.__receipt
+
 
 def attest_authorization_receipt_v2(
     authorization_material: Mapping[str, Any],
@@ -827,9 +832,9 @@ def attest_authorization_receipt_v2(
 ) -> AttestedAuthorizationReceiptV2:
     """Attest a raw Control pair without granting executor admission.
 
-    Trusted composition must choose the attester.  Accepting an implementation
-    here does not make a request-selected implementation authoritative; no
-    executor consumes the returned type in this contract revision.
+    Trusted composition must choose the attester. Accepting an implementation
+    here does not make a request-selected implementation authoritative; this
+    public result is not an execution grant.
     """
 
     if not isinstance(attester, AuthorizationReceiptV2Attester):

@@ -62,7 +62,7 @@ def _executor(spec, effects, plan):  # type: ignore[no-untyped-def]
     return Executor(
         spec,
         effects,
-        _grant(spec, execution_plan_digest=digest),
+        _grant(spec, execution_plan=execution_plan),
         execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),

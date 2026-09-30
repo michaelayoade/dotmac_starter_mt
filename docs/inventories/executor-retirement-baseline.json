@@ -186,6 +186,6 @@
   "unadopted": [
     "dotmac_erp",
     "dotmac_sub",
-    "dotmac_vendor_control_plane"
+    "dotmac_platform_control_plane"
   ]
 }

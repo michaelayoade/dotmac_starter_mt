@@ -129,6 +129,7 @@ __all__ = [
     "MALFORMED_SOURCE_REVISION",
     "NO_RECEIPT",
     "WRONG_KIND",
+    "WRONG_SUBJECT",
     "CandidateReceipt",
     "HostSource",
     "InstalledArtifact",
@@ -152,8 +153,8 @@ CANDIDATE_SCHEMA: Final = "CandidateArtifact.v1"
 
 # ── stable refusal codes ────────────────────────────────────────────────────
 #
-# `errors.py`: "Assert the code; read the prose." Four codes because there are
-# four distinct repairs, and a test that can only match on prose cannot tell
+# `errors.py`: "Assert the code; read the prose." Six codes because there are
+# six distinct repairs, and a test that can only match on prose cannot tell
 # two refusals apart once somebody improves a sentence.
 
 #: No artifact digest is available. The repair is to install from an artifact.
@@ -177,6 +178,11 @@ NO_RECEIPT: Final = "host-source-candidate-receipt-absent"
 #: it is read there or here — an abbreviated or synthetic revision cannot be
 #: compared and must not be passed on as though it identified a tree.
 MALFORMED_SOURCE_REVISION: Final = "host-source-candidate-source-revision-malformed"
+
+#: A digest self-consistent for a distribution that is not this facility's
+#: own DISTRIBUTION. The repair is to bind THIS facility's installed
+#: artifact, not to relabel or rebuild a different package.
+WRONG_SUBJECT: Final = "host-source-distribution-wrong-subject"
 
 
 # ── what the installed distribution can be asked ────────────────────────────
@@ -343,11 +349,14 @@ def candidate_receipt_from_mapping(
 class HostSource:
     """Foundation's own identity on this host, bound to a reviewable tree.
 
-    Constructible only through :func:`require_host_source`, in the sense that
-    every check lives there; a dataclass cannot forbid its own constructor, and
+    Constructible through two independently-checked paths — the legacy
+    receipt-based :func:`require_host_source`, and
+    :func:`host_source_admission.admit_host_source`'s v2 attestation-pair
+    admission — in the sense that every field's check lives in whichever of
+    the two constructed it; a dataclass cannot forbid its own constructor, and
     pretending otherwise with a private sentinel would be theatre. What it CAN
-    do is carry no field that was not checked, so that holding one of these is
-    not a claim about anything unverified.
+    do is carry no field that was not checked BY ONE OF THEM, so that holding
+    one of these is not a claim about anything unverified.
     """
 
     distribution: str
@@ -600,6 +609,20 @@ def require_host_source(
         if installed is not None
         else read_installed_artifact(distribution, metadata=metadata)
     )
+
+    if reading.distribution != DISTRIBUTION:
+        raise PreconditionFailed(
+            f"the installed distribution is {reading.distribution!r}, not "
+            f"{DISTRIBUTION!r}. This module answers exactly one question — is "
+            "THIS facility's installed artifact what its own receipt says it "
+            "is — and cannot bind any other subject, no matter how "
+            "self-consistent the caller-supplied distribution, receipt and "
+            "metadata triple looks. The repair is to bind Foundation's own "
+            "installed artifact, not to relabel or rebuild a different "
+            "package",
+            code=WRONG_SUBJECT,
+        )
+
     offered = reading.artifact_digest
 
     # WRONG KIND, before disagreement and never reported as one. Ordering is

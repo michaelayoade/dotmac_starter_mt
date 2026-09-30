@@ -171,7 +171,7 @@ from dotmac_licensing.service import (
     suspend,
 )
 
-__version__ = "0.1.0a1+dev"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "AUDIT_ACTION_ACKNOWLEDGED",

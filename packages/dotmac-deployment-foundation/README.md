@@ -21,10 +21,25 @@ must not acquire them in order to validate a descriptor. Two import-linter
 contracts hold the boundary in both directions.
 
 The plan is DATA and the executor talks to an injected `Effects` provider.
-The library has no implicit runtime, but its CLI and rehearsal entry points can
-invoke the public exposure transaction directly against an explicitly supplied
-host provider, outside `Executor`'s `ExecutionGrant` and execution-plan-digest
-checks. That separation makes twenty failure cases (wrong digest, failed
+The library has no implicit runtime. Mutating CLI paths require an
+`ExecutionGrant` issued for `FoundationExecutionPlanV3` from a Control V2
+authorization+dispatch pair by startup-fixed assembly composition. Historical
+V1 receipts and V1/V2 execution plans remain parseable but cannot authorize
+an executor. The V3 plan binds the exact candidate wheel digest, target,
+controller fingerprint and Control/Fleet-resolved host enrolment coordinates;
+the Foundation reobserves these before effects. F2 host-source admission
+remains the independent installed-source gate. Its authenticated host ID,
+installed signer fingerprint and root-version UUID must agree exactly with
+the V3 plan and fresh provider observation before effects. Effects has no
+authenticated target identity of its own: trusted CP code composes provider,
+admission and effects as one bundle. Immediately before effects, the same
+startup-fixed provider revalidates current approval standing and atomically
+consumes Control's dispatch, returning only after its external transaction
+commits. Foundation checks the frozen original pair, V3 plan, fresh context,
+F2 trace and expiry before that call; it performs no fallible checks after
+commit. The deterministic `control-dispatch:<dispatch_id>` key locates
+Control's committed ledger if the process crashes before local evidence. This defines the provider contract,
+not evidence that CP has implemented it yet. This design makes twenty failure cases (wrong digest, failed
 backup, corrupt backup, candidate never ready, a maintenance-required release
 attempted online) ordinary unit tests instead of disposable-VM exercises. A
 gate that has never been shown to fire is a gate nobody should trust.
@@ -117,6 +132,8 @@ transition.py    DB from/to contract, promotion_pending recovery and terminal
                  compare-and-swap receipt
 conformance.py   the checks a product runs in its OWN CI
 cli.py           dotmac-deploy
+execution_plan_v3.py  successor plan document; digest remains ExecutionPlanDigestV1
+authorization_v3.py  sole grant issuer from the fixed Control V2 pair provider
 ```
 
 ## Status
