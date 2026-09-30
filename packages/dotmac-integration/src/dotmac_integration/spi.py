@@ -112,6 +112,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -705,6 +706,8 @@ class ProvisionStep:
     ``endpoint_code`` selects connector code; it is not an executable command.
     The absence of a shell, argv or callable field is deliberate: a product
     supplies desired operations, never transport implementation.
+    ``input`` contains only finite JSON values with string mapping keys so its
+    canonical identity cannot depend on a mutable object's string rendering.
     """
 
     step_key: str
@@ -713,6 +716,7 @@ class ProvisionStep:
     input: Mapping[str, object] = _NO_MATERIAL
 
     def __post_init__(self) -> None:
+        _require_plan_step_fields(self)
         if not self.step_key or not self.endpoint_code:
             raise ProvisionContractError(
                 "a provision step requires non-empty step_key and endpoint_code"
@@ -725,7 +729,79 @@ class ProvisionStep:
             raise ProvisionContractError(
                 f"provision step {self.step_key!r} cannot depend on itself"
             )
-        object.__setattr__(self, "input", MappingProxyType(dict(self.input)))
+        if not isinstance(self.input, Mapping):
+            raise ProvisionContractError("provision step input requires a mapping")
+        object.__setattr__(self, "depends_on", tuple(self.depends_on))
+        object.__setattr__(self, "input", _freeze_plan_value(self.input))
+
+
+def _require_plan_step_fields(step: ProvisionStep) -> None:
+    if (
+        type(step.step_key) is not str
+        or type(step.endpoint_code) is not str
+        or any(type(dependency) is not str for dependency in step.depends_on)
+    ):
+        raise ProvisionContractError(
+            "provision step identifiers and dependencies must be strings"
+        )
+
+
+def _require_plan_keys(value: Mapping[object, object]) -> None:
+    if any(type(key) is not str for key in value):
+        raise ProvisionContractError(
+            "provision step input requires string mapping keys"
+        )
+
+
+def _require_plan_scalar(value: object) -> object:
+    if type(value) is float and not math.isfinite(value):
+        raise ProvisionContractError("provision step input requires finite JSON values")
+    if type(value) in (str, int, float, bool, type(None)):
+        return value
+    raise ProvisionContractError("provision step input requires finite JSON values")
+
+
+def _freeze_plan_value(value: object) -> object:
+    """Detach finite JSON plan input from its caller and freeze containers."""
+    if isinstance(value, Mapping):
+        _require_plan_keys(value)
+        return MappingProxyType(
+            {key: _freeze_plan_value(item) for key, item in value.items()}
+        )
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_plan_value(item) for item in value)
+    return _require_plan_scalar(value)
+
+
+def _plain_plan_value(value: object) -> object:
+    """Restore JSON containers for the existing canonical digest rule."""
+    if isinstance(value, Mapping):
+        _require_plan_keys(value)
+        return {key: _plain_plan_value(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_plain_plan_value(item) for item in value]
+    return _require_plan_scalar(value)
+
+
+def _provision_steps_digest(steps: Iterable[ProvisionStep]) -> str:
+    steps = tuple(steps)
+    for step in steps:
+        if not isinstance(step, ProvisionStep):
+            raise ProvisionContractError("provision plan requires ProvisionStep values")
+        _require_plan_step_fields(step)
+    if any(not isinstance(step.input, Mapping) for step in steps):
+        raise ProvisionContractError("provision step input requires a mapping")
+    return canonical_digest(
+        [
+            {
+                "step_key": step.step_key,
+                "endpoint_code": step.endpoint_code,
+                "depends_on": list(step.depends_on),
+                "input": _plain_plan_value(step.input),
+            }
+            for step in steps
+        ]
+    )
 
 
 def _freeze_provision_material(instance: object, *names: str) -> None:
@@ -755,9 +831,11 @@ class ProvisionPlanRequest:
     steps: tuple[ProvisionStep, ...]
     config: Mapping[str, object] = _NO_MATERIAL
     secrets: Mapping[str, object] = _NO_MATERIAL
+    _original_plan_hash: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _require_plan_hash(self.plan_hash)
+        object.__setattr__(self, "steps", tuple(self.steps))
         seen: set[str] = set()
         for step in self.steps:
             if step.step_key in seen:
@@ -772,6 +850,9 @@ class ProvisionPlanRequest:
                 )
             seen.add(step.step_key)
         _freeze_provision_material(self, "config", "secrets")
+        object.__setattr__(
+            self, "_original_plan_hash", _provision_steps_digest(self.steps)
+        )
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -784,6 +865,7 @@ class ProvisionPlanResult:
 
     def __post_init__(self) -> None:
         _require_plan_hash(self.plan_hash)
+        object.__setattr__(self, "steps", tuple(self.steps))
         _freeze_provision_material(self, "evidence")
 
 
@@ -868,6 +950,10 @@ class ProvisioningResult:
     error_code: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.status, ProvisionResultStatus):
+            raise ProvisionContractError(
+                "a provisioning result status must be a ProvisionResultStatus"
+            )
         if self.error_code is not None and not _DIAGNOSTIC_CODE_RE.fullmatch(
             self.error_code
         ):

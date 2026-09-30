@@ -25,8 +25,9 @@ from dotmac_integration.spi import (
     ProvisionPlanRequest,
     ProvisionPlanResult,
     ProvisionPlugin,
+    ProvisionResultStatus,
     ProvisionStep,
-    canonical_digest,
+    _provision_steps_digest,
     require_capability_mode,
 )
 
@@ -61,17 +62,7 @@ class ProvisionResultInvalid(ProvisionInvocationError):
 
 def provision_plan_hash(steps: Iterable[ProvisionStep]) -> str:
     """Canonical identity of the complete ordered plan, excluding secrets."""
-    return canonical_digest(
-        [
-            {
-                "step_key": step.step_key,
-                "endpoint_code": step.endpoint_code,
-                "depends_on": list(step.depends_on),
-                "input": dict(step.input),
-            }
-            for step in steps
-        ]
-    )
+    return _provision_steps_digest(steps)
 
 
 def _handler_for(plugin: ConnectorPlugin, capability_id: str) -> ProvisioningHandler:
@@ -111,8 +102,11 @@ def plan_provisioning(
     plugin: ConnectorPlugin, request: ProvisionPlanRequest
 ) -> ProvisionPlanResult:
     """Validate and invoke ``plan`` while forbidding connector-authored drift."""
-    expected_hash = provision_plan_hash(request.steps)
-    if request.plan_hash != expected_hash:
+    expected_hash = request._original_plan_hash
+    if (
+        request.plan_hash != expected_hash
+        or provision_plan_hash(request.steps) != expected_hash
+    ):
         raise ProvisionPlanRewritten(
             "the supplied plan_hash does not identify the supplied ordered steps"
         )
@@ -120,7 +114,10 @@ def plan_provisioning(
     result = _invoke("plan", lambda: handler.plan(request))
     if not isinstance(result, ProvisionPlanResult):
         raise ProvisionResultInvalid("provisioning plan returned the wrong type")
-    if result.plan_hash != request.plan_hash or result.steps != request.steps:
+    if (
+        result.plan_hash != expected_hash
+        or provision_plan_hash(result.steps) != expected_hash
+    ):
         raise ProvisionPlanRewritten(
             "a connector may validate an owner-authored plan but may not rewrite it"
         )
@@ -131,6 +128,10 @@ def _require_result(operation: str, result: object) -> ProvisioningResult:
     if not isinstance(result, ProvisioningResult):
         raise ProvisionResultInvalid(
             f"provisioning {operation} returned the wrong result type"
+        )
+    if not isinstance(result.status, ProvisionResultStatus):
+        raise ProvisionResultInvalid(
+            f"provisioning {operation} returned an invalid result status"
         )
     return result
 

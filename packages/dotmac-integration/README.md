@@ -39,11 +39,10 @@ capability payload contract (or dated schema grace) and independently names the
 wire the assembly must render. The module persists and revalidates both without
 authoring either contract.
 
-**Incubation successor, not allocated or released:** the local provisioning
-slice adds additive SPI 1.5's provider-neutral plan/apply/observe/cancel
-contract. It adds no persistence, migration or assembly wiring; the released
-and declared package history above remains unchanged until a release owner
-allocates a successor.
+**Declared, unpublished `0.1.0a18`:** its source adds additive SPI 1.5's
+provider-neutral plan/apply/observe/cancel contract. It adds no
+persistence, migration or assembly wiring. `0.1.0a17` remains the latest
+release; no consumer may exact-pin a18 until the protected release tags it.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to

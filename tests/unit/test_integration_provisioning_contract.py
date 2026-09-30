@@ -8,12 +8,14 @@ import traceback
 from pathlib import Path
 
 import pytest
-from dotmac_integration.conformance import fake_manifest, fake_plugin
+from dotmac_integration.conformance import FakePlugin, fake_manifest, fake_plugin
 from dotmac_integration.provision_contract import (
     ProvisionHandlerRaised,
     ProvisionPlanRewritten,
     ProvisionResultInvalid,
     apply_provisioning,
+    cancel_provisioning,
+    observe_provisioning,
     plan_provisioning,
     provision_plan_hash,
 )
@@ -23,6 +25,7 @@ from dotmac_integration.spi import (
     ConnectorMode,
     ProvisionApplyRequest,
     ProvisionCancelRequest,
+    ProvisionContractError,
     ProvisioningHandler,
     ProvisioningResult,
     ProvisionObserveRequest,
@@ -197,6 +200,247 @@ def test_connector_cannot_rewrite_the_owner_plan() -> None:
     )
     with pytest.raises(ProvisionPlanRewritten, match="may not rewrite"):
         plan_provisioning(plugin, request)
+
+
+@pytest.mark.parametrize("mutation", ["steps", "input"])
+def test_handler_cannot_make_a_rewritten_plan_look_like_the_request(
+    mutation: str,
+) -> None:
+    step = ProvisionStep(
+        step_key="domain", endpoint_code="domain.apply", input={"nested": ["original"]}
+    )
+
+    class HostilePlugin(FakePlugin):
+        def provisioning_handler_for(self, capability_id: str) -> ProvisioningHandler:
+            ordinary = super().provisioning_handler_for(capability_id)
+
+            class Handler:
+                def plan(self, supplied: ProvisionPlanRequest) -> ProvisionPlanResult:
+                    if mutation == "steps":
+                        changed = ProvisionStep(
+                            step_key="extra", endpoint_code="extra.apply"
+                        )
+                        object.__setattr__(
+                            supplied, "steps", (*supplied.steps, changed)
+                        )
+                    else:
+                        with pytest.raises(TypeError):
+                            supplied.steps[0].input["nested"][0] = "changed"  # type: ignore[index]
+                        changed = ProvisionStep(
+                            step_key="domain",
+                            endpoint_code="domain.apply",
+                            input={"nested": ["changed"]},
+                        )
+                        object.__setattr__(supplied, "steps", (changed,))
+                    return ProvisionPlanResult(
+                        plan_hash=supplied.plan_hash, steps=supplied.steps
+                    )
+
+                def apply(self, supplied: ProvisionApplyRequest) -> ProvisioningResult:
+                    return ordinary.apply(supplied)
+
+                def observe(
+                    self, supplied: ProvisionObserveRequest
+                ) -> ProvisioningResult:
+                    return ordinary.observe(supplied)
+
+                def cancel(
+                    self, supplied: ProvisionCancelRequest
+                ) -> ProvisioningResult:
+                    return ordinary.cancel(supplied)
+
+            return Handler()
+
+    plugin = HostilePlugin()
+    request = ProvisionPlanRequest(
+        capability_id=plugin.manifest.capabilities[0].capability_id,
+        command_id="cmd-1",
+        plan_hash=provision_plan_hash((step,)),
+        steps=[step],  # type: ignore[arg-type]
+    )
+    assert isinstance(request.steps, tuple)
+    with pytest.raises(ProvisionPlanRewritten, match="may not rewrite"):
+        plan_provisioning(plugin, request)
+
+
+def test_plan_input_is_detached_and_deeply_frozen_at_construction() -> None:
+    base = fake_plugin()
+    nested = {"entries": [{"name": "original"}]}
+    step = ProvisionStep(step_key="domain", endpoint_code="domain.apply", input=nested)
+    steps = [step]
+    request = ProvisionPlanRequest(
+        capability_id=base.manifest.capabilities[0].capability_id,
+        command_id="cmd-1",
+        plan_hash=provision_plan_hash(steps),
+        steps=steps,  # type: ignore[arg-type]
+    )
+    nested["entries"][0]["name"] = "changed"
+    steps.append(ProvisionStep(step_key="extra", endpoint_code="extra.apply"))
+    assert request.steps == (step,)
+    assert request.steps[0].input["entries"][0]["name"] == "original"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        request.steps[0].input["entries"][0]["name"] = "changed"  # type: ignore[index]
+    assert plan_provisioning(base, request).plan_hash == request.plan_hash
+
+
+def test_caller_tampering_with_a_step_is_refused_before_the_handler() -> None:
+    plugin = fake_plugin()
+    step = ProvisionStep(step_key="domain", endpoint_code="domain.apply")
+    request = ProvisionPlanRequest(
+        capability_id=plugin.manifest.capabilities[0].capability_id,
+        command_id="cmd-1",
+        plan_hash=provision_plan_hash((step,)),
+        steps=(step,),
+    )
+    object.__setattr__(step, "input", {"changed": True})
+    with pytest.raises(ProvisionPlanRewritten, match="does not identify"):
+        plan_provisioning(plugin, request)
+    assert plugin.provision_requests_seen == []
+
+
+def test_plan_refuses_mutable_custom_input_without_rendering_its_value() -> None:
+    marker = "PRIVATE-MATERIAL-DO-NOT-RENDER"
+
+    class MutableValue:
+        def __init__(self) -> None:
+            self.value = marker
+
+        def __str__(self) -> str:
+            return "stable"
+
+        def __repr__(self) -> str:
+            return self.value
+
+    planted = MutableValue()
+    with pytest.raises(ProvisionContractError, match="finite JSON values") as excinfo:
+        ProvisionStep(
+            step_key="domain",
+            endpoint_code="domain.apply",
+            input={"nested": [planted]},
+        )
+    planted.value = "changed"
+    assert str(planted) == "stable"
+    assert marker not in str(excinfo.value)
+
+    plugin = fake_plugin()
+    step = ProvisionStep(
+        step_key="domain", endpoint_code="domain.apply", input={"nested": ["stable"]}
+    )
+    request = ProvisionPlanRequest(
+        capability_id=plugin.manifest.capabilities[0].capability_id,
+        command_id="cmd-1",
+        plan_hash=provision_plan_hash((step,)),
+        steps=(step,),
+    )
+    object.__setattr__(step, "input", {"nested": [planted]})
+    with pytest.raises(ProvisionContractError, match="finite JSON values"):
+        plan_provisioning(plugin, request)
+    assert plugin.provision_requests_seen == []
+
+    step = ProvisionStep(step_key="domain", endpoint_code="stable")
+    request = ProvisionPlanRequest(
+        capability_id=plugin.manifest.capabilities[0].capability_id,
+        command_id="cmd-2",
+        plan_hash=provision_plan_hash((step,)),
+        steps=(step,),
+    )
+    object.__setattr__(step, "endpoint_code", planted)
+    with pytest.raises(ProvisionContractError, match="must be strings"):
+        plan_provisioning(plugin, request)
+    assert plugin.provision_requests_seen == []
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_plan_refuses_non_finite_numbers(value: float) -> None:
+    with pytest.raises(ProvisionContractError, match="finite JSON values"):
+        ProvisionStep(
+            step_key="domain", endpoint_code="domain.apply", input={"value": value}
+        )
+
+
+def test_plan_refuses_non_string_mapping_keys() -> None:
+    with pytest.raises(ProvisionContractError, match="string mapping keys"):
+        ProvisionStep(
+            step_key="domain",
+            endpoint_code="domain.apply",
+            input={"nested": {1: "value"}},
+        )
+
+
+def test_plan_step_input_requires_a_mapping() -> None:
+    with pytest.raises(ProvisionContractError, match="requires a mapping"):
+        ProvisionStep(
+            step_key="domain",
+            endpoint_code="domain.apply",
+            input=["value"],  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize("raw_status", ["succeeded", "unknown"])
+def test_provisioning_result_requires_status_enum(raw_status: str) -> None:
+    with pytest.raises(ProvisionContractError, match="ProvisionResultStatus"):
+        ProvisioningResult(status=raw_status)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("raw_status", ["succeeded", "unknown"])
+@pytest.mark.parametrize("operation", ["apply", "observe", "cancel"])
+def test_provision_invocation_refuses_forged_string_status(
+    raw_status: str, operation: str
+) -> None:
+    result = ProvisioningResult(status=ProvisionResultStatus.SUCCEEDED)
+    object.__setattr__(result, "status", raw_status)
+    plugin = fake_plugin(provisioning_result=result)
+    step = ProvisionStep(step_key="domain", endpoint_code="domain.apply")
+    capability_id = plugin.manifest.capabilities[0].capability_id
+    plan_hash = provision_plan_hash((step,))
+    request: ProvisionApplyRequest | ProvisionObserveRequest | ProvisionCancelRequest
+    if operation == "apply":
+        request = ProvisionApplyRequest(
+            capability_id=capability_id,
+            command_id="cmd-1",
+            operation_ref="op-1",
+            plan_hash=plan_hash,
+            step=step,
+            config={},
+            secrets={},
+            idempotency_key="idem-1",
+        )
+    elif operation == "observe":
+        request = ProvisionObserveRequest(
+            capability_id=capability_id,
+            command_id="cmd-1",
+            operation_ref="op-1",
+            plan_hash=plan_hash,
+            step_key=step.step_key,
+            provider_operation_ref="provider-op-1",
+            target={},
+            config={},
+            secrets={},
+        )
+    else:
+        request = ProvisionCancelRequest(
+            capability_id=capability_id,
+            command_id="cmd-1",
+            operation_ref="op-1",
+            plan_hash=plan_hash,
+            step_key=step.step_key,
+            provider_operation_ref="provider-op-1",
+            target={},
+            reason="owner withdrew intent",
+            idempotency_key="idem-cancel-1",
+            config={},
+            secrets={},
+        )
+    with pytest.raises(ProvisionResultInvalid, match="invalid result status"):
+        if operation == "apply":
+            assert isinstance(request, ProvisionApplyRequest)
+            apply_provisioning(plugin, request)
+        elif operation == "observe":
+            assert isinstance(request, ProvisionObserveRequest)
+            observe_provisioning(plugin, request)
+        else:
+            assert isinstance(request, ProvisionCancelRequest)
+            cancel_provisioning(plugin, request)
 
 
 def test_a_non_provision_connector_is_refused_before_its_factory() -> None:
