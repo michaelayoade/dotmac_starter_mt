@@ -1,9 +1,36 @@
 # The Foundation concern-contribution contract — DESIGN FOR REVIEW
 
-**Status: CONTRACT DESIGN ONLY — revision 6.**
-Not accepted, not implemented, and nothing depends on it. This is **not** profile
-admission and **not** cutover readiness; governance ADR 0039 remains Proposed and
-unenforced.
+**Status: CONTRACT DESIGN ONLY — revision 8.**
+This contract is **not implemented**. No implementation is accepted by this
+document; this is not profile admission, a Platform cutover, or deletion
+authority. Governance ADR 0039
+remains Proposed and unenforced.
+
+**Revision 8 changes**: Michael approved the cutover standard: applications
+become thin slices that directly compose the owning Foundation contracts; there
+is no compatibility adapter. The only adapters that remain are transport, protocol, and host-I/O adapters, and none translates admission meaning. The
+semantic-evaluator seam is now a closed, immutable verifier-artifact-owned
+registry keyed by `FoundationConcern + contract_id + contract_version`, with
+typed generators, schemas, injection sites, output codecs, semantic evaluators,
+absence scanners and registration digests. The candidate fixed inventory and
+the installed inventory are collected independently before the fresh seed is
+drawn. `SeedCommitmentV1`, `ChallengeSetDigestV1`, and
+`EvaluatorRegistrationDigestV1` make the receipt's five-part join explicit.
+No evaluator is registered from reviewed facts in this design; every concern is
+therefore `unregistered-blocks-admission`. The parity gate remains false and now
+requires retained-artifact cross-repository evidence plus proof that no shim or
+local writer survives. This is still **not implemented**, does not reserve an
+entry point, does not claim 13/13, and does not accept a candidate.
+
+**Revision 7 changes**: candidate implementation review found the required
+semantic evaluator seam is not yet specified. A generic Foundation verifier
+cannot judge typed provider observations without the per-concern contract
+evaluator, challenge schema, output schema, and semantic relation that §3.3b
+assigns to each concern contract. The candidate was withdrawn rather than leave
+a caller-controlled verifier capable of returning `admitted`. The parity map
+remains a hard block: Platform deletion requires a pinned retained-artifact,
+cross-repository admission result and row mapping, none of which this repository
+can produce or claim locally.
 
 **Revision 6 changes**: the **cross-repository parity join** (§ 11A) — Platform's
 map is fetched at its pinned commit, anchored by the **sha256 of its bytes**, and
@@ -87,8 +114,11 @@ descriptor, and thin adapters into owning services.
 
 An application MUST NOT implement profile canonicalization, profile
 verification, deployment execution, or settlement translation. **There is no
-adapter for these.** Producing or translating the Foundation contract through an
-application-local adapter preserves two competing contracts, and two contracts
+compatibility adapter for these.** At cutover an application becomes a thin
+slice directly composing the owner contracts; only transport, protocol, and
+host-I/O adapters remain, and those adapters may not translate an admission
+verdict, receipt, registry entry, or profile value. Producing or translating the
+Foundation contract through an application-local adapter preserves two competing contracts, and two contracts
 that agree today are two contracts that diverge on the day one is improved. That
 is compatibility plumbing, not composition.
 
@@ -436,6 +466,43 @@ is the one that would let the NEXT candidate be built against these challenges.
 the provider can reach, and the recorded fields become the six of clause 5. The
 provider-facing surface carries **typed challenge inputs only**.
 
+### 3.3c Revision 8: the immutable evaluator registry is the only question owner
+
+The words "Foundation creates typed challenges" are insufficient until the
+artifact that owns each typed operation is named. The verifier owns one immutable
+registry, keyed exactly by:
+
+```
+(FoundationConcern, contract_id, contract_version)
+```
+
+There are no caller callbacks, default evaluators, wildcard registrations,
+fallback lookups, or dynamically supplied relations. A missing key is
+`unregistered-blocks-admission`; it is not a reason to use a nearby contract.
+Each registered value is owned by the verifier artifact and contains this closed
+set of typed members:
+
+| member | required property |
+| --- | --- |
+| challenge generator and challenge schema | generates only the selected contract's closed challenge type |
+| private witness | keeps expected relation material out of the provider boundary |
+| output encoder, decoder, and output schema | rejects unknown/ill-typed output before evaluation |
+| independent semantic evaluator/relation | judges content, not challenge shape or a provider verdict |
+| real typed injection site | resolves the object from the assembly composition root |
+| challenge-space version | participates in the challenge commitment and digest |
+| absence scanner | has a closed inventory and a same-scope positive control |
+| canonical registration digest | identifies this complete registry entry byte-for-byte |
+
+The verifier selects an entry only after it independently collects the fixed candidate artifact inventory and the installed-distribution inventory, compares them, and records their independently derived digests. Only then may it draw a
+fresh seed. This ordering prevents a caller from seeding a challenge set against
+a source checkout, a partial installation, or an inventory it computed itself.
+
+**No evaluator rows are populated by this document.** A row needs reviewed,
+artifact-bound facts for its typed generator, evaluator, scanner, injection
+site, and positive control. Until those facts are reviewed and installed, all
+thirteen concerns are deliberately `unregistered-blocks-admission`; this is a
+block, not a 13/13 claim or an acceptance result.
+
 ### 3.4 The residual, stated honestly — an INERTNESS limit and a correctness one
 
 > **"This defeats the cheap memorisation paths. It still cannot prove arbitrary
@@ -753,8 +820,11 @@ it.
 | `challenge_space_version` | Foundation | clause 5 |
 | `seed_commitment` | verifier | clause 5 — the commitment, **never the seed** |
 | `challenge_set_digest` | Foundation | clause 5 |
+| `evaluator_registration_digest` | Foundation | `EvaluatorRegistrationDigestV1` for the exact immutable registry entry (§ 3.3c) |
 | `case_count` | Foundation | clause 5 — a bounded count |
-| `verifier_artifact_digest` | verifier | clause 5 |
+| `fixed_candidate_inventory_digest` | Foundation | independently collected fixed-candidate artifact inventory |
+| `installed_distribution_inventory_digest` | Foundation | independently collected installed-distribution inventory |
+| `verifier_artifact_digest` | verifier | exact immutable verifier artifact digest, never a caller coordinate |
 | `outcome` | **Foundation judges** | a closed verdict over the whole run |
 | `observed_at` / `observed_by` | tool | provenance |
 
@@ -769,6 +839,25 @@ There is no `detail`, no `nonce_echo`, no exception text and no free text (§ 4.
 
 **The raw seed and the challenge set are NOT here.** They live in restricted
 verifier evidence (clause 6, § 4.3b).
+
+#### Closed receipt identities (revision 8)
+
+The named digest values are typed documents, not strings supplied by the caller:
+
+* `SeedCommitmentV1` commits canonical `(challenge_space_version, seed)` bytes;
+* `ChallengeSetDigestV1` is Foundation's digest of challenges generated from
+  that committed seed and the selected registry entry;
+* `EvaluatorRegistrationDigestV1` identifies the immutable complete registry
+  entry of § 3.3c.
+
+`ApplicationFoundationAdmissionReceiptV1` closes its fields and joins five independent parts: **(1)** the five-identity contribution join from § 1.1,
+**(2)** fixed candidate artifact inventory digest, **(3)** installed
+distribution inventory digest, **(4)** the three typed challenge/evaluator
+digests above, and **(5)** the closed judged outcome. It carries no callback,
+provider verdict, raw seed, challenge values, witness, exception text, secret,
+or fallback marker. An unavailable evaluator, inventory collector, decoder,
+semantic evaluator, or absence scanner blocks admission rather than minting a
+partial receipt.
 
 ### 4.3b Restricted verifier evidence, and the OPENER
 
@@ -885,40 +974,48 @@ provider that does not work and `answers_everything` is one that does not
 discriminate; absent-proven is a subject that is not there. A contribution that
 fails § 3 may not be re-filed as an absence.
 
-### 6.0 LOGGED: a live defect in merged code, today
+### 6.0 LOGGED AND NARROWLY REPAIRED: the former misfiling defect
 
-`IntegrationSurfaceAbsenceProofV1` validates `families` against the integration
-inventory while its `concern` field accepts **any of the thirteen**. So a proof
-with `concern=WORKER_EXECUTION` carrying INTEGRATION families **constructs
-cleanly** — and then **passes the profile's misfiling guard**, because that guard
-compares the slot key against the proof's own `concern` field. *The two things
-that agree are the two things checked.* The inventory, which is the only thing
-that would disagree, is never consulted.
+Before the 2026-09-05 interim repair, `IntegrationSurfaceAbsenceProofV1`
+validated `families` against the integration inventory while its `concern` field
+accepted **any of the thirteen**. A proof with `concern=WORKER_EXECUTION`
+carrying INTEGRATION families therefore constructed cleanly — and then passed
+the profile's misfiling guard, because that guard compared the slot key against
+the proof's own `concern` field. *The two things that agreed were the two things
+checked.* The inventory, the only thing that would have disagreed, was never
+consulted.
+
+That historical construction no longer succeeds: `application_profile.py:583`
+refuses every concern other than `INTEGRATION` for this integration-shaped proof
+type. The defect remains relevant as the reason § 6.1 requires per-concern
+inventories; it is not a claim that a non-integration proof constructs today.
 
 The misfiling guard landed 2026-09-05 and is not vacuous in general — it catches
 a correctly-built proof filed under the wrong key. It cannot catch a proof
 **built against the wrong inventory**, which is the earlier and quieter defect.
 
-Revision 2 presented this as motivation for a future generalisation. **It is live
-now**, and this section says so rather than describing it in the future tense.
+Revision 2 presented the defect as motivation for a future generalisation. Its
+historical mechanism is recorded here rather than described as a live
+construction path.
 
-**Not repaired in this PR**, because the shape of the repair depends on the
-ruling below: if § 6.1's per-concern inventories are accepted, the type is
-replaced rather than patched. The narrow interim fix — refuse a `concern` other
-than `INTEGRATION`, since the only inventory the type has is integration's — is
-correct under **both** outcomes and is a few lines with a control. **It is
-offered and not taken unilaterally**, since it changes shipped behaviour and was
-asked to be logged.
+**The narrow interim repair is landed.** `application_profile.py:583` now
+refuses a `concern` other than `INTEGRATION`, because this proof type carries
+only `INTEGRATION_SURFACE_FAMILIES`. The control establishes that this is a
+real refusal, not a comment. It does not generalize the type: § 6.1's
+per-concern closed inventories, scanners, and positive controls remain proposed
+and belong to the revision-8 registry. This design neither claims that those
+other inventories exist nor treats the interim fix as admission.
 
 ### 6.1 THIRTEEN closed inventories, not one (point 6)
 
 > **"A worker-absence proof cannot certify integration, recovery or identity."**
 
 Today one closed inventory exists — `INTEGRATION_SURFACE_FAMILIES` — and
-`IntegrationSurfaceAbsenceProofV1` validates its `families` against it while its
-`concern` field accepts **any** of the thirteen. A proof for
-`worker_execution` would therefore have to enumerate *integration* families, and
-the type is integration-shaped despite its discriminator.
+`IntegrationSurfaceAbsenceProofV1` validates its `families` against it while
+the landed line-583 guard accepts only `INTEGRATION`. A proof for
+`worker_execution` is now refused before it can enumerate anything; before the
+interim repair it would have had to enumerate *integration* families. The type
+remains integration-shaped and cannot establish absence for another concern.
 
 **Each concern gets its own discriminated, closed absence inventory, each with
 its own positive control.** The generalisation is of a shape that is already
@@ -1225,6 +1322,10 @@ exists. "Non-vacuity" is the column that fails in practice.
 | N27 | the expected relation reachable by the provider | **unrepresentable — no `expected` field exists in any record** (§ 4.3) | the provider returns typed outputs only |
 | N28 | a provider discriminating on the challenge's TYPE | `shape-discriminator` mutant, refused by the semantic-relation rule | positive and negative challenges are type-indistinguishable |
 | N29 | a seed commitment nobody can open | must be openable | restricted evidence holds the raw seed AND the challenge set; the digest re-derives (§ 4.3b) |
+| N30 | evaluator key absent or unavailable | `unregistered-blocks-admission` | a reviewed immutable registry entry resolves exactly |
+| N31 | caller supplies a callback, default, wildcard, or fallback relation | must be unrepresentable | only the verifier-artifact registry can select the evaluator |
+| N32 | fixed candidate inventory and installed inventory differ | admission blocks | independently collected equal inventories proceed |
+| N33 | a shim translates Platform/local verdicts or a local writer emits a receipt | parity gate remains false | retained-artifact evidence proves direct owner-contract composition and no shim/writer |
 
 **N16 is the one that must not be skipped.** A verifier that has never refused
 anything and a composition that is correct are the same colour. Rows N1–N15 each
@@ -1234,6 +1335,16 @@ is removed.
 **N11e and N12–N14 exist today** and are exercised
 (`test_deployment_foundation_application_profile.py`). The rest are owed by the
 implementation step.
+
+**N30–N33 are revision 8's named mutants and positive controls.** The mutants
+are `unregistered-evaluator`, `caller-callback`, `inventory-split`, and
+`platform-semantic-shim`; the positive controls are respectively a reviewed
+exact registry key, a registry-only invocation, two independently collected
+equal inventories, and retained-artifact cross-repository evidence of direct
+composition with no local receipt writer. They are required implementation
+tests, not tests this design claims to ship. This document's architecture guard
+asserts these names and rows remain present so a future prose edit cannot quietly
+drop the conditions.
 
 **"Unrepresentable" now names the type that makes it so, everywhere it is
 claimed.** The word was asserted four times without one, and an invariant is not
@@ -1334,7 +1445,7 @@ programme progress.**
    (point 8). It is **two-directional** — `legacy_total` and the length of
    `added` are both fixed, so a case cannot appear or vanish as a side effect;
    a shrinking count would otherwise read as cleanup and a growing one as
-   progress. **Ten** added cases (eight of them genuinely new — see below):
+   progress. **Ten** added cases (**seven** of them genuinely new — see below):
    `uninjected`, `wrong_site`,
    `foreign_provenance`, `all_negative`, `answers_everything`, `wrong_assembly`,
    `wrong_composition`, `foreign_inventory`, `unknown_key`,
@@ -1383,7 +1494,7 @@ programme progress.**
    **Two of the added cases are NOT new**, and the map records it:
    `foreign_inventory` and `unknown_key` have legacy counterparts. They are still
    required — a case with a counterpart still has to be reproduced — but counting
-   them as gains would overstate what the successor adds. Ten obligations, eight
+   them as gains would overstate what the successor adds. Ten obligations, seven
    genuine additions.
 4. **Replace** Platform's acceptance invocation.
 5. **Delete** Platform's builder, canonicalizer and verifier **atomically, when
@@ -1507,7 +1618,7 @@ already been relayed to me once with an error.
   PARTIAL (`contract_mismatch` covers a *consumer* naming another contract, not
   an unknown contract in the envelope), and the envelope code closes the
   remainder;
-* Platform measured against **revision 2**; this is revision 5.
+* Platform measured against **revision 2**; this is revision 8.
 
 **One genuine disagreement, and Platform is right.** Platform classifies
 `uninjected` as **`approximated`** — it carries a legacy row
@@ -1591,9 +1702,8 @@ join key that § 1.1 and § 4.2b did not, which is exactly that.
 
 ## 13. What this document deliberately does NOT do
 
-* no build tool (item 7);
-* no module declarations (item 6);
-* no entry-point group is claimed or reserved;
+* no Platform build tool or semantic translator;
+* no Platform module declarations or entry-point group is claimed or reserved;
 * no ADR number is allocated — this is a proposal in
   `docs/superpowers/specs/`, which the repository defines as
   **non-authoritative intent**. It becomes authoritative by an accepted ADR, not

@@ -35,8 +35,12 @@
     "on it is a note, not a gate.",
     "",
     "Flipping it requires the per-row mapping of all 53 legacy cases, supplied by",
-    "the Platform lane. Until then step 5 of the migration (deleting the builder,",
-    "canonicalizer and verifier) may not proceed.",
+    "the Platform lane, AND pinned retained-artifact cross-repository evidence that",
+    "the generic Foundation admission path admits the retained Platform bytes, with",
+    "proof of direct owner-contract composition and no semantic shim or local",
+    "receipt writer. This repository cannot manufacture or claim that evidence",
+    "locally. Until every condition exists, step 5 of the migration (deleting the builder, canonicalizer and",
+    "verifier) may not proceed.",
     "",
     "## `nonce_only` was DROPPED in revision 3",
     "",
@@ -223,16 +227,37 @@
   "parity_gate_passed": false,
   "parity_gate_requires": [
     "the counterpart artifact is fetched at its pinned commit and its sha256 matches `counterpart_sha256`",
+    "a retained Platform artifact at immutable coordinates has a cross-repository `ApplicationFoundationAdmissionReceiptV1` whose five-part join matches the retained artifact, not a source checkout or rebuilt candidate",
+    "the cross-repository evidence proves direct Foundation owner-contract composition; no Platform-to-Foundation semantic translator, compatibility shim, local canonicalizer, local verifier, or local receipt writer remains",
+    "the evidence names the exact immutable verifier artifact and its `EvaluatorRegistrationDigestV1`; an unavailable or unregistered evaluator blocks admission",
     "every Platform row in state `unmapped` has a Foundation code in `envelope_join`",
     "Platform's four map_states sum to `legacy_total`",
     "every case present in BOTH `added` lists agrees on its `legacy_relation`",
     "`measured_against_foundation_revision` equals this contract's revision, or every difference is classified as version skew"
   ],
+  "retained_artifact_cross_repository_evidence": {
+    "status": "unavailable-blocks-parity-gate",
+    "required_receipt_schema": "ApplicationFoundationAdmissionReceipt.v1",
+    "required_join": "five-part receipt join",
+    "required_verifier_registry": "EvaluatorRegistrationDigestV1",
+    "reason": "Design-only: no retained-artifact admission receipt or reviewed evaluator registration is claimed here."
+  },
+  "no_shim_or_local_writer_evidence": {
+    "status": "unavailable-blocks-parity-gate",
+    "forbidden": [
+      "Platform-to-Foundation semantic translator",
+      "compatibility shim",
+      "Platform local canonicalizer",
+      "Platform local verifier",
+      "Platform local receipt writer"
+    ],
+    "required_positive_evidence": "cross-repository retained-artifact scan showing direct owner-contract composition"
+  },
   "platform_row_map": {
     "commit": "74dab8a8ec97bd8492d4eec5bde4edab74d4c957",
     "counterpart_sha256": "5d69b4a59fa3dd7c17674e319c60ef46f376d7e6fcfd102bafc98ab75bbfd6aa",
     "measured_against_foundation_revision": 2,
-    "measured_against_note": "Platform's map was measured against revision 2 of the Foundation contract. This map is revision 5. The skew is RECORDED rather than silently reconciled: three of the differences below are version skew, not disagreement, and a join that could not tell those apart would report progress as a defect.",
+    "measured_against_note": "Platform's map was measured against revision 2 of the Foundation contract. This map is revision 8. The skew is RECORDED rather than silently reconciled: three of the differences below are version skew, not disagreement, and a join that could not tell those apart would report progress as a defect.",
     "path": "docs/inventories/platform-parity-row-map.json",
     "repository": "michaelayoade/dotmac_platform_control_plane",
     "repository_pr": "platform-cp#170",

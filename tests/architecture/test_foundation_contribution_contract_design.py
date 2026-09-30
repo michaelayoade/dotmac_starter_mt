@@ -137,6 +137,14 @@ def test_the_design_is_marked_PROPOSED_and_allocates_no_ADR_number() -> None:
 # ── the parity map is a RATCHET, in both directions ────────────────────────
 
 PARITY = ROOT / "docs" / "inventories" / "foundation-admission-parity-map.json"
+APPLICATION_PROFILE_SOURCE = (
+    ROOT
+    / "packages"
+    / "dotmac-deployment-foundation"
+    / "src"
+    / "dotmac_deployment_foundation"
+    / "application_profile.py"
+)
 
 
 def _parity() -> dict:
@@ -286,7 +294,7 @@ def test_every_row_that_BLOCKS_DELETION_has_a_successor_code() -> None:
 def test_VERSION_SKEW_is_distinguished_from_disagreement() -> None:
     """A join that could not tell them apart would report progress as a defect.
 
-    Platform measured against revision 2; this is revision 5. `nonce_only` is
+    Platform measured against revision 2; this is revision 8. `nonce_only` is
     only in Platform's list because revision 3 removed the nonce; two cases are
     only in ours because revisions 4 and 5 added them.
     """
@@ -308,9 +316,25 @@ def test_the_gate_names_what_would_let_it_FLIP() -> None:
     parity = _parity()
     assert parity["parity_gate_passed"] is False
     requires = parity["parity_gate_requires"]
-    assert len(requires) >= 5
+    assert len(requires) >= 8
     joined = " ".join(requires)
     assert "sha256" in joined and "unmapped" in joined and "sum to" in joined
+    assert "retained Platform artifact" in joined
+    assert "semantic translator" in joined
+    assert "local receipt writer" in joined
+    assert "EvaluatorRegistrationDigestV1" in joined
+    cross_repo = parity["retained_artifact_cross_repository_evidence"]
+    assert cross_repo["status"] == "unavailable-blocks-parity-gate"
+    assert (
+        cross_repo["required_receipt_schema"]
+        == "ApplicationFoundationAdmissionReceipt.v1"
+    )
+    assert cross_repo["required_join"] == "five-part receipt join"
+    assert cross_repo["required_verifier_registry"] == "EvaluatorRegistrationDigestV1"
+    no_shim = parity["no_shim_or_local_writer_evidence"]
+    assert no_shim["status"] == "unavailable-blocks-parity-gate"
+    assert "Platform local receipt writer" in no_shim["forbidden"]
+    assert "revision 8" in parity["platform_row_map"]["measured_against_note"]
 
 
 def test_the_map_does_not_RESTATE_platforms_rows() -> None:
@@ -329,3 +353,77 @@ def test_the_design_and_the_map_agree_on_the_added_cases() -> None:
     for row in _parity()["added"]:
         assert row["case"] in text, row["case"]
     assert str(_parity()["legacy_total"]) in text
+
+
+def test_revision_8_keeps_the_registry_and_cutover_boundaries_explicit() -> None:
+    """A design guard checks named contract surfaces, not prose sentiment.
+
+    These literals are a closed review checklist. Removing one is a material
+    weakening: it re-opens a callback/fallback path, lets a product translator
+    return, or lets an evaluator-less concern look merely incomplete.
+    """
+    text = DESIGN.read_text(encoding="utf-8")
+    required = {
+        "CONTRACT DESIGN ONLY — revision 8",
+        "no compatibility adapter",
+        "transport, protocol, and host-I/O adapters",
+        "FoundationConcern, contract_id, contract_version",
+        "There are no caller callbacks, default evaluators, wildcard registrations,",
+        "unregistered-blocks-admission",
+        "fixed candidate artifact inventory and the installed-distribution inventory",
+        "SeedCommitmentV1",
+        "ChallengeSetDigestV1",
+        "EvaluatorRegistrationDigestV1",
+        "five independent parts",
+        "No evaluator rows are populated by this document",
+    }
+    assert all(phrase in text for phrase in required)
+
+    # The receipt's canonical schema table is the implementation-facing source
+    # of truth. A separate narrative list is not enough: the past defect was a
+    # ruling that reached prose but not the table an implementer would follow.
+    table = text.split("### 4.3 `ConcernVerification`", 1)[1].split("### 4.3b", 1)[0]
+    for field in (
+        "`evaluator_registration_digest`",
+        "`fixed_candidate_inventory_digest`",
+        "`installed_distribution_inventory_digest`",
+        "`verifier_artifact_digest`",
+    ):
+        assert field in table
+    assert "exact immutable verifier artifact digest" in table
+
+
+def test_revision_8_names_its_mutants_and_positive_controls() -> None:
+    """The proposed implementation cannot silently lose its sensitivity proof."""
+    text = DESIGN.read_text(encoding="utf-8")
+    for name in (
+        "unregistered-evaluator",
+        "caller-callback",
+        "inventory-split",
+        "platform-semantic-shim",
+    ):
+        assert name in text
+    for row in ("| N30 |", "| N31 |", "| N32 |", "| N33 |"):
+        assert row in text
+
+
+def test_the_stale_absence_fix_claim_tracks_the_shipped_interim_refusal() -> None:
+    """The design must not call a landed line-583 refusal merely proposed."""
+    text = DESIGN.read_text(encoding="utf-8")
+    assert "The narrow interim repair is landed." in text
+    assert "`application_profile.py:583`" in text
+    assert "offered and not taken unilaterally" not in text
+    source_lines = APPLICATION_PROFILE_SOURCE.read_text(encoding="utf-8").splitlines()
+    assert "if self.concern is not FoundationConcern.INTEGRATION:" in source_lines[582]
+    section_six = text.split("### 6.0", 1)[1].split("### 6.1", 1)[0]
+    historical, landed = section_six.split(
+        "That historical construction no longer succeeds:", 1
+    )
+    # Preserve the incident explanation: the old any-concern construction is
+    # evidence for the narrower current type, not prose we erase to go green.
+    assert "Before the 2026-09-05 interim repair" in historical
+    assert "accepted **any of the thirteen**" in historical
+    # The current-state subsection must state the landed truth and must not
+    # describe the former constructor as live.
+    assert "refuses every concern other than `INTEGRATION`" in landed
+    assert "accepted **any of the thirteen**" not in landed
