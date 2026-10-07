@@ -127,11 +127,6 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-integration": {
-      "declared": "0.1.0a18",
-      "reason": "ALLOCATED AHEAD OF SOURCE, TO KEEP THIS GUARD HONEST. a17 IS published (peeled tag dotmac-integration-v0.1.0a17 -> 2cab76b442e6cc6c8ed81a409d943ba250351c3d). a18 was allocated before the durable provisioning-runtime work began, precisely so that source divergence never had to share a version number with a17's published contract -- allocating first is what keeps this guard from becoming the thing it exists to catch. The source now contains additive SPI 1.5 provisioning and SPI 1.6 bounded synchronous REQUEST contracts under the unreleased a18 declaration, still without a persistence migration. Source presence is not registry evidence. It is NOT to be repaired by editing the version down: remove this row only when the protected module release installs, verifies, registers and tags exact 0.1.0a18; nothing may exact-pin or lock a18 before that tag exists.",
-      "state": "declared-unpublished"
-    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",
