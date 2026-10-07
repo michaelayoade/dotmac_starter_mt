@@ -946,6 +946,12 @@ def test_the_workflow_matches_the_release_security_sequence() -> None:
     verify = source.split("verify:", 1)[1]
     assert "git tag" in verify
     assert verify.index("verify-wheel") < verify.index("git tag")
+    # Connector plugins are stateless protocol adapters: the control plane owns
+    # their state and migration lineage. The recorder requires this fact to be
+    # explicit rather than inferred from an empty package directory.
+    recorder = verify.split("- name: Open the post-release record", 1)[1]
+    assert "--no-lineage" in recorder
+    assert "--package-dir" not in recorder
 
 
 def test_the_published_bytes_are_conformance_checked_not_just_installed() -> None:
