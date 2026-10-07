@@ -687,6 +687,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
         "dotmac-connector-mono",
         "dotmac-connector-paystack",
         "dotmac-connector-remita",
+        "dotmac-connector-traccar",
         "dotmac-connector-whatsapp",
     }
     resolved_keys = {
@@ -696,6 +697,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
                 "dotmac-integration-v0.1.0a10",
                 "dotmac-integration-v0.1.0a11",
                 "dotmac-integration-v0.1.0a14",
+                "dotmac-integration-v0.1.0a18",
             },
         )["connector_key"]
         for distribution in enabled
@@ -707,6 +709,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
         "dotmac-connector-mono": "mono",
         "dotmac-connector-paystack": "paystack",
         "dotmac-connector-remita": "remita",
+        "dotmac-connector-traccar": "traccar",
         "dotmac-connector-whatsapp": "meta_whatsapp",
     }
     with pytest.raises(SystemExit) as held_back:
