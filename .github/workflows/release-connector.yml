@@ -98,6 +98,7 @@ on:
           - dotmac-connector-mono
           - dotmac-connector-paystack
           - dotmac-connector-remita
+          - dotmac-connector-traccar
           - dotmac-connector-whatsapp
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
