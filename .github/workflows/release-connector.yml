@@ -370,6 +370,6 @@ jobs:
             --distribution "${{ inputs.connector }}" \
             --version "${{ inputs.version }}" \
             --tag "${{ needs.build.outputs.tag }}" \
-            --package-dir "${{ needs.build.outputs.package_dir }}" \
+            --no-lineage \
             --manifest-python /tmp/connector-registry/bin/python \
             --release-run "${{ github.run_id }}"

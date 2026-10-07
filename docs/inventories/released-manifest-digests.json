@@ -184,6 +184,21 @@
         ]
       }
     },
+    "dotmac-connector-traccar": {
+      "0.1.0a1": {
+        "tag": "dotmac-connector-traccar-v0.1.0a1",
+        "peeled_commit": "3e03a8327382e3f6615131e07bf4418ca34679c4",
+        "release_run": "37618342263",
+        "manifest_digest": "ecea813e83b28ceecfe929a6569c9d888cf3ab74bdae13ae60f5bcc86101ff9b",
+        "spi_range": ">=1.6,<2.0",
+        "capabilities": [
+          "fleet.tracking.device.read.v1",
+          "fleet.tracking.position.history.v1",
+          "fleet.tracking.position.latest.v1",
+          "integration.provider.health.v1"
+        ]
+      }
+    },
     "dotmac-connector-whatsapp": {
       "0.1.0a1": {
         "tag": "dotmac-connector-whatsapp-v0.1.0a1",
