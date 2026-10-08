@@ -287,7 +287,10 @@ def test_the_address_scan_sees_real_addresses_and_ignores_safe_ones(
 #: `vars.LANE3_*` reads per workflow. Repository variables are not masked, so
 #: each one feeds topology into public logs. Only the retiring lane may have
 #: any; D-S2b (R1) removes that lane and lowers this to {}.
-LANE3_VARIABLE_BASELINE = {"exposure-rehearsal.yml": 11}
+#: 11 -> 5 at D-S2c C1: the steps moved into `scripts/lane3_rehearse.sh`, and
+#: the workflow now reads each of the five variables once, into the script's
+#: environment, instead of repeating them across inline steps.
+LANE3_VARIABLE_BASELINE = {"exposure-rehearsal.yml": 5}
 
 
 def test_no_new_workflow_reads_lane3_topology_from_repository_variables() -> None:

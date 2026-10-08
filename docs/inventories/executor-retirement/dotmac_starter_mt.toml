@@ -449,6 +449,23 @@ Checked: it names no declared production target.
 """
 
 [[entrypoint]]
+name = "script:lane3_rehearse.sh"
+family = "script"
+path = "scripts/lane3_rehearse.sh"
+trigger = "`workflow:exposure-rehearsal` (D-S2c C1), and later the org Lane 3 launcher (C3)"
+credential = "probe-host-ssh-key"
+disposition = "non_production_executor"
+targets = ["disposable-probe-host", "lane3-rehearsal-target"]
+premise = """
+The Lane 3 rehearsal steps moved out of `workflow:exposure-rehearsal`
+(D-S2c C1). It reaches the probe vantage point through
+`script:collect_probe_evidence.sh` and the leased rehearsal target through
+`exposure_rehearsal_runner.py`, the same two targets those callees already
+declare, and adds no target of its own. Checked: it names no declared
+production target.
+"""
+
+[[entrypoint]]
 name = "script:dev-db-init.sh"
 family = "script"
 path = "scripts/dev-db-init.sh"

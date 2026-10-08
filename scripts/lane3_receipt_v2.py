@@ -305,6 +305,17 @@ def write_receipt(receipt: RehearsalReceiptV2, path: pathlib.Path) -> str:
     return receipt.sha256_digest()
 
 
+def acquire_execution_plan() -> FoundationExecutionPlanV3:
+    """The trusted CP-rendered plan, and nothing else. Refuses: no provider yet.
+
+    The ONE source of the plan the grant is issued against. The runner asks
+    this first and hands the plan to ``establish_authorization``, so the grant
+    and the receipt name the same plan by construction rather than by a
+    comparison someone could forget.
+    """
+    raise AuthorityUnavailable([p for p in PRECONDITIONS if p.startswith("trusted_cp")])
+
+
 def acquire_authority() -> tuple[FoundationExecutionPlanV3, ExecutionGrant]:
     """The trusted plan and its grant. Refuses: no provider exists yet."""
     raise AuthorityUnavailable(

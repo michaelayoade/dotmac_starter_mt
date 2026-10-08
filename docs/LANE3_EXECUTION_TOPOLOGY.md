@@ -507,6 +507,56 @@ by the PR that adds it.**
 C1 and C2 can land now: they are fail-closed and touch no host. C3 needs the
 admitted launcher change. C4 needs B5 and Gate-0. C5 needs C4.
 
+### Status: C1 and C2 implemented (2026-10-08, draft, stacked on #779)
+
+- **C1.** `scripts/lane3_rehearse.sh` has two phases. `preflight` is the
+  canonical capability check, alone. `rehearse` is, in order: resolve the
+  facility; resolve the candidate (a closed-key reader of `resolve-candidate`);
+  fetch; verify; isolated install; the authorization gate; the vantage
+  qualification; the runner, under `-E -P`.
+  - Each unit is marked `step "<name>"`, and the guards read the script unit
+    by unit (`tests/architecture/lane3_rehearse_script.py`), dropping comment
+    lines as bash does.
+  - `exposure-rehearsal.yml` now runs `bash scripts/lane3_rehearse.sh
+    preflight|rehearse` and keeps only what is a launcher property: checkout,
+    setup, runner liveness, uploads, `id-token`, `runs-on`.
+  - Dispatch inputs reach the script as **environment values**, no longer
+    interpolated into `run:` bodies.
+  - `vars.LANE3_` reads fell from 11 to 5, and the two-directional baseline is
+    lowered in the same change.
+- **C2.** The runner builds no v1 receipt (`build_receipt` is no longer
+  imported).
+  - It binds the execution run (pinned topology, runtime coordinates, the
+    `--api-run` witness) **before the descriptor is opened**.
+  - It takes the plan only from `lane3_receipt_v2.acquire_execution_plan`, and
+    `establish_authorization` issues the grant against that plan.
+  - It drives `execute_authorized_plan` at the transaction phase, and assembles
+    with `assemble_receipt` from the encrypted `--evidence-bundle` and
+    `--probe-vantage-ref`.
+  - All of those refuse today. With the checked-in topology a run is
+    UNANSWERABLE (exit 2) before the descriptor; with an admitted topology it is
+    UNANSWERABLE at the plan, before the lease. D4 refusals map onto this
+    lane's families through `receipt_v2_refusals`, with the call site choosing
+    `PreconditionUnfit` (before the host) or `SpecError` (at assembly, under
+    the lease).
+- **Rehomed onto the script (10 cases):**
+  - capability: canonical command, order before liveness, unconditional and
+    pinned, and the upload's `--out`;
+  - authorization: the gate's order, and the plan and grant source;
+  - candidate artifact: execution, identity bites, and revision/isolation
+    bites;
+  - terminal release: the slot and candidate binding.
+
+  New plant tests prove the script reader bites on a commented-out, masked or
+  preceded capability check.
+- **Still on the workflow until C3**, which brings the launcher snapshot: the
+  preflight-job properties in `test_lane_three_runner_preflight.py`;
+  `id-token: write`; and the `if: always()` terminal upload. The snapshot
+  guards and the retirement of
+  `test_the_rehearsal_job_still_targets_the_control_runner` belong to C3,
+  because today the workflow still targets the control runner and no admitted
+  launcher calls the script.
+
 ### The 19 dependent test cases, and where each goes
 
 "Script" means the guard is re-pointed at `scripts/lane3_rehearse.sh` in C1.
