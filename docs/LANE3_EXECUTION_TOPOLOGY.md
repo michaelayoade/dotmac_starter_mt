@@ -143,6 +143,49 @@ by Fleet `host_id`, the former private paths, and the slot map. Only Michael's
 provisioning identity writes it. The workflow identity reads it and never
 writes it. Receipts cite the record **version**, never its values.
 
+**Topology record schema: `lane3.vantage-topology.v1`.** The record's `data`
+is exactly this document. Every key is required, and no other key is
+accepted at any level:
+
+```json
+{
+  "schema": "lane3.vantage-topology.v1",
+  "probe_vantage":  {"key": "<opaque key>", "host": "<external probe host>", "ssh_user": "<probe login>"},
+  "inside_vantage": {"host": "<inside vantage>", "jump_principal": "<inside-vantage jump account>"},
+  "observer_principal": "lane3obs",
+  "targets": {"<Fleet host_id>": {"address": "<target address>", "far_end": "<far-end observation point>", "proxmox_slot": "<slot>"}},
+  "former_private_paths": ["<path>"],
+  "probe_ports": [443]
+}
+```
+
+- Every string is non-empty with no surrounding whitespace.
+- `probe_vantage.key` contains no `@`, because receipts cite `probe_vantage_ref` as `<key>@<record version>`.
+- `inside_vantage.jump_principal` equals the principal provisioned on `lane3-ssh/sign/inside-jump`, and is never `root`, `lane3obs` or Gate-0's `dotmac-gate0-controller`.
+- `observer_principal` is exactly `lane3obs`.
+- `targets` is a non-empty map keyed by the Fleet `host_id` bound in `FoundationExecutionPlanV3`.
+- `former_private_paths` is a non-empty list of unique strings (the R6 input).
+- `probe_ports` is a non-empty list of unique integers in 1–65535, the same list the inside vantage's `PermitOpen` uses.
+
+`scripts/lane3_topology.py` is the parser (`parse_topology_record`). It
+refuses the whole record on any deviation, and its refusal names the field,
+never the value. B7's provisioning script validates against the same rules
+(`tests/unit/test_lane3_topology.py` holds the parity fixtures).
+
+**Custody and evidence.** The values exist only in the OpenBao record (and
+Michael's private input when he writes version 1). They never appear in Git,
+dispatch inputs, logs, receipts or chat. Public evidence carries the KV
+**version** and the value-free `structure()` summary (counts only). It never
+carries a plain digest of the values: addresses are low-entropy, so a hash
+can be inverted by brute force. If a content binding is ever required, it is
+an HMAC keyed by an offline secret, decided separately.
+
+**Consumer.** The D4 runner, inside the admitted launcher job, logs in with
+the `lane3-exposure-rehearsal` JWT role (B7), reads this one record, parses it
+with `parse_topology_record`, and holds it only in the run's memory and tmpfs.
+Nothing in this repository reads OpenBao today. The parser is source-only
+until D4's live integration is admitted.
+
 **Workflow identity.** One OpenBao JWT role, proposed name
 `lane3-exposure-rehearsal`, with `bound_claims` on `repository`,
 `repository_id` and `repository_owner_id` (immutable IDs read at repository
