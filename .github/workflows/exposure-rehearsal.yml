@@ -61,16 +61,14 @@ on:
       controller_identity:
         description: "controller key fingerprint, as `ssh-keygen -lf` prints it"
         required: true
-      target:
-        description: "the leased rehearsal target"
-        required: true
-      # The thing that gets DESTROYED is a slot, not an address: the addresses
-      # are exactly what a destroy-and-restore can change, so a release binding
-      # one would bind a value that survives the wipe by coincidence. Required
-      # and undefaulted — a default here would hardcode which machine this lane
-      # is allowed to release.
-      vm_slot:
-        description: "the Proxmox slot the target occupies, `node/vmid`"
+      # The Fleet host_id, and ONLY that: the address, the Proxmox SLOT the
+      # release binds (`node/vmid`) and every vantage come from the private
+      # vantage-topology record, bound by this id (docs/LANE3_EXECUTION_TOPOLOGY.md
+      # section 4). A dispatch can no longer type an address or a slot. Required
+      # and undefaulted: a default would hardcode which machine this lane may
+      # release.
+      host_id:
+        description: "the Fleet host_id of the leased rehearsal target"
         required: true
       candidate_version:
         description: "the Foundation candidate version under test"
@@ -197,12 +195,8 @@ jobs:
           LANE3_CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           LANE3_AUTHORIZATION_RUN: ${{ inputs.authorization_run }}
           LANE3_CONTROLLER_IDENTITY: ${{ inputs.controller_identity }}
-          LANE3_TARGET: ${{ inputs.target }}
-          LANE3_VM_SLOT: ${{ inputs.vm_slot }}
-          LANE3_PROBE_HOST: ${{ vars.LANE3_PROBE_HOST }}
-          LANE3_INSIDE_VANTAGE: ${{ vars.LANE3_INSIDE_VANTAGE }}
+          LANE3_HOST_ID: ${{ inputs.host_id }}
           LANE3_JUMP_KEY: ${{ vars.LANE3_JUMP_KEY }}
-          LANE3_OBSERVER_USER: ${{ vars.LANE3_OBSERVER_USER }}
           LANE3_OBSERVER_KEY: ${{ vars.LANE3_OBSERVER_KEY }}
         run: |
           bash scripts/lane3_rehearse.sh rehearse

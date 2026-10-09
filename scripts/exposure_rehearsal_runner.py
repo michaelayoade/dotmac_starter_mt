@@ -166,6 +166,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import lane3_inside_vantage as inside_vantage
 import lane3_receipt_v2 as receipt_v2
+import lane3_topology_source as topology_source
 from dotmac_deployment_foundation.controller_identity import (
     ControllerSshFingerprintV1,
 )
@@ -227,6 +228,7 @@ from lane3_provocation import (
     private_port,
     withdraw_foreign_rules,
 )
+from lane3_topology import TopologyRecordRefused
 
 # 0 ran / 1 refused / 2 the question could not be answered — the same three the
 # repository's other gates use (`scripts/check_allocation_serialized.py`), and
@@ -480,6 +482,46 @@ def receipt_v2_refusals(
         raise refused_as(str(exc)) from exc
 
 
+@contextlib.contextmanager
+def vantage_topology_refusals(
+    *, refused_as: type[DeploymentFoundationError]
+) -> Iterator[None]:
+    """Translate the topology seam's refusals into this lane's two families.
+
+    * No reader is provisioned (`TopologySourceUnavailable`): this environment
+      cannot answer, so UNANSWERABLE, exit 2 — the same standing the
+      authorization gate reports with no verifier installed.
+    * The record was read and is malformed, or cannot bind this run
+      (`TopologyRecordRefused`, `TopologyBindingRefused`): `refused_as`, chosen
+      at the call site. Every one is raised before any target connection. The
+      messages name fields only; no topology value reaches a refusal.
+    """
+    try:
+        yield
+    except topology_source.TopologySourceUnavailable as exc:
+        raise AuthorizationUnverifiable(Standing.UNANSWERABLE, str(exc)) from exc
+    except (TopologyRecordRefused, topology_source.TopologyBindingRefused) as exc:
+        raise refused_as(str(exc)) from exc
+
+
+def install_bound_topology(
+    args: argparse.Namespace, ctx: TerminalContext, bound: topology_source.BoundTopology
+) -> None:
+    """Every topology value the run uses, from the bound record and nowhere else.
+
+    `args.target` stays the lease IDENTITY (the Fleet `host_id`); transport goes
+    to `address` and observation to `far_end`, which the parser holds equal.
+    """
+    args.target_address = bound.target_address
+    args.far_end = bound.far_end
+    args.vm_slot = bound.proxmox_slot
+    args.probe_host = bound.probe_host
+    args.inside_vantage = bound.inside_vantage
+    args.observer_user = bound.observer_principal
+    args.probe_vantage_ref = bound.probe_vantage_ref
+    ctx.vantage_topology = bound.evidence()
+
+
 class Results:
     """Collects one outcome per item, refusing a second write for the same one.
 
@@ -610,7 +652,7 @@ def _observed_from(args: argparse.Namespace, *, jump_key: str) -> dict[str, str]
     argv = [
         str(script),
         args.inside_vantage,
-        args.target,
+        args.far_end,
         args.observer_user,
         args.observer_key,
         jump_key,
@@ -644,14 +686,14 @@ def _collect_probe_phase(args: argparse.Namespace) -> dict:
         / "exposure-rehearsal"
         / "collect_probe_evidence.sh"
     )
-    argv = [str(script), "probe", args.probe_host, args.target]
+    argv = [str(script), "probe", args.probe_host, args.target_address]
     completed = subprocess.run(
         argv, capture_output=True, text=True, timeout=args.timeout, check=False
     )
     if completed.returncode != 0:
         raise ProbeRefused(
-            f"the probe phase refused ({shlex.join(argv)}): "
-            f"{completed.stderr.strip() or 'no stderr'}"
+            # No argv here: it carries the private vantage and target.
+            "the probe phase refused: " f"{completed.stderr.strip() or 'no stderr'}"
         )
     try:
         return json.loads(completed.stdout)
@@ -954,6 +996,10 @@ class TerminalContext:
     arm_attempted: bool = False
     vm_installation_id: str = ""
     receipt_digest: str = ""
+    #: The vantage topology this run bound, VALUE-FREE: record path, KV version,
+    #: `probe_vantage_ref`, the parser's counts and the Fleet `host_id`. None
+    #: until the record is read and bound, so a refusal before that claims none.
+    vantage_topology: dict[str, object] | None = None
     acts: list[CleanupAct] = dataclasses.field(default_factory=list)
     notes: list[str] = dataclasses.field(default_factory=list)
 
@@ -1229,6 +1275,7 @@ def record_terminal(
         "document": "lane3-terminal-evidence",
         "version": 1,
         "target": str(args.target),
+        "vantage_topology": ctx.vantage_topology,
         "authorization_run_id": str(args.authorization_run),
         # THREE revisions, named separately, on the record this run leaves
         # behind. The release revision is not this run's to state -- it belongs
@@ -1318,7 +1365,7 @@ def require_inside_probe_harness(
         name
         for name, value in (
             ("--inside-vantage", args.inside_vantage),
-            ("--target", args.target),
+            ("the topology target address", args.target_address),
             ("the vantage's `target_v6`", target_v6),
         )
         if not str(value).strip()
@@ -1409,7 +1456,12 @@ def run_cleanup(
         )
 
 
-def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
+def run(
+    args: argparse.Namespace,
+    ctx: TerminalContext,
+    *,
+    topology_src: topology_source.TopologySource | None = None,
+) -> int:
     started = datetime.now(UTC).isoformat()
     results = Results()
 
@@ -1470,6 +1522,24 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
             topology=topology,
         )
 
+    # The FIFTH binding: the private vantage topology, read ONLY through the
+    # injected seam (`lane3_topology_source`). Never a repository variable,
+    # dispatch input or file. Read before the descriptor and before any host
+    # contact, so a missing reader is UNANSWERABLE and a malformed record or an
+    # unbindable host is `precondition_unfit` with the host untouched. The
+    # script resolved the same record for its own pre-runner steps; a different
+    # KV version here is a different topology and refuses.
+    source = (
+        topology_src if topology_src is not None else topology_source.default_source()
+    )
+    with vantage_topology_refusals(refused_as=PreconditionUnfit):
+        bound = topology_source.bind(
+            source.read(),
+            host_id=args.host_id,
+            expected_version=args.topology_version or None,
+        )
+    install_bound_topology(args, ctx, bound)
+
     descriptor = pathlib.Path(args.descriptor)
     fixture_bytes = descriptor.read_bytes()
     spec = ProductDeploymentSpec.load(str(descriptor))
@@ -1499,6 +1569,12 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     # plan now has exactly one source and the grant is issued against it.
     with receipt_v2_refusals(refused_as=PreconditionUnfit):
         execution_plan = receipt_v2.acquire_execution_plan()
+    # The record was bound by the DISPATCHED host; the plan names the host it
+    # was rendered for. They must be one host, or the topology describes a
+    # machine the grant does not cover.
+    with vantage_topology_refusals(refused_as=PreconditionUnfit):
+        if execution_plan.host_id != bound.host_id:
+            raise topology_source.TopologyBindingRefused("host_id")
     grant = establish_authorization(
         descriptor_digest=descriptor_digest,
         target=args.target,
@@ -1558,12 +1634,14 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     with refusal_of(PreconditionUnfit):
         private = private_port(spec)
         accepted_source_set = inside_source_set(spec)
-        target_v6 = str((evidence.get("vantage") or {}).get("target_v6", args.target))
+        target_v6 = str(
+            (evidence.get("vantage") or {}).get("target_v6", args.target_address)
+        )
         require_inside_probe_harness(args, target_v6=target_v6, port=private)
 
     # ONE seam onto the host, wrapped so that what a best-effort cleanup throws
     # away is still seen. A second `_ssh_runner` would be a second writer.
-    controller = CapturingRunner(_ssh_runner(args.target, args.controller_key))
+    controller = CapturingRunner(_ssh_runner(args.target_address, args.controller_key))
     effects = ComposeHostExposureEffects(
         spec,
         deploy_dir=args.deploy_dir,
@@ -1787,7 +1865,7 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         inside_probe = inside_vantage.collect(
             str(inside_probe_harness()),
             jump=args.inside_vantage,
-            target_v4=args.target,
+            target_v4=args.target_address,
             target_v6=target_v6,
             port=private,
             timeout=args.timeout,
@@ -1953,7 +2031,11 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     return EXIT_REFUSED if failed else EXIT_OK
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    topology_src: topology_source.TopologySource | None = None,
+) -> int:
     parser = argparse.ArgumentParser(
         prog="exposure_rehearsal_runner.py",
         description="Execute Lane 3 through the controller and emit a receipt.",
@@ -1974,13 +2056,11 @@ def main(argv: list[str] | None = None) -> int:
         ("--authorization-run", "Platform CP authorization run id"),
         ("--controller-identity", "fingerprint of the dedicated controller key"),
         ("--controller-key", "path to the controller private key (a POINTER)"),
-        ("--target", "the leased rehearsal target"),
-        ("--vm-slot", "the Proxmox SLOT the target occupies, `node/vmid`"),
+        # The target, its slot and every vantage come from the topology
+        # record (`lane3_topology_source`), bound by this Fleet host_id.
+        ("--host-id", "the Fleet host_id of the leased rehearsal target"),
         ("--candidate-version", "the Foundation candidate version under test"),
-        ("--probe-host", "the external vantage the probe phase runs from"),
-        ("--inside-vantage", "the vantage INSIDE the accepted source set"),
         ("--inside-jump-key", "private key for the inside vantage jump"),
-        ("--observer-user", "the restricted target-side observation user"),
         ("--observer-key", "private key for that observation identity"),
         ("--probe-evidence", "JSON of the external vantage's measurements"),
         ("--descriptor", "the exact rehearsal fixture"),
@@ -2028,10 +2108,14 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="the age-encrypted probe evidence bundle, exactly as uploaded",
     )
+    # Not a source of the topology: the KV version the script resolved, which
+    # the runner's own read must equal. `probe_vantage_ref` is derived from the
+    # record (`<key>@<version>`) and is no longer an input.
     parser.add_argument(
-        "--probe-vantage-ref",
-        default="",
-        help="`<record-key>@<version>` of the private vantage topology record",
+        "--topology-version",
+        type=int,
+        default=0,
+        help="the vantage-topology KV version lane3_rehearse.sh resolved",
     )
     parser.add_argument("--deploy-dir", default="/srv/lane3")
     parser.add_argument("--lease-dir", default=None)
@@ -2053,9 +2137,24 @@ def main(argv: list[str] | None = None) -> int:
 
         args.lease_dir = DEFAULT_LEASE_DIR
 
+    # `target` is the lease identity, the Fleet host_id. The transport values
+    # start EMPTY and are installed only by `install_bound_topology`, so a
+    # refusal before the record is bound records none of them.
+    args.target = args.host_id
+    for name in (
+        "target_address",
+        "far_end",
+        "vm_slot",
+        "probe_host",
+        "inside_vantage",
+        "observer_user",
+        "probe_vantage_ref",
+    ):
+        setattr(args, name, "")
+
     ctx = TerminalContext()
     try:
-        return run(args, ctx)
+        return run(args, ctx, topology_src=topology_src)
     # `AuthorizationUnverifiable` is caught ALONGSIDE this lane's own refusals
     # rather than translated into one, because translating it would discard the
     # single fact it exists to carry: whether the environment could answer the

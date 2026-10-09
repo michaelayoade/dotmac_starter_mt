@@ -14,6 +14,7 @@ runner does not catch, so a clean refusal status proves the refusal came first.
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import pathlib
@@ -23,6 +24,9 @@ from typing import Any
 import pytest
 
 from tests.unit.test_lane3_receipt_v2 import API_RUN, DOCUMENT, ENVIRON
+from tests.unit.test_lane3_topology_source import HOST as TOPO_HOST
+from tests.unit.test_lane3_topology_source import VALUES as TOPO_VALUES
+from tests.unit.test_lane3_topology_source import record as topo_record
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "exposure_rehearsal_runner.py"
@@ -69,20 +73,12 @@ def _argv(
         FINGERPRINT_TEXT,
         "--controller-key",
         str(tmp_path / "controller-key"),
-        "--target",
+        "--host-id",
         "lane3-rehearsal-target",
-        "--vm-slot",
-        "dotmacproxmox/102",
         "--candidate-version",
         "0.4.0a2",
-        "--probe-host",
-        "probe.invalid",
-        "--inside-vantage",
-        "inside.invalid",
         "--inside-jump-key",
         str(tmp_path / "jump-key"),
-        "--observer-user",
-        "lane3obs",
         "--observer-key",
         str(tmp_path / "observer-key"),
         "--probe-evidence",
@@ -166,12 +162,95 @@ def test_an_admitted_run_is_unanswerable_for_want_of_a_trusted_plan(
     lane3_runtime: dict[str, str],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # Past the run binding and the descriptor, and stopped at the plan: before
-    # the lease, so no release is written and the host keeps its standing.
+    # Past the run binding, the vantage topology and the descriptor, and
+    # stopped at the plan: before the lease, so no release is written and the
+    # host keeps its standing.
     argv = _argv(tmp_path, topology=DOCUMENT, descriptor=DESCRIPTOR)
-    assert runner.main(argv) == 2
+    assert runner.main(argv, topology_src=FixedSource(topo_record())) == 2
     assert "trusted_cp_v3_plan_provider" in capsys.readouterr().err
     _no_receipt_and_no_release(tmp_path)
+
+
+# ── the vantage topology: one injected seam, before any target contact ─────
+
+
+class FixedSource:
+    """In-memory stand-in for the B7 KV reader (documentation-range values)."""
+
+    def __init__(self, document: Any, version: int = 7) -> None:
+        self.document, self.version = document, version
+
+    def read(self) -> Any:
+        return runner.topology_source.TopologyReading(
+            record=copy.deepcopy(self.document), kv_version=self.version
+        )
+
+
+def _evidence(tmp_path: pathlib.Path) -> dict[str, Any]:
+    return json.loads((tmp_path / "evidence.json").read_text(encoding="utf-8"))
+
+
+def test_without_a_topology_reader_the_run_is_unanswerable_before_the_descriptor(
+    tmp_path: pathlib.Path,
+    lane3_runtime: dict[str, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The production default: no B7 reader exists. The descriptor path does not
+    # exist, so a clean exit 2 proves the refusal came before it was opened.
+    assert runner.main(_argv(tmp_path, topology=DOCUMENT)) == 2
+    assert "topology record unavailable" in capsys.readouterr().err
+    _no_receipt_and_no_release(tmp_path)
+    assert _evidence(tmp_path)["vantage_topology"] is None
+
+
+def _far_end_elsewhere() -> dict[str, Any]:
+    doc = topo_record()
+    doc["targets"][TOPO_HOST]["far_end"] = "192.0.2.99"
+    return doc
+
+
+@pytest.mark.parametrize(
+    ("document", "extra"),
+    [
+        (_far_end_elsewhere(), []),
+        (topo_record(targets={}), []),
+        (topo_record(), ["--host-id", "unknown-host"]),
+        (topo_record(), ["--topology-version", "6"]),
+    ],
+    ids=["far-end-not-target", "no-targets", "unknown-host", "version-moved"],
+)
+def test_an_unbindable_topology_refuses_before_the_descriptor_naming_no_value(
+    tmp_path: pathlib.Path,
+    lane3_runtime: dict[str, str],
+    capsys: pytest.CaptureFixture[str],
+    document: Any,
+    extra: list[str],
+) -> None:
+    argv = _argv(tmp_path, topology=DOCUMENT) + extra
+    assert runner.main(argv, topology_src=FixedSource(document)) == 1
+    err = capsys.readouterr().err
+    for value in TOPO_VALUES:
+        assert value not in err
+    _no_receipt_and_no_release(tmp_path)
+    assert _evidence(tmp_path)["vantage_topology"] is None
+
+
+def test_a_bound_topology_is_recorded_without_values(
+    tmp_path: pathlib.Path,
+    lane3_runtime: dict[str, str],
+) -> None:
+    argv = _argv(tmp_path, topology=DOCUMENT, descriptor=DESCRIPTOR)
+    argv += ["--topology-version", "7"]
+    assert runner.main(argv, topology_src=FixedSource(topo_record())) == 2
+    evidence = _evidence(tmp_path)
+    vantage = evidence["vantage_topology"]
+    assert vantage["kv_version"] == 7
+    assert vantage["probe_vantage_ref"] == "probe-vantage-1@7"
+    assert vantage["host_id"] == TOPO_HOST == evidence["target"]
+    text = json.dumps({k: v for k, v in evidence.items() if k != "vantage_topology"})
+    text += json.dumps({k: v for k, v in vantage.items() if k != "probe_vantage_ref"})
+    for value in TOPO_VALUES:
+        assert value not in text
 
 
 def test_the_plan_source_refuses_naming_only_the_plan_precondition() -> None:

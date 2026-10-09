@@ -195,6 +195,24 @@ before any target connection. This amendment does not implement that runtime
 integration or establish admission. The private provisioning validator must
 adopt the same equality rule before B7 writes the record.
 
+**Consumption (D4, 2026-10-09).** `scripts/lane3_topology_source.py` is the one
+seam through which Lane 3 code obtains the record. The reader is injected; the
+production default (`RefusingKvTopologySource`) refuses as UNANSWERABLE until
+B7 provisions the `lane3-exposure-rehearsal` role and the record, and no
+fallback to repository variables, dispatch inputs or files exists. The dispatch
+carries only the Fleet `host_id` (the `target` and `vm_slot` inputs are gone,
+and `vars.LANE3_PROBE_HOST`/`INSIDE_VANTAGE`/`OBSERVER_USER` with them).
+`lane3_rehearse.sh` resolves the record for its pre-runner steps through the
+same seam, holding values in shell variables only. The runner reads the record
+itself before the descriptor, refuses a KV version different from the one the
+script resolved, and binds by `host_id`, then refuses unless the trusted plan's
+`host_id` is the same host. `address` is the transport, `far_end` the
+observation endpoint, the slot comes from the record, and `probe_vantage_ref`
+is derived as `<probe_vantage.key>@<KV version>`. The terminal evidence carries
+only `BoundTopology.evidence()`: record path, version, vantage reference,
+counts and `host_id`. The real KV reader is not implemented here; it lands with
+B7.
+
 **Custody and evidence.** The values exist only in the OpenBao record (and
 Michael's private input when he writes version 1). They never appear in Git,
 dispatch inputs, logs, receipts or chat. Public evidence carries the KV

@@ -77,9 +77,33 @@ read_candidate() {
   done
 }
 
+# The private vantage topology, from the ONE seam (`lane3_topology_source.py`),
+# bound by the dispatched Fleet host_id. Values land in shell variables only:
+# never echoed, never written to a file, never exported. An unknown, repeated
+# or missing key refuses, as `read_candidate` does for the candidate.
+read_topology() {
+  local line key value seen=" "
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "${key}" in
+      TOPOLOGY_VERSION) topology_version="${value}" ;;
+      TOPOLOGY_TARGET) topology_target="${value}" ;;
+      TOPOLOGY_PROBE_HOST) topology_probe_host="${value}" ;;
+      TOPOLOGY_OBSERVER_USER) topology_observer_user="${value}" ;;
+      *) refuse "the topology seam emitted an unknown key '${key}'" ;;
+    esac
+    case "${seen}" in *" ${key} "*) refuse "the topology seam repeated ${key}" ;; esac
+    seen="${seen}${key} "
+  done <<< "$1"
+  for key in TOPOLOGY_VERSION TOPOLOGY_TARGET TOPOLOGY_PROBE_HOST TOPOLOGY_OBSERVER_USER; do
+    case "${seen}" in *" ${key} "*) ;; *) refuse "the topology seam omitted ${key}" ;; esac
+  done
+}
+
 rehearse() {
   require_env LANE3_FACILITY LANE3_CANDIDATE_VERSION LANE3_AUTHORIZATION_RUN \
-    LANE3_CONTROLLER_IDENTITY LANE3_TARGET LANE3_VM_SLOT GITHUB_SHA GH_TOKEN
+    LANE3_CONTROLLER_IDENTITY LANE3_HOST_ID GITHUB_SHA GH_TOKEN
 
   # The rehearsal executes the exact candidate that may later be published.
   # Coordinates and digest come only from the committed CandidateArtifact.v1
@@ -121,20 +145,34 @@ rehearse() {
   step "Refuse unless Lane 3's authorization can be verified here"
   .lane3-foundation/bin/python -E -P scripts/lane3_authorization.py \
     --descriptor scripts/exposure-rehearsal/product.toml \
-    --target "${LANE3_TARGET}"
+    --target "${LANE3_HOST_ID}"
+
+  # The target address, the probe vantage and the observer principal exist
+  # ONLY in the OpenBao vantage-topology record (docs/LANE3_EXECUTION_TOPOLOGY.md
+  # section 4). Exit 2 means no reader is provisioned (B7), exit 1 a record or
+  # binding refusal; either stops here, before the probe host or target is
+  # touched. The runner reads the record itself and refuses a different version.
+  step "Resolve the private vantage topology for this host"
+  local topology_lines topology_version topology_target topology_probe_host \
+    topology_observer_user
+  topology_lines="$(python -I scripts/lane3_topology_source.py resolve \
+    --host-id "${LANE3_HOST_ID}")" ||
+    refuse "the vantage topology could not be resolved for this host"
+  read_topology "${topology_lines}"
+  topology_lines=""
 
   # Collected BEFORE the controller runs, so the vantage is qualified against
   # its own interfaces and routes rather than trusted, and a probe measured
   # after teardown can never be reused as a negative. The observation identity
   # is SEPARATE from the controller identity; an unset one refuses.
   step "Collect and qualify the external probe evidence"
-  [ -n "${LANE3_PROBE_HOST:-}" ] || refuse "no external probe vantage configured"
-  [ -n "${LANE3_OBSERVER_USER:-}" ] && [ -n "${LANE3_OBSERVER_KEY:-}" ] ||
+  [ -n "${topology_probe_host}" ] || refuse "no external probe vantage configured"
+  [ -n "${topology_observer_user}" ] && [ -n "${LANE3_OBSERVER_KEY:-}" ] ||
     refuse "no target-side observation identity configured. The far-end" \
       "source address is the one check measured from the far end, and a" \
       "vantage cannot certify where it egresses from"
   ./scripts/exposure-rehearsal/collect_probe_evidence.sh \
-    qualify "${LANE3_PROBE_HOST}" "${LANE3_TARGET}" > probe-evidence.json
+    qualify "${topology_probe_host}" "${topology_target}" > probe-evidence.json
 
   # Three revisions, three sources: the runner's own commit is `GITHUB_SHA`;
   # the candidate's source commit and digest come ONLY from the resolved
@@ -152,18 +190,14 @@ rehearse() {
     --authorization-run "${LANE3_AUTHORIZATION_RUN}" \
     --controller-identity "${LANE3_CONTROLLER_IDENTITY}" \
     --controller-key "${HOME}/.dotmac/controller-${LANE3_AUTHORIZATION_RUN}" \
-    --target "${LANE3_TARGET}" \
-    --vm-slot "${LANE3_VM_SLOT}" \
+    --host-id "${LANE3_HOST_ID}" \
+    --topology-version "${topology_version}" \
     --candidate-version "${LANE3_CANDIDATE_VERSION}" \
-    --probe-host "${LANE3_PROBE_HOST}" \
-    --inside-vantage "${LANE3_INSIDE_VANTAGE:-}" \
     --inside-jump-key "${LANE3_JUMP_KEY}" \
-    --observer-user "${LANE3_OBSERVER_USER}" \
     --observer-key "${LANE3_OBSERVER_KEY}" \
     --probe-evidence probe-evidence.json \
     --api-run "${LANE3_API_RUN:-}" \
     --evidence-bundle "${LANE3_EVIDENCE_BUNDLE:-}" \
-    --probe-vantage-ref "${LANE3_PROBE_VANTAGE_REF:-}" \
     --descriptor scripts/exposure-rehearsal/product.toml \
     --receipt-out receipt.json \
     --status-out docs/inventories/deployment-exposure-rehearsal-status.md \

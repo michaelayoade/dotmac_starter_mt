@@ -290,7 +290,12 @@ def test_the_address_scan_sees_real_addresses_and_ignores_safe_ones(
 #: 11 -> 5 at D-S2c C1: the steps moved into `scripts/lane3_rehearse.sh`, and
 #: the workflow now reads each of the five variables once, into the script's
 #: environment, instead of repeating them across inline steps.
-LANE3_VARIABLE_BASELINE = {"exposure-rehearsal.yml": 5}
+#: 5 -> 2 when D4 began reading the vantage-topology record
+#: (docs/LANE3_EXECUTION_TOPOLOGY.md section 4): PROBE_HOST, INSIDE_VANTAGE and
+#: OBSERVER_USER now come only from the record, through
+#: `scripts/lane3_topology_source.py`. The two left are key POINTERS (JUMP_KEY,
+#: OBSERVER_KEY), retired when the lane3-ssh certificates replace them.
+LANE3_VARIABLE_BASELINE = {"exposure-rehearsal.yml": 2}
 
 
 def test_no_new_workflow_reads_lane3_topology_from_repository_variables() -> None:

@@ -101,8 +101,11 @@ def _lane3_findings(document: dict[str, Any]) -> list[str]:
         # verifier vouches for the bytes (`scripts/lane3_authorization.py`).
         "facility",
         "controller_identity",
-        "target",
-        "vm_slot",
+        # `target` and `vm_slot` were REPLACED by `host_id` when the runner began
+        # reading the vantage-topology record: the address and the release's
+        # `node/vmid` slot come from the record, bound by this Fleet host_id, and
+        # a dispatch can no longer type either.
+        "host_id",
         "candidate_version",
     }
     if set(inputs) != expected_inputs:
