@@ -179,9 +179,13 @@ def parse_topology_record(
     for host_id, entry in raw_targets.items():
         _text(host_id, "targets.<host_id>")
         t = _closed(entry, _TARGET_KEYS, "targets.<host_id>")
+        address = _text(t["address"], "targets.<host_id>.address")
+        far_end = _text(t["far_end"], "targets.<host_id>.far_end")
+        if far_end != address:
+            raise _refuse("targets.<host_id>.far_end")
         targets[host_id] = Target(
-            address=_text(t["address"], "targets.<host_id>.address"),
-            far_end=_text(t["far_end"], "targets.<host_id>.far_end"),
+            address=address,
+            far_end=far_end,
             proxmox_slot=_text(t["proxmox_slot"], "targets.<host_id>.proxmox_slot"),
         )
 

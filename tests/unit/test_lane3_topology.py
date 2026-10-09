@@ -6,9 +6,11 @@ or vantage host must never become a log line).
 
 Parity with the B7 provisioning validator (``b67-model.py``, kept outside the
 repository with the provisioning scripts) is checked over one fixture set.
-The frozen expectations below are that validator's behaviour, measured
-2026-10-09. When ``LANE3_B67_MODEL_PATH`` names the file, the test also runs
-it live. Fixtures in ``STARTER_STRICTER`` were divergences measured on
+The original frozen expectations record that validator's behaviour, measured
+2026-10-09. Same-endpoint fixtures below require the corresponding provisioning
+validator amendment before B7; they do not claim the deployed validator changed.
+When ``LANE3_B67_MODEL_PATH`` names the file, the test also runs it live.
+Fixtures in ``STARTER_STRICTER`` were divergences measured on
 2026-10-09 (Starter refused, the provisioning validator accepted). The
 provisioning validator was tightened the same day, so both now refuse them.
 """
@@ -47,7 +49,7 @@ def base() -> dict[str, Any]:
         "targets": {
             "host-0001": {
                 "address": "192.0.2.10",
-                "far_end": f"198.51.100.20-{SECRET}",
+                "far_end": "192.0.2.10",
                 "proxmox_slot": f"slot-{SECRET}",
             },
         },
@@ -92,7 +94,7 @@ FIXTURES: dict[str, tuple[Any, str | None, bool]] = {
                 {
                     "host-0002": {
                         "address": "2001:db8::2",
-                        "far_end": "x",
+                        "far_end": "2001:db8::2",
                         "proxmox_slot": "y",
                     }
                 }
@@ -235,6 +237,27 @@ def test_a_refusal_never_discloses_a_value(name):
         lt.parse_topology_record(copy.deepcopy(record), jump_principal=jump)
     text = str(exc.value) + repr(exc.value)
     assert SECRET not in text and "192.0.2" not in text and "198.51.100" not in text
+
+
+@pytest.mark.parametrize(
+    "far_end",
+    [f"different-{SECRET}.example.invalid", "192.0.2.010", "target.example.invalid"],
+)
+def test_far_end_must_equal_the_target_endpoint_without_alias_normalization(far_end):
+    record = base()
+    record["targets"]["host-0001"]["far_end"] = far_end
+    with pytest.raises(lt.TopologyRecordRefused) as exc:
+        lt.parse_topology_record(record)
+    assert str(exc.value) == "lane3 topology record refused: targets.<host_id>.far_end"
+    assert far_end not in repr(exc.value)
+
+
+def test_same_endpoint_amendment_requires_provisioning_parity():
+    mod = _b67()
+    if mod is None:
+        pytest.skip("LANE3_B67_MODEL_PATH not set; provisioning amendment pending")
+    record = mutate(_set(["targets", "host-0001", "far_end"], "198.51.100.20"))
+    assert not b67_accepts(mod, record, None)
 
 
 def test_a_parsed_record_hides_every_value():

@@ -153,7 +153,7 @@ accepted at any level:
   "probe_vantage":  {"key": "<opaque key>", "host": "<external probe host>", "ssh_user": "<probe login>"},
   "inside_vantage": {"host": "<inside vantage>", "jump_principal": "<inside-vantage jump account>"},
   "observer_principal": "lane3obs",
-  "targets": {"<Fleet host_id>": {"address": "<target address>", "far_end": "<far-end observation point>", "proxmox_slot": "<slot>"}},
+  "targets": {"<Fleet host_id>": {"address": "<target address>", "far_end": "<target address>", "proxmox_slot": "<node/vmid>"}},
   "former_private_paths": ["<path>"],
   "probe_ports": [443]
 }
@@ -164,13 +164,36 @@ accepted at any level:
 - `inside_vantage.jump_principal` equals the principal provisioned on `lane3-ssh/sign/inside-jump`, and is never `root`, `lane3obs` or Gate-0's `dotmac-gate0-controller`.
 - `observer_principal` is exactly `lane3obs`.
 - `targets` is a non-empty map keyed by the Fleet `host_id` bound in `FoundationExecutionPlanV3`.
+- `targets.<host_id>.far_end` equals `address` exactly: the observation endpoint
+  is the same target endpoint. Aliases or equivalent address spellings are not
+  normalized. A mismatch refuses with a field-only error.
+- `proxmox_slot` names the target's Proxmox slot as `node/vmid`, matching the
+  existing runner's `--vm-slot` semantics. The parser treats it as a non-empty
+  string; it does not verify Proxmox inventory.
 - `former_private_paths` is a non-empty list of unique strings (the R6 input).
 - `probe_ports` is a non-empty list of unique integers in 1–65535, the same list the inside vantage's `PermitOpen` uses.
 
 `scripts/lane3_topology.py` is the parser (`parse_topology_record`). It
 refuses the whole record on any deviation, and its refusal names the field,
-never the value. B7's provisioning script validates against the same rules
-(`tests/unit/test_lane3_topology.py` holds the parity fixtures).
+never the value. B7's provisioning script must validate against the same rules
+before a write (`tests/unit/test_lane3_topology.py` holds the parity fixtures).
+The same-endpoint rule below requires a matching provisioning amendment;
+this parser change does not update that private script.
+
+**Same-endpoint amendment (2026-10-09).** `far_end` is the SSH endpoint on
+which the restricted observer reads what the target saw. It is not a vantage
+source address, a cached measurement, or a separate observing server. Source
+IPv4 and IPv6 observations remain dynamic, measured at the target for each
+required vantage and family on every run.
+
+The parser enforces endpoint equality only. Fleet/lease identity reconciliation,
+Proxmox inventory reconciliation and SSH host identity verification remain
+provisioning/runtime obligations. D4's pending integration must select the
+entry by the verified plan's Fleet `host_id`, use `far_end` for observation and
+`address` for target transport, and refuse missing or mismatched bindings
+before any target connection. This amendment does not implement that runtime
+integration or establish admission. The private provisioning validator must
+adopt the same equality rule before B7 writes the record.
 
 **Custody and evidence.** The values exist only in the OpenBao record (and
 Michael's private input when he writes version 1). They never appear in Git,
