@@ -8,9 +8,9 @@ Parity with the B7 provisioning validator (``b67-model.py``, kept outside the
 repository with the provisioning scripts) is checked over one fixture set.
 The frozen expectations below are that validator's behaviour, measured
 2026-10-09. When ``LANE3_B67_MODEL_PATH`` names the file, the test also runs
-it live. Fixtures in ``STARTER_STRICTER`` are the documented divergences:
-Starter refuses them, the provisioning validator (as measured) accepts them,
-and the provisioning validator should be tightened to match.
+it live. Fixtures in ``STARTER_STRICTER`` were divergences measured on
+2026-10-09 (Starter refused, the provisioning validator accepted). The
+provisioning validator was tightened the same day, so both now refuse them.
 """
 
 from __future__ import annotations
@@ -196,7 +196,7 @@ def b67_accepts(mod, record, jump) -> bool:
     try:
         mod.validate_topology(copy.deepcopy(record), jump)
         return True
-    except (AssertionError, AttributeError, TypeError, KeyError):
+    except (AssertionError, ValueError, AttributeError, TypeError, KeyError):
         return False
 
 
@@ -219,8 +219,10 @@ def test_live_parity_with_the_provisioning_validator():
     for name, (record, jump, expected) in FIXTURES.items():
         assert b67_accepts(mod, record, jump) is expected, name
     for name, (record, jump) in STARTER_STRICTER.items():
-        # A documented divergence; when b67 is tightened, move it to FIXTURES.
-        assert b67_accepts(mod, record, jump) is True, name
+        # Formerly divergent. b67-model.py was tightened on 2026-10-09 (explicit
+        # raises, whitespace on every string, no '@' in probe_vantage.key,
+        # reserved jump principals), so both validators now refuse these.
+        assert b67_accepts(mod, record, jump) is False, name
 
 
 @pytest.mark.parametrize(
