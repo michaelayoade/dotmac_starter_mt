@@ -618,3 +618,31 @@ workflow.
   Observability's runner too.
 - **Nothing here needs a Foundation `src/` change.** If C2 finds otherwise,
   that change moves before the Gate-2 freeze (row 1).
+
+### B7 runtime reader preparation
+
+`scripts/lane3_openbao_topology.py` implements the explicit JWT-to-KV reader.
+The launcher calls `lane3_topology_source.openbao_source` with an authenticated
+transport, a fresh JWT supplier and the approved exact KV version, then injects
+that source into the resolver's `main(source=...)` or the runner's
+`topology_src` parameter. Separate resolver/runner reads require fresh sources
+with the same approved version. The factory does not select an endpoint,
+credential, namespace or version from environment variables or dispatch input.
+Unconfigured/default execution still refuses.
+
+The reader requests the fixed B7 audience and role, accepts only a nonrenewable
+batch token with the sole B7 policy and a measured lifetime of at most 300
+seconds, then reads only the fixed topology record at the pinned version. It
+refuses identity-policy additions, deleted/destroyed records, mismatched
+versions and schema failures. There is no cached-success fallback or retry.
+Tokens and JWTs are kept in process memory only; removal of Python references
+is not a memory-zeroization guarantee. Batch tokens expire and cannot be
+individually revoked. No root or custody credential is used.
+
+The supplied transport uses verified HTTPS with an explicit CA file, no proxy
+or redirect, bounded response size, per-socket timeout and a request shutdown
+timer. It does not downgrade to HTTP. Existing private-tunnel HTTP deployments
+need a separately reviewed authenticated transport adapter; this change does
+not activate that path, provision B7, or establish live Gate-0 readiness.
+Hosted CI owns tests of this repository; no local or named-host test run is
+acceptance evidence for this reader.
