@@ -719,7 +719,10 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "credential_lifecycle_sweep.py": 1,
     "declared_publication_sweep.py": 1,
     "executor_retirement.py": 2,
-    "exposure_rehearsal_runner.py": 2,
+    # 2 -> 1 at D-S2c C2: the v1 receipt writer (`json.dumps(receipt.content,
+    # sort_keys=True)`) was removed; RehearsalReceipt.v2 is written by
+    # `lane3_receipt_v2.write_receipt`. The one left is the terminal evidence.
+    "exposure_rehearsal_runner.py": 1,
     "external_connector_sweep.py": 2,
     "facet_navigation_baseline.py": 1,
     "fleet_decomposition_sweep.py": 2,

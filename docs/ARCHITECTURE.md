@@ -3678,3 +3678,24 @@ image on registry → `pg_dump` backup → pin `APP_IMAGE` in `.env` → pull �
 (retries/interval/timeout all config knobs) → auto-rollback to the previous
 pin on health-gate failure (migrations are not auto-reverted; new revisions
 must stay backward-compatible with the previous release).
+
+Lane 3's product-owned private-topology I/O adapter is
+`scripts/lane3_openbao_topology.py`, composed explicitly by
+`lane3_topology_source.openbao_source` and consumed through the existing
+resolver/runner source-injection seam. The parser and host binding remain in
+`lane3_topology.py` and `lane3_topology_source.py`. This preparation introduces
+no Foundation network I/O, automatic runtime activation or new credential
+custody owner; the launcher supplies authenticated transport and a fresh B7
+JWT, and unconfigured execution refuses.
+Its Actions-specific fresh-JWT adapter is `scripts/lane3_github_oidc.py`,
+consumed by `lane3_topology_source.github_openbao_source`. The protected
+launcher owns the exact approved broker/configuration and job permissions;
+OpenBao owns JWT signature/claim verification. The default source remains
+refusing until deployment is explicitly composed.
+
+The explicit encrypted-private-channel adapter is
+`scripts/lane3_wireguard_topology.py`, composed by
+`lane3_topology_source.wireguard_github_openbao_source`. It owns public peer,
+source/route/handshake checks and source-bound HTTP over that existing channel;
+it owns no tunnel provisioning, privilege grants or runtime activation. Host
+root/kernel/configuration remain in its stated trust boundary.

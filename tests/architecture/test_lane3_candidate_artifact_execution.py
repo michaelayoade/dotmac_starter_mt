@@ -22,6 +22,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.architecture import lane3_rehearse_script as rehearse_script
+
 ROOT = Path(__file__).resolve().parents[2]
 LANE3 = ROOT / ".github/workflows/exposure-rehearsal.yml"
 RELEASE = ROOT / ".github/workflows/release-facility.yml"
@@ -78,6 +80,13 @@ RELEASE_ORDER = (
 )
 
 
+def _lane3() -> dict[str, Any]:
+    """Lane 3's rehearsal as asserted since D-S2c C1: the workflow's dispatch
+    inputs and job permissions, with the step sequence read from
+    `scripts/lane3_rehearse.sh`."""
+    return rehearse_script.as_document()
+
+
 def _lane3_findings(document: dict[str, Any]) -> list[str]:
     findings = _ordered_findings(_run_steps(document, "rehearse"), LANE3_ORDER)
     inputs = _dispatch_inputs(document)
@@ -92,8 +101,11 @@ def _lane3_findings(document: dict[str, Any]) -> list[str]:
         # verifier vouches for the bytes (`scripts/lane3_authorization.py`).
         "facility",
         "controller_identity",
-        "target",
-        "vm_slot",
+        # `target` and `vm_slot` were REPLACED by `host_id` when the runner began
+        # reading the vantage-topology record: the address and the release's
+        # `node/vmid` slot come from the record, bound by this Fleet host_id, and
+        # a dispatch can no longer type either.
+        "host_id",
         "candidate_version",
     }
     if set(inputs) != expected_inputs:
@@ -118,14 +130,14 @@ def _lane3_findings(document: dict[str, Any]) -> list[str]:
     )
     if candidate_runner not in execute:
         findings.append("the rehearsal runner is not driven by the candidate venv")
-    if "steps.candidate.outputs.candidate_sha256" not in execute:
+    if '--foundation-artifact "${candidate_sha256}"' not in execute:
         findings.append("the receipt digest is not derived from the candidate receipt")
     if "-E -P" not in execute:
         findings.append("the rehearsal runner is not launched with PYTHONPATH cleared")
     # THREE revisions, three expressions. The candidate source revision comes
     # only from the resolved receipt; the runner revision is this workflow's own
     # head SHA. One expression serving both is the conflation.
-    if "steps.candidate.outputs.candidate_source_sha" not in execute:
+    if '--candidate-source-revision "${candidate_source_sha}"' not in execute:
         findings.append("the candidate SOURCE revision is not passed at all")
     if "--candidate-source-revision" not in execute:
         findings.append("the candidate source revision is not named as its own input")
@@ -185,7 +197,16 @@ def _checkout_imports(source: str) -> list[int]:
 
 
 def test_lane3_executes_the_digest_verified_candidate_wheel() -> None:
-    assert _lane3_findings(_document(LANE3)) == []
+    assert _lane3_findings(_lane3()) == []
+    # The workflow's rehearse job runs the script once and carries no
+    # rehearsal step of its own, so the sequence above is the whole sequence.
+    calls = rehearse_script.script_calls(_document(LANE3), "rehearse")
+    assert [step["run"] for step in calls] == [rehearse_script.PHASE_CALL["rehearse"]]
+    assert [
+        step
+        for step in _document(LANE3)["jobs"]["rehearse"]["steps"]
+        if step.get("run") and step not in calls
+    ] == [], "exposure-rehearsal.yml's rehearse job runs a step outside the script"
 
 
 def test_publication_verifies_the_receipt_with_the_same_candidate_wheel() -> None:
@@ -198,7 +219,7 @@ def test_neither_executable_can_import_foundation_from_checkout() -> None:
 
 
 def test_the_lane3_guard_bites_on_each_identity_regression() -> None:
-    original = _document(LANE3)
+    original = _lane3()
 
     missing_verify = copy.deepcopy(original)
     missing_verify["jobs"]["rehearse"]["steps"] = [
@@ -229,7 +250,7 @@ def test_the_lane3_guard_bites_on_each_revision_and_isolation_regression() -> No
     says nothing about their ability to fail. Each mutation below is a shape a
     reviewer could plausibly ship.
     """
-    original = _document(LANE3)
+    original = _lane3()
 
     # Isolation removed. A venv alone does not make the wheel the only
     # importable copy: PYTHONPATH is honoured by every interpreter, so the
@@ -251,8 +272,8 @@ def test_the_lane3_guard_bites_on_each_revision_and_isolation_regression() -> No
     for step in conflated["jobs"]["rehearse"]["steps"]:
         if "scripts/exposure_rehearsal_runner.py" in str(step.get("run", "")):
             step["run"] = str(step["run"]).replace(
-                "${{ steps.candidate.outputs.candidate_source_sha }}",
-                "${GITHUB_SHA}",
+                '"${candidate_source_sha}"',
+                '"${GITHUB_SHA}"',
             )
     assert _lane3_findings(conflated)
 
@@ -264,8 +285,7 @@ def test_the_lane3_guard_bites_on_each_revision_and_isolation_regression() -> No
         if "scripts/exposure_rehearsal_runner.py" in str(step.get("run", "")):
             step["run"] = str(step["run"]).replace(
                 '--foundation-revision "${GITHUB_SHA}"',
-                "--foundation-revision "
-                '"${{ steps.candidate.outputs.candidate_source_sha }}"',
+                '--foundation-revision "${candidate_source_sha}"',
             )
     assert _lane3_findings(swapped)
 
