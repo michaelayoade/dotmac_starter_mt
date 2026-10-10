@@ -209,11 +209,18 @@ def github_openbao_source(
     jwt_request_url: str,
     jwt_request_token: str,
     oidc_broker_origin: str,
+    oidc_pinned: Any = None,
 ) -> TopologySource:
     """Bind the real Actions supplier to B7 using an independently approved broker.
 
     Arguments come from the protected launcher/configuration, never dispatch
     fields. This does not activate the default source or alter job permissions.
+
+    ``oidc_pinned`` is an optional ``lane3_github_oidc.PinnedBrokerTarget`` built
+    from a verified handoff grant (``lane3_handoff_client``). When given, the
+    token request connects only to that grant's numeric address. When omitted,
+    the legacy connect-time hostname resolution is kept for existing callers
+    that have no handoff grant.
     """
     from lane3_github_oidc import GithubOidcSupplier
 
@@ -224,6 +231,7 @@ def github_openbao_source(
             request_url=jwt_request_url,
             request_token=jwt_request_token,
             approved_origin=oidc_broker_origin,
+            pinned=oidc_pinned,
         ),
     )
 
@@ -239,6 +247,7 @@ def wireguard_github_openbao_source(
     interface: str,
     expected_local_public_key: str,
     expected_peer_public_key: str,
+    oidc_pinned: Any = None,
 ) -> TopologySource:
     """Explicit private-tunnel composition; no auto-discovery or permission grant."""
     from lane3_wireguard_topology import WireGuardOpenBaoTransport
@@ -256,6 +265,7 @@ def wireguard_github_openbao_source(
         jwt_request_url=jwt_request_url,
         jwt_request_token=jwt_request_token,
         oidc_broker_origin=oidc_broker_origin,
+        oidc_pinned=oidc_pinned,
     )
 
 
