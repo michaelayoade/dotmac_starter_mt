@@ -24,6 +24,7 @@ from conftest import (
     Env,
     owned_rules,
 )
+from lane3_broker_origin import OriginPolicy
 
 
 def _ids(env: Env, lease: str) -> tuple[int, int, str]:
@@ -56,6 +57,8 @@ def test_positive_report_grant_consume_and_pinned_tls(env: Env) -> None:
     assert j["grant"]["snapshot"]["addresses"] == [
         {"family": 4, "address": TLS_ADDRESS}
     ]
+    origins = OriginPolicy.from_mapping(env.policy["origins"])
+    assert j["grant"]["policy_digest"] == origins.digest
     closed = env.cleanup(lease)
     assert closed["evidence"]["outcome"] == "COMPLETED"
     assert closed["evidence"]["gate0_accepted"] is False

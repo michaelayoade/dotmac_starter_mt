@@ -1727,7 +1727,9 @@ class Controller:
                     "port": hp.BROKER_PORT,
                     "addresses": rows,
                 },
-                "policy_digest": policy.digest,
+                # The finite origin set's own digest (OriginPolicy); the
+                # handoff policy document digest is bound in the journal.
+                "policy_digest": policy.origins.digest,
                 "manifest_digest": manifest_digest,
                 "controller_digest": j["controller_digest"],
             }
@@ -2204,7 +2206,7 @@ def main(argv: list[str]) -> int:
             result = getattr(controller, op)(argv[2])
         else:
             result = controller.reconcile()
-        print(json.dumps(result, sort_keys=True))
+        print(json.dumps(result))
         return 0
     except Exception as exc:
         label = (

@@ -543,13 +543,12 @@ def validate_grant(value: Any) -> dict[str, Any]:
     boot_id(grant["boot_id"])
     if type(grant["sequence"]) is not int or grant["sequence"] != 1:
         raise ProtocolRefused("schema.invalid")
-    expires = _int(grant["expires_at_monotonic_ns"])
+    _int(grant["expires_at_monotonic_ns"])
     validate_binding(grant["binding"])
     origin(grant["origin"])
-    snapshot = validate_snapshot(grant["snapshot"])
-    if expires > snapshot["expires_at_monotonic_ns"]:
-        # Connection deadline is min(lease expiry, snapshot expiry).
-        raise ProtocolRefused("schema.invalid")
+    # Either expiry may be the earlier one; the connection deadline is
+    # min(lease expiry, snapshot expiry) and the client computes it.
+    validate_snapshot(grant["snapshot"])
     for key in ("policy_digest", "manifest_digest", "controller_digest"):
         hex64(grant[key])
     if len(canonical_json(grant)) > MAX_MESSAGE:

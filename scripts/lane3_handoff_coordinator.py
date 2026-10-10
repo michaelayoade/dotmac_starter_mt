@@ -804,7 +804,7 @@ def main(argv: list[str]) -> int:
                 "decide": op_decide,
                 "cleanup": op_cleanup,
             }[op](cfg, channel, gh_api)
-        print(json.dumps(result, sort_keys=True))
+        print(json.dumps(result))
         return 0
     except Exception as exc:
         label = (

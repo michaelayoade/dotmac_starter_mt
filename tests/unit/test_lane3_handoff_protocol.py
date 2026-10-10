@@ -235,7 +235,6 @@ def test_challenge_schema() -> None:
         lambda g: g["snapshot"]["addresses"].extend(
             {"family": 4, "address": f"198.51.100.{i}"} for i in range(31)
         ),
-        lambda g: g.update(expires_at_monotonic_ns=3_000),
         lambda g: g.update(origin="https://broker.example."),
     ],
 )
@@ -245,6 +244,13 @@ def test_grant_schema_refuses_and_is_sensitive(mutate: Any) -> None:
     with pytest.raises(hp.ProtocolRefused):
         hp.validate_grant(value)
     assert hp.validate_grant(grant())
+
+
+def test_grant_accepts_either_expiry_ordering() -> None:
+    later_lease = grant()
+    later_lease["expires_at_monotonic_ns"] = 3_000  # snapshot (2_000) is earlier
+    assert hp.validate_grant(later_lease)
+    assert hp.validate_grant(grant())  # lease (1_000) is earlier
 
 
 def test_grant_digest_is_canonical_and_whole_object() -> None:
