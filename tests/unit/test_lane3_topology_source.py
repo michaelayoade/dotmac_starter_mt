@@ -247,3 +247,34 @@ def test_resolve_refusal_exits_one_and_discloses_nothing(
     captured = capsys.readouterr()
     assert captured.out == ""
     _no_value_in(captured.err)
+
+
+def test_github_source_passes_the_pinned_target_through_and_defaults_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lane3_github_oidc
+
+    seen: list[dict[str, Any]] = []
+
+    class Recorder:
+        def __init__(self, **kwargs: Any) -> None:
+            seen.append(kwargs)
+
+        def __call__(self, audience: str) -> str:
+            raise AssertionError("no token request is made while composing")
+
+    monkeypatch.setattr(lane3_github_oidc, "GithubOidcSupplier", Recorder)
+    origin = "https://broker-1.region.example"
+    base: dict[str, Any] = {
+        "transport": object(),
+        "expected_version": 1,
+        "jwt_request_url": origin + "/x/idtoken?api-version=2.0",
+        "jwt_request_token": "synthetic-request-token",
+        "oidc_broker_origin": origin,
+    }
+    sentinel = object()
+    ts.github_openbao_source(**base, oidc_pinned=sentinel)
+    ts.github_openbao_source(**base)
+    assert seen[0]["pinned"] is sentinel
+    assert seen[1]["pinned"] is None
+    assert seen[0]["approved_origin"] == origin
