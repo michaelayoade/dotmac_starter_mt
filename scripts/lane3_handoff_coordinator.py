@@ -1048,6 +1048,11 @@ def op_cleanup(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
                 # The name alone cannot authorize deleting a foreign-group runner.
                 raise refused("binding.mismatch")
             runner_id = found_id
+            # Record the independently recovered identity before deleting it.
+            # A lost DELETE response must not erase the distinction between an
+            # unresolved registration POST and a known runner now absent.
+            state["runner_id"] = runner_id
+            save_state(cfg.state_path, state)
             api(f"orgs/{cfg.runner_org}/actions/runners/{runner_id}", "DELETE")
         elif runner_id is None:
             # Response UNKNOWN: present absence does not settle an in-flight POST.

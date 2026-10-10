@@ -771,7 +771,9 @@ def test_second_jit_canary_detects_removed_operation_lock(
     assert effects == ["jit"]
 
 
-@pytest.mark.parametrize("failure", ["response-lost", "runner-save-failed"])
+@pytest.mark.parametrize(
+    "failure", ["response-lost", "runner-save-failed", "delete-response-lost"]
+)
 def test_uncertain_registration_is_recovered_from_durable_exact_intent(
     tmp_path: Any, monkeypatch: Any, failure: str
 ) -> None:
@@ -804,12 +806,15 @@ def test_uncertain_registration_is_recovered_from_durable_exact_intent(
             assert "runner_id" not in durable
             assert payload["name"] == row["name"]
             registrations.append(row["name"])
-            if failure == "response-lost":
+            if failure in {"response-lost", "delete-response-lost"}:
                 raise co.CoordinatorRefused("api.unavailable")
             return {"runner": row, "encoded_jit_config": "c3ludGhldGlj"}
         if method == "DELETE":
             assert path.endswith(f"/runners/{RUNNER}")
+            assert co.load_state(cfg.state_path)["runner_id"] == RUNNER
             deleted.append(RUNNER)
+            if failure == "delete-response-lost":
+                raise co.CoordinatorRefused("api.unavailable")
             return None
         if path.endswith("runners?per_page=100"):
             rows = [] if deleted else [row]
@@ -826,6 +831,10 @@ def test_uncertain_registration_is_recovered_from_durable_exact_intent(
         co.op_launch(cfg, lambda *args: bootstrap.append(args), api, RUN)
     assert registrations == [row["name"]] and bootstrap == []
     monkeypatch.setattr(co, "save_state", original_save)
+    if failure == "delete-response-lost":
+        with pytest.raises(co.CoordinatorRefused, match="api.unavailable"):
+            co.op_cleanup(cfg, lambda *args: closed_reply(), api)
+        assert co.load_state(cfg.state_path)["runner_id"] == RUNNER
     co.op_cleanup(cfg, lambda *args: closed_reply(), api)
     assert deleted == [RUNNER] and not cfg.state_path.exists()
 
