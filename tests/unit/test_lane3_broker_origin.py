@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import json
 import pathlib
 import sys
 from typing import Any
@@ -127,11 +126,7 @@ def test_policy_exact_membership_and_digest() -> None:
     policy = m.OriginPolicy.from_mapping(doc([other, GOOD]))
     assert policy.admits(GOOD) and policy.admits(other)
     expected = hashlib.sha256(
-        json.dumps(
-            {"schema": m.POLICY_SCHEMA, "origins": sorted([GOOD, other])},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
+        "\n".join([m.POLICY_SCHEMA, *sorted([GOOD, other])]).encode() + b"\n"
     ).hexdigest()
     assert policy.digest == expected
     assert m.OriginPolicy.from_mapping(doc([GOOD, other])).digest == policy.digest

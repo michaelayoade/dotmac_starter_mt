@@ -179,7 +179,8 @@ class PinnedOidcFetcher:
     ) -> None:
         if (
             not isinstance(target, PinnedBrokerTarget)
-            or type(target.family) is not int
+            or not isinstance(target.family, int)
+            or isinstance(target.family, bool)
             or target.family not in (socket.AF_INET, socket.AF_INET6)
             or type(target.address) is not str
             or type(target.deadline_ns) is not int

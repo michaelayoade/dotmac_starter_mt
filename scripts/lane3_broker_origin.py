@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import json
 import re
 from collections.abc import Mapping
 from typing import Any, Final
@@ -101,10 +100,14 @@ def host_of(origin: str) -> str:
     return canonical_origin(origin)[len(_SCHEME) :]
 
 
-def _canonical_json(value: Any) -> bytes:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("utf-8")
+def _policy_digest(origins: list[str]) -> str:
+    """SHA-256 over the schema id and the sorted origins, one per line (LF).
+
+    Origins are canonical ASCII without whitespace, so the text form is
+    unambiguous. It is deliberately not a JSON document.
+    """
+    text = "\n".join([POLICY_SCHEMA, *origins]) + "\n"
+    return hashlib.sha256(text.encode("ascii")).hexdigest()
 
 
 class OriginPolicy:
@@ -134,10 +137,7 @@ class OriginPolicy:
         if len(set(seen)) != len(seen):
             raise OriginRefused("policy.duplicate")
         ordered = sorted(seen)
-        digest = hashlib.sha256(
-            _canonical_json({"schema": POLICY_SCHEMA, "origins": ordered})
-        ).hexdigest()
-        return cls(frozenset(ordered), digest)
+        return cls(frozenset(ordered), _policy_digest(ordered))
 
     @property
     def origins(self) -> frozenset[str]:
