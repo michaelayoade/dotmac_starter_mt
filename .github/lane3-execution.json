@@ -16,7 +16,8 @@
   },
   "admitted_launcher_revisions": [
     "67eb180022340eaea4a249cd49b06de5417b30c4",
-    "e6747360ee7842b293d69b890299a358fdef782f"
+    "e6747360ee7842b293d69b890299a358fdef782f",
+    "1fc1672243be9e3bef9bfa07612573d0bc7e4f00"
   ],
   "receipt_artifact": "lane3-rehearsal-receipt",
   "admission_evidence": null
