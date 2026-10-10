@@ -429,3 +429,44 @@ def test_pinned_malformed_request_url_refuses_before_any_socket(url: str) -> Non
     with pytest.raises(m.TopologySourceUnavailable):
         w.supplier(request_url=url)
     assert w.created == []
+
+
+def test_peer_refusal_canary_detects_weakened_numeric_peer_predicate(monkeypatch):
+    def canary():
+        world = World(peer=("192.0.2.99", 443))
+        with pytest.raises(m.TopologySourceUnavailable):
+            world.supplier()(m.AUDIENCE)
+
+    canary()
+    monkeypatch.setattr(m, "_same_address", lambda *args: True)
+    with pytest.raises(pytest.fail.Exception):
+        canary()
+
+
+def test_missing_pin_refuses_handoff_composition_before_fetch():
+    calls = []
+    with pytest.raises(m.TopologySourceUnavailable):
+        supplier(require_pinned=True, fetch=lambda *args: calls.append(args))
+    assert calls == []
+
+
+def test_started_hook_is_before_http_bytes_and_failure_aborts():
+    world = World()
+
+    def refuse_hook():
+        assert world.tls is not None and world.tls.sent == b""
+        raise RuntimeError("PRIVATE-HOOK-CANARY")
+
+    fetcher = m.PinnedOidcFetcher(
+        world.target(),
+        clock_ns=lambda: NOW,
+        context_factory=lambda: FakeContext(
+            world, verify=ssl.CERT_REQUIRED, check=True
+        ),
+        socket_factory=world.raw,
+        request_started=refuse_hook,
+    )
+    with pytest.raises(m.TopologySourceUnavailable) as caught:
+        fetcher(URL, "synthetic-request-token")
+    assert str(caught.value) == "Lane 3 topology record unavailable: oidc.request"
+    assert world.tls.sent == b""

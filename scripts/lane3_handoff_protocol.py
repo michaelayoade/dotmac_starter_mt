@@ -5,8 +5,9 @@ job-side client (``lane3_handoff_client``) and the host-side controller and
 coordinator (``lane3_handoff_controller``, ``lane3_handoff_coordinator``).
 
 Framing is one request per connection: a 4-byte big-endian unsigned length,
-then one UTF-8 JSON object of at most 8192 bytes. Decoding refuses duplicate
-keys, extra or missing keys, wrong types, nesting deeper than four,
+then one UTF-8 JSON object of at most 8192 bytes and a write-half-close.
+Decoding refuses duplicate keys, extra or missing keys, wrong types, nesting
+deeper than four,
 NaN/Infinity, non-UTF-8, surrogates and trailing bytes. Each message has its
 own 5 second read/write deadline.
 
@@ -39,6 +40,7 @@ RUN_ROOT: Final = "/run/dotmac-lane3-handoff"
 SOCKET_NAME: Final = "control.sock"
 CHALLENGE_NAME: Final = "challenge.json"
 GRANT_NAME: Final = "grant.json"
+LAUNCH_NAME: Final = "launch.json"
 LEASE_DIR_MODE: Final = 0o750
 SOCKET_MODE: Final = 0o660
 FILE_MODE: Final = 0o640
@@ -242,39 +244,26 @@ def read_frame(
     require_eof: bool = False,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
-    """Read one frame within ``deadline_s``; refuse trailing bytes.
+    """Read a frame and bounded EOF; both peers must half-close writes.
 
-    ``require_eof`` (the client reading a response) additionally requires the
-    peer to close after the frame. Without it (the server reading a request)
-    any byte already queued after the frame is refused.
+    ``require_eof`` remains a compatibility argument; EOF is always required.
+    A delayed trailing byte therefore cannot race request execution.
     """
     deadline = clock() + deadline_s
     (length,) = HEADER.unpack(_recv_exact(sock, HEADER.size, deadline, clock))
     if not 0 < length <= MAX_MESSAGE:
         raise ProtocolRefused("frame.invalid")
     raw = _recv_exact(sock, length, deadline, clock)
-    if require_eof:
-        left = deadline - clock()
-        if left <= 0:
-            raise ProtocolRefused("frame.invalid")
-        sock.settimeout(left)
-        try:
-            extra = sock.recv(1)
-        except OSError:
-            raise ProtocolRefused("frame.invalid") from None
-        if extra:
-            raise ProtocolRefused("frame.invalid")
-    else:
-        # Non-blocking peek: a socket timeout would first wait for data.
-        sock.setblocking(False)
-        try:
-            extra = sock.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
-        except BlockingIOError:
-            extra = b""
-        except OSError:
-            raise ProtocolRefused("frame.invalid") from None
-        if extra:
-            raise ProtocolRefused("frame.invalid")
+    left = deadline - clock()
+    if left <= 0:
+        raise ProtocolRefused("frame.invalid")
+    sock.settimeout(left)
+    try:
+        extra = sock.recv(1)
+    except OSError:
+        raise ProtocolRefused("frame.invalid") from None
+    if extra:
+        raise ProtocolRefused("frame.invalid")
     return decode_message(raw)
 
 
@@ -285,7 +274,7 @@ def write_frame(
     deadline_s: float = IO_DEADLINE_S,
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Write one frame within ``deadline_s``."""
+    """Write one frame and half-close within ``deadline_s``."""
     data = memoryview(frame(value))
     deadline = clock() + deadline_s
     while data:
@@ -297,7 +286,13 @@ def write_frame(
             sent = sock.send(data)
         except OSError:
             raise ProtocolRefused("frame.invalid") from None
+        if sent <= 0:
+            raise ProtocolRefused("frame.invalid")
         data = data[sent:]
+    try:
+        sock.shutdown(socket.SHUT_WR)
+    except OSError:
+        raise ProtocolRefused("frame.invalid") from None
 
 
 # ── field validators ────────────────────────────────────────────────────────
@@ -440,10 +435,30 @@ def validate_consume(value: Any) -> dict[str, Any]:
     return consume
 
 
+def validate_transport_event(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ProtocolRefused("schema.invalid")
+    op = value.get("op")
+    keys = {"protocol", "op", "lease_id", "nonce"}
+    if op == "proof":
+        keys.add("outcome")
+    elif op != "token-started":
+        raise ProtocolRefused("schema.invalid")
+    event = _exact(value, keys)
+    _protocol(event)
+    lease_id(event["lease_id"])
+    nonce(event["nonce"])
+    if op == "proof" and event["outcome"] not in ("BOUNDED_PROOF", "REFUSED"):
+        raise ProtocolRefused("schema.invalid")
+    return event
+
+
 _REQUESTS: Final[dict[str, Callable[[Any], dict[str, Any]]]] = {
     "report": validate_report,
     "poll": validate_poll,
     "consume": validate_consume,
+    "token-started": validate_transport_event,
+    "proof": validate_transport_event,
 }
 
 
@@ -487,6 +502,8 @@ _BINDING_KEYS: Final = {
     "workflow_sha",
     "workflow_blob",
     "starter_commit",
+    "admission_digest",
+    "supplier_digest",
 }
 _GRANT_KEYS: Final = {
     "protocol",
@@ -511,6 +528,8 @@ def validate_binding(value: Any) -> dict[str, Any]:
         _int(binding[key])
     for key in ("workflow_sha", "workflow_blob", "starter_commit"):
         hex40(binding[key])
+    for key in ("admission_digest", "supplier_digest"):
+        hex64(binding[key])
     return binding
 
 
@@ -554,3 +573,156 @@ def validate_grant(value: Any) -> dict[str, Any]:
     if len(canonical_json(grant)) > MAX_MESSAGE:
         raise ProtocolRefused("schema.invalid")
     return grant
+
+
+def validate_launch(value: Any) -> dict[str, Any]:
+    """Root-published launch coordinates, measured on the job's host clock."""
+    launch = _exact(
+        value,
+        {
+            "protocol",
+            "lease_id",
+            "boot_id",
+            "launched_at_monotonic_ns",
+            "expires_at_monotonic_ns",
+            "admission_digest",
+            "supplier_digest",
+        },
+    )
+    _protocol(launch)
+    lease_id(launch["lease_id"])
+    boot_id(launch["boot_id"])
+    _int(launch["launched_at_monotonic_ns"])
+    _int(launch["expires_at_monotonic_ns"])
+    if launch["expires_at_monotonic_ns"] <= launch["launched_at_monotonic_ns"]:
+        raise ProtocolRefused("schema.invalid")
+    for key in ("admission_digest", "supplier_digest"):
+        hex64(launch[key])
+    return launch
+
+
+def validate_evidence(value: Any) -> dict[str, Any]:
+    """Validate the standalone public schema; arbitrary nested journal data fails."""
+    keys = {
+        "schema",
+        "protocol",
+        "lease_id",
+        "outcome",
+        "category",
+        "origin",
+        "flags",
+        "binding",
+        "policy_digest",
+        "controller_digest",
+        "bootstrap_manifest_digest",
+        "manifest_digest",
+        "snapshot_digest",
+        "report_digest",
+        "grant_digest",
+        "transitions",
+        "cleanup",
+        "cleanup_blocked",
+        "gate0_accepted",
+        "token_request_started",
+        "issuance",
+        "proof_outcome",
+    }
+    public = _exact(value, keys)
+    _protocol(public)
+    if public["schema"] != "dotmac.lane3.handoff-evidence.v1":
+        raise ProtocolRefused("schema.invalid")
+    lease_id(public["lease_id"])
+    if public["outcome"] not in (None, "COMPLETED", "REFUSED", "EXPIRED"):
+        raise ProtocolRefused("schema.invalid")
+    if public["category"] is not None and (
+        type(public["category"]) is not str or public["category"] not in CATEGORIES
+    ):
+        raise ProtocolRefused("schema.invalid")
+    if public["origin"] is not None:
+        origin(public["origin"])
+    if public["flags"] is not None:
+        flags = _exact(public["flags"], {"explicit_port_present", "userinfo_present"})
+        for flag in flags.values():
+            _bool(flag)
+    if public["binding"] is not None:
+        validate_binding(public["binding"])
+    for key in (
+        "policy_digest",
+        "controller_digest",
+        "bootstrap_manifest_digest",
+        "manifest_digest",
+        "snapshot_digest",
+        "report_digest",
+        "grant_digest",
+    ):
+        if public[key] is not None:
+            hex64(public[key])
+    transitions = public["transitions"]
+    if type(transitions) is not list or len(transitions) > 32:
+        raise ProtocolRefused("schema.invalid")
+    states = (
+        "PREPARED",
+        "BOOTSTRAP",
+        "REPORTED",
+        "VALIDATED",
+        "GRANTED",
+        "CONSUMED",
+        "REFUSED",
+        "EXPIRED",
+        "CLOSED",
+    )
+    for row in transitions:
+        _exact(row, {"state", "offset_ms"})
+        if row["state"] not in states:
+            raise ProtocolRefused("schema.invalid")
+        if row["offset_ms"] is not None:
+            if (
+                type(row["offset_ms"]) is not int
+                or not -_MAX_INT <= row["offset_ms"] <= _MAX_INT
+            ):
+                raise ProtocolRefused("schema.invalid")
+    if public["cleanup"] is not None:
+        cleanup = _exact(
+            public["cleanup"],
+            {
+                "grant_revoked",
+                "guard_installed",
+                "processes_absent",
+                "sockets_absent",
+                "owned_rules_absent",
+                "baseline_preserved",
+                "default_drop_preserved",
+                "lease_files_absent",
+                "workspace_absent",
+                "identity_absent",
+                "timer_stopped",
+                "global_conntrack_flushed",
+            },
+        )
+        for flag in cleanup.values():
+            _bool(flag)
+        if cleanup["global_conntrack_flushed"]:
+            raise ProtocolRefused("schema.invalid")
+    if public["cleanup_blocked"] not in (
+        None,
+        "cleanup.drift",
+        "cleanup.baseline",
+        "cleanup.workspace",
+        "cleanup.identity",
+        "cleanup.failed",
+        "cleanup.processes",
+        "cleanup.blocked",
+        "cleanup.timer",
+    ):
+        raise ProtocolRefused("schema.invalid")
+    if public["gate0_accepted"] is not False:
+        raise ProtocolRefused("schema.invalid")
+    started = _bool(public["token_request_started"])
+    if public["issuance"] != ("UNKNOWN" if started else "NOT_STARTED"):
+        raise ProtocolRefused("schema.invalid")
+    if public["proof_outcome"] not in ("UNKNOWN", "BOUNDED_PROOF", "REFUSED"):
+        raise ProtocolRefused("schema.invalid")
+    if public["proof_outcome"] == "BOUNDED_PROOF" and not started:
+        raise ProtocolRefused("schema.invalid")
+    # Return an independent copy, never references to mutable journal members.
+    return json.loads(canonical_json(public))

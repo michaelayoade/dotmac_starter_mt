@@ -420,7 +420,23 @@ def test_evidence_projection_carries_no_canary() -> None:
         manifest_digest="d" * 64,
         t0_monotonic_ns=0,
         history=[{"state": "BOOTSTRAP", "at_monotonic_ns": 10**9}],
-        cleanup={"owned_rules_absent": True},
+        cleanup={
+            key: False
+            for key in (
+                "grant_revoked",
+                "guard_installed",
+                "processes_absent",
+                "sockets_absent",
+                "owned_rules_absent",
+                "baseline_preserved",
+                "default_drop_preserved",
+                "lease_files_absent",
+                "workspace_absent",
+                "identity_absent",
+                "timer_stopped",
+                "global_conntrack_flushed",
+            )
+        },
         cleanup_blocked=None,
         user="CANARY-exception-text",
         uid=UID,
@@ -430,7 +446,18 @@ def test_evidence_projection_carries_no_canary() -> None:
         env={"ACTIONS_ID_TOKEN_REQUEST_TOKEN": "CANARY-request-token-7f3a"},
     )
     j["grant"] = {
-        "binding": {"run_id": 5},
+        "binding": {
+            "repository_id": 9,
+            "run_id": 5,
+            "run_attempt": 1,
+            "job_id": 3,
+            "runner_id": 4,
+            "workflow_sha": SHA,
+            "workflow_blob": SHA,
+            "starter_commit": SHA,
+            "admission_digest": "a" * 64,
+            "supplier_digest": "b" * 64,
+        },
         "snapshot": {"digest": "e" * 64, "addresses": [{"address": "192.0.2.77"}]},
     }
     public = json.dumps(hc.evidence(j))
@@ -450,3 +477,151 @@ def test_refusal_output_is_a_fixed_label() -> None:
     assert hc.category_of(exc) == "internal"
     assert hc.category_of(hc.ControllerRefused("lease.expired")) == "lease.expired"
     assert hc.category_of(ValueError("CANARY-exception-text")) == "internal"
+
+
+def test_timing_ticket_subtracts_full_host_elapsed_and_never_revives() -> None:
+    j = {"timing": {"challenge": "a" * 64, "issued_at_monotonic_ns": 10**9}}
+    snapshot = {"challenge": "a" * 64, "ttl_remaining_ms": 60_000}
+    assert hc.snapshot_deadline(j, snapshot, 11 * 10**9) == 61 * 10**9
+    assert hc.snapshot_deadline(j, snapshot, 71 * 10**9) < 71 * 10**9
+    with pytest.raises(hc.ControllerRefused):
+        hc.snapshot_deadline(j, {**snapshot, "challenge": "b" * 64}, 2 * 10**9)
+
+
+def test_transit_canary_detects_weakened_receipt_time_formula(monkeypatch: Any) -> None:
+    j = {"timing": {"challenge": "a" * 64, "issued_at_monotonic_ns": 10**9}}
+    snapshot = {"challenge": "a" * 64, "ttl_remaining_ms": 60_000}
+
+    def canary() -> None:
+        assert hc.snapshot_deadline(j, snapshot, 71 * 10**9) < 71 * 10**9
+
+    canary()
+    monkeypatch.setattr(
+        hc, "snapshot_deadline", lambda j, s, now: now + s["ttl_remaining_ms"] * 10**6
+    )
+    with pytest.raises(AssertionError):
+        canary()
+
+
+def test_transport_start_is_persisted_as_unknown_and_proof_is_distinct() -> None:
+    j = granted()
+    j["state"] = "CONSUMED"
+    started = {**poll(), "op": "token-started"}
+    assert hc.transition(j, started, PEER, 5 * 10**9)[0]["status"] == "CONSUMED"
+    assert j["token_request_started"] is True and j["issuance"] == "UNKNOWN"
+    assert (
+        hc.transition(
+            j, {**poll(), "op": "proof", "outcome": "BOUNDED_PROOF"}, PEER, 6 * 10**9
+        )[0]["status"]
+        == "CONSUMED"
+    )
+    assert j["proof_outcome"] == "BOUNDED_PROOF" and j["issuance"] == "UNKNOWN"
+
+
+def cleanup_journal() -> dict[str, Any]:
+    j = journal("GRANTED")
+    j.update(
+        outcome=None,
+        closing=False,
+        cleanup_blocked=None,
+        user=USER,
+        uid=UID,
+        gid=UID,
+        identity_intent=hc.TAG + ":" + LEASE,
+        workspace="/run/synthetic-workspace",
+        cgroup="/system.slice/synthetic.service",
+        units={
+            "runner": "synthetic-runner",
+            "serve": "synthetic-serve",
+            "expire": "synthetic-expire",
+        },
+        firewall={
+            "family": FW.family,
+            "table": FW.table,
+            "chain": FW.chain,
+            "anchor": FW.anchor,
+        },
+        rules=[SPEC],
+        planned=[],
+        baseline_digest=hc.stable_digest([{"comment": "original"}]),
+        timer_armed=True,
+    )
+    return j
+
+
+def test_cleanup_baseline_drift_retains_guard_and_account(monkeypatch: Any) -> None:
+    effects: list[Any] = []
+
+    class Host:
+        now_ns = staticmethod(lambda: 10**9)
+        identity = staticmethod(lambda user: (UID, UID))
+        stop_unit = staticmethod(lambda unit: None)
+        kill_unit = staticmethod(lambda unit: None)
+        kill_cgroup = staticmethod(lambda group: None)
+        nft_apply = staticmethod(lambda script: effects.append(script))
+
+    controller = hc.Controller(host=Host())
+    monkeypatch.setattr(controller, "save", lambda j: None)
+    monkeypatch.setattr(controller, "_remove_lease_dir", lambda *args, **kw: None)
+    monkeypatch.setattr(controller, "_await_quiet", lambda j: None)
+    monkeypatch.setattr(controller, "_ensure_guard", lambda *args: True)
+    monkeypatch.setattr(
+        controller,
+        "chain",
+        lambda fw: ([guard_rule(), accept_rule(), {"comment": "drift"}], 1),
+    )
+    j = cleanup_journal()
+    with pytest.raises(hc.ControllerRefused, match="cleanup.blocked"):
+        controller._cleanup_locked(j, "EXPIRED", "lease.expired")
+    assert effects == []  # guard was not deleted; identity remains reserved
+    assert j["cleanup_blocked"] == "cleanup.baseline"
+    assert j["cleanup"]["guard_installed"] is True
+
+
+def test_identity_created_before_uid_journal_recovers_exact_intent(
+    monkeypatch: Any,
+) -> None:
+    class Host:
+        now_ns = staticmethod(lambda: 10**9)
+        identity = staticmethod(lambda user: (UID, UID))
+        identity_matches_intent = staticmethod(
+            lambda user, home, owner: owner == hc.TAG + ":" + LEASE
+        )
+        unit_cgroup = staticmethod(lambda unit: "/system.slice/" + unit + ".service")
+        stop_unit = staticmethod(lambda unit: None)
+
+    controller = hc.Controller(host=Host())
+    monkeypatch.setattr(controller, "save", lambda j: None)
+    monkeypatch.setattr(controller, "_remove_lease_dir", lambda *args, **kw: None)
+    monkeypatch.setattr(controller, "_ensure_guard", lambda *args: False)
+    j = cleanup_journal()
+    j.update(uid=None, gid=None, cgroup=None)
+    with pytest.raises(hc.ControllerRefused, match="cleanup.blocked"):
+        controller._cleanup_locked(j, "EXPIRED", "lease.expired")
+    assert (j["uid"], j["gid"]) == (UID, UID)
+    j = cleanup_journal()
+    j.update(uid=None, gid=None)
+    monkeypatch.setattr(controller.host, "identity_matches_intent", lambda *args: False)
+    with pytest.raises(hc.ControllerRefused, match="cleanup.blocked"):
+        controller._cleanup_locked(j, "EXPIRED", "lease.expired")
+    assert j["uid"] is None and j["cleanup_blocked"] == "cleanup.identity"
+
+
+def test_systemd_expiry_retries_lock_collision_and_stop_needs_readback(
+    monkeypatch: Any,
+) -> None:
+    calls: list[Any] = []
+    host = hc.SystemHost()
+
+    def run(argv: list[str], **kw: Any) -> bytes:
+        calls.append(argv)
+        return b"active\n" if "show" in argv else b""
+
+    monkeypatch.setattr(host, "_run", run)
+    host.arm_timer("synthetic-expiry", 1, ["/usr/bin/true"])
+    assert "--property=Restart=on-failure" in calls[0]
+    assert "--property=StartLimitIntervalSec=0" in calls[0]
+    with pytest.raises(hc.ControllerRefused, match="cleanup.timer"):
+        host.disarm_timer("synthetic-expiry")
+    with pytest.raises(hc.ControllerRefused, match="cleanup.timer"):
+        host.stop_unit("synthetic-serve")

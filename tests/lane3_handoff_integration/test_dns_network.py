@@ -9,18 +9,21 @@ IDENTICAL snapshot while SNI/Host authenticate the original host.
 from __future__ import annotations
 
 import ipaddress
+import json
 import socket
 import struct
 import threading
 from collections.abc import Iterator
 from typing import Any
 
+import lane3_handoff_protocol as hp
 import lane3_handoff_resolver as hr
 import pytest
 from conftest import (
     BROKER,
     BROKER_HOST,
     OTHER_ADDRESS,
+    PLAIN_ADDRESS,
     TLS_ADDRESS,
     Env,
     documentation_routable,
@@ -169,11 +172,14 @@ def test_real_tcp_resolution_positive(dns: DnsServer) -> None:
 
 
 def test_firewall_and_connection_consume_the_identical_snapshot(
-    env: Env, dns: DnsServer
+    env: Env, dns: DnsServer, network
 ) -> None:
     dns.zone = {hr.TYPE_A: [a(TLS_ADDRESS)]}
     snap = resolve()
+    token_requests = network.tls_accepts
     lease = env.start(["obtain", "tls", OTHER_ADDRESS])
+    env.wait_state(lease, {"REPORTED"})
+    assert network.tls_accepts == token_requests, "no token request before grant"
     reply = env.grant(
         lease,
         snap.rows(),
@@ -193,6 +199,9 @@ def test_firewall_and_connection_consume_the_identical_snapshot(
     # (wrong SNI refused) and the rebound address stays blocked.
     assert out["address"] == TLS_ADDRESS
     assert out["tls"] == "ok" and out["wrong_sni"] == "tls.refused"
+    assert out["wrong_ca"] == "tls.refused"
+    assert out["stale"] == "tls.refused"
+    assert out["delayed"] == "tls.refused"
     assert out["other"] == "blocked"
     j = env.wait_state(lease, {"CONSUMED"})
     assert j["grant"]["snapshot"]["digest"] == snap.digest
@@ -204,5 +213,26 @@ def test_firewall_and_connection_consume_the_identical_snapshot(
         and e["match"]["left"].get("payload", {}).get("field") == "daddr"
     }
     assert TLS_ADDRESS in granted and OTHER_ADDRESS not in granted
-    env.cleanup(lease)
+    public = env.cleanup(lease)["evidence"]
+    assert hp.validate_evidence(public) == public
+    assert public["token_request_started"] is True
+    assert public["issuance"] == "UNKNOWN"
+    assert public["proof_outcome"] == "BOUNDED_PROOF"
+    assert "synthetic-request-canary" not in json.dumps(public)
+    assert "synthetic-batch-canary" not in json.dumps(public)
+    env.assert_clean(lease)
+
+
+def test_production_consumer_handshake_stall_is_bounded(env: Env):
+    # Plain server accepts TCP and never completes TLS. No credential-bearing
+    # HTTP request can be sent before a successful authenticated handshake.
+    lease = env.start(["obtain", "handshake"])
+    env.grant(lease, [{"family": 4, "address": PLAIN_ADDRESS}])
+    out = env.job_output()
+    assert out["tls"] == "tls.refused"
+    assert out["elapsed_ms"] < 1500
+    public = env.cleanup(lease)["evidence"]
+    assert public["token_request_started"] is False
+    assert public["issuance"] == "NOT_STARTED"
+    assert public["proof_outcome"] == "UNKNOWN"
     env.assert_clean(lease)

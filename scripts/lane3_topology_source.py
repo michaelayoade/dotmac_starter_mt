@@ -210,6 +210,9 @@ def github_openbao_source(
     jwt_request_token: str,
     oidc_broker_origin: str,
     oidc_pinned: Any = None,
+    oidc_context_factory: Any = None,
+    oidc_request_started: Any = None,
+    require_pinned: bool = False,
 ) -> TopologySource:
     """Bind the real Actions supplier to B7 using an independently approved broker.
 
@@ -224,6 +227,7 @@ def github_openbao_source(
     """
     from lane3_github_oidc import GithubOidcSupplier
 
+    options = {"context_factory": oidc_context_factory} if oidc_context_factory else {}
     return openbao_source(
         transport=transport,
         expected_version=expected_version,
@@ -232,6 +236,9 @@ def github_openbao_source(
             request_token=jwt_request_token,
             approved_origin=oidc_broker_origin,
             pinned=oidc_pinned,
+            require_pinned=require_pinned,
+            request_started=oidc_request_started,
+            **options,
         ),
     )
 

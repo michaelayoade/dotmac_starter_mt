@@ -157,6 +157,9 @@ class _PinnedConnection(http.client.HTTPSConnection):
                 or not _same_address(self._pin_family, str(peer[0]), self._pin_address)
             ):
                 raise _refuse_pinned()
+            # Publish the raw socket while TLS handshakes so the deadline timer
+            # can interrupt a peer that keeps the handshake incomplete.
+            self.sock = raw
             self.sock = self._pin_context.wrap_socket(raw, server_hostname=self.host)
         except BaseException:
             try:
@@ -176,6 +179,7 @@ class PinnedOidcFetcher:
         clock_ns: Callable[[], int] = time.monotonic_ns,
         context_factory: Callable[[], ssl.SSLContext] = _default_context,
         socket_factory: Callable[[int, int], Any] = socket.socket,
+        request_started: Callable[[], None] | None = None,
     ) -> None:
         if (
             not isinstance(target, PinnedBrokerTarget)
@@ -197,6 +201,7 @@ class PinnedOidcFetcher:
         self._clock_ns = clock_ns
         self._context_factory = context_factory
         self._socket_factory = socket_factory
+        self._request_started = request_started
 
     def __call__(self, url: str, token: str) -> Mapping[str, Any]:
         try:
@@ -242,6 +247,10 @@ class PinnedOidcFetcher:
             connection.connect()
             if time.monotonic() - started >= budget:
                 raise _refuse()
+            if self._clock_ns() >= self._target.deadline_ns:
+                raise _refuse()
+            if self._request_started is not None:
+                self._request_started()
             connection.request(
                 "GET",
                 parsed.path + "?" + parsed.query,
@@ -255,6 +264,8 @@ class PinnedOidcFetcher:
                 raise _refuse()
             raw = reply.read(MAX_RESPONSE + 1)
             if len(raw) > MAX_RESPONSE:
+                raise _refuse()
+            if self._clock_ns() >= self._target.deadline_ns:
                 raise _refuse()
             value = json.loads(raw, object_pairs_hook=_json_object)
             if not isinstance(value, dict):
@@ -289,12 +300,21 @@ class GithubOidcSupplier:
         approved_origin: str,
         fetch: Callable[[str, str], Mapping[str, Any]] | None = None,
         pinned: PinnedBrokerTarget | None = None,
+        context_factory: Callable[[], ssl.SSLContext] = _default_context,
+        request_started: Callable[[], None] | None = None,
+        require_pinned: bool = False,
     ) -> None:
         try:
+            if require_pinned and pinned is None:
+                raise _refuse()
             if pinned is not None:
                 if fetch is not None or pinned.origin != approved_origin:
                     raise _refuse()
-                fetch = PinnedOidcFetcher(pinned)
+                fetch = PinnedOidcFetcher(
+                    pinned,
+                    context_factory=context_factory,
+                    request_started=request_started,
+                )
             elif fetch is None:
                 fetch = fetch_oidc
             origin = urlsplit(approved_origin)

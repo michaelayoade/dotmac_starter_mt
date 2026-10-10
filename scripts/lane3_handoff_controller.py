@@ -90,7 +90,6 @@ PINNED_MODULES: Final = (
     "lane3_handoff_resolver.py",
 )
 USER_PREFIX: Final = "l3h-"
-TRANSIT_ALLOWANCE_NS: Final = 2 * 1_000_000_000
 APPROVAL_MAX: Final = datetime.timedelta(minutes=30)
 LOCK_WAIT_S: Final = 4.0
 CLEANUP_WAIT_S: Final = 5.0
@@ -713,7 +712,8 @@ _ENV: Final = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"}
 _RUNNER_CHILD: Final = (
     "import json,os,sys;p=json.loads(sys.stdin.buffer.read(1048577));"
     "e={'HOME':os.getcwd(),'PATH':'/usr/bin:/bin','LANG':'C.UTF-8',"
-    "'ACTIONS_RUNNER_INPUT_JITCONFIG':p['jit']};"
+    "'ACTIONS_RUNNER_INPUT_JITCONFIG':p['jit'],'DOTMAC_LANE3_LEASE_ID':p['lease_id'],"
+    "'DOTMAC_LANE3_SUPPLIER_DIR':p['supplier_dir']};"
     "os.execve('./run.sh',['./run.sh'],e)"
 )
 
@@ -775,7 +775,20 @@ class SystemHost:
     def users_with_prefix(self, prefix: str) -> list[str]:
         return [e.pw_name for e in pwd.getpwall() if e.pw_name.startswith(prefix)]
 
-    def create_identity(self, user: str, home: Path) -> tuple[int, int]:
+    def identity_matches_intent(self, user: str, home: Path, owner: str) -> bool:
+        try:
+            entry = pwd.getpwnam(user)
+        except KeyError:
+            return False
+        return (
+            entry.pw_dir == str(home)
+            and entry.pw_shell == "/usr/sbin/nologin"
+            and entry.pw_gecos == owner
+            and entry.pw_uid > 0
+            and entry.pw_gid > 0
+        )
+
+    def create_identity(self, user: str, home: Path, owner: str) -> tuple[int, int]:
         self._run(
             [
                 "useradd",
@@ -786,6 +799,8 @@ class SystemHost:
                 str(home),
                 "--shell",
                 "/usr/sbin/nologin",
+                "--comment",
+                owner,
                 user,
             ]
         )
@@ -808,12 +823,24 @@ class SystemHost:
                 f"--on-active={seconds}s",
                 "--timer-property=AccuracySec=1s",
                 "--property=Type=oneshot",
+                "--property=Restart=on-failure",
+                "--property=RestartSec=1s",
+                "--property=StartLimitIntervalSec=0",
                 *argv,
             ]
         )
 
+    def _assert_stopped(self, name: str) -> None:
+        state = self._run(
+            ["systemctl", "show", name, "--property=ActiveState", "--value"],
+            check=False,
+        ).strip()
+        if state not in {b"inactive", b"failed", b""}:
+            raise refused("cleanup.timer")
+
     def disarm_timer(self, unit: str) -> None:
-        self._run(["systemctl", "stop", unit + ".timer"], check=False)
+        self._run(["systemctl", "stop", unit + ".timer"])
+        self._assert_stopped(unit + ".timer")
 
     def start_service(self, unit: str, argv: list[str], properties: list[str]) -> None:
         self._run(
@@ -860,7 +887,8 @@ class SystemHost:
             raise refused("host.command") from None
 
     def stop_unit(self, unit: str) -> None:
-        self._run(["systemctl", "stop", "--no-block", unit + ".service"], check=False)
+        self._run(["systemctl", "stop", unit + ".service"])
+        self._assert_stopped(unit + ".service")
 
     def kill_unit(self, unit: str) -> None:
         self._run(
@@ -989,6 +1017,22 @@ def transition(
         return _end(j, "peer.refused", now)
     if op == "poll":
         return _status(j), False
+    if op in {"token-started", "proof"}:
+        if j["state"] != "CONSUMED":
+            return _end(j, "state.invalid", now)
+        if op == "token-started":
+            if j.get("token_request_started", False):
+                return _end(j, "state.invalid", now)
+            j["token_request_started"] = True
+            j["issuance"] = "UNKNOWN"
+        else:
+            if (
+                not j.get("token_request_started", False)
+                or j.get("proof_outcome", "UNKNOWN") != "UNKNOWN"
+            ):
+                return _end(j, "state.invalid", now)
+            j["proof_outcome"] = request["outcome"]
+        return hp.response("CONSUMED"), False
     if op == "consume":
         if j["state"] == "CONSUMED":
             return _end(j, "grant.consumed", now)
@@ -1015,7 +1059,14 @@ def _status(j: Mapping[str, Any]) -> dict[str, Any]:
 # ── management-channel operation schemas (fixed; data only) ────────────────
 
 MGMT_REQUESTS: Final[dict[str, set[str]]] = {
-    "prepare": {"protocol", "op", "bootstrap_manifest", "policy_digest"},
+    "prepare": {
+        "protocol",
+        "op",
+        "bootstrap_manifest",
+        "policy_digest",
+        "qualification",
+    },
+    "timing": {"protocol", "op", "lease_id"},
     "bootstrap": {"protocol", "op", "lease_id", "jit_config"},
     "status": {"protocol", "op", "lease_id"},
     "grant": {
@@ -1024,6 +1075,7 @@ MGMT_REQUESTS: Final[dict[str, set[str]]] = {
         "lease_id",
         "report_digest",
         "binding",
+        "qualification",
         "origin",
         "snapshot",
         "policy_digest",
@@ -1052,15 +1104,19 @@ def validate_mgmt(value: Any) -> dict[str, Any]:
             hp.hex64(value["policy_digest"])
         if "report_digest" in value:
             hp.hex64(value["report_digest"])
+        if op == "prepare":
+            validate_qualification(value["qualification"])
         if op == "grant":
+            validate_qualification(value["qualification"])
             hp.validate_binding(value["binding"])
             hp.origin(value["origin"])
             snap = _exact(
                 value["snapshot"],
-                {"digest", "ttl_remaining_ms", "addresses"},
+                {"digest", "ttl_remaining_ms", "addresses", "challenge"},
                 "schema.invalid",
             )
             hp.hex64(snap["digest"])
+            hp.hex64(snap["challenge"])
             if (
                 type(snap["ttl_remaining_ms"]) is not int
                 or not 1
@@ -1081,6 +1137,53 @@ def validate_mgmt(value: Any) -> dict[str, Any]:
     if op == "refuse" and value["category"] not in hp.CATEGORIES:
         raise refused("schema.invalid")
     return value
+
+
+QUALIFICATION_KEYS: Final = {
+    "repository_id",
+    "run_id",
+    "run_attempt",
+    "workflow_sha",
+    "workflow_blob",
+    "starter_commit",
+    "environment_id",
+    "approval_digest",
+    "admission_digest",
+    "supplier_digest",
+}
+
+
+def validate_qualification(value: Any) -> dict[str, Any]:
+    value = _exact(value, QUALIFICATION_KEYS, "binding.mismatch")
+    for key in ("repository_id", "run_id", "run_attempt", "environment_id"):
+        if type(value[key]) is not int or value[key] <= 0:
+            raise refused("binding.mismatch")
+    if value["run_attempt"] != 1:
+        raise refused("approval.missing")
+    try:
+        for key in ("workflow_sha", "workflow_blob", "starter_commit"):
+            hp.hex40(value[key])
+        for key in ("approval_digest", "admission_digest", "supplier_digest"):
+            hp.hex64(value[key])
+    except hp.ProtocolRefused:
+        raise refused("binding.mismatch") from None
+    return value
+
+
+def snapshot_deadline(
+    j: Mapping[str, Any], snapshot: Mapping[str, Any], now: int
+) -> int:
+    ticket = j.get("timing")
+    if (
+        not isinstance(ticket, dict)
+        or ticket.get("challenge") != snapshot["challenge"]
+        or now < ticket["issued_at_monotonic_ns"]
+    ):
+        raise refused("snapshot.refused")
+    # The challenge predates DNS capture. Subtracting the FULL host interval
+    # includes both management hops, lookup, coordinator work and lock wait.
+    elapsed = now - ticket["issued_at_monotonic_ns"]
+    return now + snapshot["ttl_remaining_ms"] * 1_000_000 - elapsed
 
 
 # ── the controller ──────────────────────────────────────────────────────────
@@ -1225,7 +1328,13 @@ class Controller:
             strict_json(read_protected(self.paths.config_root / "policy.json"))
         )
 
-    def _approval(self, manifest_digest: str, policy_digest: str, cdigest: str) -> None:
+    def _approval(
+        self,
+        manifest_digest: str,
+        policy_digest: str,
+        cdigest: str,
+        qualification: Mapping[str, Any],
+    ) -> None:
         doc = strict_json(read_protected(self.paths.config_root / "approval.json"))
         doc = _exact(
             doc,
@@ -1235,6 +1344,7 @@ class Controller:
                 "manifest_digest",
                 "policy_digest",
                 "controller_digest",
+                "qualification_digest",
                 "expires_at",
             },
             "approval.missing",
@@ -1250,6 +1360,7 @@ class Controller:
             or doc["manifest_digest"] != manifest_digest
             or doc["policy_digest"] != policy_digest
             or doc["controller_digest"] != cdigest
+            or doc["qualification_digest"] != hp.digest(dict(qualification))
             or expires.tzinfo is None
             or not now < expires <= now + APPROVAL_MAX
         ):
@@ -1332,7 +1443,9 @@ class Controller:
         cdigest = controller_digest(self.module_dir)
         if cdigest != cfg.controller_digest:
             raise refused("controller.digest")
-        self._approval(mdigest, policy.digest, cdigest)
+        qualification = validate_qualification(req["qualification"])
+        self._approval(mdigest, policy.digest, cdigest, qualification)
+        installation, supplier_bytes = self._supplier_installation(qualification)
         archive = read_protected(cfg.archive, limit=1 << 30)
         if hashlib.sha256(archive).hexdigest() != cfg.archive_sha256:
             raise refused("runner.archive")
@@ -1361,6 +1474,13 @@ class Controller:
                 "closing": False,
                 "cleanup_blocked": None,
                 "user": USER_PREFIX + lease[:12],
+                "identity_intent": TAG + ":" + lease,
+                "qualification": dict(qualification),
+                "supplier_installation": installation,
+                "timing": None,
+                "token_request_started": False,
+                "issuance": "NOT_STARTED",
+                "proof_outcome": "UNKNOWN",
                 "uid": None,
                 "gid": None,
                 "units": {
@@ -1395,12 +1515,16 @@ class Controller:
             try:
                 self._checkpoint("prepare.journal")
                 self._pin_modules(cdigest)
-                uid, gid = self.host.create_identity(j["user"], Path(j["workspace"]))
+                uid, gid = self.host.create_identity(
+                    j["user"], Path(j["workspace"]), j["identity_intent"]
+                )
+                self._checkpoint("prepare.identity_created")
                 j["uid"], j["gid"] = uid, gid
                 j["cgroup"] = self.host.unit_cgroup(j["units"]["runner"])
                 self.save(j)
                 self._checkpoint("prepare.identity")
                 self._make_lease_dir(j)
+                self._stage_supplier(j, supplier_bytes)
                 self._checkpoint("prepare.lease_dir")
                 self._make_workspace(j, cfg, archive)
                 self._checkpoint("prepare.workspace")
@@ -1417,6 +1541,111 @@ class Controller:
                 "manifest_digest": mdigest,
                 "controller_digest": cdigest,
             }
+
+    def _supplier_installation(
+        self, qualification: Mapping[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, bytes]]:
+        installation = _exact(
+            strict_json(
+                read_protected(self.paths.config_root / "supplier-installation.json")
+            ),
+            {
+                "schema",
+                "starter_commit",
+                "admission_digest",
+                "supplier_digest",
+                "modules",
+            },
+            "binding.mismatch",
+        )
+        modules = installation["modules"]
+        if (
+            installation["schema"] != "dotmac.lane3.supplier-installation.v1"
+            or type(modules) is not dict
+            or not 1 <= len(modules) <= 32
+            or any(
+                installation[k] != qualification[k]
+                for k in ("starter_commit", "admission_digest", "supplier_digest")
+            )
+            or hp.digest(modules) != qualification["supplier_digest"]
+        ):
+            raise refused("binding.mismatch")
+        if (
+            hashlib.sha256(
+                read_protected(self.paths.config_root / "admission.json")
+            ).hexdigest()
+            != qualification["admission_digest"]
+        ):
+            raise refused("binding.mismatch")
+        bodies: dict[str, bytes] = {}
+        for name, expected in modules.items():
+            if (
+                type(name) is not str
+                or re.fullmatch(r"lane3_[a-z][a-z0-9_]*\.py", name) is None
+            ):
+                raise refused("binding.mismatch")
+            try:
+                hp.hex64(expected)
+            except hp.ProtocolRefused:
+                raise refused("binding.mismatch") from None
+            body = read_protected(
+                self.paths.config_root / "supplier" / name, limit=1 << 20
+            )
+            if hashlib.sha256(body).hexdigest() != expected:
+                raise refused("binding.mismatch")
+            bodies[name] = body
+        return installation, bodies
+
+    def _stage_supplier(
+        self, j: Mapping[str, Any], bodies: Mapping[str, bytes]
+    ) -> None:
+        parent = open_dir(self._lease_dir(j), forbid=0o027, gid=j["gid"])
+        try:
+            os.mkdir("supplier", 0o700, dir_fd=parent)
+            fd = os.open("supplier", _DIR_FLAGS, dir_fd=parent)
+            try:
+                os.fchown(fd, 0, j["gid"])
+                for name, body in bodies.items():
+                    write_atomic(fd, name, body, mode=0o440, gid=j["gid"])
+                write_atomic(
+                    fd,
+                    "supplier-installation.json",
+                    hp.canonical_json(j["supplier_installation"]),
+                    mode=0o440,
+                    gid=j["gid"],
+                )
+                os.fchmod(fd, 0o550)
+            finally:
+                os.close(fd)
+        finally:
+            os.close(parent)
+
+    def _verify_staged_supplier(self, j: Mapping[str, Any]) -> None:
+        path = self._lease_dir(j) / "supplier"
+        fd = open_dir(path, forbid=0o027, gid=j["gid"])
+        try:
+            if stat.S_IMODE(os.fstat(fd).st_mode) != 0o550:
+                raise refused("binding.mismatch")
+            installation = j["supplier_installation"]
+            if set(os.listdir(fd)) != set(installation["modules"]) | {
+                "supplier-installation.json"
+            }:
+                raise refused("binding.mismatch")
+        finally:
+            os.close(fd)
+        copied = strict_json(
+            read_protected(
+                path / "supplier-installation.json", exact_mode=0o440, gid=j["gid"]
+            )
+        )
+        if copied != installation:
+            raise refused("binding.mismatch")
+        for name, expected in installation["modules"].items():
+            body = read_protected(
+                path / name, exact_mode=0o440, gid=j["gid"], limit=1 << 20
+            )
+            if hashlib.sha256(body).hexdigest() != expected:
+                raise refused("binding.mismatch")
 
     def _pin_modules(self, cdigest: str) -> None:
         dfd = self._state_dir()
@@ -1476,13 +1705,20 @@ class Controller:
         req = validate_mgmt(request)
         if req["op"] != "bootstrap":
             raise refused("schema.invalid")
-        payload = json.dumps({"jit": req["jit_config"]}).encode("ascii")
+        payload = b""
         with self.locked():
             j = self._active(req["lease_id"])
             if j["state"] != "PREPARED":
                 raise refused("state.invalid")
             try:
                 cfg = self.host_config()
+                self._approval(
+                    j["bootstrap_manifest_digest"],
+                    j["policy_digest"],
+                    j["controller_digest"],
+                    j["qualification"],
+                )
+                self._verify_staged_supplier(j)
                 fw = Firewall(**j["firewall"])
                 if dataclasses.asdict(cfg.firewall) != j["firewall"]:
                     raise refused("config.drift")
@@ -1538,6 +1774,28 @@ class Controller:
                 j["launched_at_monotonic_ns"] = now
                 _history(j, "BOOTSTRAP", now)
                 self.save(j)
+                self._write_lease_file(
+                    j,
+                    hp.LAUNCH_NAME,
+                    hp.validate_launch(
+                        {
+                            "protocol": hp.PROTOCOL,
+                            "lease_id": j["lease_id"],
+                            "boot_id": j["boot_id"],
+                            "launched_at_monotonic_ns": now,
+                            "expires_at_monotonic_ns": j["expires_at_monotonic_ns"],
+                            "admission_digest": j["qualification"]["admission_digest"],
+                            "supplier_digest": j["qualification"]["supplier_digest"],
+                        }
+                    ),
+                )
+                payload = json.dumps(
+                    {
+                        "jit": req["jit_config"],
+                        "lease_id": j["lease_id"],
+                        "supplier_dir": str(self._lease_dir(j) / "supplier"),
+                    }
+                ).encode("ascii")
                 self.host.launch_runner(
                     j["units"]["runner"],
                     self._runner_properties(j, cfg, remaining),
@@ -1618,6 +1876,27 @@ class Controller:
             break
         raise refused("socket.unready")
 
+    def timing(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        req = validate_mgmt(request)
+        with self.locked():
+            j = self._active(req["lease_id"])
+            if (
+                j["state"] != "REPORTED"
+                or self.host.now_ns() >= j["expires_at_monotonic_ns"]
+            ):
+                raise refused("state.invalid")
+            j["timing"] = {
+                "challenge": secrets.token_hex(32),
+                "issued_at_monotonic_ns": self.host.now_ns(),
+            }
+            self.save(j)
+            return {
+                "protocol": hp.PROTOCOL,
+                "op": "timing",
+                "lease_id": j["lease_id"],
+                "challenge": j["timing"]["challenge"],
+            }
+
     def status(self, request: Mapping[str, Any]) -> dict[str, Any]:
         req = validate_mgmt(request)
         if req["op"] != "status":
@@ -1671,6 +1950,16 @@ class Controller:
         if not hmac.compare_digest(req["report_digest"], j["report_digest"]):
             raise refused("binding.mismatch")
         binding = req["binding"]
+        self._verify_staged_supplier(j)
+        qualification = j["qualification"]
+        if req["qualification"] != qualification:
+            raise refused("binding.mismatch")
+        if any(
+            binding[k] != qualification[k]
+            for k in binding
+            if k not in {"job_id", "runner_id"}
+        ):
+            raise refused("binding.mismatch")
         expected = j["report"]["expected"]
         if (
             binding["run_id"] != expected["run_id"]
@@ -1697,9 +1986,8 @@ class Controller:
         if len(bootstrap_addresses | {r["address"] for r in rows}) > hp.MAX_ADDRESSES:
             # The controller cap is real; an answer is never truncated to fit.
             raise refused("snapshot.refused")
-        snapshot_expires = (
-            now - TRANSIT_ALLOWANCE_NS + snapshot["ttl_remaining_ms"] * 1_000_000
-        )
+        snapshot_expires = snapshot_deadline(j, snapshot, now)
+        j["timing"] = None
         deadline = min(j["expires_at_monotonic_ns"], snapshot_expires)
         if deadline - now < hp.GRANT_MIN_REMAINING_NS:
             raise refused("deadline.insufficient")
@@ -1744,6 +2032,16 @@ class Controller:
         ]
         new = rule_specs(j["lease_id"], extra, start=len(bootstrap_rows))
         j["planned"] = new
+        # Earlier DNS expiry becomes the root lifecycle deadline before any
+        # extra authority. Keep the original lease timer; add a second timer.
+        j["expires_at_monotonic_ns"] = deadline
+        j["snapshot_timer_armed"] = True
+        self.save(j)
+        self.host.arm_timer(
+            j["units"]["expire"] + "-snapshot",
+            max(1, (deadline - self.host.now_ns()) // 1_000_000_000),
+            self._pinned_argv("expire", j["lease_id"]),
+        )
         j["manifest_digest"] = manifest_digest
         _history(j, "VALIDATED", now)
         self.save(j)  # PREPARED transaction: rollback knows the planned rules
@@ -1874,12 +2172,24 @@ class Controller:
             if self.self_unit != j["units"]["serve"]:
                 self.host.stop_unit(j["units"]["serve"])
             fw = Firewall(**j["firewall"])
-            identity = self.host.identity(j["user"]) if j["uid"] is not None else None
+            identity = self.host.identity(j["user"])
+            if identity is not None and j["uid"] is None:
+                # The durable random owner marker and exact account intent
+                # recover useradd's effect-before-journal interval safely.
+                if not self.host.identity_matches_intent(
+                    j["user"], Path(j["workspace"]), j["identity_intent"]
+                ):
+                    raise refused("cleanup.identity")
+                j["uid"], j["gid"] = identity
+                j["cgroup"] = self.host.unit_cgroup(j["units"]["runner"])
+                self.save(j)
             if identity is not None and identity != (j["uid"], j["gid"]):
                 raise refused("cleanup.identity")
             specs = [*j["rules"], *j["planned"]]
             if identity is not None:
                 results["guard_installed"] = self._ensure_guard(j, fw, specs)
+                if not results["guard_installed"]:
+                    raise refused("cleanup.drift")
                 self._checkpoint("cleanup.guard")
                 self.host.kill_unit(j["units"]["runner"])
                 if j["cgroup"]:
@@ -1891,6 +2201,13 @@ class Controller:
             handles, _guard = classify_owned(
                 rules, fw, j["lease_id"], j["uid"] or 0, j["user"], specs, True
             )
+            # Validate non-owned baseline BEFORE removing the deny guard.
+            if (
+                j["baseline_digest"] is not None
+                and stable_digest([r for r in rules if not owned(r)])
+                != j["baseline_digest"]
+            ):
+                raise refused("cleanup.baseline")
             if handles:
                 self.host.nft_apply("".join(delete_line(fw, h) + "\n" for h in handles))
             self._checkpoint("cleanup.rules")
@@ -1925,8 +2242,19 @@ class Controller:
             # Stop the exact timer only after verified closure.
             if j["timer_armed"]:
                 self.host.disarm_timer(j["units"]["expire"])
+            if j.get("snapshot_timer_armed"):
+                self.host.disarm_timer(j["units"]["expire"] + "-snapshot")
             results["timer_stopped"] = True
         except BaseException as exc:
+            # A late baseline/readback failure must also preserve containment.
+            if j["uid"] is not None and self.host.identity(j["user"]) == (
+                j["uid"],
+                j["gid"],
+            ):
+                with contextlib.suppress(Exception):
+                    results["guard_installed"] = self._ensure_guard(
+                        j, Firewall(**j["firewall"]), [*j["rules"], *j["planned"]]
+                    )
             j["cleanup"] = results
             j["cleanup_blocked"] = (
                 exc.label if isinstance(exc, ControllerRefused) else "cleanup.failed"
@@ -1999,8 +2327,18 @@ class Controller:
                 _check_dir(lfd, 0o027)
                 names = [hp.GRANT_NAME] if keep_dir else os.listdir(lfd)
                 for name in names:
-                    with contextlib.suppress(FileNotFoundError):
-                        os.unlink(name, dir_fd=lfd)
+                    if name == "supplier":
+                        sfd = os.open(name, _DIR_FLAGS, dir_fd=lfd)
+                        try:
+                            _check_dir(sfd, 0o027, gid=j["gid"])
+                            for module in os.listdir(sfd):
+                                os.unlink(module, dir_fd=sfd)
+                        finally:
+                            os.close(sfd)
+                        os.rmdir(name, dir_fd=lfd)
+                    else:
+                        with contextlib.suppress(FileNotFoundError):
+                            os.unlink(name, dir_fd=lfd)
                 os.fsync(lfd)
             finally:
                 os.close(lfd)
@@ -2148,27 +2486,32 @@ def evidence(j: Mapping[str, Any]) -> dict[str, Any]:
         }
         for h in j.get("history", [])
     ]
-    return {
-        "schema": EVIDENCE_SCHEMA,
-        "protocol": hp.PROTOCOL,
-        "lease_id": j["lease_id"],
-        "outcome": j.get("outcome"),
-        "category": j.get("category"),
-        "origin": report.get("origin"),
-        "flags": report.get("flags"),
-        "binding": dict(binding) if binding else None,
-        "policy_digest": j.get("policy_digest"),
-        "controller_digest": j.get("controller_digest"),
-        "bootstrap_manifest_digest": j.get("bootstrap_manifest_digest"),
-        "manifest_digest": j.get("manifest_digest"),
-        "snapshot_digest": (grant.get("snapshot") or {}).get("digest"),
-        "report_digest": j.get("report_digest"),
-        "grant_digest": j.get("grant_digest"),
-        "transitions": transitions,
-        "cleanup": j.get("cleanup"),
-        "cleanup_blocked": j.get("cleanup_blocked"),
-        "gate0_accepted": False,
-    }
+    return hp.validate_evidence(
+        {
+            "schema": EVIDENCE_SCHEMA,
+            "protocol": hp.PROTOCOL,
+            "lease_id": j["lease_id"],
+            "outcome": j.get("outcome"),
+            "category": j.get("category"),
+            "origin": report.get("origin"),
+            "flags": report.get("flags"),
+            "binding": dict(binding) if binding else None,
+            "policy_digest": j.get("policy_digest"),
+            "controller_digest": j.get("controller_digest"),
+            "bootstrap_manifest_digest": j.get("bootstrap_manifest_digest"),
+            "manifest_digest": j.get("manifest_digest"),
+            "snapshot_digest": (grant.get("snapshot") or {}).get("digest"),
+            "report_digest": j.get("report_digest"),
+            "grant_digest": j.get("grant_digest"),
+            "transitions": transitions,
+            "cleanup": j.get("cleanup"),
+            "cleanup_blocked": j.get("cleanup_blocked"),
+            "token_request_started": j.get("token_request_started", False),
+            "issuance": j.get("issuance", "NOT_STARTED"),
+            "proof_outcome": j.get("proof_outcome", "UNKNOWN"),
+            "gate0_accepted": False,
+        }
+    )
 
 
 def main(argv: list[str]) -> int:

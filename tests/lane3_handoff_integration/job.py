@@ -7,6 +7,7 @@ Prints ONE JSON line of fixed fields; never a token, URL or exception text.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import socket
@@ -18,14 +19,22 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import lane3_handoff_client as client  # noqa: E402
-import lane3_handoff_protocol as hp  # noqa: E402
+from lane3_handoff_bootstrap import load_verified_bundle  # noqa: E402
+
+_bundle = load_verified_bundle(
+    f"/run/l3h-it/run/{sys.argv[1]}/supplier",
+    f"/run/l3h-it/run/{sys.argv[1]}/launch.json",
+)
+client = _bundle["lane3_handoff_client"]
+hp = _bundle["lane3_handoff_protocol"]
+source = _bundle["lane3_topology_source"]
+bao = _bundle["lane3_openbao_topology"]
 
 RUN_ROOT = "/run/l3h-it/run"
 SHA = "5" * 40
 REPO_ID, RUN_ID, JOB_ID, RUNNER_ID = 4101, 4102, 4103, 4104
 REQUEST_URL = (
-    "https://broker.example/_apis/distributedtask/hubs/Actions/plans/p/jobs/j/"
+    "https://fixture.actions.githubusercontent.com/_apis/distributedtask/hubs/Actions/plans/p/jobs/j/"
     "idtoken?api-version=2.0"
 )
 
@@ -47,6 +56,7 @@ def raw_exchange(lease: str, payload: bytes, *, stall: float = 0) -> dict:
         time.sleep(stall)
     if payload:
         sock.sendall(payload)
+    sock.shutdown(socket.SHUT_WR)
     try:
         return hp.read_frame(sock, deadline_s=15, require_eof=True)
     except hp.ProtocolRefused:
@@ -65,29 +75,112 @@ def obtain(lease: str, gid: int, *, workflow_sha: str = SHA):
         starter_commit=SHA,
         job_id=JOB_ID,
         runner_id=RUNNER_ID,
+        admission_digest=handoff._read_json(hp.LAUNCH_NAME)["admission_digest"],
+        supplier_digest=handoff._read_json(hp.LAUNCH_NAME)["supplier_digest"],
     )
-    return handoff.obtain(
-        request_url=REQUEST_URL, expectation=expectation, launch_ns=time.monotonic_ns()
-    )
+    return handoff.obtain_from_launch(request_url=REQUEST_URL, expectation=expectation)
 
 
-def tls_get(address: str, server_name: str, host_header: str) -> str:
-    """Numeric connect, assert the peer, then TLS with SNI = approved host."""
-    raw = socket.create_connection((address, 443), timeout=5)
+class SyntheticKv:
+    """Credential-bound in-memory server; the real bounded B7 consumer runs."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def request(self, method, path, *, body=None, token=None):
+        self.calls += 1
+        if self.calls == 1:
+            assert method == "POST" and path == bao.LOGIN_PATH
+            assert body == {"role": bao.ROLE, "jwt": "a.b.c"} and token is None
+            return {
+                "auth": {
+                    "client_token": "synthetic-batch-canary",
+                    "token_type": "batch",
+                    "renewable": False,
+                    "lease_duration": 60,
+                    "policies": [bao.ROLE],
+                    "token_policies": [bao.ROLE],
+                    "identity_policies": [],
+                }
+            }
+        assert self.calls == 2 and method == "GET"
+        assert path == bao.KV_PATH + "?version=1" and token == "synthetic-batch-canary"
+        return {
+            "data": {
+                "metadata": {"version": 1, "destroyed": False, "deletion_time": ""},
+                "data": {
+                    "schema": "lane3.vantage-topology.v1",
+                    "probe_vantage": {
+                        "key": "probe-one",
+                        "host": "192.0.2.1",
+                        "ssh_user": "probe",
+                    },
+                    "inside_vantage": {
+                        "host": "192.0.2.2",
+                        "jump_principal": "lane3jump",
+                    },
+                    "observer_principal": "lane3obs",
+                    "targets": {
+                        "target-one": {
+                            "address": "192.0.2.3",
+                            "far_end": "192.0.2.3",
+                            "proxmox_slot": "node/102",
+                        }
+                    },
+                    "former_private_paths": ["192.0.2.0/24"],
+                    "probe_ports": [443],
+                },
+            }
+        }
+
+
+def production_read(
+    target,
+    *,
+    handoff=None,
+    wrong_name=False,
+    wrong_ca=False,
+    stale=False,
+    delayed=False,
+):
+    if wrong_name:
+        target = dataclasses.replace(
+            target, origin="https://other.actions.githubusercontent.com"
+        )
+    if stale:
+        target = dataclasses.replace(target, deadline_ns=time.monotonic_ns() - 1)
+    if delayed:
+        target = dataclasses.replace(
+            target, deadline_ns=time.monotonic_ns() + 200_000_000
+        )
+    transport = SyntheticKv()
+    context = (
+        (lambda: ssl.create_default_context())
+        if wrong_ca
+        else (lambda: ssl.create_default_context(cafile=os.path.join(HERE, "ca.pem")))
+    )
     try:
-        if raw.getpeername()[0] != address:
-            return "peer.mismatch"
-        context = ssl.create_default_context(cafile=os.path.join(HERE, "ca.pem"))
-        with context.wrap_socket(raw, server_hostname=server_name) as tls:
-            tls.sendall(
-                f"GET /idtoken HTTP/1.1\r\nHost: {host_header}\r\n\r\n".encode()
-            )
-            reply = tls.recv(4096)
-            return "ok" if reply.startswith(b"HTTP/1.1 200") else "http.refused"
-    except ssl.SSLError:
+        reader = source.github_openbao_source(
+            transport=transport,
+            expected_version=1,
+            jwt_request_url=target.origin
+            + ("/delay" if delayed else "")
+            + "/synthetic/jobs/j/idtoken?api-version=2.0",
+            jwt_request_token="synthetic-request-canary",
+            oidc_broker_origin=target.origin,
+            oidc_pinned=target,
+            require_pinned=True,
+            oidc_context_factory=context,
+            oidc_request_started=handoff.token_request_started if handoff else None,
+        )
+        reading = reader.read()
+        assert reading.kv_version == 1 and transport.calls == 2
+        if handoff:
+            handoff.record_proof("BOUNDED_PROOF")
+        return "ok"
+    except source.TopologySourceUnavailable:
+        assert transport.calls == 0
         return "tls.refused"
-    finally:
-        raw.close()
 
 
 def connect_result(address: str) -> str:
@@ -110,12 +203,30 @@ def main(argv: list[str]) -> None:
         emit(result="granted", address=target.address)
         follow = rest[0] if rest else ""
         if follow == "tls":
+            # Fresh suppliers below are synthetic transport canaries only.
+            # They are not production credential retries or grant re-consumption.
             emit(
                 result="granted",
                 address=target.address,
-                tls=tls_get(target.address, "broker.example", "broker.example"),
-                wrong_sni=tls_get(target.address, "other.example", "broker.example"),
+                tls=production_read(
+                    target,
+                    handoff=client.HandoffClient(
+                        lease_id=lease, run_root=RUN_ROOT, expected_gid=gid_n
+                    ),
+                ),
+                wrong_sni=production_read(target, wrong_name=True),
+                wrong_ca=production_read(target, wrong_ca=True),
+                stale=production_read(target, stale=True),
+                delayed=production_read(target, delayed=True),
                 other=connect_result(rest[1]) if len(rest) > 1 else None,
+            )
+        elif follow == "handshake":
+            started = time.monotonic()
+            result = production_read(target, delayed=True)
+            emit(
+                result="granted",
+                tls=result,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
             )
         elif follow == "hold":
             sock = socket.create_connection((rest[1], 443), timeout=5)
@@ -168,7 +279,7 @@ def main(argv: list[str]) -> None:
             "op": "report",
             "lease_id": lease,
             "nonce": nonce,
-            "origin": "https://broker.example",
+            "origin": "https://fixture.actions.githubusercontent.com",
             "flags": {"explicit_port_present": False, "userinfo_present": False},
             "expected": {
                 "run_id": RUN_ID,

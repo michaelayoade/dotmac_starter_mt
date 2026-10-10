@@ -98,6 +98,7 @@ class Config:
     starter_repository: str
     starter_commit: str
     supplier_modules: Mapping[str, str]
+    admission: Mapping[str, str]
     ssh_alias: str
     controller_path: str
     resolver: str
@@ -141,6 +142,7 @@ def parse_config(value: Any) -> Config:
         "starter_repository",
         "starter_commit",
         "supplier_modules",
+        "admission",
         "management",
         "resolver",
         "policy_path",
@@ -159,6 +161,18 @@ def parse_config(value: Any) -> Config:
         for path, digest in modules.items():
             _str(path, _MODULE)
             hp.hex64(digest)
+    except hp.ProtocolRefused:
+        raise refused("config.invalid") from None
+    admission = _exact(
+        doc["admission"], {"repository", "path", "commit", "sha256"}, "config.invalid"
+    )
+    _str(admission["repository"], _REPO)
+    _str(admission["path"], re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\.json"))
+    if ".." in admission["path"].split("/"):
+        raise refused("config.invalid")
+    try:
+        hp.hex40(admission["commit"])
+        hp.hex64(admission["sha256"])
     except hp.ProtocolRefused:
         raise refused("config.invalid") from None
     approvers, labels = doc["approvers"], doc["runner_labels"]
@@ -190,6 +204,7 @@ def parse_config(value: Any) -> Config:
         starter_repository=_str(doc["starter_repository"], _REPO),
         starter_commit=doc["starter_commit"],
         supplier_modules=dict(modules),
+        admission=dict(admission),
         ssh_alias=_str(management["ssh_alias"], _ALIAS),
         controller_path=_str(management["controller_path"], _ABS),
         resolver=resolver,
@@ -214,7 +229,7 @@ def read_json(path: Path) -> dict[str, Any]:
 
 # ── GitHub API readback ────────────────────────────────────────────────────
 
-Api = Callable[[str], Any]
+Api = Callable[..., Any]
 
 
 def gh_api(path: str, method: str = "GET", payload: Any = None) -> Any:
@@ -272,6 +287,8 @@ def readback_binding(
     run_id: int,
     runner_id: int,
     report: Mapping[str, Any],
+    prelaunch: bool = False,
+    expected_qualification: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The independent binding, or a fixed refusal. Report text is checked
     against the readback; it never supplies a value of its own."""
@@ -298,7 +315,8 @@ def readback_binding(
         or _field(run, "path", str, mismatch) != cfg.workflow_path
         or _field(run, "event", str, mismatch) != "workflow_dispatch"
         or _field(run, "head_branch", str, mismatch) != "main"
-        or _field(run, "status", str, mismatch) != "in_progress"
+        or _field(run, "status", str, mismatch)
+        not in ({"queued", "waiting", "in_progress"} if prelaunch else {"in_progress"})
         or _field(repository, "id", int, mismatch) != cfg.repository_id
         or _field(repository, "full_name", str, mismatch) != repo
     ):
@@ -329,51 +347,81 @@ def readback_binding(
     jobs = _field(listing, "jobs", list, ambiguous)
     if _field(listing, "total_count", int, ambiguous) != len(jobs):
         raise refused(ambiguous)
-    mine = [j for j in jobs if isinstance(j, dict) and j.get("runner_id") == runner_id]
-    if len(mine) != 1:
-        raise refused(ambiguous)
-    job = mine[0]
-    if (
-        _field(job, "status", str, ambiguous) != "in_progress"
-        or _field(job, "run_id", int, ambiguous) != run_id
-        or _field(job, "run_attempt", int, ambiguous) != attempt
-        or _field(job, "head_sha", str, ambiguous) != cfg.workflow_sha
-        or _field(job, "runner_group_id", int, ambiguous) != cfg.runner_group_id
-    ):
-        raise refused(ambiguous)
-    job_id = _field(job, "id", int, ambiguous)
-    for other in jobs:
-        if other is job or not isinstance(other, dict):
-            continue
-        if other.get("status") != "completed" and (
-            other.get("runner_group_id") == cfg.runner_group_id
-            or other.get("runner_id") in (None, 0)
-        ):
-            # A second protected job pending or running in this attempt.
+    job_id = 0
+    if prelaunch:
+        pending_jobs = [
+            j for j in jobs if isinstance(j, dict) and j.get("status") != "completed"
+        ]
+        if len(pending_jobs) != 1:
             raise refused(ambiguous)
+        job = pending_jobs[0]
+        if (
+            job.get("runner_id") not in (0, None)
+            or job.get("status") != "queued"
+            or job.get("run_id") != run_id
+            or job.get("run_attempt") != attempt
+            or job.get("head_sha") != cfg.workflow_sha
+            or job.get("runner_group_id") != cfg.runner_group_id
+        ):
+            raise refused(ambiguous)
+        group = _api(
+            api,
+            f"orgs/{cfg.runner_org}/actions/runner-groups/{cfg.runner_group_id}/runners",
+            ambiguous,
+        )
+        if (
+            _field(group, "total_count", int, ambiguous) != 0
+            or _field(group, "runners", list, ambiguous) != []
+        ):
+            raise refused(ambiguous)
+    else:
+        mine = [
+            j for j in jobs if isinstance(j, dict) and j.get("runner_id") == runner_id
+        ]
+        if len(mine) != 1:
+            raise refused(ambiguous)
+        job = mine[0]
+        if (
+            _field(job, "status", str, ambiguous) != "in_progress"
+            or _field(job, "run_id", int, ambiguous) != run_id
+            or _field(job, "run_attempt", int, ambiguous) != attempt
+            or _field(job, "head_sha", str, ambiguous) != cfg.workflow_sha
+            or _field(job, "runner_group_id", int, ambiguous) != cfg.runner_group_id
+        ):
+            raise refused(ambiguous)
+        job_id = _field(job, "id", int, ambiguous)
+        for other in jobs:
+            if other is job or not isinstance(other, dict):
+                continue
+            if other.get("status") != "completed" and (
+                other.get("runner_group_id") == cfg.runner_group_id
+                or other.get("runner_id") in (None, 0)
+            ):
+                # A second protected job pending or running in this attempt.
+                raise refused(ambiguous)
 
-    org = cfg.runner_org
-    runner = _api(api, f"orgs/{org}/actions/runners/{runner_id}", ambiguous)
-    labels = _field(runner, "labels", list, ambiguous)
-    names = {_field(x, "name", str, ambiguous) for x in labels}
-    if (
-        _field(runner, "id", int, ambiguous) != runner_id
-        or _field(runner, "busy", bool, ambiguous) is not True
-        or names != cfg.runner_labels
-    ):
-        raise refused(ambiguous)
-    group = _api(
-        api,
-        f"orgs/{org}/actions/runner-groups/{cfg.runner_group_id}/runners",
-        ambiguous,
-    )
-    members = _field(group, "runners", list, ambiguous)
-    if (
-        _field(group, "total_count", int, ambiguous) != 1
-        or len(members) != 1
-        or _field(members[0], "id", int, ambiguous) != runner_id
-    ):
-        raise refused(ambiguous)
+        org = cfg.runner_org
+        runner = _api(api, f"orgs/{org}/actions/runners/{runner_id}", ambiguous)
+        labels = _field(runner, "labels", list, ambiguous)
+        names = {_field(x, "name", str, ambiguous) for x in labels}
+        if (
+            _field(runner, "id", int, ambiguous) != runner_id
+            or _field(runner, "busy", bool, ambiguous) is not True
+            or names != cfg.runner_labels
+        ):
+            raise refused(ambiguous)
+        group = _api(
+            api,
+            f"orgs/{org}/actions/runner-groups/{cfg.runner_group_id}/runners",
+            ambiguous,
+        )
+        members = _field(group, "runners", list, ambiguous)
+        if (
+            _field(group, "total_count", int, ambiguous) != 1
+            or len(members) != 1
+            or _field(members[0], "id", int, ambiguous) != runner_id
+        ):
+            raise refused(ambiguous)
 
     missing = "approval.missing"
     pending = _api(api, f"{base}/pending_deployments", missing)
@@ -435,6 +483,54 @@ def readback_binding(
         if hashlib.sha256(content).hexdigest() != digest:
             raise refused(mismatch)
 
+    admission = cfg.admission
+    record = _api(
+        api,
+        f"repos/{admission['repository']}/contents/{admission['path']}?ref={admission['commit']}",
+        mismatch,
+    )
+    try:
+        if _field(record, "encoding", str, mismatch) != "base64":
+            raise refused(mismatch)
+        raw = base64.b64decode(_field(record, "content", str, mismatch), validate=False)
+        if (
+            len(raw) > hc.MAX_CONFIG
+            or hashlib.sha256(raw).hexdigest() != admission["sha256"]
+        ):
+            raise refused(mismatch)
+        admitted = hc.strict_json(raw)
+    except (ValueError, hc.ControllerRefused):
+        raise refused(mismatch) from None
+    revisions = admitted.get("admitted_launcher_revisions")
+    if (
+        admitted.get("execution_repository") != cfg.repository
+        or admitted.get("execution_repository_id") != cfg.repository_id
+        or admitted.get("workflow_path") != cfg.workflow_path
+        or type(revisions) is not list
+        or cfg.workflow_sha not in revisions
+    ):
+        raise refused(mismatch)
+    supplier = {
+        path.rsplit("/", 1)[-1]: digest for path, digest in cfg.supplier_modules.items()
+    }
+    if len(supplier) != len(cfg.supplier_modules):
+        raise refused(mismatch)
+    qualification = {
+        "repository_id": cfg.repository_id,
+        "run_id": run_id,
+        "run_attempt": attempt,
+        "workflow_sha": cfg.workflow_sha,
+        "workflow_blob": cfg.workflow_blob,
+        "starter_commit": cfg.starter_commit,
+        "environment_id": cfg.environment_id,
+        "approval_digest": hp.digest(reviews),
+        "admission_digest": admission["sha256"],
+        "supplier_digest": hp.digest(supplier),
+    }
+    if expected_qualification is not None and qualification != expected_qualification:
+        raise refused("binding.mismatch")
+    if prelaunch:
+        return qualification
     return {
         "repository_id": cfg.repository_id,
         "run_id": run_id,
@@ -444,7 +540,27 @@ def readback_binding(
         "workflow_sha": cfg.workflow_sha,
         "workflow_blob": cfg.workflow_blob,
         "starter_commit": cfg.starter_commit,
+        "admission_digest": admission["sha256"],
+        "supplier_digest": hp.digest(supplier),
     }
+
+
+def prelaunch_binding(api: Api, cfg: Config, run_id: int) -> dict[str, Any]:
+    return readback_binding(
+        api,
+        cfg,
+        run_id=run_id,
+        runner_id=0,
+        prelaunch=True,
+        report={
+            "expected": {
+                "run_id": run_id,
+                "run_attempt": 1,
+                "workflow_sha": cfg.workflow_sha,
+                "starter_commit": cfg.starter_commit,
+            }
+        },
+    )
 
 
 # ── fixed management-channel protocol ──────────────────────────────────────
@@ -460,6 +576,7 @@ MGMT_RESPONSES: Final[dict[str, set[str]]] = {
         "controller_digest",
     },
     "bootstrap": {"protocol", "op", "lease_id", "state", "remaining_ms"},
+    "timing": {"protocol", "op", "lease_id", "challenge"},
     "status": {
         "protocol",
         "op",
@@ -584,6 +701,7 @@ def decide(
     lease: str,
     run_id: int,
     runner_id: int,
+    qualification: Mapping[str, Any],
     policy_doc: Mapping[str, Any],
     bootstrap_manifest: Mapping[str, Any],
     resolve: Callable[..., hr.Snapshot] = hr.resolve,
@@ -624,18 +742,25 @@ def decide(
         return refuse("origin.not_admitted")
     try:
         binding = readback_binding(
-            api, cfg, run_id=run_id, runner_id=runner_id, report=report
+            api,
+            cfg,
+            run_id=run_id,
+            runner_id=runner_id,
+            report=report,
+            expected_qualification=qualification,
         )
     except CoordinatorRefused as exc:
         return refuse(exc.label)
     try:
+        timing = channel("timing", request("timing", lease_id=lease))
+        hp.hex64(timing["challenge"])
         snapshot = resolve(
             origin,
             resolver=cfg.resolver,
             aliases=policy.aliases,
             max_addresses=hp.MAX_ADDRESSES,
         )
-    except hr.SnapshotRefused:
+    except (hr.SnapshotRefused, hp.ProtocolRefused, CoordinatorRefused, KeyError):
         return refuse("snapshot.refused")
     rows = snapshot.rows()
     union = {r["address"] for r in manifest["destinations"]} | {
@@ -647,7 +772,7 @@ def decide(
         snapshot.remaining_ns(clock_ns()) // 1_000_000,
         hp.SNAPSHOT_MAX_AGE_NS // 1_000_000,
     )
-    margin_ms = (hp.GRANT_MIN_REMAINING_NS + hc.TRANSIT_ALLOWANCE_NS) // 1_000_000
+    margin_ms = hp.GRANT_MIN_REMAINING_NS // 1_000_000
     if ttl_ms < margin_ms:
         return refuse("deadline.insufficient")
     expected_manifest = hp.digest(hc.effective_manifest(manifest, origin, rows))
@@ -659,9 +784,11 @@ def decide(
                 lease_id=lease,
                 report_digest=report_digest,
                 binding=binding,
+                qualification=dict(qualification),
                 origin=origin,
                 snapshot={
                     "digest": snapshot.digest,
+                    "challenge": timing["challenge"],
                     "ttl_remaining_ms": int(ttl_ms),
                     "addresses": rows,
                 },
@@ -697,21 +824,26 @@ def save_state(path: Path, value: Mapping[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def op_prepare(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
+def op_prepare(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str, Any]:
     if cfg.state_path.exists():
         raise refused("lease.active")
-    group = api(
-        f"orgs/{cfg.runner_org}/actions/runner-groups/{cfg.runner_group_id}/runners"
-    )
-    if _field(group, "total_count", int, "assignment.ambiguous") != 0:
-        raise refused("assignment.ambiguous")
+    qualification = prelaunch_binding(api, cfg, run_id)
     policy = hc.parse_policy(read_json(cfg.policy_path))
     manifest = read_json(cfg.bootstrap_manifest_path)
     reply = channel(
         "prepare",
-        request("prepare", bootstrap_manifest=manifest, policy_digest=policy.digest),
+        request(
+            "prepare",
+            bootstrap_manifest=manifest,
+            policy_digest=policy.digest,
+            qualification=qualification,
+        ),
     )
-    state = {"schema": STATE_SCHEMA, "lease_id": reply["lease_id"]}
+    state = {
+        "schema": STATE_SCHEMA,
+        "lease_id": reply["lease_id"],
+        "qualification": qualification,
+    }
     save_state(cfg.state_path, state)
     return {"lease_id": reply["lease_id"], "state": reply["state"]}
 
@@ -720,8 +852,11 @@ def op_launch(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str,
     state = load_state(cfg.state_path)
     if "runner_id" in state:
         raise refused("state.invalid")
+    qualification = prelaunch_binding(api, cfg, run_id)
+    if qualification != state.get("qualification"):
+        raise refused("binding.mismatch")
     name = f"lane3-handoff-{state['lease_id'][:12]}"
-    jit = gh_api(
+    jit = api(
         f"orgs/{cfg.runner_org}/actions/runners/generate-jitconfig",
         "POST",
         {
@@ -757,6 +892,7 @@ def op_decide(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
         lease=state["lease_id"],
         run_id=state["run_id"],
         runner_id=state["runner_id"],
+        qualification=state["qualification"],
         policy_doc=read_json(cfg.policy_path),
         bootstrap_manifest=read_json(cfg.bootstrap_manifest_path),
     )
@@ -792,10 +928,12 @@ def main(argv: list[str]) -> int:
         cfg = parse_config(read_json(Path(argv[3])))
         channel = ssh_channel(cfg.ssh_alias, cfg.controller_path)
         op = argv[1]
-        if op == "launch":
+        if op in {"prepare", "launch"}:
             if len(argv) != 6 or argv[4] != "--run-id" or not argv[5].isdigit():
                 raise refused("operation.invalid")
-            result = op_launch(cfg, channel, gh_api, int(argv[5]))
+            result = (op_launch if op == "launch" else op_prepare)(
+                cfg, channel, gh_api, int(argv[5])
+            )
         elif len(argv) != 4:
             raise refused("operation.invalid")
         else:

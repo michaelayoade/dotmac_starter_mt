@@ -61,7 +61,7 @@ FW = hc.Firewall("inet", "l3h_it_egress", "output", "l3h-it-anchor")
 SHA = "5" * 40
 BLOB = "6" * 40
 REPO_ID, RUN_ID, JOB_ID, RUNNER_ID = 4101, 4102, 4103, 4104
-BROKER_HOST = "broker.example"
+BROKER_HOST = "fixture.actions.githubusercontent.com"
 BROKER = "https://" + BROKER_HOST
 TLS_ADDRESS = "192.0.2.30"
 PLAIN_ADDRESS = "192.0.2.32"
@@ -328,6 +328,39 @@ class Env:
             },
         }
         self._write(self.paths.config_root / "host.json", json.dumps(host).encode())
+        names = (
+            "lane3_broker_origin.py",
+            "lane3_handoff_protocol.py",
+            "lane3_handoff_client.py",
+            "lane3_github_oidc.py",
+            "lane3_openbao_topology.py",
+            "lane3_topology_source.py",
+            "lane3_topology.py",
+            "lane3_wireguard_topology.py",
+        )
+        supplier = self.paths.config_root / "supplier"
+        supplier.mkdir(mode=0o755)
+        modules = {}
+        for name in names:
+            raw = (SCRIPTS / name).read_bytes()
+            self._write(supplier / name, raw)
+            modules[name] = hashlib.sha256(raw).hexdigest()
+        admission = hp.canonical_json({"schema": "synthetic-source-admission.v1"})
+        self._write(self.paths.config_root / "admission.json", admission)
+        self.admission_digest = hashlib.sha256(admission).hexdigest()
+        self.supplier_digest = hp.digest(modules)
+        self._write(
+            self.paths.config_root / "supplier-installation.json",
+            hp.canonical_json(
+                {
+                    "schema": "dotmac.lane3.supplier-installation.v1",
+                    "starter_commit": SHA,
+                    "admission_digest": self.admission_digest,
+                    "supplier_digest": self.supplier_digest,
+                    "modules": modules,
+                }
+            ),
+        )
         self.approve()
         reset_firewall()
         (self.host.cgroup_root / CGROUP_PARENT.lstrip("/")).mkdir(exist_ok=True)
@@ -341,6 +374,7 @@ class Env:
             "policy_digest": hp.digest(self.policy),
             "controller_digest": hc.controller_digest(SCRIPTS),
             "expires_at": expires.isoformat(),
+            "qualification_digest": hp.digest(self.qualification()),
         }
         approval.update(changes)
         self._write(
@@ -355,12 +389,27 @@ class Env:
 
     # lease helpers -------------------------------------------------------
 
+    def qualification(self) -> dict[str, Any]:
+        return {
+            "repository_id": REPO_ID,
+            "run_id": RUN_ID,
+            "run_attempt": 1,
+            "workflow_sha": SHA,
+            "workflow_blob": BLOB,
+            "starter_commit": SHA,
+            "environment_id": 4105,
+            "approval_digest": "a" * 64,
+            "admission_digest": self.admission_digest,
+            "supplier_digest": self.supplier_digest,
+        }
+
     def prepare(self) -> str:
         reply = self.controller().prepare(
             {
                 "protocol": hp.PROTOCOL,
                 "op": "prepare",
                 "bootstrap_manifest": self.bootstrap,
+                "qualification": self.qualification(),
                 "policy_digest": hp.digest(self.policy),
             }
         )
@@ -406,6 +455,8 @@ class Env:
             "workflow_sha": SHA,
             "workflow_blob": BLOB,
             "starter_commit": SHA,
+            "admission_digest": self.admission_digest,
+            "supplier_digest": self.supplier_digest,
         }
         value.update(changes)
         return value
@@ -420,21 +471,31 @@ class Env:
     ) -> dict[str, Any]:
         j = self.wait_state(lease, {"REPORTED"})
         rows = addresses or [{"family": 4, "address": TLS_ADDRESS}]
+        timing = self.controller().timing(
+            {
+                "protocol": hp.PROTOCOL,
+                "op": "timing",
+                "lease_id": lease,
+            }
+        )
         request = {
             "protocol": hp.PROTOCOL,
             "op": "grant",
+            "qualification": self.qualification(),
             "lease_id": lease,
             "report_digest": j["report_digest"],
             "binding": self.binding(),
             "origin": BROKER,
             "snapshot": {
                 "digest": "7" * 64,
+                "challenge": timing["challenge"],
                 "ttl_remaining_ms": ttl_ms,
                 "addresses": rows,
             },
             "policy_digest": hp.digest(self.policy),
         }
         request.update(changes)
+        request["snapshot"].setdefault("challenge", timing["challenge"])
         return self.controller().grant(request)
 
     def cleanup(self, lease: str) -> dict[str, Any]:
@@ -614,6 +675,8 @@ class Servers:
                     request = tls.recv(4096)
                     self.tls_accepts += 1
                     host = b"Host: " + BROKER_HOST.encode() + b"\r\n"
+                    if b"GET /delay/" in request:
+                        time.sleep(1)
                     body = b'{"value":"a.b.c"}'
                     status = b"200 OK" if host in request else b"421 Misdirected"
                     tls.sendall(

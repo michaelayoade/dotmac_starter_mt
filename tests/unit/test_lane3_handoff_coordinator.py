@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import dataclasses
 import hashlib
 import pathlib
 import sys
@@ -33,6 +34,21 @@ RUN, RUNNER, JOB, GROUP, ENV_ID = 101, 202, 303, 4, 505
 LEASE = "d" * 32
 ORIGIN = "https://broker.example"
 
+ADMISSION = hp.canonical_json(
+    {
+        "execution_repository": REPO,
+        "execution_repository_id": 9,
+        "workflow_path": WF,
+        "admitted_launcher_revisions": [SHA],
+        "admission_evidence": None,
+    }
+)
+ADMISSION_DIGEST = hashlib.sha256(ADMISSION).hexdigest()
+SUPPLIER_DIGEST = hp.digest(
+    {"lane3_github_oidc.py": hashlib.sha256(MODULE).hexdigest()}
+)
+ADMISSION_PATH = f"repos/{STARTER}/contents/docs/admission.json?ref={STARTER_SHA}"
+
 
 def config() -> co.Config:
     return co.parse_config(
@@ -54,6 +70,12 @@ def config() -> co.Config:
             "supplier_modules": {
                 "scripts/lane3_github_oidc.py": hashlib.sha256(MODULE).hexdigest()
             },
+            "admission": {
+                "repository": STARTER,
+                "path": "docs/admission.json",
+                "commit": STARTER_SHA,
+                "sha256": ADMISSION_DIGEST,
+            },
             "management": {"ssh_alias": "synthetic-host", "controller_path": "/x/c.py"},
             "resolver": "127.0.0.53",
             "policy_path": "/x/policy.json",
@@ -66,6 +88,10 @@ def config() -> co.Config:
 def world() -> dict[str, Any]:
     base = f"repos/{REPO}/actions/runs/{RUN}"
     return {
+        ADMISSION_PATH: {
+            "encoding": "base64",
+            "content": base64.b64encode(ADMISSION).decode(),
+        },
         base: {
             "id": RUN,
             "run_attempt": 1,
@@ -175,6 +201,8 @@ def test_positive_exact_binding() -> None:
         "workflow_sha": SHA,
         "workflow_blob": BLOB,
         "starter_commit": STARTER_SHA,
+        "admission_digest": ADMISSION_DIGEST,
+        "supplier_digest": SUPPLIER_DIGEST,
     }
 
 
@@ -342,6 +370,13 @@ class Channel:
                 "report_digest": hp.digest(self.report) if self.report else None,
                 "remaining_ms": 200_000,
             }
+        if op == "timing":
+            return {
+                "protocol": hp.PROTOCOL,
+                "op": op,
+                "lease_id": LEASE,
+                "challenge": "a" * 64,
+            }
         if op == "grant":
             return {
                 "protocol": hp.PROTOCOL,
@@ -408,6 +443,7 @@ def decide(
         lease=LEASE,
         run_id=RUN,
         runner_id=RUNNER,
+        qualification=co.prelaunch_binding(api_of(prelaunch_world()), config(), RUN),
         policy_doc=kw.get("policy", POLICY),
         bootstrap_manifest=BOOTSTRAP,
         resolve=resolve,
@@ -427,8 +463,8 @@ def test_positive_decision_grants_once_with_the_exact_manifest() -> None:
     channel.manifest_digest = hp.digest(hc.effective_manifest(BOOTSTRAP, ORIGIN, rows))
     decision = decide(channel)
     assert decision.status == "GRANTED"
-    assert channel.ops() == ["status", "grant"]
-    grant_request = channel.calls[1][1]
+    assert channel.ops() == ["status", "timing", "grant"]
+    grant_request = channel.calls[2][1]
     assert grant_request["binding"]["job_id"] == JOB
     assert grant_request["snapshot"]["addresses"] == rows
     assert grant_request["snapshot"]["ttl_remaining_ms"] == 60_000
@@ -453,7 +489,7 @@ def test_unlisted_origin_refuses_without_resolution_or_grant() -> None:
     [
         ({"data": {}}, "binding.mismatch"),
         ({"resolve_error": "dns.cname_loop"}, "snapshot.refused"),
-        ({"snap": snapshot(ttl_s=46)}, "deadline.insufficient"),
+        ({"snap": snapshot(ttl_s=44)}, "deadline.insufficient"),
     ],
 )
 def test_decision_refusals_never_reach_grant(kw: dict[str, Any], label: str) -> None:
@@ -516,3 +552,97 @@ def test_channel_refuses_unvalidated_payloads_before_any_process() -> None:
         co.ssh_channel("synthetic-host; id", "/x/c.py")
     with pytest.raises(co.CoordinatorRefused):
         co.ssh_channel("synthetic-host", "/x/c.py; id")
+
+
+def test_prelaunch_missing_approval_has_no_jit_or_bootstrap(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    qualification = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    co.save_state(
+        cfg.state_path,
+        {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "qualification": qualification},
+    )
+    data = prelaunch_world()
+    data[f"{BASE}/approvals"] = []
+    effects: list[Any] = []
+
+    def api(path: str, *args: Any) -> Any:
+        if args:
+            effects.append(path)
+        return api_of(data)(path)
+
+    with pytest.raises(co.CoordinatorRefused):
+        co.op_launch(cfg, lambda *args: effects.append(args), api, RUN)
+    assert effects == []
+
+
+def prelaunch_world() -> dict[str, Any]:
+    data = world()
+    data[JOBS]["jobs"][0].update(status="queued", runner_id=0)
+    data[f"orgs/synthetic-org/actions/runner-groups/{GROUP}/runners"] = {
+        "total_count": 0,
+        "runners": [],
+    }
+    return data
+
+
+def test_prelaunch_canary_is_sensitive_to_approval_predicate(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    data = prelaunch_world()
+    good = co.prelaunch_binding(api_of(data), cfg, RUN)
+    co.save_state(
+        cfg.state_path,
+        {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "qualification": good},
+    )
+    data[f"{BASE}/approvals"] = []
+    monkeypatch.setattr(co, "prelaunch_binding", lambda *args: good)
+    effects: list[str] = []
+
+    def api(path: str, *args: Any) -> Any:
+        if args:
+            effects.append("jit")
+            return {"runner": {"id": RUNNER}, "encoded_jit_config": "c3ludGhldGlj"}
+        return api_of(data)(path)
+
+    co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+    assert effects == ["jit"]  # the original no-effects canary would go red
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        _set(BASE, "head_sha", value="f" * 40),
+        _set(BASE, "run_attempt", value=2),
+        _set(f"repos/{REPO}/contents/{WF}?ref={SHA}", "sha", value="f" * 40),
+        lambda data: data.pop(ADMISSION_PATH),
+        _set(ADMISSION_PATH, "content", value=base64.b64encode(b"{}").decode()),
+        lambda data: data[RUNS]["workflow_runs"].append(
+            {"id": RUN + 1, "status": "waiting"}
+        ),
+        _set(JOBS, "jobs", 0, "runner_id", value=RUNNER),
+    ],
+)
+def test_every_failed_prelaunch_predicate_prevents_effects(
+    tmp_path: Any, mutate: Any
+) -> None:
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    good = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    co.save_state(
+        cfg.state_path,
+        {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "qualification": good},
+    )
+    data = prelaunch_world()
+    mutate(data)
+    effects: list[Any] = []
+
+    def api(path: str, *args: Any) -> Any:
+        if args:
+            effects.append(path)
+        return api_of(data)(path)
+
+    with pytest.raises(co.CoordinatorRefused):
+        co.op_launch(cfg, lambda *args: effects.append(args), api, RUN)
+    assert effects == []

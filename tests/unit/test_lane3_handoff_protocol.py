@@ -65,6 +65,8 @@ def grant() -> dict[str, Any]:
             "workflow_sha": SHA,
             "workflow_blob": SHA,
             "starter_commit": SHA,
+            "admission_digest": "8" * 64,
+            "supplier_digest": "9" * 64,
         },
         "origin": ORIGIN,
         "snapshot": {
@@ -282,7 +284,7 @@ def test_trailing_bytes_after_a_frame_refuse() -> None:
     # Sensitivity: the same frame without the trailing byte is accepted.
     left, right = socket.socketpair()
     with left, right:
-        left.sendall(hp.frame(report()))
+        hp.write_frame(left, report())
         assert hp.read_frame(right)
 
 
@@ -335,3 +337,97 @@ def test_a_stalled_peer_hits_the_deadline() -> None:
         thread.join(5)
         assert not thread.is_alive()
         assert isinstance(done[0], hp.ProtocolRefused)
+
+
+def test_delayed_trailing_byte_refuses_before_dispatch() -> None:
+    left, right = socket.socketpair()
+    with left, right:
+        left.sendall(hp.frame(report()))
+
+        def tail() -> None:
+            import time
+
+            time.sleep(0.05)
+            left.sendall(b"x")
+            left.shutdown(socket.SHUT_WR)
+
+        thread = threading.Thread(target=tail)
+        thread.start()
+        with pytest.raises(hp.ProtocolRefused):
+            hp.read_frame(right, deadline_s=1)
+        thread.join(2)
+
+
+def test_complete_frame_without_half_close_times_out() -> None:
+    left, right = socket.socketpair()
+    with left, right:
+        left.sendall(hp.frame(report()))
+        with pytest.raises(hp.ProtocolRefused):
+            hp.read_frame(right, deadline_s=0.05)
+
+
+def public_evidence():
+    return {
+        "schema": "dotmac.lane3.handoff-evidence.v1",
+        "protocol": hp.PROTOCOL,
+        "lease_id": LEASE,
+        "outcome": "COMPLETED",
+        "category": None,
+        "origin": ORIGIN,
+        "flags": {"explicit_port_present": False, "userinfo_present": False},
+        "binding": grant()["binding"],
+        "policy_digest": "a" * 64,
+        "controller_digest": "b" * 64,
+        "bootstrap_manifest_digest": "c" * 64,
+        "manifest_digest": "d" * 64,
+        "snapshot_digest": "e" * 64,
+        "report_digest": "f" * 64,
+        "grant_digest": "0" * 64,
+        "transitions": [{"state": "CONSUMED", "offset_ms": 1}],
+        "cleanup": None,
+        "cleanup_blocked": None,
+        "gate0_accepted": False,
+        "token_request_started": True,
+        "issuance": "UNKNOWN",
+        "proof_outcome": "BOUNDED_PROOF",
+    }
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        (
+            "flags",
+            {
+                "explicit_port_present": "PRIVATE-TOKEN-CANARY",
+                "userinfo_present": False,
+            },
+        ),
+        ("binding", {**grant()["binding"], "run_id": "PRIVATE-JWT-CANARY"}),
+        ("transitions", [{"state": "PRIVATE-TOPOLOGY-CANARY", "offset_ms": 1}]),
+        ("cleanup", {"workspace_absent": "PRIVATE-PATH-CANARY"}),
+        ("cleanup_blocked", "PRIVATE-CREDENTIAL-CANARY"),
+        ("issuance", "ISSUED"),
+        ("gate0_accepted", True),
+    ],
+)
+def test_public_evidence_refuses_sensitive_values_in_projected_fields(key, value):
+    evidence = public_evidence()
+    assert hp.validate_evidence(evidence) == evidence
+    evidence[key] = value
+    with pytest.raises(hp.ProtocolRefused) as caught:
+        hp.validate_evidence(evidence)
+    assert "PRIVATE" not in str(caught.value)
+
+
+def test_evidence_binding_canary_detects_weakened_validation(monkeypatch):
+    def canary():
+        evidence = public_evidence()
+        evidence["binding"]["run_id"] = "PRIVATE-RUN-CANARY"
+        with pytest.raises(hp.ProtocolRefused):
+            hp.validate_evidence(evidence)
+
+    canary()
+    monkeypatch.setattr(hp, "validate_binding", lambda value: value)
+    with pytest.raises(pytest.fail.Exception):
+        canary()

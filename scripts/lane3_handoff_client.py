@@ -89,6 +89,8 @@ class LocalExpectation:
     job_id: int | None = None
     runner_id: int | None = None
     workflow_blob: str | None = None
+    admission_digest: str | None = None
+    supplier_digest: str | None = None
 
     def validate(self) -> None:
         for value in (self.repository_id, self.run_id, self.run_attempt):
@@ -102,6 +104,9 @@ class LocalExpectation:
                 hp.hex40(text)
             if self.workflow_blob is not None:
                 hp.hex40(self.workflow_blob)
+            for value in (self.admission_digest, self.supplier_digest):
+                if value is not None:
+                    hp.hex64(value)
         except hp.ProtocolRefused:
             raise HandoffRefused("handoff.input") from None
 
@@ -113,7 +118,13 @@ class LocalExpectation:
             ("workflow_sha", self.workflow_sha),
             ("starter_commit", self.starter_commit),
         ]
-        for key in ("job_id", "runner_id", "workflow_blob"):
+        for key in (
+            "job_id",
+            "runner_id",
+            "workflow_blob",
+            "admission_digest",
+            "supplier_digest",
+        ):
             value = getattr(self, key)
             if value is not None:
                 pairs.append((key, value))
@@ -325,6 +336,55 @@ class HandoffClient:
         return reply
 
     # -- the handoff ---------------------------------------------------------
+
+    def token_request_started(self) -> None:
+        """Persist UNKNOWN before the transport can send credential bytes."""
+        self._transport_event("token-started")
+
+    def record_proof(self, outcome: str) -> None:
+        """Record a bounded consumer outcome; issuance remains UNKNOWN."""
+        self._transport_event("proof", outcome=outcome)
+
+    def _transport_event(self, op: str, **fields: Any) -> None:
+        challenge = self.read_challenge()
+        request = {
+            "protocol": hp.PROTOCOL,
+            "op": op,
+            "lease_id": self._lease,
+            "nonce": challenge["nonce"],
+            **fields,
+        }
+        hp.validate_transport_event(request)
+        if self._call(request)["status"] != "CONSUMED":
+            raise HandoffRefused("handoff.consume")
+
+    def obtain_from_launch(
+        self, *, request_url: str, expectation: LocalExpectation
+    ) -> PinnedBrokerTarget:
+        """Use root-published original launch time, never obtain-time now.
+
+        Digest comparison here is defense in depth. Independent installation
+        and admission qualification belongs to the trusted launcher/controller.
+        """
+        try:
+            launch = hp.validate_launch(self._read_json(hp.LAUNCH_NAME))
+        except hp.ProtocolRefused:
+            raise HandoffRefused("handoff.challenge") from None
+        if launch["lease_id"] != self._lease or launch["boot_id"] != self._boot_id():
+            raise HandoffRefused("handoff.binding")
+        for key in ("admission_digest", "supplier_digest"):
+            if (
+                getattr(expectation, key) is None
+                or getattr(expectation, key) != launch[key]
+            ):
+                raise HandoffRefused("handoff.binding")
+        if self._clock() >= launch["expires_at_monotonic_ns"]:
+            raise HandoffRefused("handoff.expired")
+        return self.obtain(
+            request_url=request_url,
+            expectation=expectation,
+            launch_ns=launch["launched_at_monotonic_ns"],
+        )
 
     def obtain(
         self,

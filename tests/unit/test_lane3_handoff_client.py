@@ -8,6 +8,7 @@ single predicate the case changes.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import importlib.util
 import json
 import os
@@ -105,6 +106,8 @@ def grant_doc(**over: Any) -> dict[str, Any]:
             "workflow_sha": SHA,
             "workflow_blob": BLOB,
             "starter_commit": STARTER,
+            "admission_digest": "8" * 64,
+            "supplier_digest": "9" * 64,
         },
         "origin": HOST_URL,
         "snapshot": {
@@ -819,3 +822,50 @@ def test_real_socket_missing_controller_refuses(env: Env) -> None:
             request_url=REQUEST_URL, expectation=FULL_EXPECT, launch_ns=LAUNCH
         )
     assert refusal(e) == "handoff.files"
+
+
+def test_root_launch_time_preserves_metadata_deadline(env: Env):
+    expectation = dataclasses.replace(
+        FULL_EXPECT, admission_digest="8" * 64, supplier_digest="9" * 64
+    )
+    put(
+        env.lease / hp.LAUNCH_NAME,
+        {
+            "protocol": hp.PROTOCOL,
+            "lease_id": LEASE,
+            "boot_id": BOOT,
+            "launched_at_monotonic_ns": LAUNCH,
+            "expires_at_monotonic_ns": LEASE_EXPIRY,
+            "admission_digest": "8" * 64,
+            "supplier_digest": "9" * 64,
+        },
+    )
+    env.clock.now = LAUNCH + 46 * NS
+    with pytest.raises(c.HandoffRefused) as caught:
+        env.client().obtain_from_launch(
+            request_url=REQUEST_URL, expectation=expectation
+        )
+    assert caught.value.label == "handoff.timeout" and env.sent == []
+
+
+def test_root_launch_digest_mismatch_prevents_report(env: Env):
+    expectation = dataclasses.replace(
+        FULL_EXPECT, admission_digest="8" * 64, supplier_digest="9" * 64
+    )
+    put(
+        env.lease / hp.LAUNCH_NAME,
+        {
+            "protocol": hp.PROTOCOL,
+            "lease_id": LEASE,
+            "boot_id": BOOT,
+            "launched_at_monotonic_ns": LAUNCH,
+            "expires_at_monotonic_ns": LEASE_EXPIRY,
+            "admission_digest": "a" * 64,
+            "supplier_digest": "9" * 64,
+        },
+    )
+    with pytest.raises(c.HandoffRefused) as caught:
+        env.client().obtain_from_launch(
+            request_url=REQUEST_URL, expectation=expectation
+        )
+    assert caught.value.label == "handoff.binding" and env.sent == []

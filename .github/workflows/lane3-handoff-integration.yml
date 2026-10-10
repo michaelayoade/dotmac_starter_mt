@@ -9,6 +9,8 @@ defaults:
 # Each suite runs as root inside a DISPOSABLE network namespace on a hosted
 # runner: its own nftables, synthetic documentation addresses, a synthetic TCP
 # DNS server, generated throwaway TLS material and generated test identities.
+# systemd_lifecycle uses only uniquely named temporary host units. It measures
+# actual production effectors, not complete controller boot/recovery ordering.
 # Nothing here contacts OpenBao, a fleet host, a self-hosted runner or the
 # GitHub API, and nothing dispatches a protected workflow. No secret is used.
 
@@ -48,6 +50,10 @@ jobs:
         run: |
           files=(
             scripts/lane3_handoff_[a-z]*.py
+            scripts/lane3_github_oidc.py
+            scripts/lane3_topology_source.py
+            tests/unit/test_lane3_handoff_client.py
+            tests/unit/test_lane3_github_oidc.py
             tests/unit/test_lane3_handoff_protocol.py
             tests/unit/test_lane3_handoff_controller.py
             tests/unit/test_lane3_handoff_coordinator.py
@@ -64,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [local_socket_files, dns_network, firewall_lifecycle]
+        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
