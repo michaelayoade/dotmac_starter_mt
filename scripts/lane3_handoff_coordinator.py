@@ -882,6 +882,13 @@ def save_state(path: Path, value: Mapping[str, Any]) -> None:
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
+    parent = os.open(
+        path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    )
+    try:
+        os.fsync(parent)
+    finally:
+        os.close(parent)
 
 
 @serialized
@@ -912,12 +919,22 @@ def op_prepare(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str
 @serialized
 def op_launch(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str, Any]:
     state = load_state(cfg.state_path)
-    if "runner_id" in state:
+    if "runner_id" in state or "launch_intent" in state:
+        # A POST with an uncertain response must never be repeated. Cleanup
+        # reconciles the durable full-lease identity independently.
         raise refused("state.invalid")
     qualification = prelaunch_binding(api, cfg, run_id)
     if qualification != state.get("qualification"):
         raise refused("binding.mismatch")
-    name = f"lane3-handoff-{state['lease_id'][:12]}"
+    name = f"lane3-handoff-{state['lease_id']}"
+    state["run_id"] = run_id
+    state["launch_intent"] = {
+        "name": name,
+        "runner_group_id": cfg.runner_group_id,
+        "run_id": run_id,
+        "qualification_digest": hp.digest(qualification),
+    }
+    save_state(cfg.state_path, state)  # durable BEFORE registration effect
     jit = api(
         f"orgs/{cfg.runner_org}/actions/runners/generate-jitconfig",
         "POST",
@@ -978,31 +995,67 @@ def op_cleanup(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
         raise refused("state.invalid") from None
     if public["lease_id"] != state["lease_id"]:
         raise refused("state.invalid")
-    if "runner_id" in state:
-        runner_id = state["runner_id"]
-        if type(runner_id) is not int or runner_id <= 0:
+    if "runner_id" in state or "launch_intent" in state:
+        runner_id = state.get("runner_id")
+        if runner_id is not None and (type(runner_id) is not int or runner_id <= 0):
             raise refused("state.invalid")
-        path = f"orgs/{cfg.runner_org}/actions/runners?per_page=100"
+        name = f"lane3-handoff-{state['lease_id']}"
+        intent = state.get("launch_intent")
+        if intent is not None:
+            _exact(
+                intent,
+                {"name", "runner_group_id", "run_id", "qualification_digest"},
+                "state.invalid",
+            )
+            if (
+                intent["name"] != name
+                or intent["runner_group_id"] != cfg.runner_group_id
+                or intent["run_id"] != state.get("run_id")
+                or intent["qualification_digest"]
+                != hp.digest(state.get("qualification"))
+            ):
+                raise refused("state.invalid")
+        org_path = f"orgs/{cfg.runner_org}/actions/runners?per_page=100"
+        group_path = (
+            f"orgs/{cfg.runner_org}/actions/runner-groups/"
+            f"{cfg.runner_group_id}/runners?per_page=100"
+        )
 
-        def members() -> list[Any]:
+        def members(path: str) -> list[Any]:
             listing = _api(api, path, "api.unavailable")
             rows = _field(listing, "runners", list, "api.unavailable")
             if _field(listing, "total_count", int, "api.unavailable") != len(rows):
                 raise refused("api.unavailable")
-            if any(
-                type(row) is not dict or type(row.get("id")) is not int for row in rows
-            ):
+            ids = [row.get("id") if type(row) is dict else None for row in rows]
+            if any(type(value) is not int or value <= 0 for value in ids) or len(
+                set(ids)
+            ) != len(ids):
                 raise refused("api.unavailable")
             return rows
 
-        matching = [row for row in members() if row["id"] == runner_id]
+        rows = members(org_path)
+        matching = [row for row in rows if row.get("name") == name]
         if len(matching) > 1:
             raise refused("assignment.ambiguous")
+        group = members(group_path)
         if matching:
-            if matching[0].get("name") != f"lane3-handoff-{state['lease_id'][:12]}":
+            found_id = matching[0]["id"]
+            if runner_id is not None and found_id != runner_id:
                 raise refused("binding.mismatch")
+            if not any(
+                row["id"] == found_id and row.get("name") == name for row in group
+            ):
+                # The name alone cannot authorize deleting a foreign-group runner.
+                raise refused("binding.mismatch")
+            runner_id = found_id
             api(f"orgs/{cfg.runner_org}/actions/runners/{runner_id}", "DELETE")
-        if any(row["id"] == runner_id for row in members()):
+        elif runner_id is None:
+            # Response UNKNOWN: present absence does not settle an in-flight POST.
+            raise refused("assignment.ambiguous")
+        elif any(row["id"] == runner_id for row in rows):
+            raise refused("binding.mismatch")
+        remaining = [*members(org_path), *members(group_path)]
+        if any(row["id"] == runner_id or row.get("name") == name for row in remaining):
             raise refused("assignment.ambiguous")
     cfg.state_path.unlink()
     return {"state": reply["state"], "evidence": reply["evidence"]}

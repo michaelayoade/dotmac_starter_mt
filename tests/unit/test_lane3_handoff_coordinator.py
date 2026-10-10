@@ -669,7 +669,7 @@ def test_cleanup_removes_exact_jit_and_keeps_state_until_absence_readback(
         cfg.state_path,
         {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "runner_id": RUNNER},
     )
-    row = {"id": RUNNER, "name": f"lane3-handoff-{LEASE[:12]}"}
+    row = {"id": RUNNER, "name": f"lane3-handoff-{LEASE}"}
     deleted: list[int] = []
 
     def api(path: str, method: str = "GET") -> Any:
@@ -769,3 +769,132 @@ def test_second_jit_canary_detects_removed_operation_lock(
         monkeypatch.setattr(co, "operation_lock", lambda path: contextlib.nullcontext())
         assert not canary()  # named no-second-JIT canary goes red
     assert effects == ["jit"]
+
+
+@pytest.mark.parametrize("failure", ["response-lost", "runner-save-failed"])
+def test_uncertain_registration_is_recovered_from_durable_exact_intent(
+    tmp_path: Any, monkeypatch: Any, failure: str
+) -> None:
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    good = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    co.save_state(
+        cfg.state_path,
+        {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "qualification": good},
+    )
+    row = {"id": RUNNER, "name": f"lane3-handoff-{LEASE}"}
+    registrations: list[str] = []
+    deleted: list[int] = []
+    bootstrap: list[Any] = []
+    original_save = co.save_state
+    saves = 0
+
+    def save(path: Any, state: Any) -> None:
+        nonlocal saves
+        saves += 1
+        if failure == "runner-save-failed" and saves == 2:
+            raise OSError("synthetic save interruption")
+        original_save(path, state)
+
+    monkeypatch.setattr(co, "save_state", save)
+
+    def api(path: str, method: str = "GET", payload: Any = None) -> Any:
+        if method == "POST":
+            durable = co.load_state(cfg.state_path)
+            assert durable["launch_intent"]["name"] == row["name"]
+            assert "runner_id" not in durable
+            assert payload["name"] == row["name"]
+            registrations.append(row["name"])
+            if failure == "response-lost":
+                raise co.CoordinatorRefused("api.unavailable")
+            return {"runner": row, "encoded_jit_config": "c3ludGhldGlj"}
+        if method == "DELETE":
+            assert path.endswith(f"/runners/{RUNNER}")
+            deleted.append(RUNNER)
+            return None
+        if path.endswith("runners?per_page=100"):
+            rows = [] if deleted else [row]
+            return {"total_count": len(rows), "runners": rows}
+        return api_of(prelaunch_world())(path)
+
+    with pytest.raises((co.CoordinatorRefused, OSError)):
+        co.op_launch(cfg, lambda *args: bootstrap.append(args), api, RUN)
+    durable = co.load_state(cfg.state_path)
+    assert (
+        durable["launch_intent"]["name"] == row["name"] and "runner_id" not in durable
+    )
+    with pytest.raises(co.CoordinatorRefused, match="state.invalid"):
+        co.op_launch(cfg, lambda *args: bootstrap.append(args), api, RUN)
+    assert registrations == [row["name"]] and bootstrap == []
+    monkeypatch.setattr(co, "save_state", original_save)
+    co.op_cleanup(cfg, lambda *args: closed_reply(), api)
+    assert deleted == [RUNNER] and not cfg.state_path.exists()
+
+
+@pytest.mark.parametrize("case", ["unknown-absent", "duplicate-name", "foreign-group"])
+def test_uncertain_registration_cannot_delete_unowned_or_ambiguous_runners(
+    tmp_path: Any, case: str
+) -> None:
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    good = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    name = f"lane3-handoff-{LEASE}"
+    co.save_state(
+        cfg.state_path,
+        {
+            "schema": co.STATE_SCHEMA,
+            "lease_id": LEASE,
+            "qualification": good,
+            "run_id": RUN,
+            "launch_intent": {
+                "name": name,
+                "runner_group_id": GROUP,
+                "run_id": RUN,
+                "qualification_digest": hp.digest(good),
+            },
+        },
+    )
+    row = {"id": RUNNER, "name": name}
+    deleted: list[Any] = []
+    unrelated = {"id": RUNNER + 9, "name": "lane3-handoff-foreign"}
+
+    def api(path: str, method: str = "GET") -> Any:
+        if method == "DELETE":
+            deleted.append(path)
+            return None
+        rows = [unrelated]
+        if case == "duplicate-name":
+            rows += [row, {**row, "id": RUNNER + 1}]
+        elif case == "foreign-group" and "runner-groups/" not in path:
+            rows += [row]
+        return {"total_count": len(rows), "runners": rows}
+
+    with pytest.raises(co.CoordinatorRefused):
+        co.op_cleanup(cfg, lambda *args: closed_reply(), api)
+    assert deleted == [] and cfg.state_path.exists()
+
+
+def test_registration_canary_detects_removed_durable_intent(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    good = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    co.save_state(
+        cfg.state_path,
+        {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "qualification": good},
+    )
+    original_save = co.save_state
+
+    def weakened_save(path: Any, state: Any) -> None:
+        original_save(
+            path, {key: value for key, value in state.items() if key != "launch_intent"}
+        )
+
+    monkeypatch.setattr(co, "save_state", weakened_save)
+
+    def api(path: str, *args: Any) -> Any:
+        if args:
+            assert "launch_intent" in co.load_state(cfg.state_path)
+            pytest.fail("weakened guard unexpectedly passed the registration canary")
+        return api_of(prelaunch_world())(path)
+
+    with pytest.raises(AssertionError):
+        co.op_launch(cfg, lambda *args: pytest.fail("bootstrap forbidden"), api, RUN)
