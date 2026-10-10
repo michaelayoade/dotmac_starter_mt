@@ -6,10 +6,10 @@ repository variables and dispatch inputs into one OpenBao KV v2 record,
 parsed by :mod:`lane3_topology`). This module is the only place Lane 3 code
 obtains it.
 
-The reader is INJECTED. The real one reads the record with the
-``lane3-exposure-rehearsal`` JWT-role token (B7). That role and the record do
-not exist yet, so :class:`RefusingKvTopologySource` is the default and it
-refuses as UNANSWERABLE: the question "what is the topology" cannot be asked
+The reader is INJECTED. ``openbao_source`` prepares the real B7 JWT/KV
+reader, but authenticated deployment composition and live provisioning are
+not established by this source change. :class:`RefusingKvTopologySource`
+remains the default and refuses as UNANSWERABLE: the topology cannot be read
 here yet, which is different from "the topology is wrong". There is no
 fallback to repository variables, dispatch inputs or a file.
 
@@ -73,18 +73,16 @@ class TopologySource(Protocol):
 
 
 class RefusingKvTopologySource:
-    """The production seam until B7: it never reads anything and always refuses.
+    """The unconfigured production seam: it never reads and always refuses.
 
-    The real reader will authenticate with the ``lane3-exposure-rehearsal`` JWT
-    role and read ``RECORD_PATH`` (``lane3_topology.RECORD_PATH``). It is
-    deliberately not implemented here: no token, no OpenBao and no network
-    call exists in this module.
+    Explicit ``openbao_source`` composition supplies the B7 reader. This
+    default does not assume its role, record or authenticated transport has
+    been deployed; no ambient token, endpoint or fallback is used.
     """
 
     def read(self) -> TopologyReading:
         raise TopologySourceUnavailable(
-            "the B7 lane3-exposure-rehearsal JWT role and the vantage-topology "
-            "record are not provisioned, so no reader exists"
+            "the B7 authenticated topology reader is not provisioned or configured"
         )
 
 
@@ -184,6 +182,81 @@ SHELL_FIELDS: Final = (
 def shell_lines(bound: BoundTopology) -> list[str]:
     """``KEY=value`` lines for ``lane3_rehearse.sh``; read, never echoed."""
     return [f"{key}={getattr(bound, attr)}" for key, attr in SHELL_FIELDS]
+
+
+def openbao_source(
+    *, transport: Any, jwt_supplier: Any, expected_version: int
+) -> TopologySource:
+    """Explicit launcher composition; never selects ambient credentials or endpoints.
+
+    The same factory creates fresh sources for the shell resolver and runner.
+    Both must receive the same approved KV version. Unconfigured CLI execution
+    still refuses; deployment must inject the source into main/topology_src.
+    """
+    from lane3_openbao_topology import OpenBaoTopologySource
+
+    return OpenBaoTopologySource(
+        transport=transport,
+        jwt_supplier=jwt_supplier,
+        expected_version=expected_version,
+    )
+
+
+def github_openbao_source(
+    *,
+    transport: Any,
+    expected_version: int,
+    jwt_request_url: str,
+    jwt_request_token: str,
+    oidc_broker_origin: str,
+) -> TopologySource:
+    """Bind the real Actions supplier to B7 using an independently approved broker.
+
+    Arguments come from the protected launcher/configuration, never dispatch
+    fields. This does not activate the default source or alter job permissions.
+    """
+    from lane3_github_oidc import GithubOidcSupplier
+
+    return openbao_source(
+        transport=transport,
+        expected_version=expected_version,
+        jwt_supplier=GithubOidcSupplier(
+            request_url=jwt_request_url,
+            request_token=jwt_request_token,
+            approved_origin=oidc_broker_origin,
+        ),
+    )
+
+
+def wireguard_github_openbao_source(
+    *,
+    expected_version: int,
+    jwt_request_url: str,
+    jwt_request_token: str,
+    oidc_broker_origin: str,
+    endpoint_address: str,
+    source_address: str,
+    interface: str,
+    expected_local_public_key: str,
+    expected_peer_public_key: str,
+) -> TopologySource:
+    """Explicit private-tunnel composition; no auto-discovery or permission grant."""
+    from lane3_wireguard_topology import WireGuardOpenBaoTransport
+
+    transport = WireGuardOpenBaoTransport(
+        endpoint_address=endpoint_address,
+        source_address=source_address,
+        interface=interface,
+        expected_local_public_key=expected_local_public_key,
+        expected_peer_public_key=expected_peer_public_key,
+    )
+    return github_openbao_source(
+        transport=transport,
+        expected_version=expected_version,
+        jwt_request_url=jwt_request_url,
+        jwt_request_token=jwt_request_token,
+        oidc_broker_origin=oidc_broker_origin,
+    )
 
 
 def default_source() -> TopologySource:

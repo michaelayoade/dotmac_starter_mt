@@ -618,3 +618,69 @@ workflow.
   Observability's runner too.
 - **Nothing here needs a Foundation `src/` change.** If C2 finds otherwise,
   that change moves before the Gate-2 freeze (row 1).
+
+### B7 runtime reader preparation
+
+`scripts/lane3_openbao_topology.py` implements the explicit JWT-to-KV reader.
+The launcher calls `lane3_topology_source.openbao_source` with an authenticated
+transport, a fresh JWT supplier and the approved exact KV version, then injects
+that source into the resolver's `main(source=...)` or the runner's
+`topology_src` parameter. Separate resolver/runner reads require fresh sources
+with the same approved version. The factory does not select an endpoint,
+credential, namespace or version from environment variables or dispatch input.
+Unconfigured/default execution still refuses.
+
+The reader requests the fixed B7 audience and role, accepts only a nonrenewable
+batch token with the sole B7 policy and a measured lifetime of at most 300
+seconds, then reads only the fixed topology record at the pinned version. It
+refuses identity-policy additions, deleted/destroyed records, mismatched
+versions and schema failures. There is no cached-success fallback or retry.
+Tokens and JWTs are kept in process memory only; removal of Python references
+is not a memory-zeroization guarantee. Batch tokens expire and cannot be
+individually revoked. No root or custody credential is used.
+
+The supplied transport uses verified HTTPS with an explicit CA file, no proxy
+or redirect, bounded response size, per-socket timeout and a request shutdown
+timer. It does not downgrade to HTTP. The explicit WireGuard adapter below supports a separately pinned private
+channel. This change does not activate either path, provision B7, or establish
+live Gate-0 readiness.
+Hosted CI owns tests of this repository; no local or named-host test run is
+acceptance evidence for this reader.
+
+The explicit `github_openbao_source` factory composes the real single-use
+Actions OIDC supplier with the B7 reader. The protected launcher supplies
+`ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` in memory,
+plus the independently approved exact OIDC broker origin. The supplier
+requests only the fixed B7 audience; changed origin, extra query parameters,
+redirects, malformed responses and repeated use refuse. It never prints the
+request credential or JWT. Broker observation is not automatic egress admission.
+Signed claim validation remains OpenBao's responsibility; local JWT shape
+validation is not authorization.
+
+The protected execution workflow still has no `id-token: write` permission.
+This source preparation does not add it or edit the admitted launcher snapshot.
+Enabling it requires the reviewed launcher amendment and source-policy/admission
+reconciliation. The observed VM124 WireGuard interface is a transport candidate,
+not proof of endpoint/peer/route correctness or permission to activate this reader.
+
+
+`wireguard_github_openbao_source` explicitly selects the HTTP-over-WireGuard
+adapter in `scripts/lane3_wireguard_topology.py`; it is never a fallback from
+failed HTTPS. Its independently reviewed private configuration pins the local
+and Observe public keys, exact inner endpoint/source and interface. It checks
+only public WireGuard metadata through existing noninteractive authority,
+requires exact-host peer routes and a recent handshake, confirms the source is
+assigned to that interface and checks the source-bound kernel route. Every
+connection is source-bound, with fresh checks before connecting and before
+sending the JWT or batch token. Missing privileges, stale handshake, changed
+key, ambiguous/widened route or source mismatch refuse without fallback.
+
+The adapter never reads private keys or WireGuard configuration files, grants
+sudo, changes routes/firewalls or establishes a tunnel. The runtime account's
+permission for the exact public-state commands must be independently reviewed;
+VM124's existing management account does not establish permissions for a future
+protected runner identity. Host root, kernel, approved key/configuration custody
+and Observe remain trusted. Re-reading metadata is not a route lock and does
+not claim resistance to malicious host administrators or their races. No live
+JWT/OpenBao credential has been sent by this preparation or its read-only
+metadata qualification.
