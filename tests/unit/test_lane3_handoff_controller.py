@@ -18,8 +18,8 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import lane3_handoff_controller as hc
-import lane3_handoff_protocol as hp
+import lane3_handoff_controller as hc  # noqa: E402
+import lane3_handoff_protocol as hp  # noqa: E402
 
 LEASE = "1" * 32
 NONCE = "2" * 64
@@ -370,7 +370,7 @@ def test_management_schema_is_fixed_data_only() -> None:
     good = {"protocol": hp.PROTOCOL, "op": "status", "lease_id": LEASE}
     assert hc.validate_mgmt(dict(good))
     for bad in (
-        {**good, "path": "/tmp/x"},
+        {**good, "path": "/etc/x"},
         {**good, "op": "shell"},
         {**good, "lease_id": "../" + LEASE[3:]},
         {

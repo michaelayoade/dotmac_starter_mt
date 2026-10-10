@@ -21,7 +21,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import lane3_handoff_resolver as hr
+import lane3_handoff_resolver as hr  # noqa: E402
 
 HOST = "broker.example"
 ORIGIN = "https://" + HOST
@@ -180,7 +180,7 @@ def test_chain_longer_than_eight_refuses_and_eight_is_accepted() -> None:
         "192.168.1.1",
         "127.0.0.1",
         "169.254.169.254",
-        "0.0.0.0",
+        "0.0.0.0",  # noqa: S104
         "100.64.0.1",
         "224.0.0.1",
         "240.0.0.1",

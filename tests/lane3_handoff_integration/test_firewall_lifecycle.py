@@ -76,9 +76,8 @@ def _chain() -> list:
 def test_nft_transaction_is_atomic(env: Env) -> None:
     good = (
         f"insert rule {FW.family} {FW.table} {FW.chain} meta skuid 65000 "
-        'ip daddr 192.0.2.99 tcp dport 443 ct state new counter accept comment "dotmac-lane3-handoff:'
-        + "f" * 32
-        + ':a:0"\n'
+        "ip daddr 192.0.2.99 tcp dport 443 ct state new counter accept "
+        f'comment "dotmac-lane3-handoff:{"f" * 32}:a:0"\n'
     )
     bad = f"add rule {FW.family} {FW.table} missing_chain counter\n"
     with pytest.raises(hc.ControllerRefused):

@@ -94,9 +94,9 @@ def test_runner_cannot_replace_files_or_invoke_root_operations(env: Env) -> None
 def test_wrong_uid_with_the_task_group_is_refused_and_ends_the_lease(env: Env) -> None:
     lease = env.start(["sleep", "20"])
     _, gid, unit = _ids(env, lease)
-    subprocess.run(
+    subprocess.run(  # noqa: S603
         [
-            "useradd",
+            "/usr/sbin/useradd",
             "--system",
             "--no-create-home",
             "--shell",
@@ -117,8 +117,14 @@ def test_wrong_uid_with_the_task_group_is_refused_and_ends_the_lease(env: Env) -
 def test_a_process_outside_the_task_group_cannot_connect(env: Env) -> None:
     lease = env.start(["sleep", "20"])
     _, _, unit = _ids(env, lease)
-    subprocess.run(
-        ["useradd", "--system", "--user-group", "--no-create-home", "l3hitother"],
+    subprocess.run(  # noqa: S603
+        [
+            "/usr/sbin/useradd",
+            "--system",
+            "--user-group",
+            "--no-create-home",
+            "l3hitother",
+        ],
         check=True,
         capture_output=True,
     )

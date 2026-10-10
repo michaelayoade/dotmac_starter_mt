@@ -21,7 +21,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import lane3_handoff_protocol as hp
+import lane3_handoff_protocol as hp  # noqa: E402
 
 LEASE = "a" * 32
 NONCE = "b" * 64

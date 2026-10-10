@@ -526,10 +526,11 @@ def accept_line(
     ):
         raise refused("firewall.invalid")
     proto = "ip" if spec["family"] == 4 else "ip6"
+    comment = comment_for(lease, "a", spec["index"])
     return (
         f"insert rule {fw.family} {fw.table} {fw.chain} position {anchor} "
         f"meta skuid {uid} {proto} daddr {spec['address']} tcp dport {spec['port']} "
-        f'ct state new counter accept comment "{comment_for(lease, "a", spec["index"])}"'
+        f'ct state new counter accept comment "{comment}"'
     )
 
 
@@ -731,7 +732,7 @@ class SystemHost:
         check: bool = True,
     ) -> bytes:
         try:
-            result = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            result = subprocess.run(
                 argv,
                 input=data,
                 capture_output=True,
@@ -844,7 +845,7 @@ class SystemHost:
             _RUNNER_CHILD,
         ]
         try:
-            child = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+            child = subprocess.Popen(
                 argv,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
@@ -2092,13 +2093,19 @@ class Controller:
         j = self.load()
         if j is None or j["state"] in TERMINAL:
             return hp.response("REFUSED", "lease.unknown"), False
-        if uid != j["uid"] or proc_cgroup(pid) != j["cgroup"]:
-            raise refused("peer.refused")
-        started = proc_start_time(pid)
+        try:
+            peer_ok = uid == j["uid"] and proc_cgroup(pid) == j["cgroup"]
+            started = proc_start_time(pid)
+        except ControllerRefused:
+            peer_ok, started = False, -1
+        # Read the bounded request before answering even a refused peer, so
+        # the fixed refusal is delivered rather than lost to a reset.
         try:
             request = hp.validate_request(hp.read_frame(conn))
         except hp.ProtocolRefused as exc:
-            raise refused(exc.label) from None
+            raise refused("peer.refused" if not peer_ok else exc.label) from None
+        if not peer_ok:
+            raise refused("peer.refused")
         try:
             lock = self.locked()
             lock.__enter__()

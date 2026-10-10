@@ -79,7 +79,9 @@ def documentation_routable(address: Any) -> bool:
 
 
 def sh(*argv: str, data: bytes | None = None, check: bool = True) -> str:
-    result = subprocess.run(argv, input=data, capture_output=True, check=False)
+    result = subprocess.run(  # noqa: S603 - fixed test argv
+        argv, input=data, capture_output=True, check=False
+    )
     if check and result.returncode:
         raise AssertionError(f"{argv[0]} failed: {result.stderr.decode()[-400:]}")
     return result.stdout.decode()
@@ -484,7 +486,7 @@ def owned_rules() -> list[dict[str, Any]]:
 
 def baseline_ok() -> bool:
     doc = chain_doc()
-    chain = [x["chain"] for x in doc if "chain" in x][0]
+    chain = next(x["chain"] for x in doc if "chain" in x)
     comments = [x["rule"].get("comment") for x in doc if "rule" in x]
     return chain["policy"] == "drop" and comments == [
         "l3h-it-established",
@@ -672,4 +674,8 @@ def env(network: Servers) -> Iterator[Env]:
                 child_dir.rmdir()
     for entry in pwd.getpwall():
         if entry.pw_name.startswith(hc.USER_PREFIX) or entry.pw_name == "l3hitother":
-            subprocess.run(["userdel", entry.pw_name], check=False, capture_output=True)
+            subprocess.run(  # noqa: S603
+                ["/usr/sbin/userdel", entry.pw_name],
+                check=False,
+                capture_output=True,
+            )

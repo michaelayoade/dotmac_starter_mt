@@ -18,9 +18,9 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import lane3_handoff_coordinator as co
-import lane3_handoff_protocol as hp
-import lane3_handoff_resolver as hr
+import lane3_handoff_coordinator as co  # noqa: E402
+import lane3_handoff_protocol as hp  # noqa: E402
+import lane3_handoff_resolver as hr  # noqa: E402
 
 REPO = "synthetic-org/synthetic-launcher"
 STARTER = "synthetic-org/synthetic-starter"
@@ -437,7 +437,8 @@ def test_unlisted_origin_refuses_without_resolution_or_grant() -> None:
     policy["origins"]["origins"] = ["https://other-broker.example"]
     decision = decide(channel, policy=policy)
     assert (decision.status, decision.category) == ("REFUSED", "origin.not_admitted")
-    assert "grant" not in channel.ops() and channel.resolved == []  # type: ignore[attr-defined]
+    assert "grant" not in channel.ops()
+    assert channel.resolved == []  # type: ignore[attr-defined]
     assert channel.calls[-1] == (
         "refuse",
         co.request("refuse", lease_id=LEASE, category="origin.not_admitted"),

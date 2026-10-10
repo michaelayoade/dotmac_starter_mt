@@ -233,9 +233,9 @@ def main(argv: list[str]) -> None:
             ),
             (
                 "symlink_grant",
-                lambda: os.symlink("/tmp/forged", f"{directory}/{hp.GRANT_NAME}"),
+                lambda: os.symlink(f"{RUN_ROOT}/forged", f"{directory}/{hp.GRANT_NAME}"),
             ),
-            ("chmod_dir", lambda: os.chmod(directory, 0o777)),
+            ("chmod_dir", lambda: os.chmod(directory, 0o777)),  # noqa: S103
             ("read_journal", lambda: open("/run/l3h-it/state/journal.json").read()),
         ):
             try:
@@ -245,7 +245,7 @@ def main(argv: list[str]) -> None:
                 attempts[name] = "denied"
         import subprocess
 
-        controller = subprocess.run(
+        controller = subprocess.run(  # noqa: S603
             [
                 "/usr/bin/python3",
                 "-I",
