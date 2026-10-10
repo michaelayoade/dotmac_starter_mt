@@ -3692,3 +3692,10 @@ consumed by `lane3_topology_source.github_openbao_source`. The protected
 launcher owns the exact approved broker/configuration and job permissions;
 OpenBao owns JWT signature/claim verification. The default source remains
 refusing until deployment is explicitly composed.
+
+The explicit encrypted-private-channel adapter is
+`scripts/lane3_wireguard_topology.py`, composed by
+`lane3_topology_source.wireguard_github_openbao_source`. It owns public peer,
+source/route/handshake checks and source-bound HTTP over that existing channel;
+it owns no tunnel provisioning, privilege grants or runtime activation. Host
+root/kernel/configuration remain in its stated trust boundary.

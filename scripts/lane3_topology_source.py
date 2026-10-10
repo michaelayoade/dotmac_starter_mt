@@ -228,6 +228,37 @@ def github_openbao_source(
     )
 
 
+def wireguard_github_openbao_source(
+    *,
+    expected_version: int,
+    jwt_request_url: str,
+    jwt_request_token: str,
+    oidc_broker_origin: str,
+    endpoint_address: str,
+    source_address: str,
+    interface: str,
+    expected_local_public_key: str,
+    expected_peer_public_key: str,
+) -> TopologySource:
+    """Explicit private-tunnel composition; no auto-discovery or permission grant."""
+    from lane3_wireguard_topology import WireGuardOpenBaoTransport
+
+    transport = WireGuardOpenBaoTransport(
+        endpoint_address=endpoint_address,
+        source_address=source_address,
+        interface=interface,
+        expected_local_public_key=expected_local_public_key,
+        expected_peer_public_key=expected_peer_public_key,
+    )
+    return github_openbao_source(
+        transport=transport,
+        expected_version=expected_version,
+        jwt_request_url=jwt_request_url,
+        jwt_request_token=jwt_request_token,
+        oidc_broker_origin=oidc_broker_origin,
+    )
+
+
 def default_source() -> TopologySource:
     return RefusingKvTopologySource()
 

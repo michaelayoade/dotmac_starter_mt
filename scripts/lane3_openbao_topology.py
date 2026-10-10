@@ -78,6 +78,14 @@ class HttpsOpenBaoTransport:
         except Exception:
             raise unavailable("transport.configuration") from None
 
+    def _connection(self) -> http.client.HTTPConnection:
+        return http.client.HTTPSConnection(
+            self._host, self._port, context=self._tls, timeout=5.0
+        )
+
+    def _before_send(self) -> None:
+        """HTTPS authenticates its peer during connection establishment."""
+
     def request(
         self,
         method: str,
@@ -105,9 +113,7 @@ class HttpsOpenBaoTransport:
             or body.get("role") != ROLE
         ):
             raise unavailable("transport.operation")
-        connection = http.client.HTTPSConnection(
-            self._host, self._port, context=self._tls, timeout=5.0
-        )
+        connection = self._connection()
 
         def interrupt() -> None:
             sock = connection.sock
@@ -124,6 +130,7 @@ class HttpsOpenBaoTransport:
         timer.start()
         try:
             connection.connect()
+            self._before_send()
             if time.monotonic() - started >= READ_DEADLINE:
                 raise unavailable("transport.deadline")
             headers = {"Accept": "application/json", "Content-Type": "application/json"}
