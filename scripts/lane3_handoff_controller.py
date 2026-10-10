@@ -350,15 +350,28 @@ def _exact(value: Any, keys: set[str], label: str) -> dict[str, Any]:
 
 
 def parse_host_config(value: Any) -> HostConfig:
-    doc = _exact(value, {"schema", "firewall", "policy_digest", "controller_digest", "runner"}, "config.invalid")
+    doc = _exact(
+        value,
+        {"schema", "firewall", "policy_digest", "controller_digest", "runner"},
+        "config.invalid",
+    )
     if doc["schema"] != HOST_SCHEMA:
         raise refused("config.invalid")
-    fw = _exact(doc["firewall"], {"family", "table", "chain", "anchor_comment"}, "config.invalid")
+    fw = _exact(
+        doc["firewall"],
+        {"family", "table", "chain", "anchor_comment"},
+        "config.invalid",
+    )
     if fw["family"] != "inet" or not all(
-        type(fw[k]) is str and _NAME.fullmatch(fw[k]) for k in ("table", "chain", "anchor_comment")
+        type(fw[k]) is str and _NAME.fullmatch(fw[k])
+        for k in ("table", "chain", "anchor_comment")
     ):
         raise refused("config.invalid")
-    runner = _exact(doc["runner"], {"archive", "archive_sha256", "workspace_mb", "memory_mb"}, "config.invalid")
+    runner = _exact(
+        doc["runner"],
+        {"archive", "archive_sha256", "workspace_mb", "memory_mb"},
+        "config.invalid",
+    )
     if type(runner["archive"]) is not str or _ABS.fullmatch(runner["archive"]) is None:
         raise refused("config.invalid")
     for key, low, high in (("workspace_mb", 16, 4096), ("memory_mb", 64, 8192)):
@@ -391,7 +404,11 @@ class Policy:
 def parse_policy(value: Any) -> Policy:
     """The versioned endpoint policy: a FINITE exact origin set plus aliases."""
     doc = _exact(value, {"schema", "version", "origins", "aliases"}, "policy.invalid")
-    if doc["schema"] != POLICY_SCHEMA or type(doc["version"]) is not int or doc["version"] < 1:
+    if (
+        doc["schema"] != POLICY_SCHEMA
+        or type(doc["version"]) is not int
+        or doc["version"] < 1
+    ):
         raise refused("policy.invalid")
     try:
         origins = OriginPolicy.from_mapping(doc["origins"])
@@ -408,8 +425,14 @@ def validate_destinations(
         raise refused("manifest.invalid")
     seen: set[tuple[str, str]] = set()
     for row in rows:
-        row = _exact(row, {"purpose", "origin", "family", "address", "port"}, "manifest.invalid")
-        if row["purpose"] not in purposes or type(row["port"]) is not int or row["port"] != 443:
+        row = _exact(
+            row, {"purpose", "origin", "family", "address", "port"}, "manifest.invalid"
+        )
+        if (
+            row["purpose"] not in purposes
+            or type(row["port"]) is not int
+            or row["port"] != 443
+        ):
             raise refused("manifest.invalid")
         try:
             hp.origin(row["origin"])
@@ -429,19 +452,32 @@ def validate_bootstrap(value: Any, routable: Callable[[Any], bool]) -> dict[str,
     doc = _exact(value, {"schema", "destinations"}, "manifest.invalid")
     if doc["schema"] != BOOTSTRAP_SCHEMA:
         raise refused("manifest.invalid")
-    rows = validate_destinations(doc["destinations"], routable, frozenset({"runner-https", "module-https"}))
+    rows = validate_destinations(
+        doc["destinations"], routable, frozenset({"runner-https", "module-https"})
+    )
     if len({r["address"] for r in rows}) != len(rows):
         # One exact rule per bootstrap address keeps ownership unambiguous.
         raise refused("manifest.invalid")
     return doc
 
 
-def effective_manifest(bootstrap: Mapping[str, Any], origin: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def effective_manifest(
+    bootstrap: Mapping[str, Any], origin: str, rows: list[dict[str, Any]]
+) -> dict[str, Any]:
     broker = [
-        {"purpose": "oidc-https", "origin": origin, "family": r["family"], "address": r["address"], "port": hp.BROKER_PORT}
+        {
+            "purpose": "oidc-https",
+            "origin": origin,
+            "family": r["family"],
+            "address": r["address"],
+            "port": hp.BROKER_PORT,
+        }
         for r in rows
     ]
-    return {"schema": EFFECTIVE_SCHEMA, "destinations": [*bootstrap["destinations"], *broker]}
+    return {
+        "schema": EFFECTIVE_SCHEMA,
+        "destinations": [*bootstrap["destinations"], *broker],
+    }
 
 
 # ── nftables rule rendering and exact readback ─────────────────────────────
@@ -451,25 +487,42 @@ def comment_for(lease: str, kind: str, index: int | None = None) -> str:
     return f"{TAG}:{lease}:{kind}" + ("" if index is None else f":{index}")
 
 
-def rule_specs(lease: str, destinations: list[dict[str, Any]], start: int = 0) -> list[dict[str, Any]]:
+def rule_specs(
+    lease: str, destinations: list[dict[str, Any]], start: int = 0
+) -> list[dict[str, Any]]:
     return [
-        {"kind": "a", "index": start + i, "family": d["family"], "address": d["address"], "port": d["port"]}
+        {
+            "kind": "a",
+            "index": start + i,
+            "family": d["family"],
+            "address": d["address"],
+            "port": d["port"],
+        }
         for i, d in enumerate(destinations)
     ]
 
 
 def _safe_tokens(fw: Firewall, uid: int) -> None:
-    if type(uid) is not int or uid <= 0 or not all(
-        _NAME.fullmatch(v) for v in (fw.table, fw.chain, fw.anchor)
+    if (
+        type(uid) is not int
+        or uid <= 0
+        or not all(_NAME.fullmatch(v) for v in (fw.table, fw.chain, fw.anchor))
     ):
         raise refused("firewall.invalid")
 
 
-def accept_line(fw: Firewall, lease: str, uid: int, spec: Mapping[str, Any], anchor: int) -> str:
+def accept_line(
+    fw: Firewall, lease: str, uid: int, spec: Mapping[str, Any], anchor: int
+) -> str:
     _safe_tokens(fw, uid)
     hp.lease_id(lease)
     hp.address_row({"family": spec["family"], "address": spec["address"]})
-    if type(anchor) is not int or anchor <= 0 or spec["port"] != 443 or type(spec["index"]) is not int:
+    if (
+        type(anchor) is not int
+        or anchor <= 0
+        or spec["port"] != 443
+        or type(spec["index"]) is not int
+    ):
         raise refused("firewall.invalid")
     proto = "ip" if spec["family"] == 4 else "ip6"
     return (
@@ -505,20 +558,28 @@ def stable_digest(rules: list[Mapping[str, Any]]) -> str:
     clean = []
     for rule in rules:
         item = {k: v for k, v in rule.items() if k != "handle"}
-        item["expr"] = [e for e in rule.get("expr", []) if not (isinstance(e, dict) and "counter" in e)]
+        item["expr"] = [
+            e
+            for e in rule.get("expr", [])
+            if not (isinstance(e, dict) and "counter" in e)
+        ]
         clean.append(item)
     return hp.digest(clean)
 
 
 def _matches(rule: Mapping[str, Any]) -> list[dict[str, Any]]:
-    return [e["match"] for e in rule.get("expr", []) if isinstance(e, dict) and "match" in e]
+    return [
+        e["match"] for e in rule.get("expr", []) if isinstance(e, dict) and "match" in e
+    ]
 
 
 def _uid_ok(right: Any, uid: int, user: str) -> bool:
     return (type(right) is int and right == uid) or right == user
 
 
-def _shape_ok(rule: Mapping[str, Any], fw: Firewall, verdict: str, n_matches: int) -> bool:
+def _shape_ok(
+    rule: Mapping[str, Any], fw: Firewall, verdict: str, n_matches: int
+) -> bool:
     expr = rule.get("expr")
     if (
         rule.get("family") != fw.family
@@ -542,32 +603,63 @@ def _shape_ok(rule: Mapping[str, Any], fw: Firewall, verdict: str, n_matches: in
 
 
 def is_exact_accept(
-    rule: Mapping[str, Any], fw: Firewall, lease: str, uid: int, user: str, spec: Mapping[str, Any]
+    rule: Mapping[str, Any],
+    fw: Firewall,
+    lease: str,
+    uid: int,
+    user: str,
+    spec: Mapping[str, Any],
 ) -> bool:
-    if rule.get("comment") != comment_for(lease, "a", spec["index"]) or not _shape_ok(rule, fw, "accept", 4):
+    if rule.get("comment") != comment_for(lease, "a", spec["index"]) or not _shape_ok(
+        rule, fw, "accept", 4
+    ):
         return False
     proto = "ip" if spec["family"] == 4 else "ip6"
     found = {"uid": 0, "daddr": 0, "dport": 0, "state": 0}
     for m in _matches(rule):
         left, right, op = m.get("left"), m.get("right"), m.get("op")
-        if left == {"meta": {"key": "skuid"}} and op == "==" and _uid_ok(right, uid, user):
+        if (
+            left == {"meta": {"key": "skuid"}}
+            and op == "=="
+            and _uid_ok(right, uid, user)
+        ):
             found["uid"] += 1
-        elif left == {"payload": {"protocol": proto, "field": "daddr"}} and op == "==" and right == spec["address"]:
+        elif (
+            left == {"payload": {"protocol": proto, "field": "daddr"}}
+            and op == "=="
+            and right == spec["address"]
+        ):
             found["daddr"] += 1
-        elif left == {"payload": {"protocol": "tcp", "field": "dport"}} and op == "==" and right == spec["port"]:
+        elif (
+            left == {"payload": {"protocol": "tcp", "field": "dport"}}
+            and op == "=="
+            and right == spec["port"]
+        ):
             found["dport"] += 1
-        elif left == {"ct": {"key": "state"}} and op in ("==", "in") and right in ("new", ["new"], {"set": ["new"]}):
+        elif (
+            left == {"ct": {"key": "state"}}
+            and op in ("==", "in")
+            and right in ("new", ["new"], {"set": ["new"]})
+        ):
             found["state"] += 1
         else:
             return False
     return all(v == 1 for v in found.values())
 
 
-def is_exact_guard(rule: Mapping[str, Any], fw: Firewall, lease: str, uid: int, user: str) -> bool:
-    if rule.get("comment") != comment_for(lease, "x") or not _shape_ok(rule, fw, "drop", 1):
+def is_exact_guard(
+    rule: Mapping[str, Any], fw: Firewall, lease: str, uid: int, user: str
+) -> bool:
+    if rule.get("comment") != comment_for(lease, "x") or not _shape_ok(
+        rule, fw, "drop", 1
+    ):
         return False
     (m,) = _matches(rule)
-    return m.get("left") == {"meta": {"key": "skuid"}} and m.get("op") == "==" and _uid_ok(m.get("right"), uid, user)
+    return (
+        m.get("left") == {"meta": {"key": "skuid"}}
+        and m.get("op") == "=="
+        and _uid_ok(m.get("right"), uid, user)
+    )
 
 
 def classify_owned(
@@ -600,7 +692,11 @@ def classify_owned(
             guard = True
             handles.append(handle)
             continue
-        hits = [i for i, s in enumerate(specs) if is_exact_accept(rule, fw, lease, uid, user, s)]
+        hits = [
+            i
+            for i, s in enumerate(specs)
+            if is_exact_accept(rule, fw, lease, uid, user, s)
+        ]
         if len(hits) != 1 or hits[0] in used:
             raise refused("cleanup.drift")
         used.add(hits[0])
@@ -625,10 +721,22 @@ class SystemHost:
 
     cgroup_root = Path("/sys/fs/cgroup")
 
-    def _run(self, argv: list[str], *, data: bytes | None = None, timeout: float = 15, check: bool = True) -> bytes:
+    def _run(
+        self,
+        argv: list[str],
+        *,
+        data: bytes | None = None,
+        timeout: float = 15,
+        check: bool = True,
+    ) -> bytes:
         try:
             result = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                argv, input=data, capture_output=True, timeout=timeout, check=False, env=_ENV
+                argv,
+                input=data,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+                env=_ENV,
             )
         except (OSError, subprocess.SubprocessError):
             raise refused("host.command") from None
@@ -638,7 +746,9 @@ class SystemHost:
 
     def boot_id(self) -> str:
         try:
-            return hp.boot_id(Path("/proc/sys/kernel/random/boot_id").read_text().strip())
+            return hp.boot_id(
+                Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            )
         except (OSError, hp.ProtocolRefused):
             raise refused("boot.mismatch") from None
 
@@ -664,7 +774,19 @@ class SystemHost:
         return [e.pw_name for e in pwd.getpwall() if e.pw_name.startswith(prefix)]
 
     def create_identity(self, user: str, home: Path) -> tuple[int, int]:
-        self._run(["useradd", "--system", "--user-group", "--no-create-home", "--home-dir", str(home), "--shell", "/usr/sbin/nologin", user])
+        self._run(
+            [
+                "useradd",
+                "--system",
+                "--user-group",
+                "--no-create-home",
+                "--home-dir",
+                str(home),
+                "--shell",
+                "/usr/sbin/nologin",
+                user,
+            ]
+        )
         found = self.identity(user)
         if found is None:
             raise refused("identity.create")
@@ -674,27 +796,60 @@ class SystemHost:
         self._run(["userdel", user])
 
     def arm_timer(self, unit: str, seconds: int, argv: list[str]) -> None:
-        self._run([
-            "systemd-run", "--quiet", "--collect", "--unit", unit,
-            f"--on-active={seconds}s", "--timer-property=AccuracySec=1s",
-            "--property=Type=oneshot", *argv,
-        ])
+        self._run(
+            [
+                "systemd-run",
+                "--quiet",
+                "--collect",
+                "--unit",
+                unit,
+                f"--on-active={seconds}s",
+                "--timer-property=AccuracySec=1s",
+                "--property=Type=oneshot",
+                *argv,
+            ]
+        )
 
     def disarm_timer(self, unit: str) -> None:
         self._run(["systemctl", "stop", unit + ".timer"], check=False)
 
     def start_service(self, unit: str, argv: list[str], properties: list[str]) -> None:
-        self._run(["systemd-run", "--quiet", "--collect", "--unit", unit, *[f"--property={p}" for p in properties], *argv])
+        self._run(
+            [
+                "systemd-run",
+                "--quiet",
+                "--collect",
+                "--unit",
+                unit,
+                *[f"--property={p}" for p in properties],
+                *argv,
+            ]
+        )
 
-    def launch_runner(self, unit: str, properties: list[str], python: str, payload: bytes) -> None:
+    def launch_runner(
+        self, unit: str, properties: list[str], python: str, payload: bytes
+    ) -> None:
         argv = [
-            "systemd-run", "--quiet", "--collect", "--pipe", "--unit", unit,
-            *[f"--property={p}" for p in properties], python, "-I", "-c", _RUNNER_CHILD,
+            "systemd-run",
+            "--quiet",
+            "--collect",
+            "--pipe",
+            "--unit",
+            unit,
+            *[f"--property={p}" for p in properties],
+            python,
+            "-I",
+            "-c",
+            _RUNNER_CHILD,
         ]
         try:
             child = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-                argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                env=_ENV, start_new_session=True,
+                argv,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=_ENV,
+                start_new_session=True,
             )
             assert child.stdin is not None
             child.stdin.write(payload)
@@ -706,7 +861,9 @@ class SystemHost:
         self._run(["systemctl", "stop", "--no-block", unit + ".service"], check=False)
 
     def kill_unit(self, unit: str) -> None:
-        self._run(["systemctl", "kill", "--signal=SIGKILL", unit + ".service"], check=False)
+        self._run(
+            ["systemctl", "kill", "--signal=SIGKILL", unit + ".service"], check=False
+        )
 
     def unit_cgroup(self, unit: str) -> str:
         return f"/system.slice/{unit}.service"
@@ -724,7 +881,17 @@ class SystemHost:
         return [int(x) for x in text.split()]
 
     def mount_workspace(self, path: Path, size_mb: int) -> None:
-        self._run(["mount", "-t", "tmpfs", "-o", f"size={size_mb}m,nodev,nosuid,mode=0700", "tmpfs", str(path)])
+        self._run(
+            [
+                "mount",
+                "-t",
+                "tmpfs",
+                "-o",
+                f"size={size_mb}m,nodev,nosuid,mode=0700",
+                "tmpfs",
+                str(path),
+            ]
+        )
 
     def unmount_workspace(self, path: Path) -> None:
         if os.path.ismount(path):
@@ -849,7 +1016,16 @@ MGMT_REQUESTS: Final[dict[str, set[str]]] = {
     "prepare": {"protocol", "op", "bootstrap_manifest", "policy_digest"},
     "bootstrap": {"protocol", "op", "lease_id", "jit_config"},
     "status": {"protocol", "op", "lease_id"},
-    "grant": {"protocol", "op", "lease_id", "report_digest", "binding", "origin", "snapshot", "policy_digest"},
+    "grant": {
+        "protocol",
+        "op",
+        "lease_id",
+        "report_digest",
+        "binding",
+        "origin",
+        "snapshot",
+        "policy_digest",
+    },
     "refuse": {"protocol", "op", "lease_id", "category"},
     "cleanup": {"protocol", "op", "lease_id"},
 }
@@ -861,7 +1037,11 @@ def validate_mgmt(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("protocol") != hp.PROTOCOL:
         raise refused("schema.invalid")
     op = value.get("op")
-    if type(op) is not str or op not in MGMT_REQUESTS or set(value) != MGMT_REQUESTS[op]:
+    if (
+        type(op) is not str
+        or op not in MGMT_REQUESTS
+        or set(value) != MGMT_REQUESTS[op]
+    ):
         raise refused("schema.invalid")
     try:
         if "lease_id" in value:
@@ -873,15 +1053,28 @@ def validate_mgmt(value: Any) -> dict[str, Any]:
         if op == "grant":
             hp.validate_binding(value["binding"])
             hp.origin(value["origin"])
-            snap = _exact(value["snapshot"], {"digest", "ttl_remaining_ms", "addresses"}, "schema.invalid")
+            snap = _exact(
+                value["snapshot"],
+                {"digest", "ttl_remaining_ms", "addresses"},
+                "schema.invalid",
+            )
             hp.hex64(snap["digest"])
-            if type(snap["ttl_remaining_ms"]) is not int or not 1 <= snap["ttl_remaining_ms"] <= hp.SNAPSHOT_MAX_AGE_NS // 1_000_000:
+            if (
+                type(snap["ttl_remaining_ms"]) is not int
+                or not 1
+                <= snap["ttl_remaining_ms"]
+                <= hp.SNAPSHOT_MAX_AGE_NS // 1_000_000
+            ):
                 raise refused("schema.invalid")
     except hp.ProtocolRefused as exc:
         raise refused(exc.label) from None
     if op == "bootstrap":
         jit = value["jit_config"]
-        if type(jit) is not str or not 1 <= len(jit) <= MAX_JIT or _JIT.fullmatch(jit) is None:
+        if (
+            type(jit) is not str
+            or not 1 <= len(jit) <= MAX_JIT
+            or _JIT.fullmatch(jit) is None
+        ):
             raise refused("schema.invalid")
     if op == "refuse" and value["category"] not in hp.CATEGORIES:
         raise refused("schema.invalid")
@@ -901,7 +1094,9 @@ class Controller:
         host: Any = None,
         routable: Callable[[Any], bool] = hr.globally_routable,
         module_dir: Path | None = None,
-        wall_clock: Callable[[], datetime.datetime] = lambda: datetime.datetime.now(datetime.UTC),
+        wall_clock: Callable[[], datetime.datetime] = lambda: datetime.datetime.now(
+            datetime.UTC
+        ),
     ) -> None:
         self.paths = paths or Paths()
         self.host = host if host is not None else SystemHost()
@@ -935,7 +1130,12 @@ class Controller:
             return
         dfd = self._state_dir(create)
         try:
-            fd = os.open("lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+            fd = os.open(
+                "lock",
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+                dir_fd=dfd,
+            )
         finally:
             os.close(dfd)
         try:
@@ -956,7 +1156,9 @@ class Controller:
 
     def load(self) -> dict[str, Any] | None:
         try:
-            raw = read_protected(self.paths.journal, forbid=0o077, exact_mode=0o600, limit=MAX_MGMT_INPUT)
+            raw = read_protected(
+                self.paths.journal, forbid=0o077, exact_mode=0o600, limit=MAX_MGMT_INPUT
+            )
         except ControllerRefused:
             try:
                 self.paths.journal.lstat()
@@ -973,7 +1175,9 @@ class Controller:
             raise refused("lock.required")
         dfd = self._state_dir()
         try:
-            write_atomic(dfd, "journal.json", hp.canonical_json(dict(j)), mode=0o600, gid=0)
+            write_atomic(
+                dfd, "journal.json", hp.canonical_json(dict(j)), mode=0o600, gid=0
+            )
         finally:
             os.close(dfd)
 
@@ -985,7 +1189,13 @@ class Controller:
             cfd = os.open("closed", _DIR_FLAGS, dir_fd=dfd)
             try:
                 _check_dir(cfd, 0o077)
-                write_atomic(cfd, j["lease_id"] + ".json", hp.canonical_json(dict(j)), mode=0o600, gid=0)
+                write_atomic(
+                    cfd,
+                    j["lease_id"] + ".json",
+                    hp.canonical_json(dict(j)),
+                    mode=0o600,
+                    gid=0,
+                )
             finally:
                 os.close(cfd)
             os.unlink("journal.json", dir_fd=dfd)
@@ -1004,14 +1214,29 @@ class Controller:
     # configuration ---------------------------------------------------------
 
     def host_config(self) -> HostConfig:
-        return parse_host_config(strict_json(read_protected(self.paths.config_root / "host.json")))
+        return parse_host_config(
+            strict_json(read_protected(self.paths.config_root / "host.json"))
+        )
 
     def policy(self) -> Policy:
-        return parse_policy(strict_json(read_protected(self.paths.config_root / "policy.json")))
+        return parse_policy(
+            strict_json(read_protected(self.paths.config_root / "policy.json"))
+        )
 
     def _approval(self, manifest_digest: str, policy_digest: str, cdigest: str) -> None:
         doc = strict_json(read_protected(self.paths.config_root / "approval.json"))
-        doc = _exact(doc, {"schema", "approved", "manifest_digest", "policy_digest", "controller_digest", "expires_at"}, "approval.missing")
+        doc = _exact(
+            doc,
+            {
+                "schema",
+                "approved",
+                "manifest_digest",
+                "policy_digest",
+                "controller_digest",
+                "expires_at",
+            },
+            "approval.missing",
+        )
         try:
             expires = datetime.datetime.fromisoformat(doc["expires_at"])
         except (TypeError, ValueError):
@@ -1034,7 +1259,11 @@ class Controller:
         """(rules, anchor handle); default DROP output filter and one anchor."""
         doc = self.host.nft_list(fw)
         chains = [x["chain"] for x in doc if isinstance(x, dict) and "chain" in x]
-        if len(chains) != 1 or chains[0].get("policy") != "drop" or chains[0].get("hook") != "output":
+        if (
+            len(chains) != 1
+            or chains[0].get("policy") != "drop"
+            or chains[0].get("hook") != "output"
+        ):
             raise refused("firewall.baseline")
         rules = [x["rule"] for x in doc if isinstance(x, dict) and "rule" in x]
         anchors = [r for r in rules if r.get("comment") == fw.anchor and not owned(r)]
@@ -1042,17 +1271,23 @@ class Controller:
             raise refused("firewall.baseline")
         return rules, anchors[0]["handle"]
 
-    def _install(self, j: dict[str, Any], fw: Firewall, new: list[dict[str, Any]]) -> None:
+    def _install(
+        self, j: dict[str, Any], fw: Firewall, new: list[dict[str, Any]]
+    ) -> None:
         """One ``nft -f`` transaction, then exact readback of all owned rules."""
         rules, anchor = self.chain(fw)
         if stable_digest([r for r in rules if not owned(r)]) != j["baseline_digest"]:
             raise refused("install.failed")
-        script = "".join(accept_line(fw, j["lease_id"], j["uid"], s, anchor) + "\n" for s in new)
+        script = "".join(
+            accept_line(fw, j["lease_id"], j["uid"], s, anchor) + "\n" for s in new
+        )
         self.host.nft_apply(script)
         self._checkpoint("install.applied")
         after, _ = self.chain(fw)
         expected = [*j["rules"], *new]
-        handles, guard = classify_owned(after, fw, j["lease_id"], j["uid"], j["user"], expected, False)
+        handles, guard = classify_owned(
+            after, fw, j["lease_id"], j["uid"], j["user"], expected, False
+        )
         if (
             guard
             or len(handles) != len(expected)
@@ -1065,10 +1300,18 @@ class Controller:
     def _lease_dir(self, j: Mapping[str, Any]) -> Path:
         return self.paths.run_root / j["lease_id"]
 
-    def _write_lease_file(self, j: Mapping[str, Any], name: str, value: Mapping[str, Any]) -> None:
+    def _write_lease_file(
+        self, j: Mapping[str, Any], name: str, value: Mapping[str, Any]
+    ) -> None:
         dfd = open_dir(self._lease_dir(j), forbid=0o027, gid=j["gid"])
         try:
-            write_atomic(dfd, name, hp.canonical_json(dict(value)), mode=hp.FILE_MODE, gid=j["gid"])
+            write_atomic(
+                dfd,
+                name,
+                hp.canonical_json(dict(value)),
+                mode=hp.FILE_MODE,
+                gid=j["gid"],
+            )
         finally:
             os.close(dfd)
 
@@ -1118,7 +1361,11 @@ class Controller:
                 "user": USER_PREFIX + lease[:12],
                 "uid": None,
                 "gid": None,
-                "units": {"runner": stem + "-runner", "serve": stem + "-serve", "expire": stem + "-expire"},
+                "units": {
+                    "runner": stem + "-runner",
+                    "serve": stem + "-serve",
+                    "expire": stem + "-expire",
+                },
                 "cgroup": None,
                 "firewall": dataclasses.asdict(cfg.firewall),
                 "policy_digest": policy.digest,
@@ -1159,7 +1406,15 @@ class Controller:
             except BaseException as exc:
                 self._cleanup_locked(j, "REFUSED", category_of(exc))
                 raise
-            return {"protocol": hp.PROTOCOL, "op": "prepare", "lease_id": lease, "boot_id": boot, "state": "PREPARED", "manifest_digest": mdigest, "controller_digest": cdigest}
+            return {
+                "protocol": hp.PROTOCOL,
+                "op": "prepare",
+                "lease_id": lease,
+                "boot_id": boot,
+                "state": "PREPARED",
+                "manifest_digest": mdigest,
+                "controller_digest": cdigest,
+            }
 
     def _pin_modules(self, cdigest: str) -> None:
         dfd = self._state_dir()
@@ -1172,7 +1427,9 @@ class Controller:
         try:
             _check_dir(bfd, 0o077)
             for name in PINNED_MODULES:
-                write_atomic(bfd, name, (self.module_dir / name).read_bytes(), mode=0o600, gid=0)
+                write_atomic(
+                    bfd, name, (self.module_dir / name).read_bytes(), mode=0o600, gid=0
+                )
         finally:
             os.close(bfd)
         if controller_digest(self.paths.bin) != cdigest:
@@ -1195,7 +1452,9 @@ class Controller:
         finally:
             os.close(rfd)
 
-    def _make_workspace(self, j: Mapping[str, Any], cfg: HostConfig, archive: bytes) -> None:
+    def _make_workspace(
+        self, j: Mapping[str, Any], cfg: HostConfig, archive: bytes
+    ) -> None:
         root = self.paths.work_root
         with contextlib.suppress(FileExistsError):
             os.mkdir(root, 0o755)
@@ -1228,7 +1487,9 @@ class Controller:
                 rules, _ = self.chain(fw)
                 if any(owned(r) for r in rules):
                     raise refused("firewall.drift")
-                specs = rule_specs(j["lease_id"], j["bootstrap_manifest"]["destinations"])
+                specs = rule_specs(
+                    j["lease_id"], j["bootstrap_manifest"]["destinations"]
+                )
                 # T0: immediately before the first task egress exception.
                 t0 = self.host.now_ns()
                 j["t0_monotonic_ns"] = t0
@@ -1238,10 +1499,18 @@ class Controller:
                 self.save(j)
                 self._checkpoint("bootstrap.planned")
                 # Arm the independent rollback BEFORE any rule change.
-                seconds = max(1, (j["expires_at_monotonic_ns"] - self.host.now_ns()) // 1_000_000_000)
+                seconds = max(
+                    1,
+                    (j["expires_at_monotonic_ns"] - self.host.now_ns())
+                    // 1_000_000_000,
+                )
                 j["timer_armed"] = True  # recorded first: disarm tolerates absence
                 self.save(j)
-                self.host.arm_timer(j["units"]["expire"], int(seconds), self._pinned_argv("expire", j["lease_id"]))
+                self.host.arm_timer(
+                    j["units"]["expire"],
+                    int(seconds),
+                    self._pinned_argv("expire", j["lease_id"]),
+                )
                 self._checkpoint("bootstrap.armed")
                 self._install(j, fw, specs)
                 j["rules"], j["planned"] = specs, []
@@ -1256,7 +1525,9 @@ class Controller:
                     "boot_id": j["boot_id"],
                     "expires_at_monotonic_ns": j["expires_at_monotonic_ns"],
                 }
-                self._write_lease_file(j, hp.CHALLENGE_NAME, hp.validate_challenge(challenge))
+                self._write_lease_file(
+                    j, hp.CHALLENGE_NAME, hp.validate_challenge(challenge)
+                )
                 self._checkpoint("bootstrap.challenge")
                 now = self.host.now_ns()
                 remaining = j["expires_at_monotonic_ns"] - now
@@ -1266,7 +1537,10 @@ class Controller:
                 _history(j, "BOOTSTRAP", now)
                 self.save(j)
                 self.host.launch_runner(
-                    j["units"]["runner"], self._runner_properties(j, cfg, remaining), self.paths.python, payload
+                    j["units"]["runner"],
+                    self._runner_properties(j, cfg, remaining),
+                    self.paths.python,
+                    payload,
                 )
                 payload = b""
                 self._checkpoint("bootstrap.launched")
@@ -1274,13 +1548,27 @@ class Controller:
                 payload = b""
                 self._cleanup_locked(j, "REFUSED", category_of(exc))
                 raise
-            return {"protocol": hp.PROTOCOL, "op": "bootstrap", "lease_id": j["lease_id"], "state": "BOOTSTRAP", "remaining_ms": remaining // 1_000_000}
+            return {
+                "protocol": hp.PROTOCOL,
+                "op": "bootstrap",
+                "lease_id": j["lease_id"],
+                "state": "BOOTSTRAP",
+                "remaining_ms": remaining // 1_000_000,
+            }
 
     def _pinned_argv(self, op: str, lease: str) -> list[str]:
         hp.lease_id(lease)
-        return [self.paths.python, "-I", str(self.paths.bin / "lane3_handoff_controller.py"), op, lease]
+        return [
+            self.paths.python,
+            "-I",
+            str(self.paths.bin / "lane3_handoff_controller.py"),
+            op,
+            lease,
+        ]
 
-    def _runner_properties(self, j: Mapping[str, Any], cfg: HostConfig, remaining_ns: int) -> list[str]:
+    def _runner_properties(
+        self, j: Mapping[str, Any], cfg: HostConfig, remaining_ns: int
+    ) -> list[str]:
         workspace = j["workspace"]
         return [
             f"User={j['user']}",
@@ -1304,7 +1592,11 @@ class Controller:
         self.host.start_service(
             j["units"]["serve"],
             self._pinned_argv("serve", j["lease_id"]),
-            [f"RuntimeMaxSec={max(1, remaining)}", "KillMode=control-group", "NoNewPrivileges=yes"],
+            [
+                f"RuntimeMaxSec={max(1, remaining)}",
+                "KillMode=control-group",
+                "NoNewPrivileges=yes",
+            ],
         )
         deadline = time.monotonic() + hp.IO_DEADLINE_S
         path = self._lease_dir(j) / hp.SOCKET_NAME
@@ -1331,9 +1623,17 @@ class Controller:
         with self.locked():
             j = self._active(req["lease_id"])
             now = self.host.now_ns()
-            if j["expires_at_monotonic_ns"] is not None and now >= j["expires_at_monotonic_ns"] and j["state"] not in TERMINAL:
+            if (
+                j["expires_at_monotonic_ns"] is not None
+                and now >= j["expires_at_monotonic_ns"]
+                and j["state"] not in TERMINAL
+            ):
                 self._cleanup_locked(j, "EXPIRED", "lease.expired")
-            remaining = None if j["expires_at_monotonic_ns"] is None else max(0, j["expires_at_monotonic_ns"] - now) // 1_000_000
+            remaining = (
+                None
+                if j["expires_at_monotonic_ns"] is None
+                else max(0, j["expires_at_monotonic_ns"] - now) // 1_000_000
+            )
             return {
                 "protocol": hp.PROTOCOL,
                 "op": "status",
@@ -1358,7 +1658,9 @@ class Controller:
                 raise
             return result
 
-    def _grant_locked(self, j: dict[str, Any], req: Mapping[str, Any]) -> dict[str, Any]:
+    def _grant_locked(
+        self, j: dict[str, Any], req: Mapping[str, Any]
+    ) -> dict[str, Any]:
         now = self.host.now_ns()
         if j["state"] != "REPORTED":
             raise refused("state.invalid")
@@ -1393,12 +1695,18 @@ class Controller:
         if len(bootstrap_addresses | {r["address"] for r in rows}) > hp.MAX_ADDRESSES:
             # The controller cap is real; an answer is never truncated to fit.
             raise refused("snapshot.refused")
-        snapshot_expires = now - TRANSIT_ALLOWANCE_NS + snapshot["ttl_remaining_ms"] * 1_000_000
+        snapshot_expires = (
+            now - TRANSIT_ALLOWANCE_NS + snapshot["ttl_remaining_ms"] * 1_000_000
+        )
         deadline = min(j["expires_at_monotonic_ns"], snapshot_expires)
         if deadline - now < hp.GRANT_MIN_REMAINING_NS:
             raise refused("deadline.insufficient")
         effective = effective_manifest(j["bootstrap_manifest"], origin, rows)
-        validate_destinations(effective["destinations"], self.routable, frozenset({"runner-https", "module-https", "oidc-https"}))
+        validate_destinations(
+            effective["destinations"],
+            self.routable,
+            frozenset({"runner-https", "module-https", "oidc-https"}),
+        )
         manifest_digest = hp.digest(effective)
         grant = hp.validate_grant(
             {
@@ -1425,7 +1733,11 @@ class Controller:
         # A broker address already opened for bootstrap needs no second rule.
         # Overlap is allowed by the design and never proves token contact was
         # impossible; the no-token-before-grant rule is the workflow's.
-        extra = [r for r in effective["destinations"][len(bootstrap_rows) :] if r["address"] not in bootstrap_addresses]
+        extra = [
+            r
+            for r in effective["destinations"][len(bootstrap_rows) :]
+            if r["address"] not in bootstrap_addresses
+        ]
         new = rule_specs(j["lease_id"], extra, start=len(bootstrap_rows))
         j["planned"] = new
         j["manifest_digest"] = manifest_digest
@@ -1506,7 +1818,13 @@ class Controller:
         return j
 
     def _closed(self, j: Mapping[str, Any]) -> dict[str, Any]:
-        return {"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": j["lease_id"], "state": j["state"], "evidence": evidence(j)}
+        return {
+            "protocol": hp.PROTOCOL,
+            "op": "cleanup",
+            "lease_id": j["lease_id"],
+            "state": j["state"],
+            "evidence": evidence(j),
+        }
 
     # cleanup ---------------------------------------------------------------
 
@@ -1519,7 +1837,9 @@ class Controller:
             j["outcome"] = {"CLOSED": "COMPLETED"}.get(final, final)
         if j["state"] not in TERMINAL:
             if final != "CLOSED":
-                j["category"] = j["category"] or (label if label in hp.CATEGORIES else "internal")
+                j["category"] = j["category"] or (
+                    label if label in hp.CATEGORIES else "internal"
+                )
                 _history(j, final, now)
         j["closing"] = True
         self.save(j)
@@ -1564,7 +1884,9 @@ class Controller:
                 self._checkpoint("cleanup.killed")
             results["processes_absent"] = results["sockets_absent"] = True
             rules, _ = self.chain(fw)
-            handles, _guard = classify_owned(rules, fw, j["lease_id"], j["uid"] or 0, j["user"], specs, True)
+            handles, _guard = classify_owned(
+                rules, fw, j["lease_id"], j["uid"] or 0, j["user"], specs, True
+            )
             if handles:
                 self.host.nft_apply("".join(delete_line(fw, h) + "\n" for h in handles))
             self._checkpoint("cleanup.rules")
@@ -1573,7 +1895,10 @@ class Controller:
                 raise refused("cleanup.drift")
             results["owned_rules_absent"] = True
             results["default_drop_preserved"] = True
-            if j["baseline_digest"] is not None and stable_digest(after) != j["baseline_digest"]:
+            if (
+                j["baseline_digest"] is not None
+                and stable_digest(after) != j["baseline_digest"]
+            ):
                 raise refused("cleanup.baseline")
             results["baseline_preserved"] = True
             self._remove_lease_dir(j, keep_dir=False)
@@ -1599,7 +1924,9 @@ class Controller:
             results["timer_stopped"] = True
         except BaseException as exc:
             j["cleanup"] = results
-            j["cleanup_blocked"] = exc.label if isinstance(exc, ControllerRefused) else "cleanup.failed"
+            j["cleanup_blocked"] = (
+                exc.label if isinstance(exc, ControllerRefused) else "cleanup.failed"
+            )
             self.save(j)
             raise refused("cleanup.blocked") from None
         j["cleanup"] = results
@@ -1608,10 +1935,14 @@ class Controller:
         self.save(j)
         self._archive(j)
 
-    def _ensure_guard(self, j: dict[str, Any], fw: Firewall, specs: list[Mapping[str, Any]]) -> bool:
+    def _ensure_guard(
+        self, j: dict[str, Any], fw: Firewall, specs: list[Mapping[str, Any]]
+    ) -> bool:
         try:
             rules, _ = self.chain(fw)
-            _, present = classify_owned(rules, fw, j["lease_id"], j["uid"], j["user"], specs, True)
+            _, present = classify_owned(
+                rules, fw, j["lease_id"], j["uid"], j["user"], specs, True
+            )
         except ControllerRefused:
             present = False
         if present:
@@ -1622,7 +1953,9 @@ class Controller:
             self.host.nft_apply(guard_line(fw, j["lease_id"], j["uid"]) + "\n")
             rules, _ = self.chain(fw)
             # The guard must be the chain's first rule: ahead of ESTABLISHED.
-            return bool(rules) and is_exact_guard(rules[0], fw, j["lease_id"], j["uid"], j["user"])
+            return bool(rules) and is_exact_guard(
+                rules[0], fw, j["lease_id"], j["uid"], j["user"]
+            )
         except ControllerRefused:
             # Containment continues through the cgroup kill; the rules stay.
             return False
@@ -1672,7 +2005,12 @@ class Controller:
     def serve(self, lease: str) -> dict[str, Any]:
         """Accept one request per connection until the lease ends or expires."""
         j = self.load()
-        if j is None or j["lease_id"] != lease or j["state"] in TERMINAL or j["boot_id"] != self.host.boot_id():
+        if (
+            j is None
+            or j["lease_id"] != lease
+            or j["state"] in TERMINAL
+            or j["boot_id"] != self.host.boot_id()
+        ):
             raise refused("lease.unknown")
         self.self_unit = j["units"]["serve"]
         directory = self._lease_dir(j)
@@ -1691,7 +2029,11 @@ class Controller:
             server.settimeout(0.5)
             while True:
                 current = self.load()
-                if current is None or current["lease_id"] != lease or current["state"] in TERMINAL:
+                if (
+                    current is None
+                    or current["lease_id"] != lease
+                    or current["state"] in TERMINAL
+                ):
                     break
                 if self.host.now_ns() >= current["expires_at_monotonic_ns"]:
                     with self.locked():
@@ -1715,7 +2057,9 @@ class Controller:
         reply: dict[str, Any]
         invalidate = False
         try:
-            raw = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            raw = conn.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+            )
             pid, uid, _gid = struct.unpack("3i", raw)
             reply, invalidate = self.handle_request(conn, pid, uid)
         except Exception as exc:
@@ -1732,7 +2076,9 @@ class Controller:
                         _history(j, "REFUSED", self.host.now_ns())
                     self._cleanup_locked(j, "REFUSED", j["category"])
 
-    def handle_request(self, conn: socket.socket, pid: int, uid: int) -> tuple[dict[str, Any], bool]:
+    def handle_request(
+        self, conn: socket.socket, pid: int, uid: int
+    ) -> tuple[dict[str, Any], bool]:
         j = self.load()
         if j is None or j["state"] in TERMINAL:
             return hp.response("REFUSED", "lease.unknown"), False
@@ -1756,7 +2102,9 @@ class Controller:
             j = self.load()
             if j is None or j["boot_id"] != self.host.boot_id():
                 raise refused("boot.mismatch")
-            reply, invalidate = transition(j, request, (pid, started), self.host.now_ns())
+            reply, invalidate = transition(
+                j, request, (pid, started), self.host.now_ns()
+            )
             # The PID must still be the same live process before we commit.
             if proc_start_time(pid) != started or proc_cgroup(pid) != j["cgroup"]:
                 raise refused("peer.refused")
@@ -1773,7 +2121,12 @@ def evidence(j: Mapping[str, Any]) -> dict[str, Any]:
     binding = grant.get("binding")
     t0 = j.get("t0_monotonic_ns")
     transitions = [
-        {"state": h["state"], "offset_ms": None if t0 is None else (h["at_monotonic_ns"] - t0) // 1_000_000}
+        {
+            "state": h["state"],
+            "offset_ms": None
+            if t0 is None
+            else (h["at_monotonic_ns"] - t0) // 1_000_000,
+        }
         for h in j.get("history", [])
     ]
     return {
@@ -1803,10 +2156,20 @@ def main(argv: list[str]) -> int:
     os.umask(0o077)
     lease_ops = {"serve", "expire"}
     shape_ok = (len(argv) == 2 and argv[1] in MGMT_STDIN_OPS | {"reconcile"}) or (
-        len(argv) == 3 and argv[1] in lease_ops and re.fullmatch(r"[0-9a-f]{32}", argv[2]) is not None
+        len(argv) == 3
+        and argv[1] in lease_ops
+        and re.fullmatch(r"[0-9a-f]{32}", argv[2]) is not None
     )
     if os.geteuid() != 0 or not shape_ok:
-        print(json.dumps({"protocol": hp.PROTOCOL, "status": "REFUSED", "category": "operation.invalid"}))
+        print(
+            json.dumps(
+                {
+                    "protocol": hp.PROTOCOL,
+                    "status": "REFUSED",
+                    "category": "operation.invalid",
+                }
+            )
+        )
         return 2
     op = argv[1]
     controller = Controller()
@@ -1827,8 +2190,16 @@ def main(argv: list[str]) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     except Exception as exc:
-        label = exc.label if isinstance(exc, ControllerRefused | hp.ProtocolRefused) else "internal"
-        print(json.dumps({"protocol": hp.PROTOCOL, "status": "REFUSED", "category": label}))
+        label = (
+            exc.label
+            if isinstance(exc, ControllerRefused | hp.ProtocolRefused)
+            else "internal"
+        )
+        print(
+            json.dumps(
+                {"protocol": hp.PROTOCOL, "status": "REFUSED", "category": label}
+            )
+        )
         return 1
 
 

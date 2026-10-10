@@ -515,9 +515,7 @@ def validate_binding(value: Any) -> dict[str, Any]:
 
 
 def validate_snapshot(value: Any) -> dict[str, Any]:
-    snapshot = _exact(
-        value, {"digest", "expires_at_monotonic_ns", "port", "addresses"}
-    )
+    snapshot = _exact(value, {"digest", "expires_at_monotonic_ns", "port", "addresses"})
     hex64(snapshot["digest"])
     _int(snapshot["expires_at_monotonic_ns"])
     if type(snapshot["port"]) is not int or snapshot["port"] != BROKER_PORT:

@@ -139,14 +139,21 @@ def main(argv: list[str]) -> None:
     if mode == "raw":
         kind = rest[0]
         nonce = challenge(lease, gid_n)["nonce"]
-        poll = {"protocol": hp.PROTOCOL, "op": "poll", "lease_id": lease, "nonce": nonce}
+        poll = {
+            "protocol": hp.PROTOCOL,
+            "op": "poll",
+            "lease_id": lease,
+            "nonce": nonce,
+        }
         body = hp.encode_message(poll)
         duplicate = body[:-1] + b',"nonce":"' + nonce.encode() + b'"}'
         payloads = {
             "duplicate": struct.pack(">I", len(duplicate)) + duplicate,
             "huge": struct.pack(">I", hp.MAX_MESSAGE + 1) + b"{" * 64,
             "truncated": struct.pack(">I", len(body)) + body[:-3],
-            "mgmt": hp.frame({"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": lease}),
+            "mgmt": hp.frame(
+                {"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": lease}
+            ),
             "wrong-nonce": hp.frame({**poll, "nonce": "0" * 64}),
         }
         if kind == "stall":
@@ -174,7 +181,12 @@ def main(argv: list[str]) -> None:
         if mode == "report":
             emit(reply=reply)
             return
-        poll = {"protocol": hp.PROTOCOL, "op": "poll", "lease_id": lease, "nonce": nonce}
+        poll = {
+            "protocol": hp.PROTOCOL,
+            "op": "poll",
+            "lease_id": lease,
+            "nonce": nonce,
+        }
         for _ in range(400):
             reply = raw_exchange(lease, hp.frame(poll))
             if reply.get("status") != "WAIT":
@@ -197,7 +209,12 @@ def main(argv: list[str]) -> None:
     if mode == "report-then-consume-again":
         # A second process in the same cgroup tries to consume the grant.
         nonce = challenge(lease, gid_n)["nonce"]
-        poll = {"protocol": hp.PROTOCOL, "op": "poll", "lease_id": lease, "nonce": nonce}
+        poll = {
+            "protocol": hp.PROTOCOL,
+            "op": "poll",
+            "lease_id": lease,
+            "nonce": nonce,
+        }
         emit(reply=raw_exchange(lease, hp.frame(poll)))
         return
     if mode == "attack":
@@ -205,10 +222,19 @@ def main(argv: list[str]) -> None:
         attempts = {}
         for name, action in (
             ("unlink_socket", lambda: os.unlink(f"{directory}/{hp.SOCKET_NAME}")),
-            ("replace_socket", lambda: os.rename(f"{directory}/{hp.SOCKET_NAME}", f"{directory}/x")),
+            (
+                "replace_socket",
+                lambda: os.rename(f"{directory}/{hp.SOCKET_NAME}", f"{directory}/x"),
+            ),
             ("create_file", lambda: open(f"{directory}/grant.json.new", "x").close()),
-            ("write_challenge", lambda: open(f"{directory}/{hp.CHALLENGE_NAME}", "w").close()),
-            ("symlink_grant", lambda: os.symlink("/tmp/forged", f"{directory}/{hp.GRANT_NAME}")),
+            (
+                "write_challenge",
+                lambda: open(f"{directory}/{hp.CHALLENGE_NAME}", "w").close(),
+            ),
+            (
+                "symlink_grant",
+                lambda: os.symlink("/tmp/forged", f"{directory}/{hp.GRANT_NAME}"),
+            ),
             ("chmod_dir", lambda: os.chmod(directory, 0o777)),
             ("read_journal", lambda: open("/run/l3h-it/state/journal.json").read()),
         ):
@@ -220,8 +246,15 @@ def main(argv: list[str]) -> None:
         import subprocess
 
         controller = subprocess.run(
-            ["/usr/bin/python3", "-I", f"{HERE}/lane3_handoff_controller.py", "cleanup"],
-            input=json.dumps({"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": lease}).encode(),
+            [
+                "/usr/bin/python3",
+                "-I",
+                f"{HERE}/lane3_handoff_controller.py",
+                "cleanup",
+            ],
+            input=json.dumps(
+                {"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": lease}
+            ).encode(),
             capture_output=True,
             check=False,
         )

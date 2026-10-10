@@ -211,7 +211,10 @@ MODPATH = f"repos/{STARTER}/contents/scripts/lane3_github_oidc.py?ref={STARTER_S
             "binding.mismatch",
         ),
         (_set(JOBS, "jobs", 0, "runner_id", value=RUNNER + 1), "assignment.ambiguous"),
-        (_set(JOBS, "jobs", 0, "runner_group_id", value=GROUP + 1), "assignment.ambiguous"),
+        (
+            _set(JOBS, "jobs", 0, "runner_group_id", value=GROUP + 1),
+            "assignment.ambiguous",
+        ),
         (_set(JOBS, "total_count", value=2), "assignment.ambiguous"),
         (
             lambda d: d[JOBS]["jobs"].append({**d[JOBS]["jobs"][0], "id": JOB + 1})
@@ -226,24 +229,45 @@ MODPATH = f"repos/{STARTER}/contents/scripts/lane3_github_oidc.py?ref={STARTER_S
             "assignment.ambiguous",
         ),
         (
-            _set(f"orgs/synthetic-org/actions/runners/{RUNNER}", "labels", value=[{"name": "self-hosted"}]),
+            _set(
+                f"orgs/synthetic-org/actions/runners/{RUNNER}",
+                "labels",
+                value=[{"name": "self-hosted"}],
+            ),
             "assignment.ambiguous",
         ),
         (
-            _set(f"orgs/synthetic-org/actions/runner-groups/{GROUP}/runners", "total_count", value=2),
+            _set(
+                f"orgs/synthetic-org/actions/runner-groups/{GROUP}/runners",
+                "total_count",
+                value=2,
+            ),
             "assignment.ambiguous",
         ),
         (_set(f"{BASE}/pending_deployments", value=None), "approval.missing"),
-        (lambda d: d.update({f"{BASE}/pending_deployments": [{"x": 1}]}), "approval.missing"),
+        (
+            lambda d: d.update({f"{BASE}/pending_deployments": [{"x": 1}]}),
+            "approval.missing",
+        ),
         (lambda d: d.update({f"{BASE}/approvals": []}), "approval.missing"),
         (_set(f"{BASE}/approvals", 0, "state", value="rejected"), "approval.missing"),
-        (_set(f"{BASE}/approvals", 0, "user", "login", value="someone-else"), "approval.missing"),
         (
-            _set(f"{BASE}/approvals", 0, "environments", value=[{"id": ENV_ID + 1, "name": "x"}]),
+            _set(f"{BASE}/approvals", 0, "user", "login", value="someone-else"),
             "approval.missing",
         ),
         (
-            lambda d: d[RUNS]["workflow_runs"].append({"id": RUN + 1, "status": "waiting"}),
+            _set(
+                f"{BASE}/approvals",
+                0,
+                "environments",
+                value=[{"id": ENV_ID + 1, "name": "x"}],
+            ),
+            "approval.missing",
+        ),
+        (
+            lambda d: d[RUNS]["workflow_runs"].append(
+                {"id": RUN + 1, "status": "waiting"}
+            ),
             "assignment.ambiguous",
         ),
         (_set(RUNS, "total_count", value=500), "assignment.ambiguous"),
@@ -254,7 +278,9 @@ MODPATH = f"repos/{STARTER}/contents/scripts/lane3_github_oidc.py?ref={STARTER_S
         (lambda d: d.pop(f"{BASE}/approvals"), "approval.missing"),
     ],
 )
-def test_each_readback_row_independently_prevents_a_grant(mutate: Any, label: str) -> None:
+def test_each_readback_row_independently_prevents_a_grant(
+    mutate: Any, label: str
+) -> None:
     data = world()
     mutate(data)
     with pytest.raises(co.CoordinatorRefused) as caught:
@@ -274,7 +300,9 @@ def test_each_readback_row_independently_prevents_a_grant(mutate: Any, label: st
         ({"report": report(run_attempt=2)}, "approval.missing"),
     ],
 )
-def test_report_claims_never_override_readback(kwargs: dict[str, Any], label: str) -> None:
+def test_report_claims_never_override_readback(
+    kwargs: dict[str, Any], label: str
+) -> None:
     with pytest.raises(co.CoordinatorRefused) as caught:
         binding(**kwargs)
     assert caught.value.label == label
@@ -320,7 +348,13 @@ class Channel:
                 "grant_digest": "0" * 64,
                 "manifest_digest": self.manifest_digest or "1" * 64,
             }
-        return {"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": LEASE, "state": "CLOSED", "evidence": {}}
+        return {
+            "protocol": hp.PROTOCOL,
+            "op": "cleanup",
+            "lease_id": LEASE,
+            "state": "CLOSED",
+            "evidence": {},
+        }
 
     def ops(self) -> list[str]:
         return [op for op, _ in self.calls]
@@ -353,7 +387,9 @@ def snapshot(ttl_s: int = 60) -> hr.Snapshot:
     )
 
 
-def decide(channel: Channel, *, data: dict[str, Any] | None = None, **kw: Any) -> co.Decision:
+def decide(
+    channel: Channel, *, data: dict[str, Any] | None = None, **kw: Any
+) -> co.Decision:
     resolved: list[str] = []
 
     def resolve(origin: str, **_: Any) -> hr.Snapshot:
@@ -402,7 +438,10 @@ def test_unlisted_origin_refuses_without_resolution_or_grant() -> None:
     decision = decide(channel, policy=policy)
     assert (decision.status, decision.category) == ("REFUSED", "origin.not_admitted")
     assert "grant" not in channel.ops() and channel.resolved == []  # type: ignore[attr-defined]
-    assert channel.calls[-1] == ("refuse", co.request("refuse", lease_id=LEASE, category="origin.not_admitted"))
+    assert channel.calls[-1] == (
+        "refuse",
+        co.request("refuse", lease_id=LEASE, category="origin.not_admitted"),
+    )
 
 
 @pytest.mark.parametrize(
@@ -450,17 +489,23 @@ def test_a_lease_that_never_reports_is_refused() -> None:
 def test_management_responses_are_schema_checked() -> None:
     with pytest.raises(co.CoordinatorRefused) as caught:
         co.validate_mgmt_response(
-            "status", {"protocol": hp.PROTOCOL, "status": "REFUSED", "category": "lease.unknown"}
+            "status",
+            {"protocol": hp.PROTOCOL, "status": "REFUSED", "category": "lease.unknown"},
         )
     assert caught.value.label == "lease.unknown"
     with pytest.raises(co.CoordinatorRefused):
-        co.validate_mgmt_response("grant", {"protocol": hp.PROTOCOL, "op": "grant", "extra": 1})
+        co.validate_mgmt_response(
+            "grant", {"protocol": hp.PROTOCOL, "op": "grant", "extra": 1}
+        )
 
 
 def test_channel_refuses_unvalidated_payloads_before_any_process() -> None:
     call = co.ssh_channel("synthetic-host", "/x/c.py")
     with pytest.raises(co.CoordinatorRefused):
-        call("status", {"protocol": hp.PROTOCOL, "op": "status", "lease_id": LEASE, "cmd": "id"})
+        call(
+            "status",
+            {"protocol": hp.PROTOCOL, "op": "status", "lease_id": LEASE, "cmd": "id"},
+        )
     with pytest.raises(co.CoordinatorRefused):
         call("sh", {})
     with pytest.raises(co.CoordinatorRefused):

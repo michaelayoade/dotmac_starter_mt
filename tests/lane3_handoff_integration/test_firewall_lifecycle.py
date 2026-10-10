@@ -112,7 +112,9 @@ def test_grant_is_never_published_before_exact_readback(env: Env) -> None:
         env.host.corrupt_readback = True
 
     def observe() -> None:
-        seen["grant_file_at_install"] = (env.paths.run_root / lease / hp.GRANT_NAME).exists()
+        seen["grant_file_at_install"] = (
+            env.paths.run_root / lease / hp.GRANT_NAME
+        ).exists()
 
     def restore() -> None:
         env.host.corrupt_readback = False
@@ -166,7 +168,16 @@ def test_expiry_ends_an_established_flow_and_needs_the_guard(
     # Sensitivity: removing the NEW accepts alone does NOT end the flow,
     # because the baseline accepts ESTABLISHED traffic.
     for rule in owned_rules():
-        sh("nft", "delete", "rule", FW.family, FW.table, FW.chain, "handle", str(rule["handle"]))
+        sh(
+            "nft",
+            "delete",
+            "rule",
+            FW.family,
+            FW.table,
+            FW.chain,
+            "handle",
+            str(rule["handle"]),
+        )
     assert _grow(network, PLAIN_ADDRESS, 0.6) > 0
     window: dict[str, int] = {}
 

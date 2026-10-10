@@ -269,7 +269,9 @@ class Env:
             target = self.jobbin / item.name
             shutil.copyfile(item, target)
             target.chmod(0o644)
-        shutil.copyfile(pathlib.Path(__file__).with_name("job.py"), self.jobbin / "job.py")
+        shutil.copyfile(
+            pathlib.Path(__file__).with_name("job.py"), self.jobbin / "job.py"
+        )
         (self.jobbin / "job.py").chmod(0o644)
         (self.jobbin / "ca.pem").write_bytes(CA_PEM.read_bytes())
         (self.jobbin / "ca.pem").chmod(0o644)
@@ -290,7 +292,9 @@ class Env:
             },
             "aliases": {"exact": [], "namespaces": []},
         }
-        self._write(self.paths.config_root / "policy.json", json.dumps(self.policy).encode())
+        self._write(
+            self.paths.config_root / "policy.json", json.dumps(self.policy).encode()
+        )
         self.bootstrap = {
             "schema": hc.BOOTSTRAP_SCHEMA,
             "destinations": [
@@ -337,7 +341,9 @@ class Env:
             "expires_at": expires.isoformat(),
         }
         approval.update(changes)
-        self._write(self.paths.config_root / "approval.json", json.dumps(approval).encode())
+        self._write(
+            self.paths.config_root / "approval.json", json.dumps(approval).encode()
+        )
 
     @staticmethod
     def _write(path: pathlib.Path, data: bytes) -> None:
@@ -375,7 +381,9 @@ class Env:
         self.bootstrap_lease(lease, job)
         return lease
 
-    def wait_state(self, lease: str, states: set[str], timeout: float = 20) -> dict[str, Any]:
+    def wait_state(
+        self, lease: str, states: set[str], timeout: float = 20
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             j = self.journal()
@@ -417,7 +425,11 @@ class Env:
             "report_digest": j["report_digest"],
             "binding": self.binding(),
             "origin": BROKER,
-            "snapshot": {"digest": "7" * 64, "ttl_remaining_ms": ttl_ms, "addresses": rows},
+            "snapshot": {
+                "digest": "7" * 64,
+                "ttl_remaining_ms": ttl_ms,
+                "addresses": rows,
+            },
             "policy_digest": hp.digest(self.policy),
         }
         request.update(changes)
@@ -486,16 +498,52 @@ def make_certs() -> None:
         shutil.rmtree(CERTS)
     CERTS.mkdir(mode=0o700)
     run = lambda *a: sh("openssl", *a)  # noqa: E731
-    run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-        "-subj", "/CN=l3h-it synthetic CA", "-keyout", str(CERTS / "ca.key"),
-        "-out", str(CA_PEM))
-    run("req", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={BROKER_HOST}",
-        "-keyout", str(CERTS / "server.key"), "-out", str(CERTS / "server.csr"))
+    run(
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-days",
+        "1",
+        "-subj",
+        "/CN=l3h-it synthetic CA",
+        "-keyout",
+        str(CERTS / "ca.key"),
+        "-out",
+        str(CA_PEM),
+    )
+    run(
+        "req",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-subj",
+        f"/CN={BROKER_HOST}",
+        "-keyout",
+        str(CERTS / "server.key"),
+        "-out",
+        str(CERTS / "server.csr"),
+    )
     ext = CERTS / "ext.cnf"
     ext.write_text(f"subjectAltName=DNS:{BROKER_HOST}\n")
-    run("x509", "-req", "-in", str(CERTS / "server.csr"), "-CA", str(CA_PEM),
-        "-CAkey", str(CERTS / "ca.key"), "-CAcreateserial", "-days", "1",
-        "-extfile", str(ext), "-out", str(CERTS / "server.pem"))
+    run(
+        "x509",
+        "-req",
+        "-in",
+        str(CERTS / "server.csr"),
+        "-CA",
+        str(CA_PEM),
+        "-CAkey",
+        str(CERTS / "ca.key"),
+        "-CAcreateserial",
+        "-days",
+        "1",
+        "-extfile",
+        str(ext),
+        "-out",
+        str(CERTS / "server.pem"),
+    )
 
 
 # ── servers in the namespace (root-owned; root egress is baseline-allowed) ─
@@ -530,7 +578,9 @@ class Servers:
                 conn, _ = server.accept()
             except OSError:
                 continue
-            threading.Thread(target=self._drain, args=(conn, address), daemon=True).start()
+            threading.Thread(
+                target=self._drain, args=(conn, address), daemon=True
+            ).start()
 
     def _drain(self, conn: Any, address: str) -> None:
         with conn:
@@ -559,8 +609,12 @@ class Servers:
                     body = b'{"value":"a.b.c"}'
                     status = b"200 OK" if host in request else b"421 Misdirected"
                     tls.sendall(
-                        b"HTTP/1.1 " + status + b"\r\nContent-Length: "
-                        + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body
+                        b"HTTP/1.1 "
+                        + status
+                        + b"\r\nContent-Length: "
+                        + str(len(body)).encode()
+                        + b"\r\nConnection: close\r\n\r\n"
+                        + body
                     )
             except OSError:
                 continue

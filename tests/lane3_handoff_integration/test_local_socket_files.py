@@ -49,10 +49,13 @@ def test_positive_report_grant_consume_and_pinned_tls(env: Env) -> None:
         e["match"]["right"]
         for r in owned_rules()
         for e in r["expr"]
-        if "match" in e and e["match"]["left"].get("payload", {}).get("field") == "daddr"
+        if "match" in e
+        and e["match"]["left"].get("payload", {}).get("field") == "daddr"
     )
     assert addresses == sorted([BOOTSTRAP_ADDRESS, TLS_ADDRESS])
-    assert j["grant"]["snapshot"]["addresses"] == [{"family": 4, "address": TLS_ADDRESS}]
+    assert j["grant"]["snapshot"]["addresses"] == [
+        {"family": 4, "address": TLS_ADDRESS}
+    ]
     closed = env.cleanup(lease)
     assert closed["evidence"]["outcome"] == "COMPLETED"
     assert closed["evidence"]["gate0_accepted"] is False
@@ -92,7 +95,14 @@ def test_wrong_uid_with_the_task_group_is_refused_and_ends_the_lease(env: Env) -
     lease = env.start(["sleep", "20"])
     _, gid, unit = _ids(env, lease)
     subprocess.run(
-        ["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "l3hitother"],
+        [
+            "useradd",
+            "--system",
+            "--no-create-home",
+            "--shell",
+            "/usr/sbin/nologin",
+            "l3hitother",
+        ],
         check=True,
         capture_output=True,
     )
@@ -257,7 +267,9 @@ def test_a_journal_from_another_boot_only_cleans_up(env: Env) -> None:
         j["boot_id"] = "00000000-0000-0000-0000-000000000000"
         controller.save(j)
     with pytest.raises(hc.ControllerRefused) as caught:
-        env.controller().status({"protocol": hp.PROTOCOL, "op": "status", "lease_id": lease})
+        env.controller().status(
+            {"protocol": hp.PROTOCOL, "op": "status", "lease_id": lease}
+        )
     assert caught.value.label == "boot.mismatch"
     result = env.controller().reconcile()
     assert result["state"] == "CLOSED"

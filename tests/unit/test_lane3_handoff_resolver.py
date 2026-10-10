@@ -25,7 +25,9 @@ import lane3_handoff_resolver as hr
 
 HOST = "broker.example"
 ORIGIN = "https://" + HOST
-ALIASES = hr.AliasPolicy(frozenset({"edge.example.net"}), frozenset({"cdn.example.org"}))
+ALIASES = hr.AliasPolicy(
+    frozenset({"edge.example.net"}), frozenset({"cdn.example.org"})
+)
 DOC = tuple(
     ipaddress.ip_network(n)
     for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")
@@ -160,9 +162,7 @@ def test_cname_loop_refuses() -> None:
 def test_chain_longer_than_eight_refuses_and_eight_is_accepted() -> None:
     def zone_of(links: int) -> Zone:
         names = [HOST] + [f"n{i}.cdn.example.org" for i in range(links)]
-        rows = [
-            (names[i], hr.TYPE_CNAME, 300, names[i + 1]) for i in range(links)
-        ]
+        rows = [(names[i], hr.TYPE_CNAME, 300, names[i + 1]) for i in range(links)]
         return {
             hr.TYPE_A: ([*rows, (names[-1], hr.TYPE_A, 300, "192.0.2.10")], 0),
             hr.TYPE_AAAA: (list(rows), 0),
@@ -348,7 +348,10 @@ def test_snapshot_rows_are_rechecked_where_consumed() -> None:
     for bad in (
         [{"family": 4, "address": "10.0.0.1"}],
         [{"family": 4, "address": "192.0.2.10"}] * 2,
-        [{"family": 6, "address": "2001:db8::2"}, {"family": 4, "address": "192.0.2.1"}],
+        [
+            {"family": 6, "address": "2001:db8::2"},
+            {"family": 4, "address": "192.0.2.1"},
+        ],
         [],
     ):
         with pytest.raises(hr.SnapshotRefused):

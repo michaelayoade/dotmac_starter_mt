@@ -415,9 +415,7 @@ def readback_binding(
         and r.get("id") != run_id
         and r.get("status") in ACTIVE_RUN
     ]
-    if others or not any(
-        isinstance(r, dict) and r.get("id") == run_id for r in listed
-    ):
+    if others or not any(isinstance(r, dict) and r.get("id") == run_id for r in listed):
         raise refused(ambiguous)
 
     for path, digest in sorted(cfg.supplier_modules.items()):
@@ -596,7 +594,9 @@ def decide(
     status = wait_for_report(channel, lease, sleep=sleep)
     if status["state"] != "REPORTED":
         if status["state"] not in hc.TERMINAL:
-            channel("refuse", request("refuse", lease_id=lease, category="state.invalid"))
+            channel(
+                "refuse", request("refuse", lease_id=lease, category="state.invalid")
+            )
         return Decision("REFUSED", status["category"] or "state.invalid")
 
     def refuse(label: str) -> Decision:
@@ -674,9 +674,7 @@ def decide(
         return Decision("REFUSED", label)
     if reply["state"] != "GRANTED" or reply["manifest_digest"] != expected_manifest:
         return refuse("grant.mismatch")
-    return Decision(
-        "GRANTED", None, reply["grant_digest"], reply["manifest_digest"]
-    )
+    return Decision("GRANTED", None, reply["grant_digest"], reply["manifest_digest"])
 
 
 # ── coordinator state and CLI ──────────────────────────────────────────────
@@ -733,7 +731,9 @@ def op_launch(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str,
             "work_folder": "_work",
         },
     )
-    runner_id = _field(_field(jit, "runner", dict, "api.unavailable"), "id", int, "api.unavailable")
+    runner_id = _field(
+        _field(jit, "runner", dict, "api.unavailable"), "id", int, "api.unavailable"
+    )
     state.update(run_id=run_id, runner_id=runner_id)
     save_state(cfg.state_path, state)
     encoded = _field(jit, "encoded_jit_config", str, "api.unavailable")
@@ -776,7 +776,9 @@ def op_cleanup(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
         )
         ids = {r.get("id") for r in _field(group, "runners", list, "api.unavailable")}
         if state["runner_id"] in ids:
-            gh_api(f"orgs/{cfg.runner_org}/actions/runners/{state['runner_id']}", "DELETE")
+            gh_api(
+                f"orgs/{cfg.runner_org}/actions/runners/{state['runner_id']}", "DELETE"
+            )
     cfg.state_path.unlink()
     return {"state": reply["state"], "evidence": reply["evidence"]}
 
@@ -805,7 +807,11 @@ def main(argv: list[str]) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     except Exception as exc:
-        label = exc.label if isinstance(exc, CoordinatorRefused | hc.ControllerRefused) else "internal"
+        label = (
+            exc.label
+            if isinstance(exc, CoordinatorRefused | hc.ControllerRefused)
+            else "internal"
+        )
         print(json.dumps({"status": "REFUSED", "category": label}))
         return 1
 

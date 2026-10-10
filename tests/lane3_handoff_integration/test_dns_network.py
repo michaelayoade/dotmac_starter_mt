@@ -99,7 +99,9 @@ def resolve(**kwargs: Any) -> hr.Snapshot:
     return hr.resolve(BROKER, **args)
 
 
-def a(address: str, ttl: int = 300, owner: str = BROKER_HOST) -> tuple[str, int, int, str]:
+def a(
+    address: str, ttl: int = 300, owner: str = BROKER_HOST
+) -> tuple[str, int, int, str]:
     return (owner, hr.TYPE_A, ttl, address)
 
 
@@ -125,8 +127,14 @@ def a(address: str, ttl: int = 300, owner: str = BROKER_HOST) -> tuple[str, int,
             "dns.alias_not_admitted",
         ),
         ({hr.TYPE_A: [a(TLS_ADDRESS), a("10.1.2.3")]}, "dns.address_not_routable"),
-        ({hr.TYPE_AAAA: [(BROKER_HOST, hr.TYPE_AAAA, 300, "fd00::1")]}, "dns.address_not_routable"),
-        ({hr.TYPE_A: [a(f"203.0.113.{i}") for i in range(1, 34)]}, "dns.address_overflow"),
+        (
+            {hr.TYPE_AAAA: [(BROKER_HOST, hr.TYPE_AAAA, 300, "fd00::1")]},
+            "dns.address_not_routable",
+        ),
+        (
+            {hr.TYPE_A: [a(f"203.0.113.{i}") for i in range(1, 34)]},
+            "dns.address_overflow",
+        ),
         ({hr.TYPE_A: [a(TLS_ADDRESS, ttl=10)]}, "dns.short_ttl"),
         ({}, "dns.no_address"),
     ],
@@ -186,7 +194,8 @@ def test_firewall_and_connection_consume_the_identical_snapshot(
         e["match"]["right"]
         for r in owned_rules()
         for e in r["expr"]
-        if "match" in e and e["match"]["left"].get("payload", {}).get("field") == "daddr"
+        if "match" in e
+        and e["match"]["left"].get("payload", {}).get("field") == "daddr"
     }
     assert TLS_ADDRESS in granted and OTHER_ADDRESS not in granted
     env.cleanup(lease)

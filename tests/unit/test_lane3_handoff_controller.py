@@ -136,7 +136,13 @@ def test_duplicate_exact_report_returns_recorded_status() -> None:
             "origin.flags",
         ),
         (journal, poll(), PEER, 2 * 10**9, "peer.refused"),
-        (reported, report(origin="https://other.example"), PEER, 3 * 10**9, "report.changed"),
+        (
+            reported,
+            report(origin="https://other.example"),
+            PEER,
+            3 * 10**9,
+            "report.changed",
+        ),
         (reported, report(), (4242, 778), 3 * 10**9, "report.changed"),
         (reported, poll(), (4243, 777), 3 * 10**9, "peer.refused"),
         (reported, poll(), (4242, 778), 3 * 10**9, "peer.refused"),
@@ -159,7 +165,9 @@ def test_each_binding_independently_refuses_and_ends_the_lease(
 
 def test_second_consume_refuses_and_never_issues_a_second_grant() -> None:
     j = granted()
-    assert hc.transition(j, consume("9" * 64), PEER, 4 * 10**9)[0]["status"] == "CONSUMED"
+    assert (
+        hc.transition(j, consume("9" * 64), PEER, 4 * 10**9)[0]["status"] == "CONSUMED"
+    )
     reply, invalidate = hc.transition(j, consume("9" * 64), PEER, 5 * 10**9)
     assert reply == hp.response("REFUSED", "grant.consumed") and invalidate
     assert hc.transition(j, poll(), PEER, 6 * 10**9)[0]["status"] == "REFUSED"
@@ -243,7 +251,9 @@ def test_exact_accept_is_recognised_by_uid_or_user_name() -> None:
         lambda r: r["expr"][2]["match"].update(right=8443),
         lambda r: r["expr"].pop(3),  # no ct state new
         lambda r: r["expr"][3]["match"].update(right=["new", "established"]),
-        lambda r: r["expr"].insert(0, {"match": {"op": "==", "left": {"meta": {"key": "oif"}}, "right": "lo"}}),
+        lambda r: r["expr"].insert(
+            0, {"match": {"op": "==", "left": {"meta": {"key": "oif"}}, "right": "lo"}}
+        ),
         lambda r: r["expr"].__setitem__(5, {"drop": None}),
         lambda r: r.update(comment=hc.comment_for("f" * 32, "a", 0)),
         lambda r: r.update(table="other"),
@@ -256,8 +266,17 @@ def test_any_weakened_or_foreign_rule_is_not_exact(weaken: Any) -> None:
 
 
 def test_classify_owned_deletes_only_exact_rules_and_refuses_drift() -> None:
-    unrelated = {"family": "inet", "table": FW.table, "chain": FW.chain, "handle": 3, "comment": "keep", "expr": []}
-    handles, guard = hc.classify_owned([unrelated, guard_rule(), accept_rule()], FW, LEASE, UID, USER, [SPEC], True)
+    unrelated = {
+        "family": "inet",
+        "table": FW.table,
+        "chain": FW.chain,
+        "handle": 3,
+        "comment": "keep",
+        "expr": [],
+    }
+    handles, guard = hc.classify_owned(
+        [unrelated, guard_rule(), accept_rule()], FW, LEASE, UID, USER, [SPEC], True
+    )
     assert sorted(handles) == [10, 20] and guard
     drifted = accept_rule(11)
     drifted["expr"][1]["match"]["right"] = "198.51.100.1"
@@ -283,9 +302,13 @@ def test_rendered_rules_carry_only_validated_tokens() -> None:
     assert "position" not in guard and guard.endswith(f':{LEASE}:x"')
     for bad in (
         lambda: hc.accept_line(FW, LEASE, 0, SPEC, 7),
-        lambda: hc.accept_line(FW, LEASE, UID, {**SPEC, "address": "192.0.2.10; flush ruleset"}, 7),
+        lambda: hc.accept_line(
+            FW, LEASE, UID, {**SPEC, "address": "192.0.2.10; flush ruleset"}, 7
+        ),
         lambda: hc.accept_line(FW, LEASE, UID, {**SPEC, "port": 22}, 7),
-        lambda: hc.accept_line(hc.Firewall("inet", "t;x", "output", "a"), LEASE, UID, SPEC, 7),
+        lambda: hc.accept_line(
+            hc.Firewall("inet", "t;x", "output", "a"), LEASE, UID, SPEC, 7
+        ),
         lambda: hc.delete_line(FW, 0),
     ):
         with pytest.raises((hc.ControllerRefused, hp.ProtocolRefused)):
@@ -306,7 +329,9 @@ def test_stable_digest_ignores_handles_and_counters_only() -> None:
 
 
 def docs(address: Any) -> bool:
-    return address.is_private is False or str(address).startswith(("192.0.2.", "2001:db8"))
+    return address.is_private is False or str(address).startswith(
+        ("192.0.2.", "2001:db8")
+    )
 
 
 def bootstrap(rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -348,8 +373,18 @@ def test_management_schema_is_fixed_data_only() -> None:
         {**good, "path": "/tmp/x"},
         {**good, "op": "shell"},
         {**good, "lease_id": "../" + LEASE[3:]},
-        {"protocol": hp.PROTOCOL, "op": "bootstrap", "lease_id": LEASE, "jit_config": "a b"},
-        {"protocol": hp.PROTOCOL, "op": "refuse", "lease_id": LEASE, "category": "free text"},
+        {
+            "protocol": hp.PROTOCOL,
+            "op": "bootstrap",
+            "lease_id": LEASE,
+            "jit_config": "a b",
+        },
+        {
+            "protocol": hp.PROTOCOL,
+            "op": "refuse",
+            "lease_id": LEASE,
+            "category": "free text",
+        },
     ):
         with pytest.raises(hc.ControllerRefused):
             hc.validate_mgmt(bad)
