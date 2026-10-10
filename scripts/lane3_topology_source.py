@@ -258,15 +258,19 @@ def wireguard_github_openbao_source(
     oidc_context_factory: Any = None,
     oidc_request_started: Any = None,
     require_pinned: bool = False,
+    wireguard_guard: Any = None,
 ) -> TopologySource:
     """Explicit private-tunnel composition; no auto-discovery or permission grant.
 
-    Handoff launchers must set ``require_pinned=True``. Existing explicitly
-    composed legacy callers keep their default until migrated.
+    Handoff launchers must set ``require_pinned=True`` and supply the trusted
+    ``HandoffClient.wireguard_check`` callback as ``wireguard_guard``. Existing
+    explicitly composed legacy callers keep their default until migrated.
     """
     if require_pinned and oidc_pinned is None:
         # Refuse before WireGuard state inspection or any credential callback.
         raise TopologySourceUnavailable("oidc.request")
+    if require_pinned and not callable(wireguard_guard):
+        raise TopologySourceUnavailable("transport.wireguard")
     from lane3_wireguard_topology import WireGuardOpenBaoTransport
 
     transport = WireGuardOpenBaoTransport(
@@ -275,6 +279,7 @@ def wireguard_github_openbao_source(
         interface=interface,
         expected_local_public_key=expected_local_public_key,
         expected_peer_public_key=expected_peer_public_key,
+        guard=wireguard_guard,
     )
     return github_openbao_source(
         transport=transport,

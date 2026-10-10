@@ -431,3 +431,26 @@ def test_evidence_binding_canary_detects_weakened_validation(monkeypatch):
     monkeypatch.setattr(hp, "validate_binding", lambda value: value)
     with pytest.raises(pytest.fail.Exception):
         canary()
+
+
+def test_wireguard_check_schema_is_closed_and_digest_bound():
+    request = {
+        "protocol": hp.PROTOCOL,
+        "op": "wireguard-check",
+        "lease_id": LEASE,
+        "nonce": NONCE,
+        "config_digest": "a" * 64,
+    }
+    assert hp.validate_request(request) == request
+    for change in (
+        {"config_digest": "PRIVATE-KEY-CANARY"},
+        {"endpoint_address": "192.0.2.1"},
+        {"op": "wireguard-dump"},
+        {"config_digest": True},
+    ):
+        with pytest.raises(hp.ProtocolRefused):
+            hp.validate_request({**request, **change})
+    missing = dict(request)
+    missing.pop("nonce")
+    with pytest.raises(hp.ProtocolRefused):
+        hp.validate_request(missing)

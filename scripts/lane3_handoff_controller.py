@@ -88,7 +88,12 @@ PINNED_MODULES: Final = (
     "lane3_handoff_controller.py",
     "lane3_handoff_protocol.py",
     "lane3_handoff_resolver.py",
+    "lane3_wireguard_topology.py",
+    "lane3_openbao_topology.py",
+    "lane3_topology_source.py",
+    "lane3_topology.py",
 )
+WIREGUARD_CONFIG: Final = Path("/etc/dotmac-lane3/openbao-wireguard.json")
 USER_PREFIX: Final = "l3h-"
 APPROVAL_MAX: Final = datetime.timedelta(minutes=30)
 LOCK_WAIT_S: Final = 4.0
@@ -1102,6 +1107,7 @@ MGMT_REQUESTS: Final[dict[str, set[str]]] = {
         "op",
         "lease_id",
         "report_digest",
+        "expected_manifest_digest",
         "binding",
         "qualification",
         "origin",
@@ -1132,6 +1138,8 @@ def validate_mgmt(value: Any) -> dict[str, Any]:
             hp.hex64(value["policy_digest"])
         if "report_digest" in value:
             hp.hex64(value["report_digest"])
+        if "expected_manifest_digest" in value:
+            hp.hex64(value["expected_manifest_digest"])
         if op == "prepare":
             validate_qualification(value["qualification"])
         if op == "grant":
@@ -1675,6 +1683,18 @@ class Controller:
             if hashlib.sha256(body).hexdigest() != expected:
                 raise refused("binding.mismatch")
 
+    def _verify_controller(
+        self, j: Mapping[str, Any], cfg: HostConfig | None = None
+    ) -> None:
+        cfg = cfg if cfg is not None else self.host_config()
+        expected = j["controller_digest"]
+        if (
+            cfg.controller_digest != expected
+            or controller_digest(self.module_dir) != expected
+            or controller_digest(self.paths.bin) != expected
+        ):
+            raise refused("controller.digest")
+
     def _pin_modules(self, cdigest: str) -> None:
         dfd = self._state_dir()
         try:
@@ -1740,6 +1760,7 @@ class Controller:
                 raise refused("state.invalid")
             try:
                 cfg = self.host_config()
+                self._verify_controller(j, cfg)
                 self._approval(
                     j["bootstrap_manifest_digest"],
                     j["policy_digest"],
@@ -1906,6 +1927,8 @@ class Controller:
 
     def timing(self, request: Mapping[str, Any]) -> dict[str, Any]:
         req = validate_mgmt(request)
+        if req["op"] != "timing":
+            raise refused("schema.invalid")
         with self.locked():
             j = self._active(req["lease_id"])
             if (
@@ -1975,6 +1998,7 @@ class Controller:
             raise refused("state.invalid")
         if now >= j["expires_at_monotonic_ns"]:
             raise refused("lease.expired")
+        self._verify_controller(j)
         if not hmac.compare_digest(req["report_digest"], j["report_digest"]):
             raise refused("binding.mismatch")
         binding = req["binding"]
@@ -2026,6 +2050,8 @@ class Controller:
             frozenset({"runner-https", "module-https", "oidc-https"}),
         )
         manifest_digest = hp.digest(effective)
+        if manifest_digest != req["expected_manifest_digest"]:
+            raise refused("grant.mismatch")
         grant = hp.validate_grant(
             {
                 "protocol": hp.PROTOCOL,
@@ -2249,15 +2275,21 @@ class Controller:
                 raise refused("cleanup.identity")
             specs = [*j["rules"], *j["planned"]]
             if identity is not None:
-                results["guard_installed"] = self._ensure_guard(j, fw, specs)
-                if not results["guard_installed"]:
-                    raise refused("cleanup.drift")
+                try:
+                    results["guard_installed"] = self._ensure_guard(j, fw, specs)
+                except (ControllerRefused, OSError):
+                    results["guard_installed"] = False
                 self._checkpoint("cleanup.guard")
-                self.host.kill_unit(j["units"]["runner"])
+                with contextlib.suppress(ControllerRefused, OSError):
+                    self.host.kill_unit(j["units"]["runner"])
                 if j["cgroup"]:
-                    self.host.kill_cgroup(j["cgroup"])
+                    with contextlib.suppress(ControllerRefused, OSError):
+                        self.host.kill_cgroup(j["cgroup"])
                 self._await_quiet(j)
                 self._checkpoint("cleanup.killed")
+                results["processes_absent"] = results["sockets_absent"] = True
+                if not results["guard_installed"]:
+                    raise refused("cleanup.drift")
             results["processes_absent"] = results["sockets_absent"] = True
             rules, _ = self.chain(fw)
             handles, _guard = classify_owned(
@@ -2367,7 +2399,8 @@ class Controller:
             if time.monotonic() >= deadline:
                 raise refused("cleanup.processes")
             if j["cgroup"]:
-                self.host.kill_cgroup(j["cgroup"])
+                with contextlib.suppress(ControllerRefused, OSError):
+                    self.host.kill_cgroup(j["cgroup"])
             # The UID is unique to this lease: any process holding it (even
             # one that left the cgroup) is owned and is killed too.
             for pid in uid_processes(j["uid"]):
@@ -2489,9 +2522,98 @@ class Controller:
                         _history(j, "REFUSED", self.host.now_ns())
                     self._cleanup_locked(j, "REFUSED", j["category"])
 
+    def _wireguard_live(self, config_digest: str, deadline_ns: int) -> None:
+        # The file and all command arguments belong to root. The peer supplies
+        # only a digest, never a path, interface, executable or argv fragment.
+        from lane3_wireguard_topology import (
+            WireGuardOpenBaoTransport,
+            wireguard_config_digest,
+        )
+
+        config = _exact(
+            strict_json(read_protected(WIREGUARD_CONFIG, exact_mode=0o644)),
+            {
+                "endpoint_address",
+                "source_address",
+                "interface",
+                "expected_local_public_key",
+                "expected_peer_public_key",
+                "oidc_broker_origin",
+            },
+            "binding.mismatch",
+        )
+        selected = {
+            key: value for key, value in config.items() if key != "oidc_broker_origin"
+        }
+        if wireguard_config_digest(selected) != config_digest:
+            raise refused("binding.mismatch")
+
+        def command(argv: list[str]) -> str:
+            remaining = (deadline_ns - self.host.now_ns()) / 1_000_000_000
+            if remaining <= 0:
+                raise refused("lease.expired")
+            raw = self.host._run(argv, timeout=min(3.0, remaining))
+            if len(raw) > MAX_CONFIG:
+                raise refused("binding.mismatch")
+            return raw.decode("utf-8", errors="strict").strip()
+
+        # Constructor performs the canonical full live guard without HTTP.
+        WireGuardOpenBaoTransport(**selected, command=command)
+
+    def _wireguard_request(
+        self,
+        j: dict[str, Any],
+        request: Mapping[str, Any],
+        peer: tuple[int, int],
+        now: int,
+        *,
+        operation_deadline_ns: int | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        reply, invalidate = transition(
+            j,
+            {key: value for key, value in request.items() if key != "config_digest"}
+            | {"op": "poll"},
+            peer,
+            now,
+        )
+        if invalidate or reply["status"] != "CONSUMED":
+            return _end(j, reply.get("category") or "state.invalid", now)
+        deadline = min(
+            j["expires_at_monotonic_ns"], j["grant"]["expires_at_monotonic_ns"]
+        )
+        if now >= deadline:
+            return _end(j, "lease.expired", now)
+        budget = min(
+            deadline,
+            operation_deadline_ns
+            if operation_deadline_ns is not None
+            else now + int(hp.IO_DEADLINE_S * 1_000_000_000),
+        )
+        if self.host.now_ns() >= budget:
+            return _end(j, "deadline.insufficient", self.host.now_ns())
+        try:
+            self._verify_controller(j)
+            self._wireguard_live(request["config_digest"], budget)
+        except Exception:
+            current = self.host.now_ns()
+            return _end(
+                j,
+                "lease.expired" if current >= deadline else "binding.mismatch",
+                current,
+            )
+        after = self.host.now_ns()
+        if after >= budget:
+            return _end(
+                j,
+                "lease.expired" if after >= deadline else "deadline.insufficient",
+                after,
+            )
+        return hp.response("CONSUMED"), False
+
     def handle_request(
         self, conn: socket.socket, pid: int, uid: int
     ) -> tuple[dict[str, Any], bool]:
+        operation_started = self.host.now_ns()
         j = self.load()
         if j is None or j["state"] in TERMINAL:
             return hp.response("REFUSED", "lease.unknown"), False
@@ -2521,9 +2643,19 @@ class Controller:
             j = self.load()
             if j is None or j["boot_id"] != self.host.boot_id():
                 raise refused("boot.mismatch")
-            reply, invalidate = transition(
-                j, request, (pid, started), self.host.now_ns()
-            )
+            if request["op"] == "wireguard-check":
+                reply, invalidate = self._wireguard_request(
+                    j,
+                    request,
+                    (pid, started),
+                    self.host.now_ns(),
+                    operation_deadline_ns=operation_started
+                    + int(hp.IO_DEADLINE_S * 1_000_000_000),
+                )
+            else:
+                reply, invalidate = transition(
+                    j, request, (pid, started), self.host.now_ns()
+                )
             # The PID must still be the same live process before we commit.
             if proc_start_time(pid) != started or proc_cgroup(pid) != j["cgroup"]:
                 raise refused("peer.refused")

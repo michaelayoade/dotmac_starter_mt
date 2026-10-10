@@ -88,6 +88,17 @@ def config() -> co.Config:
 def world() -> dict[str, Any]:
     base = f"repos/{REPO}/actions/runs/{RUN}"
     return {
+        **{
+            (
+                f"repos/{REPO}/actions/workflows/synthetic.yml/runs"
+                f"?status={status}&per_page=100"
+            ): {
+                "total_count": 0,
+                "workflow_runs": [],
+            }
+            for status in co.ACTIVE_RUN
+            if status != "in_progress"
+        },
         ADMISSION_PATH: {
             "encoding": "base64",
             "content": base64.b64encode(ADMISSION).decode(),
@@ -139,11 +150,13 @@ def world() -> dict[str, Any]:
                 "user": {"login": "synthetic-human"},
             }
         ],
-        f"repos/{REPO}/actions/workflows/synthetic.yml/runs?per_page=100": {
-            "total_count": 2,
+        (
+            f"repos/{REPO}/actions/workflows/synthetic.yml/runs"
+            "?status=in_progress&per_page=100"
+        ): {
+            "total_count": 1,
             "workflow_runs": [
                 {"id": RUN, "status": "in_progress"},
-                {"id": RUN - 1, "status": "completed"},
             ],
         },
         f"repos/{STARTER}/contents/scripts/lane3_github_oidc.py?ref={STARTER_SHA}": {
@@ -218,7 +231,9 @@ def _set(path: str, *keys: Any, value: Any) -> Any:
 
 BASE = f"repos/{REPO}/actions/runs/{RUN}"
 JOBS = f"{BASE}/attempts/1/jobs?per_page=100"
-RUNS = f"repos/{REPO}/actions/workflows/synthetic.yml/runs?per_page=100"
+RUNS = (
+    f"repos/{REPO}/actions/workflows/synthetic.yml/runs?status=in_progress&per_page=100"
+)
 MODPATH = f"repos/{STARTER}/contents/scripts/lane3_github_oidc.py?ref={STARTER_SHA}"
 
 
@@ -907,3 +922,20 @@ def test_registration_canary_detects_removed_durable_intent(
 
     with pytest.raises(AssertionError):
         co.op_launch(cfg, lambda *args: pytest.fail("bootstrap forbidden"), api, RUN)
+
+
+def test_historical_runs_do_not_block_complete_active_exclusivity() -> None:
+    data = world()
+    # An old unfiltered-history endpoint may contain arbitrary terminal volume;
+    # it is not queried when deciding current active exclusivity.
+    data[f"repos/{REPO}/actions/workflows/synthetic.yml/runs?per_page=100"] = {
+        "total_count": 10_000,
+        "workflow_runs": [{"id": RUN - 1, "status": "completed"}],
+    }
+    assert binding(data)["run_id"] == RUN
+    pending = (
+        f"repos/{REPO}/actions/workflows/synthetic.yml/runs?status=pending&per_page=100"
+    )
+    data[pending] = {"total_count": 101, "workflow_runs": []}
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        binding(data)

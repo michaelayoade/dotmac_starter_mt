@@ -869,3 +869,54 @@ def test_root_launch_digest_mismatch_prevents_report(env: Env):
             request_url=REQUEST_URL, expectation=expectation
         )
     assert caught.value.label == "handoff.binding" and env.sent == []
+
+
+def test_wireguard_check_authenticates_nonce_and_requires_consumed(env: Env):
+    put(env.lease / hp.GRANT_NAME, grant_doc())
+    env.script = [hp.response("CONSUMED")]
+    assert env.client().wireguard_check("a" * 64) is None
+    assert env.sent == [
+        {
+            "protocol": hp.PROTOCOL,
+            "op": "wireguard-check",
+            "lease_id": LEASE,
+            "nonce": NONCE,
+            "config_digest": "a" * 64,
+        }
+    ]
+
+
+def test_wireguard_check_refuses_wait_before_returning_guard_success(env: Env):
+    put(env.lease / hp.GRANT_NAME, grant_doc())
+    env.script = [hp.response("WAIT")]
+    with pytest.raises(c.HandoffRefused):
+        env.client().wireguard_check("a" * 64)
+
+
+def test_wireguard_check_invalid_digest_never_exchanges(env: Env):
+    with pytest.raises(c.HandoffRefused):
+        env.client().wireguard_check("PRIVATE-TOKEN-CANARY")
+    assert env.sent == []
+
+
+def test_wireguard_check_deadline_crossing_after_exchange_refuses(env: Env):
+    put(env.lease / hp.GRANT_NAME, grant_doc())
+    client = env.client()
+
+    def exchange(request):
+        env.sent.append(request)
+        env.clock.now = GRANT_EXPIRY
+        return hp.response("CONSUMED")
+
+    client._exchange = exchange
+    with pytest.raises(c.HandoffRefused) as caught:
+        client.wireguard_check("a" * 64)
+    assert caught.value.label == "handoff.expired" and len(env.sent) == 1
+
+
+def test_wireguard_check_stale_grant_never_exchanges(env: Env):
+    put(env.lease / hp.GRANT_NAME, grant_doc())
+    env.clock.now = GRANT_EXPIRY
+    with pytest.raises(c.HandoffRefused) as caught:
+        env.client().wireguard_check("a" * 64)
+    assert caught.value.label == "handoff.expired" and env.sent == []

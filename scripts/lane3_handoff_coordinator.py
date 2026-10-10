@@ -454,20 +454,28 @@ def readback_binding(
         raise refused(missing)
 
     workflow = cfg.workflow_path.rsplit("/", 1)[1]
-    runs = _api(
-        api, f"repos/{repo}/actions/workflows/{workflow}/runs?per_page=100", ambiguous
-    )
-    listed = _field(runs, "workflow_runs", list, ambiguous)
-    if _field(runs, "total_count", int, ambiguous) > len(listed):
-        raise refused(ambiguous)
-    others = [
-        r
-        for r in listed
-        if isinstance(r, dict)
-        and r.get("id") != run_id
-        and r.get("status") in ACTIVE_RUN
-    ]
-    if others or not any(isinstance(r, dict) and r.get("id") == run_id for r in listed):
+    found = False
+    # Terminal history is irrelevant to exclusivity. Each active status query
+    # must be complete; a truncated active set still fails closed.
+    for active in sorted(ACTIVE_RUN):
+        runs = _api(
+            api,
+            f"repos/{repo}/actions/workflows/{workflow}/runs?status={active}&per_page=100",
+            ambiguous,
+        )
+        listed = _field(runs, "workflow_runs", list, ambiguous)
+        if _field(runs, "total_count", int, ambiguous) != len(listed):
+            raise refused(ambiguous)
+        for candidate in listed:
+            if (
+                type(candidate) is not dict
+                or type(candidate.get("id")) is not int
+                or candidate["id"] != run_id
+                or candidate.get("status") != active
+            ):
+                raise refused(ambiguous)
+            found = True
+    if not found:
         raise refused(ambiguous)
 
     for path, digest in sorted(cfg.supplier_modules.items()):
@@ -787,6 +795,7 @@ def decide(
                 "grant",
                 lease_id=lease,
                 report_digest=report_digest,
+                expected_manifest_digest=expected_manifest,
                 binding=binding,
                 qualification=dict(qualification),
                 origin=origin,

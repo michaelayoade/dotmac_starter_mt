@@ -11,6 +11,8 @@ defaults:
 # DNS server, generated throwaway TLS material and generated test identities.
 # systemd_lifecycle uses only uniquely named temporary host units. It measures
 # actual production effectors, not complete controller boot/recovery ordering.
+# The fifth suite, wireguard_broker, exercises a real unprivileged NNP client
+# and socket with root-only synthetic metadata, not actual kernel WireGuard.
 # Nothing here contacts OpenBao, a fleet host, a self-hosted runner or the
 # GitHub API, and nothing dispatches a protected workflow. No secret is used.
 
@@ -70,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle]
+        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle, wireguard_broker]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

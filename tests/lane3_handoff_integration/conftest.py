@@ -496,6 +496,14 @@ class Env:
         }
         request.update(changes)
         request["snapshot"].setdefault("challenge", timing["challenge"])
+        request.setdefault(
+            "expected_manifest_digest",
+            hp.digest(
+                hc.effective_manifest(
+                    self.bootstrap, request["origin"], request["snapshot"]["addresses"]
+                )
+            ),
+        )
         return self.controller().grant(request)
 
     def cleanup(self, lease: str) -> dict[str, Any]:

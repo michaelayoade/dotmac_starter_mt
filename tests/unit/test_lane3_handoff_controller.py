@@ -732,3 +732,306 @@ def test_cleanup_returns_exact_closed_archive_without_mutating_new_lease(
         controller.cleanup(
             {"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": LEASE}
         )
+
+
+@pytest.mark.parametrize("guard_failure", [False, "raises"])
+def test_guard_failure_still_kills_owned_execution_before_blocking(
+    monkeypatch: Any, guard_failure: Any
+) -> None:
+    effects: list[str] = []
+
+    class Host:
+        now_ns = staticmethod(lambda: 10**9)
+        identity = staticmethod(lambda user: (UID, UID))
+        stop_unit = staticmethod(lambda unit: None)
+        kill_unit = staticmethod(lambda unit: effects.append("unit-killed"))
+        kill_cgroup = staticmethod(lambda group: effects.append("cgroup-killed"))
+
+    controller = hc.Controller(host=Host())
+    monkeypatch.setattr(controller, "save", lambda j: None)
+    monkeypatch.setattr(controller, "_remove_lease_dir", lambda *args, **kw: None)
+    monkeypatch.setattr(
+        controller, "_await_quiet", lambda j: effects.append("uid-quiet")
+    )
+
+    def guard(*args: Any) -> bool:
+        if guard_failure == "raises":
+            raise hc.ControllerRefused("firewall.readback")
+        return False
+
+    monkeypatch.setattr(controller, "_ensure_guard", guard)
+    j = cleanup_journal()
+    with pytest.raises(hc.ControllerRefused, match="cleanup.blocked"):
+        controller._cleanup_locked(j, "EXPIRED", "lease.expired")
+    assert effects == ["unit-killed", "cgroup-killed", "uid-quiet"]
+    assert j["cleanup_blocked"] == "cleanup.drift"
+
+
+def test_runtime_controller_drift_refuses_authority_but_cleanup_remains_available(
+    monkeypatch: Any,
+) -> None:
+    import types
+
+    controller = hc.Controller()
+    cfg = types.SimpleNamespace(controller_digest="a" * 64)
+    monkeypatch.setattr(hc, "controller_digest", lambda path: "b" * 64)
+    with pytest.raises(hc.ControllerRefused, match="controller.digest"):
+        controller._verify_controller({"controller_digest": "a" * 64}, cfg)
+    monkeypatch.setattr(hc, "controller_digest", lambda path: "a" * 64)
+    controller._verify_controller({"controller_digest": "a" * 64}, cfg)
+    j = reported()
+    controller.host = types.SimpleNamespace(now_ns=lambda: 3 * 10**9)
+    monkeypatch.setattr(
+        controller,
+        "_verify_controller",
+        lambda j: (_ for _ in ()).throw(hc.ControllerRefused("controller.digest")),
+    )
+    with pytest.raises(hc.ControllerRefused, match="controller.digest"):
+        controller._grant_locked(j, {})
+    assert j["state"] == "REPORTED" and j["grant"] is None
+
+
+def test_timing_rejects_another_valid_operation_before_lock_or_save(
+    monkeypatch: Any,
+) -> None:
+    controller = hc.Controller()
+    monkeypatch.setattr(
+        controller, "locked", lambda: pytest.fail("wrong op reached lock")
+    )
+    with pytest.raises(hc.ControllerRefused, match="schema.invalid"):
+        controller.timing({"protocol": hp.PROTOCOL, "op": "status", "lease_id": LEASE})
+
+
+def test_manifest_mismatch_is_rejected_before_rule_or_grant_authority(
+    monkeypatch: Any,
+) -> None:
+    import types
+
+    policy = hc.parse_policy(
+        {
+            "schema": hc.POLICY_SCHEMA,
+            "version": 1,
+            "origins": {
+                "schema": "dotmac.lane3.broker-origin-policy.v1",
+                "origins": [ORIGIN],
+            },
+            "aliases": {"exact": [], "namespaces": []},
+        }
+    )
+    j = reported()
+    qualification = {
+        "repository_id": 9,
+        "run_id": 5,
+        "run_attempt": 1,
+        "workflow_sha": SHA,
+        "workflow_blob": SHA,
+        "starter_commit": SHA,
+        "environment_id": 7,
+        "approval_digest": "a" * 64,
+        "admission_digest": "b" * 64,
+        "supplier_digest": "c" * 64,
+    }
+    binding = {
+        key: qualification[key]
+        for key in (
+            "repository_id",
+            "run_id",
+            "run_attempt",
+            "workflow_sha",
+            "workflow_blob",
+            "starter_commit",
+            "admission_digest",
+            "supplier_digest",
+        )
+    }
+    binding.update(job_id=3, runner_id=4)
+    j.update(
+        qualification=qualification,
+        policy_digest=policy.digest,
+        bootstrap_manifest=bootstrap(),
+        timing={"challenge": "d" * 64, "issued_at_monotonic_ns": 10**9},
+    )
+    controller = hc.Controller(
+        host=types.SimpleNamespace(now_ns=lambda: 2 * 10**9), routable=docs
+    )
+    monkeypatch.setattr(controller, "_verify_controller", lambda j: None)
+    monkeypatch.setattr(controller, "_verify_staged_supplier", lambda j: None)
+    monkeypatch.setattr(controller, "policy", lambda: policy)
+    monkeypatch.setattr(
+        controller, "save", lambda j: pytest.fail("mismatch mutated authority journal")
+    )
+    monkeypatch.setattr(
+        controller,
+        "_write_lease_file",
+        lambda *args: pytest.fail("mismatch published grant"),
+    )
+    with pytest.raises(hc.ControllerRefused, match="grant.mismatch"):
+        controller._grant_locked(
+            j,
+            {
+                "report_digest": j["report_digest"],
+                "binding": binding,
+                "qualification": qualification,
+                "origin": ORIGIN,
+                "policy_digest": policy.digest,
+                "expected_manifest_digest": "0" * 64,
+                "snapshot": {
+                    "digest": "e" * 64,
+                    "challenge": "d" * 64,
+                    "ttl_remaining_ms": 60_000,
+                    "addresses": [{"family": 4, "address": "192.0.2.10"}],
+                },
+            },
+        )
+    assert j["state"] == "REPORTED" and j["grant"] is None
+
+
+def test_wireguard_broker_requires_consumed_peer_and_fresh_live_check(
+    monkeypatch: Any,
+) -> None:
+    import types
+
+    controller = hc.Controller(host=types.SimpleNamespace(now_ns=lambda: 3 * 10**9))
+    calls: list[Any] = []
+    monkeypatch.setattr(controller, "_verify_controller", lambda j: None)
+    monkeypatch.setattr(
+        controller,
+        "_wireguard_live",
+        lambda digest, deadline: calls.append((digest, deadline)),
+    )
+    request = {**poll(), "op": "wireguard-check", "config_digest": "a" * 64}
+    for state in ("REPORTED", "GRANTED"):
+        j = granted()
+        j["state"] = state
+        assert controller._wireguard_request(j, request, PEER, 3 * 10**9)[1] is True
+    j = granted()
+    j["state"] = "CONSUMED"
+    assert (
+        controller._wireguard_request(j, request, (PEER[0] + 1, PEER[1]), 3 * 10**9)[1]
+        is True
+    )
+    for changes in ({"nonce": "f" * 64}, {"lease_id": "f" * 32}):
+        j = granted()
+        j["state"] = "CONSUMED"
+        assert (
+            controller._wireguard_request(j, {**request, **changes}, PEER, 3 * 10**9)[1]
+            is True
+        )
+    assert calls == []
+    j = granted()
+    j["state"] = "CONSUMED"
+    assert controller._wireguard_request(j, request, PEER, 3 * 10**9) == (
+        hp.response("CONSUMED"),
+        False,
+    )
+    assert controller._wireguard_request(j, request, PEER, 3 * 10**9) == (
+        hp.response("CONSUMED"),
+        False,
+    )
+    assert len(calls) == 2  # no cached route authority
+
+
+@pytest.mark.parametrize("bad", [True, 1, None, "a" * 63, "A" * 64])
+def test_wireguard_wire_schema_rejects_noncanonical_digest(bad: Any) -> None:
+    with pytest.raises(hp.ProtocolRefused):
+        hp.validate_request({**poll(), "op": "wireguard-check", "config_digest": bad})
+
+
+def test_wireguard_broker_rechecks_deadline_after_metadata(monkeypatch: Any) -> None:
+    import types
+
+    now = 3 * 10**9
+    controller = hc.Controller(host=types.SimpleNamespace(now_ns=lambda: now))
+
+    def delayed(*args: Any) -> None:
+        nonlocal now
+        now = 301 * 10**9
+
+    monkeypatch.setattr(controller, "_verify_controller", lambda j: None)
+    monkeypatch.setattr(controller, "_wireguard_live", delayed)
+    j = granted()
+    j["state"] = "CONSUMED"
+    reply, invalid = controller._wireguard_request(
+        j,
+        {**poll(), "op": "wireguard-check", "config_digest": "a" * 64},
+        PEER,
+        3 * 10**9,
+    )
+    assert invalid and reply == hp.response("REFUSED", "lease.expired")
+
+
+def test_wireguard_live_uses_fixed_protected_config_and_full_fresh_root_guard(
+    monkeypatch: Any,
+) -> None:
+    import base64
+    import time
+    import types
+
+    import lane3_wireguard_topology as wg
+
+    local = base64.b64encode(b"l" * 32).decode()
+    peer = base64.b64encode(b"p" * 32).decode()
+    config = {
+        "endpoint_address": "192.0.2.10",
+        "source_address": "192.0.2.11",
+        "interface": "wgtest",
+        "expected_local_public_key": local,
+        "expected_peer_public_key": peer,
+    }
+    digest = wg.wireguard_config_digest(config)
+    paths: list[Any] = []
+    commands: list[Any] = []
+
+    def read(path: Any, **kw: Any) -> bytes:
+        paths.append(path)
+        assert kw["exact_mode"] == 0o644
+        return hp.canonical_json({**config, "oidc_broker_origin": ORIGIN})
+
+    def command(argv: list[str], **kw: Any) -> bytes:
+        commands.append(argv)
+        assert "/usr/bin/sudo" not in argv and 0 < kw["timeout"] <= 1
+        if argv[-1] == "public-key":
+            return local.encode()
+        if argv[-1] == "allowed-ips":
+            return (peer + " 192.0.2.10/32").encode()
+        if argv[-1] == "latest-handshakes":
+            return (peer + " " + str(int(time.time()))).encode()
+        if "address" in argv:
+            return hp.canonical_json(
+                [{"addr_info": [{"local": "192.0.2.11", "scope": "global"}]}]
+            )
+        return hp.canonical_json([{"dev": "wgtest", "from": "192.0.2.11"}])
+
+    monkeypatch.setattr(hc, "read_protected", read)
+    monkeypatch.setattr(wg.os, "geteuid", lambda: 0)
+    controller = hc.Controller(
+        host=types.SimpleNamespace(now_ns=lambda: 3 * 10**9, _run=command)
+    )
+    controller._wireguard_live(digest, 4 * 10**9)
+    controller._wireguard_live(digest, 4 * 10**9)
+    assert paths == [hc.WIREGUARD_CONFIG, hc.WIREGUARD_CONFIG] and len(commands) == 10
+    commands.clear()
+    with pytest.raises(hc.ControllerRefused, match="binding.mismatch"):
+        controller._wireguard_live("f" * 64, 4 * 10**9)
+    assert commands == []
+
+
+def test_wireguard_budget_includes_request_and_lock_time(monkeypatch: Any) -> None:
+    import types
+
+    controller = hc.Controller(host=types.SimpleNamespace(now_ns=lambda: 7 * 10**9))
+    monkeypatch.setattr(
+        controller,
+        "_verify_controller",
+        lambda j: pytest.fail("exhausted budget verified or executed commands"),
+    )
+    j = granted()
+    j["state"] = "CONSUMED"
+    reply, invalid = controller._wireguard_request(
+        j,
+        {**poll(), "op": "wireguard-check", "config_digest": "a" * 64},
+        PEER,
+        7 * 10**9,
+        operation_deadline_ns=6 * 10**9,
+    )
+    assert invalid and reply == hp.response("REFUSED", "deadline.insufficient")

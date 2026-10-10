@@ -446,10 +446,9 @@ def resolve(
     (chain4, v4, ttl4), (chain6, v6, ttl6) = results
     if not v4 and not v6:
         raise SnapshotRefused("dns.no_address")
-    # A family with no data may carry no chain; any chain it does carry must
-    # be the same chain, so the two families cannot point at different hosts.
-    bare4, bare6 = not v4 and chain4 == [host], not v6 and chain6 == [host]
-    if not (bare4 or bare6) and chain4 != chain6:
+    # CNAME describes the name, independently of requested address family.
+    # Even NODATA must retain the same chain; inconsistent answers refuse.
+    if chain4 != chain6:
         raise SnapshotRefused("dns.ambiguous")
     chain = chain4 if v4 else chain6
     rows: list[tuple[int, str]] = []

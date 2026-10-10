@@ -337,6 +337,46 @@ class HandoffClient:
 
     # -- the handoff ---------------------------------------------------------
 
+    def wireguard_check(self, config_digest: str) -> None:
+        """Ask the authenticated root broker to freshly check its pinned channel.
+
+        The digest selects no destination or command; root configuration owns
+        those values. Success requires this peer's consumed, live lease.
+        """
+        try:
+            hp.hex64(config_digest)
+        except hp.ProtocolRefused:
+            raise HandoffRefused("handoff.input") from None
+        challenge = self.read_challenge()
+        try:
+            grant = hp.validate_grant(self._read_json(hp.GRANT_NAME))
+        except hp.ProtocolRefused:
+            raise HandoffRefused("handoff.grant") from None
+        if (
+            grant["lease_id"] != self._lease
+            or grant["nonce"] != challenge["nonce"]
+            or grant["boot_id"] != challenge["boot_id"]
+            or grant["boot_id"] != self._boot_id()
+        ):
+            raise HandoffRefused("handoff.binding")
+        deadline = min(
+            self._connection_deadline(grant), challenge["expires_at_monotonic_ns"]
+        )
+        if self._clock() >= deadline:
+            raise HandoffRefused("handoff.expired")
+        request = {
+            "protocol": hp.PROTOCOL,
+            "op": "wireguard-check",
+            "lease_id": self._lease,
+            "nonce": challenge["nonce"],
+            "config_digest": config_digest,
+        }
+        hp.validate_wireguard_check(request)
+        if self._call(request)["status"] != "CONSUMED":
+            raise HandoffRefused("handoff.consume")
+        if self._clock() >= deadline:
+            raise HandoffRefused("handoff.expired")
+
     def token_request_started(self) -> None:
         """Persist UNKNOWN before the transport can send credential bytes."""
         self._transport_event("token-started")

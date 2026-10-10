@@ -377,3 +377,14 @@ def test_refused_origin_is_never_resolved() -> None:
                 exchange=exchange,
             )
     assert calls == []
+
+
+def test_cname_and_bare_nodata_family_refuse_inconsistent_chain() -> None:
+    chain = [(HOST, hr.TYPE_CNAME, 300, "edge.example.net")]
+    zone: Zone = {
+        hr.TYPE_A: ([*chain, ("edge.example.net", hr.TYPE_A, 300, "192.0.2.10")], 0),
+        hr.TYPE_AAAA: ([], 0),
+    }
+    assert refusal(zone) == "dns.ambiguous"
+    zone[hr.TYPE_AAAA] = (chain, 0)
+    assert run(zone).chain == (HOST, "edge.example.net")

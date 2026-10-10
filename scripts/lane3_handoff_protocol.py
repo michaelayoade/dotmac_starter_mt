@@ -453,17 +453,29 @@ def validate_transport_event(value: Any) -> dict[str, Any]:
     return event
 
 
+def validate_wireguard_check(value: Any) -> dict[str, Any]:
+    request = _exact(value, {"protocol", "op", "lease_id", "nonce", "config_digest"})
+    _protocol(request)
+    if request["op"] != "wireguard-check":
+        raise ProtocolRefused("schema.invalid")
+    lease_id(request["lease_id"])
+    nonce(request["nonce"])
+    hex64(request["config_digest"])
+    return request
+
+
 _REQUESTS: Final[dict[str, Callable[[Any], dict[str, Any]]]] = {
     "report": validate_report,
     "poll": validate_poll,
     "consume": validate_consume,
     "token-started": validate_transport_event,
     "proof": validate_transport_event,
+    "wireguard-check": validate_wireguard_check,
 }
 
 
 def validate_request(value: Any) -> dict[str, Any]:
-    """Dispatch on ``op`` to exactly one of the three request schemas."""
+    """Dispatch on ``op`` to exactly one closed request schema."""
     if not isinstance(value, dict):
         raise ProtocolRefused("schema.invalid")
     _protocol(value)

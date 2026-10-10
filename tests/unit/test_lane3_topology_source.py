@@ -314,6 +314,7 @@ def test_wireguard_factory_forwards_handoff_transport_options(monkeypatch):
             **wireguard_factory_arguments(),
             oidc_pinned=target,
             require_pinned=True,
+            wireguard_guard=lambda digest: None,
             oidc_context_factory=context,
             oidc_request_started=started,
         )
@@ -342,4 +343,44 @@ def test_wireguard_handoff_missing_grant_refuses_before_state_or_http(monkeypatc
             oidc_request_started=lambda: calls.append("request-started"),
         )
     assert caught.value.reason == "oidc.request"
+    assert calls == []
+
+
+def test_wireguard_factory_forwards_root_guard(monkeypatch):
+    import lane3_wireguard_topology
+
+    seen = []
+
+    def guard(digest):
+        return None
+
+    monkeypatch.setattr(
+        lane3_wireguard_topology,
+        "WireGuardOpenBaoTransport",
+        lambda **kwargs: seen.append(kwargs) or object(),
+    )
+    monkeypatch.setattr(ts, "github_openbao_source", lambda **kwargs: object())
+    ts.wireguard_github_openbao_source(
+        **wireguard_factory_arguments(),
+        oidc_pinned=object(),
+        require_pinned=True,
+        wireguard_guard=guard,
+    )
+    assert seen[0]["guard"] is guard
+
+
+def test_pinned_wireguard_factory_requires_root_guard_before_state(monkeypatch):
+    import lane3_wireguard_topology
+
+    calls = []
+    monkeypatch.setattr(
+        lane3_wireguard_topology,
+        "WireGuardOpenBaoTransport",
+        lambda **kwargs: calls.append("state"),
+    )
+    with pytest.raises(ts.TopologySourceUnavailable) as caught:
+        ts.wireguard_github_openbao_source(
+            **wireguard_factory_arguments(), oidc_pinned=object(), require_pinned=True
+        )
+    assert caught.value.reason == "transport.wireguard"
     assert calls == []
