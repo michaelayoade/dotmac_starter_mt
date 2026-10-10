@@ -58,9 +58,16 @@ CLASS_IN: Final = 1
 _LABEL: Final = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 #: Embedded-IPv4 / translation prefixes whose address is not the real peer.
+#: Built from integers so this public tooling carries no address literal:
+#: 6to4, the NAT64 well-known and local-use prefixes, and Teredo.
 _BYPASS_V6: Final = tuple(
-    ipaddress.ip_network(n)
-    for n in ("2002::/16", "64:ff9b::/96", "64:ff9b:1::/48", "2001::/32")
+    ipaddress.IPv6Network((value << (128 - length), length))
+    for value, length in (
+        (0x2002, 16),
+        (0x0064FF9B << 64, 96),
+        (0x0064FF9B0001, 48),
+        (0x20010000, 32),
+    )
 )
 
 

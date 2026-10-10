@@ -244,7 +244,10 @@ MODPATH = f"repos/{STARTER}/contents/scripts/lane3_github_oidc.py?ref={STARTER_S
             ),
             "assignment.ambiguous",
         ),
-        (_set(f"{BASE}/pending_deployments", value=None), "approval.missing"),
+        (
+            lambda d: d.update({f"{BASE}/pending_deployments": None}),
+            "approval.missing",
+        ),
         (
             lambda d: d.update({f"{BASE}/pending_deployments": [{"x": 1}]}),
             "approval.missing",

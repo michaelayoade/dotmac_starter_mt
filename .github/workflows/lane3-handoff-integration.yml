@@ -47,10 +47,7 @@ jobs:
       - name: Show any formatting difference and lint the handoff sources
         run: |
           files=(
-            scripts/lane3_handoff_protocol.py
-            scripts/lane3_handoff_controller.py
-            scripts/lane3_handoff_coordinator.py
-            scripts/lane3_handoff_resolver.py
+            scripts/lane3_handoff_[a-z]*.py
             tests/unit/test_lane3_handoff_protocol.py
             tests/unit/test_lane3_handoff_controller.py
             tests/unit/test_lane3_handoff_coordinator.py
