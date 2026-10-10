@@ -527,7 +527,7 @@ def cleanup_journal() -> dict[str, Any]:
         user=USER,
         uid=UID,
         gid=UID,
-        identity_intent=hc.TAG + ":" + LEASE,
+        identity_intent=hc.identity_owner(LEASE),
         workspace="/run/synthetic-workspace",
         cgroup="/system.slice/synthetic.service",
         units={
@@ -605,6 +605,13 @@ def test_identity_created_before_uid_journal_recovers_exact_intent(
     with pytest.raises(hc.ControllerRefused, match="cleanup.blocked"):
         controller._cleanup_locked(j, "EXPIRED", "lease.expired")
     assert j["uid"] is None and j["cleanup_blocked"] == "cleanup.identity"
+
+
+def test_identity_owner_is_safe_for_passwd_gecos_and_keeps_full_lease() -> None:
+    owner = hc.identity_owner(LEASE)
+    assert owner == hc.TAG + "-" + LEASE
+    assert not any(character in owner for character in ":\n\r")
+    assert owner != hc.identity_owner("f" * 32)
 
 
 def test_systemd_expiry_retries_lock_collision_and_stop_needs_readback(

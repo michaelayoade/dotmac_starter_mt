@@ -114,6 +114,11 @@ class ControllerRefused(RuntimeError):
         return self.label
 
 
+def identity_owner(lease: str) -> str:
+    # The ownership marker is stored in passwd's GECOS field; ':' is forbidden.
+    return TAG + "-" + lease
+
+
 def refused(label: str) -> ControllerRefused:
     return ControllerRefused(label)
 
@@ -1497,7 +1502,7 @@ class Controller:
                 "closing": False,
                 "cleanup_blocked": None,
                 "user": USER_PREFIX + lease[:12],
-                "identity_intent": TAG + ":" + lease,
+                "identity_intent": identity_owner(lease),
                 "qualification": dict(qualification),
                 "supplier_installation": installation,
                 "timing": None,
