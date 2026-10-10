@@ -646,3 +646,19 @@ need a separately reviewed authenticated transport adapter; this change does
 not activate that path, provision B7, or establish live Gate-0 readiness.
 Hosted CI owns tests of this repository; no local or named-host test run is
 acceptance evidence for this reader.
+
+The explicit `github_openbao_source` factory composes the real single-use
+Actions OIDC supplier with the B7 reader. The protected launcher supplies
+`ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` in memory,
+plus the independently approved exact OIDC broker origin. The supplier
+requests only the fixed B7 audience; changed origin, extra query parameters,
+redirects, malformed responses and repeated use refuse. It never prints the
+request credential or JWT. Broker observation is not automatic egress admission.
+Signed claim validation remains OpenBao's responsibility; local JWT shape
+validation is not authorization.
+
+The protected execution workflow still has no `id-token: write` permission.
+This source preparation does not add it or edit the admitted launcher snapshot.
+Enabling it requires the reviewed launcher amendment and source-policy/admission
+reconciliation. The observed VM124 WireGuard interface is a transport candidate,
+not proof of endpoint/peer/route correctness or permission to activate this reader.

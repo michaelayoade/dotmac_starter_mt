@@ -274,3 +274,47 @@ def test_transport_failure_closes_connection_and_redacts(
     assert "PRIVATE-MARKER" not in str(e.value)
     assert connection.closed
     assert connection.requests == 1
+
+
+def test_github_factory_composes_oidc_and_reader(monkeypatch: Any) -> None:
+    import lane3_github_oidc as oidc
+
+    calls = []
+
+    class Response:
+        status = 200
+
+        def read(self, size: int) -> bytes:
+            return b'{"value":"a.b.c"}'
+
+    class Connection:
+        sock = None
+
+        def connect(self) -> None:
+            pass
+
+        def request(self, method: str, path: str, **kwargs: Any) -> None:
+            calls.append((method, path, kwargs))
+
+        def getresponse(self) -> Response:
+            return Response()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        oidc.http.client, "HTTPSConnection", lambda *a, **kw: Connection()
+    )
+    t = Transport()
+    origin = "https://fixture.actions.githubusercontent.com"
+    s = mod.source.github_openbao_source(
+        transport=t,
+        expected_version=1,
+        jwt_request_url=origin + "/job/idtoken?api-version=2.0",
+        jwt_request_token="synthetic-actions-request",
+        oidc_broker_origin=origin,
+    )
+    assert s.read().kv_version == 1
+    assert t.calls[0][2]["jwt"] == "a.b.c"
+    assert len(calls) == 1
+    assert "audience=urn%3Adotmac%3Alane3%3Aexposure-rehearsal" in calls[0][1]

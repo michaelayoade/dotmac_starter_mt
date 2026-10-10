@@ -202,6 +202,32 @@ def openbao_source(
     )
 
 
+def github_openbao_source(
+    *,
+    transport: Any,
+    expected_version: int,
+    jwt_request_url: str,
+    jwt_request_token: str,
+    oidc_broker_origin: str,
+) -> TopologySource:
+    """Bind the real Actions supplier to B7 using an independently approved broker.
+
+    Arguments come from the protected launcher/configuration, never dispatch
+    fields. This does not activate the default source or alter job permissions.
+    """
+    from lane3_github_oidc import GithubOidcSupplier
+
+    return openbao_source(
+        transport=transport,
+        expected_version=expected_version,
+        jwt_supplier=GithubOidcSupplier(
+            request_url=jwt_request_url,
+            request_token=jwt_request_token,
+            approved_origin=oidc_broker_origin,
+        ),
+    )
+
+
 def default_source() -> TopologySource:
     return RefusingKvTopologySource()
 

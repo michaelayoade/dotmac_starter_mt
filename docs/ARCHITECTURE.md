@@ -3687,3 +3687,8 @@ resolver/runner source-injection seam. The parser and host binding remain in
 no Foundation network I/O, automatic runtime activation or new credential
 custody owner; the launcher supplies authenticated transport and a fresh B7
 JWT, and unconfigured execution refuses.
+Its Actions-specific fresh-JWT adapter is `scripts/lane3_github_oidc.py`,
+consumed by `lane3_topology_source.github_openbao_source`. The protected
+launcher owns the exact approved broker/configuration and job permissions;
+OpenBao owns JWT signature/claim verification. The default source remains
+refusing until deployment is explicitly composed.
