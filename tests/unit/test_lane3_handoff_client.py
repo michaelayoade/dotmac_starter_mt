@@ -132,10 +132,14 @@ class Clock:
         self.now += int(seconds * NS)
 
 
+def chmod(path: Any, mode: int, **kw: Any) -> None:
+    os.chmod(path, mode, **kw)
+
+
 def put(path: pathlib.Path, data: Any, mode: int = 0o640) -> None:
     raw = data if isinstance(data, bytes) else json.dumps(data).encode()
     path.write_bytes(raw)
-    os.chmod(path, mode)
+    chmod(path, mode)
 
 
 class Env:
@@ -144,10 +148,10 @@ class Env:
     def __init__(self, tmp: pathlib.Path) -> None:
         self.root = tmp.resolve() / "run"
         self.root.mkdir(mode=0o755)
-        os.chmod(self.root, 0o755)
+        chmod(self.root, 0o755)
         self.lease = self.root / LEASE
         self.lease.mkdir()
-        os.chmod(self.lease, 0o750)
+        chmod(self.lease, 0o750)
         put(self.lease / "challenge.json", challenge_doc())
         self.clock = Clock()
         self.sent: list[dict[str, Any]] = []
@@ -158,14 +162,14 @@ class Env:
         ]
 
     def client(self, **over: Any) -> Any:
-        args: dict[str, Any] = dict(
-            lease_id=LEASE,
-            run_root=str(self.root),
-            expected_uid=UID,
-            clock_ns=self.clock,
-            sleep=self.clock.sleep,
-            boot_id_reader=lambda: BOOT,
-        )
+        args: dict[str, Any] = {
+            "lease_id": LEASE,
+            "run_root": str(self.root),
+            "expected_uid": UID,
+            "clock_ns": self.clock,
+            "sleep": self.clock.sleep,
+            "boot_id_reader": lambda: BOOT,
+        }
         args.update(over)
         client = c.HandoffClient(**args)
         client._exchange = self._exchange  # type: ignore[method-assign]
@@ -211,16 +215,32 @@ def test_positive_control_returns_pinned_target(env: Env) -> None:
     assert [r["op"] for r in env.sent] == ["report", "poll", "consume"]
 
 
-def test_report_has_only_the_contract_fields_and_no_url_parts_or_token(env: Env) -> None:
+def test_report_has_only_the_contract_fields_and_no_url_parts_or_token(
+    env: Env,
+) -> None:
     env.obtain()
     report = env.sent[0]
     assert set(report) == {
-        "protocol", "op", "lease_id", "nonce", "origin", "flags", "expected",
+        "protocol",
+        "op",
+        "lease_id",
+        "nonce",
+        "origin",
+        "flags",
+        "expected",
     }
     assert report["origin"] == HOST_URL
-    assert report["flags"] == {"explicit_port_present": False, "userinfo_present": False}
+    assert report["flags"] == {
+        "explicit_port_present": False,
+        "userinfo_present": False,
+    }
     blob = json.dumps(env.sent)
-    for canary in ("PRIVATE-PATH-CANARY", "PRIVATE-QUERY-CANARY", "idtoken", "api-version"):
+    for canary in (
+        "PRIVATE-PATH-CANARY",
+        "PRIVATE-QUERY-CANARY",
+        "idtoken",
+        "api-version",
+    ):
         assert canary not in blob
     hp.validate_report(report)
     hp.validate_poll(env.sent[1])
@@ -288,7 +308,9 @@ def test_each_binding_field_independently_refuses_before_consume(
         {"expires_at_monotonic_ns": LEASE_EXPIRY + 1, "snapshot": None},
     ],
 )
-def test_grant_identity_origin_and_lifetime_mismatch_refuses(env: Env, over: dict[str, Any]) -> None:
+def test_grant_identity_origin_and_lifetime_mismatch_refuses(
+    env: Env, over: dict[str, Any]
+) -> None:
     g = grant_doc()
     for key, value in over.items():
         if value is None and key == "snapshot":
@@ -349,8 +371,12 @@ def test_consume_refused_by_controller_carries_fixed_category(env: Env) -> None:
     assert refusal(e) == "handoff.refused:grant.consumed"
 
 
-@pytest.mark.parametrize("category", sorted(["origin.not_admitted", "binding.mismatch", "approval.missing"]))
-def test_report_refusal_stops_without_poll_or_grant_read(env: Env, category: str) -> None:
+@pytest.mark.parametrize(
+    "category", sorted(["origin.not_admitted", "binding.mismatch", "approval.missing"])
+)
+def test_report_refusal_stops_without_poll_or_grant_read(
+    env: Env, category: str
+) -> None:
     env.script = [hp.response("REFUSED", category)]
     with pytest.raises(c.HandoffRefused) as e:
         env.obtain()
@@ -410,7 +436,10 @@ def test_launch_in_the_future_refuses(env: Env) -> None:
 
 def test_deadline_is_clamped_to_lease_expiry(tmp_path: pathlib.Path) -> None:
     e = Env(tmp_path)
-    put(e.lease / "challenge.json", challenge_doc(expires_at_monotonic_ns=LAUNCH + 10 * NS))
+    put(
+        e.lease / "challenge.json",
+        challenge_doc(expires_at_monotonic_ns=LAUNCH + 10 * NS),
+    )
     e.script = [hp.response("WAIT")]
     with pytest.raises(c.HandoffRefused) as err:
         e.obtain()
@@ -436,7 +465,9 @@ def test_deadline_is_clamped_to_lease_expiry(tmp_path: pathlib.Path) -> None:
         "",
     ],
 )
-def test_bad_local_origin_refuses_without_contacting_controller(env: Env, url: str) -> None:
+def test_bad_local_origin_refuses_without_contacting_controller(
+    env: Env, url: str
+) -> None:
     with pytest.raises(c.HandoffRefused) as e:
         env.obtain(request_url=url)
     assert refusal(e) in {"handoff.origin", "handoff.input"}
@@ -466,7 +497,11 @@ def test_non_string_request_url_refuses(value: Any) -> None:
 
 def test_challenge_boot_mismatch_refuses(env: Env) -> None:
     with pytest.raises(c.HandoffRefused) as e:
-        env.obtain(client=env.client(boot_id_reader=lambda: "00000000-0000-0000-0000-000000000000"))
+        env.obtain(
+            client=env.client(
+                boot_id_reader=lambda: "00000000-0000-0000-0000-000000000000"
+            )
+        )
     assert refusal(e) == "handoff.challenge"
     assert env.sent == []
 
@@ -476,7 +511,10 @@ def test_challenge_for_other_lease_or_expired_refuses(env: Env) -> None:
     with pytest.raises(c.HandoffRefused) as e:
         env.obtain()
     assert refusal(e) == "handoff.challenge"
-    put(env.lease / "challenge.json", challenge_doc(expires_at_monotonic_ns=env.clock.now))
+    put(
+        env.lease / "challenge.json",
+        challenge_doc(expires_at_monotonic_ns=env.clock.now),
+    )
     with pytest.raises(c.HandoffRefused) as e2:
         env.obtain(client=env.client())
     assert refusal(e2) == "handoff.expired"
@@ -510,11 +548,11 @@ def test_duplicate_keys_trailing_bytes_and_bad_encoding_refuse(env: Env) -> None
 def _break_file(env: Env, how: str) -> None:
     path = env.lease / "challenge.json"
     if how == "mode_644":
-        os.chmod(path, 0o644)
+        chmod(path, 0o644)
     elif how == "mode_600":
-        os.chmod(path, 0o600)
+        chmod(path, 0o600)
     elif how == "mode_660":
-        os.chmod(path, 0o660)
+        chmod(path, 0o660)
     elif how == "symlink":
         real = env.lease / "real.json"
         path.rename(real)
@@ -524,7 +562,7 @@ def _break_file(env: Env, how: str) -> None:
     elif how == "directory":
         path.unlink()
         path.mkdir()
-        os.chmod(path, 0o640)
+        chmod(path, 0o640)
     elif how == "fifo":
         path.unlink()
         os.mkfifo(path, 0o640)
@@ -535,17 +573,17 @@ def _break_file(env: Env, how: str) -> None:
     elif how == "missing":
         path.unlink()
     elif how == "lease_dir_755":
-        os.chmod(env.lease, 0o755)
+        chmod(env.lease, 0o755)
     elif how == "lease_dir_770":
-        os.chmod(env.lease, 0o770)
+        chmod(env.lease, 0o770)
     elif how == "lease_dir_symlink":
         moved = env.root / "moved"
         env.lease.rename(moved)
         env.lease.symlink_to(moved)
     elif how == "root_group_writable":
-        os.chmod(env.root, 0o775)
+        chmod(env.root, 0o775)
     elif how == "root_other_writable":
-        os.chmod(env.root, 0o757)
+        chmod(env.root, 0o757)
     else:  # pragma: no cover
         raise AssertionError(how)
 
@@ -553,9 +591,21 @@ def _break_file(env: Env, how: str) -> None:
 @pytest.mark.parametrize(
     "how",
     [
-        "mode_644", "mode_600", "mode_660", "symlink", "hardlink", "directory", "fifo",
-        "oversize", "empty", "missing", "lease_dir_755", "lease_dir_770",
-        "lease_dir_symlink", "root_group_writable", "root_other_writable",
+        "mode_644",
+        "mode_600",
+        "mode_660",
+        "symlink",
+        "hardlink",
+        "directory",
+        "fifo",
+        "oversize",
+        "empty",
+        "missing",
+        "lease_dir_755",
+        "lease_dir_770",
+        "lease_dir_symlink",
+        "root_group_writable",
+        "root_other_writable",
     ],
 )
 def test_untrusted_challenge_file_or_directory_refuses(env: Env, how: str) -> None:
@@ -590,7 +640,7 @@ def test_grant_file_is_checked_like_the_challenge(env: Env) -> None:
         put(path, grant_doc())
         e.script = [hp.response("GRANTED"), hp.response("CONSUMED")]
         if how == "mode":
-            os.chmod(path, 0o644)
+            chmod(path, 0o644)
         elif how == "symlink":
             real = e.lease / "real.json"
             path.rename(real)
@@ -623,7 +673,15 @@ def test_refusals_never_echo_inputs(env: Env) -> None:
     with pytest.raises(c.HandoffRefused) as e:
         env.obtain()
     text = repr(e.value) + str(e.value)
-    for needle in (str(env.root), LEASE, NONCE, "192.0.2", "99999", "PRIVATE", "broker-1"):
+    for needle in (
+        str(env.root),
+        LEASE,
+        NONCE,
+        "192.0.2",
+        "99999",
+        "PRIVATE",
+        "broker-1",
+    ):
         assert needle not in text
 
 
@@ -651,7 +709,7 @@ class FakeController:
         fd = os.open(env.lease, os.O_RDONLY | os.O_DIRECTORY)
         self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server.bind(f"/proc/self/fd/{fd}/control.sock")
-        os.chmod("control.sock", 0o660, dir_fd=fd)
+        chmod("control.sock", 0o660, dir_fd=fd)
         os.close(fd)
         self.server.listen(4)
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -696,9 +754,7 @@ def real_client(env: Env) -> Any:
 
 def test_real_socket_round_trip(env: Env) -> None:
     put(env.lease / "grant.json", grant_doc())
-    ctl = FakeController(
-        env, [hp.response("GRANTED"), hp.response("CONSUMED")]
-    )
+    ctl = FakeController(env, [hp.response("GRANTED"), hp.response("CONSUMED")])
     try:
         target = real_client(env).obtain(
             request_url=REQUEST_URL, expectation=FULL_EXPECT, launch_ns=LAUNCH
@@ -721,7 +777,9 @@ def test_real_socket_round_trip(env: Env) -> None:
         hp.frame({**hp.response("WAIT"), "extra": 1}),
     ],
 )
-def test_real_socket_malformed_or_trailing_response_refuses(env: Env, reply: bytes) -> None:
+def test_real_socket_malformed_or_trailing_response_refuses(
+    env: Env, reply: bytes
+) -> None:
     ctl = FakeController(env, [reply])
     try:
         with pytest.raises(c.HandoffRefused) as e:
@@ -736,13 +794,13 @@ def test_real_socket_malformed_or_trailing_response_refuses(env: Env, reply: byt
 def test_real_socket_wrong_mode_or_symlinked_socket_refuses(env: Env) -> None:
     ctl = FakeController(env, [hp.response("WAIT")])
     try:
-        os.chmod(env.lease / "control.sock", 0o666)
+        chmod(env.lease / "control.sock", 0o666)
         with pytest.raises(c.HandoffRefused) as e:
             real_client(env).obtain(
                 request_url=REQUEST_URL, expectation=FULL_EXPECT, launch_ns=LAUNCH
             )
         assert refusal(e) == "handoff.files"
-        os.chmod(env.lease / "control.sock", 0o660)
+        chmod(env.lease / "control.sock", 0o660)
         (env.lease / "control.sock").rename(env.lease / "real.sock")
         (env.lease / "control.sock").symlink_to(env.lease / "real.sock")
         with pytest.raises(c.HandoffRefused) as e2:

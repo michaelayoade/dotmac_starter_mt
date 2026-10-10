@@ -133,7 +133,7 @@ class FakeTls:
 
 
 class FakeRaw:
-    def __init__(self, world: "World") -> None:
+    def __init__(self, world: World) -> None:
         self.world = world
         self.closed = False
 
@@ -153,7 +153,7 @@ class FakeRaw:
 
 
 class FakeContext:
-    def __init__(self, world: "World", *, verify: Any, check: bool) -> None:
+    def __init__(self, world: World, *, verify: Any, check: bool) -> None:
         self.world = world
         self.verify_mode = verify
         self.check_hostname = check
@@ -166,9 +166,7 @@ class FakeContext:
 
 
 def http_reply(status: str = "200 OK", body: bytes = b'{"value": "a.b.c"}') -> bytes:
-    return (
-        f"HTTP/1.1 {status}\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
-    )
+    return f"HTTP/1.1 {status}\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
 
 
 class World:
@@ -205,7 +203,9 @@ class World:
         return m.PinnedOidcFetcher(
             self.target(),
             clock_ns=lambda: NOW,
-            context_factory=lambda: FakeContext(self, verify=self.verify, check=self.check),
+            context_factory=lambda: FakeContext(
+                self, verify=self.verify, check=self.check
+            ),
             socket_factory=self.raw,
         )
 
@@ -296,7 +296,9 @@ def test_pinned_connect_timeout_is_bounded_by_remaining_deadline() -> None:
 @pytest.mark.parametrize(
     ("verify", "check"), [(ssl.CERT_NONE, True), (ssl.CERT_REQUIRED, False)]
 )
-def test_pinned_weakened_tls_context_refuses_before_socket(verify: Any, check: bool) -> None:
+def test_pinned_weakened_tls_context_refuses_before_socket(
+    verify: Any, check: bool
+) -> None:
     w = World(verify=verify, check=check)
     with pytest.raises(m.TopologySourceUnavailable):
         w.supplier()(m.AUDIENCE)
@@ -322,7 +324,9 @@ def test_pinned_connect_failure_is_fixed_label_single_attempt() -> None:
     s = w.supplier()
     with pytest.raises(m.TopologySourceUnavailable) as e:
         s(m.AUDIENCE)
-    assert "PRIVATE" not in str(e.value) and "synthetic-request-token" not in str(e.value)
+    assert "PRIVATE" not in str(e.value) and "synthetic-request-token" not in str(
+        e.value
+    )
     assert len(w.connects) == 1
     with pytest.raises(m.TopologySourceUnavailable):
         s(m.AUDIENCE)
@@ -358,7 +362,9 @@ def test_pinned_fetcher_refuses_url_for_other_origin_before_socket() -> None:
 @pytest.mark.parametrize(
     "build",
     [
-        lambda w: m.PinnedBrokerTarget(ORIGIN + ":443", w.family, w.address, w.deadline),
+        lambda w: m.PinnedBrokerTarget(
+            ORIGIN + ":443", w.family, w.address, w.deadline
+        ),
         lambda w: m.PinnedBrokerTarget(ORIGIN + "/", w.family, w.address, w.deadline),
         lambda w: m.PinnedBrokerTarget(ORIGIN, 99, w.address, w.deadline),
         lambda w: m.PinnedBrokerTarget(ORIGIN, socket.AF_INET, ADDR6, w.deadline),
@@ -395,9 +401,7 @@ def test_pinned_supplier_origin_must_equal_grant_and_fetch_not_overridable() -> 
 
 
 def test_legacy_supplier_without_pinned_keeps_connect_time_fetch() -> None:
-    s = m.GithubOidcSupplier(
-        request_url=URL, approved_origin=ORIGIN, request_token="t"
-    )
+    s = m.GithubOidcSupplier(request_url=URL, approved_origin=ORIGIN, request_token="t")
     assert s._fetch is m.fetch_oidc
 
 

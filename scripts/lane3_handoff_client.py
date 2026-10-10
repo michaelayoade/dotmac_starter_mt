@@ -152,9 +152,7 @@ def _trusted_ancestor(st: os.stat_result, uid: int) -> bool:
     return not writable or bool(st.st_mode & stat.S_ISVTX)
 
 
-def _open_lease_dir(
-    run_root: str, lease_id: str, uid: int, gid: int | None
-) -> int:
+def _open_lease_dir(run_root: str, lease_id: str, uid: int, gid: int | None) -> int:
     """Descriptor walk to the lease directory; no symlink at any component."""
     if not run_root.startswith("/") or "//" in run_root:
         raise HandoffRefused("handoff.files")
@@ -163,7 +161,7 @@ def _open_lease_dir(
         raise HandoffRefused("handoff.files")
     fd = os.open("/", _DIR_FLAGS)
     try:
-        for index, name in enumerate(names + [lease_id]):
+        for index, name in enumerate([*names, lease_id]):
             nxt = os.open(name, _DIR_FLAGS, dir_fd=fd)
             os.close(fd)
             fd = nxt

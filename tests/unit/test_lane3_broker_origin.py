@@ -172,7 +172,10 @@ def test_policy_is_not_suffix_wildcard_or_normalising(candidate: Any) -> None:
         {"schema": m.POLICY_SCHEMA, "origins": [GOOD, "https://*.example"]},
         {"schema": m.POLICY_SCHEMA, "origins": [GOOD, "https://Bad.example"]},
         {"schema": m.POLICY_SCHEMA, "origins": [GOOD], "extra": 1},
-        {"schema": m.POLICY_SCHEMA, "origins": [f"https://h{i}.example" for i in range(65)]},
+        {
+            "schema": m.POLICY_SCHEMA,
+            "origins": [f"https://h{i}.example" for i in range(65)],
+        },
         "text",
         None,
     ],

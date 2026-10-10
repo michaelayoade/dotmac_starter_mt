@@ -110,7 +110,7 @@ def _canonical_json(value: Any) -> bytes:
 class OriginPolicy:
     """A finite exact set of canonical origins plus a digest of that set."""
 
-    __slots__ = ("_origins", "_digest")
+    __slots__ = ("_digest", "_origins")
 
     def __init__(self, origins: frozenset[str], digest: str) -> None:
         self._origins = origins
