@@ -13,6 +13,16 @@ file proves the gap is closed: the same invocation runs in `preflight`,
 strictly before `require_runner.py`, unconditionally, and its artifact upload
 matches `foundation-candidate.yml`'s own shape byte for byte.
 
+## Since D-S2c C1: the check lives in `scripts/lane3_rehearse.sh`
+
+The capability check moved into the Starter-owned script's `preflight` phase,
+so it outlives `exposure-rehearsal.yml` (docs/LANE3_EXECUTION_TOPOLOGY.md
+§ 13). Each property is now asserted in two halves: the SCRIPT unit is the
+pinned canonical command, unconditional and first; the WORKFLOW step is the
+pinned one-line call to that phase, still before `require_runner.py`, with no
+`if`, `continue-on-error`, `shell` or `env` that could silence it. The upload
+stays a workflow (launcher) property and keeps its pinned shape.
+
 ## Why this file walks PARSED YAML rather than grepping
 
 `test_deployment_release_lane.py` establishes the reason once and it applies
@@ -35,6 +45,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from tests.architecture import lane3_rehearse_script as rehearse_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -85,6 +97,25 @@ CANONICAL_CAPABILITY_STEP: dict[str, Any] = {
         '  --summary "${GITHUB_STEP_SUMMARY}"\n'
     ),
 }
+
+#: The workflow's whole preflight capability step since D-S2c C1: the pinned
+#: one-line call into the script's `preflight` phase, and nothing else.
+CANONICAL_PREFLIGHT_CALL_STEP: dict[str, Any] = {
+    "name": CANONICAL_CAPABILITY_STEP["name"],
+    "run": rehearse_script.PHASE_CALL["preflight"],
+}
+PREFLIGHT_CALL = "scripts/lane3_rehearse.sh preflight"
+
+
+def _script_capability_unit() -> dict[str, Any]:
+    """The script's preflight phase, which must be exactly one unit."""
+    found = rehearse_script.units("preflight")
+    assert len(found) == 1, (
+        "lane3_rehearse.sh's preflight phase must be exactly the capability "
+        f"check, found {[unit['name'] for unit in found]}"
+    )
+    return found[0]
+
 
 CANONICAL_UPLOAD_STEP: dict[str, Any] = {
     "name": "Upload the capability record",
@@ -189,20 +220,24 @@ def test_both_workflows_invoke_the_capability_script_with_root_dot() -> None:
     exposure = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
     candidate = _load_yaml(FOUNDATION_CANDIDATE_WORKFLOW)
 
-    exposure_step = _step_invoking(_steps(exposure, "preflight"), CAPABILITY_SCRIPT)
+    script_unit = _script_capability_unit()
     candidate_step = _step_invoking(_steps(candidate, "candidate"), CAPABILITY_SCRIPT)
+    exposure_step = _step_invoking(_steps(exposure, "preflight"), PREFLIGHT_CALL)
 
-    assert exposure_step["run"] == candidate_step["run"], (
-        "exposure-rehearsal.yml's capability-check command does not exactly "
-        "match foundation-candidate.yml's canonical invocation:\n"
-        f"exposure-rehearsal.yml: {exposure_step['run']!r}\n"
+    assert script_unit["run"] == candidate_step["run"], (
+        "lane3_rehearse.sh's capability-check command does not exactly match "
+        "foundation-candidate.yml's canonical invocation:\n"
+        f"lane3_rehearse.sh: {script_unit['run']!r}\n"
         f"foundation-candidate.yml: {candidate_step['run']!r}"
     )
     _assert_step_matches_canonical(
-        exposure_step, CANONICAL_CAPABILITY_STEP, source="exposure-rehearsal.yml"
+        script_unit, CANONICAL_CAPABILITY_STEP, source="lane3_rehearse.sh preflight"
     )
     _assert_step_matches_canonical(
         candidate_step, CANONICAL_CAPABILITY_STEP, source="foundation-candidate.yml"
+    )
+    _assert_step_matches_canonical(
+        exposure_step, CANONICAL_PREFLIGHT_CALL_STEP, source="exposure-rehearsal.yml"
     )
 
 
@@ -296,7 +331,7 @@ def test_capability_check_runs_in_preflight_before_the_runner_liveness_check() -
     workflow = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
     steps = _steps(workflow, "preflight")
 
-    capability_index = _index_invoking(steps, CAPABILITY_SCRIPT)
+    capability_index = _index_invoking(steps, PREFLIGHT_CALL)
     liveness_index = _index_invoking(steps, RUNNER_LIVENESS_SCRIPT)
 
     assert capability_index < liveness_index, (
@@ -341,7 +376,7 @@ def _declares_continue_on_error(step: dict[str, Any]) -> bool:
 def test_capability_check_step_is_unconditional_and_can_fail_the_job() -> None:
     exposure = _load_yaml(EXPOSURE_REHEARSAL_WORKFLOW)
     candidate = _load_yaml(FOUNDATION_CANDIDATE_WORKFLOW)
-    exposure_step = _step_invoking(_steps(exposure, "preflight"), CAPABILITY_SCRIPT)
+    exposure_step = _step_invoking(_steps(exposure, "preflight"), PREFLIGHT_CALL)
     candidate_step = _step_invoking(_steps(candidate, "candidate"), CAPABILITY_SCRIPT)
 
     assert not _declares_continue_on_error(exposure_step), (
@@ -355,16 +390,27 @@ def test_capability_check_step_is_unconditional_and_can_fail_the_job() -> None:
         "could skip it entirely and let a NOT_CAPABLE verdict pass silently — "
         "mirror foundation-candidate.yml's own unconditional step"
     )
-    # Whole-dict equality against a PINNED literal, not just against each
-    # other — see `_assert_step_matches_canonical`'s own docstring and
-    # `test_canonical_step_check_catches_a_mirrored_weakening_of_both_files`
-    # for why cross-file equality alone is not enough.
+    # Whole-dict equality against PINNED literals, for the workflow's call and
+    # for the script's unit, not just against each other — see
+    # `_assert_step_matches_canonical`'s own docstring and
+    # `test_canonical_step_check_catches_a_mirrored_weakening_of_both_files`.
     _assert_step_matches_canonical(
-        exposure_step, CANONICAL_CAPABILITY_STEP, source="exposure-rehearsal.yml"
+        exposure_step, CANONICAL_PREFLIGHT_CALL_STEP, source="exposure-rehearsal.yml"
+    )
+    _assert_step_matches_canonical(
+        _script_capability_unit(),
+        CANONICAL_CAPABILITY_STEP,
+        source="lane3_rehearse.sh preflight",
     )
     _assert_step_matches_canonical(
         candidate_step, CANONICAL_CAPABILITY_STEP, source="foundation-candidate.yml"
     )
+    # The script half can fail the job only if a failing command fails the
+    # script. `set -e` at the top does that for every unit, the capability
+    # check included; without it a NOT_CAPABLE exit would be ignored.
+    assert "\nset -euo pipefail\n" in rehearse_script.SCRIPT.read_text(
+        encoding="utf-8"
+    ), "lane3_rehearse.sh must run under `set -euo pipefail`"
 
 
 def test_continue_on_error_detector_catches_a_planted_expression_value() -> None:
@@ -386,7 +432,7 @@ def test_capability_record_upload_matches_foundation_candidates_shape() -> None:
     exposure_steps = _steps(exposure, "preflight")
     candidate_steps = _steps(candidate, "candidate")
 
-    capability_run = str(_step_invoking(exposure_steps, CAPABILITY_SCRIPT)["run"])
+    capability_run = str(_script_capability_unit()["run"])
     assert "--out lane3-runner-capability.json" in capability_run
 
     exposure_upload = _upload_step(exposure_steps)
@@ -428,3 +474,39 @@ def test_canonical_upload_step_check_catches_an_added_continue_on_error() -> Non
     mutated["continue-on-error"] = True
     with pytest.raises(AssertionError):
         _assert_step_matches_canonical(mutated, CANONICAL_UPLOAD_STEP, source="planted")
+
+
+# ── 6. the script reader bites on the same plants as the workflow did ──────
+
+
+def _planted_script(old: str, new: str) -> str:
+    text = rehearse_script.SCRIPT.read_text(encoding="utf-8")
+    assert text.count(old) == 1, "the plant must hit exactly one place"
+    return text.replace(old, new)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    (
+        # Commented out: bash runs nothing, and the reader drops the line.
+        (
+            "  python scripts/lane3_runner_capability.py \\\n",
+            "  # python scripts/lane3_runner_capability.py \\\n",
+        ),
+        # Masked: the command runs and its verdict is discarded.
+        (
+            '    --summary "${GITHUB_STEP_SUMMARY}"\n}',
+            '    --summary "${GITHUB_STEP_SUMMARY}" || true\n}',
+        ),
+        # A second unit slipped in front of the check.
+        (
+            '  step "Refuse a source whose runner',
+            '  step "Warm up"\n  true\n  step "Refuse a source whose runner',
+        ),
+    ),
+)
+def test_the_script_capability_check_bites_on_each_plant(old: str, new: str) -> None:
+    found = rehearse_script.units("preflight", _planted_script(old, new))
+    assert not (
+        len(found) == 1 and found[0] == CANONICAL_CAPABILITY_STEP
+    ), "a weakened preflight phase still matched the pinned canonical step"

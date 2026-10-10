@@ -195,6 +195,24 @@ before any target connection. This amendment does not implement that runtime
 integration or establish admission. The private provisioning validator must
 adopt the same equality rule before B7 writes the record.
 
+**Consumption (D4, 2026-10-09).** `scripts/lane3_topology_source.py` is the one
+seam through which Lane 3 code obtains the record. The reader is injected; the
+production default (`RefusingKvTopologySource`) refuses as UNANSWERABLE until
+B7 provisions the `lane3-exposure-rehearsal` role and the record, and no
+fallback to repository variables, dispatch inputs or files exists. The dispatch
+carries only the Fleet `host_id` (the `target` and `vm_slot` inputs are gone,
+and `vars.LANE3_PROBE_HOST`/`INSIDE_VANTAGE`/`OBSERVER_USER` with them).
+`lane3_rehearse.sh` resolves the record for its pre-runner steps through the
+same seam, holding values in shell variables only. The runner reads the record
+itself before the descriptor, refuses a KV version different from the one the
+script resolved, and binds by `host_id`, then refuses unless the trusted plan's
+`host_id` is the same host. `address` is the transport, `far_end` the
+observation endpoint, the slot comes from the record, and `probe_vantage_ref`
+is derived as `<probe_vantage.key>@<KV version>`. The terminal evidence carries
+only `BoundTopology.evidence()`: record path, version, vantage reference,
+counts and `host_id`. The real KV reader is not implemented here; it lands with
+B7.
+
 **Custody and evidence.** The values exist only in the OpenBao record (and
 Michael's private input when he writes version 1). They never appear in Git,
 dispatch inputs, logs, receipts or chat. Public evidence carries the KV
@@ -367,7 +385,7 @@ read-back, not by the change that was meant to cause it.
 
 | Step | Action | Evidence |
 | --- | --- | --- |
-| R1 | **Split, 2026-10-06.** (a) `exposure-rehearsal.yml` is retired only after its rehearse-job steps move into a Starter-owned script that the launcher calls (D-S2c). About 40 Starter guard tests encode its Lane 3 properties (candidate-bytes execution, `-E -P` isolation, authorization before probe, capability preflight). Deleting it first would leave those properties unguarded, because the launcher lives in another repository. (b) `control-runner-diagnostic.yml` is **held**: `packages/dotmac-runner-transport/EXTRACTION.toml` names VMID 124 (the control runner) as that programme's first adopter, and its cutover needs both repository diagnostics. Retiring it needs an owner decision on which plan wins. When R1 lands, it updates the executor inventory and lowers the `vars.LANE3_` ratchet to empty | Merge SHA. Executor-retirement ratchet green. |
+| R1 | **Split, 2026-10-06.** (a) `exposure-rehearsal.yml` is retired only after its rehearse-job steps move into a Starter-owned script that the launcher calls (D-S2c). 19 Starter guard test cases (measured 2026-10-06; § 13) encode its Lane 3 properties (candidate-bytes execution, `-E -P` isolation, authorization before probe, capability preflight). Deleting it first would leave those properties unguarded, because the launcher lives in another repository. (b) `control-runner-diagnostic.yml` is **held**: `packages/dotmac-runner-transport/EXTRACTION.toml` names VMID 124 (the control runner) as that programme's first adopter, and its cutover needs both repository diagnostics. Retiring it needs an owner decision on which plan wins. When R1 lands, it updates the executor inventory and lowers the `vars.LANE3_` ratchet to empty | Merge SHA. Executor-retirement ratchet green. |
 | R2 | Deregister `control-runner-starter-mt`. **Held** with R1(b): same VMID 124 conflict | Starter runner listing reads zero runners, with a timestamp. |
 | R3 | Destroy the runner VM and its disk, including the controller, observer, jump and probe keys at rest, and retire its Fleet declaration. **Held** with R1(b). The Lane 3 static keys can still be removed from the VM and from `authorized_keys` (R4) without destroying the VM | Hypervisor read-back of absence. Fleet record change. |
 | R4 | Remove the static `lane3obs`, jump and probe-host keys from every `authorized_keys` they were installed in | Per-host read-back naming the host. "Unobserved" is recorded as unobserved, never as absent. |
@@ -411,3 +429,258 @@ them red):
    read the execution repository.
 4. Where the JIT provisioner runs, and its owner.
 5. Certificate and token TTLs, after measurement.
+
+## 12. D4 scope: producing `RehearsalReceipt.v2` (added 2026-10-06)
+
+D4 stays separate from Packet D (§ 10). This section fixes only its first
+slice, so that a receipt the § 6 oracle reads has exactly one producer.
+
+**Where it runs.** In the launcher's job in
+`dotmac-tech/lane3-exposure-execution`, on an ephemeral runner in
+`lane3-exposure-protected`, after `lane3-rehearsal-protected` is approved. The
+producer is Starter execution tooling (`scripts/lane3_receipt_v2.py`), outside
+Foundation `src/`. It costs the candidate nothing and moves the release
+revision (roadmap freeze-boundary table, row 3).
+
+**Inputs, and where each may come from.**
+
+| Input | Source | Refused when |
+| --- | --- | --- |
+| `FoundationExecutionPlanV3`, `ExecutionGrant` | The trusted CP-rendered plan and `authorize_v3()` over an attested Control V2 pair | Always today: no provider and no verifier exist (`acquire_authority`, exit 2) |
+| `DeploymentOutcome` | The public `Executor`, driven in-process under `deployment_lock` | Always today: host-source admission has no attesting provider (`execute_authorized_plan`, exit 2) |
+| `ExecutionRunBindingV1` | The Actions runtime's repository, owner, run and attempt | The repository ID, owner ID, event, ref or workflow ref differ from `.github/lane3-execution.json` (exit 1) |
+| The run, as the Actions API reports it | `GET .../actions/runs/{run_id}`, read by the launcher and passed as `--api-run` | Any of run ID, attempt, repository ID, owner ID, workflow path, branch, event or head SHA differs from the runtime or the topology, or the head SHA is not an admitted launcher revision (exit 1) |
+| `probe_vantage_ref` | `<record-key>@<version>` of the private topology record | Not that grammar (an address or hostname does not parse) |
+| `evidence_bundle_digest` | SHA-256 of the bundle as uploaded | The bundle is not `age`-encrypted (decision 9) |
+| Results | The sixteen rows, each from its measuring phase | Any row missing or duplicated (`build_receipt_v2`) |
+
+Neither witness is trusted. A job step can overwrite its own environment, and
+the launcher's API document was fetched with a token the job holds, so a job
+that can rewrite one can rewrite the other. Requiring them to agree turns an
+accidental mismatch (a re-run attempt, a wrong ref, a step that edited one
+variable) into a refusal here instead of at publication. **The binding
+authority stays the oracle:** it selects the run by API with its own token, and
+`require_execution_run` refuses a receipt naming any other run.
+
+**Output.** The receipt's canonical bytes, written create-only after being
+re-read by `RehearsalReceiptV2.from_json` and `require_execution_run`, the
+oracle's own reader and check.
+
+**Q1, answered 2026-10-06: yes, with conditions.** Items 1 and 8 can drive the
+public `Executor` with no Foundation `src/` change:
+`render_execution_plan` → V2 → V3, then `ExecutionBindings` → `authorize_v3`,
+then `Executor(...)` under `deployment_lock` → `.run` / `.rollback`. The
+conditions:
+
+- **In-process only.** The CLI hard-codes `RefusingHostSourceAdmissionProvider`,
+  and `Executor.run` verifies the host source first.
+- **A Starter-owned `HostSourceAdmissionProvider`:**
+  `scripts/lane3_host_source_admission.py` (`Lane3HostSourceAdmissionProvider`).
+  It refuses today by delegating to Foundation's
+  `RefusingHostSourceAdmissionProvider`, so it uses the same codes and has zero
+  effects. The real implementation calls the public `admit_host_source` with:
+  - the Gate-0 attester's candidate and installed `AttestationEnvelopeV2`
+    pair, which binds the authorized wheel digest and what the target's
+    interpreter loads;
+  - an `AttestationVerifier` and `AttestationTrustPolicy` pinned to the
+    attester key in Gate-0 trust state, never taken from job inputs;
+  - the plan's `host_id`, the attested observation, and the package
+    `dotmac-deployment-foundation`;
+  - Control's `verification_context_digest` for this dispatch, and the
+    current time.
+
+  It cannot exist before Gate-0 steps A3–A5, which create the attester VM, its
+  key and the trust state, nor before Control offers a context API.
+- **Its own effects and runner.** The producer supplies its own `Effects` and
+  `ExposureEffects`, and passes its own runner to `ComposeHostExposureEffects`.
+  It never imports the CLI's private default runner.
+- **A local mirror** of the CLI's private V3 plan rendering:
+  `scripts/lane3_plan_v3.py`, built from public calls only.
+  `tests/unit/test_lane3_plan_v3.py` proves the same canonical bytes and digest
+  as `cli._render_local_execution_plan_v3`, and the same refusals. If parity
+  ever breaks, the mirror follows the CLI, or Foundation exposes a public entry
+  point before the Gate-2 freeze.
+
+**Not in this slice.** A real admission provider, the Executor drive, the
+OpenBao topology read, `lane3-ssh/` certificates, and moving
+`exposure_rehearsal_runner.py` (still v1) onto the producer (§ 13). The
+launcher calls the producer only after D-S2c.
+
+## 13. D-S2c plan: one Starter-owned rehearsal script (planning only, 2026-10-06)
+
+D-S2c is what lets R1a retire `exposure-rehearsal.yml` without leaving its
+Lane 3 properties unguarded. This section plans it. **No workflow is deleted
+by the PR that adds it.**
+
+### Steps, in order
+
+| # | Step | Where | Freeze-boundary cost |
+| --- | --- | --- | --- |
+| C1 | Move the rehearse job's steps into `scripts/lane3_rehearse.sh`: capability check, candidate download and digest verification, isolated `python -E -P` install, authorization, probe collection, runner call, terminal-record write. `exposure-rehearsal.yml` then calls only that script, so its properties are asserted on the script | Starter | Execution tooling (row 3): no candidate cost; moves the release revision |
+| C2 | Migrate `exposure_rehearsal_runner.py` from `build_receipt` (v1) onto the D4 producer: `assemble_receipt` with a plan, grant and outcome from `acquire_authority` and `execute_authorized_plan`. Item 9 becomes the v2 chain. The v1 path is removed in the same change, so nothing can publish a v1 receipt | Starter | Row 3; the receipt contract (#770) is already in candidate bytes, and nothing in Foundation `src/` changes |
+| C3 | The launcher calls `scripts/lane3_rehearse.sh` at the dispatched Starter revision, and passes `--api-run` from its own API read. Its new commit is admitted in `.github/lane3-execution.json` with a checked-in launcher snapshot (below) | launcher repo, then Starter | Row 3; moves the **admitted launcher revision** |
+| C4 | Admission evidence (§ 7, B5), then two distinct successful controller cycles through the launcher, as rule 45 requires before any retirement | live | None; it is evidence |
+| C5 | **R1a:** delete `exposure-rehearsal.yml` and record its removal receipt. Set the `workflow:exposure-rehearsal` disposition in `docs/inventories/executor-retirement/dotmac_starter_mt.toml` to retired, lower `LANE3_VARIABLE_BASELINE` to empty, and retire or rehome the tests below | Starter | Row 3; moves the release revision, so it lands **before** the authoritative Gate-3 rehearsal, or the rehearsal is repeated after it |
+
+C1 and C2 can land now: they are fail-closed and touch no host. C3 needs the
+admitted launcher change. C4 needs B5 and Gate-0. C5 needs C4.
+
+### Status: C1 and C2 implemented (2026-10-08, draft, stacked on #779)
+
+- **C1.** `scripts/lane3_rehearse.sh` has two phases. `preflight` is the
+  canonical capability check, alone. `rehearse` is, in order: resolve the
+  facility; resolve the candidate (a closed-key reader of `resolve-candidate`);
+  fetch; verify; isolated install; the authorization gate; the vantage
+  qualification; the runner, under `-E -P`.
+  - Each unit is marked `step "<name>"`, and the guards read the script unit
+    by unit (`tests/architecture/lane3_rehearse_script.py`), dropping comment
+    lines as bash does.
+  - `exposure-rehearsal.yml` now runs `bash scripts/lane3_rehearse.sh
+    preflight|rehearse` and keeps only what is a launcher property: checkout,
+    setup, runner liveness, uploads, `id-token`, `runs-on`.
+  - Dispatch inputs reach the script as **environment values**, no longer
+    interpolated into `run:` bodies.
+  - `vars.LANE3_` reads fell from 11 to 5, and the two-directional baseline is
+    lowered in the same change.
+- **C2.** The runner builds no v1 receipt (`build_receipt` is no longer
+  imported).
+  - It binds the execution run (pinned topology, runtime coordinates, the
+    `--api-run` witness) **before the descriptor is opened**.
+  - It takes the plan only from `lane3_receipt_v2.acquire_execution_plan`, and
+    `establish_authorization` issues the grant against that plan.
+  - It drives `execute_authorized_plan` at the transaction phase, and assembles
+    with `assemble_receipt` from the encrypted `--evidence-bundle` and
+    `--probe-vantage-ref`.
+  - All of those refuse today. With the checked-in topology a run is
+    UNANSWERABLE (exit 2) before the descriptor; with an admitted topology it is
+    UNANSWERABLE at the plan, before the lease. D4 refusals map onto this
+    lane's families through `receipt_v2_refusals`, with the call site choosing
+    `PreconditionUnfit` (before the host) or `SpecError` (at assembly, under
+    the lease).
+- **Rehomed onto the script (10 cases):**
+  - capability: canonical command, order before liveness, unconditional and
+    pinned, and the upload's `--out`;
+  - authorization: the gate's order, and the plan and grant source;
+  - candidate artifact: execution, identity bites, and revision/isolation
+    bites;
+  - terminal release: the slot and candidate binding.
+
+  New plant tests prove the script reader bites on a commented-out, masked or
+  preceded capability check.
+- **Still on the workflow until C3**, which brings the launcher snapshot: the
+  preflight-job properties in `test_lane_three_runner_preflight.py`;
+  `id-token: write`; and the `if: always()` terminal upload. The snapshot
+  guards and the retirement of
+  `test_the_rehearsal_job_still_targets_the_control_runner` belong to C3,
+  because today the workflow still targets the control runner and no admitted
+  launcher calls the script.
+
+### The 19 dependent test cases, and where each goes
+
+"Script" means the guard is re-pointed at `scripts/lane3_rehearse.sh` in C1.
+"Launcher" means the property belongs to the launcher workflow. A launcher
+property is guarded in Starter against a **checked-in snapshot** of the
+admitted launcher workflow, whose digest is recorded beside its revision in
+`.github/lane3-execution.json`. A launcher revision is admitted only if the
+snapshot matches the launcher repository at that commit. The launcher's own
+`source-policy` keeps its copy of each check.
+
+| File | Cases | Disposition |
+| --- | --- | --- |
+| `test_exposure_rehearsal_requires_runner_capability.py` | 5 | Script: capability check unconditional, first, before runner liveness; record-upload shape. The two "both workflows" cases become script-plus-candidate-workflow |
+| `test_lane_three_runner_preflight.py` | 5 | Launcher snapshot: hosted preflight, time bound, invokes the refusal, rehearsal depends on preflight. **Retired:** `test_the_rehearsal_job_still_targets_the_control_runner`, inverted by the runner-group check in `require_run_context` |
+| `test_lane3_authorization.py` | 2 | Script: the authorization gate precedes probe and runner; no single V1 authority |
+| `test_lane3_candidate_artifact_execution.py` | 3 | Script: digest-verified wheel, `-E -P` isolation, and the bite tests over identity, revision and isolation regressions |
+| `test_lane3_terminal_release.py` | 3 | Launcher snapshot: `id-token: write` for workload identity; the terminal record uploaded under `if: always()`. Script: binding the run to a slot and candidate |
+| `test_lane3_public_surface_guards.py` | 1 | `test_no_new_workflow_reads_lane3_topology_from_repository_variables`: its baseline is lowered to empty in C5 |
+
+Not dependent, although the name matches:
+- `test_lane3_execution_oracle.py` asserts `release-facility.yml` no longer
+  lists runs of `exposure-rehearsal.yml`.
+- `scripts/exposure-rehearsal/` fixture paths, and `exposure_rehearsal_runner`
+  imports.
+
+Also bound to the workflow: the executor-retirement inventory entry (C5) and
+the self-hosted reachability guard, which keeps passing with one fewer
+workflow.
+
+### Ordering against the R holds
+
+- **No conflict with C1–C5:** R1b (`control-runner-diagnostic.yml`), R2, R3
+  and the token half of R5 are held on the VMID 124 decision
+  (`dotmac-runner-transport`'s first adopter, hosting two runners).
+- **C5 removes only the workflow.** Starter's runner service on VMID 124 (R3)
+  and `RUNNER_QUERY_TOKEN` (R5) stay until that decision. Until then, the
+  self-hosted reachability guard is what keeps the personal runner from being
+  reached.
+- **After C5, the personal runner has no Starter workflow left,** which is
+  R3's precondition. The VM is never destroyed, because it hosts
+  Observability's runner too.
+- **Nothing here needs a Foundation `src/` change.** If C2 finds otherwise,
+  that change moves before the Gate-2 freeze (row 1).
+
+### B7 runtime reader preparation
+
+`scripts/lane3_openbao_topology.py` implements the explicit JWT-to-KV reader.
+The launcher calls `lane3_topology_source.openbao_source` with an authenticated
+transport, a fresh JWT supplier and the approved exact KV version, then injects
+that source into the resolver's `main(source=...)` or the runner's
+`topology_src` parameter. Separate resolver/runner reads require fresh sources
+with the same approved version. The factory does not select an endpoint,
+credential, namespace or version from environment variables or dispatch input.
+Unconfigured/default execution still refuses.
+
+The reader requests the fixed B7 audience and role, accepts only a nonrenewable
+batch token with the sole B7 policy and a measured lifetime of at most 300
+seconds, then reads only the fixed topology record at the pinned version. It
+refuses identity-policy additions, deleted/destroyed records, mismatched
+versions and schema failures. There is no cached-success fallback or retry.
+Tokens and JWTs are kept in process memory only; removal of Python references
+is not a memory-zeroization guarantee. Batch tokens expire and cannot be
+individually revoked. No root or custody credential is used.
+
+The supplied transport uses verified HTTPS with an explicit CA file, no proxy
+or redirect, bounded response size, per-socket timeout and a request shutdown
+timer. It does not downgrade to HTTP. The explicit WireGuard adapter below supports a separately pinned private
+channel. This change does not activate either path, provision B7, or establish
+live Gate-0 readiness.
+Hosted CI owns tests of this repository; no local or named-host test run is
+acceptance evidence for this reader.
+
+The explicit `github_openbao_source` factory composes the real single-use
+Actions OIDC supplier with the B7 reader. The protected launcher supplies
+`ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` in memory,
+plus the independently approved exact OIDC broker origin. The supplier
+requests only the fixed B7 audience; changed origin, extra query parameters,
+redirects, malformed responses and repeated use refuse. It never prints the
+request credential or JWT. Broker observation is not automatic egress admission.
+Signed claim validation remains OpenBao's responsibility; local JWT shape
+validation is not authorization.
+
+The protected execution workflow still has no `id-token: write` permission.
+This source preparation does not add it or edit the admitted launcher snapshot.
+Enabling it requires the reviewed launcher amendment and source-policy/admission
+reconciliation. The observed VM124 WireGuard interface is a transport candidate,
+not proof of endpoint/peer/route correctness or permission to activate this reader.
+
+
+`wireguard_github_openbao_source` explicitly selects the HTTP-over-WireGuard
+adapter in `scripts/lane3_wireguard_topology.py`; it is never a fallback from
+failed HTTPS. Its independently reviewed private configuration pins the local
+and Observe public keys, exact inner endpoint/source and interface. It checks
+only public WireGuard metadata through existing noninteractive authority,
+requires exact-host peer routes and a recent handshake, confirms the source is
+assigned to that interface and checks the source-bound kernel route. Every
+connection is source-bound, with fresh checks before connecting and before
+sending the JWT or batch token. Missing privileges, stale handshake, changed
+key, ambiguous/widened route or source mismatch refuse without fallback.
+
+The adapter never reads private keys or WireGuard configuration files, grants
+sudo, changes routes/firewalls or establishes a tunnel. The runtime account's
+permission for the exact public-state commands must be independently reviewed;
+VM124's existing management account does not establish permissions for a future
+protected runner identity. Host root, kernel, approved key/configuration custody
+and Observe remain trusted. Re-reading metadata is not a route lock and does
+not claim resistance to malicious host administrators or their races. No live
+JWT/OpenBao credential has been sent by this preparation or its read-only
+metadata qualification.

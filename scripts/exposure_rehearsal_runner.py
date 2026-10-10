@@ -165,6 +165,8 @@ from typing import Final
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import lane3_inside_vantage as inside_vantage
+import lane3_receipt_v2 as receipt_v2
+import lane3_topology_source as topology_source
 from dotmac_deployment_foundation.controller_identity import (
     ControllerSshFingerprintV1,
 )
@@ -198,7 +200,6 @@ from dotmac_deployment_foundation.providers.exposure_host import (
 from dotmac_deployment_foundation.rehearsal import (
     RequirementResult,
     RequirementStatus,
-    build_receipt,
     render_status_document,
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
@@ -208,8 +209,10 @@ from dotmac_deployment_foundation.vantage import (
 )
 from lane3_authorization import (
     AuthorizationUnverifiable,
+    Standing,
     establish_authorization,
 )
+from lane3_execution import TopologyRefused, load_topology
 
 # `observed_foreign`, `provoke_apply_failure` and `seed_foreign_rules` are NOT
 # imported any more and are deliberately NOT deleted from `lane3_provocation`.
@@ -225,6 +228,7 @@ from lane3_provocation import (
     private_port,
     withdraw_foreign_rules,
 )
+from lane3_topology import TopologyRecordRefused
 
 # 0 ran / 1 refused / 2 the question could not be answered — the same three the
 # repository's other gates use (`scripts/check_allocation_serialized.py`), and
@@ -450,6 +454,74 @@ def refusal_of(kind: type[DeploymentFoundationError]) -> Iterator[None]:
         raise kind(str(exc)) from exc
 
 
+@contextlib.contextmanager
+def receipt_v2_refusals(
+    *, refused_as: type[DeploymentFoundationError]
+) -> Iterator[None]:
+    """Translate the D4 producer's refusals into this lane's two families.
+
+    `lane3_receipt_v2` refuses in its own vocabulary so it can run without this
+    file. Here they meet the terminal record, which only knows two families:
+
+    * "this environment cannot answer" (`AuthorityUnavailable`, an unadmitted
+      `TopologyRefused`) becomes `AuthorizationUnverifiable` standing
+      UNANSWERABLE, exit 2. It is the same fact the authorization gate reports
+      when no verifier is installed, so it keeps that fact's status rather than
+      borrowing a refusal's.
+    * "an input contradicts what a receipt may bind" (`ReceiptRefused`) becomes
+      `refused_as`, chosen AT THE CALL SITE: before any host contact it is
+      `PreconditionUnfit`, the honest "nothing attempted"; at assembly, after
+      the lease was held and the host observed, it is `SpecError`, which
+      `classify_refusal` records as host state uncertified.
+    """
+    try:
+        yield
+    except (receipt_v2.AuthorityUnavailable, TopologyRefused) as exc:
+        raise AuthorizationUnverifiable(Standing.UNANSWERABLE, str(exc)) from exc
+    except receipt_v2.ReceiptRefused as exc:
+        raise refused_as(str(exc)) from exc
+
+
+@contextlib.contextmanager
+def vantage_topology_refusals(
+    *, refused_as: type[DeploymentFoundationError]
+) -> Iterator[None]:
+    """Translate the topology seam's refusals into this lane's two families.
+
+    * No reader is provisioned (`TopologySourceUnavailable`): this environment
+      cannot answer, so UNANSWERABLE, exit 2 — the same standing the
+      authorization gate reports with no verifier installed.
+    * The record was read and is malformed, or cannot bind this run
+      (`TopologyRecordRefused`, `TopologyBindingRefused`): `refused_as`, chosen
+      at the call site. Every one is raised before any target connection. The
+      messages name fields only; no topology value reaches a refusal.
+    """
+    try:
+        yield
+    except topology_source.TopologySourceUnavailable as exc:
+        raise AuthorizationUnverifiable(Standing.UNANSWERABLE, str(exc)) from exc
+    except (TopologyRecordRefused, topology_source.TopologyBindingRefused) as exc:
+        raise refused_as(str(exc)) from exc
+
+
+def install_bound_topology(
+    args: argparse.Namespace, ctx: TerminalContext, bound: topology_source.BoundTopology
+) -> None:
+    """Every topology value the run uses, from the bound record and nowhere else.
+
+    `args.target` stays the lease IDENTITY (the Fleet `host_id`); transport goes
+    to `address` and observation to `far_end`, which the parser holds equal.
+    """
+    args.target_address = bound.target_address
+    args.far_end = bound.far_end
+    args.vm_slot = bound.proxmox_slot
+    args.probe_host = bound.probe_host
+    args.inside_vantage = bound.inside_vantage
+    args.observer_user = bound.observer_principal
+    args.probe_vantage_ref = bound.probe_vantage_ref
+    ctx.vantage_topology = bound.evidence()
+
+
 class Results:
     """Collects one outcome per item, refusing a second write for the same one.
 
@@ -580,7 +652,7 @@ def _observed_from(args: argparse.Namespace, *, jump_key: str) -> dict[str, str]
     argv = [
         str(script),
         args.inside_vantage,
-        args.target,
+        args.far_end,
         args.observer_user,
         args.observer_key,
         jump_key,
@@ -614,14 +686,14 @@ def _collect_probe_phase(args: argparse.Namespace) -> dict:
         / "exposure-rehearsal"
         / "collect_probe_evidence.sh"
     )
-    argv = [str(script), "probe", args.probe_host, args.target]
+    argv = [str(script), "probe", args.probe_host, args.target_address]
     completed = subprocess.run(
         argv, capture_output=True, text=True, timeout=args.timeout, check=False
     )
     if completed.returncode != 0:
         raise ProbeRefused(
-            f"the probe phase refused ({shlex.join(argv)}): "
-            f"{completed.stderr.strip() or 'no stderr'}"
+            # No argv here: it carries the private vantage and target.
+            "the probe phase refused: " f"{completed.stderr.strip() or 'no stderr'}"
         )
     try:
         return json.loads(completed.stdout)
@@ -924,6 +996,10 @@ class TerminalContext:
     arm_attempted: bool = False
     vm_installation_id: str = ""
     receipt_digest: str = ""
+    #: The vantage topology this run bound, VALUE-FREE: record path, KV version,
+    #: `probe_vantage_ref`, the parser's counts and the Fleet `host_id`. None
+    #: until the record is read and bound, so a refusal before that claims none.
+    vantage_topology: dict[str, object] | None = None
     acts: list[CleanupAct] = dataclasses.field(default_factory=list)
     notes: list[str] = dataclasses.field(default_factory=list)
 
@@ -1199,6 +1275,7 @@ def record_terminal(
         "document": "lane3-terminal-evidence",
         "version": 1,
         "target": str(args.target),
+        "vantage_topology": ctx.vantage_topology,
         "authorization_run_id": str(args.authorization_run),
         # THREE revisions, named separately, on the record this run leaves
         # behind. The release revision is not this run's to state -- it belongs
@@ -1288,7 +1365,7 @@ def require_inside_probe_harness(
         name
         for name, value in (
             ("--inside-vantage", args.inside_vantage),
-            ("--target", args.target),
+            ("the topology target address", args.target_address),
             ("the vantage's `target_v6`", target_v6),
         )
         if not str(value).strip()
@@ -1379,7 +1456,12 @@ def run_cleanup(
         )
 
 
-def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
+def run(
+    args: argparse.Namespace,
+    ctx: TerminalContext,
+    *,
+    topology_src: topology_source.TopologySource | None = None,
+) -> int:
     started = datetime.now(UTC).isoformat()
     results = Results()
 
@@ -1415,6 +1497,49 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
             args.candidate_source_revision, field="--candidate-source-revision"
         )
 
+    # The FOURTH binding, and the last one decidable without the host: which
+    # Actions run this is. `RehearsalReceipt.v2` names it, and the oracle
+    # refuses a receipt whose run is not the one it selected
+    # (`require_execution_run`). Asked here, a run outside the pinned execution
+    # surface, an unadmitted topology, or an API record that contradicts this
+    # job's runtime refuses before the descriptor is opened, so no receipt that
+    # could never be accepted is produced and the host is genuinely untouched.
+    with receipt_v2_refusals(refused_as=PreconditionUnfit):
+        topology = load_topology(pathlib.Path(args.topology))
+        if not args.api_run:
+            raise receipt_v2.ReceiptRefused(
+                "no --api-run: the launcher passes the run as the Actions API "
+                "reports it, and a run without that second witness cannot be "
+                "bound"
+            )
+        execution_run = receipt_v2.execution_run_from_environment(
+            os.environ, topology=topology
+        )
+        receipt_v2.require_api_agreement(
+            receipt_v2.load_api_run(pathlib.Path(args.api_run)),
+            environ=os.environ,
+            binding=execution_run,
+            topology=topology,
+        )
+
+    # The FIFTH binding: the private vantage topology, read ONLY through the
+    # injected seam (`lane3_topology_source`). Never a repository variable,
+    # dispatch input or file. Read before the descriptor and before any host
+    # contact, so a missing reader is UNANSWERABLE and a malformed record or an
+    # unbindable host is `precondition_unfit` with the host untouched. The
+    # script resolved the same record for its own pre-runner steps; a different
+    # KV version here is a different topology and refuses.
+    source = (
+        topology_src if topology_src is not None else topology_source.default_source()
+    )
+    with vantage_topology_refusals(refused_as=PreconditionUnfit):
+        bound = topology_source.bind(
+            source.read(),
+            host_id=args.host_id,
+            expected_version=args.topology_version or None,
+        )
+    install_bound_topology(args, ctx, bound)
+
     descriptor = pathlib.Path(args.descriptor)
     fixture_bytes = descriptor.read_bytes()
     spec = ProductDeploymentSpec.load(str(descriptor))
@@ -1435,10 +1560,26 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     # authorization+dispatch pair. This workflow has no such composition, so
     # this call refuses before the lease or any host contact. V1 material is
     # never upgraded by comparing descriptor or target text with itself.
+    #
+    # The plan is the trusted CP-rendered `FoundationExecutionPlanV3`, and only
+    # the D4 producer may supply it (`lane3_receipt_v2.acquire_execution_plan`).
+    # Until a provider exists that call refuses as UNANSWERABLE, which is the
+    # same standing `establish_authorization` reports for a missing plan, so the
+    # observable verdict of this lane does not change; what changes is that the
+    # plan now has exactly one source and the grant is issued against it.
+    with receipt_v2_refusals(refused_as=PreconditionUnfit):
+        execution_plan = receipt_v2.acquire_execution_plan()
+    # The record was bound by the DISPATCHED host; the plan names the host it
+    # was rendered for. They must be one host, or the topology describes a
+    # machine the grant does not cover.
+    with vantage_topology_refusals(refused_as=PreconditionUnfit):
+        if execution_plan.host_id != bound.host_id:
+            raise topology_source.TopologyBindingRefused("host_id")
     grant = establish_authorization(
         descriptor_digest=descriptor_digest,
         target=args.target,
         authorization_document=args.authorization_document,
+        execution_plan=execution_plan,
     )
 
     # ── the lease, which cannot be self-granted ─────────────────────────────
@@ -1493,12 +1634,14 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     with refusal_of(PreconditionUnfit):
         private = private_port(spec)
         accepted_source_set = inside_source_set(spec)
-        target_v6 = str((evidence.get("vantage") or {}).get("target_v6", args.target))
+        target_v6 = str(
+            (evidence.get("vantage") or {}).get("target_v6", args.target_address)
+        )
         require_inside_probe_harness(args, target_v6=target_v6, port=private)
 
     # ONE seam onto the host, wrapped so that what a best-effort cleanup throws
     # away is still seen. A second `_ssh_runner` would be a second writer.
-    controller = CapturingRunner(_ssh_runner(args.target, args.controller_key))
+    controller = CapturingRunner(_ssh_runner(args.target_address, args.controller_key))
     effects = ComposeHostExposureEffects(
         spec,
         deploy_dir=args.deploy_dir,
@@ -1531,6 +1674,17 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         "before mutation",
         "effects.observe() before any mutation",
     )
+
+    # The plan is executed HERE, by the public `Executor` under the grant, and
+    # its `DeploymentOutcome` is item 9's last term (Q1, 2026-10-06:
+    # `lane3_receipt_v2.execute_authorized_plan`). Nothing in this file orders
+    # an effect. Until a Starter-owned host-source admission provider can
+    # attest, the call refuses as UNANSWERABLE; with the lease in hand
+    # `classify_refusal` records that as host state uncertified, the same
+    # answer an owned host gets for any refusal under the lease.
+    with receipt_v2_refusals(refused_as=SpecError):
+        execution_outcome = receipt_v2.execute_authorized_plan(execution_plan, grant)
+
     # ── item 4 is BLOCKED, and the block is the honest answer ───────────────
     #
     # This item drove `ExposureTransaction`, which no longer exists: applying a
@@ -1711,7 +1865,7 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         inside_probe = inside_vantage.collect(
             str(inside_probe_harness()),
             jump=args.inside_vantage,
-            target_v4=args.target,
+            target_v4=args.target_address,
             target_v6=target_v6,
             port=private,
             timeout=args.timeout,
@@ -1812,63 +1966,60 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         "Executor._reconcile_exposure -> verify_exposure -> _restore_exposure",
     )
 
-    # ── item 9: three terms, enforced by build_receipt ──────────────────────
+    # ── item 9: the v2 chain, enforced by build_receipt_v2 ──────────────────
     #
-    # The controller's term used to be read off the `VerificationReport` the
-    # deleted transaction returned. It comes from a verification of the host
-    # this run actually observed instead — the SAME function, `verify_exposure`,
-    # on the same observation, so the value is unchanged and its provenance is
-    # now a call this file makes rather than a side effect of an apply.
+    # Item 9 is no longer three digests asserted equal. It is a CHAIN:
+    # descriptor -> the trusted `FoundationExecutionPlanV3` -> the
+    # `ExecutionGrant` issued against that plan -> the `DeploymentOutcome` of
+    # executing it, each link checked by `build_receipt_v2`. The v1 path is gone
+    # in the same change (D-S2c C2), so nothing in this lane can publish a
+    # `RehearsalReceipt.v1` any more.
     #
-    # Deliberately NOT `descriptor_digest` restated. Item 9 is an equality
-    # between three independently produced terms, and reading the controller's
-    # from the variable the other two come from would make the comparison pass
-    # for every input — a check that compares something with itself.
+    # The controller's term is still a verification of the host this run
+    # actually observed, never `descriptor_digest` restated: a term read from
+    # the variable the others come from would compare something with itself.
     execution_report = verify_exposure(spec, observed).descriptor_digest
     results.record(
         "digest_equality",
-        PASSED,
-        "descriptor == authorized plan == controller execution report "
-        f"({descriptor_digest})",
-        "build_receipt(require_same_digest)",
+        PASSED if execution_report == descriptor_digest else FAILED,
+        "descriptor -> authorized V3 plan -> grant -> deployment outcome; the "
+        f"observed host verifies to {execution_report}",
+        "build_receipt_v2(chain)",
     )
 
-    receipt = build_receipt(
-        foundation_revision=args.foundation_revision,
-        foundation_artifact_digest=args.foundation_artifact,
-        authorization_run_id=args.authorization_run,
-        # OUT OF THE ATTESTED CONTROL V2 PAIR, never off the command line.
-        # `authorize_v3()`
-        # already proved this equals `descriptor_digest`, so item 9 does not get
-        # a new fact from it — what it gets is provenance: the term came from a
-        # document a verifier vouched for, rather than from a dispatch field.
-        #
-        # It is still NOT the middle term `AGENTS.md` rule 49 defines. That is
-        # `ExecutionPlanDigestV1` (`grant.execution_plan_digest`), and
-        # `build_receipt` cannot carry it while `require_same_digest` forces all
-        # three terms equal. Enumerated as the `middle_term_is_the_execution_
-        # plan_digest` precondition rather than quietly substituted here.
-        authorization_document_digest=grant.receipt.descriptor_digest,
-        descriptor_digest=descriptor_digest,
-        execution_report_digest=execution_report,
-        fixture_digest=str(Digest.of(fixture_bytes)),
-        controller_identity=str(controller_identity),
-        target=args.target,
-        lease_id=lease.authorization_run_id,
-        probe_identity=str(evidence.get("vantage", {}).get("address_v4", "")),
-        started_at=started,
-        finished_at=datetime.now(UTC).isoformat(),
-        results=results.all(),
-    )
-
-    pathlib.Path(args.receipt_out).write_text(
-        json.dumps(receipt.content, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
+    # The probe evidence is bound as the ENCRYPTED bundle that is published,
+    # and the vantage by its private record reference, never by an address.
+    # Both are produced outside this file; an absent one refuses at assembly.
+    with receipt_v2_refusals(refused_as=SpecError):
+        if not args.evidence_bundle:
+            raise receipt_v2.ReceiptRefused(
+                "no --evidence-bundle: a v2 receipt binds the age-encrypted "
+                "evidence bundle as uploaded, and this run was given none"
+            )
+        receipt = receipt_v2.assemble_receipt(
+            foundation_revision=args.foundation_revision,
+            foundation_artifact_digest=args.foundation_artifact,
+            descriptor_digest=descriptor_digest,
+            execution_plan=execution_plan,
+            grant=grant,
+            execution_outcome=execution_outcome,
+            fixture_digest=str(Digest.of(fixture_bytes)),
+            evidence_bundle=pathlib.Path(args.evidence_bundle).read_bytes(),
+            controller_identity=str(controller_identity),
+            lease_id=lease.authorization_run_id,
+            probe_vantage_ref=args.probe_vantage_ref,
+            execution_run=execution_run,
+            started_at=started,
+            finished_at=datetime.now(UTC).isoformat(),
+            results=results.all(),
+        )
+        ctx.receipt_digest = receipt_v2.write_receipt(
+            receipt, pathlib.Path(args.receipt_out)
+        )
     if args.status_out:
         pathlib.Path(args.status_out).write_text(
             render_status_document(receipt), encoding="utf-8"
         )
-    ctx.receipt_digest = receipt.sha256_digest()
     print(f"receipt_digest={ctx.receipt_digest}")
     failed = [r for r in receipt.results if not r.status.satisfies_publication]
     for row in failed:
@@ -1880,7 +2031,11 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     return EXIT_REFUSED if failed else EXIT_OK
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    topology_src: topology_source.TopologySource | None = None,
+) -> int:
     parser = argparse.ArgumentParser(
         prog="exposure_rehearsal_runner.py",
         description="Execute Lane 3 through the controller and emit a receipt.",
@@ -1901,17 +2056,15 @@ def main(argv: list[str] | None = None) -> int:
         ("--authorization-run", "Platform CP authorization run id"),
         ("--controller-identity", "fingerprint of the dedicated controller key"),
         ("--controller-key", "path to the controller private key (a POINTER)"),
-        ("--target", "the leased rehearsal target"),
-        ("--vm-slot", "the Proxmox SLOT the target occupies, `node/vmid`"),
+        # The target, its slot and every vantage come from the topology
+        # record (`lane3_topology_source`), bound by this Fleet host_id.
+        ("--host-id", "the Fleet host_id of the leased rehearsal target"),
         ("--candidate-version", "the Foundation candidate version under test"),
-        ("--probe-host", "the external vantage the probe phase runs from"),
-        ("--inside-vantage", "the vantage INSIDE the accepted source set"),
         ("--inside-jump-key", "private key for the inside vantage jump"),
-        ("--observer-user", "the restricted target-side observation user"),
         ("--observer-key", "private key for that observation identity"),
         ("--probe-evidence", "JSON of the external vantage's measurements"),
         ("--descriptor", "the exact rehearsal fixture"),
-        ("--receipt-out", "where to write RehearsalReceipt.v1"),
+        ("--receipt-out", "where to write RehearsalReceipt.v2 (create-only)"),
     ):
         parser.add_argument(flag, required=True, help=help_text)
     # NOT in the required block above, and the difference is the whole finding.
@@ -1930,6 +2083,40 @@ def main(argv: list[str] | None = None) -> int:
         help="the signed Platform CP authorization document (a path)",
     )
     parser.add_argument("--status-out", default="", help="generated status document")
+    # The v2 inputs (D-S2c C2). Optional at the PARSER for the same reason as
+    # `--authorization-document`: the org launcher supplies them (C3) and
+    # nothing can today, so a usage error would describe a command line rather
+    # than the run. Each is mandatory where it is used: an absent API run
+    # refuses before the descriptor is opened, an absent evidence bundle or
+    # vantage reference refuses at assembly.
+    parser.add_argument(
+        "--topology",
+        default=str(
+            pathlib.Path(__file__).resolve().parents[1]
+            / ".github"
+            / "lane3-execution.json"
+        ),
+        help="the pinned Lane 3 execution surface",
+    )
+    parser.add_argument(
+        "--api-run",
+        default="",
+        help="the launcher's saved GET .../actions/runs/{run_id} response",
+    )
+    parser.add_argument(
+        "--evidence-bundle",
+        default="",
+        help="the age-encrypted probe evidence bundle, exactly as uploaded",
+    )
+    # Not a source of the topology: the KV version the script resolved, which
+    # the runner's own read must equal. `probe_vantage_ref` is derived from the
+    # record (`<key>@<version>`) and is no longer an input.
+    parser.add_argument(
+        "--topology-version",
+        type=int,
+        default=0,
+        help="the vantage-topology KV version lane3_rehearse.sh resolved",
+    )
     parser.add_argument("--deploy-dir", default="/srv/lane3")
     parser.add_argument("--lease-dir", default=None)
     parser.add_argument("--lock-dir", default="/var/lock/dotmac")
@@ -1950,9 +2137,24 @@ def main(argv: list[str] | None = None) -> int:
 
         args.lease_dir = DEFAULT_LEASE_DIR
 
+    # `target` is the lease identity, the Fleet host_id. The transport values
+    # start EMPTY and are installed only by `install_bound_topology`, so a
+    # refusal before the record is bound records none of them.
+    args.target = args.host_id
+    for name in (
+        "target_address",
+        "far_end",
+        "vm_slot",
+        "probe_host",
+        "inside_vantage",
+        "observer_user",
+        "probe_vantage_ref",
+    ):
+        setattr(args, name, "")
+
     ctx = TerminalContext()
     try:
-        return run(args, ctx)
+        return run(args, ctx, topology_src=topology_src)
     # `AuthorizationUnverifiable` is caught ALONGSIDE this lane's own refusals
     # rather than translated into one, because translating it would discard the
     # single fact it exists to carry: whether the environment could answer the

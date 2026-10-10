@@ -61,16 +61,14 @@ on:
       controller_identity:
         description: "controller key fingerprint, as `ssh-keygen -lf` prints it"
         required: true
-      target:
-        description: "the leased rehearsal target"
-        required: true
-      # The thing that gets DESTROYED is a slot, not an address: the addresses
-      # are exactly what a destroy-and-restore can change, so a release binding
-      # one would bind a value that survives the wipe by coincidence. Required
-      # and undefaulted — a default here would hardcode which machine this lane
-      # is allowed to release.
-      vm_slot:
-        description: "the Proxmox slot the target occupies, `node/vmid`"
+      # The Fleet host_id, and ONLY that: the address, the Proxmox SLOT the
+      # release binds (`node/vmid`) and every vantage come from the private
+      # vantage-topology record, bound by this id (docs/LANE3_EXECUTION_TOPOLOGY.md
+      # section 4). A dispatch can no longer type an address or a slot. Required
+      # and undefaulted: a default would hardcode which machine this lane may
+      # release.
+      host_id:
+        description: "the Fleet host_id of the leased rehearsal target"
         required: true
       candidate_version:
         description: "the Foundation candidate version under test"
@@ -120,12 +118,12 @@ jobs:
       # here, a held host lease — on a revision that was never eligible to
       # rehearse in the first place. Stdlib only; no dependencies needed, which
       # is why it can run in `preflight` before any Foundation package exists.
+      #
+      # The check itself lives in `scripts/lane3_rehearse.sh preflight`
+      # (D-S2c C1), so it is asserted on the script and outlives this file.
       - name: Refuse a source whose runner cannot produce a rehearsal receipt
         run: |
-          python scripts/lane3_runner_capability.py \
-            --root . \
-            --out lane3-runner-capability.json \
-            --summary "${GITHUB_STEP_SUMMARY}"
+          bash scripts/lane3_rehearse.sh preflight
 
       # Preserved whatever the verdict, because a refusal is the more useful
       # record of the two: it names which reasons blocked this revision, and the
@@ -180,148 +178,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The rehearsal executes the exact candidate that may later be
-      # published. Coordinates and digest come only from the committed
-      # CandidateArtifact.v1 receipt; no dispatch field may substitute one.
-      - name: Resolve the allowlisted facility
-        run: |
-          python scripts/release_facility.py resolve \
-            "${{ inputs.facility }}" --version "${{ inputs.candidate_version }}"
-
-      - name: Resolve the recorded candidate
-        id: candidate
-        run: |
-          set -euo pipefail
-          python scripts/release_facility.py resolve-candidate \
-            "${{ inputs.facility }}" --version "${{ inputs.candidate_version }}" \
-            | tee -a "${GITHUB_OUTPUT}"
-
-      - name: Fetch the recorded candidate artifact
+      # Every rehearsal step is `scripts/lane3_rehearse.sh rehearse` (D-S2c C1):
+      # resolve, fetch and verify the recorded candidate, install it isolated
+      # (`-E -P`), ask the authorization gate, qualify the external vantage,
+      # then drive the runner. Its order and content are asserted on the
+      # script, so the org launcher (C3) inherits them by calling it rather
+      # than by copying this file.
+      #
+      # Inputs reach the script as ENVIRONMENT VARIABLES only. Interpolating a
+      # dispatch value into a `run:` body makes it shell; as an env value it is
+      # only ever data.
+      - name: Rehearse Lane 3 through the Starter-owned script
         env:
           GH_TOKEN: ${{ secrets.CANDIDATE_SOURCE_TOKEN || github.token }}
-          REPOSITORY: ${{ steps.candidate.outputs.candidate_repository }}
-          ARTIFACT_ID: ${{ steps.candidate.outputs.candidate_artifact_id }}
-        run: |
-          set -euo pipefail
-          mkdir -p candidate-dist
-          gh api "/repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
-            > candidate.zip
-          python -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
-            candidate.zip candidate-dist
-
-      - name: Refuse anything that is not the recorded candidate
-        run: |
-          python scripts/release_facility.py verify-candidate \
-            "${{ inputs.facility }}" --version "${{ inputs.candidate_version }}" \
-            --dist candidate-dist
-
-      # ISOLATED means the installed wheel is the ONLY importable copy, and the
-      # venv alone does not achieve that. `PYTHONPATH` is honoured by every
-      # interpreter regardless of which venv it lives in, so a job step that
-      # exported it — or a runner image that ships it — would put the checkout's
-      # `packages/dotmac-deployment-foundation/src` back on the path ahead of
-      # site-packages. The rehearsal would then exercise the SOURCE and pass
-      # identically whether or not the wheel is correct, which is the one
-      # outcome this whole sequence exists to make impossible.
-      #
-      # So the runner is launched `-E -P`:
-      #   -E  ignore PYTHONPATH and every other PYTHON* variable
-      #   -P  do not put the script's own directory on sys.path
-      # `-P` costs nothing here: the runner puts its own directory back
-      # explicitly, because it must import its `lane3_*` siblings and does so
-      # by an absolute path derived from `__file__` rather than by inheriting
-      # whatever the launcher happened to leave on the path.
-      - name: Install the verified candidate in an isolated environment
-        run: |
-          set -euo pipefail
-          python -m venv .lane3-foundation
-          .lane3-foundation/bin/python -m pip install --no-deps candidate-dist/*.whl
-
-      # BEFORE the probe host and the target are touched, and in the SAME
-      # interpreter the runner will use — whether an `AuthorizationVerifier` is
-      # installed is a property of the candidate venv, so asking on the hosted
-      # `preflight` job would answer about the wrong environment and asking from
-      # the checkout would answer about the wrong Foundation.
-      #
-      # 0 attested / 1 refused / 2 the question could not be answered. Today it
-      # is 2, and that failure is the point: this lane is now EXPLICITLY blocked
-      # with its preconditions enumerated, where before it went green on text.
-      - name: Refuse unless Lane 3's authorization can be verified here
-        env:
-          AUTHZ: ${{ inputs.authorization_run }}
-        run: |
-          .lane3-foundation/bin/python -E -P scripts/lane3_authorization.py \
-            --descriptor scripts/exposure-rehearsal/product.toml \
-            --target "${{ inputs.target }}"
-
-      # The external half. Collected BEFORE the controller runs so the vantage
-      # is qualified against its own interfaces and routes rather than trusted,
-      # and so a probe measured after teardown can never be reused as a
-      # negative — a refusal against a stopped service measures absence of a
-      # service, not absence of exposure.
-      # The observation identity is SEPARATE from the controller identity, and
-      # the separation is the point: the target-side read must not carry the
-      # ability to change the target. `lane3obs` has no sudo and no docker
-      # group; the controller that applies the plan is a different account.
-      # Both are configured rather than hardcoded, and an unset one REFUSES —
-      # falling back to an agent key would prove a credential works that was
-      # never meant to be used.
-      - name: Collect and qualify the external probe evidence
-        env:
-          PROBE_HOST: ${{ vars.LANE3_PROBE_HOST }}
-          TARGET: ${{ inputs.target }}
-          LANE3_OBSERVER_USER: ${{ vars.LANE3_OBSERVER_USER }}
-          LANE3_OBSERVER_KEY: ${{ vars.LANE3_OBSERVER_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "${PROBE_HOST}" || {
-            echo "REFUSED: no external probe vantage configured" >&2; exit 1; }
-          test -n "${LANE3_OBSERVER_USER}" && test -n "${LANE3_OBSERVER_KEY}" || {
-            echo "REFUSED: no target-side observation identity configured. The" \
-                 "far-end source address is the one check measured from the far" \
-                 "end, and a vantage cannot certify where it egresses from" >&2
-            exit 1; }
-          ./scripts/exposure-rehearsal/collect_probe_evidence.sh \
-            qualify "${PROBE_HOST}" "${TARGET}" > probe-evidence.json
-
-      # The runner takes the PROBE phase itself, after the apply — see its
-      # module docstring. It therefore needs the same observation identity the
-      # qualify step used, and refuses without it.
-      - name: Execute Lane 3 through the controller
-        env:
-          AUTHZ: ${{ inputs.authorization_run }}
-          LANE3_OBSERVER_USER: ${{ vars.LANE3_OBSERVER_USER }}
-          LANE3_OBSERVER_KEY: ${{ vars.LANE3_OBSERVER_KEY }}
+          LANE3_FACILITY: ${{ inputs.facility }}
+          LANE3_CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          LANE3_AUTHORIZATION_RUN: ${{ inputs.authorization_run }}
+          LANE3_CONTROLLER_IDENTITY: ${{ inputs.controller_identity }}
+          LANE3_HOST_ID: ${{ inputs.host_id }}
           LANE3_JUMP_KEY: ${{ vars.LANE3_JUMP_KEY }}
+          LANE3_OBSERVER_KEY: ${{ vars.LANE3_OBSERVER_KEY }}
         run: |
-          set -euo pipefail
-          test -n "${LANE3_JUMP_KEY}" || {
-            echo "REFUSED: no inside-vantage jump key configured. Items 12 and" \
-                 "16 need a probe that genuinely originates inside the accepted" \
-                 "source set; this host is outside it by construction" >&2
-            exit 1; }
-          .lane3-foundation/bin/python -E -P scripts/exposure_rehearsal_runner.py \
-            --foundation-revision "${GITHUB_SHA}" \
-            --candidate-source-revision \
-              "${{ steps.candidate.outputs.candidate_source_sha }}" \
-            --foundation-artifact "${{ steps.candidate.outputs.candidate_sha256 }}" \
-            --authorization-run "${AUTHZ}" \
-            --controller-identity "${{ inputs.controller_identity }}" \
-            --controller-key "${HOME}/.dotmac/controller-${AUTHZ}" \
-            --target "${{ inputs.target }}" \
-            --vm-slot "${{ inputs.vm_slot }}" \
-            --candidate-version "${{ inputs.candidate_version }}" \
-            --probe-host "${{ vars.LANE3_PROBE_HOST }}" \
-            --inside-vantage "${{ vars.LANE3_INSIDE_VANTAGE }}" \
-            --inside-jump-key "${{ vars.LANE3_JUMP_KEY }}" \
-            --observer-user "${{ vars.LANE3_OBSERVER_USER }}" \
-            --observer-key "${{ vars.LANE3_OBSERVER_KEY }}" \
-            --probe-evidence probe-evidence.json \
-            --descriptor scripts/exposure-rehearsal/product.toml \
-            --receipt-out receipt.json \
-            --status-out docs/inventories/deployment-exposure-rehearsal-status.md \
-            --release-out lane3-lease-release.json \
-            --terminal-evidence-out lane3-terminal-evidence.json
+          bash scripts/lane3_rehearse.sh rehearse
 
       # `if: always()` so a FAILED rehearsal still publishes its receipt. A
       # failure that records nothing is indistinguishable from a run that never

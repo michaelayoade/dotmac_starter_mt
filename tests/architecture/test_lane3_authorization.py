@@ -185,12 +185,12 @@ def test_three_standings_keep_refusal_distinct_from_unanswerable() -> None:
 
 
 def test_workflow_authorization_gate_precedes_probe_and_runner() -> None:
-    import yaml
+    """Asserted on `scripts/lane3_rehearse.sh` since D-S2c C1: the gate is a
+    unit of the Starter-owned script, after the isolated install and before
+    the probe and the runner, whichever workflow calls the script."""
+    from tests.architecture import lane3_rehearse_script as rehearse_script
 
-    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    bodies = [
-        str(step.get("run", "")) for step in workflow["jobs"]["rehearse"]["steps"]
-    ]
+    bodies = [unit["run"] for unit in rehearse_script.units("rehearse")]
     installed = next(
         i for i, body in enumerate(bodies) if "pip install --no-deps" in body
     )
@@ -206,20 +206,36 @@ def test_workflow_authorization_gate_precedes_probe_and_runner() -> None:
         if "scripts/exposure_rehearsal_runner.py" in body
     )
     assert installed < gate < probe < runner
+    # The gate runs in the candidate interpreter, isolated: whether a verifier
+    # is installed is a property of the candidate venv, not of the checkout.
+    assert bodies[gate].startswith(
+        ".lane3-foundation/bin/python -E -P scripts/lane3_authorization.py"
+    )
 
 
 def test_runner_and_workflow_do_not_accept_single_v1_authority() -> None:
+    from tests.architecture import lane3_rehearse_script as rehearse_script
+
     runner = RUNNER.read_text(encoding="utf-8")
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    script = rehearse_script.SCRIPT.read_text(encoding="utf-8")
     assert "establish_authorization(\n" in runner
     assert runner.index("establish_authorization(\n") < runner.index(
         "load_lease(args.target"
     )
+    # The grant is issued against the ONE trusted plan, from the D4 producer.
+    assert runner.index("receipt_v2.acquire_execution_plan()") < runner.index(
+        "establish_authorization(\n"
+    )
+    assert "execution_plan=execution_plan," in runner
     assert "--authorization-doc-digest" not in runner
     assert "--authorization-document" in runner
-    assert "--authorization-document" not in workflow
-    assert "authorization_doc_digest" not in workflow
-    assert "authorization_document_digest=grant.receipt.descriptor_digest" in runner
+    for caller in (workflow, script):
+        assert "--authorization-document" not in caller
+        assert "authorization_doc_digest" not in caller
+    # D-S2c C2: the v1 receipt path is gone, so nothing here can publish one.
+    assert "build_receipt(" not in runner
+    assert "receipt_v2.assemble_receipt(" in runner
 
 
 def test_runner_has_no_v1_authorize_call() -> None:
