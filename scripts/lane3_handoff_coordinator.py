@@ -28,12 +28,16 @@ text are never printed. Python standard library only.
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
+import fcntl
+import functools
 import hashlib
 import ipaddress
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -807,6 +811,62 @@ def decide(
 # ── coordinator state and CLI ──────────────────────────────────────────────
 
 
+@contextlib.contextmanager
+def operation_lock(path: Path) -> Any:
+    """One persistent owner-protected inode serializes the complete operation.
+
+    The lock is never unlinked with state: replacing/deleting that inode would
+    let concurrent invocations hold different locks for the same lease.
+    """
+    parent = os.open(
+        path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    )
+    try:
+        info = os.fstat(parent)
+        if info.st_uid not in {0, os.geteuid()} or stat.S_IMODE(info.st_mode) & 0o022:
+            raise refused("state.invalid")
+        fd = os.open(
+            path.name + ".lock",
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+            dir_fd=parent,
+        )
+    finally:
+        os.close(parent)
+    try:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+        ):
+            raise refused("state.invalid")
+        until = time.monotonic() + hc.LOCK_WAIT_S
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= until:
+                    raise refused("lock.busy") from None
+                time.sleep(0.05)
+        yield
+    finally:
+        os.close(fd)
+
+
+def serialized(
+    function: Callable[..., dict[str, Any]],
+) -> Callable[..., dict[str, Any]]:
+    @functools.wraps(function)
+    def wrapped(cfg: Config, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        with operation_lock(cfg.state_path):
+            return function(cfg, *args, **kwargs)
+
+    return wrapped
+
+
 def load_state(path: Path) -> dict[str, Any]:
     value = read_json(path)
     if value.get("schema") != STATE_SCHEMA:
@@ -824,6 +884,7 @@ def save_state(path: Path, value: Mapping[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+@serialized
 def op_prepare(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str, Any]:
     if cfg.state_path.exists():
         raise refused("lease.active")
@@ -848,6 +909,7 @@ def op_prepare(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str
     return {"lease_id": reply["lease_id"], "state": reply["state"]}
 
 
+@serialized
 def op_launch(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str, Any]:
     state = load_state(cfg.state_path)
     if "runner_id" in state:
@@ -883,6 +945,7 @@ def op_launch(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str,
     return {"lease_id": state["lease_id"], "state": reply["state"]}
 
 
+@serialized
 def op_decide(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
     state = load_state(cfg.state_path)
     decision = decide(
@@ -903,18 +966,44 @@ def op_decide(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
     }
 
 
+@serialized
 def op_cleanup(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
     state = load_state(cfg.state_path)
     reply = channel("cleanup", request("cleanup", lease_id=state["lease_id"]))
+    if reply.get("state") != "CLOSED" or reply.get("lease_id") != state["lease_id"]:
+        raise refused("state.invalid")
+    try:
+        public = hp.validate_evidence(reply["evidence"])
+    except (hp.ProtocolRefused, KeyError):
+        raise refused("state.invalid") from None
+    if public["lease_id"] != state["lease_id"]:
+        raise refused("state.invalid")
     if "runner_id" in state:
-        group = api(
-            f"orgs/{cfg.runner_org}/actions/runner-groups/{cfg.runner_group_id}/runners"
-        )
-        ids = {r.get("id") for r in _field(group, "runners", list, "api.unavailable")}
-        if state["runner_id"] in ids:
-            gh_api(
-                f"orgs/{cfg.runner_org}/actions/runners/{state['runner_id']}", "DELETE"
-            )
+        runner_id = state["runner_id"]
+        if type(runner_id) is not int or runner_id <= 0:
+            raise refused("state.invalid")
+        path = f"orgs/{cfg.runner_org}/actions/runners?per_page=100"
+
+        def members() -> list[Any]:
+            listing = _api(api, path, "api.unavailable")
+            rows = _field(listing, "runners", list, "api.unavailable")
+            if _field(listing, "total_count", int, "api.unavailable") != len(rows):
+                raise refused("api.unavailable")
+            if any(
+                type(row) is not dict or type(row.get("id")) is not int for row in rows
+            ):
+                raise refused("api.unavailable")
+            return rows
+
+        matching = [row for row in members() if row["id"] == runner_id]
+        if len(matching) > 1:
+            raise refused("assignment.ambiguous")
+        if matching:
+            if matching[0].get("name") != f"lane3-handoff-{state['lease_id'][:12]}":
+                raise refused("binding.mismatch")
+            api(f"orgs/{cfg.runner_org}/actions/runners/{runner_id}", "DELETE")
+        if any(row["id"] == runner_id for row in members()):
+            raise refused("assignment.ambiguous")
     cfg.state_path.unlink()
     return {"state": reply["state"], "evidence": reply["evidence"]}
 

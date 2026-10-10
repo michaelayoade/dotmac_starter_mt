@@ -116,6 +116,9 @@ class FakeTls:
         self.response = response
         self.closed = False
 
+    def do_handshake(self) -> None:
+        pass
+
     def sendall(self, data: bytes) -> None:
         self.sent += data
 
@@ -158,7 +161,10 @@ class FakeContext:
         self.verify_mode = verify
         self.check_hostname = check
 
-    def wrap_socket(self, raw: FakeRaw, server_hostname: str) -> FakeTls:
+    def wrap_socket(
+        self, raw: FakeRaw, server_hostname: str, *, do_handshake_on_connect: bool
+    ) -> FakeTls:
+        assert do_handshake_on_connect is False
         self.world.wrapped.append(server_hostname)
         tls = FakeTls(self.world.response)
         self.world.tls = tls
@@ -470,3 +476,78 @@ def test_started_hook_is_before_http_bytes_and_failure_aborts():
         fetcher(URL, "synthetic-request-token")
     assert str(caught.value) == "Lane 3 topology record unavailable: oidc.request"
     assert world.tls.sent == b""
+
+
+def test_callback_expiring_deadline_never_sends_http():
+    world = World()
+    now = [NOW]
+
+    def started():
+        now[0] = world.deadline
+
+    fetcher = m.PinnedOidcFetcher(
+        world.target(),
+        clock_ns=lambda: now[0],
+        context_factory=lambda: FakeContext(
+            world, verify=ssl.CERT_REQUIRED, check=True
+        ),
+        socket_factory=world.raw,
+        request_started=started,
+    )
+    with pytest.raises(m.TopologySourceUnavailable):
+        fetcher(URL, "synthetic-request-token")
+    assert world.tls is not None and world.tls.sent == b""
+
+
+def test_delayed_connect_recomputes_handshake_budget(monkeypatch):
+    world = World(deadline=NOW + 1_000_000_000)
+    now = [NOW]
+    original_connect = FakeRaw.connect
+
+    def delayed_connect(raw, address):
+        original_connect(raw, address)
+        now[0] += 900_000_000
+
+    timeouts = []
+    monkeypatch.setattr(FakeRaw, "connect", delayed_connect)
+    monkeypatch.setattr(
+        FakeTls, "settimeout", lambda self, value: timeouts.append(value)
+    )
+    fetcher = m.PinnedOidcFetcher(
+        world.target(),
+        clock_ns=lambda: now[0],
+        context_factory=lambda: FakeContext(
+            world, verify=ssl.CERT_REQUIRED, check=True
+        ),
+        socket_factory=world.raw,
+    )
+    assert fetcher(URL, "synthetic-request-token")["value"] == "a.b.c"
+    assert 0 < timeouts[0] <= 0.1
+
+
+def test_deadline_timer_closes_live_tls_socket_during_handshake(monkeypatch):
+    world = World()
+    callback = []
+
+    class Timer:
+        def __init__(self, budget, interrupt):
+            callback.append(interrupt)
+
+        def start(self):
+            pass
+
+        def cancel(self):
+            pass
+
+    def stalled_handshake(tls):
+        # No socket timeout is raised here: the independent deadline callback
+        # must hold the live TLS socket after wrap_socket detached raw.
+        callback[0]()
+        assert tls.closed is True
+        raise TimeoutError("PRIVATE-HANDSHAKE-CANARY")
+
+    monkeypatch.setattr(m.threading, "Timer", Timer)
+    monkeypatch.setattr(FakeTls, "do_handshake", stalled_handshake)
+    with pytest.raises(m.TopologySourceUnavailable):
+        world.fetcher()(URL, "synthetic-request-token")
+    assert world.tls is not None and world.tls.sent == b""

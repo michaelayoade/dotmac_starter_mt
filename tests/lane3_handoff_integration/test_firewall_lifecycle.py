@@ -204,17 +204,26 @@ def test_expiry_ends_an_established_flow_and_needs_the_guard(
     root_flow.close()
 
 
-def test_deadline_is_fixed_once_and_ends_the_lease(env: Env) -> None:
+def test_snapshot_shortens_root_deadline_within_original_lease_cap(env: Env) -> None:
     lease = env.start(["report"])
-    expires = env.journal()["expires_at_monotonic_ns"]
+    original_cap = env.journal()["expires_at_monotonic_ns"]
     env.wait_state(lease, {"REPORTED"})
-    assert env.journal()["expires_at_monotonic_ns"] == expires
+    assert env.journal()["expires_at_monotonic_ns"] == original_cap
     env.grant(lease)
     j = env.journal()
-    assert j["expires_at_monotonic_ns"] == expires
-    assert j["grant"]["expires_at_monotonic_ns"] <= expires
-    assert expires - j["t0_monotonic_ns"] == hp.WINDOW_NS
-    env.host.offset_ns = hp.WINDOW_NS
+    snapshot_deadline = j["grant"]["snapshot"]["expires_at_monotonic_ns"]
+    assert original_cap - j["t0_monotonic_ns"] == hp.WINDOW_NS
+    assert j["expires_at_monotonic_ns"] == snapshot_deadline < original_cap
+    assert j["grant"]["expires_at_monotonic_ns"] == snapshot_deadline
+    assert len(env.host.timers) == 2
+    original_timer, snapshot_timer = env.host.timers
+    assert original_timer[0] == j["units"]["expire"]
+    assert snapshot_timer[0] == j["units"]["expire"] + "-snapshot"
+    assert 0 < snapshot_timer[1] < original_timer[1]
+    # Cross the earlier snapshot expiry while the original lease cap remains
+    # in the future. Root status/serve must close all authority at this point.
+    env.host.offset_ns = snapshot_deadline - time.monotonic_ns() + 1_000_000
+    assert env.host.now_ns() < original_cap
     try:
         status = env.controller().status(
             {"protocol": hp.PROTOCOL, "op": "status", "lease_id": lease}
@@ -255,6 +264,7 @@ def test_rollback_is_armed_before_any_rule_change(env: Env) -> None:
 
 CRASH_POINTS = [
     "prepare.journal",
+    "prepare.identity_created",
     "prepare.identity",
     "prepare.lease_dir",
     "prepare.workspace",

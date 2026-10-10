@@ -44,6 +44,9 @@ def test_positive_report_grant_consume_and_pinned_tls(env: Env) -> None:
         "result": "granted",
         "tls": "ok",
         "wrong_sni": "tls.refused",
+        "wrong_ca": "tls.refused",
+        "stale": "tls.refused",
+        "delayed": "tls.refused",
     }
     j = env.wait_state(lease, {"CONSUMED"})
     addresses = sorted(

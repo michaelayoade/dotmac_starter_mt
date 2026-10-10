@@ -255,8 +255,18 @@ def wireguard_github_openbao_source(
     expected_local_public_key: str,
     expected_peer_public_key: str,
     oidc_pinned: Any = None,
+    oidc_context_factory: Any = None,
+    oidc_request_started: Any = None,
+    require_pinned: bool = False,
 ) -> TopologySource:
-    """Explicit private-tunnel composition; no auto-discovery or permission grant."""
+    """Explicit private-tunnel composition; no auto-discovery or permission grant.
+
+    Handoff launchers must set ``require_pinned=True``. Existing explicitly
+    composed legacy callers keep their default until migrated.
+    """
+    if require_pinned and oidc_pinned is None:
+        # Refuse before WireGuard state inspection or any credential callback.
+        raise TopologySourceUnavailable("oidc.request")
     from lane3_wireguard_topology import WireGuardOpenBaoTransport
 
     transport = WireGuardOpenBaoTransport(
@@ -273,6 +283,9 @@ def wireguard_github_openbao_source(
         jwt_request_token=jwt_request_token,
         oidc_broker_origin=oidc_broker_origin,
         oidc_pinned=oidc_pinned,
+        oidc_context_factory=oidc_context_factory,
+        oidc_request_started=oidc_request_started,
+        require_pinned=require_pinned,
     )
 
 

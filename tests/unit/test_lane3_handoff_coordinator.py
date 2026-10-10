@@ -646,3 +646,126 @@ def test_every_failed_prelaunch_predicate_prevents_effects(
     with pytest.raises(co.CoordinatorRefused):
         co.op_launch(cfg, lambda *args: effects.append(args), api, RUN)
     assert effects == []
+
+
+def closed_reply() -> dict[str, Any]:
+    return {
+        "protocol": hp.PROTOCOL,
+        "op": "cleanup",
+        "lease_id": LEASE,
+        "state": "CLOSED",
+        "evidence": co.hc.evidence(
+            {"lease_id": LEASE, "outcome": "EXPIRED", "category": None}
+        ),
+    }
+
+
+@pytest.mark.parametrize("removed", [True, False])
+def test_cleanup_removes_exact_jit_and_keeps_state_until_absence_readback(
+    tmp_path: Any, removed: bool
+) -> None:
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    co.save_state(
+        cfg.state_path,
+        {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "runner_id": RUNNER},
+    )
+    row = {"id": RUNNER, "name": f"lane3-handoff-{LEASE[:12]}"}
+    deleted: list[int] = []
+
+    def api(path: str, method: str = "GET") -> Any:
+        if method == "DELETE":
+            assert path.endswith(f"/runners/{RUNNER}")
+            deleted.append(RUNNER)
+            return None
+        rows = [] if removed and deleted else [row]
+        return {"total_count": len(rows), "runners": rows}
+
+    if removed:
+        co.op_cleanup(cfg, lambda *args: closed_reply(), api)
+        assert not cfg.state_path.exists()
+    else:
+        with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+            co.op_cleanup(cfg, lambda *args: closed_reply(), api)
+        assert cfg.state_path.exists()
+    assert deleted == [RUNNER]
+
+
+def test_operation_lock_blocks_second_jit_for_same_state(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    import threading
+
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    good = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    co.save_state(
+        cfg.state_path,
+        {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "qualification": good},
+    )
+    monkeypatch.setattr(co.hc, "LOCK_WAIT_S", 0)
+    first_jit = threading.Event()
+    release = threading.Event()
+    effects: list[str] = []
+    errors: list[BaseException] = []
+
+    def api(path: str, *args: Any) -> Any:
+        if args:
+            effects.append("jit")
+            first_jit.set()
+            assert release.wait(2)
+            return {"runner": {"id": RUNNER}, "encoded_jit_config": "c3ludGhldGlj"}
+        return api_of(prelaunch_world())(path)
+
+    def launch() -> None:
+        try:
+            co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=launch)
+    worker.start()
+    try:
+        assert first_jit.wait(2)
+        with pytest.raises(co.CoordinatorRefused, match="lock.busy"):
+            co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+        assert effects == ["jit"]
+    finally:
+        release.set()
+        worker.join(2)
+    assert not worker.is_alive() and errors == []
+    with pytest.raises(co.CoordinatorRefused, match="state.invalid"):
+        co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+    assert effects == ["jit"]
+
+
+def test_second_jit_canary_detects_removed_operation_lock(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    import contextlib
+
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    good = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    co.save_state(
+        cfg.state_path,
+        {"schema": co.STATE_SCHEMA, "lease_id": LEASE, "qualification": good},
+    )
+    monkeypatch.setattr(co.hc, "LOCK_WAIT_S", 0)
+    effects: list[str] = []
+
+    def api(path: str, *args: Any) -> Any:
+        if args:
+            effects.append("jit")
+            return {"runner": {"id": RUNNER}, "encoded_jit_config": "c3ludGhldGlj"}
+        return api_of(prelaunch_world())(path)
+
+    def canary() -> bool:
+        try:
+            co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+        except co.CoordinatorRefused as exc:
+            return exc.label == "lock.busy" and effects == []
+        return False
+
+    with co.operation_lock(cfg.state_path):
+        assert canary()
+        monkeypatch.setattr(co, "operation_lock", lambda path: contextlib.nullcontext())
+        assert not canary()  # named no-second-JIT canary goes red
+    assert effects == ["jit"]

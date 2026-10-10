@@ -33,8 +33,9 @@ bao = _bundle["lane3_openbao_topology"]
 RUN_ROOT = "/run/l3h-it/run"
 SHA = "5" * 40
 REPO_ID, RUN_ID, JOB_ID, RUNNER_ID = 4101, 4102, 4103, 4104
+BROKER = "https://fixture.actions.githubusercontent.com"
 REQUEST_URL = (
-    "https://fixture.actions.githubusercontent.com/_apis/distributedtask/hubs/Actions/plans/p/jobs/j/"
+    BROKER + "/_apis/distributedtask/hubs/Actions/plans/p/jobs/j/"
     "idtoken?api-version=2.0"
 )
 
@@ -279,7 +280,7 @@ def main(argv: list[str]) -> None:
             "op": "report",
             "lease_id": lease,
             "nonce": nonce,
-            "origin": "https://fixture.actions.githubusercontent.com",
+            "origin": BROKER,
             "flags": {"explicit_port_present": False, "userinfo_present": False},
             "expected": {
                 "run_id": RUN_ID,

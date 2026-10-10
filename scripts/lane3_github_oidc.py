@@ -133,6 +133,8 @@ class _PinnedConnection(http.client.HTTPSConnection):
         context: ssl.SSLContext,
         timeout: float,
         socket_factory: Callable[[int, int], Any],
+        deadline_ns: int,
+        clock_ns: Callable[[], int],
     ) -> None:
         super().__init__(host, BROKER_PORT, context=context, timeout=timeout)
         self._pin_family = family
@@ -140,10 +142,13 @@ class _PinnedConnection(http.client.HTTPSConnection):
         self._pin_context = context
         self._pin_timeout = timeout
         self._pin_socket_factory = socket_factory
+        self._pin_deadline_ns = deadline_ns
+        self._pin_clock_ns = clock_ns
 
     def connect(self) -> None:
         raw = self._pin_socket_factory(self._pin_family, socket.SOCK_STREAM)
         try:
+            self.sock = raw
             raw.settimeout(self._pin_timeout)
             if self._pin_family == socket.AF_INET6:
                 raw.connect((self._pin_address, BROKER_PORT, 0, 0))
@@ -157,10 +162,20 @@ class _PinnedConnection(http.client.HTTPSConnection):
                 or not _same_address(self._pin_family, str(peer[0]), self._pin_address)
             ):
                 raise _refuse_pinned()
-            # Publish the raw socket while TLS handshakes so the deadline timer
-            # can interrupt a peer that keeps the handshake incomplete.
-            self.sock = raw
-            self.sock = self._pin_context.wrap_socket(raw, server_hostname=self.host)
+            left = (self._pin_deadline_ns - self._pin_clock_ns()) / 1e9
+            if left <= 0:
+                raise _refuse_pinned()
+            # wrap_socket detaches raw. Publish the live TLS socket before
+            # handshaking so the deadline interrupt closes the actual fd.
+            self.sock = self._pin_context.wrap_socket(
+                raw, server_hostname=self.host, do_handshake_on_connect=False
+            )
+            left = (self._pin_deadline_ns - self._pin_clock_ns()) / 1e9
+            if left <= 0:
+                raise _refuse_pinned()
+            self.sock.settimeout(min(self._pin_timeout, left))
+            self.sock.do_handshake()
+
         except BaseException:
             try:
                 raw.close()
@@ -228,6 +243,8 @@ class PinnedOidcFetcher:
             context=context,
             timeout=timeout,
             socket_factory=self._socket_factory,
+            deadline_ns=self._target.deadline_ns,
+            clock_ns=self._clock_ns,
         )
 
         def interrupt() -> None:
@@ -251,6 +268,8 @@ class PinnedOidcFetcher:
                 raise _refuse()
             if self._request_started is not None:
                 self._request_started()
+            if self._clock_ns() >= self._target.deadline_ns:
+                raise _refuse()
             connection.request(
                 "GET",
                 parsed.path + "?" + parsed.query,

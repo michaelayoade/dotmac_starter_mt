@@ -831,15 +831,38 @@ class SystemHost:
         )
 
     def _assert_stopped(self, name: str) -> None:
-        state = self._run(
-            ["systemctl", "show", name, "--property=ActiveState", "--value"],
-            check=False,
-        ).strip()
-        if state not in {b"inactive", b"failed", b""}:
+        # A failed stop is normal before creation or after --collect. Only a
+        # successful independent query with explicit state proves absence.
+        try:
+            raw = self._run(
+                [
+                    "systemctl",
+                    "show",
+                    name,
+                    "--property=LoadState",
+                    "--property=ActiveState",
+                ]
+            )
+        except ControllerRefused:
+            raise refused("cleanup.timer") from None
+        lines = raw.splitlines()
+        if len(lines) != 2 or any(line.count(b"=") != 1 for line in lines):
+            raise refused("cleanup.timer")
+        state = dict(line.split(b"=", 1) for line in lines)
+        if (
+            set(state) != {b"LoadState", b"ActiveState"}
+            or state[b"LoadState"]
+            not in {b"loaded", b"not-found", b"masked", b"stub", b"merged"}
+            or state[b"ActiveState"] not in {b"inactive", b"failed"}
+            or (
+                state[b"LoadState"] == b"not-found"
+                and state[b"ActiveState"] != b"inactive"
+            )
+        ):
             raise refused("cleanup.timer")
 
     def disarm_timer(self, unit: str) -> None:
-        self._run(["systemctl", "stop", unit + ".timer"])
+        self._run(["systemctl", "stop", unit + ".timer"], check=False)
         self._assert_stopped(unit + ".timer")
 
     def start_service(self, unit: str, argv: list[str], properties: list[str]) -> None:
@@ -887,7 +910,7 @@ class SystemHost:
             raise refused("host.command") from None
 
     def stop_unit(self, unit: str) -> None:
-        self._run(["systemctl", "stop", unit + ".service"])
+        self._run(["systemctl", "stop", unit + ".service"], check=False)
         self._assert_stopped(unit + ".service")
 
     def kill_unit(self, unit: str) -> None:
@@ -2085,10 +2108,44 @@ class Controller:
         if req["op"] != "cleanup":
             raise refused("schema.invalid")
         with self.locked():
-            j = self._active_or_other_boot(req["lease_id"])
+            j = self.load()
+            if j is None or j["lease_id"] != req["lease_id"]:
+                return self._archived_closed(req["lease_id"])
             final = "CLOSED" if j["state"] == "CONSUMED" else "REFUSED"
             self._cleanup_locked(j, final, "state.invalid")
             return self._closed(j)
+
+    def _archived_closed(self, lease: str) -> dict[str, Any]:
+        # A protected exact-lease receipt is evidence only. It never authorizes
+        # mutation of a newer active lease or reconstruction of old authority.
+        hp.lease_id(lease)
+        path = self.paths.state_root / "closed" / (lease + ".json")
+        archived = strict_json(read_protected(path, exact_mode=0o600, forbid=0o077))
+        if (
+            archived.get("schema") != JOURNAL_SCHEMA
+            or archived.get("protocol") != hp.PROTOCOL
+            or archived.get("lease_id") != lease
+            or archived.get("state") != "CLOSED"
+            or archived.get("cleanup_blocked") is not None
+        ):
+            raise refused("journal.unsafe")
+        reply = self._closed(archived)  # standalone public-schema validation
+        cleanup = reply["evidence"]["cleanup"]
+        required = {
+            "grant_revoked",
+            "processes_absent",
+            "sockets_absent",
+            "owned_rules_absent",
+            "baseline_preserved",
+            "default_drop_preserved",
+            "lease_files_absent",
+            "workspace_absent",
+            "identity_absent",
+            "timer_stopped",
+        }
+        if cleanup is None or any(cleanup[key] is not True for key in required):
+            raise refused("journal.unsafe")
+        return reply
 
     def expire(self, lease: str) -> dict[str, Any]:
         """The rollback timer: ends exactly its own lease, never another one."""

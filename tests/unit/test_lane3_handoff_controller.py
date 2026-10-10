@@ -625,3 +625,103 @@ def test_systemd_expiry_retries_lock_collision_and_stop_needs_readback(
         host.disarm_timer("synthetic-expiry")
     with pytest.raises(hc.ControllerRefused, match="cleanup.timer"):
         host.stop_unit("synthetic-serve")
+
+
+@pytest.mark.parametrize("operation", ["stop_unit", "disarm_timer"])
+def test_failed_stop_of_absent_unit_requires_successful_independent_readback(
+    monkeypatch: Any, operation: str
+) -> None:
+    host = hc.SystemHost()
+    calls: list[Any] = []
+
+    def run(argv: list[str], **kw: Any) -> bytes:
+        calls.append((argv, kw))
+        if "stop" in argv:
+            assert kw["check"] is False  # missing/collected units return nonzero
+            return b""
+        assert kw.get("check", True) is True
+        return b"LoadState=not-found\nActiveState=inactive\n"
+
+    monkeypatch.setattr(host, "_run", run)
+    getattr(host, operation)("synthetic-missing")
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "readback",
+    [b"", b"LoadState=loaded\nActiveState=active\n", b"LoadState=not-found\n"],
+)
+def test_stop_cannot_turn_failed_or_ambiguous_readback_into_absence(
+    monkeypatch: Any, readback: bytes
+) -> None:
+    host = hc.SystemHost()
+    monkeypatch.setattr(
+        host, "_run", lambda argv, **kw: readback if "show" in argv else b""
+    )
+    with pytest.raises(hc.ControllerRefused, match="cleanup.timer"):
+        host.disarm_timer("synthetic-missing")
+
+
+def test_stop_readback_command_failure_refuses(monkeypatch: Any) -> None:
+    host = hc.SystemHost()
+
+    def run(argv: list[str], **kw: Any) -> bytes:
+        if "show" in argv:
+            raise hc.ControllerRefused("host.command")
+        return b""
+
+    monkeypatch.setattr(host, "_run", run)
+    with pytest.raises(hc.ControllerRefused, match="cleanup.timer"):
+        host.stop_unit("synthetic-missing")
+
+
+def test_cleanup_returns_exact_closed_archive_without_mutating_new_lease(
+    monkeypatch: Any,
+) -> None:
+    import contextlib
+
+    j = cleanup_journal()
+    j.update(
+        schema=hc.JOURNAL_SCHEMA,
+        protocol=hp.PROTOCOL,
+        state="CLOSED",
+        outcome="EXPIRED",
+        cleanup_blocked=None,
+    )
+    j["cleanup"] = {
+        key: True
+        for key in (
+            "grant_revoked",
+            "guard_installed",
+            "processes_absent",
+            "sockets_absent",
+            "owned_rules_absent",
+            "baseline_preserved",
+            "default_drop_preserved",
+            "lease_files_absent",
+            "workspace_absent",
+            "identity_absent",
+            "timer_stopped",
+        )
+    }
+    j["cleanup"]["global_conntrack_flushed"] = False
+    controller = hc.Controller()
+    monkeypatch.setattr(controller, "locked", lambda: contextlib.nullcontext())
+    monkeypatch.setattr(hc, "read_protected", lambda path, **kw: hp.canonical_json(j))
+    monkeypatch.setattr(
+        controller,
+        "_cleanup_locked",
+        lambda *args: pytest.fail("archived receipt must not mutate active lease"),
+    )
+    for active in (None, {"lease_id": "f" * 32, "state": "BOOTSTRAP"}):
+        monkeypatch.setattr(controller, "load", lambda active=active: active)
+        reply = controller.cleanup(
+            {"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": LEASE}
+        )
+        assert reply["state"] == "CLOSED" and reply["lease_id"] == LEASE
+        assert reply["evidence"]["cleanup"]["identity_absent"] is True
+    j["lease_id"] = "e" * 32
+    with pytest.raises(hc.ControllerRefused, match="journal.unsafe"):
+        controller.cleanup(
+            {"protocol": hp.PROTOCOL, "op": "cleanup", "lease_id": LEASE}
+        )
