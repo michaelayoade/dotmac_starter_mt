@@ -657,11 +657,18 @@ request credential or JWT. Broker observation is not automatic egress admission.
 Signed claim validation remains OpenBao's responsibility; local JWT shape
 validation is not authorization.
 
-The protected execution workflow still has no `id-token: write` permission.
-This source preparation does not add it or edit the admitted launcher snapshot.
-Enabling it requires the reviewed launcher amendment and source-policy/admission
-reconciliation. The observed VM124 WireGuard interface is a transport candidate,
-not proof of endpoint/peer/route correctness or permission to activate this reader.
+The reader preparation originally left the protected workflow without
+`id-token: write`. Reviewed execution-repository PR #4 subsequently added that
+job-scoped permission and the pinned reader step, merged as
+`e6747360ee7842b293d69b890299a358fdef782f` (workflow Git blob
+`39863f507236b6959ba12287957723a7eb35ee5e`). With its runner-local config absent,
+the step reports only the GitHub-provided OIDC origin, requests no token and
+reaches the final refusal. This observation is not endpoint admission. The
+config must independently pin the approved origin before authenticated reading.
+The launcher revision is listed in `.github/lane3-execution.json`; its
+`admission_evidence` remains null. The observed VM124 WireGuard interface is a
+transport candidate, not proof of endpoint/peer/route correctness or permission
+to activate this reader. The separate C3 execution/snapshot work remains open.
 
 
 `wireguard_github_openbao_source` explicitly selects the HTTP-over-WireGuard
