@@ -81,11 +81,17 @@ class DnsServer:
         self.server.close()
 
 
-@pytest.fixture()
-def dns(env: Env) -> Iterator[DnsServer]:
+@pytest.fixture(scope="session")
+def dns_server(network: Any) -> Iterator[DnsServer]:
     server = DnsServer()
     yield server
     server.stop()
+
+
+@pytest.fixture()
+def dns(dns_server: DnsServer) -> DnsServer:
+    dns_server.zone = {}
+    return dns_server
 
 
 def resolve(**kwargs: Any) -> hr.Snapshot:

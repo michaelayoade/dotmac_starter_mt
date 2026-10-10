@@ -442,9 +442,12 @@ class Env:
 
     def job_output(self, index: int = -1, timeout: float = 30) -> dict[str, Any]:
         child = self.host.jobs[index]
-        out, _ = child.communicate(timeout=timeout)
+        out, err = child.communicate(timeout=timeout)
         lines = [line for line in out.decode().splitlines() if line.startswith("{")]
-        return json.loads(lines[-1]) if lines else {"exit": child.returncode}
+        if lines:
+            return json.loads(lines[-1])
+        # Synthetic job only: its stderr carries no secret and aids diagnosis.
+        return {"exit": child.returncode, "stderr": err.decode()[-1500:]}
 
     # invariants ----------------------------------------------------------
 
@@ -462,7 +465,10 @@ class Env:
         assert hc.uid_processes(record["uid"]) == []
         cleanup = record["cleanup"]
         assert cleanup["global_conntrack_flushed"] is False
-        assert all(v for k, v in cleanup.items() if k != "global_conntrack_flushed")
+        # The guard is only needed (and only installed) while the UID exists;
+        # a crash before identity creation or after its removal needs none.
+        exempt = {"global_conntrack_flushed", "guard_installed"}
+        assert all(v for k, v in cleanup.items() if k not in exempt), cleanup
         return record
 
 

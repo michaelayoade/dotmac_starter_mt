@@ -195,7 +195,8 @@ def test_expiry_ends_an_established_flow_and_needs_the_guard(
     assert result["evidence"]["outcome"] == "EXPIRED"
     assert window == {"growth": 0, "job_alive": 1}, window
     assert env.host.jobs[0].wait(10) is not None
-    env.assert_clean(lease)
+    record = env.assert_clean(lease)
+    assert record["cleanup"]["guard_installed"] is True
     # The unrelated established root flow survived: no conntrack flush.
     before = network.received[PLAIN_ADDRESS]
     root_flow.sendall(b"still-alive")

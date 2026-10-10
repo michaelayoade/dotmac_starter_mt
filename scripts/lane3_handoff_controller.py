@@ -55,6 +55,7 @@ import os
 import pwd
 import re
 import secrets
+import signal
 import socket
 import stat
 import struct
@@ -1974,6 +1975,11 @@ class Controller:
                 raise refused("cleanup.processes")
             if j["cgroup"]:
                 self.host.kill_cgroup(j["cgroup"])
+            # The UID is unique to this lease: any process holding it (even
+            # one that left the cgroup) is owned and is killed too.
+            for pid in uid_processes(j["uid"]):
+                with contextlib.suppress(OSError):
+                    os.kill(pid, signal.SIGKILL)
             time.sleep(0.1)
 
     def _remove_lease_dir(self, j: Mapping[str, Any], *, keep_dir: bool) -> None:
@@ -2067,6 +2073,10 @@ class Controller:
             invalidate = True
         with contextlib.suppress(Exception):
             hp.write_frame(conn, reply)
+        # Close before any cleanup so the peer sees its response promptly.
+        with contextlib.suppress(OSError):
+            conn.shutdown(socket.SHUT_RDWR)
+        conn.close()
         if invalidate:
             with contextlib.suppress(Exception), self.locked():
                 j = self.load()
