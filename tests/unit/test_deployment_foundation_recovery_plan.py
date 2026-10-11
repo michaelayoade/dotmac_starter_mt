@@ -738,6 +738,10 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # (`lane3_handoff_protocol.canonical_json`): it defines `grant_digest` and
     # every handoff digest, is owned by that protocol module, and is written to
     # no Foundation store; it is not a host-lease release record.
+    # The host installer owns its immutable bundle/config and transaction
+    # encoding; these are local installation records, not Foundation release
+    # documents. It must verify runtime bytes before importing the protocol.
+    "lane3_handoff_install.py": 1,
     "lane3_handoff_protocol.py": 1,
     "lane3_runner_capability.py": 1,
     "palette_debt_baseline.py": 1,
