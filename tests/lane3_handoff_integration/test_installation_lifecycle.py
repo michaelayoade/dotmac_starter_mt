@@ -173,6 +173,8 @@ class Installation:
             wrapper,
             (
                 "import pathlib,sys\n"
+                # Importing from the measured runtime must not add __pycache__.
+                "sys.dont_write_bytecode=True\n"
                 f"sys.path.insert(0,{str(installed)!r})\n"
                 "import lane3_handoff_install as hi\n"
                 f"hi.Installer(hi.Paths(prefix=pathlib.Path({str(self.paths.prefix)!r}))).boot_reconcile()\n"
@@ -183,6 +185,7 @@ class Installation:
             self.dispatcher,
             (
                 "import json,pathlib,sys\n"
+                "sys.dont_write_bytecode=True\n"
                 f"sys.path.insert(0,{str(installed)!r})\n"
                 "import lane3_handoff_install as hi\n"
                 "try:\n"
