@@ -730,6 +730,15 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "foundation_candidate.py": 1,
     "foundation_disposition.py": 1,
     "kernel_release_authorization.py": 1,
+    # The pre-import bootstrap hashes the supplier module map before protocol
+    # code is trusted; it cannot import that code to serialize its own admission
+    # input. This digest is not a Foundation store or host-lease release record.
+    "lane3_handoff_bootstrap.py": 1,
+    # The Lane 3 broker-handoff wire contract's canonical JSON
+    # (`lane3_handoff_protocol.canonical_json`): it defines `grant_digest` and
+    # every handoff digest, is owned by that protocol module, and is written to
+    # no Foundation store; it is not a host-lease release record.
+    "lane3_handoff_protocol.py": 1,
     "lane3_runner_capability.py": 1,
     "palette_debt_baseline.py": 1,
     "release_artifact_verification.py": 1,

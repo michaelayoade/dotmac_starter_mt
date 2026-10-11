@@ -209,14 +209,25 @@ def github_openbao_source(
     jwt_request_url: str,
     jwt_request_token: str,
     oidc_broker_origin: str,
+    oidc_pinned: Any = None,
+    oidc_context_factory: Any = None,
+    oidc_request_started: Any = None,
+    require_pinned: bool = False,
 ) -> TopologySource:
     """Bind the real Actions supplier to B7 using an independently approved broker.
 
     Arguments come from the protected launcher/configuration, never dispatch
     fields. This does not activate the default source or alter job permissions.
+
+    ``oidc_pinned`` is an optional ``lane3_github_oidc.PinnedBrokerTarget`` built
+    from a verified handoff grant (``lane3_handoff_client``). When given, the
+    token request connects only to that grant's numeric address. When omitted,
+    the legacy connect-time hostname resolution is kept for existing callers
+    that have no handoff grant.
     """
     from lane3_github_oidc import GithubOidcSupplier
 
+    options = {"context_factory": oidc_context_factory} if oidc_context_factory else {}
     return openbao_source(
         transport=transport,
         expected_version=expected_version,
@@ -224,6 +235,10 @@ def github_openbao_source(
             request_url=jwt_request_url,
             request_token=jwt_request_token,
             approved_origin=oidc_broker_origin,
+            pinned=oidc_pinned,
+            require_pinned=require_pinned,
+            request_started=oidc_request_started,
+            **options,
         ),
     )
 
@@ -239,8 +254,23 @@ def wireguard_github_openbao_source(
     interface: str,
     expected_local_public_key: str,
     expected_peer_public_key: str,
+    oidc_pinned: Any = None,
+    oidc_context_factory: Any = None,
+    oidc_request_started: Any = None,
+    require_pinned: bool = False,
+    wireguard_guard: Any = None,
 ) -> TopologySource:
-    """Explicit private-tunnel composition; no auto-discovery or permission grant."""
+    """Explicit private-tunnel composition; no auto-discovery or permission grant.
+
+    Handoff launchers must set ``require_pinned=True`` and supply the trusted
+    ``HandoffClient.wireguard_check`` callback as ``wireguard_guard``. Existing
+    explicitly composed legacy callers keep their default until migrated.
+    """
+    if require_pinned and oidc_pinned is None:
+        # Refuse before WireGuard state inspection or any credential callback.
+        raise TopologySourceUnavailable("oidc.request")
+    if require_pinned and not callable(wireguard_guard):
+        raise TopologySourceUnavailable("transport.wireguard")
     from lane3_wireguard_topology import WireGuardOpenBaoTransport
 
     transport = WireGuardOpenBaoTransport(
@@ -249,6 +279,7 @@ def wireguard_github_openbao_source(
         interface=interface,
         expected_local_public_key=expected_local_public_key,
         expected_peer_public_key=expected_peer_public_key,
+        guard=wireguard_guard,
     )
     return github_openbao_source(
         transport=transport,
@@ -256,6 +287,10 @@ def wireguard_github_openbao_source(
         jwt_request_url=jwt_request_url,
         jwt_request_token=jwt_request_token,
         oidc_broker_origin=oidc_broker_origin,
+        oidc_pinned=oidc_pinned,
+        oidc_context_factory=oidc_context_factory,
+        oidc_request_started=oidc_request_started,
+        require_pinned=require_pinned,
     )
 
 

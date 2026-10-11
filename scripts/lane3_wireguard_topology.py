@@ -2,7 +2,9 @@
 
 The approved launcher pins both public keys, inner IPs and interface from
 independently reviewed configuration. Kernel metadata is re-read before every
-connection and before sending credentials. Root/kernel/WireGuard configuration
+connection and before sending credentials. Handoff composition supplies an
+authenticated root broker callback; legacy explicit callers inspect locally.
+Root/kernel/WireGuard configuration
 remain trusted; these checks do not resist a malicious host administrator or
 provide a route-lock/anti-race guarantee against that administrator.
 """
@@ -19,6 +21,7 @@ import subprocess
 import time
 from collections.abc import Callable
 
+from lane3_handoff_protocol import digest
 from lane3_openbao_topology import (
     MAX_RESPONSE,
     HttpsOpenBaoTransport,
@@ -28,6 +31,41 @@ from lane3_openbao_topology import (
 
 def _refuse() -> TopologySourceUnavailable:
     return TopologySourceUnavailable("transport.wireguard")
+
+
+def wireguard_config_digest(config: dict[str, str]) -> str:
+    """Canonical digest of the exact validated public channel; no host effects."""
+    try:
+        keys = {
+            "endpoint_address",
+            "source_address",
+            "interface",
+            "expected_local_public_key",
+            "expected_peer_public_key",
+        }
+        if type(config) is not dict or set(config) != keys:
+            raise _refuse()
+        if any(type(value) is not str for value in config.values()):
+            raise _refuse()
+        destination = ipaddress.ip_address(config["endpoint_address"])
+        source = ipaddress.ip_address(config["source_address"])
+        if (
+            str(destination) != config["endpoint_address"]
+            or str(source) != config["source_address"]
+            or destination.version != source.version
+            or destination == source
+            or re.fullmatch(r"wg[a-zA-Z0-9_-]{0,13}", config["interface"]) is None
+        ):
+            raise _refuse()
+        for key in ("expected_local_public_key", "expected_peer_public_key"):
+            raw = base64.b64decode(config[key], validate=True)
+            if len(raw) != 32 or base64.b64encode(raw).decode() != config[key]:
+                raise _refuse()
+        if config["expected_local_public_key"] == config["expected_peer_public_key"]:
+            raise _refuse()
+        return digest(config)
+    except Exception:
+        raise _refuse() from None
 
 
 def public_command(args: list[str]) -> str:
@@ -58,8 +96,20 @@ class WireGuardOpenBaoTransport(HttpsOpenBaoTransport):
         expected_peer_public_key: str,
         command: Callable[[list[str]], str] = public_command,
         clock: Callable[[], float] = time.time,
+        guard: Callable[[str], None] | None = None,
     ) -> None:
         try:
+            config = {
+                "endpoint_address": endpoint_address,
+                "source_address": source_address,
+                "interface": interface,
+                "expected_local_public_key": expected_local_public_key,
+                "expected_peer_public_key": expected_peer_public_key,
+            }
+            if any(type(value) is not str for value in config.values()):
+                raise _refuse()
+            if guard is not None and not callable(guard):
+                raise _refuse()
             self._destination = ipaddress.ip_address(endpoint_address)
             self._source = ipaddress.ip_address(source_address)
             if (
@@ -83,6 +133,8 @@ class WireGuardOpenBaoTransport(HttpsOpenBaoTransport):
             self._peer_key = expected_peer_public_key
             self._command = command
             self._clock = clock
+            self._broker_guard = guard
+            self._config_digest = wireguard_config_digest(config)
             self._guard()
         except Exception:
             raise _refuse() from None
@@ -93,6 +145,12 @@ class WireGuardOpenBaoTransport(HttpsOpenBaoTransport):
 
     def _guard(self) -> None:
         try:
+            if self._broker_guard is not None:
+                # Trusted composition supplies the authenticated root callback.
+                # No command, sudo or local state fallback is allowed here.
+                if self._broker_guard(self._config_digest) is not None:
+                    raise _refuse()
+                return
             if self._wg("public-key") != self._local_key:
                 raise _refuse()
             allowed = self._wg("allowed-ips")
