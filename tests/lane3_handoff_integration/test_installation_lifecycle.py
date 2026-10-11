@@ -43,7 +43,9 @@ def put(path: pathlib.Path, raw: bytes, mode: int = 0o600) -> None:
 
 def snapshot(path: pathlib.Path) -> dict[str, tuple[bytes, int, int, int]]:
     """Compare bytes and authority metadata; no synthetic private value output."""
-    result = {}
+    result: dict[str, tuple[bytes, int, int, int]] = {}
+    if not os.path.lexists(path):
+        return result
     for item in [path, *sorted(path.rglob("*"))] if path.is_dir() else [path]:
         info = item.lstat()
         assert not item.is_symlink()
@@ -745,10 +747,11 @@ def test_uninstall_removes_only_the_recorded_installation(
 def test_uninstall_removes_empty_runtime_parent_and_is_repeatable(
     installation: Installation,
 ) -> None:
-    installation.install(installation.inputs(1))
+    inputs = installation.inputs(1)
+    installation.install(inputs)
     assert installation.installer.uninstall() == "UNINSTALLED"
     assert not installation.paths.runtime.exists()
-    installation.install(installation.inputs(1))
+    installation.install(inputs)
     assert installation.installer.verify()["config_digest"]
 
 
