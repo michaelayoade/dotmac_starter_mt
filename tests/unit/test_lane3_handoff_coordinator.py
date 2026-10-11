@@ -48,46 +48,67 @@ SUPPLIER_DIGEST = hp.digest(
     {"lane3_github_oidc.py": hashlib.sha256(MODULE).hexdigest()}
 )
 ADMISSION_PATH = f"repos/{STARTER}/contents/docs/admission.json?ref={STARTER_SHA}"
+DISPATCHER = "/opt/dotmac-lane3-handoff/" + "a" * 64 + "/lane3_handoff_install.py"
+
+
+def config_doc(controller_path: str = DISPATCHER) -> dict[str, Any]:
+    return {
+        "schema": co.CONFIG_SCHEMA,
+        "repository": REPO,
+        "repository_id": 9,
+        "workflow_path": WF,
+        "workflow_sha": SHA,
+        "workflow_blob": BLOB,
+        "environment": "synthetic-env",
+        "environment_id": ENV_ID,
+        "approvers": ["synthetic-human"],
+        "runner_org": "synthetic-org",
+        "runner_group_id": GROUP,
+        "runner_labels": ["self-hosted", "synthetic"],
+        "starter_repository": STARTER,
+        "starter_commit": STARTER_SHA,
+        "supplier_modules": {
+            "scripts/lane3_github_oidc.py": hashlib.sha256(MODULE).hexdigest()
+        },
+        "admission": {
+            "repository": STARTER,
+            "path": "docs/admission.json",
+            "commit": STARTER_SHA,
+            "sha256": ADMISSION_DIGEST,
+        },
+        "management": {
+            "ssh_alias": "synthetic-host",
+            "controller_path": controller_path,
+        },
+        "resolver": "127.0.0.53",
+        "policy_path": "/x/policy.json",
+        "bootstrap_manifest_path": "/x/bootstrap.json",
+        "state_path": "/x/state.json",
+    }
 
 
 def config() -> co.Config:
-    return co.parse_config(
-        {
-            "schema": co.CONFIG_SCHEMA,
-            "repository": REPO,
-            "repository_id": 9,
-            "workflow_path": WF,
-            "workflow_sha": SHA,
-            "workflow_blob": BLOB,
-            "environment": "synthetic-env",
-            "environment_id": ENV_ID,
-            "approvers": ["synthetic-human"],
-            "runner_org": "synthetic-org",
-            "runner_group_id": GROUP,
-            "runner_labels": ["self-hosted", "synthetic"],
-            "starter_repository": STARTER,
-            "starter_commit": STARTER_SHA,
-            "supplier_modules": {
-                "scripts/lane3_github_oidc.py": hashlib.sha256(MODULE).hexdigest()
-            },
-            "admission": {
-                "repository": STARTER,
-                "path": "docs/admission.json",
-                "commit": STARTER_SHA,
-                "sha256": ADMISSION_DIGEST,
-            },
-            "management": {
-                "ssh_alias": "synthetic-host",
-                "controller_path": "/opt/dotmac-lane3-handoff/"
-                + "a" * 64
-                + "/lane3_handoff_install.py",
-            },
-            "resolver": "127.0.0.53",
-            "policy_path": "/x/policy.json",
-            "bootstrap_manifest_path": "/x/bootstrap.json",
-            "state_path": "/x/state.json",
-        }
-    )
+    return co.parse_config(config_doc())
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/opt/dotmac-lane3-handoff/" + "a" * 64 + "/lane3_handoff_controller.py",
+        "/opt/dotmac-lane3-handoff/" + "A" * 64 + "/lane3_handoff_install.py",
+        "/opt/dotmac-lane3-handoff/" + "a" * 63 + "/lane3_handoff_install.py",
+        "/opt/dotmac-lane3-handoff/../" + "a" * 64 + "/lane3_handoff_install.py",
+        DISPATCHER + "\n",
+        "/x/c.py",
+    ],
+)
+def test_management_path_is_only_the_installed_dispatcher(path: str) -> None:
+    # Sensitivity: the same document is accepted with the installed dispatcher.
+    assert co.parse_config(config_doc()).controller_path == DISPATCHER
+    with pytest.raises(co.CoordinatorRefused):
+        co.parse_config(config_doc(path))
+    with pytest.raises(co.CoordinatorRefused):
+        co.ssh_channel("synthetic-host", path)
 
 
 def world() -> dict[str, Any]:
@@ -560,7 +581,7 @@ def test_management_responses_are_schema_checked() -> None:
 
 
 def test_channel_refuses_unvalidated_payloads_before_any_process() -> None:
-    call = co.ssh_channel("synthetic-host", "/x/c.py")
+    call = co.ssh_channel("synthetic-host", DISPATCHER)
     with pytest.raises(co.CoordinatorRefused):
         call(
             "status",
@@ -569,9 +590,9 @@ def test_channel_refuses_unvalidated_payloads_before_any_process() -> None:
     with pytest.raises(co.CoordinatorRefused):
         call("sh", {})
     with pytest.raises(co.CoordinatorRefused):
-        co.ssh_channel("synthetic-host; id", "/x/c.py")
+        co.ssh_channel("synthetic-host; id", DISPATCHER)
     with pytest.raises(co.CoordinatorRefused):
-        co.ssh_channel("synthetic-host", "/x/c.py; id")
+        co.ssh_channel("synthetic-host", DISPATCHER + "; id")
 
 
 def test_remote_command_runs_the_controller_without_bytecode(
@@ -584,13 +605,13 @@ def test_remote_command_runs_the_controller_without_bytecode(
         raise OSError
 
     monkeypatch.setattr(co.subprocess, "run", fake_run)
-    call = co.ssh_channel("synthetic-host", "/x/c.py")
+    call = co.ssh_channel("synthetic-host", DISPATCHER)
     with pytest.raises(co.CoordinatorRefused):
         call(
             "status",
             {"protocol": hp.PROTOCOL, "op": "status", "lease_id": LEASE},
         )
-    assert seen and seen[0][-1] == "sudo -n /usr/bin/python3 -I -B /x/c.py status"
+    assert seen and seen[0][-1] == f"sudo -n /usr/bin/python3 -I -B {DISPATCHER} status"
 
 
 def test_prelaunch_missing_approval_has_no_jit_or_bootstrap(

@@ -187,7 +187,7 @@ re-measuring whatever is left. With nothing installed it reports `ABSENT`;
 success reports `UNINSTALLED`. Uninstall deletes the installed dispatcher, so
 rerun an interrupted uninstall from the reviewed bundle copy instead:
 `/usr/bin/python3 -I -B /root/reviewed-bundle/runtime/lane3_handoff_install.py uninstall`.
-Never delete `uninstall-intent.json` by hand. It never touches nftables state, users, the
+Never delete `uninstall-intent.json` by hand. Uninstall never touches nftables state, users, the
 state directory and its lock, or anything the installer did not record.
 Records written by older bundles (with the previous `RequiredBy` unit) do not
 validate under this code and must be retired by the bundle that wrote them.

@@ -708,6 +708,7 @@ class Installer:
             if exists(self.paths.stage) or exists(self.paths.backup):
                 raise InstallRefused("installation.drift")
             self.refuse_requires_link()
+            self.remove_wants_link(remove=False)
             if not exists(self.paths.runtime):
                 make_directory(self.paths.runtime, 0o755)
             runtime = self.paths.runtime / bundle_digest

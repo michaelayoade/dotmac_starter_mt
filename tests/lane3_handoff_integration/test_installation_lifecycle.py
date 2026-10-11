@@ -902,6 +902,44 @@ def test_sigkill_uninstall_is_finished_by_rerun(
     assert installation.installer.uninstall() == "ABSENT"
 
 
+@pytest.mark.parametrize(
+    ("kind", "target"),
+    [("requires", "../" + hi.UNIT_NAME), ("wants", "/nonexistent-synthetic-target")],
+)
+def test_install_refuses_unowned_boot_link_before_any_change(
+    installation: Installation, kind: str, target: str
+) -> None:
+    link = installation.link(kind, target)
+    before = installation.live_snapshot()
+    with pytest.raises(hi.InstallRefused, match="installation.drift"):
+        installation.install(installation.inputs(1))
+    assert installation.live_snapshot() == before
+    assert not installation.paths.transaction.exists()
+    # Sensitivity: the link alone caused the refusal.
+    link.unlink()
+    installation.install(installation.inputs(2))
+    assert installation.installer.verify()["config_digest"]
+
+
+def test_uninstall_rerun_rechecks_wants_link_before_disable(
+    installation: Installation,
+) -> None:
+    installation.install(installation.inputs(1))
+    wants = installation.link("wants", "../" + hi.UNIT_NAME)
+    kill_uninstall(installation, "uninstall_intent")
+    wants.unlink()
+    wants.symlink_to("/nonexistent-synthetic-target")
+    with pytest.raises(hi.InstallRefused, match="installation.drift"):
+        installation.installer.uninstall()
+    assert installation.paths.intent.exists()
+    assert command("/usr/bin/systemctl", "is-active", installation.unit) == "active"
+    # Sensitivity: restoring the exact link lets the same rerun finish.
+    wants.unlink()
+    wants.symlink_to("../" + hi.UNIT_NAME)
+    assert installation.installer.uninstall() == "UNINSTALLED"
+    assert_uninstalled(installation)
+
+
 def test_uninstall_intent_with_invalid_record_refuses_and_deletes_nothing(
     installation: Installation,
 ) -> None:
