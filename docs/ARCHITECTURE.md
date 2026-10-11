@@ -3708,6 +3708,7 @@ runtime or Gate 0 acceptance. Its owners and consumers are:
 | `lane3_broker_origin.py`, `lane3_handoff_protocol.py` | Starter: exact-origin grammar and bounded, value-free protocol | Controller, coordinator and job client |
 | `lane3_handoff_coordinator.py`, `lane3_handoff_resolver.py` | Starter: authoritative GitHub qualification, immutable source installation, exact DNS capture and durable JIT cleanup | Independently approved host ceremony |
 | `lane3_handoff_controller.py` | Starter: root lease journal, task identity, UID-scoped firewall, launch budget, exact-owned rollback and fresh read-only WireGuard checks | Coordinator and authenticated consumed-lease client over the private socket |
+| `lane3_handoff_install.py` | Starter: immutable installation bundle, protected independent configuration, locked management dispatch, durable install rollback and boot-readiness barrier | Host administrator and the fixed coordinator management channel |
 | `lane3_handoff_bootstrap.py`, `lane3_handoff_client.py` | Starter: verify staged bytes before supplier imports; consume the job-bound grant using the original launch budget | Protected launcher amendment, separately reviewed |
 | `lane3_github_oidc.py` pinned transport | Starter: TLS identity and exact numeric destination; persist request-start evidence before sending credentials | Explicit topology-source composition |
 

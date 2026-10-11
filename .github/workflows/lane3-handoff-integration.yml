@@ -13,6 +13,8 @@ defaults:
 # actual production effectors, not complete controller boot/recovery ordering.
 # The fifth suite, wireguard_broker, exercises a real unprivileged NNP client
 # and socket with root-only synthetic metadata, not actual kernel WireGuard.
+# wireguard_kernel measures real synthetic kernel peers; installation_lifecycle
+# measures isolated installer transactions and temporary boot-recovery units.
 # Nothing here contacts OpenBao, a fleet host, a self-hosted runner or the
 # GitHub API, and nothing dispatches a protected workflow. No secret is used.
 
@@ -60,6 +62,7 @@ jobs:
             tests/unit/test_lane3_handoff_controller.py
             tests/unit/test_lane3_handoff_coordinator.py
             tests/unit/test_lane3_handoff_resolver.py
+            tests/unit/test_lane3_handoff_install.py
             tests/lane3_handoff_integration
           )
           python -m ruff format --diff "${files[@]}"
@@ -72,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle, wireguard_broker]
+        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle, wireguard_broker, wireguard_kernel, installation_lifecycle]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,8 +97,8 @@ jobs:
       - name: Install nftables and confirm the host tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q nftables
-          command -v nft setpriv unshare openssl useradd
+          sudo apt-get install -y -q nftables wireguard-tools iproute2
+          command -v nft setpriv unshare nsenter openssl useradd wg ip
           test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
       - name: Run the suite as root in a disposable network namespace
         env:
