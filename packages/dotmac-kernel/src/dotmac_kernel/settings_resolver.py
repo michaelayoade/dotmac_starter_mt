@@ -32,11 +32,12 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from types import MappingProxyType
 from typing import Any, Final, Generic, TypeVar, cast
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import Select, delete, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -216,6 +217,47 @@ class InvalidSpecDefaultError(ValueError):
     """A spec's own default violates the spec's own constraints."""
 
 
+class StrictSettingResolutionReason(str, Enum):
+    """Bounded diagnostics for a strict read; never stored value text."""
+
+    UNDECLARED_SPEC = "undeclared_spec"
+    SPEC_MISMATCH = "spec_mismatch"
+    INVALID_SCOPE = "invalid_scope"
+    READ_FAILED = "read_failed"
+    EXTRACTION_FAILED = "extraction_failed"
+    TYPE_UNAVAILABLE = "type_unavailable"
+    INVALID_VALUE = "invalid_value"
+    NO_VALUE = "no_value"
+
+
+class StrictSettingResolutionError(ValueError):
+    """A strict read refused; only declaration names and a reason are exposed.
+
+    No scope identifiers, stored values, SQL parameters or underlying exception
+    text are retained. Callers decide how refusal affects their operation.
+    """
+
+    def __init__(
+        self,
+        *,
+        domain: str,
+        key: str,
+        scope_kind: str,
+        reason: StrictSettingResolutionReason,
+    ) -> None:
+        self.domain = domain
+        self.key = key
+        self.scope_kind = scope_kind
+        self.reason = reason
+        super().__init__(f"setting {domain}/{key} at {scope_kind}: {reason.value}")
+
+
+class _StrictValueError(ValueError):
+    def __init__(self, reason: StrictSettingResolutionReason) -> None:
+        self.reason = reason
+        super().__init__(reason.value)
+
+
 def _fingerprint(spec: SettingSpec[Any]) -> tuple[object, ...]:
     """What makes two declarations of one setting the SAME declaration.
 
@@ -333,18 +375,12 @@ def _scope_for(
     return SettingScope.tenant(cast("UUID", resolved))
 
 
-def _select_row(
-    db: Session, domain: SettingDomain, key: str, scope: SettingScope
-) -> DomainSetting | None:
-    """The active row for this (domain, key, scope), or None.
-
-    `is_active=False` falls through resolution exactly like a missing row:
-    an inactive tenant row yields to the platform row, an inactive platform
-    row yields to the spec default.
-    """
+def _at_scope(
+    statement: Select[Any], domain: SettingDomain, key: str, scope: SettingScope
+) -> Select[Any]:
+    """Shared active-row predicates for ORM reads and fresh scalar snapshots."""
     statement = (
-        select(DomainSetting)
-        .where(DomainSetting.domain == domain)
+        statement.where(DomainSetting.domain == domain)
         .where(DomainSetting.key == key)
         .where(DomainSetting.scope_kind == scope.kind)
         .where(DomainSetting.is_active == True)  # noqa: E712
@@ -361,10 +397,64 @@ def _select_row(
         if scope.scope_id is None
         else DomainSetting.scope_id == scope.scope_id
     )
-    return db.scalars(statement).first()
+    return statement
 
 
-def _extract_raw(setting: DomainSetting | None) -> object | None:
+def _select_row(
+    db: Session, domain: SettingDomain, key: str, scope: SettingScope
+) -> DomainSetting | None:
+    """The active row at this scope, or None (inactive rows are absent)."""
+    return db.scalars(_at_scope(select(DomainSetting), domain, key, scope)).first()
+
+
+@dataclass(frozen=True, slots=True)
+class _SettingSnapshot:
+    value_json: object | None
+    value_text: str | None
+    is_secret: bool
+    tenant_id: UUID | None
+
+
+def _select_snapshot(
+    db: Session, domain: SettingDomain, key: str, scope: SettingScope
+) -> _SettingSnapshot | None:
+    # Selecting COLUMNS avoids the identity map entirely. populate_existing
+    # would overwrite the caller's pending edits, which a read must not do.
+    row = db.execute(
+        _at_scope(
+            select(
+                DomainSetting.value_json,
+                DomainSetting.value_text,
+                DomainSetting.is_secret,
+                DomainSetting.tenant_id,
+            ),
+            domain,
+            key,
+            scope,
+        )
+    ).first()
+    return None if row is None else _SettingSnapshot(*row)
+
+
+def _winning_row(
+    db: Session, spec: SettingSpec[Any], target: SettingScope, *, fresh: bool = False
+) -> tuple[DomainSetting | _SettingSnapshot | None, SettingSource]:
+    """One chain walk for both compatibility and strict single-key reads."""
+    chain = (
+        resolution_chain(target, active_scope_kinds()) if spec.inherits else (target,)
+    )
+    for candidate in chain:
+        row = (
+            _select_snapshot(db, spec.domain, spec.key, candidate)
+            if fresh
+            else _select_row(db, spec.domain, spec.key, candidate)
+        )
+        if row is not None:
+            return row, candidate.kind
+    return None, "default"
+
+
+def _extract_raw(setting: DomainSetting | _SettingSnapshot | None) -> object | None:
     """The stored value, decrypted when the row holds a secret.
 
     `value_json` is never encrypted: only `value_text` carries a secret, since
@@ -470,7 +560,12 @@ def _check_against_spec(
 
 
 def _finish(
-    spec: SettingSpec[Any], raw: object | None, source: SettingSource
+    spec: SettingSpec[Any],
+    raw: object | None,
+    source: SettingSource,
+    *,
+    strict: bool = False,
+    row_present: bool = False,
 ) -> tuple[object, SettingSource]:
     """Turn a raw stored value into the resolved one: coercion, constraint
     checks, and the degrade-to-default rule.
@@ -479,7 +574,13 @@ def _finish(
     rules would drift, and the drift would be invisible — a page reading twenty
     settings in bulk would quietly answer differently from the same settings
     read one at a time.
+
+    The strict policy refuses an unusable winner instead of degrading it.
+    `row_present` distinguishes absence from a row containing no usable value;
+    only absence may select a profile/spec default under that policy.
     """
+    if strict and row_present and raw is None:
+        raise _StrictValueError(StrictSettingResolutionReason.NO_VALUE)
     if raw is None:
         # The deployment's declared answer, before the module's fallback. Both
         # the single-key and bulk paths reach this, so a settings screen and a
@@ -491,10 +592,14 @@ def _finish(
             raw, source = spec.default, "default"
 
     if raw is None:
+        if strict:
+            raise _StrictValueError(StrictSettingResolutionReason.NO_VALUE)
         value = None
     else:
         value, error = _check_against_spec(spec, raw)
         if error is not None:
+            if strict:
+                raise _StrictValueError(StrictSettingResolutionReason.INVALID_VALUE)
             # Unusable stored value — degrade to the default rather than
             # surface something the spec says is impossible. `stored_at`
             # exists because this makes the bad row invisible to an editor.
@@ -646,22 +751,7 @@ def resolve_with_source(
     if hit is not _CACHE_MISS:
         return cast("tuple[object, SettingSource]", hit)
 
-    row = None
-    source: SettingSource = "default"
-    # Most specific first, ending at platform. The chain comes from the DECLARED
-    # ranks, so a product that inserts a level (site, region, user) gets it in
-    # the right position without editing this function.
-    # A non-inheriting spec is asked at its OWN scope and nowhere else: the
-    # chain is truncated rather than walked, so a less-specific row cannot
-    # answer for it.
-    chain = (
-        resolution_chain(target, active_scope_kinds()) if spec.inherits else (target,)
-    )
-    for candidate in chain:
-        row = _select_row(db, domain, key, candidate)
-        if row is not None:
-            source = candidate.kind
-            break
+    row, source = _winning_row(db, spec, target)
 
     value, source = _finish(spec, _extract_raw(row), source)
 
@@ -708,6 +798,57 @@ def resolve(
         db, spec.domain, spec.key, tenant_id=tenant_id, scope=scope
     )
     return cast("T", value)
+
+
+def resolve_strict(db: Session, spec: SettingSpec[T], *, scope: SettingScope) -> T:
+    """Read a fresh, validated value or raise `StrictSettingResolutionError`.
+
+    Requires a matching registered declaration and explicit declared scope.
+    The first active row wins (respecting `inherits`); an invalid winner never
+    falls through. Only absent rows select profile then spec defaults, which
+    must also validate and be non-null. The read bypasses cache reads/writes
+    and ORM identity state, without flushing or completing the caller session.
+
+    Fresh means database columns visible under the caller's transaction
+    isolation, not a globally linearized configuration change. No environment
+    fallback, session creation, commit or rollback is performed.
+    """
+    reason = StrictSettingResolutionReason.UNDECLARED_SPEC
+    scope_kind = scope.kind if isinstance(scope, SettingScope) else "invalid"
+    try:
+        registered = get_spec(spec.domain, spec.key)
+        reason = StrictSettingResolutionReason.SPEC_MISMATCH
+        if _fingerprint(registered) != _fingerprint(spec):
+            raise _StrictValueError(reason)
+        reason = StrictSettingResolutionReason.INVALID_SCOPE
+        if not isinstance(scope, SettingScope):
+            raise _StrictValueError(reason)
+        active_scope_kinds().require(scope.kind)
+        reason = StrictSettingResolutionReason.TYPE_UNAVAILABLE
+        active_setting_value_types().require(registered.value_type)
+        with db.no_autoflush:
+            reason = StrictSettingResolutionReason.READ_FAILED
+            row, source = _winning_row(db, registered, scope, fresh=True)
+            reason = StrictSettingResolutionReason.EXTRACTION_FAILED
+            raw = _extract_raw(row)
+            reason = StrictSettingResolutionReason.INVALID_VALUE
+            value, _source = _finish(
+                registered, raw, source, strict=True, row_present=row is not None
+            )
+        return cast("T", value)
+    except _StrictValueError as exc:
+        failure_reason = exc.reason
+    except Exception:
+        # Drivers, decryptors, type codecs and validators may include values
+        # in exception text. Never retain their exception or traceback chain.
+        failure_reason = reason
+    # Raise OUTSIDE the handler: even __context__ must not retain the failure.
+    raise StrictSettingResolutionError(
+        domain=str(spec.domain),
+        key=spec.key,
+        scope_kind=scope_kind,
+        reason=failure_reason,
+    ) from None
 
 
 def resolve_value(
@@ -1452,6 +1593,8 @@ __all__ = [
     "SettingChangeContext",
     "SettingSpec",
     "StoredSetting",
+    "StrictSettingResolutionError",
+    "StrictSettingResolutionReason",
     "active_setting_defaults",
     "bootstrap_change_context",
     "clear_by_key",
@@ -1461,6 +1604,7 @@ __all__ = [
     "register_specs",
     "resolve",
     "resolve_many",
+    "resolve_strict",
     "resolve_value",
     "seed_settings_from_env",
     "stored_at",

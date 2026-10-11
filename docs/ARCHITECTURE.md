@@ -1599,6 +1599,25 @@ level that actually answered: the scope kind (`"tenant"`, `"platform"`, …),
 secret's value (masked whenever a real row exists; never for the built-in
 default — there's nothing to hide there).
 
+**Fresh strict reads** are owned by the same resolver through the general
+`resolve_strict(db, spec, *, scope: SettingScope) -> T` API. A matching registered
+declaration and declared explicit scope are required. The shared chain walk and
+validation core retain the same scope/profile/spec precedence and `inherits`
+policy. An invalid or null winning row refuses rather than falling through;
+profile/spec defaults are considered only when no active row exists and must
+also validate as non-null. Database, decryption and type-registry failures never
+become defaults. `StrictSettingResolutionError` carries only domain, key, scope
+kind and an enum reason, without original exception text or chain.
+
+Strict reads bypass both cache operations and select scalar database columns,
+so a preloaded ORM object cannot supply stale values. `no_autoflush` protects
+the caller's pending changes; explicitly flushed changes remain visible. The
+resolver neither opens nor completes a session and has no environment fallback.
+Freshness remains subject to the caller's transaction isolation, rather than
+promising a globally linearized configuration flip. Compatibility reads retain
+their existing caching and degradation behavior. Source acceptance is covered by
+`tests/unit/test_settings_strict_resolution.py`; hosted CI owns test execution.
+
 Finer levels than `tenant` are possible — a spec resolves through the
 declared scope chain (`dotmac_kernel.setting_scopes`), most specific first,
 always ending at the platform row. `tenant_id` carries isolation and only
