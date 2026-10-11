@@ -156,15 +156,16 @@ class Installation:
                 " print(json.dumps({'refused':'unexpected'}));sys.exit(2)\n"
             ).encode(),
         )
-        command(
-            "nft",
-            "-f",
-            "-",
-            data=(
-                f"table inet {self.table} {{ chain output {{ type filter hook output "
-                'priority 0; policy drop; counter comment "installation-anchor"; } }'
-            ).encode(),
-        )
+        rules = (
+            f"table inet {self.table} {{\n"
+            "  chain output {\n"
+            "    type filter hook output priority 0; policy drop;\n"
+            '    counter comment "installation-anchor";\n'
+            "  }\n"
+            "}\n"
+        ).encode()
+        command("nft", "--check", "-f", "-", data=rules)
+        command("nft", "-f", "-", data=rules)
         self.table_created = True
         wrapper = self.root / "reconcile.py"
         installed = self.paths.runtime / self.bundle_digest
