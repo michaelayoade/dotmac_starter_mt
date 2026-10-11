@@ -284,6 +284,19 @@ disposition = "not_an_executor"
 premise = "commands no deployment verb, directly or through any in-tree callee"
 
 [[entrypoint]]
+name = "workflow:lane3-handoff-integration"
+family = "workflow"
+path = ".github/workflows/lane3-handoff-integration.yml"
+trigger = "push, pull_request"
+credential = "none"
+disposition = "not_an_executor"
+premise = """
+Hosted-runner tests only: root inside a disposable network namespace on the
+GitHub-hosted VM itself, with synthetic addresses, DNS, TLS and identities.
+Reaches no fleet host, uses no secret and commands no deployment verb.
+"""
+
+[[entrypoint]]
 name = "workflow:foundation-candidate"
 family = "workflow"
 path = ".github/workflows/foundation-candidate.yml"

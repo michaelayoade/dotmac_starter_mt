@@ -247,3 +247,140 @@ def test_resolve_refusal_exits_one_and_discloses_nothing(
     captured = capsys.readouterr()
     assert captured.out == ""
     _no_value_in(captured.err)
+
+
+def test_github_source_passes_the_pinned_target_through_and_defaults_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lane3_github_oidc
+
+    seen: list[dict[str, Any]] = []
+
+    class Recorder:
+        def __init__(self, **kwargs: Any) -> None:
+            seen.append(kwargs)
+
+        def __call__(self, audience: str) -> str:
+            raise AssertionError("no token request is made while composing")
+
+    monkeypatch.setattr(lane3_github_oidc, "GithubOidcSupplier", Recorder)
+    origin = "https://broker-1.region.example"
+    base: dict[str, Any] = {
+        "transport": object(),
+        "expected_version": 1,
+        "jwt_request_url": origin + "/x/idtoken?api-version=2.0",
+        "jwt_request_token": "synthetic-request-token",
+        "oidc_broker_origin": origin,
+    }
+    sentinel = object()
+    ts.github_openbao_source(**base, oidc_pinned=sentinel)
+    ts.github_openbao_source(**base)
+    assert seen[0]["pinned"] is sentinel
+    assert seen[1]["pinned"] is None
+    assert seen[0]["approved_origin"] == origin
+
+
+def wireguard_factory_arguments():
+    origin = "https://fixture.actions.githubusercontent.com"
+    return {
+        "expected_version": 1,
+        "jwt_request_url": origin + "/x/idtoken?api-version=2.0",
+        "jwt_request_token": "synthetic-request-canary",
+        "oidc_broker_origin": origin,
+        "endpoint_address": "192.0.2.1",
+        "source_address": "192.0.2.2",
+        "interface": "wgfixture",
+        "expected_local_public_key": "synthetic-local-key",
+        "expected_peer_public_key": "synthetic-peer-key",
+    }
+
+
+def test_wireguard_factory_forwards_handoff_transport_options(monkeypatch):
+    import lane3_wireguard_topology
+
+    transport, target, context, started = object(), object(), object(), object()
+    result = object()
+    seen = []
+    monkeypatch.setattr(
+        lane3_wireguard_topology,
+        "WireGuardOpenBaoTransport",
+        lambda **kwargs: transport,
+    )
+    monkeypatch.setattr(
+        ts, "github_openbao_source", lambda **kwargs: seen.append(kwargs) or result
+    )
+    assert (
+        ts.wireguard_github_openbao_source(
+            **wireguard_factory_arguments(),
+            oidc_pinned=target,
+            require_pinned=True,
+            wireguard_guard=lambda digest: None,
+            oidc_context_factory=context,
+            oidc_request_started=started,
+        )
+        is result
+    )
+    assert seen[0]["transport"] is transport
+    assert seen[0]["oidc_pinned"] is target
+    assert seen[0]["oidc_context_factory"] is context
+    assert seen[0]["oidc_request_started"] is started
+    assert seen[0]["require_pinned"] is True
+
+
+def test_wireguard_handoff_missing_grant_refuses_before_state_or_http(monkeypatch):
+    import lane3_wireguard_topology
+
+    calls = []
+    monkeypatch.setattr(
+        lane3_wireguard_topology,
+        "WireGuardOpenBaoTransport",
+        lambda **kwargs: calls.append("wireguard-state"),
+    )
+    with pytest.raises(ts.TopologySourceUnavailable) as caught:
+        ts.wireguard_github_openbao_source(
+            **wireguard_factory_arguments(),
+            require_pinned=True,
+            oidc_request_started=lambda: calls.append("request-started"),
+        )
+    assert caught.value.reason == "oidc.request"
+    assert calls == []
+
+
+def test_wireguard_factory_forwards_root_guard(monkeypatch):
+    import lane3_wireguard_topology
+
+    seen = []
+
+    def guard(digest):
+        return None
+
+    monkeypatch.setattr(
+        lane3_wireguard_topology,
+        "WireGuardOpenBaoTransport",
+        lambda **kwargs: seen.append(kwargs) or object(),
+    )
+    monkeypatch.setattr(ts, "github_openbao_source", lambda **kwargs: object())
+    ts.wireguard_github_openbao_source(
+        **wireguard_factory_arguments(),
+        oidc_pinned=object(),
+        require_pinned=True,
+        wireguard_guard=guard,
+    )
+    assert seen[0]["guard"] is guard
+
+
+def test_pinned_wireguard_factory_requires_root_guard_before_state(monkeypatch):
+    import lane3_wireguard_topology
+
+    calls = []
+    monkeypatch.setattr(
+        lane3_wireguard_topology,
+        "WireGuardOpenBaoTransport",
+        lambda **kwargs: calls.append("state"),
+    )
+    with pytest.raises(ts.TopologySourceUnavailable) as caught:
+        ts.wireguard_github_openbao_source(
+            **wireguard_factory_arguments(), oidc_pinned=object(), require_pinned=True
+        )
+    assert caught.value.reason == "transport.wireguard"
+    assert calls == []

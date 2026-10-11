@@ -3699,3 +3699,33 @@ The explicit encrypted-private-channel adapter is
 source/route/handshake checks and source-bound HTTP over that existing channel;
 it owns no tunnel provisioning, privilege grants or runtime activation. Host
 root/kernel/configuration remain in its stated trust boundary.
+
+The broker-handoff preparation is product-owned source, not an installed
+runtime or Gate 0 acceptance. Its owners and consumers are:
+
+| Component | Owner and responsibility | Consumer |
+|---|---|---|
+| `lane3_broker_origin.py`, `lane3_handoff_protocol.py` | Starter: exact-origin grammar and bounded, value-free protocol | Controller, coordinator and job client |
+| `lane3_handoff_coordinator.py`, `lane3_handoff_resolver.py` | Starter: authoritative GitHub qualification, immutable source installation, exact DNS capture and durable JIT cleanup | Independently approved host ceremony |
+| `lane3_handoff_controller.py` | Starter: root lease journal, task identity, UID-scoped firewall, launch budget, exact-owned rollback and fresh read-only WireGuard checks | Coordinator and authenticated consumed-lease client over the private socket |
+| `lane3_handoff_bootstrap.py`, `lane3_handoff_client.py` | Starter: verify staged bytes before supplier imports; consume the job-bound grant using the original launch budget | Protected launcher amendment, separately reviewed |
+| `lane3_github_oidc.py` pinned transport | Starter: TLS identity and exact numeric destination; persist request-start evidence before sending credentials | Explicit topology-source composition |
+
+The launcher must wire request-start and proof-outcome events explicitly.
+The KV proof outcome is runner-reported, not independently observed by root.
+After request start, issuance remains `UNKNOWN`; a bounded KV proof records
+its own result and does not prove whether an issuance occurred. Root-owned
+configuration, finite independently approved origins, GitHub API authority,
+host kernel and custody remain trust assumptions. Hosted synthetic coverage
+does not establish the composed production rollback/reboot proof. Installation,
+human review of the launcher and its source-policy change, protected-run
+approval and Gate 0 acceptance remain separate; `admission_evidence` is null.
+
+The pinned WireGuard composition requires the lease client's root-check
+callback; missing or failed checks never fall back to job-side sudo. Each
+request compares the consumer's canonical five-field channel digest with the
+fixed protected live configuration, performs fresh public-state checks and
+returns only a fixed status. No caller-selected command or path crosses this
+boundary. Runner `NoNewPrivileges` remains enabled. Synthetic root command
+metadata proves callback/socket behavior, not real kernel WireGuard state or
+the complete production systemd composition.

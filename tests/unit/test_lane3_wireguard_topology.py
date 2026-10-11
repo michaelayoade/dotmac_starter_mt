@@ -150,3 +150,133 @@ def test_linux_explicit_source_route_shape() -> None:
     k = Kernel()
     k.route = [{"dev": "wg0", "from": "192.0.2.2"}]
     transport(k)
+
+
+def test_root_guard_digest_and_fresh_check_points_never_run_commands():
+    import lane3_handoff_protocol as hp
+
+    kernel, checks = Kernel(), []
+    channel = transport(kernel, guard=lambda digest: checks.append(digest))
+    expected = hp.digest(
+        {
+            "endpoint_address": "192.0.2.1",
+            "source_address": "192.0.2.2",
+            "interface": "wg0",
+            "expected_local_public_key": LOCAL,
+            "expected_peer_public_key": PEER,
+        }
+    )
+    assert checks == [expected] and kernel.calls == []
+    connection = channel._connection()
+    connection.close()
+    channel._before_send()
+    assert checks == [expected] * 3 and kernel.calls == []
+
+
+def test_root_guard_refusal_prevents_connection_and_send(monkeypatch):
+    checks, commands, connects = [], Kernel(), []
+
+    def guard(digest):
+        checks.append(digest)
+        if len(checks) > 1:
+            raise RuntimeError("PRIVATE-GUARD-CANARY")
+
+    channel = transport(commands, guard=guard)
+    monkeypatch.setattr(
+        m.http.client, "HTTPConnection", lambda *a, **k: connects.append(a)
+    )
+    with pytest.raises(m.TopologySourceUnavailable) as caught:
+        channel._connection()
+    assert connects == [] and commands.calls == []
+    assert "PRIVATE" not in str(caught.value)
+    with pytest.raises(m.TopologySourceUnavailable):
+        channel._before_send()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("endpoint_address", 123),
+        ("source_address", True),
+        ("interface", "eth0"),
+        ("expected_local_public_key", "PRIVATE-KEY-CANARY"),
+        ("expected_peer_public_key", LOCAL),
+    ],
+)
+def test_invalid_broker_configuration_refuses_before_guard(field, value):
+    checks = []
+    config = {
+        "endpoint_address": "192.0.2.1",
+        "source_address": "192.0.2.2",
+        "interface": "wg0",
+        "expected_local_public_key": LOCAL,
+        "expected_peer_public_key": PEER,
+        "guard": lambda digest: checks.append(digest),
+    }
+    config[field] = value
+    with pytest.raises(m.TopologySourceUnavailable):
+        m.WireGuardOpenBaoTransport(**config)
+    assert checks == []
+
+
+def test_false_broker_callback_is_not_success_and_never_falls_back():
+    commands = Kernel()
+    with pytest.raises(m.TopologySourceUnavailable):
+        transport(commands, guard=lambda digest: False)
+    assert commands.calls == []
+
+
+def test_broker_digest_excludes_no_foreign_fields():
+    config = {
+        "endpoint_address": "192.0.2.1",
+        "source_address": "192.0.2.2",
+        "interface": "wg0",
+        "expected_local_public_key": LOCAL,
+        "expected_peer_public_key": PEER,
+    }
+    assert len(m.wireguard_config_digest(config)) == 64
+    with pytest.raises(m.TopologySourceUnavailable):
+        m.wireguard_config_digest(
+            {**config, "oidc_broker_origin": "https://fixture.example"}
+        )
+
+
+def test_broker_presend_refusal_canary_detects_weakened_guard(monkeypatch):
+    def canary():
+        checks, events, commands = [], [], Kernel()
+
+        def guard(config_digest):
+            checks.append(config_digest)
+            if len(checks) == 3:
+                raise RuntimeError("PRIVATE-METADATA-CANARY")
+
+        class Connection:
+            sock = None
+
+            def connect(self):
+                events.append("connected")
+
+            def request(self, *args, **kwargs):
+                events.append("credential-send")
+                raise RuntimeError("synthetic-send-stop")
+
+            def close(self):
+                events.append("closed")
+
+        monkeypatch.setattr(
+            m.http.client, "HTTPConnection", lambda *a, **k: Connection()
+        )
+        channel = transport(commands, guard=guard)
+        with pytest.raises(m.TopologySourceUnavailable):
+            channel.request(
+                "POST",
+                api.LOGIN_PATH,
+                body={"role": api.ROLE, "jwt": "synthetic-jwt-canary"},
+            )
+        assert events == ["connected", "closed"]
+        assert checks == [checks[0]] * 3 and commands.calls == []
+
+    canary()
+    monkeypatch.setattr(m.WireGuardOpenBaoTransport, "_before_send", lambda self: None)
+    with pytest.raises(AssertionError):
+        canary()
