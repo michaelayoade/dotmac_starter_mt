@@ -569,6 +569,25 @@ def test_channel_refuses_unvalidated_payloads_before_any_process() -> None:
         co.ssh_channel("synthetic-host", "/x/c.py; id")
 
 
+def test_remote_command_runs_the_controller_without_bytecode(
+    monkeypatch: Any,
+) -> None:
+    seen: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_: Any) -> Any:
+        seen.append(argv)
+        raise OSError
+
+    monkeypatch.setattr(co.subprocess, "run", fake_run)
+    call = co.ssh_channel("synthetic-host", "/x/c.py")
+    with pytest.raises(co.CoordinatorRefused):
+        call(
+            "status",
+            {"protocol": hp.PROTOCOL, "op": "status", "lease_id": LEASE},
+        )
+    assert seen and seen[0][-1] == "sudo -n /usr/bin/python3 -I -B /x/c.py status"
+
+
 def test_prelaunch_missing_approval_has_no_jit_or_bootstrap(
     tmp_path: Any, monkeypatch: Any
 ) -> None:

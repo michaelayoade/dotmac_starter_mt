@@ -95,7 +95,10 @@ before installing or recovering; installation never removes it.
 Configure the coordinator's `management.controller_path` and the existing
 restricted SSH/sudo boundary to authorize ONLY the exact installed immutable
 dispatcher path with one of `prepare`, `timing`, `bootstrap`, `status`, `grant`,
-`refuse`, or `cleanup`. It accepts a bounded protocol document on stdin. There
+`refuse`, or `cleanup`. The coordinator's fixed remote command is
+`sudo -n /usr/bin/python3 -I -B <controller_path> <op>`; `-B` keeps the
+isolated interpreter from writing bytecode into the measured runtime, so any
+sudoers or `ForceCommand` text must match that exact form. It accepts a bounded protocol document on stdin. There
 is no caller-selected executable, config path, lease argument, shell fragment
 or arbitrary Python permission. Updating that external authorization is a
 separate reviewed operation; the installer does not edit sudoers or SSH keys.
@@ -113,12 +116,16 @@ Emergency cleanup does not acquire a new approval dependency.
 ## Boot reconciliation and interrupted installation
 
 The generated `dotmac-lane3-handoff-reconcile.service` is a root oneshot unit,
-enabled as a requirement of `multi-user.target`, ordered after the explicitly
-named firewall baseline owner. Its immutable dispatcher runs original
+enabled as `WantedBy=multi-user.target` (a want, not a requirement), ordered
+`Before=multi-user.target` and after the explicitly named firewall baseline
+owner, with a 45 second start timeout. A failed or timed-out reconcile
+therefore does not fail `multi-user.target` or block host boot; safety stays
+fail-closed in the dispatcher instead. Its immutable dispatcher runs original
 controller reconciliation before writing a root-private readiness receipt
 under `/run`, bound to the current boot ID and both installed digests.
 `prepare` additionally requires that receipt and an active reconciliation
-unit. A stale boot receipt, failed service, byte drift or pending transaction
+unit. Every lease, and so every egress grant, starts at `prepare`: `bootstrap`,
+`grant` and `serve` act only on an existing lease bound to the current boot. A stale boot receipt, failed service, byte drift or pending transaction
 refuses preparation.
 
 Before the first runtime or live-configuration mutation, the installer fsyncs
@@ -148,6 +155,38 @@ finishes idempotent prior-backup retirement and reports `COMMIT_FINISHED`;
 it does not claim to have rolled back an already committed target. Unknown
 drift or unsafe objects retain the barrier for existing management recovery.
 Previous readiness is deliberately regenerated, never carried across rollback.
+
+## Uninstall
+
+```sh
+/usr/bin/python3 -I -B /opt/dotmac-lane3-handoff/<bundle-digest>/lane3_handoff_install.py uninstall
+```
+
+`uninstall` removes a completed installation. It refuses with
+`installation.lease` if any `journal.json` exists (active or terminal) and
+with `installation.pending` if an install transaction is pending. Under the
+shared lock it first verifies the installation record and the runtime,
+configuration and unit trees exactly; any drift (including a present
+`approval.json`, a leftover `multi-user.target.requires` link, or a
+non-exact enablement link) refuses before anything is deleted. Retire a
+separately provisioned `approval.json` through its owner first.
+
+It then persists `uninstall-intent.json` and, in order: disables and stops the
+reconcile unit (a positively observed `not-found` is tolerated); removes the
+unit file and its `multi-user.target.wants` link, only if exactly owned; runs
+`daemon-reload`; removes the installed runtime directory, configuration
+directory, readiness receipt and installation record, exact-owned files only;
+and reads back that all are absent before removing the intent. The empty
+`/opt/dotmac-lane3-handoff` parent is removed only if empty.
+
+The intent makes the operation idempotent and SIGKILL-safe: while it exists,
+install, verify, boot reconciliation and management dispatch refuse with
+`installation.pending`, and rerunning `uninstall` finishes the remaining steps,
+re-measuring whatever is left. With nothing installed it reports `ABSENT`;
+success reports `UNINSTALLED`. It never touches nftables state, users, the
+state directory and its lock, or anything the installer did not record.
+Records written by older bundles (with the previous `RequiredBy` unit) do not
+validate under this code and must be retired by the bundle that wrote them.
 
 `verify` performs read-only installed byte/mode/census checks under the shared
 lock; it does not establish readiness or approve a run. Root-only

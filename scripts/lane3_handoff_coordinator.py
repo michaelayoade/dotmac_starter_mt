@@ -646,7 +646,7 @@ def ssh_channel(alias: str, controller_path: str) -> Channel:
             raise refused("mgmt.invalid") from None
         if request["op"] != op:
             raise refused("mgmt.invalid")
-        remote = f"sudo -n /usr/bin/python3 -I {controller_path} {op}"
+        remote = f"sudo -n /usr/bin/python3 -I -B {controller_path} {op}"
         argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
         argv += [alias, remote]
         try:

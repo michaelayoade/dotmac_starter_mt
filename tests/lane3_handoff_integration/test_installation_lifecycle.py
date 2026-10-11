@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import lane3_handoff_controller as hc
 import lane3_handoff_install as hi
@@ -98,6 +98,7 @@ class Installation:
         self.bundle = root / "bundle"
         self.bundle_digest = ""
         self.worker = root / "install-worker.py"
+        self.uninstall_worker = root / "uninstall-worker.py"
 
     def setup(self) -> None:
         for relative in (
@@ -148,6 +149,28 @@ class Installation:
                 " paths=hi.Paths(prefix=pathlib.Path(sys.argv[1]))\n"
                 " hi.Installer(paths,system).install("
                 "pathlib.Path(sys.argv[2]),sys.argv[3],pathlib.Path(sys.argv[4]),sys.argv[5])\n"
+                "except hi.InstallRefused as exc:\n"
+                " print(json.dumps({'refused':exc.label}));sys.exit(1)\n"
+                "except OSError:\n"
+                " print(json.dumps({'refused':'installation.refused'}));sys.exit(1)\n"
+                "except Exception:\n"
+                " print(json.dumps({'refused':'unexpected'}));sys.exit(2)\n"
+            ).encode(),
+        )
+        put(
+            self.uninstall_worker,
+            (
+                "import json,os,pathlib,signal,sys\n"
+                f"sys.path.insert(0,{str(SCRIPTS)!r})\n"
+                "import lane3_handoff_install as hi\n"
+                + inspect.getsource(FixtureSystem)
+                + "\ntry:\n"
+                " os.umask(0o077)\n"
+                " crash=None if sys.argv[3]=='-' else sys.argv[3]\n"
+                " system=FixtureSystem(sys.argv[2],crash)\n"
+                " paths=hi.Paths(prefix=pathlib.Path(sys.argv[1]))\n"
+                " installer=hi.Installer(paths,system)\n"
+                " print(json.dumps({'status':installer.uninstall()}))\n"
                 "except hi.InstallRefused as exc:\n"
                 " print(json.dumps({'refused':exc.label}));sys.exit(1)\n"
                 "except OSError:\n"
@@ -311,6 +334,42 @@ class Installation:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
+
+    def start_uninstall(self, crash: str | None) -> subprocess.Popen[bytes]:
+        return subprocess.Popen(  # noqa: S603 - isolated owned fixture worker
+            [
+                sys.executable,
+                "-I",
+                str(self.uninstall_worker),
+                str(self.paths.prefix),
+                self.unit,
+                crash or "-",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def link(self, kind: str, target: str) -> pathlib.Path:
+        """Plant a boot-target link under the isolated prefix, never the host."""
+        directory = self.paths.unit.parent / f"multi-user.target.{kind}"
+        directory.mkdir(mode=0o755, exist_ok=True)
+        directory.chmod(0o755)
+        link = directory / hi.UNIT_NAME
+        link.symlink_to(target)
+        return link
+
+    def installed_paths(self) -> list[pathlib.Path]:
+        return [
+            self.paths.config,
+            self.paths.record,
+            self.paths.unit,
+            self.paths.ready,
+            self.paths.transaction,
+            self.paths.intent,
+            self.paths.stage,
+            self.paths.backup,
+            self.paths.runtime / self.bundle_digest,
+        ]
 
     def status(self, lease: str) -> dict[str, object]:
         result = subprocess.run(  # noqa: S603 - exact installed dispatcher fixture
@@ -617,3 +676,266 @@ def test_dynamic_approval_does_not_block_installed_status_dispatch(
     assert response["op"] == "status" and response["state"] == "PREPARED"
     assert response["lease_id"] == lease
     assert snapshot(approval) == before
+
+
+def kill_uninstall(value: Installation, phase: str) -> None:
+    child = value.start_uninstall(phase)
+    try:
+        child.communicate(timeout=45)
+        assert (
+            child.returncode == -signal.SIGKILL
+        ), "uninstaller must reach its SIGKILL checkpoint"
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
+
+
+def assert_uninstalled(value: Installation) -> None:
+    for path in value.installed_paths():
+        assert not path.exists() and not path.is_symlink()
+    for kind in ("wants", "requires"):
+        assert not (
+            value.paths.unit.parent / f"multi-user.target.{kind}" / hi.UNIT_NAME
+        ).is_symlink()
+
+
+def test_generated_unit_is_wanted_not_required_by_boot_target(
+    installation: Installation,
+) -> None:
+    installation.install(installation.inputs(1))
+    text = installation.paths.unit.read_text()
+    assert "[Install]\nWantedBy=multi-user.target\n" in text
+    assert "RequiredBy" not in text
+    assert "Before=multi-user.target\n" in text
+    assert "TimeoutStartSec=45\n" in text
+    assert "ExecStart=/usr/bin/python3 -I -B /opt/dotmac-lane3-handoff/" in text
+
+
+def test_uninstall_removes_only_the_recorded_installation(
+    installation: Installation,
+) -> None:
+    installation.install(installation.inputs(1))
+    wants = installation.link("wants", "../" + hi.UNIT_NAME)
+    sibling = installation.paths.runtime / ("f" * 64)
+    sibling.mkdir(mode=0o755)
+    canary = installation.paths.state / "unrelated-canary"
+    put(canary, b"synthetic state outside installer record")
+    canary_before = snapshot(canary)
+    lock = installation.paths.state / "lock"
+    lock_inode = lock.stat().st_ino
+    nft_before = command("nft", "list", "table", "inet", installation.table)
+    assert installation.installer.uninstall() == "UNINSTALLED"
+    assert_uninstalled(installation)
+    assert not wants.is_symlink()
+    assert snapshot(canary) == canary_before
+    assert lock.stat().st_ino == lock_inode
+    # A sibling not recorded by the installer keeps the runtime parent alive.
+    assert sibling.is_dir() and installation.paths.runtime.is_dir()
+    assert command("nft", "list", "table", "inet", installation.table) == nft_before
+    assert (
+        command("/usr/bin/systemctl", "is-active", installation.unit, check=False)
+        != "active"
+    )
+    # Idempotent: a second run observes absence and changes nothing.
+    assert installation.installer.uninstall() == "ABSENT"
+    sibling.rmdir()
+
+
+def test_uninstall_removes_empty_runtime_parent_and_is_repeatable(
+    installation: Installation,
+) -> None:
+    installation.install(installation.inputs(1))
+    assert installation.installer.uninstall() == "UNINSTALLED"
+    assert not installation.paths.runtime.exists()
+    installation.install(installation.inputs(1))
+    assert installation.installer.verify()["config_digest"]
+
+
+def test_uninstall_refuses_any_lease_and_deletes_nothing(
+    installation: Installation,
+) -> None:
+    installation.install(installation.inputs(1))
+    before = installation.live_snapshot()
+    journal = installation.paths.state / "journal.json"
+    put(journal, hi.canonical({"synthetic": "active-lease-barrier"}))
+    with pytest.raises(hi.InstallRefused, match="installation.lease"):
+        installation.installer.uninstall()
+    assert installation.live_snapshot() == before
+    assert not installation.paths.intent.exists()
+    # Sensitivity: the lease alone caused the refusal.
+    journal.unlink()
+    assert installation.installer.uninstall() == "UNINSTALLED"
+    assert_uninstalled(installation)
+
+
+def test_uninstall_refuses_pending_transaction_and_deletes_nothing(
+    installation: Installation,
+) -> None:
+    installation.install(installation.inputs(1))
+    kill_install(installation, installation.inputs(2), "activated")
+    before = installation.live_snapshot()
+    with pytest.raises(hi.InstallRefused, match="installation.pending"):
+        installation.installer.uninstall()
+    assert installation.live_snapshot() == before
+    assert installation.paths.transaction.exists()
+    assert not installation.paths.intent.exists()
+    installation.installer.recover()
+    assert installation.installer.uninstall() == "UNINSTALLED"
+    assert_uninstalled(installation)
+
+
+def mutate(value: Installation, fault: str) -> tuple[pathlib.Path, Callable[[], None]]:
+    paths = value.paths
+    runtime = paths.runtime / value.bundle_digest / "lane3_handoff_controller.py"
+    if fault == "runtime_byte":
+        original = runtime.read_bytes()
+        runtime.chmod(0o644)
+        runtime.write_bytes(original + b"#")
+        runtime.chmod(0o444)
+
+        def undo() -> None:
+            runtime.chmod(0o644)
+            runtime.write_bytes(original)
+            runtime.chmod(0o444)
+
+        return runtime, undo
+    if fault == "config_mode":
+        victim = paths.config / "policy.json"
+        victim.chmod(0o640)
+        return victim, lambda: victim.chmod(0o600)
+    if fault == "config_extra":
+        extra = paths.config / "extra.json"
+        put(extra, b"{}")
+        return extra, extra.unlink
+    if fault == "approval_present":
+        approval = paths.config / "approval.json"
+        put(approval, b"synthetic opaque approval is not installer-owned")
+        return approval, approval.unlink
+    if fault == "unit_byte":
+        original = paths.unit.read_bytes()
+        paths.unit.write_bytes(original + b"\n")
+        return paths.unit, lambda: paths.unit.write_bytes(original)
+    if fault == "ready_mode":
+        paths.ready.chmod(0o644)
+        return paths.ready, lambda: paths.ready.chmod(0o600)
+    if fault == "stray_stage":
+        paths.stage.mkdir(mode=0o700)
+        return paths.stage, paths.stage.rmdir
+    if fault == "requires_link":
+        link = value.link("requires", "../" + hi.UNIT_NAME)
+        return link, link.unlink
+    if fault == "foreign_wants_link":
+        link = value.link("wants", "/nonexistent-synthetic-target")
+        return link, link.unlink
+    raise AssertionError(fault)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "runtime_byte",
+        "config_mode",
+        "config_extra",
+        "approval_present",
+        "unit_byte",
+        "ready_mode",
+        "stray_stage",
+        "requires_link",
+        "foreign_wants_link",
+    ],
+)
+def test_uninstall_refuses_drift_without_deleting(
+    installation: Installation, fault: str
+) -> None:
+    installation.install(installation.inputs(1))
+    _, undo = mutate(installation, fault)
+    before = installation.live_snapshot()
+    active = command("/usr/bin/systemctl", "is-active", installation.unit)
+    with pytest.raises(hi.InstallRefused):
+        installation.installer.uninstall()
+    assert installation.live_snapshot() == before
+    assert not installation.paths.intent.exists()
+    assert command("/usr/bin/systemctl", "is-active", installation.unit) == active
+    # Sensitivity: the exact drift alone caused the refusal.
+    undo()
+    assert installation.installer.uninstall() == "UNINSTALLED"
+    assert_uninstalled(installation)
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "uninstall_intent",
+        "uninstall_stopped",
+        "uninstall_unit_removed",
+        "uninstall_reloaded",
+        "uninstall_runtime_removed",
+        "uninstall_config_removed",
+        "uninstall_ready_removed",
+        "uninstall_record_removed",
+    ],
+)
+def test_sigkill_uninstall_is_finished_by_rerun(
+    installation: Installation, phase: str
+) -> None:
+    installation.install(installation.inputs(1))
+    installation.link("wants", "../" + hi.UNIT_NAME)
+    kill_uninstall(installation, phase)
+    assert installation.paths.intent.exists()
+    # The barrier holds until the operation is finished explicitly.
+    with pytest.raises(hi.InstallRefused, match="installation.pending"):
+        installation.installer.dispatch("status", hi.canonical({"op": "status"}))
+    with pytest.raises(hi.InstallRefused, match="installation.pending"):
+        installation.installer.verify()
+    with pytest.raises(hi.InstallRefused, match="installation.pending"):
+        installation.installer.boot_reconcile()
+    with pytest.raises(hi.InstallRefused, match="installation.pending"):
+        installation.install(installation.inputs(2))
+    with pytest.raises(hi.InstallRefused, match="installation.pending"):
+        installation.installer.recover()
+    assert installation.installer.uninstall() == "UNINSTALLED"
+    assert_uninstalled(installation)
+    assert installation.installer.uninstall() == "ABSENT"
+
+
+def test_uninstall_intent_with_invalid_record_refuses_and_deletes_nothing(
+    installation: Installation,
+) -> None:
+    installation.install(installation.inputs(1))
+    record = installation.installer.record()
+    record["config_files"]["../../unrelated"] = "b" * 64
+    put(
+        installation.paths.intent,
+        hi.canonical({"schema": hi.UNINSTALL_SCHEMA, "record": record}),
+    )
+    before = installation.live_snapshot()
+    with pytest.raises(hi.InstallRefused):
+        installation.installer.uninstall()
+    assert installation.live_snapshot() == before
+    installation.paths.intent.unlink()
+    assert installation.installer.uninstall() == "UNINSTALLED"
+
+
+def test_recover_refuses_stale_requires_link_and_removes_exact_wants_link(
+    installation: Installation,
+) -> None:
+    kill_install(installation, installation.inputs(1), "activated")
+    requires = installation.link("requires", "../" + hi.UNIT_NAME)
+    with pytest.raises(hi.InstallRefused, match="installation.drift"):
+        installation.installer.recover()
+    # Barrier retained; the refusal precedes any recovery mutation.
+    assert installation.paths.transaction.exists()
+    assert installation.paths.config.exists()
+    assert requires.is_symlink()
+    requires.unlink()
+    foreign = installation.link("wants", "/nonexistent-synthetic-target")
+    with pytest.raises(hi.InstallRefused, match="installation.drift"):
+        installation.installer.recover()
+    assert installation.paths.transaction.exists()
+    assert installation.paths.config.exists()
+    foreign.unlink()
+    exact_link = installation.link("wants", "../" + hi.UNIT_NAME)
+    assert installation.installer.recover() == "ROLLED_BACK"
+    assert not exact_link.is_symlink()
+    assert not installation.paths.transaction.exists()

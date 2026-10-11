@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import pathlib
 import sys
@@ -73,7 +74,7 @@ def test_unit_requires_real_explicit_firewall_owner_and_fixed_dispatcher():
     rendered = hi.unit_bytes("a" * 64, "nftables.service").decode()
     assert "Requires=nftables.service" in rendered
     assert "After=local-fs.target nftables.service" in rendered
-    assert " -I /opt/dotmac-lane3-handoff/" in rendered
+    assert " -I -B /opt/dotmac-lane3-handoff/" in rendered
     assert "boot-reconcile" in rendered
     assert "RemainAfterExit=yes" in rendered
     for unit in ("", "../nftables.service", "nftables.service\nExecStart=/bin/sh"):
@@ -153,3 +154,55 @@ def test_installed_record_cannot_expand_the_deletion_authority():
     record["config_files"]["../../unrelated"] = "b" * 64
     with pytest.raises(hi.InstallRefused):
         hi.Installer().validate_record_value(record)
+
+
+def test_unit_is_wanted_not_required_by_the_boot_target():
+    rendered = hi.unit_bytes("a" * 64, "nftables.service").decode()
+    assert rendered.endswith("[Install]\nWantedBy=multi-user.target\n")
+    assert "RequiredBy" not in rendered
+    # Ordering is unchanged and the start timeout stays bounded.
+    assert "Before=multi-user.target\n" in rendered
+    assert "TimeoutStartSec=45\n" in rendered
+
+
+def test_unit_runs_the_dispatcher_without_bytecode():
+    rendered = hi.unit_bytes("a" * 64, "nftables.service").decode()
+    assert (
+        "ExecStart=/usr/bin/python3 -I -B /opt/dotmac-lane3-handoff/" + "a" * 64
+    ) in rendered
+    template = (
+        ROOT / "deploy/lane3-handoff/dotmac-lane3-handoff-reconcile.service.in"
+    ).read_text()
+    assert "ExecStart=/usr/bin/python3 -I -B /opt/" in template
+    assert "WantedBy=multi-user.target" in template and "RequiredBy" not in template
+
+
+def test_uninstall_is_an_administrative_command_not_a_management_op():
+    # The coordinator's permitted surface is exactly the dispatcher op set.
+    assert "uninstall" not in hi.MANAGEMENT_OPS
+    with pytest.raises(hi.InstallRefused):
+        hi.management_operation(["uninstall"])
+    source = inspect.getsource(hi.main)
+    assert 'argv[1:] == ["uninstall"]' in source
+
+
+def test_uninstall_checks_refusals_before_any_mutation():
+    source = inspect.getsource(hi.Installer.uninstall)
+    for guard in ("self.no_lease()", "self.no_transaction()", "self.verify_record("):
+        assert guard in source
+        assert source.index(guard) < source.index("write_file(")
+    assert source.index("write_file(") < source.index("self.stop_reconcile_unit()")
+    assert source.index("self.stop_reconcile_unit()") < source.index("unlink(")
+    assert source.index("daemon-reload") < source.index("remove_partial_tree(")
+    assert source.index("remove_partial_tree(") < source.index(
+        "self.record() != record"
+    )
+    assert source.rindex("uninstall_readback(record)") > source.index(
+        "uninstall_record_removed"
+    )
+
+
+def test_uninstall_never_touches_firewall_or_accounts():
+    source = inspect.getsource(hi.Installer.uninstall)
+    for forbidden in ("nft", "userdel", "useradd", "rmtree", "shutil"):
+        assert forbidden not in source

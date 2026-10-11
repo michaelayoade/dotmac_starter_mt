@@ -27,6 +27,7 @@ BUNDLE_SCHEMA = "dotmac.lane3.handoff-install-bundle.v1"
 INPUT_SCHEMA = "dotmac.lane3.handoff-install-input.v1"
 RECORD_SCHEMA = "dotmac.lane3.handoff-installed.v1"
 TRANSACTION_SCHEMA = "dotmac.lane3.handoff-install-transaction.v1"
+UNINSTALL_SCHEMA = "dotmac.lane3.handoff-uninstall-intent.v1"
 SUPPLIER_COMMIT = "f867f20a2d17372172ca3a0d09a5eb4a72b62961"
 SUPPLIER_HASHES = {
     "lane3_topology.py": (
@@ -202,6 +203,18 @@ class Paths:
     @property
     def transaction(self) -> Path:
         return self.state / "install-transaction.json"
+
+    @property
+    def intent(self) -> Path:
+        return self.state / "uninstall-intent.json"
+
+    @property
+    def wants(self) -> Path:
+        return self.unit.parent / "multi-user.target.wants" / UNIT_NAME
+
+    @property
+    def requires(self) -> Path:
+        return self.unit.parent / "multi-user.target.requires" / UNIT_NAME
 
     @property
     def stage(self) -> Path:
@@ -420,9 +433,9 @@ def unit_bytes(bundle_digest: str, baseline_unit: str) -> bytes:
         f"Requires={baseline_unit}\nAfter=local-fs.target {baseline_unit}\n"
         "Before=multi-user.target\n"
         "[Service]\nType=oneshot\nRemainAfterExit=yes\nUser=root\nGroup=root\nUMask=0077\n"
-        "ExecStart=/usr/bin/python3 -I /opt/dotmac-lane3-handoff/"
+        "ExecStart=/usr/bin/python3 -I -B /opt/dotmac-lane3-handoff/"
         f"{bundle_digest}/lane3_handoff_install.py boot-reconcile\n"
-        "TimeoutStartSec=45\n[Install]\nRequiredBy=multi-user.target\n"
+        "TimeoutStartSec=45\n[Install]\nWantedBy=multi-user.target\n"
     ).encode()
 
 
@@ -506,6 +519,10 @@ class Installer:
         if exists(self.paths.transaction):
             raise InstallRefused("installation.pending")
 
+    def no_uninstall(self) -> None:
+        if exists(self.paths.intent):
+            raise InstallRefused("installation.pending")
+
     def record(self) -> dict[str, Any]:
         value = strict_json(read_file(self.paths.record, 0o600))
         self.validate_record_value(value)
@@ -566,6 +583,7 @@ class Installer:
     def verify(self) -> dict[str, Any]:
         with self.locked():
             self.no_transaction()
+            self.no_uninstall()
             record = self.record()
             self.verify_record(record, allow_approval=True)
             return record
@@ -679,6 +697,7 @@ class Installer:
         }
         with self.locked():
             self.no_transaction()
+            self.no_uninstall()
             self.no_lease()
             cleanup_temp(self.paths.transaction, 0o600)
             prior = self.record() if exists(self.paths.record) else None
@@ -839,6 +858,7 @@ class Installer:
 
     def boot_reconcile(self) -> dict[str, Any]:
         with self.locked():
+            self.no_uninstall()
             record = self.record()
             if exists(self.paths.transaction):
                 pending = self.transaction()
@@ -867,6 +887,7 @@ class Installer:
             raise InstallRefused("operation.invalid")
         with self.locked():
             self.no_transaction()
+            self.no_uninstall()
             record = self.record()
             self.verify_record(record, allow_approval=True)
             self.entrypoint(record)
@@ -882,7 +903,11 @@ class Installer:
         """Explicit rollback of interrupted install; never clean up a lease."""
         with self.locked():
             self.no_lease()
+            self.no_uninstall()
             pending = self.transaction()
+            # Unknown enablement links refuse before any recovery mutation.
+            self.refuse_requires_link()
+            self.remove_wants_link(remove=False)
             prior, target = pending["prior"], pending["target"]
             if pending["phase"] == "committed":
                 if self.record() != target:
@@ -972,22 +997,8 @@ class Installer:
         return "ROLLED_BACK"
 
     def retire_unit(self) -> None:
-        link = self.paths.unit.parent / "multi-user.target.requires" / UNIT_NAME
-        if exists(link):
-            fd = directory(link.parent)
-            try:
-                info = os.stat(link.name, dir_fd=fd, follow_symlinks=False)
-                target = os.readlink(link.name, dir_fd=fd)
-                if (
-                    not stat.S_ISLNK(info.st_mode)
-                    or info.st_uid != 0
-                    or target not in {"../" + UNIT_NAME, str(self.paths.unit)}
-                ):
-                    raise InstallRefused("installation.drift")
-                os.unlink(link.name, dir_fd=fd)
-                os.fsync(fd)
-            finally:
-                os.close(fd)
+        self.refuse_requires_link()
+        self.remove_wants_link()
         state = self.system.run(
             ["/usr/bin/systemctl", "show", "--property=LoadState", "--value", UNIT_NAME]
         )
@@ -995,6 +1006,157 @@ class Installer:
             self.system.run(["/usr/bin/systemctl", "stop", UNIT_NAME])
         elif state != "not-found":
             raise InstallRefused("installation.system")
+
+    def refuse_requires_link(self) -> None:
+        """A leftover hard-requirement link is never ours to interpret."""
+        if exists(self.paths.requires):
+            raise InstallRefused("installation.drift")
+
+    def remove_wants_link(self, *, remove: bool = True) -> None:
+        link = self.paths.wants
+        if not exists(link):
+            return
+        fd = directory(link.parent)
+        try:
+            info = os.stat(link.name, dir_fd=fd, follow_symlinks=False)
+            target = os.readlink(link.name, dir_fd=fd)
+            if (
+                not stat.S_ISLNK(info.st_mode)
+                or info.st_uid != 0
+                or target not in {"../" + UNIT_NAME, str(self.paths.unit)}
+            ):
+                raise InstallRefused("installation.drift")
+            if remove:
+                os.unlink(link.name, dir_fd=fd)
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def uninstall(self) -> str:
+        """Remove a completed installation; an intent makes reruns finish it."""
+        with self.locked():
+            self.no_lease()
+            self.no_transaction()
+            cleanup_temp(self.paths.intent, 0o600)
+            if exists(self.paths.intent):
+                record = self.uninstall_intent()
+            elif not exists(self.paths.record):
+                self.uninstall_readback()
+                return "ABSENT"
+            else:
+                record = self.record()
+                self.verify_record(record)
+                self.refuse_requires_link()
+                if exists(self.paths.wants):
+                    self.remove_wants_link(remove=False)
+                if exists(self.paths.ready):
+                    read_file(self.paths.ready, 0o600)
+                if exists(self.paths.stage) or exists(self.paths.backup):
+                    raise InstallRefused("installation.drift")
+                write_file(
+                    self.paths.intent,
+                    canonical({"schema": UNINSTALL_SCHEMA, "record": record}),
+                    0o600,
+                )
+            self.system.checkpoint("uninstall_intent")
+            self.refuse_requires_link()
+            if exists(self.paths.unit):
+                cleanup_temp(self.paths.unit, 0o644)
+                if digest(read_file(self.paths.unit, 0o644)) != record["unit_sha256"]:
+                    raise InstallRefused("installation.drift")
+                self.stop_reconcile_unit()
+                self.system.checkpoint("uninstall_stopped")
+                self.remove_wants_link()
+                unlink(self.paths.unit)
+            else:
+                self.remove_wants_link()
+            self.system.checkpoint("uninstall_unit_removed")
+            self.system.run(["/usr/bin/systemctl", "daemon-reload"])
+            self.system.checkpoint("uninstall_reloaded")
+            runtime = self.paths.runtime / record["bundle_digest"]
+            if exists(runtime):
+                self.remove_partial_tree(
+                    runtime,
+                    {
+                        **record["manifest"]["runtime"],
+                        "bundle.json": record["bundle_digest"],
+                    },
+                    0o444,
+                    0o755,
+                )
+            self.remove_empty_runtime_parent()
+            self.system.checkpoint("uninstall_runtime_removed")
+            if exists(self.paths.config):
+                self.remove_partial_tree(
+                    self.paths.config, record["config_files"], 0o600, 0o700
+                )
+            self.system.checkpoint("uninstall_config_removed")
+            cleanup_temp(self.paths.ready, 0o600)
+            if exists(self.paths.ready):
+                read_file(self.paths.ready, 0o600)
+                unlink(self.paths.ready)
+            self.system.checkpoint("uninstall_ready_removed")
+            cleanup_temp(self.paths.record, 0o600)
+            if exists(self.paths.record):
+                if self.record() != record:
+                    raise InstallRefused("installation.drift")
+                unlink(self.paths.record)
+            self.system.checkpoint("uninstall_record_removed")
+            self.uninstall_readback(record)
+            unlink(self.paths.intent)
+            return "UNINSTALLED"
+
+    def uninstall_intent(self) -> dict[str, Any]:
+        value = strict_json(read_file(self.paths.intent, 0o600))
+        exact(value, {"schema", "record"})
+        if value["schema"] != UNINSTALL_SCHEMA:
+            raise InstallRefused()
+        self.validate_record_value(value["record"])
+        return value["record"]
+
+    def stop_reconcile_unit(self) -> None:
+        """Disable then stop the unit; positively observed absence is fine."""
+        state = self.system.run(
+            ["/usr/bin/systemctl", "show", "--property=LoadState", "--value", UNIT_NAME]
+        )
+        if state == "loaded":
+            self.system.run(["/usr/bin/systemctl", "disable", UNIT_NAME])
+            self.system.run(["/usr/bin/systemctl", "stop", UNIT_NAME])
+        elif state != "not-found":
+            raise InstallRefused("installation.system")
+
+    def uninstall_readback(self, record: dict[str, Any] | None = None) -> None:
+        paths = [
+            self.paths.unit,
+            self.paths.wants,
+            self.paths.requires,
+            self.paths.config,
+            self.paths.stage,
+            self.paths.backup,
+            self.paths.ready,
+            self.paths.record,
+            self.paths.transaction,
+        ]
+        if record is not None:
+            paths.append(self.paths.runtime / record["bundle_digest"])
+        if any(exists(path) for path in paths):
+            raise InstallRefused("installation.unowned")
+
+    def remove_empty_runtime_parent(self) -> None:
+        if not exists(self.paths.runtime):
+            return
+        fd = directory(self.paths.runtime, mode=0o755)
+        try:
+            empty = not os.listdir(fd)
+        finally:
+            os.close(fd)
+        if empty:
+            self.paths.runtime.rmdir()
+            parent = directory(self.paths.runtime.parent)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
 
     def remove_partial_stage(self, target: dict[str, Any]) -> None:
         self.remove_partial_tree(self.paths.stage, target["config_files"], 0o600, 0o700)
@@ -1102,6 +1264,8 @@ def main(argv: list[str]) -> int:
             result = installer.dispatch(argv[1], sys.stdin.buffer.read(MAX_FILE + 1))
         elif argv[1:] == ["boot-reconcile"]:
             result = installer.boot_reconcile()
+        elif argv[1:] == ["uninstall"]:
+            result = {"status": installer.uninstall()}
         elif argv[1:] == ["recover"]:
             result = {"status": installer.recover()}
         elif argv[1:] == ["verify"]:

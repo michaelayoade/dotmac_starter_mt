@@ -11,8 +11,8 @@ RemainAfterExit=yes
 User=root
 Group=root
 UMask=0077
-ExecStart=/usr/bin/python3 -I /opt/dotmac-lane3-handoff/@BUNDLE_DIGEST@/lane3_handoff_install.py boot-reconcile
+ExecStart=/usr/bin/python3 -I -B /opt/dotmac-lane3-handoff/@BUNDLE_DIGEST@/lane3_handoff_install.py boot-reconcile
 TimeoutStartSec=45
 
 [Install]
-RequiredBy=multi-user.target
+WantedBy=multi-user.target
