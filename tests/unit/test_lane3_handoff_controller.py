@@ -585,7 +585,7 @@ def test_identity_created_before_uid_journal_recovers_exact_intent(
         now_ns = staticmethod(lambda: 10**9)
         identity = staticmethod(lambda user: (UID, UID))
         identity_matches_intent = staticmethod(
-            lambda user, home, owner: owner == hc.TAG + ":" + LEASE
+            lambda user, home, owner: owner == hc.TAG + "-" + LEASE
         )
         unit_cgroup = staticmethod(lambda unit: "/system.slice/" + unit + ".service")
         stop_unit = staticmethod(lambda unit: None)
