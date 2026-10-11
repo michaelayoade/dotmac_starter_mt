@@ -1870,6 +1870,7 @@ class Controller:
         return [
             self.paths.python,
             "-I",
+            "-B",
             str(self.paths.bin / "lane3_handoff_controller.py"),
             op,
             lease,

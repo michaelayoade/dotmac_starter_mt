@@ -66,6 +66,10 @@ _LOGIN: Final = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 _LABEL: Final = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _ENV_NAME: Final = re.compile(r"[A-Za-z0-9_.-]{1,255}")
 _ABS: Final = re.compile(r"/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+")
+# Only the installed dispatcher; never the raw (readiness-ungated) controller.
+_DISPATCHER: Final = re.compile(
+    r"/opt/dotmac-lane3-handoff/[0-9a-f]{64}/lane3_handoff_install\.py"
+)
 
 
 class CoordinatorRefused(RuntimeError):
@@ -210,7 +214,7 @@ def parse_config(value: Any) -> Config:
         supplier_modules=dict(modules),
         admission=dict(admission),
         ssh_alias=_str(management["ssh_alias"], _ALIAS),
-        controller_path=_str(management["controller_path"], _ABS),
+        controller_path=_str(management["controller_path"], _DISPATCHER),
         resolver=resolver,
         policy_path=Path(_str(doc["policy_path"], _ABS)),
         bootstrap_manifest_path=Path(_str(doc["bootstrap_manifest_path"], _ABS)),
@@ -635,7 +639,7 @@ def validate_mgmt_response(op: str, value: Any) -> dict[str, Any]:
 def ssh_channel(alias: str, controller_path: str) -> Channel:
     """The existing authenticated management path, with a fixed command."""
     _str(alias, _ALIAS)
-    _str(controller_path, _ABS)
+    _str(controller_path, _DISPATCHER)
 
     def call(op: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         if op not in hc.MGMT_STDIN_OPS:
@@ -646,7 +650,7 @@ def ssh_channel(alias: str, controller_path: str) -> Channel:
             raise refused("mgmt.invalid") from None
         if request["op"] != op:
             raise refused("mgmt.invalid")
-        remote = f"sudo -n /usr/bin/python3 -I {controller_path} {op}"
+        remote = f"sudo -n /usr/bin/python3 -I -B {controller_path} {op}"
         argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
         argv += [alias, remote]
         try:
