@@ -76,7 +76,12 @@ def config() -> co.Config:
                 "commit": STARTER_SHA,
                 "sha256": ADMISSION_DIGEST,
             },
-            "management": {"ssh_alias": "synthetic-host", "controller_path": "/x/c.py"},
+            "management": {
+                "ssh_alias": "synthetic-host",
+                "controller_path": "/opt/dotmac-lane3-handoff/"
+                + "a" * 64
+                + "/lane3_handoff_install.py",
+            },
             "resolver": "127.0.0.53",
             "policy_path": "/x/policy.json",
             "bootstrap_manifest_path": "/x/bootstrap.json",

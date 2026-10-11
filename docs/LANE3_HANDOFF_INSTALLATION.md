@@ -37,7 +37,7 @@ WireGuard configuration, credentials, runner accounts or per-run approvals.
 ## Build and stage
 
 ```sh
-/usr/bin/python3 -I scripts/lane3_handoff_install.py build \
+/usr/bin/python3 -I -B scripts/lane3_handoff_install.py build \
   --source /reviewed/clean/checkout \
   --revision REVIEWED_FULL_COMMIT \
   --output /reviewed/new-bundle
@@ -73,7 +73,7 @@ Run the independently reviewed installer bytes from the staged bundle under
 root and isolated Python:
 
 ```sh
-/usr/bin/python3 -I /root/reviewed-bundle/runtime/lane3_handoff_install.py install \
+/usr/bin/python3 -I -B /root/reviewed-bundle/runtime/lane3_handoff_install.py install \
   --bundle /root/reviewed-bundle --bundle-digest REVIEWED_BUNDLE_SHA256 \
   --config-input /root/reviewed-config --config-digest REVIEWED_CONFIG_SHA256
 ```
@@ -96,7 +96,8 @@ Configure the coordinator's `management.controller_path` and the existing
 restricted SSH/sudo boundary to authorize ONLY the exact installed immutable
 dispatcher path with one of `prepare`, `timing`, `bootstrap`, `status`, `grant`,
 `refuse`, or `cleanup`. The coordinator's fixed remote command is
-`sudo -n /usr/bin/python3 -I -B <controller_path> <op>`; `-B` keeps the
+`sudo -n /usr/bin/python3 -I -B <controller_path> <op>` (the coordinator accepts only `/opt/dotmac-lane3-handoff/<bundle-digest>/lane3_handoff_install.py`
+as `controller_path`, never the raw controller); `-B` keeps the
 isolated interpreter from writing bytecode into the measured runtime, so any
 sudoers or `ForceCommand` text must match that exact form. It accepts a bounded protocol document on stdin. There
 is no caller-selected executable, config path, lease argument, shell fragment
@@ -143,7 +144,7 @@ it or invoke the raw controller to bypass it. An administrator uses the same
 reviewed installer under isolated Python:
 
 ```sh
-/usr/bin/python3 -I /root/reviewed-bundle/runtime/lane3_handoff_install.py recover
+/usr/bin/python3 -I -B /root/reviewed-bundle/runtime/lane3_handoff_install.py recover
 ```
 
 Before the durable `committed` point, recovery restores the exact prior
@@ -183,7 +184,10 @@ The intent makes the operation idempotent and SIGKILL-safe: while it exists,
 install, verify, boot reconciliation and management dispatch refuse with
 `installation.pending`, and rerunning `uninstall` finishes the remaining steps,
 re-measuring whatever is left. With nothing installed it reports `ABSENT`;
-success reports `UNINSTALLED`. It never touches nftables state, users, the
+success reports `UNINSTALLED`. Uninstall deletes the installed dispatcher, so
+rerun an interrupted uninstall from the reviewed bundle copy instead:
+`/usr/bin/python3 -I -B /root/reviewed-bundle/runtime/lane3_handoff_install.py uninstall`.
+Never delete `uninstall-intent.json` by hand. It never touches nftables state, users, the
 state directory and its lock, or anything the installer did not record.
 Records written by older bundles (with the previous `RequiredBy` unit) do not
 validate under this code and must be retired by the bundle that wrote them.

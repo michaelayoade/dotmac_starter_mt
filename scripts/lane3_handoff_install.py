@@ -707,6 +707,7 @@ class Installer:
                 raise InstallRefused("installation.unowned")
             if exists(self.paths.stage) or exists(self.paths.backup):
                 raise InstallRefused("installation.drift")
+            self.refuse_requires_link()
             if not exists(self.paths.runtime):
                 make_directory(self.paths.runtime, 0o755)
             runtime = self.paths.runtime / bundle_digest
@@ -1064,6 +1065,7 @@ class Installer:
                 cleanup_temp(self.paths.unit, 0o644)
                 if digest(read_file(self.paths.unit, 0o644)) != record["unit_sha256"]:
                     raise InstallRefused("installation.drift")
+                self.remove_wants_link(remove=False)
                 self.stop_reconcile_unit()
                 self.system.checkpoint("uninstall_stopped")
                 self.remove_wants_link()
