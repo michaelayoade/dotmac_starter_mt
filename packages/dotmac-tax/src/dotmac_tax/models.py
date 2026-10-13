@@ -177,6 +177,7 @@ class TaxRule(Base):
     tenant_id: Mapped[UUID] = mapped_column(
         Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
     )
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     tax_code_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
@@ -241,6 +242,75 @@ class TaxRuleBand(Base):
     rate: Mapped[Decimal] = mapped_column(RATE, nullable=False)
 
     rule: Mapped[TaxRule] = relationship(back_populates="bands")
+
+
+class TaxRuleSupersession(Base):
+    """Append-only edge; published rules and historical facts remain intact."""
+
+    __tablename__ = "tax_rule_supersessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_tax_rule_supersessions_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "predecessor_rule_id",
+            name="uq_tax_rule_supersessions_predecessor",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "replacement_rule_id",
+            name="uq_tax_rule_supersessions_replacement",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "source_ref",
+            "source_version",
+            name="uq_tax_rule_supersessions_source",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "predecessor_rule_id"],
+            [f"{SCHEMA}.tax_rules.tenant_id", f"{SCHEMA}.tax_rules.id"],
+            ondelete="RESTRICT",
+            name="fk_tax_rule_supersessions_predecessor",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "replacement_rule_id"],
+            [f"{SCHEMA}.tax_rules.tenant_id", f"{SCHEMA}.tax_rules.id"],
+            ondelete="RESTRICT",
+            name="fk_tax_rule_supersessions_replacement",
+        ),
+        CheckConstraint(
+            "replacement_version > predecessor_version AND predecessor_version > 0",
+            name="ck_tax_rule_supersessions_versions",
+        ),
+        Index(
+            "ix_tax_rule_supersessions_selection",
+            "tenant_id",
+            "effective_from",
+            "predecessor_rule_id",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+    predecessor_rule_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    predecessor_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    replacement_rule_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    replacement_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    actor_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    published_by_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class TaxSubjectClassification(Base):
@@ -915,6 +985,7 @@ TENANT_MODELS = (
     TaxCode,
     TaxRule,
     TaxRuleBand,
+    TaxRuleSupersession,
     TaxSubjectClassification,
     TaxDeterminationSet,
     TaxDetermination,
@@ -947,5 +1018,6 @@ __all__ = [
     "TaxReturnEvent",
     "TaxRule",
     "TaxRuleBand",
+    "TaxRuleSupersession",
     "TaxSubjectClassification",
 ]

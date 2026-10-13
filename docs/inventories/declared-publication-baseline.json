@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-accounting": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 remains published and tagged as dotmac-accounting-v0.1.0a1, with its released migration bytes unchanged. 0.1.0a2 adds ac_0002_posted_content to freeze OLD and NEW posted source ancestry and serialize source edits with posting; that additive migration requires a new distribution identity. Hosted acceptance, authorized publication and adopter qualification remain separate gates. Remove this row only with the oracle-backed record of an authorized exact 0.1.0a2 publication; candidate allocation authorizes no tag, adoption or production migration.",
+      "state": "declared-unpublished"
+    },
     "dotmac-ai-operations": {
       "declared": "0.1.0a2",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ai-operations-v0.1.0a1). 0.1.0a2 adds the stateless advisory-protocol contracts (AIAdvisoryInvocation/AIAdvisoryResult/AIActionProposal/AIActionDecision/AIExecutionObservation/AICapabilityExposureRef) and hardens capability-id/digest binding, so src/ no longer matches the bytes that the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication.",
@@ -151,6 +156,11 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
+    },
+    "dotmac-tax": {
+      "declared": "0.1.0a5",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adoption baseline. Candidate a5 adds explicit immutable rule supersession and bounded policy read/preview contracts for the user-directed composable rate and basis editor. Sub must consume a verified published successor before its authoring UI can adopt these commands; this source candidate changes no product pin or financial writer authority. Remove this row only in the authorized oracle-backed a5 release record; allocation is not publication.",
+      "state": "declared-unpublished"
     },
     "dotmac-usage": {
       "declared": "0.1.0a1",

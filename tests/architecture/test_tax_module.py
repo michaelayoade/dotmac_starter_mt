@@ -48,7 +48,7 @@ MIGRATIONS = tuple(sorted((SOURCE / "migrations/versions").glob("tx_*.py")))
 
 def test_manifest_allocates_one_tenant_only_tax_lineage() -> None:
     assert module.code == "tax"
-    assert module.version == "0.1.0a4"
+    assert module.version == "0.1.0a5"
     assert module.short_code == "tax"
     assert module.migration_prefix == "tx"
     assert module.migration_branch == "tax"
@@ -283,10 +283,52 @@ def test_tax_migration_forces_rls_and_protects_filing_evidence() -> None:
         "tx_0001_tax.py",
         "tx_0002_multi_tax.py",
         "tx_0003_result_fingerprint.py",
+        "tx_0004_rule_supersession.py",
     ]
     source = "\n".join(path.read_text(encoding="utf-8") for path in MIGRATIONS)
     compact = re.sub(r"\s+", " ", source)
     assert "protect_tax_evidence" in source
+    created_tables: set[str] = set()
+    for migration in MIGRATIONS:
+        tree = ast.parse(migration.read_text(encoding="utf-8"))
+        constants = {
+            target.id: node.value.value
+            for node in tree.body
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "op"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                continue
+            if node.func.attr == "create_table":
+                schema = next(
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg == "schema"
+                )
+                schema_name = (
+                    constants.get(schema.id)
+                    if isinstance(schema, ast.Name)
+                    else schema.value
+                )
+                assert schema_name == module.db_schema
+                created_tables.add(node.args[0].value)
+            elif node.func.attr == "execute" and isinstance(node.args[0].value, str):
+                created_tables.update(
+                    re.findall(
+                        rf"CREATE TABLE {re.escape(module.db_schema)}\.(\w+)\s*\(",
+                        node.args[0].value,
+                    )
+                )
+    assert created_tables == set(module.tables)
     for table in module.tables:
         assert (
             f"ALTER TABLE {module.db_schema}.{table} ENABLE ROW LEVEL SECURITY"
@@ -299,7 +341,6 @@ def test_tax_migration_forces_rls_and_protects_filing_evidence() -> None:
         assert (
             f"CREATE POLICY {table}_tenant_isolation " f"ON {module.db_schema}.{table}"
         ) in compact
-        assert f'"{table}"' in source
     for table in (
         "tax_rules",
         "tax_rule_bands",
@@ -373,12 +414,14 @@ def test_every_tax_determination_reader_crosses_the_sealed_projector() -> None:
         }
 
     assert users("TaxDetermination") == {
+        "_build_tax_policy_result",
         "_determine_tax_set_row",
         "_verified_determination_contracts_for_period",
         "determine_tax",
     }
-    assert users("TaxDeterminationLine") == {"_determine_tax_set_row"}
+    assert users("TaxDeterminationLine") == {"_build_tax_policy_result"}
     assert users("TaxDeterminationSet") == {
+        "_build_tax_policy_result",
         "_determination_set_contract",
         "_determine_tax_set_row",
         "_result_content_fingerprint",
@@ -401,3 +444,22 @@ def test_every_tax_determination_reader_crosses_the_sealed_projector() -> None:
         if isinstance(child, ast.Name)
     }
     assert "_determination_set_contract" in verified_reader_names
+
+    preview_names = {
+        child.id
+        for child in ast.walk(functions["preview_tax_policy"])
+        if isinstance(child, ast.Name)
+    }
+    assert {"_build_tax_policy_result", "TaxPolicyPreviewV1"} <= preview_names
+    assert {
+        "TaxDeterminationSetV1",
+        "_determination_set_contract",
+        "_sealed_result_fingerprint",
+        "_result_content_fingerprint",
+    }.isdisjoint(preview_names)
+    for name in ("preview_tax_policy", "_build_tax_policy_result"):
+        assert not {
+            child.attr
+            for child in ast.walk(functions[name])
+            if isinstance(child, ast.Attribute)
+        } & {"add", "flush", "commit", "rollback"}

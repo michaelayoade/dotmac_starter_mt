@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Tenant tax policy and classifications, effective-dated multi-tax determinations, statutory reporting snapshots, filing obligations, and tax-return lifecycle evidence"
-contract = "Configure authorities, jurisdictions, tax codes, effective rules, ordered/compound calculation bases and progressive bands; publish evidenced tax-specific party/supply/place classifications; expose policy through immutable ORM-free V1 reads and exact-replay natural-key ensure commands; determine an ordered, result-content-sealed component set from typed source facts and return it through an ORM-free exact-Money V1 contract while preserving standard/zero/exempt/out-of-scope treatment identity; aggregate configured report boxes into versioned snapshots; schedule explicit filing obligations; and govern prepare/review/file/accept/reject/amend transitions. NOT a country-specific rate/calendar/code enum, taxpayer identity validation transport, invoice/order/payroll ownership, government portal client, GL account, journal entry, fiscal period, payment, or remittance transport."
+contract = "Configure authorities, jurisdictions, tax codes, effective rules, ordered/compound calculation bases and progressive bands; publish evidenced tax-specific party/supply/place classifications; expose policy through immutable ORM-free V1 reads and exact-replay natural-key ensure commands; append explicit evidenced effective-dated supersession edges through a flush-only owner command; seal rule and progressive-band membership in the creating transaction with deferred publication enforcement; preview current policy through the shared selector/calculation builder using a distinct advisory contract; determine an ordered, result-content-sealed component set from typed source facts and return it through an ORM-free exact-Money V1 contract while preserving standard/zero/exempt/out-of-scope treatment identity; aggregate configured report boxes into versioned snapshots; schedule explicit filing obligations; and govern prepare/review/file/accept/reject/amend transitions. NOT a country-specific rate/calendar/code enum, taxpayer identity validation transport, invoice/order/payroll ownership, government portal client, GL account, journal entry, fiscal period, payment, or remittance transport."
 source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_starter_mt"]
 source_revisions = [
   "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
@@ -32,6 +32,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_tax_module.py",
   "dotmac_starter_mt:tests/test_financial_modules_isolation.py",
   "dotmac_starter_mt:tests/test_tax_released_migration_upgrade.py",
+  "dotmac_starter_mt:tests/test_tax_policy_supersession.py",
 ]
 # CORRECTED 2026-08-29. Was `contract_consumers = ["dotmac_erp"]` with
 # `status = "adopted"`. A pin is installation, not adoption: ERP pins

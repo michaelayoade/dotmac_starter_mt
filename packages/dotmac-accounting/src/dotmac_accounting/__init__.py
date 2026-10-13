@@ -60,7 +60,7 @@ from dotmac_accounting.service import (
     soft_close_period,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "Account",
