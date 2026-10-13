@@ -61,9 +61,15 @@ _INTERNAL_RELATIONS = (
     ("document_lines", ("document_id",), "documents", ("id",)),
     (
         "document_lines",
-        ("document_id", "obligation_id"),
+        ("document_id", "billing_account_id"),
         "documents",
-        ("id", "obligation_id"),
+        ("id", "billing_account_id"),
+    ),
+    (
+        "document_lines",
+        ("obligation_id", "billing_account_id"),
+        "rated_obligations",
+        ("id", "billing_account_id"),
     ),
     ("document_events", ("document_id",), "documents", ("id",)),
     (

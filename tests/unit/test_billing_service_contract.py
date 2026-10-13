@@ -18,6 +18,7 @@ def test_the_coherent_financial_path_exists() -> None:
         "create_billing_account",
         "accept_rated_obligation",
         "create_draft_document",
+        "create_multi_line_draft_document",
         "issue_document",
         "void_document",
         "issue_credit_note",

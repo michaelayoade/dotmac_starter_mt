@@ -4,6 +4,12 @@ All notable changes follow Semantic Versioning.
 
 ## 0.1.0a2 — UNRELEASED
 
+- Add typed homogeneous multiline drafts with structural account/obligation
+  affinity, exact explicit prices and immutable authoring provenance in an
+  additive migration. Keep the released root migration unchanged.
+- Preserve all line tax evidence and common FX, revalidate at issuance and
+  prevent adding lines to an issued invoice. Exclude unrelated document-owned
+  tax/FX rows from credit-note facts.
 - Add a typed, atomic cash-backed available-credit draw across confirmed
   settlement sources, preserving allocation provenance and existing financial
   events. Non-cash grants and opening-balance funding remain separate gaps.

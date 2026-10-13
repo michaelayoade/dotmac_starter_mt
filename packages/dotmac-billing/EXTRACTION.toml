@@ -102,6 +102,7 @@ inventory_evidence = [
   "docs/inventories/billing-extraction-dossier.md",
   "docs/inventories/billing-parity-tests.md",
   "docs/inventories/billing-source-variance.md",
+  "docs/inventories/billing-multiline-extraction.md",
   "docs/inventories/billing-sub-cutover-readiness.md",
   "docs/adr/0020-billing-owns-operational-receivables.md",
   "docs/adr/0023-dual-plane-modules-declare-both-persistence-planes.md",

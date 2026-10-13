@@ -102,6 +102,23 @@ legacy-payment metadata branches, noncash credit grants, issuance funding
 reservations, or product-specific prepaid finalization. No new table, mutable
 balance, external contract or sibling-product import is introduced.
 
+The unpublished successor also adds `DraftDocumentLine`,
+`CreateMultiLineDraftDocument` and `create_multi_line_draft_document`. This
+command requires at least two accepted obligations with one account, Money
+identity, subject, service, collection timing and service period. Explicit unit
+prices and quantities must reproduce the rated amounts exactly. Tax snapshots
+retain their obligation provenance and must reconcile exactly; FX must be
+uniform. Issuance rechecks the aggregate and immutable authoring mode preserves
+the distinction from the shipped single-line command.
+
+The additive `bi_0002_multiline` migration introduces account-affinity line FKs,
+immutable document authoring provenance and issued-invoice insertion refusal.
+It leaves `bi_0001_billing` and historical financial facts unchanged. Downgrade
+after explicit multiline authoring is refused. Heterogeneous invoices and
+line-specific tax/FX wire attribution require a later contract design. See
+`docs/inventories/billing-multiline-extraction.md` for source dispositions,
+limits and required hosted proofs; no Sub adoption is claimed.
+
 Position rebuilds read persisted scalar effects, so freshly flushed ORM decimal
 representations cannot change the attestation hash. The existing hash algorithm
 and strict comparison with immutable position facts are preserved. Historical
