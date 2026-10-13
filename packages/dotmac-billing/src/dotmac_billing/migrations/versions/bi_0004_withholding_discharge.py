@@ -376,7 +376,9 @@ def _apply(*, upgrade: bool) -> None:
             if (
                 connection.execute(
                     sa.text(
-                        f"SELECT 1 FROM mod_billing.{prefix}withholding_discharges LIMIT 1"
+                        "SELECT 1 FROM mod_billing.platform_withholding_discharges LIMIT 1"
+                        if prefix
+                        else "SELECT 1 FROM mod_billing.withholding_discharges LIMIT 1"
                     )
                 ).first()
                 is not None
