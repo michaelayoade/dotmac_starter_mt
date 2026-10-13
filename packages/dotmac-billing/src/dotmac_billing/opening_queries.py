@@ -434,7 +434,7 @@ def get_opening_cash_lot_position(
     )
     groups = _table(scope, "posting_groups")
     with db.no_autoflush:
-        watermark = db.execute(
+        latest_posting_group_id = db.execute(
             _scoped(
                 select(groups.c.id)
                 .where(groups.c.billing_account_id == lot.billing_account_id)
@@ -466,7 +466,7 @@ def get_opening_cash_lot_position(
             lot.initial_amount.currency.code,
             lot.initial_amount.currency.minor_units,
         ),
-        watermark,
+        latest_posting_group_id,
         unwound,
     )
 
@@ -491,7 +491,7 @@ def get_opening_cash_target(
             .mappings()
             .all()
         )
-        watermark = db.execute(
+        latest_posting_group_id = db.execute(
             _scoped(
                 select(groups.c.id)
                 .where(groups.c.billing_account_id == billing_account_id)
@@ -521,7 +521,7 @@ def get_opening_cash_target(
         account["currency"],
         account["minor_units"],
         state.state_fingerprint,
-        "none" if watermark is None else str(watermark),
+        "none" if latest_posting_group_id is None else str(latest_posting_group_id),
     )
 
 
@@ -646,9 +646,9 @@ def get_accounting_fact_v4(
         and set(by_id)
         == {item.allocation_effect_id for item in fact.settlement_allocations}
     )
-    for item in fact.settlement_allocations:
-        original = by_id[item.allocation_effect_id]
-        allocation = item.allocation
+    for allocation_fact in fact.settlement_allocations:
+        original = by_id[allocation_fact.allocation_effect_id]
+        allocation = allocation_fact.allocation
         _require(
             (
                 allocation.settlement_id,

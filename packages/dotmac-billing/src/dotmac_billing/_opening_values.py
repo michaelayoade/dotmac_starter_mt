@@ -52,13 +52,15 @@ def minor_units_of(value: Money) -> int:
     shift = exponent + units
     if shift < 0 and -shift >= len(digits):
         raise OpeningEvidenceError("opening cash must not require rounding")
+    scale = 1
+    for _ in range(abs(shift)):
+        scale *= 10
     if shift < 0:
-        divisor = 10**-shift
-        if coefficient % divisor:
+        if coefficient % scale:
             raise OpeningEvidenceError("opening cash must not require rounding")
-        coefficient //= divisor
+        coefficient //= scale
     else:
-        coefficient *= 10**shift
+        coefficient *= scale
     return -coefficient if sign else coefficient
 
 

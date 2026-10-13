@@ -857,12 +857,18 @@ def _historical_invoice_room(platform: bool) -> None:
 def _invoice_guards(platform: bool, *, restore: bool) -> None:
     prefix = "platform_" if platform else ""
     scope = "" if platform else " AND x.tenant_id = NEW.tenant_id"
+    # Both SQL fragments are closed plane literals, with no caller input.
     opening = (
         ""
         if restore
-        else f"""
-        used := used - (SELECT coalesce(sum(x.amount_delta), 0) FROM mod_billing.{prefix}opening_cash_effects x
-          WHERE x.document_id = invoice_id{scope});
+        else """
+        used := used - (SELECT coalesce(sum(x.amount_delta), 0) FROM mod_billing.platform_opening_cash_effects x
+          WHERE x.document_id = invoice_id);
+    """
+        if platform
+        else """
+        used := used - (SELECT coalesce(sum(x.amount_delta), 0) FROM mod_billing.opening_cash_effects x
+          WHERE x.document_id = invoice_id AND x.tenant_id = NEW.tenant_id);
     """
     )
     if not restore:
