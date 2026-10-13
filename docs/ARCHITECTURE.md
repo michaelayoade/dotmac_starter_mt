@@ -545,6 +545,31 @@ entitlement grants. Billing may update subscription state, and metering may
 feed quota and/or billing, but request handlers consult local entitlement and
 quota decisions—not payment providers or raw license payloads.
 
+### Lane 3 bounded proof campaign mechanics
+
+The product-owned `scripts/lane3_campaign_management.py` owns the one-shot
+retained-management timer handoff; `lane3_campaign_client.py` owns non-root,
+short-lived proof material and its systemd client; `lane3_campaign_transport.py`
+owns the exact-UID, exact-address SSH-only transport window. The identity helper
+owns only accounts it can prove it created. These operational helpers do not
+change the installed handoff controller or grant deployment authorization.
+The issuer adapter owns its one-shot public certificate exchange and bounded
+supervisor; the bridge owns the ordered management stdio protocol; the runner
+owns qualification before matrix invocation; the remote adapter owns the public
+request/response exchange; and the composition adapter owns stage and cleanup
+ordering. Their canonical implementations are `lane3_campaign_issuer.py`,
+`lane3_campaign_bridge.py`, `lane3_campaign_runner.py`,
+`lane3_campaign_remote.py` and `lane3_campaign_composition.py`. The operator
+adapter, `lane3_campaign_operator.py`, owns the bounded Mac control sequence
+and requires actual archived closure plus a fresh empty runner-group read before
+requesting management removal. Their JSON envelopes and digests describe these
+product-owned protocols, not Foundation
+leases or release-store records. Host-specific inputs, custody material and
+approval records remain private protected deployment inputs. Hosted CI tests
+the canonical source files whose hashes bind deployment. See [the campaign
+evidence boundary](LANE3_PROOF_CAMPAIGN.md). Shipping these helpers is not a live-proof,
+N3 acceptance, Gate-0 acceptance or Foundation allocation.
+
 ### Build and deployment execution: `dotmac-deployment-foundation` (as built, 2026-08-28)
 
 ADR-0003 § "Infrastructure provisioning and deployment execution" declared
