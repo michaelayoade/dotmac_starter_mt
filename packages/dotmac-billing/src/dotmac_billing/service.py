@@ -2758,6 +2758,66 @@ def _settlement_has_active_backing(
         expected = -expected
 
 
+def _require_live_invoice_issuance(
+    db: Session, *, scope: Scope, document: _DocumentRow
+) -> None:
+    """Use the persisted exposure FK as the invoice-to-issuance relation.
+
+    Canonical source provenance and exact issued AR effects qualify that link;
+    aggregate account AR cannot prove that this invoice remains collectible.
+    The caller holds the account lock before its document lock.
+    """
+    plane = _models(scope)
+    statement = select(plane.group).where(
+        plane.group.group_kind == "invoice_issued",
+        plane.group.billing_account_id == document.billing_account_id,
+        plane.group.currency == document.currency,
+        plane.group.minor_units == document.minor_units,
+        plane.group.source_ref == f"document:{document.id}:issue",
+        plane.group.reverses_group_id.is_(None),
+    )
+    candidates = tuple(
+        db.execute(_where_scope(statement, scope, plane.group)).scalars()
+    )
+    if len(candidates) != 1:
+        raise BillingRuleViolation(
+            "invoice_issuance_not_live",
+            "invoice requires one unreversed, structurally bound issuance posting",
+        )
+    valid = []
+    for group in candidates:
+        exposure = select(plane.exposure_fact.id).where(
+            plane.exposure_fact.document_id == document.id,
+            plane.exposure_fact.billing_account_id == document.billing_account_id,
+            plane.exposure_fact.posting_group_watermark == group.id,
+            plane.exposure_fact.source_version == group.source_version,
+            plane.exposure_fact.currency == document.currency,
+            plane.exposure_fact.minor_units == document.minor_units,
+        )
+        reversal = select(plane.group.id).where(
+            plane.group.reverses_group_id == group.id
+        )
+        effects = select(plane.effect).where(plane.effect.posting_group_id == group.id)
+        rows = tuple(db.execute(_where_scope(effects, scope, plane.effect)).scalars())
+        if (
+            db.execute(_where_scope(exposure, scope, plane.exposure_fact)).first()
+            is not None
+            and db.execute(_where_scope(reversal, scope, plane.group)).first() is None
+            and len(rows) == 1
+            and rows[0].lane == "receivable"
+            and rows[0].amount_delta == document.grand_total
+            and rows[0].billing_account_id == document.billing_account_id
+            and rows[0].currency == document.currency
+            and rows[0].minor_units == document.minor_units
+        ):
+            valid.append(group.id)
+    if len(valid) != 1:
+        raise BillingRuleViolation(
+            "invoice_issuance_not_live",
+            "invoice requires one unreversed, structurally bound issuance posting",
+        )
+
+
 def _require_credit_target(
     db: Session, *, scope: Scope, document: _DocumentRow, account_id: UUID
 ) -> None:
@@ -2902,6 +2962,7 @@ def accept_withholding_discharge(
         _require_credit_target(
             session, scope=scope, document=invoice, account_id=account.id
         )
+        _require_live_invoice_issuance(session, scope=scope, document=invoice)
         if command.accepted_amount.amount > _document_outstanding(
             session, scope=scope, document=invoice
         ):
@@ -3593,6 +3654,10 @@ def _reverse_group(
     source_ref: str,
     exposure_document_ids: Iterable[UUID] = (),
 ) -> _PostingGroupRow:
+    if original.group_kind in ("withholding_accepted", "withholding_reversed"):
+        raise BillingRuleViolation(
+            "withholding_owner_required", "use the withholding correction command"
+        )
     plane = _models(scope)
     already_statement = select(plane.group.id).where(
         plane.group.reverses_group_id == original.id
@@ -3660,10 +3725,6 @@ def reverse_posting_group(
         row_id=original_evidence.billing_account_id,
         lock=True,
     )
-    if original_evidence.group_kind in ("withholding_accepted", "withholding_reversed"):
-        raise BillingRuleViolation(
-            "withholding_owner_required", "use the withholding correction command"
-        )
     offered = fingerprint_of(asdict(command))
 
     def operation(session: Session) -> dict[str, object]:
@@ -3673,6 +3734,16 @@ def reverse_posting_group(
             model=plane.group,
             row_id=command.posting_group_id,
         )
+        if original.group_kind in ("withholding_accepted", "withholding_reversed"):
+            raise BillingRuleViolation(
+                "withholding_owner_required", "use the withholding correction command"
+            )
+        if original.group_kind == "invoice_issued":
+            raise BillingRuleViolation(
+                "invoice_correction_owner_required",
+                "use void_document or the invoice correction owner "
+                "for invoice issuance",
+            )
         group = _reverse_group(
             session,
             scope=scope,

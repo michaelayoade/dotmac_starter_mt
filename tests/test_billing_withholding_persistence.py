@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import uuid
 from copy import deepcopy
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -54,7 +55,7 @@ def _tables(plane):
 
 
 def _invoice(connection, plane, tenant=None, *, legacy=False):
-    """Insert a real draft/line then issue it, including on published bi_0001."""
+    """Raw historical issuance for predecessor and bad-account fixtures only."""
     prefix = "" if plane == "tenant" else "platform_"
     scope_columns = "tenant_id, " if tenant else ""
     scope_values = ":tenant, " if tenant else ""
@@ -227,9 +228,43 @@ def _insert(connection, plane, row, posting, *, effect=True):
 def _seed(scratch, plane):
     tenant = billing._create_tenants(scratch[0], 1)[0] if plane == "tenant" else None
     engine = create_engine(scratch[0])
+    scope = TenantScope(tenant) if tenant else PlatformScope()
+    url = scratch[1] if tenant else scratch[2]
+    with billing._session(url, scope) as session:
+        account = billing.create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=f"sql-wht:{uuid.uuid4()}",
+            currency="NGN",
+            minor_units=2,
+        )
+        command = replace(
+            billing._obligation_command(
+                account.id, scope=scope, source_fact_id=f"sql-wht:{uuid.uuid4()}"
+            ),
+            tax_amount=billing._money("0"),
+            total_amount=billing._money("100"),
+            tax_snapshots=(),
+        )
+        obligation = billing.accept_rated_obligation(
+            session,
+            scope=scope,
+            command=command,
+            accepted_source_kinds=frozenset({"recurring_charge_occurrence"}),
+        )
+        draft = billing.create_draft_document(
+            session, scope=scope, command=billing._draft_command(obligation.id)
+        )
+        document = billing.issue_document(
+            session,
+            scope=scope,
+            command=billing._issue_command(draft.id),
+            numbering=billing.NUMBERING,
+        )
+        account_id, document_id = account.id, document.id
+        session.commit()
     with engine.begin() as connection:
-        account, document = _invoice(connection, plane, tenant)
-        row, posting = _row(connection, plane, account, document, tenant)
+        row, posting = _row(connection, plane, account_id, document_id, tenant)
         _insert(connection, plane, row, posting)
     return engine, row
 
@@ -718,3 +753,275 @@ def test_populated_downgrade_fails_globally_before_ddl_and_restores_caller_timeo
                 == row["id"]
             )
         engine.dispose()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize("withholding_first", [False, True])
+def test_sql_invoice_reversal_and_withholding_cannot_borrow_other_invoice_ar(
+    scratch, plane, withholding_first
+):
+    from dotmac_billing.commands import ReversePostingGroupCommand
+    from dotmac_billing.service import (
+        accept_withholding_discharge,
+        reverse_posting_group,
+    )
+
+    tenant = billing._create_tenants(scratch[0], 1)[0] if plane == "tenant" else None
+    scope = TenantScope(tenant) if tenant else PlatformScope()
+    url = scratch[1] if tenant else scratch[2]
+    with billing._session(url, scope) as session:
+        account, _, invoice = billing._seed_invoice(
+            session, scope, suffix=f"sql-two-ar-{plane}-{withholding_first}"
+        )
+        draft = billing._additional_credit_invoice(
+            session, scope, account.id, f"sql-second-ar-{plane}-{withholding_first}"
+        )
+        billing.issue_document(
+            session,
+            scope=scope,
+            command=billing._issue_command(draft.id),
+            numbering=billing.NUMBERING,
+        )
+        session.commit()
+        account_id, invoice_id = account.id, invoice.id
+        command_wht = billing._withholding_command(
+            account_id,
+            invoice_id,
+            scope=scope,
+            suffix=f"sql-two-{plane}-{withholding_first}",
+        )
+        _, group_model, effect_model = _tables(plane)
+        original = session.execute(
+            select(group_model).where(
+                group_model.source_ref == f"document:{invoice_id}:issue"
+            )
+        ).scalar_one()
+        original_id, original_version = original.id, original.source_version
+        if withholding_first:
+            row = accept_withholding_discharge(
+                session, scope=scope, command=command_wht
+            )
+            row_id = row.id
+            session.commit()
+    engine = create_engine(scratch[0])
+    with engine.begin() as connection:
+        values = {
+            "id": uuid.uuid4(),
+            "billing_account_id": account_id,
+            "group_kind": "reversal",
+            "currency": "NGN",
+            "minor_units": 2,
+            "source_ref": f"raw-issue-reverse:{plane}:{withholding_first}",
+            "source_version": original_version + 100,
+            "reverses_group_id": original_id,
+            "occurred_at": billing.NOW,
+        }
+        if tenant:
+            values["tenant_id"] = tenant
+        if withholding_first:
+            with pytest.raises(DBAPIError), connection.begin_nested():
+                connection.execute(group_model.__table__.insert().values(**values))
+        else:
+            connection.execute(group_model.__table__.insert().values(**values))
+            effect = {
+                "id": uuid.uuid4(),
+                "posting_group_id": values["id"],
+                "billing_account_id": account_id,
+                "lane": "receivable",
+                "amount_delta": Decimal("-120"),
+                "currency": "NGN",
+                "minor_units": 2,
+            }
+            if tenant:
+                effect["tenant_id"] = tenant
+            connection.execute(effect_model.__table__.insert().values(**effect))
+    with billing._session(url, scope) as session:
+        if withholding_first:
+            assert (
+                accept_withholding_discharge(
+                    session, scope=scope, command=command_wht
+                ).id
+                == row_id
+            )
+            # New attempts remain owner-gated.
+            with pytest.raises(billing.BillingRuleViolation, match="void_document"):
+                reverse_posting_group(
+                    session,
+                    scope=scope,
+                    command=ReversePostingGroupCommand(
+                        original_id, billing.NOW, "new-raw-retry"
+                    ),
+                )
+        else:
+            with pytest.raises(
+                billing.BillingRuleViolation, match="structurally bound"
+            ):
+                accept_withholding_discharge(session, scope=scope, command=command_wht)
+            raw, posting = _row(
+                session.connection(), plane, account_id, invoice_id, tenant
+            )
+            with pytest.raises(DBAPIError), session.begin_nested():
+                _insert(session.connection(), plane, raw, posting)
+        # The other invoice leaves positive account AR in either order.
+        assert billing.rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+            verify_latest=False,
+        ).collectible_receivable == (
+            Decimal("235") if withholding_first else Decimal("120")
+        )
+    engine.dispose()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_raw_invoice_reversal_races_with_withholding_under_account_lock(scratch, plane):
+    import threading
+
+    from dotmac_billing.service import accept_withholding_discharge
+
+    tenant = billing._create_tenants(scratch[0], 1)[0] if plane == "tenant" else None
+    scope = TenantScope(tenant) if tenant else PlatformScope()
+    url = scratch[1] if tenant else scratch[2]
+    with billing._session(url, scope) as session:
+        account, _, invoice = billing._seed_invoice(
+            session, scope, suffix=f"raw-issue-race-{plane}"
+        )
+        draft = billing._additional_credit_invoice(
+            session, scope, account.id, f"raw-issue-race-second-{plane}"
+        )
+        billing.issue_document(
+            session,
+            scope=scope,
+            command=billing._issue_command(draft.id),
+            numbering=billing.NUMBERING,
+        )
+        _, group, effect = _tables(plane)
+        issuance = session.execute(
+            select(group).where(group.source_ref == f"document:{invoice.id}:issue")
+        ).scalar_one()
+        account_id, invoice_id, issuance_id = account.id, invoice.id, issuance.id
+        wht = billing._withholding_command(
+            account_id, invoice_id, scope=scope, suffix=f"raw-reverse-race-{plane}"
+        )
+        session.commit()
+    barrier = threading.Barrier(2)
+    accepted, refused, errors = [], [], []
+    engine = create_engine(scratch[0])
+
+    def runner(withholding):
+        try:
+            barrier.wait(timeout=20)
+            if withholding:
+                with billing._session(url, scope) as session:
+                    try:
+                        accept_withholding_discharge(session, scope=scope, command=wht)
+                        session.commit()
+                        accepted.append("withholding")
+                    except billing.BillingRuleViolation:
+                        refused.append("withholding")
+            else:
+                try:
+                    with engine.begin() as connection:
+                        group_id = uuid.uuid4()
+                        values = {
+                            "id": group_id,
+                            "billing_account_id": account_id,
+                            "group_kind": "reversal",
+                            "currency": "NGN",
+                            "minor_units": 2,
+                            "source_ref": f"raw-race-reversal:{plane}",
+                            "source_version": 100,
+                            "reverses_group_id": issuance_id,
+                            "occurred_at": billing.NOW,
+                        }
+                        posting = {
+                            "id": uuid.uuid4(),
+                            "posting_group_id": group_id,
+                            "billing_account_id": account_id,
+                            "lane": "receivable",
+                            "amount_delta": Decimal("-120"),
+                            "currency": "NGN",
+                            "minor_units": 2,
+                        }
+                        if tenant:
+                            values["tenant_id"] = posting["tenant_id"] = tenant
+                        connection.execute(group.__table__.insert().values(**values))
+                        connection.execute(effect.__table__.insert().values(**posting))
+                    accepted.append("reversal")
+                except DBAPIError as exc:
+                    if exc.orig.sqlstate != "23514":
+                        raise
+                    refused.append("reversal")
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=runner, args=(kind,)) for kind in (False, True)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "raw reversal / withholding admission deadlocked"
+    assert errors == []
+    assert len(accepted) == len(refused) == 1
+    with billing._session(url, scope) as session:
+        position = billing.rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+            verify_latest=False,
+        )
+        assert position.collectible_receivable == (
+            Decimal("235") if accepted == ["withholding"] else Decimal("120")
+        )
+    engine.dispose()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize("kind", ["reversal", "allocation", "withholding_reversed"])
+def test_raw_sql_cannot_reverse_withholding_without_its_exact_inverse_row(
+    scratch, plane, kind
+):
+    engine, row = _seed(scratch, plane)
+    _, group, _ = _tables(plane)
+    with engine.begin() as connection:
+        values = {
+            "id": uuid.uuid4(),
+            "billing_account_id": row["billing_account_id"],
+            "group_kind": kind,
+            "currency": "NGN",
+            "minor_units": 2,
+            "source_ref": f"raw-wht-bypass:{uuid.uuid4()}",
+            "source_version": 100,
+            "reverses_group_id": row["posting_group_id"],
+            "occurred_at": billing.NOW,
+        }
+        if "tenant_id" in row:
+            values["tenant_id"] = row["tenant_id"]
+        with pytest.raises(DBAPIError), connection.begin_nested():
+            connection.execute(group.__table__.insert().values(**values))
+            connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        # The permitted group kind works only with its actual exact inverse row.
+        inverse, posting = _row(
+            connection,
+            plane,
+            row["billing_account_id"],
+            row["document_id"],
+            row.get("tenant_id"),
+            original=row,
+        )
+        _insert(connection, plane, inverse, posting)
+        connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        values.update(
+            id=uuid.uuid4(),
+            source_ref=f"raw-inverse-bypass:{uuid.uuid4()}",
+            source_version=101,
+            reverses_group_id=inverse["posting_group_id"],
+        )
+        with pytest.raises(DBAPIError), connection.begin_nested():
+            connection.execute(group.__table__.insert().values(**values))
+    engine.dispose()

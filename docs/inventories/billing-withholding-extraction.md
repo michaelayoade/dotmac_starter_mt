@@ -75,3 +75,25 @@ Sub cutover, heterogeneous invoice grouping or production gate. The user's settl
 direction is immutable money facts with appended corrections and composable,
 versioned rate/basis UI owned by Tax; numeric/statutory category choices are not
 reopened by this successor.
+
+
+## Invoice-specific issuance protection
+
+A positive account balance does not prove that a particular invoice is still
+collectible. WHT admission now requires exactly one canonical `invoice_issued`
+group, linked through the scoped invoice exposure foreign keys and qualified by
+the owner-defined issuance source reference, account/currency/precision and
+exact issued receivable effect. An issuance with any reversal is refused.
+New generic invoice-issuance reversal requests must use the document void or
+invoice correction owner. Exact historical retries resolve before these mutable
+admission checks. The additive bi4 SQL guards serialize raw reversal and WHT
+admission on the account and enforce both orders, including when a second
+invoice leaves aggregate AR positive. These successor canaries await hosted CI;
+no published migration, V1 payload or historical hash changed.
+
+Generic reversal is also refused by the private posting reversal helper for both
+WHT kinds. SQL permits a reversal of accepted WHT only through the dedicated
+`withholding_reversed` kind and its actual, exact linked inverse discharge row;
+corrections themselves cannot be reversed. Modern persistence fixtures issue a
+genuine 100-total invoice through Billing before inserting raw WHT evidence,
+while predecessor and negative-account fixtures retain explicit raw setup.
