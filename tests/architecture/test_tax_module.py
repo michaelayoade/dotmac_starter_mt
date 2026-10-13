@@ -48,7 +48,7 @@ MIGRATIONS = tuple(sorted((SOURCE / "migrations/versions").glob("tx_*.py")))
 
 def test_manifest_allocates_one_tenant_only_tax_lineage() -> None:
     assert module.code == "tax"
-    assert module.version == "0.1.0a4"
+    assert module.version == "0.1.0a5"
     assert module.short_code == "tax"
     assert module.migration_prefix == "tx"
     assert module.migration_branch == "tax"
@@ -283,6 +283,7 @@ def test_tax_migration_forces_rls_and_protects_filing_evidence() -> None:
         "tx_0001_tax.py",
         "tx_0002_multi_tax.py",
         "tx_0003_result_fingerprint.py",
+        "tx_0004_rule_supersession.py",
     ]
     source = "\n".join(path.read_text(encoding="utf-8") for path in MIGRATIONS)
     compact = re.sub(r"\s+", " ", source)
