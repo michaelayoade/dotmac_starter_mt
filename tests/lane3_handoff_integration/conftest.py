@@ -440,7 +440,9 @@ class Env:
             j = self.journal()
             if j is None:
                 return self.closed(lease)
-            if j["state"] in states:
+            # CLOSED is saved before archival unlinks the live journal. Wait
+            # for absence above so closure callers observe the archived receipt.
+            if j["state"] in states and j["state"] != "CLOSED":
                 return j
             time.sleep(0.05)
         raise AssertionError("state not reached")
