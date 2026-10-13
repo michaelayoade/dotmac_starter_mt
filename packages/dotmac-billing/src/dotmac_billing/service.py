@@ -3398,7 +3398,7 @@ def grant_non_cash_credit(
             kind="grant",
             amount=command.amount,
         )
-        non_cash_effects = (granted,)
+        non_cash_effects: tuple[NonCashCreditEffectV1, ...] = (granted,)
         ar_effects: tuple[tuple[EffectLane, Decimal], ...] = ()
         documents: tuple[UUID, ...] = ()
         if command.restricted_document_id is not None:

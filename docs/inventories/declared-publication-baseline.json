@@ -158,8 +158,8 @@
       "state": "never-published"
     },
     "dotmac-tax": {
-      "declared": "0.1.0a5",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adoption baseline. Candidate a5 adds explicit immutable rule supersession and bounded policy read/preview contracts for the user-directed composable rate and basis editor. Sub must consume a verified published successor before its authoring UI can adopt these commands; this source candidate changes no product pin or financial writer authority. Remove this row only in the authorized oracle-backed a5 release record; allocation is not publication.",
+      "declared": "0.1.0a6",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adopter baseline. Candidate a6 includes a5 immutable rule supersession, sealed rule/band membership, bounded policy history and advisory preview; a6 adds caller-transaction exact catalog/rule authoring without internal savepoint completion, reusing Tax validation and replay comparators. The Sub owner must roll back and retry whole commands on unique insert contention. Sub policy UI requires a verified published successor and real owner/permission binding; no unpublished pin, financial writer or production authority is activated. Remove only through the exact authorized release record.",
       "state": "declared-unpublished"
     },
     "dotmac-usage": {

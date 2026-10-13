@@ -3795,3 +3795,24 @@ a deferred unpublished-commit refusal. Existing a4 writers require a policy
 write fence before tx_0004; the a5 source API retains their signatures and DTOs.
 Downgrade refuses any nonempty rule or edge store. Package source support does not claim
 product UI delivery, publication, adoption or writer authority cutover.
+
+Tax also owns the explicitly public `ensure_tax_authority_in_transaction`,
+`ensure_tax_jurisdiction_in_transaction`, `ensure_tax_code_in_transaction` and
+`ensure_tax_rule_in_transaction` authoring participants. They reuse existing
+normalization, exact-content comparators and creation/publication behavior,
+return ORM-free V1 DTOs, and never complete a transaction or savepoint. They
+explicitly flush the owner's pending unit of work before refreshed reads,
+preserving the caller's `Session.autoflush` setting. Mutable catalog replay
+compares transaction-visible current content, including with a previously
+loaded identity map; it is not permanent idempotency after catalog changes.
+A unique-insert loser propagates `IntegrityError`; only the public caller
+boundary rolls back and retries the whole owner command in a fresh transaction.
+Authority/rule helpers may instead observe a committed winner at their
+pre-write duplicate check: that healthy domain conflict re-reads the natural
+key and compares exact content without completing a transaction. This path
+depends on those domain checks preceding every helper mutation; database
+integrity failures are never recovered inside the participant.
+The existing `ensure_tax_*` savepoint APIs retain their signatures and behavior.
+The source inventory and scope exclusions are recorded in
+`docs/inventories/tax-owner-authoring-extraction.md`; product adoption remains
+separate.
