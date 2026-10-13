@@ -240,10 +240,20 @@ def test_governance_enrolls_closed_immutable_probe_contract() -> None:
 def test_environment_file_empty_value_wins_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    spec = ProductDeploymentSpec.loads(DESCRIPTOR)
+    spec = ProductDeploymentSpec.loads(descriptor())
+    _staged_host(tmp_path)
+    asset = tmp_path / "retained.yml"
+    asset.write_text(render_compose(spec))
     monkeypatch.setenv("DATABASE_URL", "planted-parent-value")
-    (tmp_path / ".env").write_text("DATABASE_URL=\n")
-    effects = ComposeHostEffects(spec, tmp_path)
+    with (tmp_path / ".env").open("a") as env_file:
+        env_file.write("DATABASE_URL=\n")
+    effects = ComposeHostEffects(
+        spec,
+        tmp_path,
+        retained_compose_assets={
+            spec.image: RetainedComposeAsset(asset, render_compose_digest(spec))
+        },
+    )
     assert "DATABASE_URL" not in effects.resolved_materials()
     assert effects._materials_env(("DATABASE_URL",))["DATABASE_URL"] == ""
 
@@ -500,7 +510,16 @@ def test_full_executor_material_gates_order_bootstrap_and_handoff(
     assert "pre_mutation" in events, "fixture must reach the actual readiness gate"
     if failure_phase == "pre_mutation":
         assert effects.bootstrapped == []
-        assert effects.mutations == []
+        # Failure observability remains mandatory. Exact equality excludes
+        # credential bootstrap, backup, DDL, candidate startup and handoff.
+        assert effects.mutations == [
+            ("emit_annotation", "deployment.start"),
+            ("emit_annotation", "deployment.failure"),
+            ("write_evidence", "deploy"),
+        ]
+        assert effects.migration_images == []
+        assert effects.candidate_started_with == []
+        assert effects.switched_to == []
         assert not outcome.mutated
         assert outcome.standing is RunStanding.REFUSED
         assert outcome.failed_step is StepKind.VERIFY_MATERIALS
