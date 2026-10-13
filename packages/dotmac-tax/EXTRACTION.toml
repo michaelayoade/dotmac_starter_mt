@@ -33,6 +33,8 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_financial_modules_isolation.py",
   "dotmac_starter_mt:tests/test_tax_released_migration_upgrade.py",
   "dotmac_starter_mt:tests/test_tax_policy_supersession.py",
+  "dotmac_starter_mt:tests/unit/test_tax_owner_authoring.py",
+  "dotmac_starter_mt:tests/test_tax_owner_authoring.py",
 ]
 # CORRECTED 2026-08-29. Was `contract_consumers = ["dotmac_erp"]` with
 # `status = "adopted"`. A pin is installation, not adoption: ERP pins
@@ -48,11 +50,11 @@ contract_consumers = []
 candidate_consumers = ["dotmac_erp", "dotmac_sub"]
 adoption_evidence_schema = "v1"
 composition_boundary = "Applications submit typed, deduplicated source facts and consume determinations through local orchestration. Tax imports no billing, payroll, banking or accounting sibling. Official authority APIs and identity validation are Integrator/product adapters; accounting consequences use opaque references outside the module."
-inventory_evidence = ["docs/inventories/tax-sources.md"]
+inventory_evidence = ["docs/inventories/tax-sources.md", "docs/inventories/tax-owner-authoring-extraction.md"]
 first_cutover = "ERP is the qualifying policy/reporting source and first decision owner to retire after shared accounting exists. Sub then supplies its billing tax and withholding facts through a versioned product API/outbox contract without losing its operational source-fact ownership. Backoffice is a later exact-pin consumer. No package or table creation is a cutover."
 shadow_and_drift = "Replay source facts against both engines and compare selected rule/version, bases, output/recoverable amounts, configured report boxes, payable totals, obligations and return transitions. Any rule ambiguity or source-version mismatch fails closed; shadow writes neither owner."
 local_copy_retirement = "Seal one policy/determination/reporting writer switch, then remove ERP's fixed TaxType/rate/calendar/report-format decisions and direct filing lifecycle writers. Product source-fact writers remain only for facts they own; country/provider transports remain adapters. No fallback calculator or dual return ledger survives."
-next_action = "Release 0.1.0a4 after its package, public-policy-contract and unchanged released-migration gates are green. ERP then pins the immutable a4 release coordinates and uses only the exact-replay ensure/read seam to bind its sealed C3 policy map; shadow remains default-off and moves no writer authority. PAYE shadow waits for persisted annual taxable-base and approved band evidence. Sub may first contain its billing defects, then supplies facts only after a tax-classification backfill, zero-drift shadow, and explicit writer switch."
+next_action = "Released a4 remains the current adopter baseline. Validate and publish the authoring successor (candidate a6), including a5 sealed rule supersession/history/advisory preview and a6 caller-transaction exact authoring. Sub then exact-pins the verified artifact and binds its composable policy UI through its registered transaction owner and real tax permissions; source preparation activates no invoice policy or writer. ERP's existing a4 adoption and shadow retain their own acceptance gates. PAYE requires persisted annual taxable-base and band evidence. Financial migration, zero-drift shadow and authority transfer remain separately gated."
 
 # Typed product claims refreshed from the exact revisions above. Product-owned
 # source facts survive cutover; only their local tax-policy, determination,

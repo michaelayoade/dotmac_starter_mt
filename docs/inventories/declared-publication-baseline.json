@@ -78,8 +78,8 @@
       "state": "never-published"
     },
     "dotmac-billing": {
-      "declared": "0.1.0a2",
-      "reason": "DEVELOPMENT SUCCESSOR FOR SUB-FIRST CASH-BACKED CREDIT DRAW. Billing 0.1.0a1 is historically published at peeled commit 92a1626b16d7e068f92536d8cfcb2ef9b6f270c2. Its importable source cannot change under that released identity. 0.1.0a2 contains the typed available-credit draw and reversed-funding allocation guards, homogeneous multiline drafts, and additive bi_0003_issued_line_freeze enforcement for every issued document kind with draft-to-issued credit-note staging; it is not published or adopted. Remove this row only with the successor publication record after required hosted CI and release verification. No Sub dependency pin, production deployment or authority switch follows from this declaration.",
+      "declared": "0.1.0a4",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a4 adds immutable non-cash grant/effect and V2 position evidence in additive bi_0005, preserving cash and prepaid funding separation and prior wire contracts. Hosted acceptance, authorized publication and product qualification remain separate; this allocation changes no product pin or production writer authority.",
       "state": "declared-unpublished"
     },
     "dotmac-connector-flutterwave": {
@@ -158,8 +158,8 @@
       "state": "never-published"
     },
     "dotmac-tax": {
-      "declared": "0.1.0a5",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adoption baseline. Candidate a5 adds explicit immutable rule supersession and bounded policy read/preview contracts for the user-directed composable rate and basis editor. Sub must consume a verified published successor before its authoring UI can adopt these commands; this source candidate changes no product pin or financial writer authority. Remove this row only in the authorized oracle-backed a5 release record; allocation is not publication.",
+      "declared": "0.1.0a6",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adopter baseline. Candidate a6 includes a5 immutable rule supersession, sealed rule/band membership, bounded policy history and advisory preview; a6 adds caller-transaction exact catalog/rule authoring without internal savepoint completion, reusing Tax validation and replay comparators. The Sub owner must roll back and retry whole commands on unique insert contention. Sub policy UI requires a verified published successor and real owner/permission binding; no unpublished pin, financial writer or production authority is activated. Remove only through the exact authorized release record.",
       "state": "declared-unpublished"
     },
     "dotmac-usage": {

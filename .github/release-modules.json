@@ -466,8 +466,11 @@
           "dotmac_billing/migrations/versions/bi_0001_billing.py",
           "dotmac_billing/migrations/versions/bi_0002_multiline.py",
           "dotmac_billing/migrations/versions/bi_0003_issued_line_freeze.py",
+          "dotmac_billing/migrations/versions/bi_0004_withholding_discharge.py",
+          "dotmac_billing/migrations/versions/bi_0005_non_cash_credit.py",
           "dotmac_billing/models.py",
           "dotmac_billing/py.typed",
+          "dotmac_billing/queries.py",
           "dotmac_billing/service.py"
         ],
         "forbidden_prefixes": [
