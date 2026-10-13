@@ -204,6 +204,8 @@ def test_transport_timeout_reaps_child(tmp_path: Path) -> None:
 
 
 def test_governance_enrolls_closed_immutable_probe_contract() -> None:
+    import ast
+
     root = Path(__file__).resolve().parents[2]
     profile = json.loads((root / ".dotmac/standards-profile.json").read_text())
     surface = next(
@@ -219,8 +221,19 @@ def test_governance_enrolls_closed_immutable_probe_contract() -> None:
         for row in profile["authorities"]
         if row["authority_id"] == "candidate-material-readiness"
     )
-    assert authority["decision_interface"].endswith(
-        "Executor._verify_candidate_materials"
+    assert authority["decision_interface"] == (
+        "dotmac_deployment_foundation.engine.run.Executor"
+    )
+    owner = root / authority["owner_implementation"]
+    tree = ast.parse(owner.read_text())
+    executor = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "Executor"
+    )
+    assert any(
+        isinstance(node, ast.FunctionDef) and node.name == "_verify_candidate_materials"
+        for node in executor.body
     )
 
 

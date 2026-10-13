@@ -37,7 +37,7 @@
       "protected_resources": ["candidate-material-readiness-decision"],
       "owner_component": "deployment-foundation-executor",
       "owner_implementation": "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/engine/run.py",
-      "decision_interface": "dotmac_deployment_foundation.engine.run.Executor._verify_candidate_materials",
+      "decision_interface": "dotmac_deployment_foundation.engine.run.Executor",
       "canonical_writer_paths": ["packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/engine/run.py"],
       "adapter_paths": ["packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/providers/compose_host.py"],
       "drift_test_paths": ["tests/unit/test_deployment_foundation_material_readiness.py"]
