@@ -53,3 +53,23 @@ acceptance and monetary correlation fail closed. Cancellation, expiry and proof
 rejection retain their existing lifecycle behavior. Resolving historical scales
 requires separate source evidence and authorization; this package supplies no
 repair writer.
+
+Additive `pm_0003_confirmation_immutable` makes confirmation UPDATE and DELETE
+fail at the PostgreSQL boundary, including direct SQL, no-op updates and intent
+or tenant deletion cascades. `app_user` retains SELECT/INSERT but loses
+UPDATE/DELETE on confirmations; owner-issued DML is refused by the trigger.
+Intent/proof lifecycle privileges and tenant RLS stay intact. This protects
+ordinary DML; database owners and superusers still control DDL and can remove
+triggers. It does not attest privileged administration.
+
+The migration takes a transaction-scoped exclusive table lock with a 5-second
+lock timeout and 60-second statement timeout, failing atomically on contention.
+It does not rewrite confirmation rows or resolve legacy NULL precision. Empty
+pre-adoption databases support downgrade to `pm_0002_money_precision` and
+reupgrade; downgrade refuses while any confirmation evidence exists, including
+legacy evidence, before removing protections. Before adoption, source rollback
+is available without applying this migration. After adoption, retain financial
+evidence and the database guard when rolling application source back; production
+migration downgrade is not a rollback procedure. PostgreSQL mutation, populated
+predecessor, lifecycle race/replay and caller rollback canaries require hosted
+CI acceptance; authoring them is not execution evidence.
