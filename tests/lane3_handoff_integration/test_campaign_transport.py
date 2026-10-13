@@ -31,12 +31,31 @@ class Host(t.SystemBackend):
                 "--property=NetworkNamespacePath=" + self.namespace,
                 *argv[1:],
             ]
-        return super().run(argv, data)
+        # These commands carry only synthetic fixture inputs. Keep production
+        # command failures redacted, but expose fixture stderr in hosted CI.
+        result = subprocess.run(  # noqa: S603 - fixed owned fixture commands
+            argv, input=data, capture_output=True, timeout=2, check=False
+        )
+        if result.returncode:
+            raise AssertionError(
+                f"fixture command failed ({result.returncode}): {argv!r}; "
+                + result.stderr.decode(errors="replace")
+            )
+        return result.stdout.decode().strip()
 
     def install(self, specs, uid, anchor):
         super().install(specs, uid, anchor)
+        print(
+            "synthetic installed nft JSON:", json.dumps(self.chain()[1], sort_keys=True)
+        )
         if self.lost:
             raise TimeoutError("PRIVATE-LOST-OPEN-CANARY")
+
+    def guard(self, uid, comment):
+        super().guard(uid, comment)
+        print(
+            "synthetic guarded nft JSON:", json.dumps(self.chain()[1], sort_keys=True)
+        )
 
 
 @pytest.fixture
@@ -168,11 +187,11 @@ def transport(tmp_path, monkeypatch):
         host.run(
             ["/usr/sbin/nft", "-f", "-"],
             (
-                f"table inet {table} {{ chain output {{ "
-                "type filter hook output priority 0; policy drop; "
-                "meta skuid 0 accept; ct state established,related accept; "
-                f'counter drop comment "{t.ANCHOR}"; '
-                "} }\n"
+                f"table inet {table} {{\n chain output {{\n"
+                "type filter hook output priority 0; policy drop;\n"
+                "meta skuid 0 accept; ct state established,related accept;\n"
+                f'counter drop comment "{t.ANCHOR}";\n'
+                "}\n}\n"
             ).encode(),
         )
         host.run(

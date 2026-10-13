@@ -152,9 +152,11 @@ def lifecycle(tmp_path, monkeypatch):
 
     def root_fstat(fd):
         s = real_fstat(fd)
-        return SimpleNamespace(
-            st_mode=s.st_mode, st_uid=0, st_nlink=s.st_nlink, st_size=s.st_size
-        )
+        # Preserve inode/device fields used by shutil.rmtree symlink defenses.
+        # Only the synthetic owner changes; all filesystem identity stays real.
+        values = list(s)
+        values[4] = 0  # stat_result.st_uid
+        return identity.os.stat_result(values)
 
     monkeypatch.setattr(identity.os, "fstat", root_fstat)
 

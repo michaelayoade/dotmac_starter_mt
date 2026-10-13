@@ -86,11 +86,14 @@ def client_fixture(request):
     runner = root / "matrix.py"
     # The fixture executes only after production handshake GO. Sending this UDP
     # packet demonstrates nft's meta skuid sees precisely the reviewed UID.
+    # The drop anchor deliberately rejects it; only that PermissionError is
+    # admitted, and both the UID counter and blocked verdict are asserted.
     runner.write_text(
         "import json,os,socket\n"
-        "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n"
-        "s.sendto(b'synthetic',(\"127.0.0.1\",39671))\n"
-        "print(json.dumps({'uid':os.getuid(),'gid':os.getgid(),'full_b8_complete':False}))\n"
+        "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); blocked=False\n"
+        "try:\n s.sendto(b'synthetic',(\"127.0.0.1\",39671))\n"
+        "except PermissionError:\n blocked=True\n"
+        "print(json.dumps({'uid':os.getuid(),'gid':os.getgid(),'udp_blocked':blocked,'full_b8_complete':False}))\n"
     )
     runner.chmod(0o644)
     import lane3_campaign_transport as transport_source
@@ -235,7 +238,23 @@ def client_fixture(request):
                 ]
             return super().run(argv, data)
 
-    transport = t.Transport(
+    class FixtureTransport(t.Transport):
+        def open(self):
+            try:
+                return super().open()
+            except t.Refused:
+                # This fixture owns a unique table/session and uses only RFC5737
+                # destinations. Show exact synthetic owned expressions so hosted
+                # failures can distinguish nft rendering from ownership defects.
+                try:
+                    _, rules = self.backend.chain()
+                    diagnostic = {"synthetic_nft_owned_rules": self._owned(rules)}
+                except Exception:
+                    diagnostic = {"synthetic_nft_readback": "unavailable"}
+                print(json.dumps(diagnostic, sort_keys=True))
+                raise
+
+    transport = FixtureTransport(
         binding, t.Manifest.parse(manifest_document), TransportHost(binding)
     )
     transport.initialize_closed()
@@ -354,6 +373,7 @@ def test_real_uid_cgroup_socket_uid_and_owned_nft_counter(client_fixture):
     certificates(client)
     result = client.execute()
     assert result["uid"] == identity.uid and result["gid"] == identity.gid
+    assert result["udp_blocked"] is True
     nft = json.loads(sh("nft", "-j", "list", "table", "inet", table))
     counters = [
         e["counter"]["packets"]
