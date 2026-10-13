@@ -1688,16 +1688,20 @@ def _post_group(
         )
     )
     db.flush()
-    _emit(
-        db,
-        scope=scope,
-        event_type=(
-            "billing.accounting.fact.v2"
-            if withholding is not None
-            else "billing.accounting.fact.v1"
-        ),
-        payload=fact_payload,
-    )
+    if withholding is not None:
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.accounting.fact.v2",
+            payload=fact_payload,
+        )
+    else:
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.accounting.fact.v1",
+            payload=fact_payload,
+        )
     _emit(
         db,
         scope=scope,

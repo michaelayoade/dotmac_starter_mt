@@ -172,6 +172,8 @@ def _guards(platform: bool) -> None:
     tenant_call = "" if platform else ", NEW.tenant_id"
     issuance_scope = "" if platform else " AND g.tenant_id = scope_id"
     relation_scope = "" if platform else " AND x.tenant_id = g.tenant_id"
+    # SQLAlchemy text() removes the escaped colon before sending SQL; the
+    # persisted source suffix remains ':issue', rather than becoming a bind.
     op.execute(f"""
     CREATE FUNCTION mod_billing.has_{prefix}live_invoice_issuance(
         invoice_id uuid, account_id uuid, currency_code text, scale integer{tenant_arg}
@@ -179,12 +181,12 @@ def _guards(platform: bool) -> None:
         SELECT count(*) = 1 AND (SELECT count(*) FROM mod_billing.{prefix}posting_groups g
             WHERE g.group_kind = 'invoice_issued' AND g.reverses_group_id IS NULL
               AND g.billing_account_id = account_id AND g.currency = currency_code
-              AND g.minor_units = scale AND g.source_ref = 'document:' || invoice_id::text || ':issue'
+              AND g.minor_units = scale AND g.source_ref = 'document:' || invoice_id::text || '\\:issue'
               {issuance_scope}) = 1
         FROM mod_billing.{prefix}posting_groups g
         WHERE g.group_kind = 'invoice_issued' AND g.reverses_group_id IS NULL
           AND g.billing_account_id = account_id AND g.currency = currency_code
-          AND g.minor_units = scale AND g.source_ref = 'document:' || invoice_id::text || ':issue'
+          AND g.minor_units = scale AND g.source_ref = 'document:' || invoice_id::text || '\\:issue'
           {issuance_scope}
           AND EXISTS (SELECT 1 FROM mod_billing.{prefix}receivable_exposure_facts x
               WHERE x.document_id = invoice_id AND x.billing_account_id = account_id
@@ -255,8 +257,11 @@ def _guards(platform: bool) -> None:
          WHERE x.id = NEW.billing_account_id{scope} FOR UPDATE;
         SELECT * INTO doc FROM mod_billing.{prefix}documents x
          WHERE x.id = NEW.document_id{scope} FOR UPDATE;
+        -- Immutable groups/discharges require no row UPDATE privilege. Every
+        -- admission/correction already holds its scoped account lock; the
+        -- original evidence cannot change while that account serializes peers.
         SELECT * INTO grp FROM mod_billing.{prefix}posting_groups x
-         WHERE x.id = NEW.posting_group_id{scope} FOR UPDATE;
+         WHERE x.id = NEW.posting_group_id{scope};
         IF account.id IS NULL OR doc.id IS NULL OR grp.id IS NULL
            OR account.currency <> NEW.currency OR account.minor_units <> NEW.minor_units
            OR doc.billing_account_id IS DISTINCT FROM NEW.billing_account_id
@@ -326,7 +331,7 @@ def _guards(platform: bool) -> None:
         END IF;
         IF NEW.reverses_discharge_id IS NOT NULL THEN
             SELECT * INTO original FROM mod_billing.{table} x
-             WHERE x.id = NEW.reverses_discharge_id{scope} FOR UPDATE;
+             WHERE x.id = NEW.reverses_discharge_id{scope};
             IF original.id IS NULL OR original.reverses_discharge_id IS NOT NULL
                OR NEW.id = original.id OR original.billing_account_id <> NEW.billing_account_id
                OR original.document_id <> NEW.document_id OR original.currency <> NEW.currency
