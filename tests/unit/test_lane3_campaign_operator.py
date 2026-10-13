@@ -616,6 +616,8 @@ def real_owned_journal(monkeypatch):
             "runner_group_id": 4,
             "ssh_destination": "synthetic-host",
             "github_run_id": 12,
+            "issuer_module": directory / "lane3_campaign_issuer.py",
+            "issuer_sha256": "0" * 64,
         }
         monkeypatch.setattr(module, "deployment_inputs", lambda: binding)
         prepared = {

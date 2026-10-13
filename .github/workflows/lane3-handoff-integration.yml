@@ -144,4 +144,8 @@ jobs:
             tests/unit/test_lane3_campaign_invoker.py \
             tests/unit/test_lane3_campaign_bootstrap.py \
             tests/unit/test_lane3_campaign_bootstrap_tcp.py \
-            tests/unit/test_lane3_campaign_freshness.py
+            tests/unit/test_lane3_campaign_freshness.py \
+            tests/unit/test_lane3_campaign_operator.py \
+            tests/unit/test_lane3_handoff_client.py \
+            tests/unit/test_lane3_handoff_controller.py \
+            tests/unit/test_lane3_handoff_coordinator.py

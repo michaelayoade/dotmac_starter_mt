@@ -897,7 +897,14 @@ def test_manifest_mismatch_is_rejected_before_rule_or_grant_authority(
         qualification=qualification,
         policy_digest=policy.digest,
         bootstrap_manifest=bootstrap(),
-        timing={"challenge": "d" * 64, "issued_at_monotonic_ns": 10**9},
+        boot_id="synthetic-boot",
+        timing={
+            "challenge": "d" * 64,
+            "issued_at_monotonic_ns": 10**9,
+            "phase": "REPORTED",
+            "lease_id": LEASE,
+            "boot_id": "synthetic-boot",
+        },
     )
     controller = hc.Controller(
         host=types.SimpleNamespace(now_ns=lambda: 2 * 10**9), routable=docs

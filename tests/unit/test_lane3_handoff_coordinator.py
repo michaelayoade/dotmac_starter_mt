@@ -919,12 +919,16 @@ def test_uncertain_registration_is_recovered_from_durable_exact_intent(
     deleted: list[int] = []
     bootstrap: list[Any] = []
     original_save = co.save_state
-    saves = 0
+    runner_save_interrupted = False
 
     def save(path: Any, state: Any) -> None:
-        nonlocal saves
-        saves += 1
-        if failure == "runner-save-failed" and saves == 2:
+        nonlocal runner_save_interrupted
+        if (
+            failure == "runner-save-failed"
+            and "runner_id" in state
+            and not runner_save_interrupted
+        ):
+            runner_save_interrupted = True
             raise OSError("synthetic save interruption")
         original_save(path, state)
 
