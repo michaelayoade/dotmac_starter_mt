@@ -77,6 +77,11 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-billing": {
+      "declared": "0.1.0a2",
+      "reason": "DEVELOPMENT SUCCESSOR FOR SUB-FIRST CASH-BACKED CREDIT DRAW. Billing 0.1.0a1 is historically published at peeled commit 92a1626b16d7e068f92536d8cfcb2ef9b6f270c2. Its importable source cannot change under that released identity. 0.1.0a2 contains the typed available-credit draw and reversed-funding allocation guards, homogeneous multiline drafts, and additive bi_0003_issued_line_freeze enforcement for every issued document kind with draft-to-issued credit-note staging; it is not published or adopted. Remove this row only with the successor publication record after required hosted CI and release verification. No Sub dependency pin, production deployment or authority switch follows from this declaration.",
+      "state": "declared-unpublished"
+    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
@@ -130,6 +135,11 @@
     "dotmac-kernel": {
       "declared": "0.1.0a104+dev",
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a104 IS published and tagged (dotmac-kernel-v0.1.0a104). This source adds strict fresh settings resolution, so continuing to declare bare 0.1.0a104 would make one released version name two importable contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only through a separately authorized allocation of the next public version at release time; never remove the marker merely to quiet a gate.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-payments": {
+      "declared": "0.1.0a2",
+      "reason": "DECLARED FOR THE CONFIRMED-INTAKE SAFETY PREREQUISITE, NOT YET RELEASED. Published a1 peels from dotmac-payments-v0.1.0a1 to 04b9771320b865b66d1322660fc6d3590605c973; the tag oracle on 2026-10-13 contained no a2 tag. a2 adds exact immutable confirmation replay and serialized intent/proof lifecycle mutations, so those behaviors cannot silently replace the published a1 artifact. Remove this row only after the protected module release installs, verifies and tags exact 0.1.0a2. Declaration and hosted source tests are not publication or Sub writer-switch evidence; Sub remains authoritative pending backfill, zero-drift shadow and separately authorized cutover.",
       "state": "declared-unpublished"
     },
     "dotmac-platform-health": {

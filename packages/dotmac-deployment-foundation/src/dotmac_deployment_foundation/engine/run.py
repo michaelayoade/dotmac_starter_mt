@@ -94,8 +94,13 @@ from ..host_source_admission import (
     HostSourceAdmissionProvider,
     HostSourceAdmissionTrace,
 )
+from ..material_readiness import (
+    MaterialProbeObservation,
+    MaterialProbePhase,
+    MaterialProbeStatus,
+)
 from ..policy import build_firewall_plan
-from ..spec import ProductDeploymentSpec
+from ..spec import SCHEMA_V4, MaterialProbe, ProductDeploymentSpec
 from ..telemetry import Annotation
 from .lock import DeploymentLockHeld
 from .plan import (
@@ -144,6 +149,15 @@ class BackupResult:
     size_bytes: int
     checksum: str
     checksum_algorithm: str
+
+
+@runtime_checkable
+class CandidateMaterialProbeEffects(Protocol):
+    """V4-only capability; older Effects providers retain their interface."""
+
+    def probe_candidate_materials(
+        self, probe: MaterialProbe, *, image: str
+    ) -> MaterialProbeObservation: ...
 
 
 @runtime_checkable
@@ -775,8 +789,17 @@ class Executor:
         # case with no marker at all.
         self._annotate("deployment.start", plan)
         try:
-            self._bootstrap_principals(outcome)
-            self._run_steps(plan.steps, plan, outcome)
+            if self._spec.descriptor_schema == SCHEMA_V4:
+                boundary = next(
+                    (index for index, step in enumerate(plan.steps) if step.mutates),
+                    len(plan.steps),
+                )
+                self._run_steps(plan.steps[:boundary], plan, outcome)
+                self._bootstrap_principals(outcome)
+                self._run_steps(plan.steps[boundary:], plan, outcome)
+            else:
+                self._bootstrap_principals(outcome)
+                self._run_steps(plan.steps, plan, outcome)
             # AFTER the steps, and the ordering is the act's rather than a
             # preference: the rules published here point at containers that
             # `_do_switch` has already recreated, so reconciling before the
@@ -943,8 +966,10 @@ class Executor:
     def _bootstrap_principals(self, outcome: DeploymentOutcome) -> None:
         """Install the credentials this plan was authorized to install.
 
-        BEFORE the step loop, and the ordering is the act's rather than a
-        preference: a migration may need the role to exist and be able to
+        For V1-V3, BEFORE the step loop. V4 first completes its read-only
+        gates, including candidate material readiness, then bootstraps before
+        the mutating step suffix. In every schema the ordering is deliberate:
+        a migration may need the role to exist and be able to
         authenticate, so a bootstrap after `migrate` would be a bootstrap for
         the run after this one. It adds a credential and destroys nothing, so it
         does not sit behind the backup gate.
@@ -1531,10 +1556,88 @@ class Executor:
                     f"role {role.code!r} holds the migration owner material "
                     f"{self._spec.migration.owner_material!r}"
                 )
+        if self._spec.descriptor_schema == SCHEMA_V4:
+            self._verify_candidate_materials(MaterialProbePhase.PRE_MUTATION, plan)
         return (
             f"{len(required)} material(s) resolve; "
             "owner material absent from every role"
         )
+
+    def _verify_candidate_materials(
+        self, phase: MaterialProbePhase, plan: DeploymentPlan
+    ) -> str:
+        if not isinstance(self._effects, CandidateMaterialProbeEffects):
+            raise PreconditionFailed("candidate material probe provider unavailable")
+        required = {role.code for role in self._spec.roles if role.replicas > 0}
+        declared_roles = {role.code for role in self._spec.roles}
+        try:
+            observed = tuple(self._effects.observe_roles())
+        except Exception:
+            raise PreconditionFailed("candidate role observation unavailable") from None
+        application_digests = {self._spec.image.rsplit("@", 1)[-1]}
+        application_digests.update(
+            observation.image_digest
+            for observation in observed
+            if observation.code in declared_roles and observation.image_digest
+        )
+        if any(
+            observation.running
+            and observation.code not in declared_roles
+            and observation.image_digest in application_digests
+            for observation in observed
+        ):
+            raise PreconditionFailed(
+                "running application role is absent from candidate descriptor"
+            )
+        required.update(
+            observation.code
+            for observation in observed
+            if observation.running and observation.code in declared_roles
+        )
+        probes = {
+            probe.role: probe
+            for probe in self._spec.material_probes
+            if probe.phase is phase
+        }
+        if required - probes.keys():
+            raise PreconditionFailed(
+                "candidate material probes lack active-role coverage"
+            )
+        # Paired optional-role declarations remain probed after maintenance
+        # stops the primary; stopping Beat must not erase its post gate.
+        required.update(probes)
+        for role in sorted(required):
+            try:
+                observation = self._effects.probe_candidate_materials(
+                    probes[role], image=self._spec.image
+                )
+            except Exception:
+                raise PreconditionFailed(
+                    "candidate material probe unavailable"
+                ) from None
+            if (
+                not isinstance(observation, MaterialProbeObservation)
+                or observation.image != self._spec.image
+                or observation.role != role
+                or observation.phase is not phase
+                or observation.result.status is not MaterialProbeStatus.READY
+            ):
+                raise PreconditionFailed(
+                    f"candidate material probe did not establish readiness for {role}"
+                )
+        return f"{len(required)} candidate role material probes ready ({phase.value})"
+
+    def _do_verify_post_migration_materials(
+        self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
+    ) -> str:
+        try:
+            return self._verify_candidate_materials(
+                MaterialProbePhase.POST_MIGRATION, plan
+            )
+        except PreconditionFailed:
+            raise StepFailed(
+                step.kind.value, "post-migration candidate materials are not ready"
+            ) from None
 
     def _do_verify_external_recovery_receipt(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome

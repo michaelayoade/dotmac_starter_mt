@@ -20,6 +20,7 @@ from .plan import (
 )
 from .run import (
     BackupResult,
+    CandidateMaterialProbeEffects,
     CommandResult,
     DeploymentOutcome,
     Effects,
@@ -30,6 +31,7 @@ from .run import (
 
 __all__ = [
     "BackupResult",
+    "CandidateMaterialProbeEffects",
     "CommandResult",
     "DeploymentLockHeld",
     "DeploymentOutcome",

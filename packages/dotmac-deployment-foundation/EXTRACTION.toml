@@ -16,7 +16,7 @@ source_repositories = [
 ]
 
 source_revisions = [
-  "dotmac_sub:1a3edf0eb567fe02665606d368f8f342536f548c",
+  "dotmac_sub:aff0e7e2ccde0c4657e87aecd8f2d657726b1130",
   "dotmac_integrator:78bcaebf4692fbde298ef2107b231d983e04a5c6",
   "dotmac_erp:7b62974b366eead1b32bead380e47d9cf10ec4c7",
   "dotmac_starter_mt:ac5e439e622ec5adba94cf52f4f961f2c39a2d30",
@@ -39,6 +39,13 @@ source_paths = [
   "dotmac_sub:scripts/db_backup.sh",
   "dotmac_sub:scripts/docker_image_retention.sh",
   "dotmac_sub:scripts/release_backup_policy.py",
+  # Candidate material readiness source accepted in Sub PR #3585, not a claim
+  # that the Foundation successor is published or adopted.
+  "dotmac_sub:scripts/deployment_secret_readiness.py",
+  "dotmac_sub:scripts/setup/verify_openbao_boot_secrets.py",
+  "dotmac_sub:scripts/setup/verify_deployment_secret_requirements.py",
+  "dotmac_sub:app/services/deployment_secret_requirements.py",
+  "dotmac_sub:app/services/deployment_secret_schema.py",
   # The canonical warm-candidate ingress, NOT the older divergent copy at
   # deploy/nginx/selfcare.dotmac.io. Told apart three ways: it is what
   # nginx/setup-nginx.sh:35 installs; it alone carries the `backup` upstream
@@ -82,12 +89,20 @@ source_paths = [
 ]
 
 preserved_tests = [
-  # Sub and ERP ship no test for their deployment engines — the scripts are
+  # The historical initial extraction found no engine tests. Readiness now
+  # has the accepted product-first proof recorded below; history is not erased.
+  # Sub and ERP originally shipped no test for their deployment engines — the scripts are
   # shell and are exercised only by deploying. That absence is itself the
   # extraction's strongest argument and is recorded rather than glossed:
   # `docs/inventories/deployment-foundation-sources.md` § 7.
   # Integrator is the exception and its image audit IS a test, with its own
   # sensitivity proof; it is the parity obligation this package inherits.
+  "dotmac_sub:tests/test_deployment_secret_readiness.py",
+  "dotmac_sub:tests/test_deployment_secret_requirements.py",
+  "dotmac_sub:tests/test_deployment_secret_schema.py",
+  "dotmac_sub:tests/integration/test_deployment_secret_requirements_pg.py",
+  "dotmac_sub:tests/integration/test_deployment_secret_schema_pg.py",
+  "dotmac_starter_mt:tests/unit/test_deployment_foundation_material_readiness.py",
   "dotmac_integrator:scripts/audit_image.sh",
   "dotmac_integrator:tests/architecture/test_the_assembly_stays_thin.py",
   "dotmac_starter_mt:tests/unit/test_deployment_foundation_secrets_guard.py",
@@ -138,12 +153,20 @@ source_mode_note = "product-first, and the qualifying sources are three rather t
 product = "dotmac_sub"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "1a3edf0eb567fe02665606d368f8f342536f548c"
+revision = "aff0e7e2ccde0c4657e87aecd8f2d657726b1130"
 evidence_paths = [
   "scripts/deploy.sh",
   "scripts/deploy_production.sh",
   "scripts/db_backup.sh",
   "nginx/selfcare.dotmac.io.conf",
+  "scripts/deployment_secret_readiness.py",
+  "scripts/setup/verify_openbao_boot_secrets.py",
+  "scripts/setup/verify_deployment_secret_requirements.py",
+  "app/services/deployment_secret_requirements.py",
+  "app/services/deployment_secret_schema.py",
+  "tests/test_deployment_secret_readiness.py",
+  "tests/integration/test_deployment_secret_requirements_pg.py",
+  "tests/integration/test_deployment_secret_schema_pg.py",
 ]
 
 [[product_writers]]

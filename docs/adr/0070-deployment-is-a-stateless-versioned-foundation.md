@@ -1044,3 +1044,27 @@ chooses an additive v1 field or a v2 schema.
 controller-fingerprint issuance, binding certificate issuance to a Control
 lease, and the four Lane 3 runner fixes (D4) are not decided here. This
 amendment closes neither Packet D nor any gate.
+
+
+### Decision amendment — 2026-10-13: candidate material probes
+
+The Foundation owns the execution and ordering of candidate-image material
+readiness, while each product owns the meaning and retrieval of its secrets.
+`ProductDeploymentSpec.v4` explicitly succeeds V3 with immutable per-role
+`material_probes` for `pre_mutation` and `post_migration`. Older schemas retain
+canonical bytes and refuse the new declarations. Every desired active
+application role and every already-running application role requires both
+phases, including a scheduler declared with zero desired replicas. Unrelated
+auxiliary images do not become application roles.
+
+The pre-mutation gate precedes backup, bootstrap and DDL. After head verification,
+the post-migration gate precedes candidate startup and handoff. Each probe runs
+with the exact candidate image and role configuration, without starting its
+dependencies or allowing mounts/interpreter overrides to replace candidate code.
+The only child result is `CandidateMaterialProbeResult.v1`: a closed bounded
+JSON document of named statuses. Raw diagnostics, secret values and child-echoed
+image/role authority are refused. The provider verifies execution coordinates,
+bounds stdout during collection, discards stderr, and removes only its unique
+one-off container. Renewal/authentication, OpenBao policy and product requirement
+reduction remain with their existing owners. This source amendment allocates no
+release identity, publishes no wheel and authorizes no host change or retirement.

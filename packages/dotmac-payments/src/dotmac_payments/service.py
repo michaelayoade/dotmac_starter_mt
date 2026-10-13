@@ -26,19 +26,23 @@ from decimal import Decimal
 from uuid import UUID
 
 from dotmac_kernel.cache import TenantScope
-from dotmac_kernel.money import Money, currency
+from dotmac_kernel.money import Currency, Money
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_payments.contracts import (
+    ConfirmationNotFound,
     ConfirmationSource,
+    ConfirmedCashObservationV1,
     Conflict,
+    GetConfirmedCashV1,
     OpenPaymentIntent,
     PaymentIntentStatus,
     RecordConfirmation,
     ReviewTransferProof,
     SubmitTransferProof,
     TransferProofState,
+    UnresolvedMoneyPrecision,
 )
 from dotmac_payments.models import (
     PaymentConfirmation,
@@ -63,27 +67,68 @@ def _required(value: str, field: str) -> str:
 
 
 def _positive(money: Money, field: str) -> Money:
+    if (
+        type(money.currency.minor_units) is not int
+        or not 0 <= money.currency.minor_units <= 6
+    ):
+        raise Conflict(f"{field} currency scale must be an integer from 0 to 6")
+    if not money.amount.is_finite():
+        raise Conflict(f"{field} must be finite")
+    if money.amount >= Decimal("100000000000000"):
+        raise Conflict(f"{field} does not fit Numeric(20, 6)")
     if money.amount <= Decimal(0):
         raise Conflict(f"{field} must be greater than zero")
     return money
 
 
+def _persisted_money(amount: Decimal, code: str, scale: int | None) -> Money:
+    if scale is None:
+        raise UnresolvedMoneyPrecision("stored currency precision is unresolved")
+    if type(scale) is not int or not 0 <= scale <= 6:
+        raise UnresolvedMoneyPrecision("stored currency precision is unsupported")
+    # Inspect before Money construction, whose public constructor quantizes.
+    if not amount.is_finite() or not Decimal(0) < amount < Decimal("100000000000000"):
+        raise Conflict("stored amount does not fit positive finite Numeric(20, 6)")
+    money = Money.of(amount, Currency(code, scale))
+    if money.amount != amount:
+        raise UnresolvedMoneyPrecision("stored amount conflicts with its precision")
+    return money
+
+
 def _intent(db: Session, tenant_id: UUID, intent_id: UUID) -> PaymentIntent:
     row = db.scalar(
-        select(PaymentIntent).where(
-            PaymentIntent.tenant_id == tenant_id, PaymentIntent.id == intent_id
-        )
+        select(PaymentIntent)
+        .where(PaymentIntent.tenant_id == tenant_id, PaymentIntent.id == intent_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if row is None:
         raise Conflict("payment intent was not found in the tenant")
     return row
 
 
+def _utc_moment(value: datetime) -> datetime:
+    """Compare persisted instants consistently across timezone-aware drivers.
+
+    SQLite's test adapter returns naive UTC values for timezone-bearing columns;
+    production PostgreSQL returns aware instants. This changes no stored fact.
+    """
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 def _same_currency(intent: PaymentIntent, money: Money, field: str) -> None:
-    if money.currency.code != intent.currency_code:
+    if intent.minor_units is None:
+        raise UnresolvedMoneyPrecision(
+            "payment intent currency precision is unresolved"
+        )
+    if (
+        money.currency.code != intent.currency_code
+        or money.currency.minor_units != intent.minor_units
+    ):
         raise Conflict(
-            f"{field} currency {money.currency.code} does not match the intent "
-            f"currency {intent.currency_code}"
+            f"{field} currency {money.currency.code}/{money.currency.minor_units} "
+            f"does not match the intent currency "
+            f"{intent.currency_code}/{intent.minor_units}"
         )
 
 
@@ -103,6 +148,7 @@ def open_payment_intent(
         if (
             existing.requested_amount != requested.amount
             or existing.currency_code != requested.currency.code
+            or existing.minor_units != requested.currency.minor_units
         ):
             raise Conflict("reference was reused for a different amount")
         if existing.payer_reference != command.payer_reference.strip():
@@ -128,6 +174,7 @@ def open_payment_intent(
         provider_type=_required(command.provider_type, "provider type").upper(),
         channel=_required(command.channel, "channel").upper(),
         currency_code=requested.currency.code,
+        minor_units=requested.currency.minor_units,
         requested_amount=requested.amount,
         status=_OPEN,
         opened_at=opened_at,
@@ -156,7 +203,7 @@ def cancel_payment_intent(
     moment = cancelled_at or datetime.now(UTC)
     if intent.status is not _OPEN:
         raise Conflict("only a pending payment intent can be cancelled")
-    if moment < intent.opened_at:
+    if _utc_moment(moment) < _utc_moment(intent.opened_at):
         raise Conflict("cancellation cannot precede the opening time")
     intent.status = PaymentIntentStatus.CANCELLED
     intent.settled_at = moment
@@ -171,7 +218,9 @@ def expire_payment_intent(
     moment = now or datetime.now(UTC)
     if intent.status is not _OPEN:
         raise Conflict("only a pending payment intent can expire")
-    if intent.expires_at is None or intent.expires_at > moment:
+    if intent.expires_at is None or _utc_moment(intent.expires_at) > _utc_moment(
+        moment
+    ):
         raise Conflict("payment intent has not reached its expiry")
     intent.status = PaymentIntentStatus.EXPIRED
     intent.settled_at = moment
@@ -196,6 +245,7 @@ def submit_transfer_proof(
         ),
         document_reference=_required(command.document_reference, "document reference"),
         currency_code=declared.currency.code,
+        minor_units=declared.currency.minor_units,
         declared_amount=declared.amount,
         state=TransferProofState.SUBMITTED,
         declared_at=command.declared_at or datetime.now(UTC),
@@ -215,40 +265,61 @@ def review_transfer_proof(
     place an intent can become CONFIRMED.
     """
     tenant_id = _tenant(scope)
-    proof = db.scalar(
-        select(PaymentTransferProof).where(
+    # Discover the parent without taking a child lock. Every lifecycle writer
+    # acquires the intent first, then its proof, so provider and review paths
+    # cannot invert lock order or confirm from a stale PENDING ORM instance.
+    intent_id = db.scalar(
+        select(PaymentTransferProof.intent_id).where(
             PaymentTransferProof.tenant_id == tenant_id,
             PaymentTransferProof.id == command.proof_id,
         )
+    )
+    if intent_id is None:
+        raise Conflict("transfer proof was not found in the tenant")
+    _intent(db, tenant_id, intent_id)
+    proof = db.scalar(
+        select(PaymentTransferProof)
+        .where(
+            PaymentTransferProof.tenant_id == tenant_id,
+            PaymentTransferProof.id == command.proof_id,
+            PaymentTransferProof.intent_id == intent_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if proof is None:
         raise Conflict("transfer proof was not found in the tenant")
     if proof.state is not TransferProofState.SUBMITTED:
         raise Conflict("transfer proof has already been reviewed")
+    reviewer = _required(command.reviewer, "reviewer")
     reviewed_at = command.reviewed_at or datetime.now(UTC)
-    proof.reviewer = _required(command.reviewer, "reviewer")
-    proof.reviewed_at = reviewed_at
+    rejection_reason: str | None = None
     if not command.accept:
-        proof.state = TransferProofState.REJECTED
-        proof.rejection_reason = _required(
-            command.rejection_reason or "", "rejection reason"
-        )
-        db.flush()
-        return proof
-    proof.state = TransferProofState.ACCEPTED
-    record_confirmation(
-        db,
-        scope=scope,
-        command=RecordConfirmation(
-            intent_id=proof.intent_id,
-            source=ConfirmationSource.TRANSFER_PROOF,
-            external_reference=proof.submitted_reference,
-            confirmed=Money.of(
-                Decimal(proof.declared_amount), currency(proof.currency_code)
+        rejection_reason = _required(command.rejection_reason or "", "rejection reason")
+    else:
+        # Validate/correlate before mutating proof evidence: an expected
+        # confirmation conflict must not autoflush an ACCEPTED proof.
+        record_confirmation(
+            db,
+            scope=scope,
+            command=RecordConfirmation(
+                intent_id=proof.intent_id,
+                source=ConfirmationSource.TRANSFER_PROOF,
+                external_reference=proof.submitted_reference,
+                confirmed=_persisted_money(
+                    Decimal(proof.declared_amount),
+                    proof.currency_code,
+                    proof.minor_units,
+                ),
+                observed_at=reviewed_at,
             ),
-            observed_at=reviewed_at,
-        ),
+        )
+    proof.reviewer = reviewer
+    proof.reviewed_at = reviewed_at
+    proof.state = (
+        TransferProofState.ACCEPTED if command.accept else TransferProofState.REJECTED
     )
+    proof.rejection_reason = rejection_reason
     db.flush()
     return proof
 
@@ -275,12 +346,29 @@ def record_confirmation(
             raise Conflict(
                 "external reference is already correlated to a different intent"
             )
+        if (
+            replay.confirmed_amount != confirmed.amount
+            or replay.currency_code != confirmed.currency.code
+            or replay.minor_units != confirmed.currency.minor_units
+            or replay.source != command.source
+        ):
+            raise Conflict(
+                "external reference was reused for different confirmation evidence"
+            )
+        if command.observed_at is not None and _utc_moment(
+            command.observed_at
+        ) != _utc_moment(replay.observed_at):
+            raise Conflict(
+                "external reference was reused for a different observation time"
+            )
         return replay
 
     if intent.status is not _OPEN:
         raise Conflict("only a pending payment intent can be confirmed")
     observed_at = command.observed_at or datetime.now(UTC)
-    if intent.expires_at is not None and observed_at > intent.expires_at:
+    if intent.expires_at is not None and _utc_moment(observed_at) > _utc_moment(
+        intent.expires_at
+    ):
         raise Conflict("payment intent had already expired when this was observed")
 
     row = PaymentConfirmation(
@@ -290,6 +378,7 @@ def record_confirmation(
         provider_type=intent.provider_type,
         external_reference=external_reference,
         currency_code=confirmed.currency.code,
+        minor_units=confirmed.currency.minor_units,
         confirmed_amount=confirmed.amount,
         observed_at=observed_at,
     )
@@ -301,7 +390,45 @@ def record_confirmation(
     return row
 
 
+def get_confirmed_cash_v1(
+    db: Session, *, scope: TenantScope, query: GetConfirmedCashV1
+) -> ConfirmedCashObservationV1:
+    """Read immutable persisted scalars without flushing caller-owned changes.
+
+    This observation neither commits the caller's transaction nor resolves a
+    payer to a Billing account. Pending ORM changes cannot rewrite evidence.
+    """
+    tenant_id = _tenant(scope)
+    table = PaymentConfirmation.__table__
+    with db.no_autoflush:
+        row = (
+            db.execute(
+                select(table).where(
+                    table.c.tenant_id == tenant_id, table.c.id == query.confirmation_id
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+    if row is None:
+        raise ConfirmationNotFound("payment confirmation was not found in the tenant")
+    confirmed = _persisted_money(
+        row["confirmed_amount"], row["currency_code"], row["minor_units"]
+    )
+    return ConfirmedCashObservationV1(
+        scope=scope,
+        confirmation_id=row["id"],
+        intent_id=row["intent_id"],
+        confirmed=confirmed,
+        source=ConfirmationSource(row["source"]),
+        provider_type=row["provider_type"],
+        external_reference=row["external_reference"],
+        observed_at=_utc_moment(row["observed_at"]),
+    )
+
+
 __all__ = [
+    "get_confirmed_cash_v1",
     "cancel_payment_intent",
     "expire_payment_intent",
     "open_payment_intent",
