@@ -16,7 +16,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -70,14 +70,19 @@ from dotmac_billing.service import (
     void_document,
 )
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
-from dotmac_kernel.idempotency import IdempotencyConflict
-from dotmac_kernel.messaging.models import PlatformOutboxEvent
+from dotmac_kernel.idempotency import IdempotencyConflict, fingerprint_of
+from dotmac_kernel.idempotency_models import (
+    IdempotencyRecord,
+    PlatformIdempotencyRecord,
+)
+from dotmac_kernel.messaging.models import OutboxEvent, PlatformOutboxEvent
 from dotmac_kernel.money import Currency, Money
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import ForeignKeyConstraint, create_engine, event, func, select, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -958,6 +963,324 @@ def test_concurrent_duplicate_obligation_issuance_and_settlement_replay_once(
             session.scalar(select(func.count()).select_from(models.ConfirmedSettlement))
             == 1
         )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_settlement_replay_binds_persisted_account_lane_evidence_and_source(
+    scratch, plane
+) -> None:
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    ledger = IdempotencyRecord if plane == "tenant" else PlatformIdempotencyRecord
+    with _session(url, scope) as session:
+        accounts = [
+            create_billing_account(
+                session,
+                scope=scope,
+                external_account_ref=f"binding-{plane}-{index}",
+                currency="NGN",
+                minor_units=2,
+            )
+            for index in range(2)
+        ]
+        command = replace(
+            _settlement_command(accounts[0].id, scope=scope),
+            source_system="binding:integrator",
+            source_settlement_key=f"binding-{plane}",
+        )
+        accepted = frozenset({"provider_settled", "bank_confirmed"})
+        settlement = accept_settlement(
+            session,
+            scope=scope,
+            command=command,
+            accepted_confirmation_evidence=accepted,
+        )
+        settlement_id = settlement.id
+        # Pin the published algorithm: existing ledger rows must remain replayable.
+        legacy_fingerprint = fingerprint_of(
+            {
+                "amount": command.amount.amount,
+                "currency": command.amount.currency.code,
+                "minor_units": command.amount.currency.minor_units,
+                "occurred_at": command.occurred_at,
+                "source_version": command.source_version,
+            }
+        )
+        record = session.execute(
+            select(ledger).where(
+                ledger.scope == "billing.settlement",
+                ledger.key
+                == f"{command.source_system}:{command.source_settlement_key}",
+            )
+        ).scalar_one()
+        assert (
+            record.fingerprint == settlement.request_fingerprint == legacy_fingerprint
+        )
+        session.commit()
+        assert (
+            accept_settlement(
+                session,
+                scope=scope,
+                command=command,
+                accepted_confirmation_evidence=accepted,
+            ).id
+            == settlement_id
+        )
+        retry = accept_settlement(
+            session,
+            scope=scope,
+            command=replace(command, observed_at=NOW + timedelta(days=1)),
+            accepted_confirmation_evidence=accepted,
+        )
+        assert retry.id == settlement_id
+        assert retry.observed_at == NOW
+        changes = (
+            {"billing_account_id": accounts[1].id},
+            {"funding_lane": SettlementFundingLane.PREPAID_FUNDING},
+            {"confirmation_evidence": "bank_confirmed"},
+            # These two source pairs have the same historical colon-joined key.
+            {
+                "source_system": "binding",
+                "source_settlement_key": f"integrator:binding-{plane}",
+            },
+        )
+        for change in changes:
+            changed = replace(command, **change)
+            # Retained ORM state must neither authorize a changed retry nor deny
+            # the original command. No pending UPDATE is planted in the session.
+            for field, value in change.items():
+                set_committed_value(
+                    settlement,
+                    field,
+                    value.value if isinstance(value, SettlementFundingLane) else value,
+                )
+            set_committed_value(settlement, "observed_at", NOW + timedelta(days=2))
+            with pytest.raises(IdempotencyConflict, match="different request"):
+                accept_settlement(
+                    session,
+                    scope=scope,
+                    command=changed,
+                    accepted_confirmation_evidence=accepted,
+                )
+            original = accept_settlement(
+                session,
+                scope=scope,
+                command=command,
+                accepted_confirmation_evidence=accepted,
+            )
+            assert original.id == settlement_id
+            assert original.billing_account_id == command.billing_account_id
+            assert original.funding_lane == command.funding_lane.value
+            assert original.confirmation_evidence == command.confirmation_evidence
+            assert original.source_system == command.source_system
+            assert original.source_settlement_key == command.source_settlement_key
+            assert original.observed_at == command.observed_at
+            session.expire(settlement)
+        session.commit()
+        for account in accounts:
+            position = rebuild_receivable_position(
+                session,
+                scope=scope,
+                billing_account_id=account.id,
+                currency="NGN",
+                minor_units=2,
+            )
+            assert position.available_credit == (
+                Decimal("120")
+                if account.id == command.billing_account_id
+                else Decimal("0")
+            )
+            assert position.prepaid_funding == Decimal("0")
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_settlement_different_account_race_has_one_credit_and_one_refusal(
+    scratch, plane
+) -> None:
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account_ids = [
+            create_billing_account(
+                session,
+                scope=scope,
+                external_account_ref=f"binding-race-{plane}-{index}",
+                currency="NGN",
+                minor_units=2,
+            ).id
+            for index in range(2)
+        ]
+        session.commit()
+    settlement_model = (
+        models.ConfirmedSettlement
+        if plane == "tenant"
+        else models.PlatformConfirmedSettlement
+    )
+    barrier = threading.Barrier(2)
+    results: list[tuple[uuid.UUID, uuid.UUID]] = []
+    errors: list[BaseException] = []
+
+    def runner(account_id: uuid.UUID) -> None:
+        try:
+            with _session(url, scope) as session:
+                # Both attempts pass the replay lookup before either INSERT.
+                # This exercises the kernel's losing SAVEPOINT rollback as well
+                # as Billing's persisted binding check on the winner.
+                @event.listens_for(session, "before_flush")
+                def synchronize_acceptance(_session, _context, _instances) -> None:
+                    if any(isinstance(row, settlement_model) for row in _session.new):
+                        barrier.wait(timeout=20)
+
+                row = accept_settlement(
+                    session,
+                    scope=scope,
+                    command=_settlement_command(
+                        account_id, scope=scope, source_key=f"binding-race-{plane}"
+                    ),
+                    accepted_confirmation_evidence=frozenset({"provider_settled"}),
+                )
+                settlement_id = row.id
+                session.commit()
+                results.append((account_id, settlement_id))
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=runner, args=(account_id,))
+        for account_id in account_ids
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "Billing account race deadlocked"
+    assert len(results) == len(errors) == 1
+    assert isinstance(errors[0], IdempotencyConflict)
+    with _session(url, scope) as session:
+        for account_id in account_ids:
+            position = rebuild_receivable_position(
+                session,
+                scope=scope,
+                billing_account_id=account_id,
+                currency="NGN",
+                minor_units=2,
+            )
+            assert position.available_credit == (
+                Decimal("120") if account_id == results[0][0] else Decimal("0")
+            )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(settlement_model)
+                .where(settlement_model.billing_account_id.in_(account_ids))
+            )
+            == 1
+        )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_settlement_rollback_removes_money_outbox_and_replay_binding(
+    scratch, plane
+) -> None:
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    settlement_model = (
+        models.ConfirmedSettlement
+        if plane == "tenant"
+        else models.PlatformConfirmedSettlement
+    )
+    group_model = (
+        models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+    )
+    effect_model = (
+        models.PostingEffect if plane == "tenant" else models.PlatformPostingEffect
+    )
+    ledger = IdempotencyRecord if plane == "tenant" else PlatformIdempotencyRecord
+    outbox = OutboxEvent if plane == "tenant" else PlatformOutboxEvent
+    with _session(url, scope) as session:
+        account_id = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=f"binding-rollback-{plane}",
+            currency="NGN",
+            minor_units=2,
+        ).id
+        session.commit()
+        command = _settlement_command(
+            account_id, scope=scope, source_key=f"binding-rollback-{plane}"
+        )
+        abandoned_id = accept_settlement(
+            session,
+            scope=scope,
+            command=command,
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        ).id
+        session.rollback()
+    with _session(url, scope) as session:
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(settlement_model)
+                .where(settlement_model.id == abandoned_id)
+            )
+            == 0
+        )
+        for model in (group_model, effect_model):
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(model)
+                    .where(model.billing_account_id == account_id)
+                )
+                == 0
+            )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(ledger)
+                .where(
+                    ledger.scope == "billing.settlement",
+                    ledger.key == f"integrator:binding-rollback-{plane}",
+                )
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(outbox)
+                .where(
+                    outbox.event_type == "billing.settlement.accepted.v1",
+                    outbox.payload["settlement_id"].as_string() == str(abandoned_id),
+                )
+            )
+            == 0
+        )
+        accepted_id = accept_settlement(
+            session,
+            scope=scope,
+            command=replace(
+                command, funding_lane=SettlementFundingLane.PREPAID_FUNDING
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        ).id
+        assert accepted_id != abandoned_id
+        session.commit()
 
 
 def test_settlement_replay_conflict_money_guards_and_rebuild_hash(scratch) -> None:

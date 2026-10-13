@@ -33,6 +33,12 @@ file bytes. Artifact creation locks the invoice lifecycle and refuses a new
 medium after cancellation; a pre-existing idempotent command still replays its
 historical relation.
 
+Settlement replay preserves the published source-key and money/version
+fingerprint algorithm. Billing additionally compares persisted account, funding
+lane, confirmation evidence and exact source identifiers before returning a
+settlement, including after a concurrent acceptance. A retry's `observed_at` is
+transport receipt metadata and retains the original observation.
+
 The database enforces Billing's internal relationship graph on both planes:
 obligations and settlements belong to their account, document lines belong to
 the same obligation/document pair, posting and allocation effects cannot cross
