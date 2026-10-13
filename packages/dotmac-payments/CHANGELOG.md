@@ -2,6 +2,11 @@
 
 ## 0.1.0a2 — 2026-10-13 (declared, unpublished)
 
+- Persists exact Money currency scale in additive `pm_0002_money_precision`;
+  legacy NULL precision remains unresolved without an inferred default/backfill.
+- Exposes frozen tenant-scoped confirmed-cash observations from persisted scalar
+  evidence with typed missing/unknown-precision refusals and caller-owned transactions.
+- Refuses unsupported scales, nonfinite amounts and Numeric(20, 6) overflow.
 - Refuses confirmation replay with a changed amount, currency, source or supplied
   observation instant. An omitted instant replays the original evidence.
 - Serializes confirmation, cancellation, expiry and proof submission on the

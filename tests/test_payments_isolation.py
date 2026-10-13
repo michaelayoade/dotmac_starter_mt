@@ -55,7 +55,7 @@ def _url(base: str, database: str, user: str | None = None) -> str:
 
 
 @pytest.fixture
-def migrated() -> Iterator[tuple[str, str]]:
+def migrated(request) -> Iterator[tuple[str, str]]:
     superuser = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv(
         "TEST_DATABASE_URL"
     )
@@ -81,7 +81,7 @@ def migrated() -> Iterator[tuple[str, str]]:
         cfg.set_main_option("script_location", str(ROOT / "alembic"))
         cfg.set_main_option("version_locations", f"{KERNEL} {VERSIONS}")
         os.environ["MIGRATION_DATABASE_URL"] = admin
-        command.upgrade(cfg, "heads")
+        command.upgrade(cfg, getattr(request, "param", "heads"))
         yield admin, _url(superuser, name, "app_user")
     finally:
         with server.connect() as connection:
@@ -413,3 +413,207 @@ def test_concurrent_reviews_cannot_accept_and_reject_the_same_proof(migrated):
         assert session.scalar(
             select(func.count()).select_from(PaymentConfirmation)
         ) == (1 if proof.state is TransferProofState.ACCEPTED else 0)
+
+
+@pytest.mark.parametrize(
+    "code,scale,value",
+    [
+        ("JPY", 0, "123"),
+        ("NGN", 2, "123.45"),
+        ("BHD", 3, "123.456"),
+        ("XTS", 6, "123.456789"),
+    ],
+)
+def test_exact_confirmed_cash_is_fresh_scoped_and_rollback_owned(
+    migrated, code, scale, value
+):
+    from dotmac_kernel.money import Currency
+    from dotmac_payments import (
+        ConfirmationNotFound,
+        GetConfirmedCashV1,
+        get_confirmed_cash_v1,
+    )
+
+    scope, _, _, now = _seed_pending(migrated)
+    money = Money.of(value, Currency(code, scale))
+    app_url = migrated[1]
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        intent = open_payment_intent(
+            session,
+            scope=scope,
+            command=OpenPaymentIntent(
+                payer_reference="precision-payer",
+                purpose=PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT,
+                requested=money,
+                reference="precision",
+                provider_type="bank",
+                channel="transfer",
+                opened_at=now,
+            ),
+        )
+        proof = submit_transfer_proof(
+            session,
+            scope=scope,
+            command=SubmitTransferProof(
+                intent_id=intent.id,
+                declared=money,
+                document_reference="proof",
+                submitted_reference="precision-proof",
+            ),
+        )
+        review_transfer_proof(
+            session,
+            scope=scope,
+            command=ReviewTransferProof(
+                proof_id=proof.id,
+                accept=True,
+                reviewer="reviewer",
+                reviewed_at=now,
+            ),
+        )
+        confirmation = session.scalar(
+            select(PaymentConfirmation).where(
+                PaymentConfirmation.intent_id == intent.id
+            )
+        )
+        query = GetConfirmedCashV1(confirmation.id)
+        intent_id = intent.id
+        session.commit()
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        observation = get_confirmed_cash_v1(session, scope=scope, query=query)
+        assert observation.confirmed == money
+        assert observation.intent_id == intent_id
+        assert observation.observed_at == now
+        stale = session.get(PaymentConfirmation, query.confirmation_id)
+        stale.confirmed_amount = Money.of("9", money.currency).amount
+        assert get_confirmed_cash_v1(session, scope=scope, query=query) == observation
+        # Reads do not flush dirty evidence, and leave transaction authority here.
+        session.rollback()
+    foreign = TenantScope(uuid.uuid4())
+    with _tenant_session(app_url, foreign.tenant_id) as session:
+        with pytest.raises(ConfirmationNotFound):
+            get_confirmed_cash_v1(session, scope=foreign, query=query)
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        pending = open_payment_intent(
+            session,
+            scope=scope,
+            command=OpenPaymentIntent(
+                payer_reference="rollback-payer",
+                purpose=PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT,
+                requested=money,
+                reference="rollback",
+                provider_type="bank",
+                channel="transfer",
+                opened_at=now,
+            ),
+        )
+        confirmation = record_confirmation(
+            session,
+            scope=scope,
+            command=RecordConfirmation(
+                intent_id=pending.id,
+                source=ConfirmationSource.MANUAL,
+                external_reference="rollback-confirmation",
+                confirmed=money,
+                observed_at=now,
+            ),
+        )
+        rolled_back = GetConfirmedCashV1(confirmation.id)
+        assert (
+            get_confirmed_cash_v1(session, scope=scope, query=rolled_back).confirmed
+            == money
+        )
+        session.rollback()
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        with pytest.raises(ConfirmationNotFound):
+            get_confirmed_cash_v1(session, scope=scope, query=rolled_back)
+
+
+@pytest.mark.parametrize("migrated", ["pm_0001_payment_intents"], indirect=True)
+def test_precision_upgrade_preserves_legacy_evidence_and_refuses_guessing(migrated):
+    from dotmac_payments import (
+        GetConfirmedCashV1,
+        UnresolvedMoneyPrecision,
+        get_confirmed_cash_v1,
+    )
+
+    from alembic import command
+    from alembic.config import Config
+
+    admin_url, app_url = migrated
+    tenant_id, intent_id, proof_id, confirmation_id = (uuid.uuid4() for _ in range(4))
+    engine = create_engine(admin_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO public.tenants (id,slug,name) VALUES (:id,:slug,:slug)"),
+            {"id": tenant_id, "slug": f"legacy:{tenant_id}"},
+        )
+        connection.execute(
+            text("SELECT set_config('app.current_tenant', :tenant, true)"),
+            {"tenant": str(tenant_id)},
+        )
+        connection.execute(
+            text("""INSERT INTO mod_payments.payment_intents
+            (id,tenant_id,reference,payer_reference,purpose,provider_type,channel,
+             currency_code,requested_amount,status,opened_at)
+            VALUES (:id,:tenant,'legacy','payer','ACCOUNT_CREDIT_DEPOSIT',
+                    'BANK','TRANSFER','BHD',123.456,'PENDING',now())"""),
+            {"id": intent_id, "tenant": tenant_id},
+        )
+        connection.execute(
+            text("""INSERT INTO mod_payments.payment_transfer_proofs
+            (id,tenant_id,intent_id,submitted_reference,document_reference,
+             currency_code,declared_amount,state,declared_at)
+            VALUES (:id,:tenant,:intent,'legacy-proof','file:legacy','BHD',
+                    123.456,'SUBMITTED',now())"""),
+            {"id": proof_id, "tenant": tenant_id, "intent": intent_id},
+        )
+        connection.execute(
+            text("""INSERT INTO mod_payments.payment_confirmations
+            (id,tenant_id,intent_id,source,provider_type,external_reference,
+             currency_code,confirmed_amount,observed_at)
+            VALUES (:id,:tenant,:intent,'MANUAL','BANK','legacy-confirmation',
+                    'BHD',123.456,now())"""),
+            {"id": confirmation_id, "tenant": tenant_id, "intent": intent_id},
+        )
+        before = {
+            table: connection.execute(
+                text(f"SELECT to_jsonb(t) FROM mod_payments.{table} t")  # noqa: S608 — closed TABLES
+            ).scalar_one()
+            for table in TABLES
+        }
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "alembic"))
+    cfg.set_main_option("version_locations", f"{KERNEL} {VERSIONS}")
+    command.upgrade(cfg, "pm_0002_money_precision")
+    with engine.begin() as connection:
+        connection.execute(
+            text("SELECT set_config('app.current_tenant', :tenant, true)"),
+            {"tenant": str(tenant_id)},
+        )
+        for table in TABLES:
+            after = connection.execute(
+                text(f"SELECT to_jsonb(t) FROM mod_payments.{table} t")  # noqa: S608 — closed TABLES
+            ).scalar_one()
+            assert after.pop("minor_units") is None
+            assert after == before[table]
+    scope = TenantScope(tenant_id)
+    with _tenant_session(app_url, tenant_id) as session:
+        with pytest.raises(UnresolvedMoneyPrecision):
+            get_confirmed_cash_v1(
+                session, scope=scope, query=GetConfirmedCashV1(confirmation_id)
+            )
+        with pytest.raises(UnresolvedMoneyPrecision):
+            review_transfer_proof(
+                session,
+                scope=scope,
+                command=ReviewTransferProof(
+                    proof_id=proof_id, accept=True, reviewer="reviewer"
+                ),
+            )
+        proof = session.get(PaymentTransferProof, proof_id)
+        assert proof.state is TransferProofState.SUBMITTED
+        assert proof.reviewer is None
+        cancel_payment_intent(session, scope=scope, intent_id=intent_id)
+        session.commit()
+    engine.dispose()

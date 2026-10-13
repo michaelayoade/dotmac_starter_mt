@@ -2340,6 +2340,7 @@
           "dotmac_payments/manifest.py",
           "dotmac_payments/migrations/__init__.py",
           "dotmac_payments/migrations/versions/pm_0001_payment_intents.py",
+          "dotmac_payments/migrations/versions/pm_0002_money_precision.py",
           "dotmac_payments/models.py",
           "dotmac_payments/service.py"
         ],

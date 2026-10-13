@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
+from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.money import Money
 
 
@@ -16,6 +17,33 @@ class PaymentError(Exception):
 
 class Conflict(PaymentError):
     """The intent, proof or confirmation state is inadmissible."""
+
+
+class ConfirmationNotFound(PaymentError):
+    """The requested confirmation is absent from the tenant scope."""
+
+
+class UnresolvedMoneyPrecision(Conflict):
+    """Legacy evidence has no authoritative currency scale."""
+
+
+@dataclass(frozen=True, slots=True)
+class GetConfirmedCashV1:
+    confirmation_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmedCashObservationV1:
+    """Persisted cash evidence; payer/account identity belongs to assembly."""
+
+    scope: TenantScope
+    confirmation_id: UUID
+    intent_id: UUID
+    confirmed: Money
+    source: ConfirmationSource
+    provider_type: str
+    external_reference: str
+    observed_at: datetime
 
 
 class PaymentPurpose(enum.StrEnum):
@@ -116,6 +144,10 @@ class RecordConfirmation:
 
 __all__ = [
     "Conflict",
+    "ConfirmationNotFound",
+    "ConfirmedCashObservationV1",
+    "GetConfirmedCashV1",
+    "UnresolvedMoneyPrecision",
     "ConfirmationSource",
     "OpenPaymentIntent",
     "PaymentError",

@@ -26,19 +26,23 @@ from decimal import Decimal
 from uuid import UUID
 
 from dotmac_kernel.cache import TenantScope
-from dotmac_kernel.money import Money, currency
+from dotmac_kernel.money import Currency, Money
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_payments.contracts import (
+    ConfirmationNotFound,
     ConfirmationSource,
+    ConfirmedCashObservationV1,
     Conflict,
+    GetConfirmedCashV1,
     OpenPaymentIntent,
     PaymentIntentStatus,
     RecordConfirmation,
     ReviewTransferProof,
     SubmitTransferProof,
     TransferProofState,
+    UnresolvedMoneyPrecision,
 )
 from dotmac_payments.models import (
     PaymentConfirmation,
@@ -63,8 +67,31 @@ def _required(value: str, field: str) -> str:
 
 
 def _positive(money: Money, field: str) -> Money:
+    if (
+        type(money.currency.minor_units) is not int
+        or not 0 <= money.currency.minor_units <= 6
+    ):
+        raise Conflict(f"{field} currency scale must be an integer from 0 to 6")
+    if not money.amount.is_finite():
+        raise Conflict(f"{field} must be finite")
+    if money.amount >= Decimal("100000000000000"):
+        raise Conflict(f"{field} does not fit Numeric(20, 6)")
     if money.amount <= Decimal(0):
         raise Conflict(f"{field} must be greater than zero")
+    return money
+
+
+def _persisted_money(amount: Decimal, code: str, scale: int | None) -> Money:
+    if scale is None:
+        raise UnresolvedMoneyPrecision("stored currency precision is unresolved")
+    if type(scale) is not int or not 0 <= scale <= 6:
+        raise UnresolvedMoneyPrecision("stored currency precision is unsupported")
+    # Inspect before Money construction, whose public constructor quantizes.
+    if not amount.is_finite() or not Decimal(0) < amount < Decimal("100000000000000"):
+        raise Conflict("stored amount does not fit positive finite Numeric(20, 6)")
+    money = Money.of(amount, Currency(code, scale))
+    if money.amount != amount:
+        raise UnresolvedMoneyPrecision("stored amount conflicts with its precision")
     return money
 
 
@@ -90,10 +117,18 @@ def _utc_moment(value: datetime) -> datetime:
 
 
 def _same_currency(intent: PaymentIntent, money: Money, field: str) -> None:
-    if money.currency.code != intent.currency_code:
+    if intent.minor_units is None:
+        raise UnresolvedMoneyPrecision(
+            "payment intent currency precision is unresolved"
+        )
+    if (
+        money.currency.code != intent.currency_code
+        or money.currency.minor_units != intent.minor_units
+    ):
         raise Conflict(
-            f"{field} currency {money.currency.code} does not match the intent "
-            f"currency {intent.currency_code}"
+            f"{field} currency {money.currency.code}/{money.currency.minor_units} "
+            f"does not match the intent currency "
+            f"{intent.currency_code}/{intent.minor_units}"
         )
 
 
@@ -113,6 +148,7 @@ def open_payment_intent(
         if (
             existing.requested_amount != requested.amount
             or existing.currency_code != requested.currency.code
+            or existing.minor_units != requested.currency.minor_units
         ):
             raise Conflict("reference was reused for a different amount")
         if existing.payer_reference != command.payer_reference.strip():
@@ -138,6 +174,7 @@ def open_payment_intent(
         provider_type=_required(command.provider_type, "provider type").upper(),
         channel=_required(command.channel, "channel").upper(),
         currency_code=requested.currency.code,
+        minor_units=requested.currency.minor_units,
         requested_amount=requested.amount,
         status=_OPEN,
         opened_at=opened_at,
@@ -208,6 +245,7 @@ def submit_transfer_proof(
         ),
         document_reference=_required(command.document_reference, "document reference"),
         currency_code=declared.currency.code,
+        minor_units=declared.currency.minor_units,
         declared_amount=declared.amount,
         state=TransferProofState.SUBMITTED,
         declared_at=command.declared_at or datetime.now(UTC),
@@ -268,8 +306,10 @@ def review_transfer_proof(
                 intent_id=proof.intent_id,
                 source=ConfirmationSource.TRANSFER_PROOF,
                 external_reference=proof.submitted_reference,
-                confirmed=Money.of(
-                    Decimal(proof.declared_amount), currency(proof.currency_code)
+                confirmed=_persisted_money(
+                    Decimal(proof.declared_amount),
+                    proof.currency_code,
+                    proof.minor_units,
                 ),
                 observed_at=reviewed_at,
             ),
@@ -309,6 +349,7 @@ def record_confirmation(
         if (
             replay.confirmed_amount != confirmed.amount
             or replay.currency_code != confirmed.currency.code
+            or replay.minor_units != confirmed.currency.minor_units
             or replay.source != command.source
         ):
             raise Conflict(
@@ -337,6 +378,7 @@ def record_confirmation(
         provider_type=intent.provider_type,
         external_reference=external_reference,
         currency_code=confirmed.currency.code,
+        minor_units=confirmed.currency.minor_units,
         confirmed_amount=confirmed.amount,
         observed_at=observed_at,
     )
@@ -348,7 +390,45 @@ def record_confirmation(
     return row
 
 
+def get_confirmed_cash_v1(
+    db: Session, *, scope: TenantScope, query: GetConfirmedCashV1
+) -> ConfirmedCashObservationV1:
+    """Read immutable persisted scalars without flushing caller-owned changes.
+
+    This observation neither commits the caller's transaction nor resolves a
+    payer to a Billing account. Pending ORM changes cannot rewrite evidence.
+    """
+    tenant_id = _tenant(scope)
+    table = PaymentConfirmation.__table__
+    with db.no_autoflush:
+        row = (
+            db.execute(
+                select(table).where(
+                    table.c.tenant_id == tenant_id, table.c.id == query.confirmation_id
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+    if row is None:
+        raise ConfirmationNotFound("payment confirmation was not found in the tenant")
+    confirmed = _persisted_money(
+        row["confirmed_amount"], row["currency_code"], row["minor_units"]
+    )
+    return ConfirmedCashObservationV1(
+        scope=scope,
+        confirmation_id=row["id"],
+        intent_id=row["intent_id"],
+        confirmed=confirmed,
+        source=ConfirmationSource(row["source"]),
+        provider_type=row["provider_type"],
+        external_reference=row["external_reference"],
+        observed_at=_utc_moment(row["observed_at"]),
+    )
+
+
 __all__ = [
+    "get_confirmed_cash_v1",
     "cancel_payment_intent",
     "expire_payment_intent",
     "open_payment_intent",

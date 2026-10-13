@@ -27,3 +27,29 @@ Version `0.1.0a2` is declared and unpublished. Sub remains the live writer until
 its history backfill, zero-drift shadow and separately authorized cutover pass.
 
 The tenant-only `pm` lineage owns `mod_payments`.
+
+
+Currency precision is persisted as `minor_units` alongside the code on intents,
+proofs and confirmations. New commands require finite positive amounts that fit
+`Numeric(20, 6)` and an explicit Money scale from 0 through 6. A code with a
+different scale is a different currency for replay and correlation.
+
+`get_confirmed_cash_v1(db, scope=TenantScope(...), query=GetConfirmedCashV1(id))`
+returns frozen `ConfirmedCashObservationV1` with `scope`, `confirmation_id`,
+`intent_id`, exact `confirmed: Money`, `source`, `provider_type`,
+`external_reference` and the original `observed_at`. It reads persisted immutable
+confirmation scalars without autoflushing pending ORM changes or completing the
+transaction. `ConfirmationNotFound` refuses absent/cross-tenant IDs;
+`UnresolvedMoneyPrecision` refuses historical evidence whose scale is unknown.
+A caller may observe its own uncommitted confirmation; the caller owns commit
+and rollback, so an observation is not a durable transaction receipt. Assembly
+must resolve intent/payer to account through its own structural binding; provider
+metadata never supplies Billing identity or turns claimed deductions into cash.
+
+Additive `pm_0002_money_precision` leaves existing rows with NULL precision. It
+has no scale default or inferred backfill: neither a currency registry nor the
+Numeric decimal exponent proves the original command scale. Legacy proof
+acceptance and monetary correlation fail closed. Cancellation, expiry and proof
+rejection retain their existing lifecycle behavior. Resolving historical scales
+requires separate source evidence and authorization; this package supplies no
+repair writer.
