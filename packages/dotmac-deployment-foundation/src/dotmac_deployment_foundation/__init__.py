@@ -135,6 +135,7 @@ from .document import (
 )
 from .drift import DriftReport, Observation, Verdict, compare
 from .engine import (
+    CandidateMaterialProbeEffects,
     DeploymentLockHeld,
     DeploymentOutcome,
     DeploymentPlan,
@@ -285,6 +286,17 @@ from .lease_release import (
     require_release_for_reuse,
     write_release,
 )
+from .material_readiness import (
+    MATERIAL_PROBE_MAX_CHECKS,
+    MATERIAL_PROBE_MAX_STDOUT_BYTES,
+    MATERIAL_PROBE_RESULT_SCHEMA,
+    MaterialProbeCheck,
+    MaterialProbeObservation,
+    MaterialProbePhase,
+    MaterialProbeResult,
+    MaterialProbeStatus,
+    parse_material_probe_result,
+)
 from .policy import (
     build_edge_plan,
     build_firewall_plan,
@@ -389,10 +401,12 @@ from .spec import (
     SCHEMA_V1,
     SCHEMA_V2,
     SCHEMA_V3,
+    SCHEMA_V4,
     SCHEMAS,
     DatabaseContract,
     DatabaseRole,
     IsolationInvariant,
+    MaterialProbe,
     ProductDeploymentSpec,
 )
 from .telemetry import (
@@ -546,6 +560,7 @@ __all__ = [
     "EffectivePrivilegeFact",
     "EffectivePrivilegeKey",
     "Effects",
+    "CandidateMaterialProbeEffects",
     "INTEGRATION_SURFACE_FAMILIES",
     "ApplicationFoundationProfile",
     "ConcernBinding",
@@ -694,6 +709,17 @@ __all__ = [
     "SCHEMA_V1",
     "SCHEMA_V2",
     "SCHEMA_V3",
+    "SCHEMA_V4",
+    "MaterialProbe",
+    "MATERIAL_PROBE_RESULT_SCHEMA",
+    "MATERIAL_PROBE_MAX_STDOUT_BYTES",
+    "MATERIAL_PROBE_MAX_CHECKS",
+    "MaterialProbePhase",
+    "MaterialProbeStatus",
+    "MaterialProbeCheck",
+    "MaterialProbeResult",
+    "MaterialProbeObservation",
+    "parse_material_probe_result",
     "SecretValueError",
     "Severity",
     "SignatureVerifier",

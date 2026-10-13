@@ -30,12 +30,30 @@
         "tests/unit/test_licensing_receiver.py",
         "tests/unit/test_licence_ack_commit_contract.py"
       ]
+    },
+    {
+      "authority_id": "candidate-material-readiness",
+      "subject": "Admission of candidate material readiness before credential bootstrap and after migrations.",
+      "protected_resources": ["candidate-material-readiness-decision"],
+      "owner_component": "deployment-foundation-executor",
+      "owner_implementation": "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/engine/run.py",
+      "decision_interface": "dotmac_deployment_foundation.engine.run.Executor._verify_candidate_materials",
+      "canonical_writer_paths": ["packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/engine/run.py"],
+      "adapter_paths": ["packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/providers/compose_host.py"],
+      "drift_test_paths": ["tests/unit/test_deployment_foundation_material_readiness.py"]
     }
   ],
   "typed_contract_surfaces": [
     {
       "surface_id": "licence-application-service-contract",
       "paths": ["app/features/licensing/service.py"],
+      "require_public_annotations": true,
+      "forbid_any": true,
+      "require_immutable_records": true
+    },
+    {
+      "surface_id": "candidate-material-probe-contract",
+      "paths": ["packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/material_readiness.py"],
       "require_public_annotations": true,
       "forbid_any": true,
       "require_immutable_records": true

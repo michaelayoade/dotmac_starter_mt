@@ -46,29 +46,39 @@ import hashlib
 import json
 import os
 import re
+import selectors
 import subprocess  # nosec B404 -- argv lists, shell=False; see the module docstring
 import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
 import zlib
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
-from typing import IO
+from typing import IO, Protocol
 
 from ..deployment_evidence import StepStanding
 from ..engine.run import BackupResult, CommandResult, RoleObservation
 from ..errors import PreconditionFailed, SpecError, StepFailed
 from ..evidence import SignedEvidenceEnvelope
 from ..execution_plan_v2 import PostgresPrincipalCredentialBootstrapV1
+from ..material_readiness import (
+    MATERIAL_PROBE_MAX_STDOUT_BYTES,
+    MaterialProbeObservation,
+    MaterialProbeResult,
+    MaterialProbeStatus,
+    parse_material_probe_result,
+    unavailable_material_probe,
+)
 from ..recovery import refuse_identity_stripping
 from ..render.compose import render_compose, render_compose_digest
 from ..render.nginx import _ingress_roles as _nginx_ingress_roles
 from ..render.nginx import handoff_contract_pattern, render_nginx
-from ..spec import BackupDataset, ProductDeploymentSpec
+from ..spec import BackupDataset, MaterialProbe, ProductDeploymentSpec
 from ..toolchain import DEFAULT_TOOLS, require_absolute_tool
 
 __all__ = ["ComposeHostEffects", "NginxInstaller", "RetainedComposeAsset"]
@@ -87,6 +97,74 @@ PopenFactory = Callable[
     [Sequence[str], "Mapping[str, str] | None"], "subprocess.Popen[bytes]"
 ]
 ReadinessProbe = Callable[[str, float], bool]
+
+
+class MaterialProbeTransport(Protocol):
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_seconds: int,
+        env: Mapping[str, str],
+        max_stdout_bytes: int,
+    ) -> MaterialProbeResult: ...
+
+
+def _bounded_material_probe(
+    argv: Sequence[str],
+    *,
+    timeout_seconds: int,
+    env: Mapping[str, str],
+    max_stdout_bytes: int,
+) -> MaterialProbeResult:
+    """Collect only bounded stdout; child diagnostics are discarded at source."""
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        process = subprocess.Popen(  # nosec B603 -- argv only, no shell
+            list(argv),
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=dict(env),
+        )
+        if process.stdout is None:
+            return unavailable_material_probe()
+        deadline = time.monotonic() + timeout_seconds
+        output = bytearray()
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return unavailable_material_probe()
+                for key, _events in selector.select(remaining):
+                    chunk = os.read(
+                        key.fd, min(4096, max_stdout_bytes + 1 - len(output))
+                    )
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                    else:
+                        output.extend(chunk)
+                        if len(output) > max_stdout_bytes:
+                            return unavailable_material_probe()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return unavailable_material_probe()
+            exit_code = process.wait(timeout=remaining)
+        result = parse_material_probe_result(bytes(output))
+        if exit_code != 0 and result.status is MaterialProbeStatus.READY:
+            return unavailable_material_probe()
+        return result
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return unavailable_material_probe()
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            if process.stdout is not None:
+                process.stdout.close()
 
 
 # ── the default runner and popen factory ────────────────────────────────────
@@ -261,6 +339,14 @@ class ComposeHostEffects:
         env_file: Path | str | None = None,
         extra_env_files: tuple[Path | str, ...] = (),
         runner: Runner = _default_runner,
+        material_probe_transport: MaterialProbeTransport = _bounded_material_probe,
+        material_probe_protected_roots: tuple[str, ...] = (
+            "/usr",
+            "/opt",
+            "/bin",
+            "/lib",
+            "/lib64",
+        ),
         popen_factory: PopenFactory = _default_popen_factory,
         readiness_probe: ReadinessProbe = _default_readiness_probe,
         clock: Callable[[], float] = time.time,
@@ -300,6 +386,8 @@ class ComposeHostEffects:
         migration_heads_timeout_seconds: int = 60,
     ) -> None:
         self._spec = spec
+        self._material_probe_transport = material_probe_transport
+        self._material_probe_protected_roots = material_probe_protected_roots
         self._deploy_dir = Path(deploy_dir)
         self._compose_file = (
             Path(compose_file)
@@ -502,14 +590,8 @@ class ComposeHostEffects:
         A test proves this by planting a value and asserting it appears
         NOWHERE in the return value or its `repr()`.
         """
-        names: set[str] = set()
-        for key, value in self._env_file_values().items():
-            if value:
-                names.add(key)
-        for key, value in os.environ.items():
-            if value:
-                names.add(key)
-        return sorted(names)
+        effective = {**os.environ, **self._env_file_values()}
+        return sorted(key for key, value in effective.items() if value)
 
     def _write_env_value(self, key: str, value: str) -> None:
         """Set `KEY=value` in the deploy dir's env file, atomically.
@@ -583,7 +665,7 @@ class ComposeHostEffects:
         )
         if not pulled.ok:
             raise PreconditionFailed(
-                f"`{self._docker_bin} pull {reference}` failed: " f"{_output(pulled)}"
+                f"`{self._docker_bin} pull {reference}` failed: {_output(pulled)}"
             )
         return True
 
@@ -1084,6 +1166,172 @@ class ComposeHostEffects:
             )
         return {**self._materials_env(materials), self._image_env_var: str(image)}
 
+    def probe_candidate_materials(
+        self, probe: MaterialProbe, *, image: str
+    ) -> MaterialProbeObservation:
+        """Execute retained candidate bytes as the declared role, never the host."""
+        result = unavailable_material_probe()
+        name = "foundation-material-probe-" + uuid.uuid4().hex
+        try:
+            if image != self._spec.image or probe not in self._spec.material_probes:
+                raise PreconditionFailed("unbound candidate material probe")
+            role = self._spec.role(probe.role)
+            topology = self._spec.compose_topology
+            if topology is None:
+                raise PreconditionFailed(
+                    "candidate material probes need retained topology"
+                )
+            placement = topology.placement(probe.role)
+            if {"PYTHONPATH", "PYTHONHOME"} & (
+                set(role.materials) | dict(role.environment).keys()
+            ):
+                raise PreconditionFailed("candidate interpreter overrides are refused")
+            self._validate_v3_mounts()
+            env = self._candidate_image_env(role.materials, image=image)
+            # Match _run's mount interpolation exactly: file pointers are
+            # authoritative even when the parent exports a different target.
+            file_values = self._env_file_values()
+            for item in (
+                *topology.placements,
+                *(job.placement for job in topology.jobs),
+            ):
+                for mount in item.mounts:
+                    for material in (mount.source_material, mount.target_material):
+                        if material:
+                            env[material] = file_values[material]
+            if self._spec.migration.owner_material in dict(role.environment):
+                raise PreconditionFailed("runtime role holds migration-only material")
+            image_env = self._run(
+                [
+                    self._docker_bin,
+                    "image",
+                    "inspect",
+                    "--format",
+                    '{{range .Config.Env}}{{println (index (split . "=") 0)}}{{end}}',
+                    image,
+                ],
+                timeout_seconds=self._inspect_timeout_seconds,
+            )
+            if not image_env.ok:
+                raise PreconditionFailed("candidate image environment unavailable")
+            image_names = set(image_env.stdout.splitlines())
+            if any(
+                not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item)
+                for item in image_names
+            ):
+                raise PreconditionFailed("candidate image environment invalid")
+            if {
+                self._spec.migration.owner_material,
+                "PYTHONPATH",
+                "PYTHONHOME",
+            } & image_names:
+                raise PreconditionFailed(
+                    "candidate image contains forbidden environment overrides"
+                )
+            working = self._run(
+                [
+                    self._docker_bin,
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{.Config.WorkingDir}}",
+                    image,
+                ],
+                timeout_seconds=self._inspect_timeout_seconds,
+            )
+            if not working.ok:
+                raise PreconditionFailed("candidate working directory unavailable")
+            working_dir = PurePosixPath(working.stdout.strip() or "/")
+            if (
+                not working_dir.is_absolute()
+                or str(working_dir).startswith("//")
+                or ".." in working_dir.parts
+            ):
+                raise PreconditionFailed("candidate working directory invalid")
+            protected = (
+                PurePosixPath(self._app_root),
+                PurePosixPath(probe.argv[0]).parent,
+                working_dir,
+                *(PurePosixPath(path) for path in self._material_probe_protected_roots),
+            )
+            for target in [
+                *(volume.target for volume in role.volumes),
+                *(
+                    mount.target or file_values.get(mount.target_material, "")
+                    for mount in placement.mounts
+                ),
+            ]:
+                path = PurePosixPath(target)
+                if (
+                    not path.is_absolute()
+                    or str(path).startswith("//")
+                    or ".." in path.parts
+                    or any(
+                        path == root
+                        or path.is_relative_to(root)
+                        or root.is_relative_to(path)
+                        for root in protected
+                    )
+                ):
+                    raise PreconditionFailed(
+                        "candidate code or interpreter mount is refused"
+                    )
+            with self._candidate_compose_argv(image) as compose:
+                # Explicit executable bypasses image entrypoint wrappers; retained
+                # Compose supplies role user, mounts, environment and networks.
+                argv = [
+                    *compose,
+                    "run",
+                    "--no-deps",
+                    "--name",
+                    name,
+                    "--entrypoint",
+                    probe.argv[0],
+                    probe.role,
+                    *probe.argv[1:],
+                ]
+                result = self._material_probe_transport(
+                    argv,
+                    timeout_seconds=probe.timeout_seconds,
+                    env=env,
+                    max_stdout_bytes=MATERIAL_PROBE_MAX_STDOUT_BYTES,
+                )
+                if not isinstance(result, MaterialProbeResult):
+                    result = unavailable_material_probe()
+                expected = self._run(
+                    [
+                        self._docker_bin,
+                        "image",
+                        "inspect",
+                        "--format",
+                        "{{.Id}}",
+                        image,
+                    ],
+                    timeout_seconds=self._inspect_timeout_seconds,
+                )
+                expected_id = expected.stdout.strip() if expected.ok else ""
+                if (
+                    not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_id)
+                    or self._container_image_id(name) != expected_id
+                ):
+                    result = unavailable_material_probe()
+        except Exception:
+            result = unavailable_material_probe()
+        finally:
+            # Only our random one-off name; never remove an existing role.
+            try:
+                cleanup = self._runner(
+                    [self._docker_bin, "rm", "-f", name],
+                    timeout=self._inspect_timeout_seconds,
+                    env=None,
+                    capture=True,
+                )
+                if not cleanup.ok:
+                    result = unavailable_material_probe()
+            except Exception:
+                result = unavailable_material_probe()
+        return MaterialProbeObservation(image, probe.role, probe.phase, result)
+
     def run_migration_command(
         self,
         command: Sequence[str],
@@ -1285,8 +1533,7 @@ class ComposeHostEffects:
         if not result.ok:
             raise StepFailed(
                 "start_candidate",
-                f"could not resolve the image id for {container!r}: "
-                f"{_output(result)}",
+                f"could not resolve the image id for {container!r}: {_output(result)}",
             )
         return result.stdout.strip()
 
@@ -1697,8 +1944,7 @@ class ComposeHostEffects:
             if not result.ok:
                 raise StepFailed(
                     "prune_images",
-                    f"`{self._docker_bin} image rm {ref}` failed: "
-                    f"{_output(result)}",
+                    f"`{self._docker_bin} image rm {ref}` failed: {_output(result)}",
                 )
 
 
@@ -1790,7 +2036,7 @@ class NginxInstaller:
         if not reload_result.ok:
             raise StepFailed(
                 "switch",
-                f"`{self._nginx_bin} -s reload` failed: " f"{_output(reload_result)}",
+                f"`{self._nginx_bin} -s reload` failed: {_output(reload_result)}",
             )
 
     def _live_config(self) -> str:
