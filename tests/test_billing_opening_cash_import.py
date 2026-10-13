@@ -205,7 +205,13 @@ def _command(
                 cash_amount_minor=amount + consumed,
                 precision=precision,
             ),
-            consumptions=(replace(base.consumptions[0], amount_minor=consumed),),
+            consumptions=(
+                replace(
+                    base.consumptions[0],
+                    amount_minor=consumed,
+                    reference=f"legacy-allocation:{account_id}:{index}",
+                ),
+            ),
         )
         population.append(identity)
         lots.append(lot)
@@ -384,7 +390,9 @@ def _counts(session, plane, account_id):
     counts = {}
     for name, model in tables.items():
         statement = select(func.count()).select_from(model)
-        if name == "AccountingFact":
+        if name == "BillingAccount":
+            statement = statement.where(model.id == account_id)
+        elif name == "AccountingFact":
             group = tables["PostingGroup"]
             statement = statement.join(group, model.posting_group_id == group.id).where(
                 group.billing_account_id == account_id

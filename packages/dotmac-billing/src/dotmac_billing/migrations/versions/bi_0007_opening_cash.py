@@ -561,9 +561,9 @@ def _completeness(platform: bool) -> None:
     scope = "" if platform else " AND x.tenant_id = NEW.tenant_id"
     joined = "" if platform else " AND e.tenant_id = x.tenant_id"
     payload_scope = (
-        "payload->'scope' IS DISTINCT FROM '{}'::jsonb"
+        "expected_v4_payload->'scope' IS DISTINCT FROM '{}'::jsonb"
         if platform
-        else "(payload->'scope'->>'tenant_id') IS DISTINCT FROM NEW.tenant_id::text"
+        else "(expected_v4_payload->'scope'->>'tenant_id') IS DISTINCT FROM NEW.tenant_id::text"
     )
     op.execute(f"""
     CREATE FUNCTION mod_billing.check_{prefix}opening_lot_claim() RETURNS trigger AS $$
@@ -581,7 +581,7 @@ def _completeness(platform: bool) -> None:
       DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION mod_billing.check_{prefix}opening_lot_claim();
     CREATE FUNCTION mod_billing.check_{prefix}opening_posting() RETURNS trigger AS $$
     DECLARE group_id uuid; grp record; fact record; receipt record; original record;
-            payload jsonb; cash numeric; ar numeric; ordinary_count bigint; opening_count bigint; n bigint;
+            expected_v4_payload jsonb; cash numeric; ar numeric; ordinary_count bigint; opening_count bigint; n bigint;
             invoice_id uuid; expected_room numeric; affected_count bigint;
     BEGIN
       IF TG_TABLE_NAME = '{prefix}posting_groups' THEN group_id := NEW.id;
@@ -592,23 +592,23 @@ def _completeness(platform: bool) -> None:
       PERFORM 1 FROM mod_billing.{prefix}billing_accounts x WHERE x.id = grp.billing_account_id{scope} FOR UPDATE;
       SELECT count(*) INTO n FROM mod_billing.{prefix}accounting_facts x WHERE x.posting_group_id = group_id{scope};
       SELECT * INTO fact FROM mod_billing.{prefix}accounting_facts x WHERE x.posting_group_id = group_id AND x.fact_version = 4{scope};
-      payload := fact.fact_payload::jsonb;
+      expected_v4_payload := fact.fact_payload::jsonb;
       IF grp.id IS NULL OR grp.reverses_group_id IS NOT NULL OR n <> 1 OR fact.id IS NULL
         OR fact.source_authority <> 'internal' OR fact.source_system <> 'dotmac-billing' OR fact.effect_kind <> grp.group_kind
         OR fact.occurred_at <> grp.occurred_at OR fact.fact_digest !~ '^[0-9a-f]{{64}}$'
         OR {payload_scope}
-        OR (payload->>'fact_id') IS DISTINCT FROM fact.id::text OR (payload->>'fact_version')::integer IS DISTINCT FROM 4
-        OR (payload->>'billing_account_id') IS DISTINCT FROM grp.billing_account_id::text
-        OR (payload->>'posting_group_id') IS DISTINCT FROM grp.id::text
-        OR (payload->>'effect_kind') IS DISTINCT FROM grp.group_kind
-        OR (payload->>'source_system') IS DISTINCT FROM 'dotmac-billing'
-        OR (payload->>'source_authority') IS DISTINCT FROM 'internal'
-        OR (payload->>'source_ref') IS DISTINCT FROM grp.source_ref
-        OR (payload->>'occurred_at')::timestamptz IS DISTINCT FROM grp.occurred_at
-        OR jsonb_typeof(payload->'effects') IS DISTINCT FROM 'array'
-        OR jsonb_typeof(payload->'settlement_allocations') IS DISTINCT FROM 'array'
-        OR jsonb_typeof(payload->'opening_cash_effects') IS DISTINCT FROM 'array'
-        OR jsonb_typeof(payload->'cash_source_order') IS DISTINCT FROM 'array'
+        OR (expected_v4_payload->>'fact_id') IS DISTINCT FROM fact.id::text OR (expected_v4_payload->>'fact_version')::integer IS DISTINCT FROM 4
+        OR (expected_v4_payload->>'billing_account_id') IS DISTINCT FROM grp.billing_account_id::text
+        OR (expected_v4_payload->>'posting_group_id') IS DISTINCT FROM grp.id::text
+        OR (expected_v4_payload->>'effect_kind') IS DISTINCT FROM grp.group_kind
+        OR (expected_v4_payload->>'source_system') IS DISTINCT FROM 'dotmac-billing'
+        OR (expected_v4_payload->>'source_authority') IS DISTINCT FROM 'internal'
+        OR (expected_v4_payload->>'source_ref') IS DISTINCT FROM grp.source_ref
+        OR (expected_v4_payload->>'occurred_at')::timestamptz IS DISTINCT FROM grp.occurred_at
+        OR jsonb_typeof(expected_v4_payload->'effects') IS DISTINCT FROM 'array'
+        OR jsonb_typeof(expected_v4_payload->'settlement_allocations') IS DISTINCT FROM 'array'
+        OR jsonb_typeof(expected_v4_payload->'opening_cash_effects') IS DISTINCT FROM 'array'
+        OR jsonb_typeof(expected_v4_payload->'cash_source_order') IS DISTINCT FROM 'array'
       THEN RAISE EXCEPTION 'opening posting requires its exact source-bound V4 fact' USING ERRCODE = 'check_violation'; END IF;
       SELECT coalesce(sum(x.amount_delta), 0), count(*) INTO cash, opening_count
         FROM mod_billing.{prefix}opening_cash_effects x WHERE x.posting_group_id = group_id{scope};
@@ -625,18 +625,18 @@ def _completeness(platform: bool) -> None:
         OR EXISTS (SELECT 1 FROM mod_billing.{prefix}posting_effects x WHERE x.posting_group_id = group_id AND x.lane NOT IN ('receivable', 'available_credit'){scope})
         OR EXISTS (SELECT 1 FROM mod_billing.{prefix}withholding_discharges x WHERE x.posting_group_id = group_id{scope})
         OR EXISTS (SELECT 1 FROM mod_billing.{prefix}non_cash_credit_effects x WHERE x.posting_group_id = group_id{scope})
-        OR jsonb_array_length(payload->'effects') <> (CASE WHEN ar = 0 THEN 1 ELSE 2 END)
-        OR EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'effects') p WHERE NOT EXISTS (
+        OR jsonb_array_length(expected_v4_payload->'effects') <> (CASE WHEN ar = 0 THEN 1 ELSE 2 END)
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(expected_v4_payload->'effects') p WHERE NOT EXISTS (
             SELECT 1 FROM mod_billing.{prefix}posting_effects x WHERE x.posting_group_id = group_id{scope}
               AND x.lane = p->>'lane' AND x.amount_delta = (p->'amount_delta'->>'amount')::numeric
               AND x.currency = p->'amount_delta'->>'currency' AND x.minor_units = (p->'amount_delta'->>'minor_units')::integer))
-        OR jsonb_array_length(payload->'opening_cash_effects') <> opening_count
-        OR EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'opening_cash_effects') p WHERE NOT EXISTS (
+        OR jsonb_array_length(expected_v4_payload->'opening_cash_effects') <> opening_count
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(expected_v4_payload->'opening_cash_effects') p WHERE NOT EXISTS (
             SELECT 1 FROM mod_billing.{prefix}opening_cash_effects x WHERE x.id = (p->>'effect_id')::uuid AND x.posting_group_id = group_id{scope} AND x.evidence::jsonb = p))
         OR EXISTS (SELECT 1 FROM mod_billing.{prefix}opening_cash_effects x WHERE x.posting_group_id = group_id{scope}
-            AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'opening_cash_effects') p WHERE (p->>'effect_id')::uuid = x.id))
-        OR jsonb_array_length(payload->'settlement_allocations') <> ordinary_count
-        OR EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'settlement_allocations') p WHERE NOT EXISTS (
+            AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(expected_v4_payload->'opening_cash_effects') p WHERE (p->>'effect_id')::uuid = x.id))
+        OR jsonb_array_length(expected_v4_payload->'settlement_allocations') <> ordinary_count
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(expected_v4_payload->'settlement_allocations') p WHERE NOT EXISTS (
             SELECT 1 FROM mod_billing.{prefix}allocation_effects x WHERE x.id = (p->>'allocation_effect_id')::uuid AND x.posting_group_id = group_id{scope}
               AND (p->'allocation'->>'settlement_id') IS NOT DISTINCT FROM x.settlement_id::text
               AND (p->'allocation'->>'document_id') IS NOT DISTINCT FROM x.document_id::text
@@ -646,23 +646,23 @@ def _completeness(platform: bool) -> None:
               AND (p->'allocation'->'amount_delta'->>'currency') = x.currency
               AND (p->'allocation'->'amount_delta'->>'minor_units')::integer = x.minor_units))
         OR EXISTS (SELECT 1 FROM mod_billing.{prefix}allocation_effects x WHERE x.posting_group_id = group_id{scope}
-            AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'settlement_allocations') p WHERE (p->>'allocation_effect_id')::uuid = x.id))
+            AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(expected_v4_payload->'settlement_allocations') p WHERE (p->>'allocation_effect_id')::uuid = x.id))
       THEN RAISE EXCEPTION 'opening V4 must exactly represent every posting and concrete source effect' USING ERRCODE = 'check_violation'; END IF;
-      IF jsonb_array_length(payload->'cash_source_order') <> ordinary_count + opening_count
-        OR EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'cash_source_order') WITH ORDINALITY p(value, ordinality)
+      IF jsonb_array_length(expected_v4_payload->'cash_source_order') <> ordinary_count + opening_count
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(expected_v4_payload->'cash_source_order') WITH ORDINALITY p(value, ordinality)
             WHERE (p.value->>'sequence')::bigint IS DISTINCT FROM p.ordinality
               OR ((p.value->>'allocation_effect_id') IS NULL) = ((p.value->>'opening_effect_id') IS NULL)
               OR (p.value->>'allocation_effect_id' IS NOT NULL AND NOT EXISTS (
                   SELECT 1 FROM mod_billing.{prefix}allocation_effects x WHERE x.id = (p.value->>'allocation_effect_id')::uuid AND x.posting_group_id = group_id{scope}))
               OR (p.value->>'opening_effect_id' IS NOT NULL AND NOT EXISTS (
                   SELECT 1 FROM mod_billing.{prefix}opening_cash_effects x WHERE x.id = (p.value->>'opening_effect_id')::uuid AND x.posting_group_id = group_id{scope})))
-        OR EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'cash_source_order') p
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(expected_v4_payload->'cash_source_order') p
             GROUP BY p->>'allocation_effect_id', p->>'opening_effect_id' HAVING count(*) <> 1)
       THEN RAISE EXCEPTION 'V4 source ordering must bind each actual source effect once' USING ERRCODE = 'check_violation'; END IF;
       IF grp.group_kind IN ('opening_cash_imported', 'opening_cash_import_reversed') THEN
         SELECT count(*) INTO n FROM mod_billing.{prefix}opening_import_receipts x WHERE x.posting_group_id = group_id{scope};
         SELECT * INTO receipt FROM mod_billing.{prefix}opening_import_receipts x WHERE x.posting_group_id = group_id{scope};
-        IF n <> 1 OR payload->'import_receipt' IS DISTINCT FROM receipt.evidence::jsonb OR ordinary_count <> 0
+        IF n <> 1 OR expected_v4_payload->'import_receipt' IS DISTINCT FROM receipt.evidence::jsonb OR ordinary_count <> 0
           OR ar <> 0 OR abs(cash) <> receipt.total_residual THEN
             RAISE EXCEPTION 'opening recognition/unwind requires its exact receipt and no new cash settlement or invoice' USING ERRCODE = 'check_violation';
         END IF;
@@ -678,7 +678,7 @@ def _completeness(platform: bool) -> None:
               RAISE EXCEPTION 'opening import must represent every ordered selected lot exactly' USING ERRCODE = 'check_violation';
           END IF;
         ELSE
-          IF receipt.receipt_kind <> 'unwind' OR (payload->>'corrects_posting_group_id') IS DISTINCT FROM (receipt.evidence::jsonb->'verification'->>'original_posting_group_id')
+          IF receipt.receipt_kind <> 'unwind' OR (expected_v4_payload->>'corrects_posting_group_id') IS DISTINCT FROM (receipt.evidence::jsonb->'verification'->>'original_posting_group_id')
             OR EXISTS (SELECT 1 FROM mod_billing.{prefix}opening_cash_lots x WHERE x.receipt_id = receipt.original_receipt_id{scope} AND x.residual_amount > 0
                 AND NOT EXISTS (SELECT 1 FROM mod_billing.{prefix}opening_cash_effects e WHERE e.lot_id = x.id AND e.posting_group_id = group_id{joined} AND e.effect_kind = 'import_unwind' AND e.amount_delta = -x.residual_amount))
             OR opening_count <> (SELECT count(*) FROM mod_billing.{prefix}opening_cash_lots x WHERE x.receipt_id = receipt.original_receipt_id AND x.residual_amount > 0{scope}) THEN
@@ -686,7 +686,7 @@ def _completeness(platform: bool) -> None:
           END IF;
         END IF;
       ELSE
-        IF payload->>'import_receipt' IS NOT NULL
+        IF expected_v4_payload->>'import_receipt' IS NOT NULL
           OR EXISTS (SELECT 1 FROM mod_billing.{prefix}opening_import_receipts x WHERE x.posting_group_id = group_id{scope})
           OR EXISTS (SELECT 1 FROM mod_billing.{prefix}opening_cash_lots x WHERE x.posting_group_id = group_id{scope}) THEN
             RAISE EXCEPTION 'opening use cannot create new principal or receipts' USING ERRCODE = 'check_violation';
@@ -697,7 +697,7 @@ def _completeness(platform: bool) -> None:
           RAISE EXCEPTION 'opening-bearing draw requires exact positive application sources' USING ERRCODE = 'check_violation';
         END IF;
         IF grp.group_kind = 'cash_credit_draw_reversed' THEN
-          SELECT * INTO original FROM mod_billing.{prefix}posting_groups x WHERE x.id = (payload->>'corrects_posting_group_id')::uuid{scope};
+          SELECT * INTO original FROM mod_billing.{prefix}posting_groups x WHERE x.id = (expected_v4_payload->>'corrects_posting_group_id')::uuid{scope};
           IF original.id IS NULL OR original.group_kind <> 'opening_cash_applied' OR original.billing_account_id <> grp.billing_account_id
             OR original.currency <> grp.currency OR original.minor_units <> grp.minor_units OR ar <> cash
             OR EXISTS (SELECT 1 FROM mod_billing.{prefix}opening_cash_effects x WHERE x.posting_group_id = group_id{scope}
@@ -731,7 +731,7 @@ def _completeness(platform: bool) -> None:
             AND x.collectible_receivable = expected_room
         ) THEN RAISE EXCEPTION 'opening invoice exposure must match exact resolved source room' USING ERRCODE = 'check_violation'; END IF;
       END LOOP;
-      IF NOT EXISTS (SELECT 1 FROM public.{prefix}outbox_events x WHERE x.event_type = 'billing.accounting.fact.v4' AND x.payload::jsonb = payload{scope}) THEN
+      IF NOT EXISTS (SELECT 1 FROM public.{prefix}outbox_events x WHERE x.event_type = 'billing.accounting.fact.v4' AND x.payload::jsonb = expected_v4_payload{scope}) THEN
         RAISE EXCEPTION 'opening V4 requires its atomic outbox evidence' USING ERRCODE = 'check_violation';
       END IF;
       RETURN NEW;
@@ -952,7 +952,7 @@ def _legacy_guards(platform: bool) -> None:
     );
     $$ LANGUAGE sql;
     CREATE FUNCTION mod_billing.guard_{prefix}opening_owner() RETURNS trigger AS $$
-    DECLARE original record; root record; allocation record; settlement_id uuid; visited uuid[] := ARRAY[]::uuid[];
+    DECLARE original record; root record; allocation record; v_claimed_settlement_id uuid; visited uuid[] := ARRAY[]::uuid[];
     BEGIN
       IF TG_TABLE_NAME = '{prefix}posting_groups' THEN
         PERFORM 1 FROM mod_billing.{prefix}billing_accounts x WHERE x.id = NEW.billing_account_id{scope} FOR UPDATE;
@@ -972,10 +972,10 @@ def _legacy_guards(platform: bool) -> None:
             SELECT * INTO root FROM mod_billing.{prefix}posting_groups x WHERE x.id = root.reverses_group_id{scope};
           END LOOP;
           IF root.group_kind = 'settlement_accepted' THEN
-            SELECT x.id INTO settlement_id FROM mod_billing.{prefix}confirmed_settlements x
+            SELECT x.id INTO v_claimed_settlement_id FROM mod_billing.{prefix}confirmed_settlements x
               WHERE 'settlement:' || x.id::text = root.source_ref AND x.billing_account_id = root.billing_account_id{scope};
             IF EXISTS (SELECT 1 FROM mod_billing.{prefix}allocation_effects x JOIN mod_billing.{prefix}posting_groups g ON g.id = x.posting_group_id {'' if platform else 'AND g.tenant_id = x.tenant_id'}
-                WHERE x.settlement_id = settlement_id AND g.group_kind = 'opening_cash_applied'{scope}
+                WHERE x.settlement_id = v_claimed_settlement_id AND g.group_kind = 'opening_cash_applied'{scope}
                   AND x.amount_delta + (SELECT coalesce(sum(e.amount_delta), 0) FROM mod_billing.{prefix}allocation_effects e WHERE e.offsets_allocation_id = x.id{same_parent}) > 0) THEN
               RAISE EXCEPTION 'reverse complete mixed draws before correcting their settlement backing' USING ERRCODE = 'check_violation';
             END IF;
