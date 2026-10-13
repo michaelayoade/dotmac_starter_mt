@@ -144,12 +144,12 @@ def preview_opening_account_import(
         source_mappings.setdefault((part.source_account_key, part.currency), set()).add(
             part.account_id
         )
-    for mapping_coordinate, mapped_values in (
-        *target_mappings.items(),
-        *source_mappings.items(),
-    ):
-        if len(mapped_values) != 1:
-            block("account_mapping_ambiguous", str(mapping_coordinate))
+    for target_coordinate, target_values in target_mappings.items():
+        if len(target_values) != 1:
+            block("account_mapping_ambiguous", str(target_coordinate))
+    for source_coordinate, source_values in source_mappings.items():
+        if len(source_values) != 1:
+            block("account_mapping_ambiguous", str(source_coordinate))
     for item in manifest.dispositions:
         if item.partition not in partitions:
             block("partition_membership_missing", item.identity.key)
