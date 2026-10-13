@@ -480,7 +480,7 @@ def test_refusal_output_is_a_fixed_label() -> None:
 
 
 def test_timing_ticket_subtracts_full_host_elapsed_and_never_revives() -> None:
-    j = {"timing": {"challenge": "a" * 64, "issued_at_monotonic_ns": 10**9}}
+    j = timing_journal()
     snapshot = {"challenge": "a" * 64, "ttl_remaining_ms": 60_000}
     assert hc.snapshot_deadline(j, snapshot, 11 * 10**9) == 61 * 10**9
     assert hc.snapshot_deadline(j, snapshot, 71 * 10**9) < 71 * 10**9
@@ -489,7 +489,7 @@ def test_timing_ticket_subtracts_full_host_elapsed_and_never_revives() -> None:
 
 
 def test_transit_canary_detects_weakened_receipt_time_formula(monkeypatch: Any) -> None:
-    j = {"timing": {"challenge": "a" * 64, "issued_at_monotonic_ns": 10**9}}
+    j = timing_journal()
     snapshot = {"challenge": "a" * 64, "ttl_remaining_ms": 60_000}
 
     def canary() -> None:
@@ -501,6 +501,85 @@ def test_transit_canary_detects_weakened_receipt_time_formula(monkeypatch: Any) 
     )
     with pytest.raises(AssertionError):
         canary()
+
+
+def timing_journal():
+    return {
+        "lease_id": LEASE,
+        "boot_id": "synthetic-boot",
+        "state": "PREPARED",
+        "timing": {
+            "challenge": "a" * 64,
+            "issued_at_monotonic_ns": 10**9,
+            "lease_id": LEASE,
+            "boot_id": "synthetic-boot",
+            "phase": "PREPARED",
+        },
+    }
+
+
+@pytest.mark.parametrize("field", ["lease_id", "boot_id", "phase"])
+def test_timing_ticket_is_bound_to_lease_boot_and_phase(field):
+    j = timing_journal()
+    j["timing"][field] = "wrong"
+    with pytest.raises(hc.ControllerRefused, match="snapshot.refused"):
+        hc.snapshot_deadline(
+            j, {"challenge": "a" * 64, "ttl_remaining_ms": 60000}, 2 * 10**9
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["challenge", "manifest_digest", "provenance_digest", "observation_remaining_ms"],
+)
+def test_bootstrap_receipt_is_closed_and_required(field):
+    receipt = {
+        "challenge": "a" * 64,
+        "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+        "manifest_digest": "b" * 64,
+        "provenance_digest": "c" * 64,
+        "observation_remaining_ms": 60000,
+    }
+    request = {
+        "protocol": hp.PROTOCOL,
+        "op": "bootstrap",
+        "lease_id": LEASE,
+        "jit_config": "c3ludGhldGlj",
+        "bootstrap_snapshot": receipt,
+    }
+    assert hc.validate_mgmt(request) == request
+    del receipt[field]
+    with pytest.raises(hc.ControllerRefused):
+        hc.validate_mgmt(request)
+
+
+@pytest.mark.parametrize(
+    "defect", ["profile", "legacy_ttl_field", "age_overflow", "age_zero"]
+)
+def test_bootstrap_age_receipt_cannot_accept_a_legacy_or_unbounded_policy(defect):
+    receipt = {
+        "challenge": "a" * 64,
+        "manifest_digest": "b" * 64,
+        "provenance_digest": "c" * 64,
+        "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+        "observation_remaining_ms": 60000,
+    }
+    if defect == "profile":
+        receipt["profile"] = "legacy-ttl-policy"
+    elif defect == "legacy_ttl_field":
+        receipt["ttl_remaining_ms"] = receipt.pop("observation_remaining_ms")
+    else:
+        receipt["observation_remaining_ms"] = 60001 if defect == "age_overflow" else 0
+    with pytest.raises(hc.ControllerRefused, match="schema.invalid"):
+        hc.validate_mgmt(
+            {
+                "protocol": hp.PROTOCOL,
+                "op": "bootstrap",
+                "lease_id": LEASE,
+                "jit_config": "c3ludGhldGlj",
+                "bootstrap_snapshot": receipt,
+            }
+        )
 
 
 def test_transport_start_is_persisted_as_unknown_and_proof_is_distinct() -> None:
@@ -849,7 +928,14 @@ def test_manifest_mismatch_is_rejected_before_rule_or_grant_authority(
         qualification=qualification,
         policy_digest=policy.digest,
         bootstrap_manifest=bootstrap(),
-        timing={"challenge": "d" * 64, "issued_at_monotonic_ns": 10**9},
+        boot_id="synthetic-boot",
+        timing={
+            "challenge": "d" * 64,
+            "issued_at_monotonic_ns": 10**9,
+            "phase": "REPORTED",
+            "lease_id": LEASE,
+            "boot_id": "synthetic-boot",
+        },
     )
     controller = hc.Controller(
         host=types.SimpleNamespace(now_ns=lambda: 2 * 10**9), routable=docs

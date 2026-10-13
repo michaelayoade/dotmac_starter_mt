@@ -12,6 +12,7 @@ import dataclasses
 import hashlib
 import pathlib
 import sys
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -84,6 +85,9 @@ def config_doc(controller_path: str = DISPATCHER) -> dict[str, Any]:
         "resolver": "127.0.0.53",
         "policy_path": "/x/policy.json",
         "bootstrap_manifest_path": "/x/bootstrap.json",
+        "bootstrap_manifest_sha256": "a" * 64,
+        "bootstrap_proposal_path": "/x/proposal.json",
+        "bootstrap_proposal_sha256": "b" * 64,
         "state_path": "/x/state.json",
     }
 
@@ -649,7 +653,13 @@ def test_prelaunch_missing_approval_has_no_jit_or_bootstrap(
         return api_of(data)(path)
 
     with pytest.raises(co.CoordinatorRefused):
-        co.op_launch(cfg, lambda *args: effects.append(args), api, RUN)
+        co.op_launch(
+            cfg,
+            lambda *args: effects.append(args),
+            api,
+            RUN,
+            deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+        )
     assert effects == []
 
 
@@ -692,7 +702,13 @@ def test_prelaunch_canary_is_sensitive_to_approval_predicate(
             return {"runner": {"id": RUNNER}, "encoded_jit_config": "c3ludGhldGlj"}
         return api_of(data)(path)
 
-    co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+    co.op_launch(
+        cfg,
+        lambda *args: {"state": "BOOTSTRAP"},
+        api,
+        RUN,
+        deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+    )
     assert effects == ["jit"]  # the original no-effects canary would go red
 
 
@@ -729,7 +745,13 @@ def test_every_failed_prelaunch_predicate_prevents_effects(
         return api_of(data)(path)
 
     with pytest.raises(co.CoordinatorRefused):
-        co.op_launch(cfg, lambda *args: effects.append(args), api, RUN)
+        co.op_launch(
+            cfg,
+            lambda *args: effects.append(args),
+            api,
+            RUN,
+            deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+        )
     assert effects == []
 
 
@@ -802,7 +824,13 @@ def test_operation_lock_blocks_second_jit_for_same_state(
 
     def launch() -> None:
         try:
-            co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+            co.op_launch(
+                cfg,
+                lambda *args: {"state": "BOOTSTRAP"},
+                api,
+                RUN,
+                deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+            )
         except BaseException as exc:
             errors.append(exc)
 
@@ -811,14 +839,26 @@ def test_operation_lock_blocks_second_jit_for_same_state(
     try:
         assert first_jit.wait(2)
         with pytest.raises(co.CoordinatorRefused, match="lock.busy"):
-            co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+            co.op_launch(
+                cfg,
+                lambda *args: {"state": "BOOTSTRAP"},
+                api,
+                RUN,
+                deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+            )
         assert effects == ["jit"]
     finally:
         release.set()
         worker.join(2)
     assert not worker.is_alive() and errors == []
     with pytest.raises(co.CoordinatorRefused, match="state.invalid"):
-        co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+        co.op_launch(
+            cfg,
+            lambda *args: {"state": "BOOTSTRAP"},
+            api,
+            RUN,
+            deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+        )
     assert effects == ["jit"]
 
 
@@ -844,7 +884,13 @@ def test_second_jit_canary_detects_removed_operation_lock(
 
     def canary() -> bool:
         try:
-            co.op_launch(cfg, lambda *args: {"state": "BOOTSTRAP"}, api, RUN)
+            co.op_launch(
+                cfg,
+                lambda *args: {"state": "BOOTSTRAP"},
+                api,
+                RUN,
+                deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+            )
         except co.CoordinatorRefused as exc:
             return exc.label == "lock.busy" and effects == []
         return False
@@ -873,12 +919,16 @@ def test_uncertain_registration_is_recovered_from_durable_exact_intent(
     deleted: list[int] = []
     bootstrap: list[Any] = []
     original_save = co.save_state
-    saves = 0
+    runner_save_interrupted = False
 
     def save(path: Any, state: Any) -> None:
-        nonlocal saves
-        saves += 1
-        if failure == "runner-save-failed" and saves == 2:
+        nonlocal runner_save_interrupted
+        if (
+            failure == "runner-save-failed"
+            and "runner_id" in state
+            and not runner_save_interrupted
+        ):
+            runner_save_interrupted = True
             raise OSError("synthetic save interruption")
         original_save(path, state)
 
@@ -907,13 +957,25 @@ def test_uncertain_registration_is_recovered_from_durable_exact_intent(
         return api_of(prelaunch_world())(path)
 
     with pytest.raises((co.CoordinatorRefused, OSError)):
-        co.op_launch(cfg, lambda *args: bootstrap.append(args), api, RUN)
+        co.op_launch(
+            cfg,
+            lambda *args: bootstrap.append(args),
+            api,
+            RUN,
+            deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+        )
     durable = co.load_state(cfg.state_path)
     assert (
         durable["launch_intent"]["name"] == row["name"] and "runner_id" not in durable
     )
     with pytest.raises(co.CoordinatorRefused, match="state.invalid"):
-        co.op_launch(cfg, lambda *args: bootstrap.append(args), api, RUN)
+        co.op_launch(
+            cfg,
+            lambda *args: bootstrap.append(args),
+            api,
+            RUN,
+            deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+        )
     assert registrations == [row["name"]] and bootstrap == []
     monkeypatch.setattr(co, "save_state", original_save)
     if failure == "delete-response-lost":
@@ -991,7 +1053,13 @@ def test_registration_canary_detects_removed_durable_intent(
         return api_of(prelaunch_world())(path)
 
     with pytest.raises(AssertionError):
-        co.op_launch(cfg, lambda *args: pytest.fail("bootstrap forbidden"), api, RUN)
+        co.op_launch(
+            cfg,
+            lambda *args: pytest.fail("bootstrap forbidden"),
+            api,
+            RUN,
+            deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+        )
 
 
 def test_historical_runs_do_not_block_complete_active_exclusivity() -> None:
@@ -1087,7 +1155,13 @@ def test_group_drift_refuses_prepare_launch_and_decide_without_effects(
     )
     before = cfg.state_path.read_bytes()
     with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
-        co.op_launch(cfg, lambda *args: effects.append(args), api, RUN)
+        co.op_launch(
+            cfg,
+            lambda *args: effects.append(args),
+            api,
+            RUN,
+            deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+        )
     assert effects == [] and cfg.state_path.read_bytes() == before
     assigned = world()
     mutate(assigned)
@@ -1258,3 +1332,25 @@ def test_positive_group_requires_present_unassigned_fields(key: str) -> None:
 )
 def test_null_group_does_not_relax_exclusivity(tmp_path: Any, mutate: Any) -> None:
     test_every_failed_prelaunch_predicate_prevents_effects(tmp_path, mutate)
+
+
+@pytest.fixture(autouse=True)
+def legacy_binding_tests_use_a_separate_admitted_dns_capture(monkeypatch):
+    """Existing GitHub/cleanup canaries isolate their pre-existing predicates.
+
+    The real new capture path is exercised in test_lane3_campaign_freshness.py
+    and the canonical TCP wire suite; this substitute never weakens production.
+    """
+
+    def fresh(*args):
+        return (
+            SimpleNamespace(
+                digest="a" * 64,
+                provenance_digest="b" * 64,
+                remaining_ns=lambda now: 60_000_000_000,
+            ),
+            {"challenge": "c" * 64},
+        )
+
+    monkeypatch.setattr(co, "fresh_bootstrap", fresh)
+    monkeypatch.setattr(co, "retain_bootstrap_provenance", lambda *args: None)

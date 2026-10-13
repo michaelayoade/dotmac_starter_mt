@@ -41,6 +41,22 @@ def put(path: pathlib.Path, raw: bytes, mode: int = 0o600) -> None:
     path.chmod(mode)
 
 
+def pinned_supplier() -> dict[str, bytes]:
+    """Keep the admitted supplier closure independent of current runtime edits."""
+    files = {}
+    for name in hi.SUPPLIER_HASHES:
+        result = subprocess.run(  # noqa: S603 - fixed immutable repository objects
+            ["/usr/bin/git", "show", hi.SUPPLIER_COMMIT + ":scripts/" + name],
+            cwd=SCRIPTS.parent,
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
+        files[name] = result.stdout
+    assert {name: hi.digest(raw) for name, raw in files.items()} == hi.SUPPLIER_HASHES
+    return files
+
+
 def snapshot(path: pathlib.Path) -> dict[str, tuple[bytes, int, int, int]]:
     """Compare bytes and authority metadata; no synthetic private value output."""
     result: dict[str, tuple[bytes, int, int, int]] = {}
@@ -131,10 +147,7 @@ class Installation:
             (self.paths.prefix / relative).mkdir(mode=0o700)
         self.bundle.mkdir(mode=0o700)
         runtime = {name: (SCRIPTS / name).read_bytes() for name in hi.RUNTIME_MODULES}
-        supplier = {name: (SCRIPTS / name).read_bytes() for name in hi.SUPPLIER_HASHES}
-        assert {
-            name: hi.digest(raw) for name, raw in supplier.items()
-        } == hi.SUPPLIER_HASHES
+        supplier = pinned_supplier()
         for name, files in (("runtime", runtime), ("supplier", supplier)):
             directory = self.bundle / name
             directory.mkdir(mode=0o700)
@@ -461,6 +474,143 @@ def kill_install(
         if child.poll() is None:
             child.kill()
             child.wait(timeout=5)
+
+
+LEGACY_RUNTIME_COMMIT = "6dc1cd68e829225acc930da4aa82a58628ff05c3"
+
+
+def install_real_legacy_closure(value: Installation):
+    """Install actual immutable old ten-file bytes through their old installer."""
+    current = (value.bundle, value.bundle_digest, value.worker)
+    legacy = value.root / "legacy-bundle"
+    legacy.mkdir(mode=0o700)
+    runtime = {}
+    for name in hi.LEGACY_RUNTIME_MODULES:
+        result = subprocess.run(  # noqa: S603 - fixed immutable repository objects
+            ["/usr/bin/git", "show", LEGACY_RUNTIME_COMMIT + ":scripts/" + name],
+            cwd=SCRIPTS.parent,
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
+        runtime[name] = result.stdout
+    for group, files in (
+        ("runtime", runtime),
+        ("supplier", pinned_supplier()),
+    ):
+        directory = legacy / group
+        directory.mkdir(mode=0o700)
+        for name, raw in files.items():
+            put(directory / name, raw)
+    manifest = {
+        "schema": hi.BUNDLE_SCHEMA,
+        "runtime_commit": LEGACY_RUNTIME_COMMIT,
+        "supplier_commit": hi.SUPPLIER_COMMIT,
+        "runtime": {name: hi.digest(raw) for name, raw in runtime.items()},
+        "supplier": dict(hi.SUPPLIER_HASHES),
+    }
+    raw = hi.canonical(manifest)
+    legacy_digest = hi.digest(raw)
+    put(legacy / "bundle.json", raw)
+    worker = value.root / "legacy-worker.py"
+    old_worker = value.worker.read_bytes().replace(
+        repr(str(SCRIPTS)).encode(), repr(str(legacy / "runtime")).encode(), 1
+    )
+    old_worker = old_worker.replace(
+        b"import lane3_handoff_install as hi\n",
+        b"sys.dont_write_bytecode=True\nimport lane3_handoff_install as hi\n",
+        1,
+    )
+    put(worker, old_worker)
+    wrapper = value.root / "reconcile.py"
+    new_installed = value.paths.runtime / value.bundle_digest
+    old_installed = value.paths.runtime / legacy_digest
+    wrapper.write_bytes(
+        wrapper.read_bytes().replace(
+            repr(str(new_installed)).encode(), repr(str(old_installed)).encode()
+        )
+    )
+    value.bundle, value.bundle_digest, value.worker = legacy, legacy_digest, worker
+    inputs = value.inputs(1)
+    host_path = inputs[0] / "host.json"
+    host = hi.strict_json(host_path.read_bytes())
+    host["controller_digest"] = hp.digest(
+        {name: hi.digest(runtime[name]) for name in hi.CONTROLLER_MODULES}
+    )
+    put(host_path, hi.canonical(host))
+    input_path = inputs[0] / "installation-input.json"
+    input_doc = hi.strict_json(input_path.read_bytes())
+    input_doc["files"]["host.json"] = hi.digest(host_path.read_bytes())
+    put(input_path, hi.canonical(input_doc))
+    before = value.live_snapshot()
+    with pytest.raises(hi.InstallRefused):
+        value.installer.install(
+            legacy, legacy_digest, inputs[0], hi.digest(input_path.read_bytes())
+        )
+    assert value.live_snapshot() == before
+    value.install((inputs[0], hi.digest(input_path.read_bytes())))
+    prior = value.installer.record(allow_legacy_runtime=True)
+    value.installer.verify_record(prior)
+    assert set(prior["manifest"]["runtime"]) == set(hi.LEGACY_RUNTIME_MODULES)
+    value.bundle, value.bundle_digest, value.worker = current
+    return prior, old_installed, new_installed
+
+
+def test_current_runtime_and_pinned_supplier_have_distinct_measured_protocols(
+    installation: Installation,
+):
+    bundle = installation.bundle
+    manifest = hi.strict_json((bundle / "bundle.json").read_bytes())
+    hi.validate_manifest(manifest)
+    for group in ("runtime", "supplier"):
+        assert {
+            name: hi.digest((bundle / group / name).read_bytes())
+            for name in manifest[group]
+        } == manifest[group]
+    protocol = "lane3_handoff_protocol.py"
+    assert (bundle / "runtime" / protocol).read_bytes() == (
+        SCRIPTS / protocol
+    ).read_bytes()
+    assert (bundle / "runtime" / protocol).read_bytes() != (
+        bundle / "supplier" / protocol
+    ).read_bytes()
+    assert manifest["supplier"] == hi.SUPPLIER_HASHES
+    assert manifest["supplier_commit"] == hi.SUPPLIER_COMMIT
+
+
+@pytest.mark.parametrize("rollback", [False, True])
+def test_real_old_ten_file_runtime_upgrades_or_restores_exactly(
+    installation: Installation, rollback: bool
+):
+    prior, old_installed, new_installed = install_real_legacy_closure(installation)
+    before = installation.live_snapshot()
+    wrapper = installation.root / "reconcile.py"
+    wrapper.write_bytes(
+        wrapper.read_bytes().replace(
+            repr(str(old_installed)).encode(), repr(str(new_installed)).encode()
+        )
+    )
+    replacement = installation.inputs(2)
+    if rollback:
+        kill_install(installation, replacement, "activated")
+        pending = installation.installer.transaction()
+        assert pending["prior"] == prior
+        assert set(pending["target"]["manifest"]["runtime"]) == set(hi.RUNTIME_MODULES)
+        wrapper.write_bytes(
+            wrapper.read_bytes().replace(
+                repr(str(new_installed)).encode(), repr(str(old_installed)).encode()
+            )
+        )
+        assert installation.installer.recover() == "ROLLED_BACK"
+        assert installation.live_snapshot() == before
+        installation.installer.verify_record(prior)
+        installation.installer.require_ready(prior)
+    else:
+        installation.install(replacement)
+        target = installation.installer.verify()
+        assert set(target["manifest"]["runtime"]) == set(hi.RUNTIME_MODULES)
+        assert "lane3_campaign_bootstrap.py" in target["manifest"]["runtime"]
+        assert old_installed.exists()
 
 
 def test_real_reconcile_unit_publishes_current_boot_readiness(

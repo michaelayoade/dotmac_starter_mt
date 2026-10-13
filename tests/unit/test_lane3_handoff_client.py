@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
-import importlib.util
+import importlib
 import json
 import os
 import pathlib
@@ -28,17 +28,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 
-def _load(name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-hp = _load("lane3_handoff_protocol")
-c = _load("lane3_handoff_client")
+# Keep the public protocol's exception identity shared with controllers already
+# imported by other unit modules; collection must not replace a canonical module.
+hp = importlib.import_module("lane3_handoff_protocol")
+c = importlib.import_module("lane3_handoff_client")
 
 UID = os.getuid()
 LEASE = "0123456789abcdef0123456789abcdef"

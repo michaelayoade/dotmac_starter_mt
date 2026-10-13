@@ -1100,7 +1100,7 @@ MGMT_REQUESTS: Final[dict[str, set[str]]] = {
         "qualification",
     },
     "timing": {"protocol", "op", "lease_id"},
-    "bootstrap": {"protocol", "op", "lease_id", "jit_config"},
+    "bootstrap": {"protocol", "op", "lease_id", "jit_config", "bootstrap_snapshot"},
     "status": {"protocol", "op", "lease_id"},
     "grant": {
         "protocol",
@@ -1142,6 +1142,29 @@ def validate_mgmt(value: Any) -> dict[str, Any]:
             hp.hex64(value["expected_manifest_digest"])
         if op == "prepare":
             validate_qualification(value["qualification"])
+        if op == "bootstrap":
+            snap = _exact(
+                value["bootstrap_snapshot"],
+                {
+                    "challenge",
+                    "profile",
+                    "manifest_digest",
+                    "provenance_digest",
+                    "observation_remaining_ms",
+                },
+                "schema.invalid",
+            )
+            if snap["profile"] != hp.BOOTSTRAP_OBSERVATION_PROFILE:
+                raise refused("schema.invalid")
+            for key in ("challenge", "manifest_digest", "provenance_digest"):
+                hp.hex64(snap[key])
+            if (
+                type(snap["observation_remaining_ms"]) is not int
+                or not 1
+                <= snap["observation_remaining_ms"]
+                <= hp.BOOTSTRAP_OBSERVATION_MAX_AGE_NS // 1_000_000
+            ):
+                raise refused("schema.invalid")
         if op == "grant":
             validate_qualification(value["qualification"])
             hp.validate_binding(value["binding"])
@@ -1213,6 +1236,9 @@ def snapshot_deadline(
     if (
         not isinstance(ticket, dict)
         or ticket.get("challenge") != snapshot["challenge"]
+        or ticket.get("phase") != j["state"]
+        or ticket.get("lease_id") != j["lease_id"]
+        or ticket.get("boot_id") != j["boot_id"]
         or now < ticket["issued_at_monotonic_ns"]
     ):
         raise refused("snapshot.refused")
@@ -1768,6 +1794,20 @@ class Controller:
                     j["qualification"],
                 )
                 self._verify_staged_supplier(j)
+                receipt = req["bootstrap_snapshot"]
+                if receipt["manifest_digest"] != j["bootstrap_manifest_digest"]:
+                    raise refused("binding.mismatch")
+                observation_deadline = snapshot_deadline(
+                    j,
+                    {
+                        "challenge": receipt["challenge"],
+                        "ttl_remaining_ms": receipt["observation_remaining_ms"],
+                    },
+                    self.host.now_ns(),
+                )
+                j["timing"] = None  # consumed once; grant needs a new REPORTED ticket
+                j["bootstrap_snapshot"] = dict(receipt)
+                j["bootstrap_observation_deadline_monotonic_ns"] = observation_deadline
                 fw = Firewall(**j["firewall"])
                 if dataclasses.asdict(cfg.firewall) != j["firewall"]:
                     raise refused("config.drift")
@@ -1799,10 +1839,14 @@ class Controller:
                     self._pinned_argv("expire", j["lease_id"]),
                 )
                 self._checkpoint("bootstrap.armed")
+                if self.host.now_ns() >= observation_deadline:
+                    raise refused("lease.expired")
                 self._install(j, fw, specs)
                 j["rules"], j["planned"] = specs, []
                 self.save(j)
                 self._checkpoint("bootstrap.recorded")
+                if self.host.now_ns() >= observation_deadline:
+                    raise refused("lease.expired")
                 self._start_server(j)
                 self._checkpoint("bootstrap.served")
                 challenge = {
@@ -1845,6 +1889,8 @@ class Controller:
                         "supplier_dir": str(self._lease_dir(j) / "supplier"),
                     }
                 ).encode("ascii")
+                if self.host.now_ns() >= observation_deadline:
+                    raise refused("lease.expired")
                 self.host.launch_runner(
                     j["units"]["runner"],
                     self._runner_properties(j, cfg, remaining),
@@ -1853,6 +1899,8 @@ class Controller:
                 )
                 payload = b""
                 self._checkpoint("bootstrap.launched")
+                if self.host.now_ns() >= observation_deadline:
+                    raise refused("lease.expired")
             except BaseException as exc:
                 payload = b""
                 self._cleanup_locked(j, "REFUSED", category_of(exc))
@@ -1932,14 +1980,24 @@ class Controller:
             raise refused("schema.invalid")
         with self.locked():
             j = self._active(req["lease_id"])
-            if (
-                j["state"] != "REPORTED"
-                or self.host.now_ns() >= j["expires_at_monotonic_ns"]
+            if j["state"] not in {"PREPARED", "REPORTED"} or (
+                j["state"] == "REPORTED"
+                and (
+                    j["expires_at_monotonic_ns"] is None
+                    or self.host.now_ns() >= j["expires_at_monotonic_ns"]
+                )
             ):
+                raise refused("state.invalid")
+            if j["state"] == "PREPARED" and j.get("timing") is not None:
+                # Bootstrap observation age is anchored to one original host
+                # challenge; another timing request cannot extend that budget.
                 raise refused("state.invalid")
             j["timing"] = {
                 "challenge": secrets.token_hex(32),
                 "issued_at_monotonic_ns": self.host.now_ns(),
+                "phase": j["state"],
+                "lease_id": j["lease_id"],
+                "boot_id": j["boot_id"],
             }
             self.save(j)
             return {

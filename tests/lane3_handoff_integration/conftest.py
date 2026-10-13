@@ -420,15 +420,32 @@ class Env:
         )
         return reply["lease_id"]
 
-    def bootstrap_lease(self, lease: str, job: list[str] | None = None) -> None:
+    def bootstrap_lease(
+        self,
+        lease: str,
+        job: list[str] | None = None,
+        snapshot: dict[str, Any] | None = None,
+    ) -> None:
         if job is not None:
             self.host.job_argv = job
+        if snapshot is None:
+            timing = self.controller().timing(
+                {"protocol": hp.PROTOCOL, "op": "timing", "lease_id": lease}
+            )
+            snapshot = {
+                "challenge": timing["challenge"],
+                "manifest_digest": hp.digest(self.bootstrap),
+                "provenance_digest": "a" * 64,
+                "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+                "observation_remaining_ms": 60000,
+            }
         self.controller().bootstrap(
             {
                 "protocol": hp.PROTOCOL,
                 "op": "bootstrap",
                 "lease_id": lease,
                 "jit_config": "c3ludGhldGljLWppdA==",
+                "bootstrap_snapshot": snapshot,
             }
         )
 

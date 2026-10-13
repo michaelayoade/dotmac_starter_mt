@@ -277,7 +277,11 @@ Exchange = Callable[[bytes], bytes]
 
 
 def tcp_exchange(
-    resolver: str, port: int = 53, deadline_s: float = QUERY_DEADLINE_S
+    resolver: str,
+    port: int = 53,
+    deadline_s: float = QUERY_DEADLINE_S,
+    *,
+    deadline_ns: int | None = None,
 ) -> Exchange:
     """One DNS-over-TCP exchange per query to ONE numeric resolver address."""
     address = ipaddress.ip_address(resolver)
@@ -285,9 +289,19 @@ def tcp_exchange(
 
     def exchange(query: bytes) -> bytes:
         deadline = time.monotonic() + deadline_s
+        if deadline_ns is not None:
+            deadline = min(deadline, deadline_ns / 1_000_000_000)
+
+        def remaining() -> float:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise SnapshotRefused("dns.timeout")
+            return left
+
         with socket.socket(family, socket.SOCK_STREAM) as sock:
-            sock.settimeout(deadline_s)
+            sock.settimeout(remaining())
             sock.connect((str(address), port))
+            sock.settimeout(remaining())
             sock.sendall(struct.pack(">H", len(query)) + query)
             header = _recv(sock, 2, deadline)
             (length,) = struct.unpack(">H", header)
@@ -411,7 +425,33 @@ def snapshot_digest(
     )
 
 
-def resolve(
+@dataclass(frozen=True)
+class QueryObservation:
+    """Canonical relevant answer records and their actual acquisition times."""
+
+    qtype: int
+    started_at_monotonic_ns: int
+    received_at_monotonic_ns: int
+    validated_at_monotonic_ns: int
+    records: tuple[Record, ...]
+
+
+@dataclass(frozen=True)
+class BootstrapObservation:
+    """Positive-TTL DNS evidence; this carries no claim of DNS expiry/validity."""
+
+    origin: str
+    resolver: str
+    chain: tuple[str, ...]
+    addresses: tuple[tuple[int, str], ...]
+    ttl_s: int
+    captured_at_monotonic_ns: int
+    acquired_at_monotonic_ns: int
+    digest: str
+    queries: tuple[QueryObservation, ...]
+
+
+def observe_bootstrap(
     origin: str,
     *,
     resolver: str,
@@ -421,8 +461,55 @@ def resolve(
     clock_ns: Callable[[], int] = time.monotonic_ns,
     routable: Callable[[Any], bool] = globally_routable,
     query_id: Callable[[], int] = lambda: secrets.randbelow(65536),
-) -> Snapshot:
-    """Capture one snapshot for an already admitted canonical ``origin``."""
+) -> BootstrapObservation:
+    """Bootstrap-only positive-TTL observation through the canonical DNS owner.
+
+    Unlike broker ``resolve``, this creates no TTL-derived expiry or grant. Its
+    separately selected closed bootstrap profile owns an observation-age bound.
+    """
+    captured, chain, rows, ttl, queries = _capture_dns(
+        origin,
+        resolver=resolver,
+        aliases=aliases,
+        max_addresses=max_addresses,
+        exchange=exchange,
+        clock_ns=clock_ns,
+        routable=routable,
+        query_id=query_id,
+        query_clock=clock_ns,
+    )
+    if ttl <= 0:
+        raise SnapshotRefused("dns.nonpositive_ttl")
+    return BootstrapObservation(
+        origin,
+        resolver,
+        chain,
+        rows,
+        ttl,
+        captured,
+        clock_ns(),
+        snapshot_digest(
+            origin, resolver, chain, [{"family": f, "address": a} for f, a in rows], ttl
+        ),
+        queries,
+    )
+
+
+def _capture_dns(
+    origin: str,
+    *,
+    resolver: str,
+    aliases: AliasPolicy,
+    max_addresses: int,
+    exchange: Exchange | None = None,
+    clock_ns: Callable[[], int] = time.monotonic_ns,
+    routable: Callable[[Any], bool] = globally_routable,
+    query_id: Callable[[], int] = lambda: secrets.randbelow(65536),
+    query_clock: Callable[[], int] | None = None,
+) -> tuple[
+    int, tuple[str, ...], tuple[tuple[int, str], ...], int, tuple[QueryObservation, ...]
+]:
+    """One canonical acquisition/validation owner shared by both public paths."""
     try:
         hp.origin(origin)
     except hp.ProtocolRefused:
@@ -433,16 +520,25 @@ def resolve(
     ask = exchange if exchange is not None else tcp_exchange(resolver)
     captured = clock_ns()
     results = []
+    queries = []
     for rtype in (TYPE_A, TYPE_AAAA):
         qid = query_id()
+        started = query_clock() if query_clock is not None else captured
         try:
             raw = ask(encode_query(qid, host, rtype))
         except SnapshotRefused:
             raise
         except Exception:
             raise SnapshotRefused("dns.failure") from None
+        received = query_clock() if query_clock is not None else captured
         answer = parse_response(raw, qid, host, rtype)
         results.append(_family_result(host, answer, rtype, aliases))
+        if query_clock is not None:
+            queries.append(
+                QueryObservation(
+                    rtype, started, received, query_clock(), answer.records
+                )
+            )
     (chain4, v4, ttl4), (chain6, v6, ttl6) = results
     if not v4 and not v6:
         raise SnapshotRefused("dns.no_address")
@@ -463,6 +559,31 @@ def resolve(
     rows.sort()
     ttls = [t for t in (ttl4, ttl6) if t is not None]
     ttl = min(ttls)
+    return captured, tuple(chain), tuple(rows), ttl, tuple(queries)
+
+
+def resolve(
+    origin: str,
+    *,
+    resolver: str,
+    aliases: AliasPolicy,
+    max_addresses: int,
+    exchange: Exchange | None = None,
+    clock_ns: Callable[[], int] = time.monotonic_ns,
+    routable: Callable[[Any], bool] = globally_routable,
+    query_id: Callable[[], int] = lambda: secrets.randbelow(65536),
+) -> Snapshot:
+    """Capture one snapshot for an already admitted canonical ``origin``."""
+    captured, chain, rows, ttl, _ = _capture_dns(
+        origin,
+        resolver=resolver,
+        aliases=aliases,
+        max_addresses=max_addresses,
+        exchange=exchange,
+        clock_ns=clock_ns,
+        routable=routable,
+        query_id=query_id,
+    )
     if ttl < MIN_TTL_S:
         raise SnapshotRefused("dns.short_ttl")
     lifetime_s = min(ttl, MAX_SNAPSHOT_S)
@@ -472,8 +593,8 @@ def resolve(
     return Snapshot(
         origin=origin,
         resolver=resolver,
-        chain=tuple(chain),
-        addresses=tuple(rows),
+        chain=chain,
+        addresses=rows,
         ttl_s=ttl,
         captured_at_monotonic_ns=captured,
         expires_at_monotonic_ns=expires,
@@ -506,6 +627,9 @@ __all__ = [
     "MIN_TTL_S",
     "AliasPolicy",
     "Snapshot",
+    "BootstrapObservation",
+    "QueryObservation",
+    "observe_bootstrap",
     "SnapshotRefused",
     "globally_routable",
     "resolve",

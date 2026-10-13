@@ -87,6 +87,153 @@ def test_nft_transaction_is_atomic(env: Env) -> None:
     assert len(owned_rules()) == 1
 
 
+def bootstrap_receipt(env: Env, lease: str) -> dict:
+    timing = env.controller().timing(
+        {"protocol": hp.PROTOCOL, "op": "timing", "lease_id": lease}
+    )
+    return {
+        "challenge": timing["challenge"],
+        "manifest_digest": hp.digest(env.bootstrap),
+        "provenance_digest": "a" * 64,
+        "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+        "observation_remaining_ms": 60000,
+    }
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ["management_transit", "before_install", "during_install", "served", "launched"],
+)
+def test_real_bootstrap_observation_age_expiry_refuses_and_cleans_exact_rules(
+    env: Env, phase
+) -> None:
+    lease = env.prepare()
+    receipt = bootstrap_receipt(env, lease)
+
+    def expire():
+        env.host.offset_ns += 61_000_000_000
+
+    if phase == "management_transit":
+        expire()
+    elif phase == "before_install":
+        env.host.on_checkpoint["bootstrap.armed"] = expire
+    elif phase in {"served", "launched"}:
+        env.host.on_checkpoint["bootstrap." + phase] = expire
+    else:
+        original = env.host.nft_apply
+
+        def delayed_install(script):
+            original(script)
+            if "tcp dport 443" in script:
+                expire()
+
+        env.host.nft_apply = delayed_install
+    with pytest.raises(hc.ControllerRefused, match="lease.expired"):
+        env.bootstrap_lease(lease, ["sleep", "20"], snapshot=receipt)
+    if phase == "launched":
+        assert len(env.host.jobs) == 1
+        assert env.host.jobs[0].poll() is not None
+    else:
+        assert env.host.jobs == []
+    installed = any("tcp dport 443" in script for script in env.host.applied)
+    assert installed == (phase in {"during_install", "served", "launched"})
+    assert owned_rules() == [] and baseline_ok()
+    env.assert_clean(lease)
+
+
+@pytest.mark.parametrize("defect", ["challenge", "manifest", "phase"])
+def test_real_bootstrap_ticket_or_manifest_mismatch_installs_no_accept_and_cleans(
+    env: Env, defect
+) -> None:
+    lease = env.prepare()
+    receipt = bootstrap_receipt(env, lease)
+    if defect == "phase":
+        controller = env.controller()
+        with controller.locked():
+            j = controller.load()
+            assert j is not None
+            j["timing"]["phase"] = "REPORTED"
+            controller.save(j)
+    else:
+        receipt["challenge" if defect == "challenge" else "manifest_digest"] = "f" * 64
+    with pytest.raises(hc.ControllerRefused):
+        env.bootstrap_lease(lease, ["sleep", "20"], snapshot=receipt)
+    assert env.host.jobs == []
+    assert not any("tcp dport 443" in script for script in env.host.applied)
+    env.assert_clean(lease)
+
+
+def test_fresh_installation_keeps_original_bootstrap_window_and_timer(env: Env) -> None:
+    lease = env.start(["sleep", "20"])
+    j = env.journal()
+    assert j["expires_at_monotonic_ns"] - j["t0_monotonic_ns"] == hp.WINDOW_NS
+    assert (
+        j["bootstrap_observation_deadline_monotonic_ns"] < j["expires_at_monotonic_ns"]
+    )
+    assert env.host.timers[0][1] > 60
+    assert j["timing"] is None
+    env.cleanup(lease)
+    env.assert_clean(lease)
+
+
+def test_bootstrap_observation_budget_cannot_be_extended_by_another_challenge(env: Env):
+    lease = env.prepare()
+    receipt = bootstrap_receipt(env, lease)
+    original_ticket = env.journal()["timing"]
+    with pytest.raises(hc.ControllerRefused, match="state.invalid"):
+        env.controller().timing(
+            {"protocol": hp.PROTOCOL, "op": "timing", "lease_id": lease}
+        )
+    assert env.journal()["timing"] == original_ticket
+    env.bootstrap_lease(lease, ["sleep", "20"], snapshot=receipt)
+    assert env.journal()["bootstrap_snapshot"] == receipt
+    env.cleanup(lease)
+    env.assert_clean(lease)
+
+
+def test_reported_broker_challenge_can_replace_the_consumed_bootstrap_ticket(env: Env):
+    lease = env.start(["report"])
+    env.wait_state(lease, {"REPORTED"})
+    request = {"protocol": hp.PROTOCOL, "op": "timing", "lease_id": lease}
+    first = env.controller().timing(request)
+    second = env.controller().timing(request)
+    assert first["challenge"] != second["challenge"]
+    assert env.journal()["timing"]["phase"] == "REPORTED"
+    assert env.journal()["timing"]["challenge"] == second["challenge"]
+    env.cleanup(lease)
+    env.assert_clean(lease)
+
+
+def test_real_transit_canary_detects_a_receipt_time_deadline_reset(
+    env: Env, monkeypatch
+) -> None:
+    def canary():
+        lease = env.prepare()
+        receipt = bootstrap_receipt(env, lease)
+        env.host.offset_ns += 61_000_000_000
+        blocked = False
+        jobs_before = len(env.host.jobs)
+        try:
+            try:
+                env.bootstrap_lease(lease, ["sleep", "20"], snapshot=receipt)
+            except hc.ControllerRefused:
+                blocked = True
+        finally:
+            if env.journal() is not None:
+                env.cleanup(lease)
+            env.assert_clean(lease)
+        assert blocked and len(env.host.jobs) == jobs_before
+
+    canary()
+    monkeypatch.setattr(
+        hc,
+        "snapshot_deadline",
+        lambda j, receipt, now: now + receipt["ttl_remaining_ms"] * 1_000_000,
+    )
+    with pytest.raises(AssertionError):
+        canary()
+
+
 def test_partial_install_failure_installs_nothing_and_cleans_up(env: Env) -> None:
     lease = env.prepare()
     env.host.corrupt_apply = True

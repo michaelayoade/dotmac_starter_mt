@@ -299,6 +299,8 @@ def test_harness_requires_bounded_output_exact_marker_and_successful_exit(
     operator = SimpleNamespace(
         measured=lambda path, pin: measurements.append((path, pin)),
         remaining=remaining,
+        coordinator_binding=lambda: {},
+        deployment_inputs=lambda: {"bundle_digest": "b" * 64},
     )
     started = time.monotonic()
     if accepted:
@@ -314,7 +316,7 @@ def test_harness_requires_bounded_output_exact_marker_and_successful_exit(
         "/bin/bash",
         str(tmp_path / "l3mgmt-tests.sh"),
         "full",
-        module.BUNDLE,
+        "b" * 64,
         str(evidence),
     ]
     assert len(set(deadlines)) == 1

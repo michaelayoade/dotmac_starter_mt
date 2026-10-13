@@ -47,6 +47,7 @@ from typing import Any, Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import lane3_campaign_bootstrap as cb
 import lane3_handoff_controller as hc
 import lane3_handoff_protocol as hp
 import lane3_handoff_resolver as hr
@@ -112,6 +113,9 @@ class Config:
     resolver: str
     policy_path: Path
     bootstrap_manifest_path: Path
+    bootstrap_manifest_sha256: str
+    bootstrap_proposal_path: Path
+    bootstrap_proposal_sha256: str
     state_path: Path
 
 
@@ -155,6 +159,9 @@ def parse_config(value: Any) -> Config:
         "resolver",
         "policy_path",
         "bootstrap_manifest_path",
+        "bootstrap_manifest_sha256",
+        "bootstrap_proposal_path",
+        "bootstrap_proposal_sha256",
         "state_path",
     }
     doc = _exact(value, keys, "config.invalid")
@@ -163,6 +170,8 @@ def parse_config(value: Any) -> Config:
     try:
         for key in ("workflow_sha", "workflow_blob", "starter_commit"):
             hp.hex40(doc[key])
+        for key in ("bootstrap_manifest_sha256", "bootstrap_proposal_sha256"):
+            hp.hex64(doc[key])
         modules = doc["supplier_modules"]
         if not isinstance(modules, dict) or not 1 <= len(modules) <= 32:
             raise refused("config.invalid")
@@ -218,6 +227,9 @@ def parse_config(value: Any) -> Config:
         resolver=resolver,
         policy_path=Path(_str(doc["policy_path"], _ABS)),
         bootstrap_manifest_path=Path(_str(doc["bootstrap_manifest_path"], _ABS)),
+        bootstrap_manifest_sha256=doc["bootstrap_manifest_sha256"],
+        bootstrap_proposal_path=Path(_str(doc["bootstrap_proposal_path"], _ABS)),
+        bootstrap_proposal_sha256=doc["bootstrap_proposal_sha256"],
         state_path=Path(_str(doc["state_path"], _ABS)),
     )
 
@@ -969,7 +981,10 @@ def op_prepare(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str
         raise refused("lease.active")
     qualification = prelaunch_binding(api, cfg, run_id)
     policy = hc.parse_policy(read_json(cfg.policy_path))
-    manifest = read_json(cfg.bootstrap_manifest_path)
+    manifest = cb.load_manifest(
+        cfg.bootstrap_manifest_path, cfg.bootstrap_manifest_sha256
+    )
+    cb.load_config(cfg.bootstrap_proposal_path, cfg.bootstrap_proposal_sha256)
     reply = channel(
         "prepare",
         request(
@@ -983,21 +998,36 @@ def op_prepare(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str
         "schema": STATE_SCHEMA,
         "lease_id": reply["lease_id"],
         "qualification": qualification,
+        "bootstrap_manifest_digest": hp.digest(manifest),
+        "bootstrap_proposal_sha256": cfg.bootstrap_proposal_sha256,
     }
     save_state(cfg.state_path, state)
+    if reply["manifest_digest"] != state["bootstrap_manifest_digest"]:
+        raise refused("binding.mismatch")
     return {"lease_id": reply["lease_id"], "state": reply["state"]}
 
 
 @serialized
-def op_launch(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str, Any]:
+def op_launch(
+    cfg: Config, channel: Channel, api: Api, run_id: int, *, deadline_ns: int
+) -> dict[str, Any]:
     state = load_state(cfg.state_path)
     if "runner_id" in state or "launch_intent" in state:
         # A POST with an uncertain response must never be repeated. Cleanup
         # reconciles the durable full-lease identity independently.
         raise refused("state.invalid")
+    frozen, timing = fresh_bootstrap(cfg, channel, state, deadline_ns)
+    # Prepare already qualified the privileged preparation. Keep launch's
+    # qualification after read-only DNS, next to the actual registration.
     qualification = prelaunch_binding(api, cfg, run_id)
     if qualification != state.get("qualification"):
         raise refused("binding.mismatch")
+    retain_bootstrap_provenance(cfg.state_path, state["lease_id"], frozen)
+    state["bootstrap_provenance_digest"] = frozen.provenance_digest
+    save_state(cfg.state_path, state)
+    now = time.monotonic_ns()
+    if now >= deadline_ns or frozen.remaining_ns(now) <= 0:
+        raise refused("deadline.insufficient")
     name = f"lane3-handoff-{state['lease_id']}"
     state["run_id"] = run_id
     state["launch_intent"] = {
@@ -1007,6 +1037,14 @@ def op_launch(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str,
         "qualification_digest": hp.digest(qualification),
     }
     save_state(cfg.state_path, state)  # durable BEFORE registration effect
+    now = time.monotonic_ns()
+    if now >= deadline_ns or frozen.remaining_ns(now) <= 0:
+        # No POST was attempted. Keep that fact distinguishable from an
+        # uncertain response, while the exclusive provenance prevents resume.
+        state.pop("launch_intent")
+        state.pop("run_id")
+        save_state(cfg.state_path, state)
+        raise refused("deadline.insufficient")
     jit = api(
         f"orgs/{cfg.runner_org}/actions/runners/generate-jitconfig",
         "POST",
@@ -1025,13 +1063,121 @@ def op_launch(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str,
     encoded = _field(jit, "encoded_jit_config", str, "api.unavailable")
     jit = None
     try:
+        now = time.monotonic_ns()
+        if now >= deadline_ns:
+            raise refused("deadline.insufficient")
+        observation_remaining_ms = frozen.remaining_ns(now) // 1_000_000
+        if (
+            not 1
+            <= observation_remaining_ms
+            <= hp.BOOTSTRAP_OBSERVATION_MAX_AGE_NS // 1_000_000
+        ):
+            raise refused("snapshot.refused")
         reply = channel(
             "bootstrap",
-            request("bootstrap", lease_id=state["lease_id"], jit_config=encoded),
+            request(
+                "bootstrap",
+                lease_id=state["lease_id"],
+                jit_config=encoded,
+                bootstrap_snapshot={
+                    "challenge": timing["challenge"],
+                    "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+                    "manifest_digest": frozen.digest,
+                    "provenance_digest": frozen.provenance_digest,
+                    "observation_remaining_ms": observation_remaining_ms,
+                },
+            ),
         )
     finally:
         encoded = ""
     return {"lease_id": state["lease_id"], "state": reply["state"]}
+
+
+def fresh_bootstrap(
+    cfg: Config, channel: Channel, state: Mapping[str, Any], deadline_ns: int
+) -> tuple[cb.FrozenBootstrap, dict[str, Any]]:
+    """A PREPARED host challenge precedes all fresh DNS and every JIT effect."""
+    if type(deadline_ns) is not int or time.monotonic_ns() >= deadline_ns:
+        raise refused("deadline.insufficient")
+    if state.get("bootstrap_proposal_sha256") != cfg.bootstrap_proposal_sha256:
+        raise refused("binding.mismatch")
+    manifest = cb.load_manifest(
+        cfg.bootstrap_manifest_path, cfg.bootstrap_manifest_sha256
+    )
+    if hp.digest(manifest) != state.get("bootstrap_manifest_digest"):
+        raise refused("binding.mismatch")
+    proposal = cb.load_config(
+        cfg.bootstrap_proposal_path, cfg.bootstrap_proposal_sha256
+    )
+    timing = channel("timing", request("timing", lease_id=state["lease_id"]))
+    hp.hex64(timing["challenge"])
+    try:
+        frozen = cb.capture(proposal, deadline_ns=deadline_ns)
+        frozen.require_same(manifest)
+    except cb.BootstrapRefused:
+        raise refused("snapshot.refused") from None
+    if (
+        time.monotonic_ns() >= deadline_ns
+        or frozen.remaining_ns(time.monotonic_ns()) <= 0
+    ):
+        raise refused("deadline.insufficient")
+    return frozen, timing
+
+
+def retain_bootstrap_provenance(
+    state_path: Path, lease: str, frozen: cb.FrozenBootstrap
+) -> None:
+    """Preserve all private observations once; cleanup never depends on this file."""
+    hp.lease_id(lease)
+    name = state_path.name + "." + lease + ".bootstrap-provenance.json"
+    raw = hp.canonical_json(frozen.provenance)
+    if hashlib.sha256(raw).hexdigest() != frozen.provenance_digest:
+        raise refused("binding.mismatch")
+    parent = os.open(
+        state_path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    )
+    try:
+        info = os.fstat(parent)
+        if info.st_uid not in {0, os.geteuid()} or stat.S_IMODE(info.st_mode) & 0o022:
+            raise refused("state.invalid")
+        fd = os.open(
+            name,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+            dir_fd=parent,
+        )
+        try:
+            os.fchmod(fd, 0o600)
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or info.st_uid != os.geteuid()
+            ):
+                raise refused("state.invalid")
+            with os.fdopen(fd, "wb", closefd=False) as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(fd)
+            before = os.fstat(fd)
+            os.lseek(fd, 0, os.SEEK_SET)
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                measured = stream.read(len(raw) + 1)
+            after = os.fstat(fd)
+            if (
+                measured != raw
+                or before.st_nlink != 1
+                or after.st_nlink != 1
+                or stat.S_IMODE(after.st_mode) != 0o600
+                or (before.st_mtime_ns, before.st_ctime_ns, before.st_size)
+                != (after.st_mtime_ns, after.st_ctime_ns, after.st_size)
+            ):
+                raise refused("state.invalid")
+        finally:
+            os.close(fd)
+        os.fsync(parent)
+    finally:
+        os.close(parent)
 
 
 @serialized
@@ -1046,7 +1192,9 @@ def op_decide(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
         runner_id=state["runner_id"],
         qualification=state["qualification"],
         policy_doc=read_json(cfg.policy_path),
-        bootstrap_manifest=read_json(cfg.bootstrap_manifest_path),
+        bootstrap_manifest=cb.load_manifest(
+            cfg.bootstrap_manifest_path, cfg.bootstrap_manifest_sha256
+        ),
     )
     return {
         "status": decision.status,
@@ -1148,11 +1296,21 @@ def main(argv: list[str]) -> int:
         channel = ssh_channel(cfg.ssh_alias, cfg.controller_path)
         op = argv[1]
         if op in {"prepare", "launch"}:
-            if len(argv) != 6 or argv[4] != "--run-id" or not argv[5].isdigit():
+            expected_length = 8 if op == "launch" else 6
+            if (
+                len(argv) != expected_length
+                or argv[4] != "--run-id"
+                or not argv[5].isdigit()
+            ):
                 raise refused("operation.invalid")
-            result = (op_launch if op == "launch" else op_prepare)(
-                cfg, channel, gh_api, int(argv[5])
-            )
+            if op == "launch":
+                if argv[6] != "--deadline-monotonic-ns" or not argv[7].isdigit():
+                    raise refused("operation.invalid")
+                result = op_launch(
+                    cfg, channel, gh_api, int(argv[5]), deadline_ns=int(argv[7])
+                )
+            else:
+                result = op_prepare(cfg, channel, gh_api, int(argv[5]))
         elif len(argv) != 4:
             raise refused("operation.invalid")
         else:

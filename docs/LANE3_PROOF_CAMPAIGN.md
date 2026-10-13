@@ -144,7 +144,9 @@ The retained launch sequence runs in one parent call with a single 60-second
 absolute deadline established before retain: retain, gate prepare, existing
 pinned coordinator CLI prepare, gate bootstrap, existing CLI launch. Each gate
 checks the actual protected key-load receipt. The fixed CLI roles preserve the
-existing `--config` and prepare/launch-only `--run-id` formats. Measured coordinator
+existing `--config` and prepare/launch-only `--run-id` formats; launch also receives
+`--deadline-monotonic-ns` carrying that same parent deadline, never a reset.
+Measured coordinator
 configuration binds both its own GitHub reads and the final independent group
 read to the same organization/group, SSH alias, installed dispatcher and state
 path. Source verification does not authorize execution.
