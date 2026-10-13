@@ -99,6 +99,14 @@ class ReviewTransferProof:
 
 @dataclass(frozen=True, slots=True)
 class RecordConfirmation:
+    """Correlate immutable confirmed-payment evidence to its named intent.
+
+    A repeated provider/external-reference identity must retain its intent,
+    amount, currency and source. A supplied observation instant must match the
+    original; omitting it on replay retains the stored instant. New evidence
+    alone defaults an omitted instant to the current time.
+    """
+
     intent_id: UUID
     source: ConfirmationSource
     external_reference: str

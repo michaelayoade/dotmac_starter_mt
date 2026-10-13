@@ -132,6 +132,11 @@
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a104 IS published and tagged (dotmac-kernel-v0.1.0a104). This source adds strict fresh settings resolution, so continuing to declare bare 0.1.0a104 would make one released version name two importable contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only through a separately authorized allocation of the next public version at release time; never remove the marker merely to quiet a gate.",
       "state": "declared-unpublished"
     },
+    "dotmac-payments": {
+      "declared": "0.1.0a2",
+      "reason": "DECLARED FOR THE CONFIRMED-INTAKE SAFETY PREREQUISITE, NOT YET RELEASED. Published a1 peels from dotmac-payments-v0.1.0a1 to 04b9771320b865b66d1322660fc6d3590605c973; the tag oracle on 2026-10-13 contained no a2 tag. a2 adds exact immutable confirmation replay and serialized intent/proof lifecycle mutations, so those behaviors cannot silently replace the published a1 artifact. Remove this row only after the protected module release installs, verifies and tags exact 0.1.0a2. Declaration and hosted source tests are not publication or Sub writer-switch evidence; Sub remains authoritative pending backfill, zero-drift shadow and separately authorized cutover.",
+      "state": "declared-unpublished"
+    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",

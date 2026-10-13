@@ -106,3 +106,24 @@ tax reconciliation. Extra document-owned tax is refused for new explicit
 invoices, so it cannot bypass the line evidence. Fresh and predecessor migration
 canaries are authored; their hosted execution remains required. No Sub source
 writer, production schema or financial record has changed.
+
+## Ordered continuation
+
+The execution order below separates implementation evidence from activation.
+Completed source slices do not retire Sub's incumbent financial writer.
+
+| Slice | Required result before advancing |
+|---|---|
+| Cash-backed credit draw | PR #802 at `d6d3981b97db84bb54f31467f97014266bff0c02` passed all 36 hosted checks. Review, merge and successor publication remain separate steps. |
+| Homogeneous multiline invoices | PR #803 includes the additive migration and exact evidence guards. PostgreSQL integration and security passed `a284f98c250c41129c12026126554b5ed0053f6a`; its precise SQLAlchemy alias-type fix at `31d3e7c944df07f99ecc9b89231fca5251fbdc8b` requires fresh complete CI acceptance. |
+| Confirmed-payment safety | The Payments successor must reject conflicting confirmation evidence and serialize competing intent transitions. Prove exact retry, competing confirmations, cancellation/expiry and transfer-proof review on migrated PostgreSQL before an adopter turns a confirmation into Billing money. |
+| Sub numbering composition | Pin released Numbering `0.1.0a2`, compose its tenant lineage and prove isolation, preview, retry and rollback against Sub's migrated schema. Its peeled publication coordinate is `4c282228b53405442effc4159f5db9d50446d335`; registry verification run `31908774569` does not replace adopter-database proof. |
+| Numbering switch preparation | Derive exact settings-to-series mapping and business-date/command identities from incumbent callers. Produce read-only counter/collision evidence, seed and inverse plans, and complete writer retirement evidence before enabling allocation. |
+| Intake and prepaid orchestration | Bind verified actual cash to Billing settlements, then exercise funding-time obligation, final period, invoice, allocation and service consequence with exact retry and concurrency proofs. No gross-payment substitution for WHT deductions. |
+| Remaining consumers and migration | Complete Tax, rendering/artifact convergence, Collections, existing ERP-feed mapping and Sub read projections; rehearse open items/opening lanes plus exceptions, closed-history archive and the coupled ledger switch. |
+
+WHT records must distinguish claimed deductions, accepted receivable discharge
+and tax-credit evidence. The accountant's applicability/rate/basis/VAT/rounding
+and recognition policy remains pending; a deduction never becomes spendable
+cash credit. This is distinct from the pending prepaid VAT ruling and non-cash
+promotional-credit decision.
