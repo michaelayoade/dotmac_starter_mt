@@ -546,7 +546,8 @@ class PlatformConfirmedSettlement(Base, _SettlementColumns):
 
 class _CashSourceClaimColumns:
     id: Mapped[UUID] = uuid_pk()
-    settlement_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    settlement_id: Mapped[UUID | None] = mapped_column(Uuid())
+    opening_cash_lot_id: Mapped[UUID | None] = mapped_column(Uuid())
     billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     source_system: Mapped[str] = mapped_column(String(120), nullable=False)
     source_settlement_key: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -593,6 +594,35 @@ class CashSourceClaim(Base, _TenantRow, _CashSourceClaimColumns):
             name="fk_cash_claim_settlement",
             ondelete="RESTRICT",
         ),
+        CheckConstraint(
+            "(settlement_id IS NULL) <> (opening_cash_lot_id IS NULL)",
+            name="ck_cash_claim_owner",
+        ),
+        UniqueConstraint(
+            "tenant_id", "opening_cash_lot_id", name="uq_cash_claim_opening_lot"
+        ),
+        ForeignKeyConstraint(
+            [
+                "tenant_id",
+                "opening_cash_lot_id",
+                "billing_account_id",
+                "source_system",
+                "source_settlement_key",
+                "currency",
+                "minor_units",
+            ],
+            [
+                f"{SCHEMA}.opening_cash_lots.tenant_id",
+                f"{SCHEMA}.opening_cash_lots.id",
+                f"{SCHEMA}.opening_cash_lots.billing_account_id",
+                f"{SCHEMA}.opening_cash_lots.source_system",
+                f"{SCHEMA}.opening_cash_lots.source_settlement_key",
+                f"{SCHEMA}.opening_cash_lots.currency",
+                f"{SCHEMA}.opening_cash_lots.minor_units",
+            ],
+            name="fk_cash_claim_opening_lot",
+            ondelete="RESTRICT",
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -627,6 +657,33 @@ class PlatformCashSourceClaim(Base, _CashSourceClaimColumns):
                 )
             ],
             name="fk_platform_cash_claim_settlement",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(settlement_id IS NULL) <> (opening_cash_lot_id IS NULL)",
+            name="ck_platform_cash_claim_owner",
+        ),
+        UniqueConstraint(
+            "opening_cash_lot_id", name="uq_platform_cash_claim_opening_lot"
+        ),
+        ForeignKeyConstraint(
+            [
+                "opening_cash_lot_id",
+                "billing_account_id",
+                "source_system",
+                "source_settlement_key",
+                "currency",
+                "minor_units",
+            ],
+            [
+                f"{SCHEMA}.platform_opening_cash_lots.id",
+                f"{SCHEMA}.platform_opening_cash_lots.billing_account_id",
+                f"{SCHEMA}.platform_opening_cash_lots.source_system",
+                f"{SCHEMA}.platform_opening_cash_lots.source_settlement_key",
+                f"{SCHEMA}.platform_opening_cash_lots.currency",
+                f"{SCHEMA}.platform_opening_cash_lots.minor_units",
+            ],
+            name="fk_platform_cash_claim_opening_lot",
             ondelete="RESTRICT",
         ),
         schema_table_args(SCHEMA),
@@ -1818,7 +1875,206 @@ class PlatformReceivablePositionFactV2(Base, _PositionFactV2Columns):
     __table_args__ = _position_v2_constraints(tenant=False)
 
 
+class _OpeningEvidenceColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    posting_group_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class _OpeningImportReceiptColumns(_OpeningEvidenceColumns):
+    receipt_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    original_receipt_id: Mapped[UUID | None] = mapped_column(Uuid())
+    manifest_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_identity: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    total_residual: Mapped[Decimal] = money_column()
+    expected_target_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    expected_target_watermark: Mapped[str] = mapped_column(String(255), nullable=False)
+    migration_authority_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class _OpeningCashLotColumns(_OpeningEvidenceColumns):
+    receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_system: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_settlement_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    gross_amount: Mapped[Decimal] = money_column()
+    historical_consumed: Mapped[Decimal] = money_column()
+    residual_amount: Mapped[Decimal] = money_column()
+
+
+class _OpeningCashEffectColumns(_OpeningEvidenceColumns):
+    lot_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    effect_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount_delta: Mapped[Decimal] = money_column()
+    document_id: Mapped[UUID | None] = mapped_column(Uuid())
+    original_effect_id: Mapped[UUID | None] = mapped_column(Uuid())
+    source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    authorization_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+def _opening_constraints(*, tenant: bool, kind: str) -> tuple[object, ...]:
+    prefix = "" if tenant else "platform_"
+    scope = ["tenant_id"] if tenant else []
+    table = f"{prefix}opening_{kind}"
+    constraints: list[object] = [
+        CheckConstraint("minor_units BETWEEN 0 AND 6", name=f"ck_{table}_precision"),
+        UniqueConstraint(
+            *scope, "id", "billing_account_id", name=f"uq_{table}_account"
+        ),
+        ForeignKeyConstraint(
+            [*scope, "posting_group_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.{prefix}posting_groups.{key}"
+                for key in (*scope, "id", "billing_account_id")
+            ],
+            name=f"fk_{table}_group",
+            ondelete="RESTRICT",
+        ),
+    ]
+    links = []
+    if kind == "import_receipts":
+        constraints.extend(
+            (
+                UniqueConstraint(
+                    *scope,
+                    "receipt_kind",
+                    "request_identity",
+                    name=f"uq_{table}_request",
+                ),
+                UniqueConstraint(
+                    *scope, "original_receipt_id", name=f"uq_{table}_inverse"
+                ),
+            )
+        )
+        links.append(("original_receipt_id", "import_receipts"))
+    elif kind == "cash_lots":
+        constraints.extend(
+            (
+                UniqueConstraint(
+                    *scope, "receipt_id", "sequence", name=f"uq_{table}_sequence"
+                ),
+                UniqueConstraint(
+                    *scope,
+                    "id",
+                    "billing_account_id",
+                    "source_system",
+                    "source_settlement_key",
+                    "currency",
+                    "minor_units",
+                    name=f"uq_{prefix}opening_lot_claim_binding",
+                ),
+            )
+        )
+        links.append(("receipt_id", "import_receipts"))
+    else:
+        constraints.extend(
+            (
+                Index(
+                    f"{prefix}opening_refund_one_correction",
+                    *scope,
+                    "original_effect_id",
+                    unique=True,
+                    postgresql_where=text("effect_kind = 'refund_correction'"),
+                ),
+                Index(
+                    f"{prefix}opening_lot_one_recognition",
+                    *scope,
+                    "lot_id",
+                    unique=True,
+                    postgresql_where=text("effect_kind = 'recognition'"),
+                ),
+            )
+        )
+        constraints.extend(
+            (
+                UniqueConstraint(
+                    *scope, "posting_group_id", "sequence", name=f"uq_{table}_sequence"
+                ),
+                UniqueConstraint(
+                    *scope, "id", "lot_id", "billing_account_id", name=f"uq_{table}_lot"
+                ),
+                ForeignKeyConstraint(
+                    [*scope, "original_effect_id", "lot_id", "billing_account_id"],
+                    [
+                        f"{SCHEMA}.{table}.{key}"
+                        for key in (*scope, "id", "lot_id", "billing_account_id")
+                    ],
+                    name=f"fk_{table}_original",
+                    ondelete="RESTRICT",
+                ),
+            )
+        )
+        links.append(("lot_id", "cash_lots"))
+        constraints.append(
+            ForeignKeyConstraint(
+                [*scope, "document_id", "billing_account_id"],
+                [
+                    f"{SCHEMA}.{prefix}documents.{key}"
+                    for key in (*scope, "id", "billing_account_id")
+                ],
+                name=f"fk_{table}_document",
+                ondelete="RESTRICT",
+            )
+        )
+    for column, target in links:
+        constraints.append(
+            ForeignKeyConstraint(
+                [*scope, column, "billing_account_id"],
+                [
+                    f"{SCHEMA}.{prefix}opening_{target}.{key}"
+                    for key in (*scope, "id", "billing_account_id")
+                ],
+                name=f"fk_{table}_{column}",
+                ondelete="RESTRICT",
+            )
+        )
+    return (*constraints, schema_table_args(SCHEMA))
+
+
+class OpeningImportReceipt(Base, _TenantRow, _OpeningImportReceiptColumns):
+    __tablename__ = "opening_import_receipts"
+    __table_args__ = _opening_constraints(tenant=True, kind="import_receipts")
+
+
+class PlatformOpeningImportReceipt(Base, _OpeningImportReceiptColumns):
+    __tablename__ = "platform_opening_import_receipts"
+    __table_args__ = _opening_constraints(tenant=False, kind="import_receipts")
+
+
+class OpeningCashLot(Base, _TenantRow, _OpeningCashLotColumns):
+    __tablename__ = "opening_cash_lots"
+    __table_args__ = _opening_constraints(tenant=True, kind="cash_lots")
+
+
+class PlatformOpeningCashLot(Base, _OpeningCashLotColumns):
+    __tablename__ = "platform_opening_cash_lots"
+    __table_args__ = _opening_constraints(tenant=False, kind="cash_lots")
+
+
+class OpeningCashEffect(Base, _TenantRow, _OpeningCashEffectColumns):
+    __tablename__ = "opening_cash_effects"
+    __table_args__ = _opening_constraints(tenant=True, kind="cash_effects")
+
+
+class PlatformOpeningCashEffect(Base, _OpeningCashEffectColumns):
+    __tablename__ = "platform_opening_cash_effects"
+    __table_args__ = _opening_constraints(tenant=False, kind="cash_effects")
+
+
 TENANT_TABLES = (
+    "opening_import_receipts",
+    "opening_cash_lots",
+    "opening_cash_effects",
     "cash_source_claims",
     "non_cash_credit_grants",
     "non_cash_credit_effects",
@@ -1844,6 +2100,9 @@ TENANT_TABLES = (
 )
 
 PLATFORM_TABLES = (
+    "platform_opening_import_receipts",
+    "platform_opening_cash_lots",
+    "platform_opening_cash_effects",
     "platform_cash_source_claims",
     "platform_non_cash_credit_grants",
     "platform_non_cash_credit_effects",
@@ -1869,6 +2128,12 @@ PLATFORM_TABLES = (
 )
 
 __all__ = [
+    "OpeningImportReceipt",
+    "PlatformOpeningImportReceipt",
+    "OpeningCashLot",
+    "PlatformOpeningCashLot",
+    "OpeningCashEffect",
+    "PlatformOpeningCashEffect",
     "CashSourceClaim",
     "PlatformCashSourceClaim",
     "NonCashCreditGrant",

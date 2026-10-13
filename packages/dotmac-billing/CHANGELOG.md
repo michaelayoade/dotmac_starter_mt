@@ -2,6 +2,19 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a7 — UNRELEASED
+
+- Add verified cash-only opening import into pristine accounts with immutable
+  receipts, source lots and permanently occupied exact cash-source claims.
+- Complete deterministic ordinary/opening credit draw, atomic partial/full mixed
+  draw inverses, independently evidenced unused refunds and full one-time refund
+  corrections, and authority-qualified full import unwind after net uses close.
+- Add distinct AccountingFactV4 with actual source effect identities and complete
+  source ordering; preserve settlement-only V1–V3 facts and historical retry bytes.
+- Add `bi_0007_opening_cash` scoped affinity, append-only, room and completeness
+  fences on both planes; preserve accepted rows and migration bytes. No release,
+  operational import, adoption or activation is implied.
+
 ## 0.1.0a6 — UNRELEASED
 
 - Add provenance-only immutable cash-source claims for real settlements on both

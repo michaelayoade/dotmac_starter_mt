@@ -78,8 +78,8 @@
       "state": "never-published"
     },
     "dotmac-billing": {
-      "declared": "0.1.0a6",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a6 adds immutable exact cash-source claims consumed by existing settlement acceptance, provenance-only historical claim backfill and deferred completeness fencing. It introduces no opening money or import writer. Hosted acceptance and Michael source approval are pending; package publication is already authorized by the closed allowlist and remains separate from product adoption and production activation. No product pins change.",
+      "declared": "0.1.0a7",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a7 adds cash-only opening import, permanent shared receipt claims, mixed-source credit draws and atomic linked inverses, evidenced unused refunds/corrections, full unwind and distinct V4 accounting. Trusted cash/source/migration evidence and exact target admission are required; unsupported opening lanes remain refused. Hosted acceptance and Michael source approval are pending. Package publication is already authorized by the closed allowlist; product adoption and production activation remain separate. No product pins change.",
       "state": "declared-unpublished"
     },
     "dotmac-connector-flutterwave": {
