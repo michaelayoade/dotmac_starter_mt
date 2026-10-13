@@ -32,7 +32,7 @@ from .database_catalog import (
 )
 from .digest import Digest
 from .errors import PreconditionFailed, SpecError
-from .spec import SCHEMA_V2, SCHEMA_V3, ProductDeploymentSpec
+from .spec import SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, ProductDeploymentSpec
 
 __all__ = [
     "DATABASE_DESCRIPTOR_CATALOG_BINDING_SCHEMA",
@@ -175,7 +175,7 @@ class DatabaseDescriptorCatalogBindingV1:
         if spec.database is None:
             raise SpecError("a database catalog binding requires [database]")
         if (
-            spec.descriptor_schema in (SCHEMA_V2, SCHEMA_V3)
+            spec.descriptor_schema in (SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
             and catalogs != spec.database.catalogs
         ):
             raise SpecError(
