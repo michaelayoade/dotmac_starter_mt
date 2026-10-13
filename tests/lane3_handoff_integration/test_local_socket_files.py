@@ -13,6 +13,8 @@ import pathlib
 import pwd
 import stat
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -77,6 +79,40 @@ def test_wait_closed_times_out_if_live_closed_is_never_archived(monkeypatch) -> 
     assert journal.call_count == 2
     closed.assert_not_called()
     assert clock.sleep.call_count == 2
+
+
+def test_harness_journal_waits_for_atomic_writer_lock(env: Env) -> None:
+    env.prepare()
+    baseline = env.journal()
+    assert baseline is not None
+    held, release, reading = threading.Event(), threading.Event(), threading.Event()
+
+    def writer():
+        controller = env.controller()
+        with controller.locked():
+            held.set()
+            assert release.wait(10)
+            controller.save(baseline)
+
+    def reader():
+        reading.set()
+        return env.journal()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        writing = pool.submit(writer)
+        try:
+            assert held.wait(5)
+            # Sensitivity: the prior unlocked observer can finish while the
+            # writer owns the transaction, exposing replace/unlink races.
+            assert env.controller().load() == baseline
+            observing = pool.submit(reader)
+            assert reading.wait(5)
+            with pytest.raises(TimeoutError):
+                observing.result(timeout=0.2)
+        finally:
+            release.set()
+        writing.result(timeout=5)
+        assert observing.result(timeout=5) == baseline
 
 
 def test_positive_report_grant_consume_and_pinned_tls(env: Env) -> None:

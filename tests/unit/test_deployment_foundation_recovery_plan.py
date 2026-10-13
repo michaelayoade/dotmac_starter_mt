@@ -730,6 +730,22 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "foundation_candidate.py": 1,
     "foundation_disposition.py": 1,
     "kernel_release_authorization.py": 1,
+    # Campaign records are product-owned host lifecycle documents, never
+    # Foundation leases/releases. Client owns its approval/material/closure
+    # encoding; identity owns its account journal and independently verifies
+    # the transport manifest digest before releasing a UID. Management owns
+    # the immutable callback binding. Transport owns its manifest/baseline
+    # digest, durable state encoding and two value-free CLI receipt shapes.
+    # Composition owns the original deadline envelope; remote owns its exact
+    # public exchange manifest; runner owns its material and execution views.
+    # These are campaign protocols, never Foundation release-store documents.
+    "lane3_campaign_client.py": 1,
+    "lane3_campaign_composition.py": 1,
+    "lane3_campaign_identity.py": 2,
+    "lane3_campaign_management.py": 1,
+    "lane3_campaign_remote.py": 1,
+    "lane3_campaign_runner.py": 2,
+    "lane3_campaign_transport.py": 4,
     # The pre-import bootstrap hashes the supplier module map before protocol
     # code is trusted; it cannot import that code to serialize its own admission
     # input. This digest is not a Foundation store or host-lease release record.

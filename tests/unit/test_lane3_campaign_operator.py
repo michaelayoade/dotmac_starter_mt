@@ -1,0 +1,654 @@
+"""Actual canonical operator contracts; executable evidence belongs to hosted CI."""
+
+from __future__ import annotations
+
+import importlib
+import json
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+import time
+from types import SimpleNamespace
+
+import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
+
+
+def operator():
+    return importlib.import_module("lane3_campaign_operator")
+
+
+def test_operator_requires_explicit_protected_configuration(monkeypatch):
+    module = operator()
+    monkeypatch.setattr(module, "DEPLOYMENT", None)
+    with pytest.raises(RuntimeError, match="protected-deployment-required"):
+        module.deployment_inputs()
+    for invalid in ({}, {"unrecognized": "SECRET-CANARY"}, [], None):
+        with pytest.raises((ValueError, module.CampaignRefused)) as error:
+            module.configure(invalid)
+        assert "SECRET-CANARY" not in str(error.value)
+    assert module.DEPLOYMENT is None
+
+
+def test_protected_configuration_is_one_shot_and_defensively_copied(monkeypatch):
+    module = operator()
+    monkeypatch.setattr(module, "DEPLOYMENT", None)
+    deployment = {
+        **{
+            key: "/synthetic/" + key
+            for key in (
+                "runtime",
+                "coordinator_config",
+                "state_path",
+                "key_receipt",
+                "issuer_deployment",
+            )
+        },
+        **dict.fromkeys(
+            (
+                "coordinator_config_sha256",
+                "bundle_digest",
+                "issuer_sha256",
+                "issuer_deployment_sha256",
+            ),
+            "a" * 64,
+        ),
+        "runtime_pins": dict.fromkeys(module.RUNTIME_ROLES, "b" * 64),
+        "github_run_id": 12,
+        "qualification": {
+            "repository_id": 1,
+            "run_id": 12,
+            "run_attempt": 1,
+            "environment_id": 2,
+            **dict.fromkeys(
+                ("workflow_sha", "workflow_blob", "starter_commit"), "c" * 40
+            ),
+            **dict.fromkeys(
+                ("approval_digest", "admission_digest", "supplier_digest"), "d" * 64
+            ),
+        },
+        "ssh_destination": "synthetic-host",
+        "runner_org": "synthetic-org",
+        "runner_group_id": 4,
+        "issuer_module": "/synthetic/lane3_campaign_issuer.py",
+    }
+    module.configure(deployment)
+    deployment["runtime_pins"]["lane3_handoff_protocol.py"] = "e" * 64
+    view = module.deployment_inputs()
+    view["qualification"]["run_id"] = 99
+    assert (
+        module.deployment_inputs()["runtime_pins"]["lane3_handoff_protocol.py"]
+        == "b" * 64
+    )
+    assert module.deployment_inputs()["qualification"]["run_id"] == 12
+    with pytest.raises(RuntimeError, match="deployment-already-configured"):
+        module.configure(deployment)
+
+
+@pytest.fixture
+def pipe_child():
+    processes = []
+
+    def launch(code):
+        process = subprocess.Popen(  # noqa: S603 - synthetic owned interpreter
+            [sys.executable, "-I", "-B", "-c", code],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            bufsize=0,
+        )
+        processes.append(process)
+        return process
+
+    yield launch
+    for process in processes:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+        process.stdin.close()
+        process.stdout.close()
+
+
+def test_json_pipe_preserves_fragmented_lines_and_partial_writes(
+    pipe_child, monkeypatch
+):
+    module = operator()
+    process = pipe_child(
+        "import os,sys\n"
+        "line=sys.stdin.buffer.readline()\n"
+        "for b in line: os.write(1,bytes([b]))\n"
+        "os.write(1,b'{\"second\":true}\\n')\n"
+    )
+    pipe = module.JsonPipe(process)
+    write = module.os.write
+    counts = []
+
+    def fragmented(fd, data):
+        count = write(fd, data[:3])
+        counts.append(count)
+        return count
+
+    monkeypatch.setattr(module.os, "write", fragmented)
+    value = {"op": "synthetic", "nested": [1, {"ok": True}]}
+    deadline = time.monotonic() + 5
+    pipe.send(value, deadline)
+    assert pipe.receive(deadline) == value
+    assert pipe.receive(deadline) == {"second": True}
+    assert len(counts) > 1 and max(counts) <= 3
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b"", b'{"incomplete":true}', b'{"op":1,"op":2}\n', b"[]\n", b"x" * 65],
+)
+def test_json_pipe_refuses_eof_duplicates_nonobjects_and_oversized_frames(
+    pipe_child, payload
+):
+    module = operator()
+    process = pipe_child("import os\nos.write(1," + repr(payload) + ")\n")
+    with pytest.raises(module.CampaignRefused):
+        module.JsonPipe(process).receive(time.monotonic() + 5, limit=64)
+
+
+def test_json_pipe_never_resets_an_inherited_deadline(pipe_child):
+    module = operator()
+    process = pipe_child("import time\ntime.sleep(10)\n")
+    deadline = time.monotonic() - 1
+    pipe = module.JsonPipe(process)
+    for operation in (
+        lambda: pipe.send({"op": "synthetic"}, deadline),
+        lambda: pipe.receive(deadline),
+    ):
+        with pytest.raises((module.CampaignRefused, TimeoutError)):
+            operation()
+
+
+def test_owned_subprocess_timeout_kills_its_actual_process_group(monkeypatch):
+    module = operator()
+    launched = []
+    killed = []
+    popen = module.subprocess.Popen
+    killpg = module.os.killpg
+
+    def launch(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        launched.append(process)
+        return process
+
+    def kill(group, sig):
+        killed.append((group, sig))
+        return killpg(group, sig)
+
+    monkeypatch.setattr(module.subprocess, "Popen", launch)
+    monkeypatch.setattr(module.os, "killpg", kill)
+    with pytest.raises(module.CampaignRefused):
+        module._run_owned(
+            [sys.executable, "-I", "-B", "-c", "import time; time.sleep(10)"],
+            time.monotonic() + 0.2,
+        )
+    assert len(launched) == 1
+    assert killed == [(launched[0].pid, signal.SIGKILL)]
+    assert launched[0].returncode == -signal.SIGKILL
+
+
+def management_fixture(monkeypatch, tmp_path, defect=None):
+    module = operator()
+    protocol = importlib.import_module("lane3_handoff_protocol")
+    events = []
+    clock = [100.0]
+    lease = "a" * 32
+    evidence = {
+        "schema": "dotmac.lane3.handoff-evidence.v1",
+        "protocol": protocol.PROTOCOL,
+        "lease_id": lease,
+        "outcome": "REFUSED",
+        "category": None,
+        **dict.fromkeys(
+            (
+                "origin",
+                "flags",
+                "binding",
+                "policy_digest",
+                "controller_digest",
+                "bootstrap_manifest_digest",
+                "manifest_digest",
+                "snapshot_digest",
+                "report_digest",
+                "grant_digest",
+            ),
+            None,
+        ),
+        "transitions": [{"state": "CLOSED", "offset_ms": 1}],
+        "cleanup": {
+            **dict.fromkeys(module.CLEANUP, True),
+            "guard_installed": True,
+            "global_conntrack_flushed": False,
+        },
+        "cleanup_blocked": None,
+        "gate0_accepted": False,
+        "token_request_started": False,
+        "issuance": "NOT_STARTED",
+        "proof_outcome": "REFUSED",
+    }
+    monkeypatch.setattr(
+        module,
+        "deployment_inputs",
+        lambda: {
+            "state_path": tmp_path / "absent",
+            "github_run_id": 12,
+        },
+    )
+    monkeypatch.setattr(module, "load_module", lambda role: protocol)
+    monkeypatch.setattr(module, "coordinator_binding", lambda: {})
+    monkeypatch.setattr(
+        module,
+        "durable_owned_state",
+        lambda: {"lease_id": lease},
+    )
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        module, "key_age", lambda maximum: events.append(("key", maximum))
+    )
+
+    class Pipe:
+        def send(self, value, deadline):
+            self.op = value["op"]
+            events.append((self.op, deadline))
+            clock[0] += 3
+
+        def receive(self, deadline, limit=262144):
+            if defect == self.op:
+                raise module.CampaignRefused("synthetic-gate")
+            if self.op == "finish":
+                return {
+                    "status": "CLOSED",
+                    "op": "finish",
+                    "local_journal_absent": True,
+                }
+            return {"status": "PASS", "op": self.op}
+
+    def coordinator(op, deadline, run_id=None):
+        events.append((op, deadline, run_id))
+        if defect == op:
+            raise module.CampaignRefused("synthetic-lost-response")
+        if op == "cleanup":
+            return {"state": "CLOSED", "evidence": evidence}
+        return {
+            "state": "PREPARED" if op == "prepare" else "BOOTSTRAP",
+            "lease_id": lease,
+        }
+
+    def closure(role, deadline, request=None):
+        events.append((role, deadline))
+        if role == "group":
+            return {"total_count": 1 if defect == "pagination" else 0, "runners": []}
+        assert json.loads(request) == {
+            "protocol": protocol.PROTOCOL,
+            "op": "cleanup",
+            "lease_id": lease,
+        }
+        archive_evidence = json.loads(json.dumps(evidence))
+        if defect == "evidence-mismatch":
+            archive_evidence["outcome"] = "EXPIRED"
+        return {
+            "protocol": protocol.PROTOCOL,
+            "op": "cleanup",
+            "lease_id": "b" * 32 if defect == "archive" else lease,
+            "state": "CLOSED",
+            "evidence": archive_evidence,
+        }
+
+    monkeypatch.setattr(module, "coordinator_cli", coordinator)
+    monkeypatch.setattr(module, "closure_read", closure)
+    management = module.ManagementStdio(None)
+    management.pipe = Pipe()
+    return module, management, events, evidence
+
+
+def test_one_parent_keeps_original_deadline_through_both_gates_and_actual_cli(
+    monkeypatch, tmp_path
+):
+    _, management, events, _ = management_fixture(monkeypatch, tmp_path)
+    assert management.retained_launch()["state"] == "BOOTSTRAP"
+    assert [event[0] for event in events] == [
+        "key",
+        "retain",
+        "key",
+        "gate_prepare",
+        "prepare",
+        "key",
+        "gate_bootstrap",
+        "launch",
+    ]
+    assert [event[1] for event in events if event[0] == "key"] == [30, 30, 60]
+    assert [event[1:] for event in events if event[0] in ("prepare", "launch")] == [
+        (160, 12),
+        (160, 12),
+    ]
+    management.finish()
+    assert [event[0] for event in events][-4:] == [
+        "cleanup",
+        "archive",
+        "group",
+        "finish",
+    ]
+    assert management.phase == "finished"
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "cleanup",
+        "archive",
+        "evidence-mismatch",
+        "pagination",
+        "cleanup-bit",
+        "blocked",
+        "state-drift",
+    ],
+)
+def test_closure_requires_cleanup_archive_original_bits_and_complete_zero_group(
+    monkeypatch, tmp_path, defect
+):
+    module, management, events, evidence = management_fixture(
+        monkeypatch, tmp_path, defect
+    )
+    management.retained_launch()
+    if defect == "state-drift":
+        monkeypatch.setattr(
+            module, "durable_owned_state", lambda: {"lease_id": "b" * 32}
+        )
+    elif defect == "cleanup-bit":
+        evidence["cleanup"]["processes_absent"] = False
+    elif defect == "blocked":
+        evidence["cleanup_blocked"] = "cleanup.drift"
+    with pytest.raises(module.CampaignRefused):
+        management.finish()
+    assert "finish" not in [event[0] for event in events]
+    assert management.finish_attempted is True and management.phase == "bootstrapped"
+    with pytest.raises(module.CampaignRefused):
+        management.finish()
+    assert sum(event[0] == "cleanup" for event in events) == (defect != "state-drift")
+
+
+@pytest.mark.parametrize("defect", ["gate_bootstrap", "launch"])
+def test_prepare_success_then_failure_finalizes_once_without_reregistering(
+    monkeypatch, tmp_path, defect
+):
+    module, management, events, _ = management_fixture(monkeypatch, tmp_path, defect)
+    with pytest.raises(module.CampaignRefused):
+        management.retained_launch()
+    assert management.phase == "finished"
+    names = [event[0] for event in events]
+    assert (
+        names.count("retain") == names.count("prepare") == names.count("cleanup") == 1
+    )
+    assert names.count("launch") == (defect == "launch")
+    assert names[-4:] == ["cleanup", "archive", "group", "finish"]
+    with pytest.raises(module.CampaignRefused):
+        management.retained_launch()
+
+
+def test_lost_prepare_with_unknown_durable_ownership_stays_unproven(
+    monkeypatch, tmp_path
+):
+    module, management, events, _ = management_fixture(monkeypatch, tmp_path, "prepare")
+
+    def unknown():
+        raise module.CampaignRefused("state-ownership-unproved")
+
+    monkeypatch.setattr(module, "durable_owned_state", unknown)
+    with pytest.raises(module.CampaignRefused):
+        management.retained_launch()
+    assert management.failure == "UNPROVEN" and management.lease_id is None
+    assert not {"launch", "cleanup", "finish"} & {event[0] for event in events}
+
+
+def test_stale_prepare_gate_preserves_original_bridge_without_remote_prepare(
+    monkeypatch, tmp_path
+):
+    module, management, events, _ = management_fixture(
+        monkeypatch, tmp_path, "gate_prepare"
+    )
+    with pytest.raises(module.CampaignRefused):
+        management.retained_launch()
+    assert management.failure == "UNPROVEN" and management.phase == "retained"
+    assert not {"prepare", "launch", "cleanup", "finish"} & {
+        event[0] for event in events
+    }
+
+
+def test_management_close_sends_eof_without_claiming_attached_process_authority():
+    module = operator()
+    events = []
+    process = SimpleNamespace(
+        stdin=SimpleNamespace(closed=False, close=lambda: events.append("eof"))
+    )
+    module.ManagementStdio(process).close()
+    assert events == ["eof"]
+
+
+@pytest.mark.parametrize(
+    "maximum,age,accepted",
+    [
+        (30, 30, True),
+        (30, 30.1, False),
+        (60, 60, True),
+        (60, 60.1, False),
+        (30, -1, False),
+    ],
+)
+def test_key_age_uses_exact_30_and_60_second_bounds(
+    monkeypatch, maximum, age, accepted
+):
+    module = operator()
+    monkeypatch.setattr(
+        module, "deployment_inputs", lambda: {"key_receipt": pathlib.Path("/synthetic")}
+    )
+    monkeypatch.setattr(
+        module,
+        "owned",
+        lambda *args: json.dumps(
+            {
+                "schema": "dotmac.l3mgmt.key-load.v1",
+                "loaded_at": 100.0 - age,
+                "lifetime_seconds": 480,
+            }
+        ).encode(),
+    )
+    monkeypatch.setattr(module.time, "time", lambda: 100.0)
+    if accepted:
+        assert module.key_age(maximum) == age
+    else:
+        with pytest.raises(module.CampaignRefused, match="key-age"):
+            module.key_age(maximum)
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_actual_coordinator_cli_measures_source_before_fixed_prepare_command(
+    monkeypatch, drift
+):
+    module = operator()
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "deployment_inputs",
+        lambda: {
+            "runtime": pathlib.Path("/synthetic"),
+            "runtime_pins": {"lane3_handoff_coordinator.py": "a" * 64},
+            "coordinator_config": pathlib.Path("/synthetic/config.json"),
+            "github_run_id": 12,
+        },
+    )
+    monkeypatch.setattr(module, "coordinator_binding", lambda: {})
+
+    def measure(path, pin):
+        calls.append((path, pin))
+        if drift:
+            raise module.CampaignRefused("code-pin")
+
+    monkeypatch.setattr(module, "measured", measure)
+    monkeypatch.setattr(
+        module, "_run_owned", lambda args, deadline: calls.append((args, deadline))
+    )
+    if drift:
+        with pytest.raises(module.CampaignRefused):
+            module.coordinator_cli("prepare", 160, 12)
+        assert len(calls) == 1
+    else:
+        module.coordinator_cli("prepare", 160, 12)
+        assert calls[-1] == (
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                "/synthetic/lane3_handoff_coordinator.py",
+                "prepare",
+                "--config",
+                "/synthetic/config.json",
+                "--run-id",
+                "12",
+            ],
+            160,
+        )
+        with pytest.raises(module.CampaignRefused):
+            module.coordinator_cli("prepare", 160, 13)
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [None, "foreign-target", "foreign-group", "boolean-group", "foreign-state"],
+)
+def test_closure_routes_must_match_pinned_coordinator_configuration(
+    monkeypatch, defect
+):
+    module = operator()
+    binding = {
+        "coordinator_config": pathlib.Path("/synthetic/config"),
+        "coordinator_config_sha256": "a" * 64,
+        "state_path": pathlib.Path("/synthetic/state"),
+        "bundle_digest": "b" * 64,
+        "runner_org": "synthetic-org",
+        "runner_group_id": 4,
+        "ssh_destination": "synthetic-host",
+        "qualification": {},
+    }
+    config = {
+        "state_path": str(binding["state_path"]),
+        "runner_org": "synthetic-org",
+        "runner_group_id": 4,
+        "management": {
+            "ssh_alias": "synthetic-host",
+            "controller_path": "/opt/dotmac-lane3-handoff/"
+            + "b" * 64
+            + "/lane3_handoff_install.py",
+        },
+    }
+    if defect == "foreign-target":
+        config["management"]["ssh_alias"] = "unapproved-host"
+    elif defect == "foreign-group":
+        config["runner_group_id"] = 5
+    elif defect == "boolean-group":
+        config["runner_group_id"] = True
+    elif defect == "foreign-state":
+        config["state_path"] = "/other/state"
+    monkeypatch.setattr(module, "deployment_inputs", lambda: binding)
+    monkeypatch.setattr(module, "measured", lambda *args: json.dumps(config).encode())
+    if defect:
+        with pytest.raises(module.CampaignRefused, match="coordinator-binding"):
+            module.coordinator_binding()
+    else:
+        assert module.coordinator_binding() == config
+
+
+@pytest.mark.parametrize("failure", [None, "issuer", "late", "remote-cleanup"])
+def test_b8_prepared_custody_precedes_public_prepare_and_is_consumed_once(
+    monkeypatch, failure
+):
+    module = operator()
+    events = []
+    clock = [100.0]
+    prepared = SimpleNamespace(
+        secret="SECRET-CANARY", close=lambda: events.append("custody-close")
+    )
+    public_issued = {
+        "certificates": {"observer": "synthetic-public-cert"},
+        "public_record": {},
+    }
+
+    def issue(requests, *, remaining_seconds, prepared_custody):
+        assert requests == {"public_keys": {"observer": "ssh-ed25519 synthetic"}}
+        assert remaining_seconds == 40 and prepared_custody is prepared
+        events.append("issue")
+        if failure == "issuer":
+            raise module.CampaignRefused("issuer-failed")
+        clock[0] += 41 if failure == "late" else 7
+        return public_issued
+
+    monkeypatch.setattr(
+        module,
+        "load_issuer",
+        lambda: SimpleNamespace(
+            prepare_custody=lambda: (events.append("custody-ready") or prepared),
+            issue=issue,
+        ),
+    )
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    result = {
+        "matrix_result": {"classification": "synthetic"},
+        "full_b8_complete": False,
+        "admission_changed": False,
+    }
+
+    class Pipe:
+        def __init__(self, process):
+            self.reads = 0
+
+        def send(self, value, deadline):
+            events.append(value["op"])
+            if value["op"] == "issued":
+                assert deadline == 140
+                assert value["issued"] == public_issued
+                assert "SECRET-CANARY" not in json.dumps(value)
+
+        def receive(self, deadline, limit=262144):
+            self.reads += 1
+            if self.reads == 1:
+                return {
+                    "op": "requests",
+                    "requests": {"public_keys": {"observer": "ssh-ed25519 synthetic"}},
+                    "remaining_seconds": 40,
+                }
+            assert deadline == 200
+            if failure == "remote-cleanup":
+                raise module.CampaignRefused("cleanup-failed")
+            return {"op": "closed", "result": result}
+
+    monkeypatch.setattr(module, "JsonPipe", Pipe)
+    process = SimpleNamespace(
+        stdin=SimpleNamespace(closed=False, close=lambda: events.append("stdin-close")),
+        wait=lambda timeout: None,
+        returncode=0,
+    )
+    exchange = module.B8Stdio()
+    with pytest.raises(module.CampaignRefused):
+        exchange.exchange(process)
+    assert events == []
+    exchange.prepare_custody()
+    if failure:
+        with pytest.raises(module.CampaignRefused):
+            exchange.exchange(process)
+    else:
+        assert exchange.exchange(process) == result
+    assert events[:3] == ["custody-ready", "prepare", "issue"]
+    assert events[-2:] == ["stdin-close", "custody-close"]
+    assert exchange.used is True and exchange.prepared is None
+    if failure in ("issuer", "late"):
+        assert "issued" not in events
+    with pytest.raises(module.CampaignRefused):
+        exchange.exchange(process)
+    assert events.count("prepare") == 1
