@@ -562,7 +562,11 @@ ordering. Their canonical implementations are `lane3_campaign_issuer.py`,
 `lane3_campaign_remote.py` and `lane3_campaign_composition.py`. The operator
 adapter, `lane3_campaign_operator.py`, owns the bounded Mac control sequence
 and requires actual archived closure plus a fresh empty runner-group read before
-requesting management removal. Their JSON envelopes and digests describe these
+requesting management removal. `lane3_campaign_invoker.py` owns the bounded
+parent processes and closed management checkpoint. The operator reviews the
+actual protected proof and cleanup before separately invoking the custody and
+B8 exchange; a broker grant never admits that phase. Their JSON envelopes and
+digests describe these
 product-owned protocols, not Foundation
 leases or release-store records. Host-specific inputs, custody material and
 approval records remain private protected deployment inputs. Hosted CI tests
