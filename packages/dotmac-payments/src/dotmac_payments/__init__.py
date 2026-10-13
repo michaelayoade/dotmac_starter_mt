@@ -29,7 +29,7 @@ from dotmac_payments.service import (
     submit_transfer_proof,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 __all__ = [
     "Conflict",
     "ConfirmationSource",

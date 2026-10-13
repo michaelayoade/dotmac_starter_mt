@@ -48,7 +48,7 @@ from dotmac_billing.linking import (
 from dotmac_billing.manifest import module
 from dotmac_billing.migrations import versions_dir
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "AcceptRatedObligationV1",

@@ -193,6 +193,9 @@ class PlatformRatedObligation(Base, _ObligationColumns):
 
 
 class _DocumentColumns(_EvidenceTime):
+    authoring_mode: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default=text("'legacy_single'")
+    )
     id: Mapped[UUID] = uuid_pk()
     billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     obligation_id: Mapped[UUID | None] = mapped_column(Uuid())
@@ -224,6 +227,10 @@ class _DocumentColumns(_EvidenceTime):
 class BillingDocument(Base, _TenantRow, _DocumentColumns):
     __tablename__ = "documents"
     __table_args__ = (
+        CheckConstraint(
+            "authoring_mode IN ('legacy_single', 'explicit_multiline')",
+            name="ck_documents_authoring_mode",
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "billing_account_id"],
             [f"{SCHEMA}.billing_accounts.tenant_id", f"{SCHEMA}.billing_accounts.id"],
@@ -270,6 +277,10 @@ class BillingDocument(Base, _TenantRow, _DocumentColumns):
 class PlatformBillingDocument(Base, _DocumentColumns):
     __tablename__ = "platform_documents"
     __table_args__ = (
+        CheckConstraint(
+            "authoring_mode IN ('legacy_single', 'explicit_multiline')",
+            name="ck_platform_documents_authoring_mode",
+        ),
         ForeignKeyConstraint(
             ["billing_account_id"],
             [f"{SCHEMA}.platform_billing_accounts.id"],
@@ -308,6 +319,7 @@ class PlatformBillingDocument(Base, _DocumentColumns):
 
 
 class _DocumentLineColumns(_EvidenceTime):
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     id: Mapped[UUID] = uuid_pk()
     document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     obligation_id: Mapped[UUID | None] = mapped_column(Uuid())
@@ -334,13 +346,23 @@ class DocumentLine(Base, _TenantRow, _DocumentLineColumns):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["tenant_id", "document_id", "obligation_id"],
+            ["tenant_id", "document_id", "billing_account_id"],
             [
                 f"{SCHEMA}.documents.tenant_id",
                 f"{SCHEMA}.documents.id",
-                f"{SCHEMA}.documents.obligation_id",
+                f"{SCHEMA}.documents.billing_account_id",
             ],
-            name="fk_document_lines_document_obligation",
+            name="fk_document_lines_document_account",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "obligation_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.rated_obligations.tenant_id",
+                f"{SCHEMA}.rated_obligations.id",
+                f"{SCHEMA}.rated_obligations.billing_account_id",
+            ],
+            name="fk_document_lines_obligation_account",
             ondelete="RESTRICT",
         ),
         UniqueConstraint("tenant_id", "id", name="uq_document_lines_tenant_id_id"),
@@ -367,12 +389,21 @@ class PlatformDocumentLine(Base, _DocumentLineColumns):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["document_id", "obligation_id"],
+            ["document_id", "billing_account_id"],
             [
                 f"{SCHEMA}.platform_documents.id",
-                f"{SCHEMA}.platform_documents.obligation_id",
+                f"{SCHEMA}.platform_documents.billing_account_id",
             ],
-            name="fk_platform_document_lines_obligation",
+            name="fk_platform_document_lines_document_account",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["obligation_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.platform_rated_obligations.id",
+                f"{SCHEMA}.platform_rated_obligations.billing_account_id",
+            ],
+            name="fk_platform_document_lines_obligation_account",
             ondelete="RESTRICT",
         ),
         UniqueConstraint(

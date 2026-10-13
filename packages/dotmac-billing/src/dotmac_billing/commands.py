@@ -60,6 +60,32 @@ class CreateDraftDocument:
 
 
 @dataclass(frozen=True, slots=True)
+class DraftDocumentLine:
+    obligation_id: UUID
+    description: str
+    quantity: Decimal
+    unit_code: str
+    unit_amount: Money
+
+
+@dataclass(frozen=True, slots=True)
+class CreateMultiLineDraftDocument:
+    billing_account_id: UUID
+    idempotency_key: str
+    lines: tuple[DraftDocumentLine, ...]
+    seller_snapshot: PartyDocumentSnapshotV1
+    customer_snapshot: PartyDocumentSnapshotV1
+    payment_instructions: PaymentInstructionsSnapshotV1
+    brand_asset: PresentationAssetReferenceV1
+    locale: str
+    timezone: str
+    document_profile_code: str
+    document_profile_version: str
+    due_date_basis: DueDateBasisV1
+    party_tax_identities: tuple[PartyTaxIdentitySnapshotV1, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class IssueDocument:
     document_id: UUID
     series_code: str
@@ -93,6 +119,15 @@ class IssueCreditNote:
 @dataclass(frozen=True, slots=True)
 class AllocationCommand:
     settlement_id: UUID
+    document_id: UUID
+    amount: Money
+    occurred_at: datetime
+    source_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyAvailableCreditCommand:
+    billing_account_id: UUID
     document_id: UUID
     amount: Money
     occurred_at: datetime
@@ -134,7 +169,10 @@ class ReversePostingGroupCommand:
 
 __all__ = [
     "AllocationCommand",
+    "ApplyAvailableCreditCommand",
     "CreateDraftDocument",
+    "CreateMultiLineDraftDocument",
+    "DraftDocumentLine",
     "DeallocationCommand",
     "IssueCreditNote",
     "IssueDocument",
