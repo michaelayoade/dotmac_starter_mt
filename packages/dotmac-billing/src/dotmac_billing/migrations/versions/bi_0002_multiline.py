@@ -129,7 +129,7 @@ def _plane(platform: bool, *, upgrade: bool) -> None:
         )
         op.execute(f"DROP TRIGGER {table}_freeze ON {_SCHEMA}.{table}")
         # TableClause.alias() creates Alias; its return annotation is broader.
-        op.execute(
+        op.get_bind().execute(
             sa.update(cast(Alias, line))
             .values(billing_account_id=document.c.billing_account_id)
             .where(same_document)
