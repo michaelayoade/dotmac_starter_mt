@@ -143,27 +143,28 @@ def test_real_resolver_captures_both_families_twice_with_exact_origin_aliases(
         deadline_ns=21 * NS,
         clock_ns=clock,
     )
-    assert len(frozen.snapshots) == 4
+    assert len(frozen.observations) == 4
     assert Counter((r, h, q) for r, h, q, _, _ in tcp.calls) == Counter(
         (resolver, host, qtype)
         for resolver in RESOLVERS
         for host in aliases
         for qtype in (hr.TYPE_A, hr.TYPE_AAAA)
     )
-    for snapshot in frozen.snapshots:
+    for snapshot in frozen.observations:
         host = snapshot.origin.removeprefix("https://")
         assert snapshot.chain == (host, aliases[host])
         assert snapshot.addresses == ((4, V4), (6, V6))
         assert snapshot.ttl_s == 45
-        assert snapshot.expires_at_monotonic_ns == 46 * NS
-    assert frozen.expires_at_monotonic_ns == 46 * NS
+        assert snapshot.acquired_at_monotonic_ns >= snapshot.captured_at_monotonic_ns
+        assert len(snapshot.queries) == 2
+    assert frozen.observation_deadline_monotonic_ns == 61 * NS
     assert {row["origin"] for row in frozen.manifest["destinations"]} == {
         "https://" + HOST
     }
     assert all(call[3:] == (hr.QUERY_DEADLINE_S, 21 * NS) for call in tcp.calls)
 
 
-@pytest.mark.parametrize("ttl", [0, 44])
+@pytest.mark.parametrize("ttl", [0])
 @pytest.mark.parametrize("short_record", ["cname", "a", "aaaa"])
 def test_real_resolver_refuses_short_ttl_on_every_relevant_record(
     monkeypatch: pytest.MonkeyPatch, ttl: int, short_record: str
@@ -231,7 +232,7 @@ def test_capture_refuses_wrong_cname_chain_through_real_resolver(
         cb.capture(candidate, deadline_ns=10 * NS, clock_ns=clock)
 
 
-@pytest.mark.parametrize("disagreement", ["chain", "a", "aaaa"])
+@pytest.mark.parametrize("disagreement", ["chain"])
 def test_capture_refuses_dual_resolver_disagreement(
     monkeypatch: pytest.MonkeyPatch, disagreement: str
 ) -> None:
@@ -254,6 +255,151 @@ def test_capture_refuses_dual_resolver_disagreement(
             clock_ns=clock,
         )
     assert len(tcp.calls) == 4
+
+
+@pytest.mark.parametrize("ttl", [1, 44, 45, 50, 300])
+def test_positive_bootstrap_ttl_uses_age_and_broker_policy_stays_strict(
+    monkeypatch: pytest.MonkeyPatch, ttl: int
+) -> None:
+    clock, tcp = install(
+        monkeypatch, lambda resolver, host, qtype: records(host, qtype, ttl=ttl)
+    )
+    frozen = cb.capture(config(), deadline_ns=10 * NS, clock_ns=clock)
+    assert frozen.observation_deadline_monotonic_ns == 61 * NS
+    assert all(item.ttl_s == ttl for item in frozen.observations)
+    assert all(
+        record.ttl == ttl
+        for item in frozen.observations
+        for query in item.queries
+        for record in query.records
+    )
+    exchange = tcp(RESOLVERS[0], deadline_s=hr.QUERY_DEADLINE_S)
+    args = {
+        "resolver": RESOLVERS[0],
+        "aliases": hr.AliasPolicy(frozenset({EDGE}), frozenset()),
+        "max_addresses": 32,
+        "exchange": exchange,
+        "clock_ns": clock,
+    }
+    if ttl < 45:
+        with pytest.raises(hr.SnapshotRefused, match="dns.short_ttl"):
+            hr.resolve("https://" + HOST, **args)
+    else:
+        snapshot = hr.resolve("https://" + HOST, **args)
+        assert (
+            snapshot.expires_at_monotonic_ns
+            == snapshot.captured_at_monotonic_ns + min(ttl, 60) * NS
+        )
+    assert hr.MIN_TTL_S == 45 and hr.MAX_SNAPSHOT_S == 60
+
+
+def test_actual_complete_two_resolver_union_is_deduplicated_and_every_member_is_bound(
+    monkeypatch,
+):
+    clock, tcp = install(
+        monkeypatch,
+        lambda resolver, host, qtype: records(
+            host,
+            qtype,
+            ttl=1,
+            address="1.1.1.1"
+            if resolver == RESOLVERS[1] and qtype == hr.TYPE_A
+            else None,
+        ),
+    )
+    frozen = cb.capture(config(), deadline_ns=10 * NS, clock_ns=clock)
+    assert len(tcp.calls) == 4
+    assert {row["address"] for row in frozen.manifest["destinations"]} == {
+        V4,
+        V6,
+        "1.1.1.1",
+    }
+    assert len(frozen.observations) == 2
+    assert frozen.observations[0].chain == frozen.observations[1].chain
+    assert {
+        address for item in frozen.observations for _, address in item.addresses
+    } == {V4, V6, "1.1.1.1"}
+
+
+def test_one_complete_resolver_cannot_replace_the_other_failed_query(monkeypatch):
+    def zone(resolver, host, qtype):
+        if resolver == RESOLVERS[1] and qtype == hr.TYPE_AAAA:
+            raise hr.SnapshotRefused("dns.failure")
+        return records(host, qtype, ttl=1)
+
+    clock, tcp = install(monkeypatch, zone)
+    with pytest.raises(cb.BootstrapRefused, match="bootstrap.dns"):
+        cb.capture(config(), deadline_ns=10 * NS, clock_ns=clock)
+    assert len(tcp.calls) == 4
+    assert Counter(
+        (resolver, qtype) for resolver, _, qtype, _, _ in tcp.calls
+    ) == Counter(
+        (resolver, qtype)
+        for resolver in RESOLVERS
+        for qtype in (hr.TYPE_A, hr.TYPE_AAAA)
+    )
+
+
+@pytest.mark.parametrize("union_size", [32, 33])
+def test_actual_per_resolver_sets_can_fit_while_their_union_overflows(
+    monkeypatch, union_size
+):
+    def zone(resolver, host, qtype):
+        cname = (host, hr.TYPE_CNAME, 1, EDGE)
+        if qtype == hr.TYPE_AAAA:
+            return [cname]
+        positions = (
+            range(1, 17) if resolver == RESOLVERS[0] else range(17, union_size + 1)
+        )
+        return [
+            cname,
+            *((EDGE, hr.TYPE_A, 1, f"11.0.0.{position}") for position in positions),
+        ]
+
+    clock, tcp = install(monkeypatch, zone)
+    if union_size == 33:
+        with pytest.raises(cb.BootstrapRefused, match="bootstrap.dns"):
+            cb.capture(config(), deadline_ns=10 * NS, clock_ns=clock)
+    else:
+        frozen = cb.capture(config(), deadline_ns=10 * NS, clock_ns=clock)
+        assert len(frozen.manifest["destinations"]) == 32
+    assert len(tcp.calls) == 4
+
+
+def test_earliest_capture_age_includes_queued_work_and_detects_completion_reset(
+    monkeypatch,
+):
+    clock, tcp = install(
+        monkeypatch,
+        lambda resolver, host, qtype: records(host, qtype, ttl=1),
+        advance_ns=4 * NS,
+    )
+    inputs = config(*((f"origin{i}.example", (EDGE,)) for i in range(4)))
+
+    def canary():
+        # A larger synthetic parent budget isolates the independent fixed age
+        # bound; the actual operator's retained budget stays exactly 60 seconds.
+        try:
+            cb.capture(inputs, deadline_ns=clock.now + 120 * NS, clock_ns=clock)
+        except cb.BootstrapRefused as exc:
+            assert str(exc) == "bootstrap.expired"
+            return
+        raise AssertionError("completion time reset the original observation age")
+
+    canary()
+    assert len(tcp.calls) == 16
+    monkeypatch.setattr(
+        cb.FrozenBootstrap,
+        "observation_deadline_monotonic_ns",
+        property(
+            lambda self: max(
+                item.acquired_at_monotonic_ns for item in self.observations
+            )
+            + 60 * NS
+        ),
+    )
+    with pytest.raises(AssertionError):
+        canary()
 
 
 def test_capture_tcp_queries_inherit_one_shrinking_absolute_budget_without_retry(

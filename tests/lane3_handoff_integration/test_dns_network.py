@@ -118,7 +118,7 @@ def a(
     return (owner, hr.TYPE_A, ttl, address)
 
 
-def test_bootstrap_generator_uses_both_real_tcp_resolvers_with_original_expiry(dns):
+def test_bootstrap_generator_unions_both_real_tcp_observations_with_original_age(dns):
     second_address = "127.0.0.54"
     second = DnsServer(second_address)
     try:
@@ -126,10 +126,14 @@ def test_bootstrap_generator_uses_both_real_tcp_resolvers_with_original_expiry(d
             server.queries.clear()
             server.zone = {
                 hr.TYPE_A: [
-                    (BROKER_HOST, hr.TYPE_CNAME, 45, "edge.example.net"),
-                    a(TLS_ADDRESS, 45, owner="edge.example.net"),
+                    (BROKER_HOST, hr.TYPE_CNAME, 1, "edge.example.net"),
+                    a(
+                        TLS_ADDRESS if server is dns else OTHER_ADDRESS,
+                        1,
+                        owner="edge.example.net",
+                    ),
                 ],
-                hr.TYPE_AAAA: [(BROKER_HOST, hr.TYPE_CNAME, 45, "edge.example.net")],
+                hr.TYPE_AAAA: [(BROKER_HOST, hr.TYPE_CNAME, 1, "edge.example.net")],
             }
         # Hosted-only transport injection: the production parser admits only
         # the independently measured proposal's global resolver addresses.
@@ -144,17 +148,20 @@ def test_bootstrap_generator_uses_both_real_tcp_resolvers_with_original_expiry(d
         assert (
             sorted(dns.queries) == sorted(second.queries) == [hr.TYPE_A, hr.TYPE_AAAA]
         )
-        assert len(frozen.snapshots) == 2
-        assert all(snapshot.ttl_s == 45 for snapshot in frozen.snapshots)
+        assert len(frozen.observations) == 2
+        assert all(snapshot.ttl_s == 1 for snapshot in frozen.observations)
         assert all(
             snapshot.chain == (BROKER_HOST, "edge.example.net")
-            for snapshot in frozen.snapshots
+            for snapshot in frozen.observations
         )
-        assert frozen.expires_at_monotonic_ns == min(
-            snapshot.captured_at_monotonic_ns + 45_000_000_000
-            for snapshot in frozen.snapshots
+        assert frozen.observation_deadline_monotonic_ns == min(
+            snapshot.captured_at_monotonic_ns + 60_000_000_000
+            for snapshot in frozen.observations
         )
-        assert frozen.manifest["destinations"][0]["address"] == TLS_ADDRESS
+        assert {row["address"] for row in frozen.manifest["destinations"]} == {
+            TLS_ADDRESS,
+            OTHER_ADDRESS,
+        }
     finally:
         second.stop()
 

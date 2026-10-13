@@ -436,7 +436,8 @@ class Env:
                 "challenge": timing["challenge"],
                 "manifest_digest": hp.digest(self.bootstrap),
                 "provenance_digest": "a" * 64,
-                "ttl_remaining_ms": 60000,
+                "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+                "observation_remaining_ms": 60000,
             }
         self.controller().bootstrap(
             {

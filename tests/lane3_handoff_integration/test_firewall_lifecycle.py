@@ -95,7 +95,8 @@ def bootstrap_receipt(env: Env, lease: str) -> dict:
         "challenge": timing["challenge"],
         "manifest_digest": hp.digest(env.bootstrap),
         "provenance_digest": "a" * 64,
-        "ttl_remaining_ms": 60000,
+        "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+        "observation_remaining_ms": 60000,
     }
 
 
@@ -103,7 +104,7 @@ def bootstrap_receipt(env: Env, lease: str) -> dict:
     "phase",
     ["management_transit", "before_install", "during_install", "served", "launched"],
 )
-def test_real_bootstrap_dns_expiry_refuses_and_cleans_exact_rules(
+def test_real_bootstrap_observation_age_expiry_refuses_and_cleans_exact_rules(
     env: Env, phase
 ) -> None:
     lease = env.prepare()
@@ -166,9 +167,39 @@ def test_fresh_installation_keeps_original_bootstrap_window_and_timer(env: Env) 
     lease = env.start(["sleep", "20"])
     j = env.journal()
     assert j["expires_at_monotonic_ns"] - j["t0_monotonic_ns"] == hp.WINDOW_NS
-    assert j["bootstrap_dns_deadline_monotonic_ns"] < j["expires_at_monotonic_ns"]
+    assert (
+        j["bootstrap_observation_deadline_monotonic_ns"] < j["expires_at_monotonic_ns"]
+    )
     assert env.host.timers[0][1] > 60
     assert j["timing"] is None
+    env.cleanup(lease)
+    env.assert_clean(lease)
+
+
+def test_bootstrap_observation_budget_cannot_be_extended_by_another_challenge(env: Env):
+    lease = env.prepare()
+    receipt = bootstrap_receipt(env, lease)
+    original_ticket = env.journal()["timing"]
+    with pytest.raises(hc.ControllerRefused, match="state.invalid"):
+        env.controller().timing(
+            {"protocol": hp.PROTOCOL, "op": "timing", "lease_id": lease}
+        )
+    assert env.journal()["timing"] == original_ticket
+    env.bootstrap_lease(lease, ["sleep", "20"], snapshot=receipt)
+    assert env.journal()["bootstrap_snapshot"] == receipt
+    env.cleanup(lease)
+    env.assert_clean(lease)
+
+
+def test_reported_broker_challenge_can_replace_the_consumed_bootstrap_ticket(env: Env):
+    lease = env.start(["report"])
+    env.wait_state(lease, {"REPORTED"})
+    request = {"protocol": hp.PROTOCOL, "op": "timing", "lease_id": lease}
+    first = env.controller().timing(request)
+    second = env.controller().timing(request)
+    assert first["challenge"] != second["challenge"]
+    assert env.journal()["timing"]["phase"] == "REPORTED"
+    assert env.journal()["timing"]["challenge"] == second["challenge"]
     env.cleanup(lease)
     env.assert_clean(lease)
 

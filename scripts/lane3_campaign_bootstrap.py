@@ -17,6 +17,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -25,7 +26,7 @@ import lane3_handoff_controller as hc
 import lane3_handoff_protocol as hp
 import lane3_handoff_resolver as hr
 
-CONFIG_SCHEMA = "dotmac.bootstrap-completion-proposal.v1"
+CONFIG_SCHEMA = "dotmac.bootstrap-completion-proposal.v2"
 MAX_CONFIG_BYTES = 262144
 MAX_ORIGINS = 64
 MAX_WORKERS = 8
@@ -63,7 +64,8 @@ def _parse_config(value: Any) -> BootstrapConfig:
         "resolvers",
         "max_union_addresses",
         "minimum_ttl_seconds",
-        "snapshot_cap_seconds",
+        "maximum_observation_age_seconds",
+        "profile",
         "transport",
         "module_https",
         "new_origin_or_alias",
@@ -77,15 +79,17 @@ def _parse_config(value: Any) -> BootstrapConfig:
         "schema": CONFIG_SCHEMA,
         "status": "PROPOSED_NOT_ADMITTED",
         "max_union_addresses": hp.MAX_ADDRESSES,
-        "minimum_ttl_seconds": hr.MIN_TTL_S,
-        "snapshot_cap_seconds": hr.MAX_SNAPSHOT_S,
+        "minimum_ttl_seconds": 1,
+        "maximum_observation_age_seconds": hp.BOOTSTRAP_OBSERVATION_MAX_AGE_NS
+        // 1_000_000_000,
+        "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
         "transport": "TCP",
         "module_https": [],
         "new_origin_or_alias": "STOP",
         "shared_ip_representative": (
             "lexicographically-smallest-resolving-approved-origin"
         ),
-        "resolver_comparison": "equal-normalized-chain-and-address-set",
+        "resolver_comparison": "equal-normalized-chain-address-union",
     }
     if any(
         type(value[key]) is not type(item) or value[key] != item
@@ -187,9 +191,9 @@ def _read_measured(path: Path, expected_sha256: str) -> bytes:
 
 @dataclass(frozen=True, repr=False)
 class FrozenBootstrap:
-    """Held immutable observations, retaining every original capture and expiry."""
+    """Held immutable observations under the separately authorized capture age."""
 
-    snapshots: tuple[hr.Snapshot, ...]
+    observations: tuple[hr.BootstrapObservation, ...]
     manifest_bytes: bytes
     digest: str
     proposal_sha256: str
@@ -200,9 +204,11 @@ class FrozenBootstrap:
     @property
     def provenance(self) -> dict[str, Any]:
         return {
-            "schema": "dotmac.bootstrap-provenance.v1",
+            "schema": "dotmac.bootstrap-provenance.v2",
+            "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+            "observation_deadline_monotonic_ns": self.observation_deadline_monotonic_ns,
             "proposal_sha256": self.proposal_sha256,
-            "snapshots": [asdict(snapshot) for snapshot in self.snapshots],
+            "observations": [asdict(observation) for observation in self.observations],
         }
 
     @property
@@ -214,11 +220,17 @@ class FrozenBootstrap:
         return hc.strict_json(self.manifest_bytes)
 
     @property
-    def expires_at_monotonic_ns(self) -> int:
-        return min(snapshot.expires_at_monotonic_ns for snapshot in self.snapshots)
+    def observation_deadline_monotonic_ns(self) -> int:
+        return (
+            min(
+                observation.captured_at_monotonic_ns
+                for observation in self.observations
+            )
+            + hp.BOOTSTRAP_OBSERVATION_MAX_AGE_NS
+        )
 
     def remaining_ns(self, now_ns: int) -> int:
-        return self.expires_at_monotonic_ns - now_ns
+        return self.observation_deadline_monotonic_ns - now_ns
 
     def require_same(self, manifest: Any) -> None:
         if hp.canonical_json(manifest) != self.manifest_bytes:
@@ -230,7 +242,7 @@ def capture(
     *,
     deadline_ns: int,
     clock_ns: Callable[[], int] = time.monotonic_ns,
-    resolve: Callable[..., hr.Snapshot] = hr.resolve,
+    resolve: Callable[..., hr.BootstrapObservation] = hr.observe_bootstrap,
     routable: Callable[[Any], bool] = hr.globally_routable,
 ) -> FrozenBootstrap:
     """Resolve all approved origins twice within the inherited absolute budget.
@@ -240,13 +252,17 @@ def capture(
     in-flight TCP queries retain the resolver's bounded socket timeout.
     """
 
+    stopped = Event()
+
     def remaining() -> float:
         left = deadline_ns - clock_ns()
-        if left <= 0:
+        if stopped.is_set() or left <= 0:
             raise BootstrapRefused("bootstrap.deadline")
         return left / 1_000_000_000
 
-    def one(origin: str, aliases: hr.AliasPolicy, resolver: str) -> hr.Snapshot:
+    def one(
+        origin: str, aliases: hr.AliasPolicy, resolver: str
+    ) -> hr.BootstrapObservation:
         remaining()
 
         def exchange(query: bytes) -> bytes:
@@ -270,13 +286,30 @@ def capture(
         )
         remaining()
         if (
-            not isinstance(snapshot, hr.Snapshot)
+            not isinstance(snapshot, hr.BootstrapObservation)
             or snapshot.origin != origin
             or snapshot.resolver != resolver
             or type(snapshot.captured_at_monotonic_ns) is not int
-            or snapshot.captured_at_monotonic_ns > clock_ns()
+            or not 0
+            <= snapshot.captured_at_monotonic_ns
+            <= snapshot.acquired_at_monotonic_ns
+            <= clock_ns()
+            or tuple(query.qtype for query in snapshot.queries)
+            != (hr.TYPE_A, hr.TYPE_AAAA)
+            or type(snapshot.ttl_s) is not int
+            or snapshot.ttl_s <= 0
         ):
-            raise BootstrapRefused("bootstrap.snapshot")
+            raise BootstrapRefused("bootstrap.observation")
+        for query in snapshot.queries:
+            if not (
+                isinstance(query, hr.QueryObservation)
+                and snapshot.captured_at_monotonic_ns
+                <= query.started_at_monotonic_ns
+                <= query.received_at_monotonic_ns
+                <= query.validated_at_monotonic_ns
+                <= snapshot.acquired_at_monotonic_ns
+            ):
+                raise BootstrapRefused("bootstrap.observation")
         return snapshot
 
     remaining()
@@ -299,9 +332,9 @@ def capture(
         representatives: dict[tuple[int, str], str] = {}
         for origin, _ in config.origins:
             left, right = by_origin[origin]
-            if left.chain != right.chain or set(left.addresses) != set(right.addresses):
+            if left.chain != right.chain:
                 raise BootstrapRefused("bootstrap.dns_agreement")
-            for address in left.addresses:
+            for address in set(left.addresses) | set(right.addresses):
                 representatives[address] = min(
                     origin, representatives.get(address, origin)
                 )
@@ -336,6 +369,7 @@ def capture(
     except Exception:
         raise BootstrapRefused("bootstrap.dns") from None
     finally:
+        stopped.set()
         for future in futures:
             future.cancel()
-        pool.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=True, cancel_futures=True)

@@ -47,15 +47,16 @@ def campaign(tmp_path, monkeypatch):
         ],
         "resolvers": ["9.9.9.9", "149.112.112.112"],
         "max_union_addresses": 32,
-        "minimum_ttl_seconds": 45,
-        "snapshot_cap_seconds": 60,
+        "minimum_ttl_seconds": 1,
+        "maximum_observation_age_seconds": 60,
+        "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
         "transport": "TCP",
         "module_https": [],
         "new_origin_or_alias": "STOP",
         "shared_ip_representative": (
             "lexicographically-smallest-resolving-approved-origin"
         ),
-        "resolver_comparison": "equal-normalized-chain-and-address-set",
+        "resolver_comparison": "equal-normalized-chain-address-union",
         "shared_ip_limitation": "Synthetic shared address fixture.",
     }
 
@@ -92,15 +93,16 @@ def campaign(tmp_path, monkeypatch):
     monkeypatch.setattr(co, "prelaunch_binding", lambda *args: qualification)
     monkeypatch.setattr(co.time, "monotonic_ns", lambda: clock[0])
     snapshots = tuple(
-        hr.Snapshot(
+        hr.BootstrapObservation(
             "https://runner.example",
             resolver,
             ("runner.example",),
             ((4, "9.9.9.9"),),
             60,
             clock[0],
-            clock[0] + 60_000_000_000,
+            clock[0],
             hp.digest({"resolver": resolver}),
+            (),
         )
         for resolver in proposal["resolvers"]
     )
@@ -151,13 +153,14 @@ def test_actual_launch_challenges_before_all_dns_and_jit_and_binds_every_snapsho
         "challenge": "c" * 64,
         "manifest_digest": c.frozen.digest,
         "provenance_digest": c.frozen.provenance_digest,
-        "ttl_remaining_ms": 60000,
+        "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
+        "observation_remaining_ms": 60000,
     }
     state = co.load_state(c.cfg.state_path)
     assert state["bootstrap_provenance_digest"] == c.frozen.provenance_digest
     assert state["runner_id"] == 123
     assert c.frozen.provenance["proposal_sha256"] == c.cfg.bootstrap_proposal_sha256
-    assert len(c.frozen.provenance["snapshots"]) == 2
+    assert len(c.frozen.provenance["observations"]) == 2
 
 
 @pytest.mark.parametrize("phase", ["dns", "provenance", "jit"])
@@ -202,7 +205,7 @@ def test_rebound_manifest_cannot_create_jit(campaign, monkeypatch):
     changed = c.frozen.manifest
     changed["destinations"][0]["address"] = "149.112.112.112"
     frozen = cb.FrozenBootstrap(
-        c.frozen.snapshots,
+        c.frozen.observations,
         hp.canonical_json(changed),
         hp.digest(changed),
         c.cfg.bootstrap_proposal_sha256,

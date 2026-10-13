@@ -30,15 +30,16 @@ def document():
         "inventory_sha256": "a" * 64,
         "observation_sha256": "b" * 64,
         "max_union_addresses": 32,
-        "minimum_ttl_seconds": 45,
-        "snapshot_cap_seconds": 60,
+        "minimum_ttl_seconds": 1,
+        "maximum_observation_age_seconds": 60,
+        "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
         "transport": "TCP",
         "module_https": [],
         "new_origin_or_alias": "STOP",
         "shared_ip_representative": (
             "lexicographically-smallest-resolving-approved-origin"
         ),
-        "resolver_comparison": "equal-normalized-chain-and-address-set",
+        "resolver_comparison": "equal-normalized-chain-address-union",
         "shared_ip_limitation": (
             "Synthetic shared IP rules do not select an HTTP hostname."
         ),
@@ -59,14 +60,18 @@ def routable(address):
 
 def resolver(origin, *, resolver, **kwargs):
     captured = NOW if origin == ORIGINS[0] else NOW + 2_000_000_000
-    return hr.Snapshot(
+    return hr.BootstrapObservation(
         origin=origin,
         resolver=resolver,
         chain=(origin[8:], "edge.example.net"),
         addresses=((4, "203.0.113.10"),),
         ttl_s=45 if resolver == RESOLVERS[0] else 300,
         captured_at_monotonic_ns=captured,
-        expires_at_monotonic_ns=captured + 45_000_000_000,
+        acquired_at_monotonic_ns=captured + 4,
+        queries=tuple(
+            hr.QueryObservation(qtype, captured, captured + 1, captured + 2, ())
+            for qtype in (hr.TYPE_A, hr.TYPE_AAAA)
+        ),
         digest=hp.digest({"origin": origin, "resolver": resolver}),
     )
 
@@ -96,17 +101,17 @@ def test_shared_ip_uses_actual_lexical_representative_and_keeps_every_snapshot()
             }
         ],
     }
-    assert len(frozen.snapshots) == 4
-    assert {(s.origin, s.resolver) for s in frozen.snapshots} == {
+    assert len(frozen.observations) == 4
+    assert {(s.origin, s.resolver) for s in frozen.observations} == {
         (origin, resolver) for origin in ORIGINS for resolver in RESOLVERS
     }
     assert frozen.digest == hp.digest(frozen.manifest)
-    assert frozen.expires_at_monotonic_ns == NOW + 45_000_000_000
-    assert frozen.remaining_ns(NOW + 44_000_000_000) == 1_000_000_000
+    assert frozen.observation_deadline_monotonic_ns == NOW + 60_000_000_000
+    assert frozen.remaining_ns(NOW + 59_000_000_000) == 1_000_000_000
     frozen.require_same(frozen.manifest)
 
 
-@pytest.mark.parametrize("defect", ["chain", "addresses"])
+@pytest.mark.parametrize("defect", ["chain"])
 def test_one_resolver_disagreement_refuses_the_entire_capture(defect):
     def disagree(origin, **kwargs):
         snapshot = resolver(origin, **kwargs)
@@ -162,16 +167,15 @@ def test_measured_external_config_rejects_wrong_bytes_and_symlink(tmp_path):
         cb.load_config(link, pin)
 
 
-def test_original_earliest_expiry_is_not_restarted_at_completion():
-    def stale(origin, **kwargs):
-        import dataclasses
-
-        return dataclasses.replace(
-            resolver(origin, **kwargs), expires_at_monotonic_ns=NOW
-        )
-
+def test_original_earliest_age_is_not_restarted_at_completion():
     with pytest.raises(cb.BootstrapRefused, match="bootstrap.expired"):
-        capture(stale)
+        cb.capture(
+            cb.parse_config(document()),
+            deadline_ns=NOW + 120_000_000_000,
+            clock_ns=lambda: NOW + 61_000_000_000,
+            resolve=resolver,
+            routable=routable,
+        )
 
 
 def test_fresh_capture_must_match_frozen_manifest_exactly():
@@ -180,6 +184,40 @@ def test_fresh_capture_must_match_frozen_manifest_exactly():
     changed["destinations"][0]["origin"] = ORIGINS[1]
     with pytest.raises(cb.BootstrapRefused, match="bootstrap.manifest_changed"):
         frozen.require_same(changed)
+
+
+def test_old_proposal_cannot_select_the_new_union_age_profile():
+    old = document()
+    old["schema"] = "dotmac.bootstrap-completion-proposal.v1"
+    with pytest.raises(cb.BootstrapRefused):
+        cb.parse_config(old)
+    wrong = document()
+    wrong["profile"] = "legacy-ttl-policy"
+    with pytest.raises(cb.BootstrapRefused):
+        cb.parse_config(wrong)
+
+
+def test_both_resolver_address_sets_contribute_and_keep_all_provenance():
+    import dataclasses
+
+    def steered(origin, **kwargs):
+        observation = resolver(origin, **kwargs)
+        if kwargs["resolver"] == RESOLVERS[1]:
+            observation = dataclasses.replace(
+                observation, addresses=((4, "203.0.113.11"),), ttl_s=1
+            )
+        return observation
+
+    frozen = capture(steered)
+    assert [row["address"] for row in frozen.manifest["destinations"]] == [
+        "203.0.113.10",
+        "203.0.113.11",
+    ]
+    assert all(row["origin"] == ORIGINS[0] for row in frozen.manifest["destinations"])
+    assert len(frozen.observations) == 4
+    assert {item.ttl_s for item in frozen.observations} == {1, 45}
+    assert frozen.observation_deadline_monotonic_ns == NOW + 60_000_000_000
+    assert frozen.provenance["profile"] == hp.BOOTSTRAP_OBSERVATION_PROFILE
 
 
 def test_parent_deadline_is_never_reset():
@@ -259,7 +297,7 @@ def test_private_config_and_frozen_provenance_are_redacted_from_repr():
     frozen = capture()
     assert repr(cb.parse_config(document())) == "BootstrapConfig(<private>)"
     assert repr(frozen) == "FrozenBootstrap(<private>)"
-    assert len(frozen.provenance["snapshots"]) == 4
+    assert len(frozen.provenance["observations"]) == 4
     assert frozen.provenance_digest == hp.digest(frozen.provenance)
 
 
@@ -275,5 +313,5 @@ def test_resolver_output_cannot_change_identity_or_claim_a_future_capture(defect
         }
         return dataclasses.replace(resolver(origin, **kwargs), **changes[defect])
 
-    with pytest.raises(cb.BootstrapRefused, match="bootstrap.snapshot"):
+    with pytest.raises(cb.BootstrapRefused, match="bootstrap.observation"):
         capture(bad)

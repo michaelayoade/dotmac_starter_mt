@@ -122,7 +122,11 @@ the raw controller as alternative management authority. Per-run
 the original controller validates it when an operation needs approval.
 Emergency cleanup does not acquire a new approval dependency.
 
-### Bootstrap DNS and frozen manifest
+### Bootstrap union and observation-age profile
+
+This profile is source preparation for hosted qualification. It requires new
+independently measured private proposal bytes; the historical v1 proposal is
+preserved and cannot select the new policy.
 
 The campaign owner measures the private external proposal with its independently
 approved SHA-256, calls `lane3_campaign_bootstrap.capture` with an absolute parent
@@ -135,12 +139,24 @@ Coordinator configuration adds `bootstrap_proposal_path`,
 `bootstrap_proposal_sha256` and `bootstrap_manifest_sha256` alongside the existing
 `bootstrap_manifest_path`. Both external files are owner-held regular mode-0600
 files with one link and measured stable bytes. The frozen manifest is canonical
-protocol JSON. The generator uses the existing resolver's strict DNS parser,
-finite per-original exact alias policy, global address checks, minimum TTL and
-snapshot cap. Both configured TCP resolvers must agree on each original's chain
-and address set. Shared addresses select the lexically smallest approved origin
+protocol JSON. The closed proposal schema is
+`dotmac.bootstrap-completion-proposal.v2`, with profile
+`dotmac.lane3.bootstrap-union-observation-age.v1`, `minimum_ttl_seconds: 1`,
+`maximum_observation_age_seconds: 60` and
+`resolver_comparison: equal-normalized-chain-address-union`. Legacy TTL-policy
+fields or a different profile refuse.
+
+The canonical resolver's `observe_bootstrap` entrypoint shares DNS acquisition,
+strict parsing, finite per-original exact alias and public-address validation
+with broker resolution. It requires positive TTLs, complete A/AAAA observations
+from both configured resolvers, and identical normalized chains. The generator
+uses their deduplicated address union; neither resolver can substitute for a
+failed observation. Shared addresses select the lexically smallest approved origin
 that actually resolved to them. Complete observations for every original and
-resolver remain in private provenance; deduplication only affects nft rows.
+resolver, including actual record TTLs and acquisition times, remain in private
+provenance; deduplication only affects nft rows. Bootstrap observation age is
+bounded by 60 seconds from the earliest original pre-query capture, including
+later queued work. Collection completion never resets it.
 The existing grant path still enforces the 32-address union with the actual
 broker snapshot.
 
@@ -148,23 +164,32 @@ The actual invoker/operator sequence retains its original single 60-second
 deadline. After preparing the frozen rows, `launch` obtains a PREPARED timing
 challenge, captures fresh DNS under that inherited deadline and requires the
 same manifest digest before any JIT POST. The exact GitHub admission binding
-is rechecked after DNS before registration,
-under the same deadline. It exclusively writes the complete
+is rechecked after DNS before registration under the same deadline. It
+exclusively writes the complete
 mode-0600 provenance at
 `<state-name>.<lease-id>.bootstrap-provenance.json` beside the local journal,
-including the measured proposal digest and all original capture/expiry times.
+including the measured proposal digest, closed profile and all original capture
+and acquisition times.
 The journal binds its digest. This retained evidence is not a resume token.
 
-The closed bootstrap receipt carries challenge, manifest digest, provenance
-digest and the floored remaining lifetime of the earliest original snapshot.
+The closed bootstrap receipt requires the profile, challenge, manifest digest,
+provenance digest and floored `observation_remaining_ms` from that original age
+deadline. The former `ttl_remaining_ms` bootstrap field is refused.
 The controller binds its ticket to phase, lease and boot and uses the existing
 `snapshot_deadline` calculation to subtract the full host interval, including
-both management hops. It checks that same separate DNS deadline before and
+both management hops. Bootstrap permits one original PREPARED timing challenge;
+another cannot extend the budget. It checks that same separate age deadline before and
 after installing rules and around runner launch. Expiry refuses and invokes
 the existing exact-owned cleanup. A fresh completed installation keeps the
 original 300-second bootstrap rollback window; the later broker grant retains
-its existing DNS lifetime and 45-second usable floor. Cleanup does not resolve
+its minimum DNS TTL of 45, lifetime `min(TTL, 60 seconds)` and 45-second usable
+floor. Cleanup does not resolve
 DNS or require the provenance file to exist.
+
+This bootstrap age is owner-authorized observation age, not DNS validity.
+An address supplied by only one resolver may enter the union, and it may have
+expired from DNS before installation or remain permitted during the existing
+300-second rule window. Matching chains do not corroborate every address.
 
 These changes require a newly reviewed immutable runtime bundle and a reviewed
 dispatcher authorization update. The previously installed bundle cannot

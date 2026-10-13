@@ -1066,8 +1066,12 @@ def op_launch(
         now = time.monotonic_ns()
         if now >= deadline_ns:
             raise refused("deadline.insufficient")
-        ttl_remaining_ms = frozen.remaining_ns(now) // 1_000_000
-        if not 1 <= ttl_remaining_ms <= hp.SNAPSHOT_MAX_AGE_NS // 1_000_000:
+        observation_remaining_ms = frozen.remaining_ns(now) // 1_000_000
+        if (
+            not 1
+            <= observation_remaining_ms
+            <= hp.BOOTSTRAP_OBSERVATION_MAX_AGE_NS // 1_000_000
+        ):
             raise refused("snapshot.refused")
         reply = channel(
             "bootstrap",
@@ -1077,9 +1081,10 @@ def op_launch(
                 jit_config=encoded,
                 bootstrap_snapshot={
                     "challenge": timing["challenge"],
+                    "profile": hp.BOOTSTRAP_OBSERVATION_PROFILE,
                     "manifest_digest": frozen.digest,
                     "provenance_digest": frozen.provenance_digest,
-                    "ttl_remaining_ms": ttl_remaining_ms,
+                    "observation_remaining_ms": observation_remaining_ms,
                 },
             ),
         )

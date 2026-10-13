@@ -148,4 +148,5 @@ jobs:
             tests/unit/test_lane3_campaign_operator.py \
             tests/unit/test_lane3_handoff_client.py \
             tests/unit/test_lane3_handoff_controller.py \
+            tests/unit/test_lane3_handoff_resolver.py \
             tests/unit/test_lane3_handoff_coordinator.py
