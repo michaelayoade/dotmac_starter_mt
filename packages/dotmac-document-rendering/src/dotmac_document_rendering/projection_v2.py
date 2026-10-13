@@ -234,8 +234,10 @@ def _validate_payment_url_v2(url: str) -> None:
         raise FactShapeInvalid(
             "frozen payment link must be HTTPS with a host and no credentials"
         )
-    if any(ord(char) < 32 or ord(char) == 127 for char in unquote(url)):
-        raise FactShapeInvalid("frozen payment link contains escaped controls")
+    if any(ord(char) < 32 or ord(char) == 127 or char == "\\" for char in unquote(url)):
+        raise FactShapeInvalid(
+            "frozen payment link contains escaped controls or backslashes"
+        )
     if (
         not parsed.netloc
         or parsed.netloc.endswith(":")

@@ -165,3 +165,74 @@ This reader supplies Billing evidence only. The rendering adapter still needs
 an explicit provenance mapping and reconciliation between Billing's presentation
 digest and Rendering's projection digest. The Billing-owned official artifact
 relation remains the existing `RecordDocumentArtifactV1`/reconciler boundary.
+
+## Opening evidence preflight (source candidate)
+
+`preview_opening_account_import` is a pure query over an immutable
+`OpeningPreviewRequestV1`. It returns a typed preview and counted blockers;
+`admissible` means only that this evidence passed preflight. It creates no
+settlement, monetary fact, spendable funding, import permission or activation.
+There is no database/network/file access or transaction boundary in the query.
+
+The candidate manifest preserves the complete declared source population,
+per-member eligible/excluded/blocking dispositions and exact counts, every
+account/currency partition and explicit precision, signed integer minor-unit
+lane controls, and immutable cash lots with ordered exact historical
+allocations, refunds, reversals and reservations. It binds actual source
+installation, repository/schema/snapshot capture coordinates, economic and
+recorded cutoffs, source-authority reference and both mapping versions. The
+versioned domain-separated fingerprint includes every identity and ordered
+piece of provenance using Kernel's existing fingerprint helper. Equal balances
+with different provenance are different candidates. Aware timestamps are
+normalized to UTC only for fingerprinting, preserving their original contract
+values. Structural integer inputs are limited to 4096 bits and are never
+coerced or truncated. A hash does not seal or
+prove a candidate, and declared snapshot coordinates alone do not establish a
+complete trusted source capture.
+
+The first supported selected partition contains only evidenced residual cash;
+open AR and all other lane controls must be zero. This restriction is a source
+implementation boundary, not a reopening of agreed WHT, VAT or noncash policy.
+The controls retain the Sub census lanes (`collectible_receivable`,
+`unapplied_customer_credit`, `prepaid_funding_reserved`,
+`prepaid_funding_consumed`, `written_off_total`, `refunded_total`,
+`adjustment_total`) alongside explicit cash/noncash credit and open AR controls.
+Unsupported selected partitions are refused in their entirety. Other declared
+partitions remain in the manifest and its fingerprint; selection does not
+silently discard population or convert unsupported balances into cash.
+
+For each supported cash lot, confirmed gross minus exact historical allocations,
+refunds and reservations must equal its residual, without tolerance,
+netting, negative clamps, proportional attribution or balance plugs. The lot
+preserves typed confirmation owner/reference/version/digest, evidence kind,
+confirmed cash amount/currency/precision, and real consumption references and exact live
+`source_system` / `source_settlement_key` mappings. Duplicate cash sources are
+checked across the full manifest in the actual installation/source namespace.
+Every generic reversal is a counted blocker, including a reversal with a
+resolved allocation reference. Any consumption with `reverses_ref` also blocks
+admission regardless of its kind; relabeling inverse evidence as an allocation,
+refund or reservation cannot admit it. Cash-source returns and inverses that restore
+cash require explicit distinct semantics before admission. Reservation releases
+and other inverse kinds are also unsupported and refused. Original ordered
+evidence remains intact. The Sub census is input evidence and is not funded-cash proof.
+
+A trusted application assembly must inject an `OpeningEvidenceVerifier`. There
+is no built-in permissive verifier and no request field that substitutes a
+caller boolean, actor permission or digest for trust. The verifier must qualify
+complete source binding, cash confirmation and complete historical attribution,
+live source namespace mapping, and migration authority for the precise preview
+operation, scope, manifest, partition and target. The query checks the returned
+binding against the request, including target expected-position fingerprint
+and posting watermark. Missing/unsupported verification is a counted blocker;
+`OpeningVerificationUnavailable` is the bounded expected failure type.
+Programmer failures propagate. The verifier implementation used here must
+itself be pure; obtaining authenticated evidence is an assembly responsibility.
+
+The complete cash-lifecycle writer remains deferred until actual proof closure
+and accepted predecessor sequencing. Such a writer must atomically claim the
+shared live cash-source namespace, recheck current target position/watermark
+and migration authority, and establish immutable backing understood by draw,
+refund and reversal. This query does not call ordinary settlement acceptance or
+invoice issuance and does not invent settlement IDs or repost historical cash
+or revenue. No storage, schema, release, import or production switch is enabled
+by this source candidate.

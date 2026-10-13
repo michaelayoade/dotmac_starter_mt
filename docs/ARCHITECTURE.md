@@ -3829,3 +3829,20 @@ bank/narrative instructions with no payment link. A link requires its own frozen
 owner evidence; current Sub live URL construction is not qualified provenance.
 Publication, Kernel qualification, Files composition and Billing's sole official
 artifact reconciler remain separate adoption work.
+
+
+### Billing opening evidence preflight (unpublished a5 candidate)
+
+Billing exposes immutable complete-population candidate evidence and a pure
+`preview_opening_account_import` query. Exact minor-unit controls, cash-lot
+provenance and ordering, target position fingerprints and posting watermarks are
+bound to an assembly-owned source/cash/migration-authority verifier. A digest is
+content identity, never source or migration authority. Missing evidence and
+unsupported inverse/release semantics produce counted refusals.
+
+This successor adds no persistence, opening funding, importer, financial event
+or authority switch. The source census does not by itself establish confirmed
+cash. A future writer must qualify real cash backing, reserve the shared live
+settlement identity, implement draw/refund/correction together, and recheck its
+current target in the caller-owned transaction. Source acceptance, package
+publication, product adoption and one coupled production switch remain distinct.

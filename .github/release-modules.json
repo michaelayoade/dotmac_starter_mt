@@ -469,6 +469,8 @@
           "dotmac_billing/migrations/versions/bi_0004_withholding_discharge.py",
           "dotmac_billing/migrations/versions/bi_0005_non_cash_credit.py",
           "dotmac_billing/models.py",
+          "dotmac_billing/opening_contracts.py",
+          "dotmac_billing/opening_validation.py",
           "dotmac_billing/py.typed",
           "dotmac_billing/queries.py",
           "dotmac_billing/service.py"
@@ -3100,14 +3102,14 @@
         "required": [
           "dotmac_tax/py.typed",
           "dotmac_tax/contracts.py",
-          "dotmac_tax/_policy_query_contracts.py",
-          "dotmac_tax/_policy_queries.py",
+        "dotmac_tax/_policy_query_contracts.py",
+        "dotmac_tax/_policy_queries.py",
           "dotmac_tax/manifest.py",
           "dotmac_tax/migrations/__init__.py",
           "dotmac_tax/migrations/versions/tx_0001_tax.py",
           "dotmac_tax/migrations/versions/tx_0002_multi_tax.py",
           "dotmac_tax/migrations/versions/tx_0003_result_fingerprint.py",
-          "dotmac_tax/migrations/versions/tx_0004_rule_supersession.py",
+        "dotmac_tax/migrations/versions/tx_0004_rule_supersession.py",
           "dotmac_tax/models.py",
           "dotmac_tax/service.py"
         ],

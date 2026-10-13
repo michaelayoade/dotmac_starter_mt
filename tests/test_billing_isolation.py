@@ -191,7 +191,14 @@ class _Numbering:
         idempotency_key: str,
     ) -> str:
         scope_code = "tenant" if isinstance(scope, TenantScope) else "platform"
-        return f"{series_code.upper()}-{scope_code}-{idempotency_key[-8:]}"
+        scope_identity = (
+            f"tenant:{scope.tenant_id}"
+            if isinstance(scope, TenantScope)
+            else "platform"
+        )
+        identity = repr((scope_identity, series_code, idempotency_key))
+        number = uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
+        return f"{series_code.upper()}-{scope_code}-{number}"
 
 
 NUMBERING = _Numbering()

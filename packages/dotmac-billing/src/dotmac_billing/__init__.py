@@ -68,6 +68,30 @@ from dotmac_billing.linking import (
 )
 from dotmac_billing.manifest import module
 from dotmac_billing.migrations import versions_dir
+from dotmac_billing.opening_contracts import (
+    OpeningBlockerV1,
+    OpeningCaptureV1,
+    OpeningCashConfirmationV1,
+    OpeningCashLotV1,
+    OpeningConsumptionV1,
+    OpeningDispositionV1,
+    OpeningEvidenceError,
+    OpeningEvidenceVerifier,
+    OpeningImportPreviewV1,
+    OpeningLaneControlsV1,
+    OpeningManifestV1,
+    OpeningPartitionV1,
+    OpeningPopulationCountsV1,
+    OpeningPreviewRequestV1,
+    OpeningSourceIdentityV1,
+    OpeningTargetV1,
+    OpeningVerificationUnavailable,
+    OpeningVerificationV1,
+)
+from dotmac_billing.opening_validation import (
+    opening_manifest_fingerprint,
+    preview_opening_account_import,
+)
 from dotmac_billing.queries import (
     get_invoice_document_fact,
     get_non_cash_credit_effect,
@@ -76,9 +100,29 @@ from dotmac_billing.queries import (
     get_withholding_discharge,
 )
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 __all__ = [
+    "OpeningBlockerV1",
+    "OpeningCaptureV1",
+    "OpeningCashConfirmationV1",
+    "OpeningCashLotV1",
+    "OpeningConsumptionV1",
+    "OpeningDispositionV1",
+    "OpeningEvidenceError",
+    "OpeningEvidenceVerifier",
+    "OpeningImportPreviewV1",
+    "OpeningLaneControlsV1",
+    "OpeningManifestV1",
+    "OpeningPartitionV1",
+    "OpeningPopulationCountsV1",
+    "OpeningPreviewRequestV1",
+    "OpeningSourceIdentityV1",
+    "OpeningTargetV1",
+    "OpeningVerificationUnavailable",
+    "OpeningVerificationV1",
+    "opening_manifest_fingerprint",
+    "preview_opening_account_import",
     "get_receivable_position_v2",
     "GrantNonCashCredit",
     "ApplyNonCashCredit",
