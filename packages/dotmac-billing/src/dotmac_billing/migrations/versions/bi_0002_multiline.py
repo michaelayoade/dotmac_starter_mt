@@ -5,8 +5,11 @@ Historical document anchors and financial evidence remain unchanged.
 
 from __future__ import annotations
 
+from typing import cast
+
 import sqlalchemy as sa
 from dotmac_kernel.planes import ModulePlane, selected_module_planes
+from sqlalchemy.sql.selectable import Alias
 
 from alembic import op
 
@@ -125,8 +128,9 @@ def _plane(platform: bool, *, upgrade: bool) -> None:
             schema=_SCHEMA,
         )
         op.execute(f"DROP TRIGGER {table}_freeze ON {_SCHEMA}.{table}")
+        # TableClause.alias() creates Alias; its return annotation is broader.
         op.execute(
-            sa.update(line)
+            sa.update(cast(Alias, line))
             .values(billing_account_id=document.c.billing_account_id)
             .where(same_document)
         )
