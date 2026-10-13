@@ -617,8 +617,476 @@ class AccountingFactV1:
     fx_snapshot: AppliedFxSnapshotV1 | None = None
 
 
+ACCOUNTING_FACT_V2_CONTRACT = "billing.accounting.fact.v2"
+
+
+def _withholding_money(value: Money, *, positive: bool = False) -> None:
+    if not isinstance(value, Money):
+        raise TypeError("withholding amounts must be Money")
+    if (
+        not value.amount.is_finite()
+        or value.amount < 0
+        or (positive and value.amount == 0)
+    ):
+        raise ValueError("withholding money must be finite and non-negative")
+    if value.amount.adjusted() >= 14:
+        raise ValueError("withholding money exceeds Billing numeric precision")
+    if (
+        not 0 <= value.currency.minor_units <= 6
+        or value.amount
+        != value.amount.quantize(Decimal(1).scaleb(-value.currency.minor_units))
+    ):
+        raise ValueError("withholding money must have exact supported precision")
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingTaxLineV1:
+    sequence: int
+    taxable_amount: Money
+    rate: Decimal | None
+    tax_amount: Money
+
+    def __post_init__(self) -> None:
+        if type(self.sequence) is not int or self.sequence < 1:
+            raise ValueError("withholding line sequence must be positive")
+        _withholding_money(self.taxable_amount)
+        _withholding_money(self.tax_amount)
+        if self.taxable_amount.currency != self.tax_amount.currency:
+            raise ValueError("withholding line currency must agree")
+        if self.rate is not None and (
+            not isinstance(self.rate, Decimal)
+            or not self.rate.is_finite()
+            or self.rate < 0
+        ):
+            raise ValueError("withholding rate must be an exact finite Decimal")
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingTaxEvidenceV1:
+    """Assembly-mapped Tax result, never a Billing rate calculation.
+
+    Source fingerprints bind the full Tax result; component and ordered lines
+    retain its exact basis and amounts. References are audit evidence, not proof
+    that the caller is authorized or that a certificate is valid.
+    """
+
+    source_owner: str
+    determination_ref: str
+    source_version: str
+    source_fingerprint: str
+    result_fingerprint: str
+    evidence_ref: str
+    source_ref: str
+    component_ref: str
+    rule_ref: str
+    rule_version: str
+    treatment_code: str
+    calculation_base_code: str
+    inclusive: bool
+    taxable_basis: Money
+    amount: Money
+    lines: tuple[WithholdingTaxLineV1, ...]
+    scope: Scope
+    billing_account_id: UUID
+    document_id: UUID
+    recognition_basis_code: str
+    fact_kind: str
+    transaction_side: str
+    determined_at: datetime
+
+    def __post_init__(self) -> None:
+        texts = (
+            self.source_owner,
+            self.determination_ref,
+            self.evidence_ref,
+            self.source_ref,
+            self.component_ref,
+            self.rule_ref,
+            self.rule_version,
+            self.treatment_code,
+            self.calculation_base_code,
+            self.source_version,
+            self.source_fingerprint,
+            self.recognition_basis_code,
+            self.fact_kind,
+            self.transaction_side,
+        )
+        if any(not isinstance(value, str) or not value.strip() for value in texts):
+            raise ValueError("withholding Tax evidence requires complete provenance")
+        if (
+            not self.result_fingerprint.startswith("rv1:")
+            or len(self.result_fingerprint) != 68
+            or any(c not in "0123456789abcdef" for c in self.result_fingerprint[4:])
+        ):
+            raise ValueError(
+                "withholding evidence requires the sealed Tax rv1 fingerprint"
+            )
+        if len(self.source_owner) > 120 or any(
+            len(value) > 255 for value in (self.determination_ref, self.component_ref)
+        ):
+            raise ValueError("withholding Tax identities exceed persistence bounds")
+        if not isinstance(self.scope, TenantScope | PlatformScope):
+            raise TypeError("withholding Tax evidence requires an explicit scope")
+        if isinstance(self.scope, TenantScope) and not isinstance(
+            self.scope.tenant_id, UUID
+        ):
+            raise TypeError("withholding tenant scope requires a UUID")
+        if not isinstance(self.billing_account_id, UUID) or not isinstance(
+            self.document_id, UUID
+        ):
+            raise TypeError(
+                "withholding Tax evidence requires UUID account and invoice"
+            )
+        if self.determined_at.tzinfo is None:
+            raise ValueError("withholding determination requires an aware instant")
+        if type(self.inclusive) is not bool:
+            raise TypeError("withholding inclusive flag must be boolean")
+        _withholding_money(self.taxable_basis)
+        _withholding_money(self.amount, positive=True)
+        if self.taxable_basis.currency != self.amount.currency:
+            raise ValueError("withholding evidence currency must agree")
+        if not isinstance(self.lines, tuple) or not self.lines:
+            raise ValueError("withholding evidence requires ordered Tax lines")
+        sequences = tuple(line.sequence for line in self.lines)
+        if sequences != tuple(sorted(set(sequences))):
+            raise ValueError(
+                "withholding Tax lines must preserve increasing unique sequences"
+            )
+        if any(line.tax_amount.currency != self.amount.currency for line in self.lines):
+            raise ValueError("withholding Tax line currency must agree")
+        if (
+            sum((line.tax_amount.amount for line in self.lines), Decimal(0))
+            != self.amount.amount
+        ):
+            raise ValueError("withholding Tax lines must total the component amount")
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingCertificateObservationV1:
+    source_owner: str
+    observation_ref: str
+    status: str
+    evidence_ref: str
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            any(
+                not value.strip()
+                for value in (
+                    self.source_owner,
+                    self.observation_ref,
+                    self.status,
+                    self.evidence_ref,
+                )
+            )
+            or self.observed_at.tzinfo is None
+        ):
+            raise ValueError(
+                "certificate observation requires provenance and an aware instant"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingDischargeEffectV1:
+    discharge_id: UUID
+    document_id: UUID
+    claim_ref: str
+    claimed_amount: Money
+    accepted_delta: Money
+    tax_evidence: WithholdingTaxEvidenceV1
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    certificate_observation: WithholdingCertificateObservationV1 | None = None
+    settlement_id: UUID | None = None
+    allocation_id: UUID | None = None
+    reverses_discharge_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        _withholding_money(self.claimed_amount, positive=True)
+        delta = self.accepted_delta
+        if (
+            not isinstance(delta, Money)
+            or not delta.amount.is_finite()
+            or delta.amount == 0
+            or abs(delta.amount) > self.claimed_amount.amount
+        ):
+            raise ValueError(
+                "withholding effect requires a bounded nonzero exact delta"
+            )
+        if (
+            delta.currency != self.claimed_amount.currency
+            or delta.currency != self.tax_evidence.amount.currency
+            or self.claimed_amount.amount > self.tax_evidence.amount.amount
+        ):
+            raise ValueError("withholding effect must match its determined evidence")
+        if (delta.amount < 0) != (self.reverses_discharge_id is not None):
+            raise ValueError("withholding correction direction must match its linkage")
+        if self.tax_evidence.document_id != self.document_id:
+            raise ValueError("withholding effect must bind the Tax invoice")
+        if any(
+            not value.strip()
+            for value in (
+                self.claim_ref,
+                self.authorization_actor_ref,
+                self.authorization_evidence_ref,
+            )
+        ):
+            raise ValueError("withholding effect requires claim and audit evidence")
+
+
+@dataclass(frozen=True, slots=True)
+class AccountingFactV2:
+    """WHT-only successor; V1 fields, bytes and emissions remain unchanged."""
+
+    scope: Scope
+    source_system: str
+    fact_id: UUID
+    fact_version: int
+    billing_account_id: UUID
+    posting_group_id: UUID
+    source_ref: str
+    source_authority: Literal["internal", "provider_owned", "external_finance"]
+    effect_kind: Literal["withholding_accepted", "withholding_reversed"]
+    occurred_at: datetime
+    committed_at: datetime
+    effects: tuple[AccountingEffectV1, ...]
+    withholding_discharges: tuple[WithholdingDischargeEffectV1, ...]
+    reverses_fact_id: UUID | None = None
+
+
+ACCOUNTING_FACT_V3_CONTRACT = "billing.accounting.fact.v3"
+RECEIVABLE_POSITION_V2_CONTRACT = "billing.receivable.position.v2"
+NonCashCreditEffectKind = Literal[
+    "grant", "application", "application_reversal", "unused_reduction"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashCreditPolicyParameterV1:
+    name: str
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.name.strip() or not isinstance(self.value, str):
+            raise ValueError("policy parameters require a name and textual value")
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashCreditClassificationV1:
+    """Accepted policy snapshot; references are evidence, never permission proof."""
+
+    category: str
+    config_owner: str
+    config_ref: str
+    config_version: str
+    config_digest: str
+    accepted_snapshot: tuple[NonCashCreditPolicyParameterV1, ...]
+
+    def __post_init__(self) -> None:
+        import re
+
+        for text, limit in (
+            (self.category, 120),
+            (self.config_owner, 120),
+            (self.config_ref, 255),
+            (self.config_version, 255),
+        ):
+            if not isinstance(text, str) or not text.strip() or len(text) > limit:
+                raise ValueError(
+                    "noncash classification requires bounded policy identity"
+                )
+        if re.fullmatch(r"[0-9a-f]{64}", self.config_digest) is None:
+            raise ValueError("noncash classification requires a SHA256 digest")
+        if (
+            not isinstance(self.accepted_snapshot, tuple)
+            or any(
+                not isinstance(value, NonCashCreditPolicyParameterV1)
+                for value in self.accepted_snapshot
+            )
+            or len({value.name for value in self.accepted_snapshot})
+            != len(self.accepted_snapshot)
+        ):
+            raise ValueError(
+                "accepted policy snapshot requires unique immutable typed parameters"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashCreditGrantV1:
+    scope: Scope
+    grant_id: UUID
+    billing_account_id: UUID
+    original_amount: Money
+    classification: NonCashCreditClassificationV1
+    source_owner: str
+    source_ref: str
+    source_version: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    restricted_document_id: UUID | None = None
+    replaces_grant_id: UUID | None = None
+    replaces_effect_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        _withholding_money(self.original_amount, positive=True)
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or self.occurred_at.tzinfo is None
+        ):
+            raise ValueError("grant requires explicit scope and aware instant")
+        _non_cash_identity(
+            self.source_owner,
+            self.source_ref,
+            self.source_version,
+            self.authorization_actor_ref,
+            self.authorization_evidence_ref,
+        )
+        if not isinstance(self.classification, NonCashCreditClassificationV1):
+            raise TypeError("grant requires typed accepted classification")
+
+    @property
+    def subtotal(self) -> Money:
+        return self.original_amount
+
+    @property
+    def total(self) -> Money:
+        return self.original_amount
+
+    @property
+    def tax_total(self) -> Money:
+        return Money.of(Decimal("0"), self.original_amount.currency)
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashCreditEffectV1:
+    scope: Scope
+    effect_id: UUID
+    grant_id: UUID
+    billing_account_id: UUID
+    effect_kind: NonCashCreditEffectKind
+    availability_delta: Money
+    source_owner: str
+    source_ref: str
+    source_version: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    document_id: UUID | None = None
+    original_application_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.availability_delta, Money):
+            raise TypeError("noncash delta requires Money")
+        _withholding_money(
+            Money(abs(self.availability_delta.amount), self.availability_delta.currency)
+        )
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or self.occurred_at.tzinfo is None
+        ):
+            raise ValueError("effect requires explicit scope and aware instant")
+        _non_cash_identity(
+            self.source_owner,
+            self.source_ref,
+            self.source_version,
+            self.authorization_actor_ref,
+            self.authorization_evidence_ref,
+        )
+        positive = self.effect_kind in ("grant", "application_reversal")
+        if (
+            self.effect_kind
+            not in ("grant", "application", "application_reversal", "unused_reduction")
+            or (self.availability_delta.amount > 0) != positive
+            or self.availability_delta.amount == 0
+        ):
+            raise ValueError("noncash effect direction is invalid")
+        if (self.document_id is not None) != (
+            self.effect_kind in ("application", "application_reversal")
+        ):
+            raise ValueError("only application effects require an invoice")
+        if (self.original_application_id is not None) != (
+            self.effect_kind == "application_reversal"
+        ):
+            raise ValueError(
+                "only an application reversal links its original application"
+            )
+
+
+def _non_cash_identity(owner: str, *values: str) -> None:
+    if (
+        not isinstance(owner, str)
+        or not owner.strip()
+        or len(owner) > 120
+        or any(
+            not isinstance(value, str) or not value.strip() or len(value) > 255
+            for value in values
+        )
+    ):
+        raise ValueError(
+            "noncash facts require bounded source and authorization evidence"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReceivablePositionV2(ReceivablePositionV1):
+    """Four independent balances; V1 fingerprints retain their original meaning."""
+
+    available_non_cash_credit: Money
+
+    def __post_init__(self) -> None:
+        ReceivablePositionV1.__post_init__(self)
+        _withholding_money(self.available_non_cash_credit)
+        if (
+            self.available_non_cash_credit.amount < 0
+            or self.available_non_cash_credit.currency != self.available_credit.currency
+        ):
+            raise ValueError(
+                "available noncash credit must be nonnegative in the position currency"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class AccountingFactV3:
+    scope: Scope
+    source_system: str
+    fact_id: UUID
+    fact_version: int
+    billing_account_id: UUID
+    posting_group_id: UUID
+    source_ref: str
+    source_authority: Literal["internal"]
+    effect_kind: Literal[
+        "non_cash_credit_granted",
+        "non_cash_credit_applied",
+        "non_cash_credit_application_reversed",
+        "non_cash_credit_reduced",
+    ]
+    occurred_at: datetime
+    committed_at: datetime
+    effects: tuple[AccountingEffectV1, ...]
+    non_cash_credit_effects: tuple[NonCashCreditEffectV1, ...]
+    non_cash_credit_grant: NonCashCreditGrantV1 | None = None
+
+
 __all__ = [
+    "ACCOUNTING_FACT_V3_CONTRACT",
+    "RECEIVABLE_POSITION_V2_CONTRACT",
+    "NonCashCreditEffectKind",
+    "NonCashCreditPolicyParameterV1",
+    "NonCashCreditClassificationV1",
+    "NonCashCreditGrantV1",
+    "NonCashCreditEffectV1",
+    "ReceivablePositionV2",
+    "AccountingFactV3",
     "ACCOUNTING_FACT_CONTRACT",
+    "ACCOUNTING_FACT_V2_CONTRACT",
+    "AccountingFactV2",
+    "WithholdingTaxLineV1",
+    "WithholdingTaxEvidenceV1",
+    "WithholdingCertificateObservationV1",
+    "WithholdingDischargeEffectV1",
     "ARTIFACT_COMMAND_CONTRACT",
     "ARTIFACT_REPAIR_CONTRACT",
     "DOCUMENT_FACT_CONTRACT",

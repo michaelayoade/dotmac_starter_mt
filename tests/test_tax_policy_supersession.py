@@ -16,6 +16,7 @@ from dotmac_tax import (
     TaxRuleSupersessionInput,
     TaxRuleViolation,
     determine_tax_set,
+    get_tax_rule,
     preview_tax_policy,
     publish_tax_rule,
     supersede_tax_rule,
@@ -116,34 +117,52 @@ def test_cross_tenant_predecessor_is_not_found(db):
     assert db.scalar(select(func.count()).select_from(TaxRuleSupersession)) == 0
 
 
-def test_effective_boundary_and_sealed_replay(db):
-    tenant_id, predecessor, fact, command = _setup(db)
-    original = determine_tax_set(db, tenant_id=tenant_id, fact=fact, determined_at=NOW)
-    edge = supersede_tax_rule(db, tenant_id=tenant_id, command=command)
-    assert supersede_tax_rule(db, tenant_id=tenant_id, command=command) == edge
-    assert predecessor.effective_to is None
-    for offset, amount in [(-1, "10"), (0, "20"), (1, "20")]:
-        changed = replace(
-            fact,
-            occurred_on=command.effective_from + timedelta(days=offset),
-            source_ref=f"invoice:{offset}",
+def test_effective_boundary_and_sealed_replay(upgraded_policy_database):
+    # SQLite loses timezone offsets on persisted timestamp reload; this proof
+    # exercises sealed evidence across real owner commits under migrated RLS.
+    tenant_id, _, fact, command, original, _, _, app_url = upgraded_policy_database
+    db, engine = _online_session(app_url, tenant_id)
+    try:
+        edge = supersede_tax_rule(db, tenant_id=tenant_id, command=command)
+        assert supersede_tax_rule(db, tenant_id=tenant_id, command=command) == edge
+        predecessor = get_tax_rule(
+            db,
+            tenant_id=tenant_id,
+            tax_code_id=original.components[0].tax_code_id,
+            version=1,
         )
-        result = determine_tax_set(
-            db, tenant_id=tenant_id, fact=changed, determined_at=NOW
+        assert predecessor.effective_to is None
+        for offset, amount in [(-1, "10"), (0, "20"), (1, "20")]:
+            changed = replace(
+                fact,
+                occurred_on=command.effective_from + timedelta(days=offset),
+                source_ref=f"invoice:{offset}",
+            )
+            result = determine_tax_set(
+                db, tenant_id=tenant_id, fact=changed, determined_at=NOW
+            )
+            assert result.tax_amount == Money.of(amount, NGN)
+        db.commit()
+        db.execute(
+            text("SELECT set_config('app.current_tenant', :tenant, true)"),
+            {"tenant": str(tenant_id)},
         )
-        assert result.tax_amount == Money.of(amount, NGN)
-    assert (
-        determine_tax_set(db, tenant_id=tenant_id, fact=fact, determined_at=NOW)
-        == original
-    )
-    with pytest.raises(TaxConflict):
-        supersede_tax_rule(
-            db, tenant_id=tenant_id, command=replace(command, reason="different")
+        assert supersede_tax_rule(db, tenant_id=tenant_id, command=command) == edge
+        assert (
+            determine_tax_set(db, tenant_id=tenant_id, fact=fact, determined_at=NOW)
+            == original
         )
-    with pytest.raises(TaxConflict):
-        supersede_tax_rule(
-            db, tenant_id=tenant_id, command=replace(command, source_ref="other")
-        )
+        with pytest.raises(TaxConflict):
+            supersede_tax_rule(
+                db, tenant_id=tenant_id, command=replace(command, reason="different")
+            )
+        with pytest.raises(TaxConflict):
+            supersede_tax_rule(
+                db, tenant_id=tenant_id, command=replace(command, source_ref="other")
+            )
+    finally:
+        db.close()
+        engine.dispose()
 
 
 def test_preview_uses_same_policy_without_persisting(db, monkeypatch):

@@ -48,7 +48,7 @@ MIGRATIONS = tuple(sorted((SOURCE / "migrations/versions").glob("tx_*.py")))
 
 def test_manifest_allocates_one_tenant_only_tax_lineage() -> None:
     assert module.code == "tax"
-    assert module.version == "0.1.0a5"
+    assert module.version == "0.1.0a6"
     assert module.short_code == "tax"
     assert module.migration_prefix == "tx"
     assert module.migration_branch == "tax"

@@ -104,11 +104,13 @@ def _country(value: str) -> str:
     return code
 
 
-def _authority(db: Session, tenant_id: UUID, authority_id: UUID) -> TaxAuthority:
+def _authority(
+    db: Session, tenant_id: UUID, authority_id: UUID, *, refresh: bool = False
+) -> TaxAuthority:
     row = db.scalar(
-        select(TaxAuthority).where(
-            TaxAuthority.tenant_id == tenant_id, TaxAuthority.id == authority_id
-        )
+        select(TaxAuthority)
+        .where(TaxAuthority.tenant_id == tenant_id, TaxAuthority.id == authority_id)
+        .execution_options(populate_existing=refresh)
     )
     if row is None:
         raise TaxNotFound("tax authority not found")
@@ -116,22 +118,28 @@ def _authority(db: Session, tenant_id: UUID, authority_id: UUID) -> TaxAuthority
 
 
 def _jurisdiction(
-    db: Session, tenant_id: UUID, jurisdiction_id: UUID
+    db: Session, tenant_id: UUID, jurisdiction_id: UUID, *, refresh: bool = False
 ) -> TaxJurisdiction:
     row = db.scalar(
-        select(TaxJurisdiction).where(
+        select(TaxJurisdiction)
+        .where(
             TaxJurisdiction.tenant_id == tenant_id,
             TaxJurisdiction.id == jurisdiction_id,
         )
+        .execution_options(populate_existing=refresh)
     )
     if row is None:
         raise TaxNotFound("tax jurisdiction not found")
     return row
 
 
-def _code(db: Session, tenant_id: UUID, tax_code_id: UUID) -> TaxCode:
+def _code(
+    db: Session, tenant_id: UUID, tax_code_id: UUID, *, refresh: bool = False
+) -> TaxCode:
     row = db.scalar(
-        select(TaxCode).where(TaxCode.tenant_id == tenant_id, TaxCode.id == tax_code_id)
+        select(TaxCode)
+        .where(TaxCode.tenant_id == tenant_id, TaxCode.id == tax_code_id)
+        .execution_options(populate_existing=refresh)
     )
     if row is None:
         raise TaxNotFound("tax code not found")
@@ -1188,6 +1196,190 @@ def publish_tax_subject_classification(
     db.add(row)
     db.flush()
     return row
+
+
+def _flush_authoring_transaction(db: Session, *, tenant_id: UUID) -> None:
+    """Preserve the caller's autoflush setting while flushing its pending UOW.
+
+    These APIs are write participants, including on exact replay. Flushing
+    before refreshed reads preserves pending owner edits and avoids accepting
+    stale mutable catalog content from a long-lived Session identity map.
+    """
+    if not isinstance(tenant_id, UUID):
+        raise TypeError("Tax authoring requires an explicit tenant UUID")
+    db.flush()
+
+
+def ensure_tax_authority_in_transaction(
+    db: Session, *, tenant_id: UUID, command: TaxAuthorityInput
+) -> TaxAuthorityV1:
+    """Flush/create or exact-replay an authority inside the caller's transaction.
+
+    No commit, rollback or savepoint is performed. The initial flush may flush
+    all pending owner work, without changing ``Session.autoflush``. A unique
+    insert loser propagates ``IntegrityError``: the owner must roll back and
+    retry its whole command in a fresh transaction. Do not query the failed
+    transaction. Catalog replay compares current transaction-visible content;
+    it is not durable idempotency across catalog mutation/deletion.
+
+    A helper's duplicate precheck may observe a winner after this command's
+    first read. Only a healthy, mutation-free domain conflict is re-read for
+    exact replay; database integrity failures always propagate to the owner.
+    """
+    _flush_authoring_transaction(db, tenant_id=tenant_id)
+    code = _clean(command.code, "tax authority code")
+    identity = (
+        select(TaxAuthority)
+        .where(TaxAuthority.tenant_id == tenant_id, TaxAuthority.code == code)
+        .execution_options(populate_existing=True)
+    )
+    existing = db.scalar(identity)
+    if existing is None:
+        try:
+            existing = create_tax_authority(db, tenant_id=tenant_id, command=command)
+        except TaxConflict:
+            # create_tax_authority's domain conflict is its duplicate precheck,
+            # before db.add/flush. Never reread an aborted session or pending
+            # UOW. This guard does not prove that future code has not flushed
+            # writes: domain-conflict paths must remain before any mutation.
+            if not db.is_active or db.new or db.dirty or db.deleted:
+                raise
+            existing = db.scalar(identity)
+            if existing is None:
+                raise
+    return _exact_authority_replay(
+        existing,
+        code=code,
+        name=command.name.strip(),
+        authority_level_code=(
+            command.authority_level_code.strip()
+            if command.authority_level_code
+            else None
+        ),
+    )
+
+
+def ensure_tax_jurisdiction_in_transaction(
+    db: Session, *, tenant_id: UUID, command: TaxJurisdictionInput
+) -> TaxJurisdictionV1:
+    """Flush/create or exact-replay a jurisdiction; caller owns rollback/retry.
+
+    The owner boundary and mutable-catalog guarantees are the same as
+    ``ensure_tax_authority_in_transaction``. Exact replay precedes parent-state
+    admission, preserving the existing ensure contract for retired parents.
+    """
+    _flush_authoring_transaction(db, tenant_id=tenant_id)
+    code = _clean(command.code, "jurisdiction code")
+    existing = db.scalar(
+        select(TaxJurisdiction)
+        .where(TaxJurisdiction.tenant_id == tenant_id, TaxJurisdiction.code == code)
+        .execution_options(populate_existing=True)
+    )
+    if existing is not None:
+        return _exact_jurisdiction_replay(
+            existing,
+            command=command,
+            code=code,
+            name=command.name.strip(),
+            country_code=command.country_code.strip().upper(),
+            subdivision_code=(
+                command.subdivision_code.strip() if command.subdivision_code else None
+            ),
+        )
+    # Refresh a possibly preloaded mutable parent before the established
+    # creation helper performs its ordinary parent-state admission.
+    _authority(db, tenant_id, command.authority_id, refresh=True)
+    return _jurisdiction_contract(
+        create_tax_jurisdiction(db, tenant_id=tenant_id, command=command)
+    )
+
+
+def ensure_tax_code_in_transaction(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    jurisdiction_id: UUID,
+    code: str,
+    name: str,
+    tax_kind_code: str,
+    description: str | None = None,
+) -> TaxCodeV1:
+    """Flush/create or exact-replay a code; caller owns full rollback/retry.
+
+    See ``ensure_tax_authority_in_transaction`` for the owner boundary, initial
+    UOW flush and transaction-visible mutable-catalog replay guarantees.
+    """
+    _flush_authoring_transaction(db, tenant_id=tenant_id)
+    normalized_code = _clean(code, "tax code")
+    existing = db.scalar(
+        select(TaxCode)
+        .where(
+            TaxCode.tenant_id == tenant_id,
+            TaxCode.jurisdiction_id == jurisdiction_id,
+            TaxCode.code == normalized_code,
+        )
+        .execution_options(populate_existing=True)
+    )
+    if existing is not None:
+        return _exact_code_replay(
+            existing,
+            normalized_code=normalized_code,
+            normalized_name=name.strip(),
+            normalized_kind=tax_kind_code.strip(),
+            normalized_description=description.strip() if description else None,
+        )
+    _jurisdiction(db, tenant_id, jurisdiction_id, refresh=True)
+    return _code_contract(
+        create_tax_code(
+            db,
+            tenant_id=tenant_id,
+            jurisdiction_id=jurisdiction_id,
+            code=code,
+            name=name,
+            tax_kind_code=tax_kind_code,
+            description=description,
+        )
+    )
+
+
+def ensure_tax_rule_in_transaction(
+    db: Session, *, tenant_id: UUID, command: TaxRuleInput
+) -> TaxRuleV1:
+    """Flush/publish or exact-replay one immutable published rule version.
+
+    See ``ensure_tax_authority_in_transaction`` for whole-owner rollback/retry
+    and pending-UOW flush guarantees. Rules and ordered bands are published
+    through Tax's established publication helper. Unpublished rows fail closed;
+    this API does not complete a transaction to publish them.
+    """
+    _flush_authoring_transaction(db, tenant_id=tenant_id)
+    identity = (
+        select(TaxRule)
+        .where(
+            TaxRule.tenant_id == tenant_id,
+            TaxRule.tax_code_id == command.tax_code_id,
+            TaxRule.version == command.version,
+        )
+        .execution_options(populate_existing=True)
+    )
+    existing = db.scalar(identity)
+    # Currency in rule DTOs is supplied by the mutable jurisdiction catalog.
+    # Refresh both parents even for immutable-rule replay.
+    code = _code(db, tenant_id, command.tax_code_id, refresh=True)
+    _jurisdiction(db, tenant_id, code.jurisdiction_id, refresh=True)
+    if existing is None:
+        try:
+            existing = publish_tax_rule(db, tenant_id=tenant_id, command=command)
+        except TaxConflict:
+            # The helper's retired-parent/duplicate domain checks all precede
+            # db.add/flush. A winner may now exist, and exact replay continues
+            # to precede mutable-parent admission, as in the existing API.
+            if not db.is_active or db.new or db.dirty or db.deleted:
+                raise
+            existing = db.scalar(identity)
+            if existing is None:
+                raise
+    return _exact_rule_replay(db, tenant_id=tenant_id, row=existing, command=command)
 
 
 def ensure_tax_authority(
@@ -3027,9 +3219,13 @@ __all__ = [
     "determine_tax",
     "determine_tax_set",
     "ensure_tax_authority",
+    "ensure_tax_authority_in_transaction",
     "ensure_tax_code",
+    "ensure_tax_code_in_transaction",
     "ensure_tax_jurisdiction",
+    "ensure_tax_jurisdiction_in_transaction",
     "ensure_tax_rule",
+    "ensure_tax_rule_in_transaction",
     "ensure_tax_subject_classification",
     "file_tax_return",
     "generate_statutory_report",

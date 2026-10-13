@@ -58,9 +58,13 @@ from dotmac_tax.service import (
     determine_tax,
     determine_tax_set,
     ensure_tax_authority,
+    ensure_tax_authority_in_transaction,
     ensure_tax_code,
+    ensure_tax_code_in_transaction,
     ensure_tax_jurisdiction,
+    ensure_tax_jurisdiction_in_transaction,
     ensure_tax_rule,
+    ensure_tax_rule_in_transaction,
     ensure_tax_subject_classification,
     file_tax_return,
     generate_statutory_report,
@@ -80,7 +84,7 @@ from dotmac_tax.service import (
     update_tax_jurisdiction,
 )
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a6"
 
 __all__ = [
     "ListTaxAuthoritiesV1",
@@ -133,9 +137,13 @@ __all__ = [
     "determine_tax",
     "determine_tax_set",
     "ensure_tax_authority",
+    "ensure_tax_authority_in_transaction",
     "ensure_tax_code",
+    "ensure_tax_code_in_transaction",
     "ensure_tax_jurisdiction",
+    "ensure_tax_jurisdiction_in_transaction",
     "ensure_tax_rule",
+    "ensure_tax_rule_in_transaction",
     "ensure_tax_subject_classification",
     "file_tax_return",
     "generate_statutory_report",

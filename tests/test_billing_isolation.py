@@ -560,7 +560,12 @@ def test_catalog_proves_force_rls_and_exact_platform_revoke(scratch) -> None:
                 columns
                 if table_name in ONLINE_MUTABLE_TABLES
                 else {"id"}
-                if table_name == "billing_accounts"
+                if table_name
+                in {
+                    "billing_accounts",
+                    "non_cash_credit_grants",
+                    "non_cash_credit_effects",
+                }
                 else set()
             )
             assert update_columns == expected_update_columns
@@ -616,7 +621,12 @@ def test_catalog_proves_force_rls_and_exact_platform_revoke(scratch) -> None:
                 columns
                 if table_name.removeprefix("platform_") in ONLINE_MUTABLE_TABLES
                 else {"id"}
-                if table_name == "platform_billing_accounts"
+                if table_name
+                in {
+                    "platform_billing_accounts",
+                    "platform_non_cash_credit_grants",
+                    "platform_non_cash_credit_effects",
+                }
                 else set()
             )
             assert update_columns == expected_update_columns
@@ -4038,3 +4048,789 @@ def test_document_fact_query_hashes_raw_stored_json_not_decoder_reserialization(
             "Z", "+00:00"
         )
         session.rollback()
+
+
+def _withholding_command(
+    account_id, document_id, *, scope, suffix="1", claimed="5.00", accepted=None
+):
+    """Frozen Tax owner evidence; fixtures never authorize finance adoption."""
+    from dotmac_billing.commands import AcceptWithholdingDischarge
+    from dotmac_billing.contracts import WithholdingTaxEvidenceV1, WithholdingTaxLineV1
+
+    evidence = WithholdingTaxEvidenceV1(
+        source_owner="dotmac-tax",
+        determination_ref=f"tax-set:{suffix}",
+        source_version="opaque-source-v1",
+        source_fingerprint=f"source:{suffix}",
+        result_fingerprint="rv1:" + "a" * 64,
+        evidence_ref=f"tax-evidence:{suffix}",
+        source_ref=f"document:{document_id}",
+        component_ref=f"component:{suffix}",
+        rule_ref="configured-rule",
+        rule_version="1",
+        treatment_code="withholding",
+        calculation_base_code="subtotal",
+        inclusive=False,
+        taxable_basis=_money("100.00"),
+        amount=_money(claimed),
+        lines=(WithholdingTaxLineV1(1, _money("100.00"), None, _money(claimed)),),
+        scope=scope,
+        billing_account_id=account_id,
+        document_id=document_id,
+        recognition_basis_code="invoice_issued",
+        fact_kind="invoice",
+        transaction_side="sale",
+        determined_at=NOW,
+    )
+    return AcceptWithholdingDischarge(
+        scope=scope,
+        billing_account_id=account_id,
+        document_id=document_id,
+        idempotency_key=f"wht-retry:{suffix}",
+        source_owner="customer-remittance",
+        source_ref=f"wht-source:{suffix}",
+        claim_ref=f"wht-claim:{suffix}",
+        claimed_amount=_money(claimed),
+        accepted_amount=_money(accepted or claimed),
+        tax_evidence=evidence,
+        authorization_actor_ref="finance-user:fixture",
+        authorization_evidence_ref="trusted-assembly-audit:fixture",
+        occurred_at=NOW,
+    )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_withholding_partial_replay_correction_and_bypass_refusal(scratch, plane):
+    from dotmac_billing.commands import ReverseWithholdingDischarge
+    from dotmac_billing.service import (
+        accept_withholding_discharge,
+        reverse_withholding_discharge,
+    )
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(session, scope, suffix=f"wht-{plane}")
+        command = _withholding_command(
+            account.id, invoice.id, scope=scope, suffix=plane, accepted="3.00"
+        )
+        from dotmac_billing.contracts import WithholdingCertificateObservationV1
+
+        command = replace(
+            command,
+            certificate_observation=WithholdingCertificateObservationV1(
+                "customer-evidence",
+                "certificate-observation:1",
+                "observed_unverified",
+                "certificate:file:1",
+                NOW,
+            ),
+        )
+        # Constructing a claim or certificate is observational and posts nothing.
+        before = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert before.collectible_receivable == Decimal("120")
+        row = accept_withholding_discharge(session, scope=scope, command=command)
+        after = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert after.collectible_receivable == Decimal("117")
+        assert after.available_credit == before.available_credit == 0
+        assert after.prepaid_funding == before.prepaid_funding == 0
+        assert (
+            accept_withholding_discharge(session, scope=scope, command=command).id
+            == row.id
+        )
+        with pytest.raises(IdempotencyConflict):
+            accept_withholding_discharge(
+                session,
+                scope=scope,
+                command=replace(command, authorization_evidence_ref="changed"),
+            )
+        with pytest.raises(BillingConflict):
+            accept_withholding_discharge(
+                session,
+                scope=scope,
+                command=replace(command, idempotency_key="fresh-retry"),
+            )
+        with pytest.raises(BillingConflict):
+            accept_withholding_discharge(
+                session,
+                scope=scope,
+                command=replace(
+                    command,
+                    idempotency_key="fresh-source-retry",
+                    source_ref="changed-source",
+                    claim_ref="changed-claim",
+                ),
+            )
+        with pytest.raises(BillingRuleViolation, match="withholding"):
+            void_document(
+                session,
+                scope=scope,
+                document_id=invoice.id,
+                source_ref="void-wht",
+                actor_ref="fixture",
+                occurred_at=NOW,
+            )
+        with pytest.raises(BillingRuleViolation, match="withholding"):
+            reverse_posting_group(
+                session,
+                scope=scope,
+                command=ReversePostingGroupCommand(
+                    row.posting_group_id, NOW, "generic-wht-reverse"
+                ),
+            )
+        correction = ReverseWithholdingDischarge(
+            scope,
+            row.id,
+            "wht-correction-retry",
+            "wht-correction",
+            "finance-user:fixture",
+            "audit:correction",
+            NOW,
+        )
+        inverse = reverse_withholding_discharge(
+            session, scope=scope, command=correction
+        )
+        assert inverse.amount_delta == Decimal("-3")
+        assert inverse.reverses_discharge_id == row.id
+        assert inverse.evidence["tax_evidence"] == row.evidence["tax_evidence"]
+        assert (
+            reverse_withholding_discharge(session, scope=scope, command=correction).id
+            == inverse.id
+        )
+        assert rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        ).collectible_receivable == Decimal("120")
+        fact_model = (
+            models.AccountingFact
+            if plane == "tenant"
+            else models.PlatformAccountingFact
+        )
+        facts = (
+            session.execute(
+                select(fact_model).where(
+                    fact_model.posting_group_id.in_(
+                        (row.posting_group_id, inverse.posting_group_id)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert {fact.fact_version for fact in facts} == {2}
+        assert all("withholding_discharges" in fact.fact_payload for fact in facts)
+        session.commit()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_withholding_107500_invoice_102500_cash_5000_discharge(scratch, plane):
+    from dotmac_billing.service import accept_withholding_discharge
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=f"wht-net-cash-{plane}",
+            currency="NGN",
+            minor_units=2,
+        )
+        rated = replace(
+            _obligation_command(
+                account.id, scope=scope, source_fact_id=f"gross-{plane}"
+            ),
+            pre_tax_amount=_money("100000"),
+            tax_amount=_money("7500"),
+            total_amount=_money("107500"),
+            tax_snapshots=(
+                AppliedTaxSnapshotV1(
+                    "standard",
+                    "source-zone",
+                    "vat-policy",
+                    "1",
+                    Decimal("0.075"),
+                    _money("100000"),
+                    _money("7500"),
+                ),
+            ),
+        )
+        obligation = accept_rated_obligation(
+            session,
+            scope=scope,
+            command=rated,
+            accepted_source_kinds=frozenset({"recurring_charge_occurrence"}),
+        )
+        draft = create_draft_document(
+            session, scope=scope, command=_draft_command(obligation.id)
+        )
+        invoice = issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        cash = accept_settlement(
+            session,
+            scope=scope,
+            command=_settlement_command(
+                account.id, scope=scope, source_key=f"actual-{plane}", amount="102500"
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        cash_group = allocate_settlement(
+            session,
+            scope=scope,
+            command=AllocationCommand(
+                cash.id, invoice.id, _money("102500"), NOW, f"cash-allocate:{plane}"
+            ),
+        )
+        allocation_model = (
+            models.AllocationEffect
+            if plane == "tenant"
+            else models.PlatformAllocationEffect
+        )
+        cash_allocation = session.execute(
+            select(allocation_model).where(
+                allocation_model.posting_group_id == cash_group.id
+            )
+        ).scalar_one()
+        command = _withholding_command(
+            account.id, invoice.id, scope=scope, suffix=f"net-{plane}", claimed="5000"
+        )
+        command = replace(
+            command, settlement_id=cash.id, allocation_id=cash_allocation.id
+        )
+        row = accept_withholding_discharge(session, scope=scope, command=command)
+        assert (
+            accept_withholding_discharge(session, scope=scope, command=command).id
+            == row.id
+        )  # replay after AR reached zero
+        position = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert (
+            position.collectible_receivable
+            == position.available_credit
+            == position.prepaid_funding
+            == 0
+        )
+        assert cash.amount == Decimal("102500")
+        assert (
+            session.execute(
+                select(func.count())
+                .select_from(allocation_model)
+                .where(allocation_model.posting_group_id == row.posting_group_id)
+            ).scalar_one()
+            == 0
+        )
+        exposure_model = (
+            models.ReceivableExposureFact
+            if plane == "tenant"
+            else models.PlatformReceivableExposureFact
+        )
+        assert (
+            session.execute(
+                select(exposure_model).where(
+                    exposure_model.posting_group_watermark == row.posting_group_id
+                )
+            )
+            .scalar_one()
+            .collectible_receivable
+            == 0
+        )
+        session.commit()
+
+
+def test_withholding_cannot_replay_or_post_across_tenants(scratch):
+    from dotmac_billing.service import accept_withholding_discharge
+
+    admin_url, tenant_url, _ = scratch
+    left, right = _create_tenants(admin_url)
+    scope_a, scope_b = TenantScope(left), TenantScope(right)
+    with _session(tenant_url, scope_a) as session:
+        account, _, invoice = _seed_invoice(session, scope_a, suffix="wht-isolation")
+        command = _withholding_command(account.id, invoice.id, scope=scope_a)
+        row = accept_withholding_discharge(session, scope=scope_a, command=command)
+        discharge_id = row.id
+        session.commit()
+    with _session(tenant_url, scope_b) as session:
+        with pytest.raises(BillingRuleViolation, match="scope"):
+            accept_withholding_discharge(session, scope=scope_b, command=command)
+        offered = replace(
+            command,
+            scope=scope_b,
+            tax_evidence=replace(command.tax_evidence, scope=scope_b),
+        )
+        with pytest.raises(BillingRuleViolation, match="not found"):
+            accept_withholding_discharge(session, scope=scope_b, command=offered)
+        assert (
+            session.execute(
+                select(models.WithholdingDischarge).where(
+                    models.WithholdingDischarge.id == discharge_id
+                )
+            ).first()
+            is None
+        )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_withholding_rollback_removes_discharge_position_fact_and_retry(scratch, plane):
+    from dotmac_billing.service import accept_withholding_discharge
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"wht-rollback-{plane}"
+        )
+        command = _withholding_command(
+            account.id, invoice.id, scope=scope, suffix=f"rollback-{plane}"
+        )
+        row = accept_withholding_discharge(session, scope=scope, command=command)
+        discharge_id, group_id, account_id = row.id, row.posting_group_id, account.id
+        session.rollback()
+    with _session(url, scope) as session:
+        discharge_model = (
+            models.WithholdingDischarge
+            if plane == "tenant"
+            else models.PlatformWithholdingDischarge
+        )
+        group_model = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        fact_model = (
+            models.AccountingFact
+            if plane == "tenant"
+            else models.PlatformAccountingFact
+        )
+        outbox_model = OutboxEvent if plane == "tenant" else PlatformOutboxEvent
+        assert session.get(discharge_model, discharge_id) is None
+        assert session.get(group_model, group_id) is None
+        assert (
+            session.execute(
+                select(fact_model).where(fact_model.posting_group_id == group_id)
+            ).first()
+            is None
+        )
+        assert (
+            session.execute(
+                select(outbox_model).where(
+                    outbox_model.event_type == "billing.accounting.fact.v2",
+                    outbox_model.payload["posting_group_id"].as_string()
+                    == str(group_id),
+                    outbox_model.payload["billing_account_id"].as_string()
+                    == str(account_id),
+                    outbox_model.payload["source_ref"].as_string()
+                    == command.source_ref,
+                )
+            ).first()
+            is None
+        )
+        assert rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        ).collectible_receivable == Decimal("120")
+        retried = accept_withholding_discharge(session, scope=scope, command=command)
+        assert retried.id != discharge_id
+        session.commit()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_withholding_and_cash_allocation_serialize_invoice_room(scratch, plane):
+    from dotmac_billing.service import accept_withholding_discharge
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(session, scope, suffix=f"wht-race-{plane}")
+        settlement = accept_settlement(
+            session,
+            scope=scope,
+            command=_settlement_command(
+                account.id, scope=scope, source_key=f"wht-race-{plane}", amount="120"
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        wht_command = _withholding_command(
+            account.id, invoice.id, scope=scope, suffix=f"race-{plane}", claimed="120"
+        )
+        cash_command = AllocationCommand(
+            settlement.id, invoice.id, _money("120"), NOW, f"cash-race:{plane}"
+        )
+        session.commit()
+        account_id = account.id
+    barrier = threading.Barrier(2)
+    accepted, refused, errors = [], [], []
+
+    def runner(withholding):
+        try:
+            with _session(url, scope) as session:
+                barrier.wait(timeout=20)
+                try:
+                    if withholding:
+                        result = accept_withholding_discharge(
+                            session, scope=scope, command=wht_command
+                        )
+                    else:
+                        result = allocate_settlement(
+                            session, scope=scope, command=cash_command
+                        )
+                    session.commit()
+                    accepted.append(result.id)
+                except BillingRuleViolation as exc:
+                    refused.append(exc)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=runner, args=(kind,)) for kind in (True, False)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "withholding/cash admission deadlocked"
+    assert errors == []
+    assert len(accepted) == len(refused) == 1
+    with _session(url, scope) as session:
+        position = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert position.collectible_receivable == 0
+        assert position.available_credit in (Decimal("0"), Decimal("120"))
+        assert position.prepaid_funding == 0
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_withholding_and_credit_note_serialize_invoice_room(scratch, plane):
+    from dotmac_billing.service import accept_withholding_discharge
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"wht-credit-race-{plane}"
+        )
+        wht_command = _withholding_command(
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix=f"credit-race-{plane}",
+            claimed="120",
+        )
+        credit_command = IssueCreditNote(
+            invoice.id,
+            _money("120"),
+            _money("0"),
+            _money("120"),
+            "correction",
+            "credit",
+            NOW.date(),
+            "fixture",
+            f"credit-wht-race:{plane}",
+            NOW,
+            "credit.standard",
+            "1",
+        )
+        account_id = account.id
+    barrier = threading.Barrier(2)
+    accepted, refused, errors = [], [], []
+
+    def runner(withholding):
+        try:
+            with _session(url, scope) as session:
+                barrier.wait(timeout=20)
+                try:
+                    if withholding:
+                        result = accept_withholding_discharge(
+                            session, scope=scope, command=wht_command
+                        )
+                    else:
+                        result = issue_credit_note(
+                            session,
+                            scope=scope,
+                            command=credit_command,
+                            numbering=NUMBERING,
+                        )
+                    session.commit()
+                    accepted.append(result.id)
+                except BillingRuleViolation as exc:
+                    refused.append(exc)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=runner, args=(kind,)) for kind in (True, False)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "withholding/credit-note admission deadlocked"
+    assert errors == []
+    assert len(accepted) == len(refused) == 1
+    with _session(url, scope) as session:
+        position = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert (
+            position.collectible_receivable
+            == position.available_credit
+            == position.prepaid_funding
+            == 0
+        )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_invoice_generic_reversal_cannot_borrow_another_invoice_ar(scratch, plane):
+    from dotmac_billing.service import accept_withholding_discharge
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"wht-two-invoices-{plane}"
+        )
+        draft = _additional_credit_invoice(
+            session, scope, account.id, f"second-ar-{plane}"
+        )
+        issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        group_model = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        issuance = session.execute(
+            select(group_model).where(
+                group_model.source_ref == f"document:{invoice.id}:issue"
+            )
+        ).scalar_one()
+        reverse = ReversePostingGroupCommand(
+            issuance.id, NOW, f"generic-issue-reverse:{plane}"
+        )
+        with pytest.raises(BillingRuleViolation, match="void_document"):
+            reverse_posting_group(session, scope=scope, command=reverse)
+        command = _withholding_command(
+            account.id, invoice.id, scope=scope, suffix=f"two-ar-{plane}"
+        )
+        row = accept_withholding_discharge(session, scope=scope, command=command)
+        with pytest.raises(BillingRuleViolation, match="void_document"):
+            reverse_posting_group(session, scope=scope, command=reverse)
+        assert (
+            accept_withholding_discharge(session, scope=scope, command=command).id
+            == row.id
+        )
+        assert rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        ).collectible_receivable == Decimal("235")
+        session.commit()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_legacy_invoice_reverse_exact_replay_precedes_new_owner_refusal(scratch, plane):
+    from dataclasses import asdict
+
+    from dotmac_billing.service import (
+        _idempotent,
+        _reverse_group,
+        accept_withholding_discharge,
+    )
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"legacy-reverse-{plane}"
+        )
+        draft = _additional_credit_invoice(
+            session, scope, account.id, f"legacy-second-{plane}"
+        )
+        issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        group_model = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        original = session.execute(
+            select(group_model).where(
+                group_model.source_ref == f"document:{invoice.id}:issue"
+            )
+        ).scalar_one()
+        command = ReversePostingGroupCommand(
+            original.id, NOW, f"legacy-invoice-reverse:{plane}"
+        )
+
+        def predecessor_operation(db):
+            # Seed the exact previous public operation, not a fabricated replay result.
+            reversal = _reverse_group(
+                db,
+                scope=scope,
+                original=original,
+                occurred_at=command.occurred_at,
+                source_ref=command.source_ref,
+            )
+            return {"posting_group_id": str(reversal.id)}
+
+        outcome = _idempotent(
+            session,
+            scope=scope,
+            operation_scope="billing.posting.reverse",
+            key=command.source_ref,
+            fingerprint=fingerprint_of(asdict(command)),
+            operation=predecessor_operation,
+        )
+        session.commit()
+        assert reverse_posting_group(
+            session, scope=scope, command=command
+        ).id == uuid.UUID(str(outcome.result["posting_group_id"]))
+        with pytest.raises(BillingRuleViolation, match="void_document"):
+            reverse_posting_group(
+                session,
+                scope=scope,
+                command=replace(command, source_ref="new-invoice-reverse"),
+            )
+        wht = _withholding_command(
+            account.id, invoice.id, scope=scope, suffix=f"legacy-reversed-wht-{plane}"
+        )
+        with pytest.raises(BillingRuleViolation, match="structurally bound"):
+            accept_withholding_discharge(session, scope=scope, command=wht)
+        assert rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        ).collectible_receivable == Decimal("120")
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_private_generic_reverse_cannot_bypass_withholding_inverse_owner(
+    scratch, plane
+):
+    from dotmac_billing.commands import ReverseWithholdingDischarge
+    from dotmac_billing.service import (
+        _reverse_group,
+        accept_withholding_discharge,
+        reverse_withholding_discharge,
+    )
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"private-wht-reverse-{plane}"
+        )
+        row = accept_withholding_discharge(
+            session,
+            scope=scope,
+            command=_withholding_command(
+                account.id, invoice.id, scope=scope, suffix=f"private-reverse-{plane}"
+            ),
+        )
+        group = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        original = session.get(group, row.posting_group_id)
+        with pytest.raises(BillingRuleViolation, match="withholding correction"):
+            _reverse_group(
+                session,
+                scope=scope,
+                original=original,
+                occurred_at=NOW,
+                source_ref="private-wht-bypass",
+            )
+        correction = ReverseWithholdingDischarge(
+            scope,
+            row.id,
+            f"dedicated-retry:{plane}",
+            f"dedicated-reverse:{plane}",
+            "finance:fixture",
+            "audit:fixture",
+            NOW,
+        )
+        inverse = reverse_withholding_discharge(
+            session, scope=scope, command=correction
+        )
+        assert inverse.amount_delta == -row.amount_delta
+        assert inverse.reverses_discharge_id == row.id
+        assert (
+            reverse_withholding_discharge(session, scope=scope, command=correction).id
+            == inverse.id
+        )
+        with pytest.raises(BillingRuleViolation, match="withholding correction"):
+            _reverse_group(
+                session,
+                scope=scope,
+                original=session.get(group, inverse.posting_group_id),
+                occurred_at=NOW,
+                source_ref="private-inverse-bypass",
+            )
+        session.commit()
