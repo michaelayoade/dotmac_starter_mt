@@ -326,13 +326,13 @@ def test_document_rendering_is_allowlisted_as_an_explicitly_stateless_module() -
     output entirely keeps downstream steps from mistaking an empty string for
     an unknown schema.
     """
-    result = _resolve("dotmac-document-rendering", version="0.1.0a1")
+    result = _resolve("dotmac-document-rendering", version="0.1.0a2")
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.splitlines())
-    assert emitted["kernel_floor"] == "0.1.0a88"
+    assert emitted["kernel_floor"] == "0.1.0a103"
     assert emitted["release_shape"] == "stateless"
     assert "db_schema" not in emitted
-    assert emitted["tag"] == "dotmac-document-rendering-v0.1.0a1"
+    assert emitted["tag"] == "dotmac-document-rendering-v0.1.0a2"
 
 
 def test_release_smoke_executes_against_a_real_stateless_manifest(

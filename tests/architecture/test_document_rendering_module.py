@@ -23,6 +23,10 @@ def _forbidden_import_findings(source: str, *, label: str) -> list[str]:
         "dotmac_files",
         "dotmac_billing",
         "dotmac_numbering",
+        "dotmac_brand_profiles",
+        "dotmac_customers",
+        "dotmac_tax",
+        "dotmac_payments",
     }
     forbidden_kernel_modules = {"db", "idempotency", "models", "messaging"}
     findings: list[str] = []
@@ -58,17 +62,35 @@ def _purity_findings(source: str, *, label: str) -> list[str]:
         "os",
         "random",
         "secrets",
+        "subprocess",
+        "ftplib",
+        "urllib3",
     }
-    forbidden_calls = {"now", "today", "utcnow", "getenv", "environ", "uuid4"}
+    forbidden_calls = {
+        "now",
+        "today",
+        "utcnow",
+        "getenv",
+        "environ",
+        "uuid4",
+        "open",
+        "urlopen",
+    }
     findings: list[str] = []
     tree = ast.parse(source, filename=label)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".", 1)[0] in forbidden_imports:
+                if (
+                    alias.name.split(".", 1)[0] in forbidden_imports
+                    or alias.name == "urllib.request"
+                ):
                     findings.append(f"{label}:{node.lineno}: import {alias.name}")
         elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.split(".", 1)[0] in forbidden_imports:
+            if (
+                node.module.split(".", 1)[0] in forbidden_imports
+                or node.module == "urllib.request"
+            ):
                 findings.append(f"{label}:{node.lineno}: from {node.module}")
         elif isinstance(node, ast.Call):
             name = (
@@ -90,7 +112,11 @@ def _money_findings(source: str, *, label: str) -> list[str]:
             if node.func.id in {"float", "sum"}:
                 findings.append(f"{label}:{node.lineno}: {node.func.id}()")
         if isinstance(node, ast.BinOp):
-            names = {n.id.lower() for n in ast.walk(node) if isinstance(n, ast.Name)}
+            names = {
+                n.id.lower() if isinstance(n, ast.Name) else n.attr.lower()
+                for n in ast.walk(node)
+                if isinstance(n, ast.Name | ast.Attribute)
+            }
             if any(any(token in name for token in money_names) for name in names):
                 findings.append(f"{label}:{node.lineno}: money arithmetic")
     return findings

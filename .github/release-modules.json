@@ -469,6 +469,8 @@
           "dotmac_billing/migrations/versions/bi_0004_withholding_discharge.py",
           "dotmac_billing/migrations/versions/bi_0005_non_cash_credit.py",
           "dotmac_billing/models.py",
+          "dotmac_billing/opening_contracts.py",
+          "dotmac_billing/opening_validation.py",
           "dotmac_billing/py.typed",
           "dotmac_billing/queries.py",
           "dotmac_billing/service.py"
@@ -795,19 +797,26 @@
       "package_dir": "packages/dotmac-document-rendering",
       "import_name": "dotmac_document_rendering",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a88",
+      "kernel_floor": "0.1.0a103",
       "db_schema": null,
       "tag_prefix": "dotmac-document-rendering-v",
       "wheel_contents": {
         "required": [
-          "dotmac_document_rendering/py.typed",
-          "dotmac_document_rendering/manifest.py",
           "dotmac_document_rendering/conformance.py",
+          "dotmac_document_rendering/conformance_v2.py",
           "dotmac_document_rendering/contracts.py",
+          "dotmac_document_rendering/contracts_v2.py",
+          "dotmac_document_rendering/manifest.py",
+          "dotmac_document_rendering/output_validation_v2.py",
           "dotmac_document_rendering/projection.py",
+          "dotmac_document_rendering/projection_v2.py",
+          "dotmac_document_rendering/py.typed",
           "dotmac_document_rendering/renderers.py",
+          "dotmac_document_rendering/renderers_v2.py",
           "dotmac_document_rendering/service.py",
-          "dotmac_document_rendering/templates.py"
+          "dotmac_document_rendering/service_v2.py",
+          "dotmac_document_rendering/templates.py",
+          "dotmac_document_rendering/templates_v2.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -817,7 +826,8 @@
         ],
         "allowed_requires": [
           "dotmac-kernel",
-          "python"
+          "python",
+          "pypdf"
         ]
       }
     },

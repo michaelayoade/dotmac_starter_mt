@@ -13,6 +13,10 @@ from typing import Final
 from dotmac_kernel.cache import PlatformScope, TenantScope
 
 from dotmac_document_rendering.conformance import renderer_contract_violations
+from dotmac_document_rendering.conformance_v2 import (
+    renderer_contract_violations_v2,
+    result_contract_violations_v2,
+)
 from dotmac_document_rendering.contracts import (
     Block,
     ColumnSpec,
@@ -57,6 +61,29 @@ from dotmac_document_rendering.contracts import (
     TemplateInvalid,
     TemplateNotFound,
 )
+from dotmac_document_rendering.contracts_v2 import (
+    DiscountV2,
+    DocumentLineV2,
+    DocumentProfileBindingV2,
+    DocumentProjectionV2,
+    DocumentRendererV2,
+    DueDateBasisV2,
+    FrozenPaymentLinkV2,
+    FxSnapshotV2,
+    InvoiceDocumentFactV2,
+    PartySnapshotV2,
+    PartyTaxIdentityV2,
+    PaymentInstructionsV2,
+    PaymentLinkValueV2,
+    PostalAddressV2,
+    PresentationAssetV2,
+    RecordedLineReferenceV2,
+    RegisteredIdentifierV2,
+    RenderedDocumentV2,
+    RenderRequestV2,
+    SelectedTemplateV2,
+    TaxSnapshotV2,
+)
 from dotmac_document_rendering.manifest import module
 from dotmac_document_rendering.projection import (
     PROJECTION_CONTRACT_VERSION,
@@ -68,23 +95,51 @@ from dotmac_document_rendering.projection import (
     validate_fact,
     validate_projection_source_fields,
 )
+from dotmac_document_rendering.projection_v2 import (
+    PROJECTION_CONTRACT_VERSION_V2,
+    canonical_projection_payload_v2,
+    fact_fingerprint_v2,
+    project_invoice_v2,
+    projection_digest_v2,
+    validate_fact_v2,
+    validate_payment_link_v2,
+)
 from dotmac_document_rendering.renderers import (
     DeterministicHtmlRenderer,
     InMemoryDocumentRenderer,
     PdfDocumentRenderer,
     html_from_projection,
 )
+from dotmac_document_rendering.renderers_v2 import (
+    DeterministicHtmlRendererV2,
+    InMemoryDocumentRendererV2,
+    PdfDocumentRendererV2,
+    html_from_projection_v2,
+)
 from dotmac_document_rendering.service import render_document
+from dotmac_document_rendering.service_v2 import (
+    render_document_v2,
+)
 from dotmac_document_rendering.templates import (
     DEFAULT_ENGLISH_LABELS,
     TemplateCatalog,
     label_map,
 )
+from dotmac_document_rendering.templates_v2 import (
+    DEFAULT_ENGLISH_LABELS_V2,
+    TemplateCatalogV2,
+)
 
-__version__: Final[str] = "0.1.0a1"
+__version__: Final[str] = "0.1.0a2"
 
 SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
     {
+        "dotmac_document_rendering.contracts_v2",
+        "dotmac_document_rendering.projection_v2",
+        "dotmac_document_rendering.templates_v2",
+        "dotmac_document_rendering.renderers_v2",
+        "dotmac_document_rendering.service_v2",
+        "dotmac_document_rendering.conformance_v2",
         "dotmac_document_rendering.conformance",
         "dotmac_document_rendering.contracts",
         "dotmac_document_rendering.manifest",
@@ -95,9 +150,48 @@ SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
     }
 )
 
-INTERNAL_MODULES: Final[frozenset[str]] = frozenset()
+INTERNAL_MODULES: Final[frozenset[str]] = frozenset(
+    {"dotmac_document_rendering.output_validation_v2"}
+)
 
 __all__ = [
+    "PostalAddressV2",
+    "RegisteredIdentifierV2",
+    "PartySnapshotV2",
+    "PartyTaxIdentityV2",
+    "DiscountV2",
+    "RecordedLineReferenceV2",
+    "DocumentLineV2",
+    "TaxSnapshotV2",
+    "FxSnapshotV2",
+    "DueDateBasisV2",
+    "PresentationAssetV2",
+    "FrozenPaymentLinkV2",
+    "PaymentInstructionsV2",
+    "InvoiceDocumentFactV2",
+    "DocumentProfileBindingV2",
+    "SelectedTemplateV2",
+    "PaymentLinkValueV2",
+    "DocumentProjectionV2",
+    "RenderRequestV2",
+    "RenderedDocumentV2",
+    "DocumentRendererV2",
+    "PROJECTION_CONTRACT_VERSION_V2",
+    "canonical_projection_payload_v2",
+    "fact_fingerprint_v2",
+    "projection_digest_v2",
+    "project_invoice_v2",
+    "validate_fact_v2",
+    "validate_payment_link_v2",
+    "DEFAULT_ENGLISH_LABELS_V2",
+    "TemplateCatalogV2",
+    "DeterministicHtmlRendererV2",
+    "InMemoryDocumentRendererV2",
+    "PdfDocumentRendererV2",
+    "html_from_projection_v2",
+    "render_document_v2",
+    "renderer_contract_violations_v2",
+    "result_contract_violations_v2",
     "DEFAULT_ENGLISH_LABELS",
     "INTERNAL_MODULES",
     "PROJECTION_CONTRACT_VERSION",
