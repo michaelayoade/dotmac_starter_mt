@@ -156,7 +156,10 @@ def test_actual_nonroot_pinned_runner_qualifies_before_matrix(
     import pwd
 
     directory, _ = supervisor
-    directory.chmod(0o711)
+    # Match the public, root-owned deployment code directory. Python import
+    # discovery needs directory listing as well as traversal; private material
+    # remains in the separate nobody-owned0700 work directory.
+    directory.chmod(0o755)
     account = pwd.getpwnam("nobody")
     work = directory / "work"
     work.mkdir(mode=0o700)
