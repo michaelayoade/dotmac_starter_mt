@@ -13,7 +13,10 @@ import pathlib
 import pwd
 import stat
 import subprocess
+from types import SimpleNamespace
+from unittest.mock import Mock
 
+import conftest as harness
 import lane3_handoff_controller as hc
 import lane3_handoff_protocol as hp
 import pytest
@@ -31,6 +34,49 @@ def _ids(env: Env, lease: str) -> tuple[int, int, str]:
     j = env.journal()
     assert j is not None and j["lease_id"] == lease
     return j["uid"], j["gid"], j["units"]["runner"]
+
+
+def test_wait_closed_requires_archived_receipt_after_live_closed(monkeypatch) -> None:
+    environment = object.__new__(Env)
+    lease = "a" * 32
+    live = {"lease_id": lease, "state": "CLOSED", "outcome": "REFUSED"}
+    archived = dict(live)
+    journal = Mock(side_effect=[live, None])
+    closed = Mock(return_value=archived)
+    clock = SimpleNamespace(
+        monotonic=Mock(side_effect=[0.0, 0.0, 0.1]),
+        sleep=Mock(),
+    )
+    monkeypatch.setattr(environment, "journal", journal)
+    monkeypatch.setattr(environment, "closed", closed)
+    monkeypatch.setattr(harness, "time", clock)
+
+    # The live CLOSED save precedes receipt publication and journal unlink.
+    # Returning the live dictionary would expose an unfinished archive step.
+    assert environment.wait_state(lease, {"CLOSED"}, timeout=1) is archived
+    assert journal.call_count == 2
+    closed.assert_called_once_with(lease)
+    clock.sleep.assert_called_once_with(0.05)
+
+
+def test_wait_closed_times_out_if_live_closed_is_never_archived(monkeypatch) -> None:
+    environment = object.__new__(Env)
+    lease = "a" * 32
+    journal = Mock(return_value={"lease_id": lease, "state": "CLOSED"})
+    closed = Mock()
+    clock = SimpleNamespace(
+        monotonic=Mock(side_effect=[0.0, 0.0, 0.5, 1.0]),
+        sleep=Mock(),
+    )
+    monkeypatch.setattr(environment, "journal", journal)
+    monkeypatch.setattr(environment, "closed", closed)
+    monkeypatch.setattr(harness, "time", clock)
+
+    with pytest.raises(AssertionError, match="state not reached"):
+        environment.wait_state(lease, {"CLOSED"}, timeout=1)
+    assert journal.call_count == 2
+    closed.assert_not_called()
+    assert clock.sleep.call_count == 2
 
 
 def test_positive_report_grant_consume_and_pinned_tls(env: Env) -> None:
