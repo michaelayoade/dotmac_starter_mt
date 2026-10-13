@@ -1472,7 +1472,7 @@ map is
 
 | Package | Sole owned decision/state surface | Qualifying provenance |
 |---|---|---|
-| `dotmac-accounting` | Tenant chart, fiscal periods/dimensions, balanced posting, reversal and immutable ledger evidence | ERP GL behavior and tests |
+| `dotmac-accounting` | Tenant chart, fiscal periods/dimensions, balanced posting, reversal and immutable ledger evidence and posted source ancestry (`ac_0002_posted_content`, candidate `0.1.0a2`) | ERP GL behavior and tests |
 | `dotmac-analytics` | Declared aggregate observations and deterministic rebuildable current-point projections | ERP metric storage/computers; fleet projection requirements |
 | `dotmac-banking` | Bank-account masters, statement/cash observations, matching decisions and reconciliation evidence | ERP banking behavior |
 | `dotmac-documents` | Controlled document identity, immutable exact-content versions, lifecycle, collaboration and acknowledgements | ERP handbook base plus Sub immutable quote delta |

@@ -7265,7 +7265,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
         {"ib_0002_supplied_identity.py", "ib_0003_transport_refs.py"}
     ),
     "dotmac-kernel": frozenset(),
-    "dotmac-accounting": frozenset(),
+    "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),

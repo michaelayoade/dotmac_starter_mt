@@ -141,3 +141,23 @@ independent databases. The final production switch is therefore blocked until
 an accepted cutover decision defines the cross-database write fence, final
 evidence instant, failure recovery and traffic switch. This amendment does not
 silently weaken that fleet invariant.
+
+## Amendment, 2026-10-13 — freeze posted source ancestry
+
+The `0.1.0a2` candidate adds `ac_0002_posted_content` to enforce the existing
+immutable-posted-content decision for direct SQL as well as service callers.
+The published root migration and v1 contracts retain their exact bytes.
+Source line writes lock both OLD and NEW journals; dimension assignments first
+lock both source lines and derive ancestry from those locked tuples. Parent
+status locks serialize child edits with posting. Every visible parent must be
+DRAFT, and missing/hidden ancestry is refused. Draft FK cascades alone may
+continue after a parent has already been deleted by its guarded cascade.
+
+The additive migration drains predecessor parent and child writers under a
+bounded transaction-local lock timeout. Its downgrade refuses any non-DRAFT
+journal or appended ledger/dimension evidence before restoring the historical
+guard. Deadlocks caused by parent/child lock inversion abort safely and require
+whole-transaction retry. The migration does not certify or repair historical
+source content; immutable posted ledger snapshots remain authoritative. Fresh
+and exact released-predecessor PostgreSQL canaries require hosted CI execution.
+This source candidate allocates no publication, adoption or production change.
