@@ -772,6 +772,7 @@ def test_later_resolution_cannot_overdraw_invoice_masked_by_second_invoice(
                 command=billing._settlement_command(
                     account, scope=scope, amount="80", source_key=str(uuid4())
                 ),
+                accepted_confirmation_evidence=frozenset({"provider_settled"}),
             )
             if later == "allocation"
             else None

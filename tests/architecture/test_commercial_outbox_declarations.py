@@ -61,12 +61,15 @@ def test_billing_declares_exactly_the_events_its_service_emits() -> None:
         == emitted
         == {
             "billing.accounting.fact.v1",
+            "billing.accounting.fact.v2",
+            "billing.accounting.fact.v3",
             "billing.document.artifact.recorded.v1",
             "billing.document.artifact.repaired.v1",
             "billing.invoice.document.fact.v1",
             "billing.obligation.accepted.v1",
             "billing.receivable.exposure.v1",
             "billing.receivable.position.v1",
+            "billing.receivable.position.v2",
             "billing.settlement.accepted.v1",
         }
     )

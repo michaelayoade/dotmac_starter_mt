@@ -276,7 +276,12 @@ def test_credit_queries_ignore_dirty_orm_and_snapshot_stays_fresh_after_cash(
         receipt = b._settlement_command(
             account.id, scope=scope, source_key=str(uuid4()), amount="10"
         )
-        accept_settlement(db, scope=scope, command=receipt)
+        accept_settlement(
+            db,
+            scope=scope,
+            command=receipt,
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
         position_model = (
             models.ReceivablePositionFactV2
             if plane == "tenant"
@@ -372,6 +377,7 @@ def test_credit_cross_tenant_query_and_command_denials(scratch):
         account, _, invoice = b._seed_invoice(db, first, suffix=str(uuid4()))
         command = _grant(first, account.id)
         grant = grant_non_cash_credit(db, scope=first, command=command)
+        invoice_id = invoice.id
         db.commit()
     with b._session(url, second) as db:
         with pytest.raises(BillingRuleViolation):
@@ -380,7 +386,7 @@ def test_credit_cross_tenant_query_and_command_denials(scratch):
             grant_non_cash_credit(db, scope=second, command=command)
         with pytest.raises(BillingRuleViolation):
             apply_non_cash_credit(
-                db, scope=second, command=_apply(second, grant.grant_id, invoice.id)
+                db, scope=second, command=_apply(second, grant.grant_id, invoice_id)
             )
 
 
