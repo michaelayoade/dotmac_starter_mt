@@ -148,9 +148,11 @@ def test_real_bootstrap_ticket_or_manifest_mismatch_installs_no_accept_and_clean
     receipt = bootstrap_receipt(env, lease)
     if defect == "phase":
         controller = env.controller()
-        j = env.journal()
-        j["timing"]["phase"] = "REPORTED"
-        controller.save(j)
+        with controller.locked():
+            j = controller.load()
+            assert j is not None
+            j["timing"]["phase"] = "REPORTED"
+            controller.save(j)
     else:
         receipt["challenge" if defect == "challenge" else "manifest_digest"] = "f" * 64
     with pytest.raises(hc.ControllerRefused):
