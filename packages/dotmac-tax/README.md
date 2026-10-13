@@ -48,3 +48,48 @@ history.
 The optional package owns the `tx` lineage and `mod_tax` schema. It imports no
 sibling domain and never reads another application's database. See
 `EXTRACTION.toml` and `docs/inventories/tax-sources.md`.
+
+Policy authoring in a5 uses `supersede_tax_rule` with a typed
+`TaxRuleSupersessionInput`. The command appends an evidenced replacement edge;
+it never edits a published rule or a sealed determination. The replacement
+preserves applicability and priority, starts at or after the predecessor's
+start, and inherits its end. Rate, method, progressive bands, recovery,
+treatment, inclusive flag, sequence and supported calculation base may change.
+Only a leaf may be replaced. Source reference/version provides exact retry
+identity; different content and stale predecessors raise `TaxConflict`.
+
+A replacement suppresses its explicit predecessor from the boundary onward.
+Chains retain earlier date behavior; unrelated equal-ranked overlaps still
+refuse determination. Existing sealed source facts replay before selection and
+retain their exact original results. Downgrading a database containing any
+rule or supersession refuses, because a4 would reopen band membership and
+reactivate superseded policy.
+
+`preview_tax_policy` reads current persisted policy through the same selector
+and calculation builder as determination. Its distinct `TaxPolicyPreviewV1`
+contains selected rules, bases, amounts and lines without determination IDs,
+seals or authoritative evidence. It writes and flushes nothing, and raises the
+same typed refusals. It does not simulate an unpublished replacement.
+
+The replacement command is flush-only and opens no savepoint. The product
+transaction owner must roll back and retry the whole command after a database
+conflict. Legacy `ensure_*` commands retain their a4 savepoint behavior and
+must not be called inside a host that forbids nested transaction boundaries.
+This source candidate establishes no UI delivery, publication, product pin,
+authority switch or deployment acceptance.
+
+A5 seals progressive-band membership with the rule. Existing a4 rule rows
+acquire `is_published=true` through the additive column default; no financial
+values are repaired. New rules build with `false`, insert bands, then make the
+sole content-preserving `false→true` transition before the owner returns.
+A deferred constraint forbids committing an unpublished rule, and band inserts
+lock their parent and refuse published membership. Reads and selection exclude
+transaction-local unpublished rows. Both migration directions acquire bounded
+five-second admission locks; downgrade requires a globally empty rule/edge
+store and restores the prior trigger only in that empty case.
+
+This schema change requires a write fence: old a4 binaries cannot publish new
+rules after tx_0004, because they do not perform the required publication
+transition. Drain old tax-policy writers before migration and resume them only
+with a5. Public a4 service signatures and immutable `TaxRuleV1` remain available
+in a5; this is source API compatibility, not old-binary write compatibility.

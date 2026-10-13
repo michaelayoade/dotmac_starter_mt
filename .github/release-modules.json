@@ -159,6 +159,7 @@
           "dotmac_accounting/manifest.py",
           "dotmac_accounting/migrations/__init__.py",
           "dotmac_accounting/migrations/versions/ac_0001_accounting.py",
+          "dotmac_accounting/migrations/versions/ac_0002_posted_content.py",
           "dotmac_accounting/models.py",
           "dotmac_accounting/service.py"
         ],
@@ -3091,11 +3092,14 @@
         "required": [
           "dotmac_tax/py.typed",
           "dotmac_tax/contracts.py",
+        "dotmac_tax/_policy_query_contracts.py",
+        "dotmac_tax/_policy_queries.py",
           "dotmac_tax/manifest.py",
           "dotmac_tax/migrations/__init__.py",
           "dotmac_tax/migrations/versions/tx_0001_tax.py",
           "dotmac_tax/migrations/versions/tx_0002_multi_tax.py",
           "dotmac_tax/migrations/versions/tx_0003_result_fingerprint.py",
+        "dotmac_tax/migrations/versions/tx_0004_rule_supersession.py",
           "dotmac_tax/models.py",
           "dotmac_tax/service.py"
         ],

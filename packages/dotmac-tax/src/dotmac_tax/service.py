@@ -27,8 +27,12 @@ from dotmac_tax.contracts import (
     TaxFact,
     TaxJurisdictionInput,
     TaxJurisdictionV1,
+    TaxPolicyPreviewComponentV1,
+    TaxPolicyPreviewV1,
     TaxRuleBandV1,
     TaxRuleInput,
+    TaxRuleSupersessionInput,
+    TaxRuleSupersessionV1,
     TaxRuleV1,
     TaxSubjectClassificationInput,
     TaxSubjectClassificationV1,
@@ -49,6 +53,7 @@ from dotmac_tax.models import (
     TaxReturnEvent,
     TaxRule,
     TaxRuleBand,
+    TaxRuleSupersession,
     TaxSubjectClassification,
 )
 
@@ -182,6 +187,8 @@ def _exact_policy_money(amount: Decimal, *, currency: Currency) -> Money:
 
 
 def _rule_contract(db: Session, *, tenant_id: UUID, row: TaxRule) -> TaxRuleV1:
+    if row.is_published is False:
+        raise TaxConflict("tax rule version is not published")
     code = _code(db, tenant_id, row.tax_code_id)
     jurisdiction = _jurisdiction(db, tenant_id, code.jurisdiction_id)
     currency = Currency(jurisdiction.currency_code, jurisdiction.minor_units)
@@ -305,6 +312,7 @@ def get_tax_rule(
     row = db.scalar(
         select(TaxRule).where(
             TaxRule.tenant_id == tenant_id,
+            TaxRule.is_published.is_(True),
             TaxRule.tax_code_id == tax_code_id,
             TaxRule.version == version,
         )
@@ -1050,6 +1058,7 @@ def publish_tax_rule(
     if existing is not None:
         raise TaxConflict("tax rule version already exists")
     row = TaxRule(
+        is_published=False,
         tenant_id=tenant_id,
         tax_code_id=command.tax_code_id,
         version=command.version,
@@ -1089,6 +1098,8 @@ def publish_tax_rule(
         for band in ordered
     )
     db.add(row)
+    db.flush()
+    row.is_published = True
     db.flush()
     return row
 
@@ -1541,6 +1552,166 @@ def _exact_rule_replay(
     return contract
 
 
+def _supersession_contract(
+    db: Session, *, tenant_id: UUID, row: TaxRuleSupersession
+) -> TaxRuleSupersessionV1:
+    replacement = db.scalar(
+        select(TaxRule).where(
+            TaxRule.tenant_id == tenant_id, TaxRule.id == row.replacement_rule_id
+        )
+    )
+    if replacement is None:
+        raise TaxConflict("supersession replacement is missing")
+    return TaxRuleSupersessionV1(
+        tenant_id,
+        row.id,
+        row.predecessor_rule_id,
+        row.predecessor_version,
+        _rule_contract(db, tenant_id=tenant_id, row=replacement),
+        row.effective_from,
+        row.actor_id,
+        row.published_by_ref,
+        row.reason,
+        row.evidence_ref,
+        row.source_ref,
+        row.source_version,
+        _utc_datetime(row.published_at),
+    )
+
+
+def supersede_tax_rule(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    command: TaxRuleSupersessionInput,
+    published_at: datetime | None = None,
+) -> TaxRuleSupersessionV1:
+    """Append one explicit replacement, flush only; caller owns rollback/retry.
+
+    The tenant/code row serializes competing policy authors. Exact source replay
+    precedes leaf validation so later replacements never invalidate a retry.
+    """
+    predecessor = db.scalar(
+        select(TaxRule).where(
+            TaxRule.tenant_id == tenant_id,
+            TaxRule.id == command.predecessor_rule_id,
+            TaxRule.is_published.is_(True),
+        )
+    )
+    if predecessor is None:
+        raise TaxNotFound("predecessor tax rule was not found")
+    db.execute(
+        select(TaxCode.id)
+        .where(TaxCode.tenant_id == tenant_id, TaxCode.id == predecessor.tax_code_id)
+        .with_for_update(key_share=True)
+    ).scalar_one()
+    metadata = tuple(
+        _clean(value, label)
+        for value, label in (
+            (command.published_by_ref, "publisher"),
+            (command.reason, "reason"),
+            (command.evidence_ref, "evidence reference"),
+            (command.source_ref, "source reference"),
+            (command.source_version, "source version"),
+        )
+    )
+    existing = db.scalar(
+        select(TaxRuleSupersession).where(
+            TaxRuleSupersession.tenant_id == tenant_id,
+            TaxRuleSupersession.source_ref == metadata[3],
+            TaxRuleSupersession.source_version == metadata[4],
+        )
+    )
+    if existing is not None:
+        contract = _supersession_contract(db, tenant_id=tenant_id, row=existing)
+        if (
+            contract.predecessor_rule_id != command.predecessor_rule_id
+            or contract.predecessor_version != command.predecessor_version
+            or contract.effective_from != command.effective_from
+            or contract.actor_id != command.actor_id
+            or (
+                contract.published_by_ref,
+                contract.reason,
+                contract.evidence_ref,
+                contract.source_ref,
+                contract.source_version,
+            )
+            != metadata
+            or contract.replacement.tax_code_id != command.replacement.tax_code_id
+            or contract.replacement.version != command.replacement.version
+            or _rule_contract_content(contract.replacement)
+            != _rule_command_content(command.replacement)
+        ):
+            raise TaxConflict("supersession source identity has different content")
+        return contract
+    if predecessor.version != command.predecessor_version:
+        raise TaxConflict("predecessor tax rule version is stale")
+    if (
+        db.scalar(
+            select(TaxRuleSupersession.id).where(
+                TaxRuleSupersession.tenant_id == tenant_id,
+                TaxRuleSupersession.predecessor_rule_id == predecessor.id,
+            )
+        )
+        is not None
+    ):
+        raise TaxConflict("predecessor tax rule has already been superseded")
+    replacement = command.replacement
+    identity = (
+        "tax_code_id",
+        "priority",
+        "fact_kind",
+        "recognition_basis_code",
+        "transaction_side",
+        "party_category",
+        "supply_category",
+        "place_code",
+    )
+    old = _rule_contract(db, tenant_id=tenant_id, row=predecessor)
+    for name in identity:
+        value = getattr(replacement, name)
+        if isinstance(value, str):
+            value = value.strip()
+        if value != getattr(old, name):
+            raise TaxRuleViolation("supersession must preserve applicability identity")
+    if (
+        replacement.version <= predecessor.version
+        or replacement.effective_from != command.effective_from
+        or command.effective_from < predecessor.effective_from
+        or (
+            predecessor.effective_to is not None
+            and command.effective_from > predecessor.effective_to
+        )
+        or replacement.effective_to != predecessor.effective_to
+    ):
+        raise TaxRuleViolation(
+            "supersession must replace the remaining predecessor interval"
+        )
+    when = published_at or datetime.now(UTC)
+    _require_aware_input(when)
+    successor = publish_tax_rule(
+        db, tenant_id=tenant_id, command=replacement, published_at=when
+    )
+    row = TaxRuleSupersession(
+        tenant_id=tenant_id,
+        predecessor_rule_id=predecessor.id,
+        predecessor_version=predecessor.version,
+        replacement_rule_id=successor.id,
+        replacement_version=successor.version,
+        effective_from=command.effective_from,
+        actor_id=command.actor_id,
+        published_by_ref=metadata[0],
+        reason=metadata[1],
+        evidence_ref=metadata[2],
+        source_ref=metadata[3],
+        source_version=metadata[4],
+        published_at=when,
+    )
+    db.add(row)
+    db.flush()
+    return _supersession_contract(db, tenant_id=tenant_id, row=row)
+
+
 def _classification_command_content(
     command: TaxSubjectClassificationInput,
     *,
@@ -1772,11 +1943,19 @@ def _applicable_rules(
         )
         .where(
             TaxRule.tenant_id == tenant_id,
+            TaxRule.is_published.is_(True),
             TaxCode.jurisdiction_id == fact.jurisdiction_id,
             TaxCode.status == "active",
             TaxRule.fact_kind == fact.fact_kind,
             TaxRule.recognition_basis_code == fact.recognition_basis_code,
             TaxRule.transaction_side == fact.transaction_side,
+            ~select(TaxRuleSupersession.id)
+            .where(
+                TaxRuleSupersession.tenant_id == tenant_id,
+                TaxRuleSupersession.predecessor_rule_id == TaxRule.id,
+                TaxRuleSupersession.effective_from <= fact.occurred_on,
+            )
+            .exists(),
             TaxRule.effective_from <= fact.occurred_on,
             (TaxRule.effective_to.is_(None))
             | (TaxRule.effective_to >= fact.occurred_on),
@@ -1992,6 +2171,35 @@ def _determine_tax_set_row(
     if jurisdiction.status != "active":
         raise TaxConflict("tax determination cannot use a retired jurisdiction")
 
+    row = _build_tax_policy_result(
+        db,
+        tenant_id=tenant_id,
+        fact=fact,
+        determined_at=determined_at,
+        jurisdiction=jurisdiction,
+        source_ref=source_ref,
+        source_version=source_version,
+        fingerprint=fingerprint,
+    )
+    db.add(row)
+    db.flush()
+    row.result_fingerprint = _result_content_fingerprint(row)
+    row.result_seal_state = "sealed"
+    db.flush()
+    return row
+
+
+def _build_tax_policy_result(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    fact: TaxFact,
+    determined_at: datetime,
+    jurisdiction: TaxJurisdiction,
+    source_ref: str,
+    source_version: str,
+    fingerprint: str,
+) -> TaxDeterminationSet:
     selected_rules = _applicable_rules(db, tenant_id, fact)
     determination_set_id = uuid4()
     source_amount = _round(fact.base_amount.amount, jurisdiction.minor_units)
@@ -2111,12 +2319,73 @@ def _determine_tax_set_row(
     )
     row.components.extend(components)
     _validate_persisted_result_structure(row)
-    db.add(row)
-    db.flush()
-    row.result_fingerprint = _result_content_fingerprint(row)
-    row.result_seal_state = "sealed"
-    db.flush()
     return row
+
+
+def preview_tax_policy(
+    db: Session, *, tenant_id: UUID, fact: TaxFact, determined_at: datetime
+) -> TaxPolicyPreviewV1:
+    """Read current persisted policy without writes or durable evidence IDs.
+
+    Refusals raise the same typed errors as determination. Proposed unpublished
+    replacements are outside this preview's scope. Source identities are not replayed.
+    """
+    _require_aware_input(determined_at)
+    with db.no_autoflush:
+        jurisdiction, source_ref, source_version, fingerprint = _validate_tax_fact(
+            db, tenant_id=tenant_id, fact=fact
+        )
+        if jurisdiction.status != "active":
+            raise TaxConflict("tax preview cannot use a retired jurisdiction")
+        row = _build_tax_policy_result(
+            db,
+            tenant_id=tenant_id,
+            fact=fact,
+            determined_at=determined_at,
+            jurisdiction=jurisdiction,
+            source_ref=source_ref,
+            source_version=source_version,
+            fingerprint=fingerprint,
+        )
+        currency = Currency(row.currency_code, row.minor_units)
+
+        def money(amount: Decimal) -> Money:
+            return _exact_money(amount, currency=currency, label="preview amount")
+
+        return TaxPolicyPreviewV1(
+            tenant_id,
+            row.jurisdiction_id,
+            row.occurred_on,
+            money(row.source_amount),
+            money(row.net_amount),
+            money(row.tax_amount),
+            money(row.gross_amount),
+            tuple(
+                TaxPolicyPreviewComponentV1(
+                    cast(int, item.component_sequence),
+                    item.tax_code_id,
+                    item.rule_id,
+                    item.rule_version,
+                    cast(str, item.treatment_code),
+                    cast(str, item.calculation_base_code),
+                    cast(bool, item.inclusive),
+                    money(item.base_amount),
+                    money(item.tax_amount),
+                    money(item.recoverable_amount),
+                    money(item.non_recoverable_amount),
+                    tuple(
+                        TaxDeterminationLineV1(
+                            line.sequence,
+                            money(line.taxable_amount),
+                            line.rate,
+                            money(line.tax_amount),
+                        )
+                        for line in item.lines
+                    ),
+                )
+                for item in row.components
+            ),
+        )
 
 
 def determine_tax_set(
@@ -2771,6 +3040,8 @@ __all__ = [
     "get_tax_subject_classification",
     "prepare_tax_return",
     "publish_tax_rule",
+    "supersede_tax_rule",
+    "preview_tax_policy",
     "publish_tax_subject_classification",
     "reject_tax_return",
     "update_tax_authority",

@@ -411,6 +411,7 @@ def test_policy_rule_read_refuses_to_round_corrupt_persisted_fixed_money(
     tenant = _tenant(db)
     _, _, code = _masters(db, tenant.id)
     row = TaxRule(
+        is_published=True,
         tenant_id=tenant.id,
         tax_code_id=code.id,
         version=1,
