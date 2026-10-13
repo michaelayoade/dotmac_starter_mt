@@ -16,15 +16,42 @@ branch_labels = None
 depends_on = None
 
 
-def _bound_lock() -> None:
-    op.execute("/* mod_payments guard transition */ SET LOCAL lock_timeout = '5s'")
-    op.execute(
-        "/* mod_payments guard transition */ SET LOCAL statement_timeout = '60s'"
-    )
+def _bound_lock(*, downgrade: bool = False) -> None:
+    connection = op.get_bind()
+    previous_timeout = connection.execute(sa.text("SHOW lock_timeout")).scalar_one()
+    previous_statement_timeout = connection.execute(
+        sa.text("SHOW statement_timeout")
+    ).scalar_one()
     # Serialize concurrent inserts with the downgrade evidence decision as well
     # as mutations with the trigger/privilege transition. Fail rather than wait
     # indefinitely behind a live writer. Alembic owns the DDL transaction.
-    op.execute("LOCK TABLE mod_payments.payment_confirmations IN ACCESS EXCLUSIVE MODE")
+    if downgrade:
+        # Never mistake a tenant-filtered empty result for absence of evidence.
+        # A non-BYPASSRLS owner fails closed under FORCE ROW LEVEL SECURITY.
+        op.execute("""
+            SET LOCAL lock_timeout = '5s';
+            SET LOCAL statement_timeout = '60s';
+            SET LOCAL row_security = off;
+            LOCK TABLE mod_payments.payment_confirmations IN ACCESS EXCLUSIVE MODE;
+        """)
+    else:
+        op.execute("""
+            SET LOCAL lock_timeout = '5s';
+            SET LOCAL statement_timeout = '60s';
+            LOCK TABLE mod_payments.payment_confirmations IN ACCESS EXCLUSIVE MODE;
+        """)
+    # Settings belong to the caller; the transaction retains the table lock
+    # through the trigger/privilege transition after restoring both bounds.
+    connection.execute(
+        sa.text(
+            "SELECT pg_catalog.set_config('lock_timeout', :timeout, true), "
+            "pg_catalog.set_config('statement_timeout', :statement_timeout, true)"
+        ),
+        {
+            "timeout": previous_timeout,
+            "statement_timeout": previous_statement_timeout,
+        },
+    )
 
 
 def upgrade() -> None:
@@ -51,10 +78,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    _bound_lock()
-    # Never mistake a tenant-filtered empty result for absence of evidence.
-    # A non-BYPASSRLS migration owner fails closed under FORCE ROW LEVEL SECURITY.
-    op.execute("/* mod_payments evidence check */ SET LOCAL row_security = off")
+    _bound_lock(downgrade=True)
     evidence = (
         op.get_bind()
         .execute(sa.text("SELECT 1 FROM mod_payments.payment_confirmations LIMIT 1"))

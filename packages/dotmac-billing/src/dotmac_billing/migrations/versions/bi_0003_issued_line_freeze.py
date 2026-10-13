@@ -20,6 +20,9 @@ depends_on = None
 
 
 def _replace(*, platform: bool, all_kinds: bool) -> None:
+    # Both inputs are booleans supplied by this migration: the only prefix is
+    # "platform_" or "", and every remaining SQL fragment below is a literal.
+    # Runtime document/tenant values remain trigger fields, never interpolated.
     prefix = "platform_" if platform else ""
     tenant_match = "" if platform else " AND tenant_id = NEW.tenant_id"
     kind_declaration = "" if all_kinds else "kind text;"
@@ -49,10 +52,12 @@ def _replace(*, platform: bool, all_kinds: bool) -> None:
         RETURN NEW;
     END;
     $$ LANGUAGE plpgsql
-    """)
+    """)  # nosec B608 -- boolean-selected module literals only; no untrusted SQL input
 
 
 def _replace_mutation(*, platform: bool, locking: bool) -> None:
+    # Prefix, function name and tenant predicates are closed literal choices;
+    # OLD/NEW values are evaluated by PostgreSQL, never Python interpolation.
     prefix = "platform_" if platform else ""
     name = "platform" if platform else "tenant"
     tenant_old = "" if platform else " AND tenant_id = OLD.tenant_id"
@@ -91,7 +96,7 @@ def _replace_mutation(*, platform: bool, locking: bool) -> None:
             END LOOP;
             RETURN NEW;
         END;
-        """
+        """  # nosec B608 -- boolean-selected prefix/predicates only; no untrusted SQL input
     else:
         # Restore bi_0002's predecessor guard on downgrade.
         body = f"""
@@ -106,7 +111,7 @@ def _replace_mutation(*, platform: bool, locking: bool) -> None:
             END IF;
             RETURN COALESCE(NEW, OLD);
         END;
-        """
+        """  # nosec B608 -- same closed prefix/predicates as upgrade; no untrusted SQL input
     op.execute(f"""
     CREATE OR REPLACE FUNCTION mod_billing.freeze_{name}_document_line()
     RETURNS trigger AS $$ {body} $$ LANGUAGE plpgsql
@@ -121,19 +126,33 @@ def _apply(*, all_kinds: bool) -> None:
     # Drain writers using the predecessor functions before replacing them.
     # Parent tables precede child tables in the same plane order on every run.
     tables = [
-        f"mod_billing.{'platform_' if plane == ModulePlane.PLATFORM else ''}{table}"
+        f"{'platform_' if plane == ModulePlane.PLATFORM else ''}{table}"
         for table in ("documents", "document_lines")
         for plane in selected
     ]
     connection = op.get_bind()
     previous_timeout = connection.execute(text("SHOW lock_timeout")).scalar_one()
-    op.execute("SET LOCAL lock_timeout = '5s'")
-    op.execute(f"LOCK TABLE {', '.join(tables)} IN ACCESS EXCLUSIVE MODE")
-    # Restore the caller's setting; the acquired table locks remain held until
+    previous_statement_timeout = connection.execute(
+        text("SHOW statement_timeout")
+    ).scalar_one()
+    # Keep the bounded lock operation together; every selected table is
+    # explicitly qualified, including each subsequent table in the list.
+    op.execute(f"""
+        SET LOCAL lock_timeout = '5s';
+        SET LOCAL statement_timeout = '60s';
+        LOCK TABLE mod_billing.{', mod_billing.'.join(tables)} IN ACCESS EXCLUSIVE MODE;
+    """)
+    # Restore the caller's settings; the acquired table locks remain held until
     # the migration transaction ends, including all function replacements.
     connection.execute(
-        text("SELECT set_config('lock_timeout', :timeout, true)"),
-        {"timeout": previous_timeout},
+        text(
+            "SELECT pg_catalog.set_config('lock_timeout', :timeout, true), "
+            "pg_catalog.set_config('statement_timeout', :statement_timeout, true)"
+        ),
+        {
+            "timeout": previous_timeout,
+            "statement_timeout": previous_statement_timeout,
+        },
     )
     for plane in (ModulePlane.TENANT, ModulePlane.PLATFORM):
         if plane in planes:
