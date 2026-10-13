@@ -21,7 +21,7 @@
 - Expose distinct advisory preview through the shared calculation path.
 - Add bounded policy listing and rule history for UI consumers.
 
-## 0.1.0a4 — unreleased
+## 0.1.0a4 — released
 
 ### Added
 

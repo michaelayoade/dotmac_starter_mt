@@ -77,7 +77,7 @@ from enum import Enum
 from typing import Final
 
 from ..errors import SpecError
-from ..spec import ProductDeploymentSpec
+from ..spec import SCHEMA_V4, ProductDeploymentSpec
 
 
 class Phase(str, Enum):
@@ -110,6 +110,7 @@ class StepKind(str, Enum):
     STOP_FOR_MAINTENANCE = "stop_for_maintenance"
     MIGRATE = "migrate"
     VERIFY_HEADS = "verify_heads"
+    VERIFY_POST_MIGRATION_MATERIALS = "verify_post_migration_materials"
     START_CANDIDATE = "start_candidate"
     GATE_CANDIDATE = "gate_candidate"
     SWITCH = "switch"
@@ -174,6 +175,7 @@ _PHASE_OF: Final[Mapping[StepKind, Phase]] = {
     StepKind.STOP_FOR_MAINTENANCE: Phase.MUTATE,
     StepKind.MIGRATE: Phase.MUTATE,
     StepKind.VERIFY_HEADS: Phase.MUTATE,
+    StepKind.VERIFY_POST_MIGRATION_MATERIALS: Phase.MUTATE,
     StepKind.START_CANDIDATE: Phase.MUTATE,
     StepKind.GATE_CANDIDATE: Phase.MUTATE,
     StepKind.SWITCH: Phase.MUTATE,
@@ -510,6 +512,18 @@ def build_plan(
             timeout_seconds=120,
         )
     )
+
+    if spec.descriptor_schema == SCHEMA_V4:
+        steps.append(
+            Step(
+                StepKind.VERIFY_POST_MIGRATION_MATERIALS,
+                "Verify candidate materials under each application role "
+                "after migrations",
+                timeout_seconds=sum(
+                    probe.timeout_seconds for probe in spec.material_probes
+                ),
+            )
+        )
 
     if strategy is Strategy.WARM_CANDIDATE:
         for role in warmable:

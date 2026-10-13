@@ -1,5 +1,28 @@
 # Changelog — dotmac-payments
 
+## 0.1.0a2 — 2026-10-13 (declared, unpublished)
+
+- Enforce confirmed-cash UPDATE/DELETE refusal at the PostgreSQL boundary,
+  including deletion cascades, while preserving intent/proof lifecycle writes.
+  Bound migration locking and refuse downgrade while confirmation evidence exists.
+
+- Persists exact Money currency scale in additive `pm_0002_money_precision`;
+  legacy NULL precision remains unresolved without an inferred default/backfill.
+- Exposes frozen tenant-scoped confirmed-cash observations from persisted scalar
+  evidence with typed missing/unknown-precision refusals and caller-owned transactions.
+- Refuses unsupported scales, nonfinite amounts and Numeric(20, 6) overflow.
+- Refuses confirmation replay with a changed amount, currency, source or supplied
+  observation instant. An omitted instant replays the original evidence.
+- Serializes confirmation, cancellation, expiry and proof submission on the
+  tenant-scoped intent row, refreshing stored state after acquiring the lock.
+- Reviews proofs in intent-before-proof lock order and leaves review evidence
+  untouched when confirmation is refused.
+- Adds migrated PostgreSQL races for duplicate/different provider references,
+  cancellation, expiry, proof acceptance and competing proof reviews. SQLite
+  canaries cover immutable replay and failed-review evidence.
+- Preserves the released `pm_0001_payment_intents` migration and existing public
+  command fields. This version changes no financial allocation or cash owner.
+
 ## 0.1.0a1 — 2026-08-22
 
 - Extracts Sub's top-up intent, transfer-proof and gateway-observation boundary

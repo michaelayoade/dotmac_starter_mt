@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from enum import Enum
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import Scope, TenantScope
 from dotmac_kernel.idempotency import (
+    IdempotencyConflict,
     IdempotentOutcome,
     Operation,
     execute_once,
@@ -26,8 +27,11 @@ from sqlalchemy.orm import Session
 from dotmac_billing import models
 from dotmac_billing.commands import (
     AllocationCommand,
+    ApplyAvailableCreditCommand,
     CreateDraftDocument,
+    CreateMultiLineDraftDocument,
     DeallocationCommand,
+    DraftDocumentLine,
     IssueCreditNote,
     IssueDocument,
     NumberingProvider,
@@ -616,6 +620,7 @@ def create_draft_document(
                 {
                     "id": uuid4(),
                     "document_id": document_id,
+                    "billing_account_id": obligation.billing_account_id,
                     "obligation_id": obligation.id,
                     "line_number": 1,
                     "description": command.description,
@@ -631,7 +636,9 @@ def create_draft_document(
                 },
             )
         )
-        session.add_all([document, line])
+        session.add(document)
+        session.flush()
+        session.add(line)
         for identity in command.party_tax_identities:
             session.add(
                 plane.party_tax(
@@ -661,6 +668,354 @@ def create_draft_document(
             row_id=UUID(str(outcome.result["document_id"])),
         ),
     )
+
+
+def _require_line_input(line: DraftDocumentLine, obligation: _ObligationRow) -> None:
+    quantity = line.quantity
+    if (
+        not quantity.is_finite()
+        or quantity <= 0
+        or quantity >= Decimal("1e14")
+        or quantity != quantity.quantize(Decimal("0.000001"))
+    ):
+        raise BillingRuleViolation(
+            "invalid_line_quantity", "quantity must be positive and exact at six places"
+        )
+    if (
+        not line.description.strip()
+        or not line.unit_code.strip()
+        or len(line.unit_code) > 40
+    ):
+        raise BillingRuleViolation(
+            "invalid_line_description", "description and unit code are required"
+        )
+    amount = line.unit_amount
+    if (
+        amount.currency.code != obligation.currency
+        or amount.currency.minor_units != obligation.minor_units
+    ):
+        raise BillingRuleViolation(
+            "line_currency_mismatch", "line money must match its obligation"
+        )
+    with localcontext() as context:
+        context.prec = 60  # Numeric(20,6) operands multiply without context rounding.
+        product = amount.amount * quantity
+    if (
+        not amount.amount.is_finite()
+        or amount.amount < 0
+        or product != obligation.pre_tax_amount
+    ):
+        raise BillingRuleViolation(
+            "line_amount_mismatch",
+            "explicit unit price times quantity must exactly equal rated pre-tax",
+        )
+
+
+def _require_homogeneous(obligations: tuple[_ObligationRow, ...]) -> None:
+    attributes = (
+        "billing_account_id",
+        "currency",
+        "minor_units",
+        "subject_ref",
+        "service_ref",
+        "collection_timing",
+        "service_period_status",
+        "period_start",
+        "period_end",
+    )
+    anchor = obligations[0]
+    if any(
+        any(getattr(row, attr) != getattr(anchor, attr) for attr in attributes)
+        for row in obligations
+    ):
+        raise BillingRuleViolation(
+            "heterogeneous_document",
+            "invoice obligations must share account, currency and exposure evidence",
+        )
+
+
+def _require_undocumented(
+    db: Session, *, scope: Scope, plane: _PlaneModels, obligation_id: UUID
+) -> None:
+    for model, predicate, code in (
+        (
+            plane.line,
+            plane.line.obligation_id == obligation_id,
+            "obligation_already_documented",
+        ),
+        (
+            plane.obligation,
+            plane.obligation.supersedes_obligation_id == obligation_id,
+            "obligation_superseded",
+        ),
+    ):
+        if (
+            db.execute(
+                _where_scope(select(model.id).where(predicate), scope, model)
+            ).first()
+            is not None
+        ):
+            raise BillingConflict(
+                code, "obligation is no longer eligible for draft authoring"
+            )
+
+
+def create_multi_line_draft_document(
+    db: Session, *, scope: Scope, command: CreateMultiLineDraftDocument
+) -> _DocumentRow:
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=command.billing_account_id,
+        lock=True,
+    )
+    offered = fingerprint_of(asdict(command))
+
+    def operation(session: Session) -> dict[str, object]:
+        if not command.idempotency_key.strip() or len(command.lines) < 2:
+            raise BillingRuleViolation(
+                "empty_document",
+                "multiline draft requires an idempotency key and at least two lines",
+            )
+        ids = tuple(line.obligation_id for line in command.lines)
+        if len(set(ids)) != len(ids):
+            raise BillingRuleViolation(
+                "duplicate_obligation", "an obligation may appear only once"
+            )
+        obligations = tuple(
+            _one(session, scope=scope, model=plane.obligation, row_id=key)
+            for key in ids
+        )
+        _require_homogeneous(obligations)
+        for line, row in zip(command.lines, obligations, strict=True):
+            if row.billing_account_id != account.id:
+                raise BillingRuleViolation(
+                    "line_account_mismatch",
+                    "obligation must belong to the selected account",
+                )
+            _require_account_money(account, line.unit_amount)
+            _require_line_input(line, row)
+            _require_undocumented(
+                session, scope=scope, plane=plane, obligation_id=row.id
+            )
+        _require_obligation_taxes(
+            session, scope=scope, plane=plane, obligations=obligations
+        )
+        _obligation_fx(session, scope=scope, plane=plane, obligation_ids=ids)
+        anchor = obligations[0]
+        document_id = uuid4()
+        header_fields = (
+            "due_date_basis",
+            "document_profile_code",
+            "document_profile_version",
+            "seller_snapshot",
+            "customer_snapshot",
+            "payment_instructions",
+            "brand_asset",
+            "locale",
+            "timezone",
+        )
+        document = plane.document(
+            **_values(
+                scope,
+                {
+                    "id": document_id,
+                    "billing_account_id": account.id,
+                    "obligation_id": anchor.id,
+                    "authoring_mode": "explicit_multiline",
+                    "document_kind": "invoice",
+                    "credits_document_id": None,
+                    "lifecycle": "draft",
+                    "series_code": None,
+                    "document_number": None,
+                    "currency": anchor.currency,
+                    "minor_units": anchor.minor_units,
+                    "subtotal": sum(
+                        (row.pre_tax_amount for row in obligations), Decimal("0")
+                    ),
+                    "tax_total": sum(
+                        (row.tax_amount for row in obligations), Decimal("0")
+                    ),
+                    "grand_total": sum(
+                        (row.total_amount for row in obligations), Decimal("0")
+                    ),
+                    "due_at": None,
+                    "issued_at": None,
+                    **{
+                        name: _wire_value(getattr(command, name))
+                        for name in header_fields
+                    },
+                },
+            )
+        )
+        session.add(document)
+        session.flush()
+        for index, (line, row) in enumerate(
+            zip(command.lines, obligations, strict=True), 1
+        ):
+            session.add(
+                plane.line(
+                    **_values(
+                        scope,
+                        {
+                            "id": uuid4(),
+                            "billing_account_id": account.id,
+                            "document_id": document_id,
+                            "obligation_id": row.id,
+                            "line_number": index,
+                            "description": line.description,
+                            "quantity": line.quantity,
+                            "unit_code": line.unit_code,
+                            "unit_amount": line.unit_amount.amount,
+                            "pre_tax_amount": row.pre_tax_amount,
+                            "tax_amount": row.tax_amount,
+                            "total_amount": row.total_amount,
+                            "currency": row.currency,
+                            "minor_units": row.minor_units,
+                            "price_source_version": row.price_version_id,
+                        },
+                    )
+                )
+            )
+        for identity in command.party_tax_identities:
+            session.add(
+                plane.party_tax(
+                    **_values(
+                        scope,
+                        {"id": uuid4(), "document_id": document_id, **asdict(identity)},
+                    )
+                )
+            )
+        session.flush()
+        return {"document_id": str(document_id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.document.multiline_draft",
+        key=command.idempotency_key,
+        fingerprint=offered,
+        operation=operation,
+    )
+    return cast(
+        _DocumentRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.document,
+            row_id=UUID(str(outcome.result["document_id"])),
+        ),
+    )
+
+
+def _validate_invoice_lines(
+    db: Session, *, scope: Scope, plane: _PlaneModels, document: _DocumentRow
+) -> None:
+    lines = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.line)
+                .where(plane.line.document_id == document.id)
+                .order_by(plane.line.line_number),
+                scope,
+                plane.line,
+            )
+        ).scalars()
+    )
+    explicit = document.authoring_mode == "explicit_multiline"
+    if explicit and len(lines) < 2:
+        raise BillingRuleViolation(
+            "multiline_lines_missing",
+            "explicit multiline invoice requires at least two lines",
+        )
+    if not lines or any(line.obligation_id is None for line in lines):
+        raise BillingRuleViolation(
+            "invoice_obligation_missing", "invoice lines require rated obligations"
+        )
+    obligations = tuple(
+        _one(db, scope=scope, model=plane.obligation, row_id=line.obligation_id)
+        for line in lines
+    )
+    _require_homogeneous(obligations)
+    if tuple(line.line_number for line in lines) != tuple(range(1, len(lines) + 1)):
+        raise BillingRuleViolation(
+            "invalid_line_order", "invoice line numbers must be contiguous"
+        )
+    successors = db.execute(
+        _where_scope(
+            select(plane.obligation.id).where(
+                plane.obligation.supersedes_obligation_id.in_(
+                    tuple(row.id for row in obligations)
+                )
+            ),
+            scope,
+            plane.obligation,
+        )
+    ).first()
+    if successors is not None:
+        raise BillingConflict(
+            "obligation_superseded", "invoice contains superseded rated evidence"
+        )
+    if (
+        document.obligation_id != obligations[0].id
+        or document.billing_account_id != obligations[0].billing_account_id
+    ):
+        raise BillingRuleViolation(
+            "invoice_anchor_mismatch",
+            "invoice anchor must identify its first obligation",
+        )
+    # The shipped single-line authoring contract uses rated pre-tax as unit amount,
+    # independently of quantity. Preserve that historical contract; the new path
+    # validates explicit price multiplication at authoring and multiline issuance.
+    for line, row in zip(lines, obligations, strict=True):
+        unit_money = _money(line.unit_amount, line.currency, line.minor_units)
+        if unit_money.amount != line.unit_amount:
+            raise BillingRuleViolation(
+                "line_precision_mismatch",
+                "stored unit price must be exact at currency precision",
+            )
+        if explicit:
+            _require_line_input(
+                DraftDocumentLine(
+                    row.id,
+                    line.description,
+                    line.quantity,
+                    line.unit_code,
+                    unit_money,
+                ),
+                row,
+            )
+        if (
+            line.billing_account_id != document.billing_account_id
+            or line.currency != row.currency
+            or line.minor_units != row.minor_units
+            or line.price_source_version != row.price_version_id
+            or (line.pre_tax_amount, line.tax_amount, line.total_amount)
+            != (row.pre_tax_amount, row.tax_amount, row.total_amount)
+        ):
+            raise BillingRuleViolation(
+                "invoice_line_evidence_mismatch",
+                "draft line differs from rated evidence",
+            )
+    if (document.currency, document.minor_units) != (
+        obligations[0].currency,
+        obligations[0].minor_units,
+    ):
+        raise BillingRuleViolation(
+            "invoice_currency_mismatch", "invoice currency differs from its obligations"
+        )
+    if (document.subtotal, document.tax_total, document.grand_total) != tuple(
+        sum((getattr(row, name) for row in obligations), Decimal("0"))
+        for name in ("pre_tax_amount", "tax_amount", "total_amount")
+    ):
+        raise BillingRuleViolation(
+            "invoice_total_mismatch", "invoice totals must equal rated line evidence"
+        )
+    if explicit:
+        _require_obligation_taxes(db, scope=scope, plane=plane, obligations=obligations)
+    _document_financial_snapshots(db, scope=scope, plane=plane, document=document)
 
 
 def _next_source_version(
@@ -779,6 +1134,106 @@ def _receivable_exposure(
     )
 
 
+def _require_obligation_taxes(
+    db: Session,
+    *,
+    scope: Scope,
+    plane: _PlaneModels,
+    obligations: tuple[_ObligationRow, ...],
+) -> None:
+    ids = tuple(row.id for row in obligations)
+    snapshots = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.tax).where(plane.tax.obligation_id.in_(ids)),
+                scope,
+                plane.tax,
+            )
+        ).scalars()
+    )
+    for obligation in obligations:
+        matching = tuple(
+            snapshot
+            for snapshot in snapshots
+            if snapshot.obligation_id == obligation.id
+        )
+        with localcontext() as context:
+            context.prec = 60
+            tax_total = sum(
+                (snapshot.tax_amount for snapshot in matching), Decimal("0")
+            )
+        for snapshot in matching:
+            if (snapshot.currency, snapshot.minor_units) != (
+                obligation.currency,
+                obligation.minor_units,
+            ):
+                raise BillingRuleViolation(
+                    "tax_money_identity_mismatch",
+                    "tax snapshots must match rated currency and precision",
+                )
+            for amount in (snapshot.taxable_basis, snapshot.tax_amount):
+                if (
+                    not amount.is_finite()
+                    or amount < 0
+                    or _money(amount, snapshot.currency, snapshot.minor_units).amount
+                    != amount
+                ):
+                    raise BillingRuleViolation(
+                        "tax_money_precision_mismatch",
+                        "tax snapshot amounts must be exact nonnegative money",
+                    )
+        if tax_total != obligation.tax_amount:
+            raise BillingRuleViolation(
+                "tax_snapshot_total_mismatch",
+                "tax snapshot amounts must sum exactly to rated tax",
+            )
+
+
+def _fx_fact(row: Any) -> AppliedFxSnapshotV1:
+    return AppliedFxSnapshotV1(
+        observation_id=row.observation_id,
+        observation_version=row.observation_version,
+        base_currency=row.base_currency,
+        quote_currency=row.quote_currency,
+        rate=row.rate,
+        rate_purpose=row.rate_purpose,
+        observed_at=row.observed_at,
+        effective_at=row.effective_at,
+        rounding_policy=row.rounding_policy,
+        provenance=row.provenance,
+    )
+
+
+def _obligation_fx(
+    db: Session, *, scope: Scope, plane: _PlaneModels, obligation_ids: tuple[UUID, ...]
+) -> AppliedFxSnapshotV1 | None:
+    if not obligation_ids:
+        return None
+    rows = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.fx).where(plane.fx.obligation_id.in_(obligation_ids)),
+                scope,
+                plane.fx,
+            )
+        ).scalars()
+    )
+    snapshots = []
+    for obligation_id in obligation_ids:
+        matching = tuple(row for row in rows if row.obligation_id == obligation_id)
+        if len(matching) > 1:
+            raise BillingRuleViolation(
+                "ambiguous_fx", "an obligation must have at most one FX snapshot"
+            )
+        snapshots.append(None if not matching else _fx_fact(matching[0]))
+    if any(snapshot != snapshots[0] for snapshot in snapshots):
+        raise BillingRuleViolation(
+            "heterogeneous_fx",
+            "all obligation FX snapshots must be absent or identical",
+        )
+    return snapshots[0]
+
+
 def _document_financial_snapshots(
     db: Session,
     *,
@@ -786,16 +1241,67 @@ def _document_financial_snapshots(
     plane: _PlaneModels,
     document: _DocumentRow,
 ) -> tuple[tuple[AppliedTaxSnapshotV1, ...], AppliedFxSnapshotV1 | None]:
-    taxes_statement = select(plane.tax).where(
-        (plane.tax.document_id == document.id)
-        | (plane.tax.obligation_id == document.obligation_id)
+    ids_statement = (
+        select(plane.line.obligation_id)
+        .where(
+            plane.line.document_id == document.id, plane.line.obligation_id.is_not(None)
+        )
+        .order_by(plane.line.line_number)
     )
-    taxes = tuple(db.execute(_where_scope(taxes_statement, scope, plane.tax)).scalars())
-    fx_statement = select(plane.fx).where(
-        (plane.fx.document_id == document.id)
-        | (plane.fx.obligation_id == document.obligation_id)
+    obligation_ids = tuple(
+        db.execute(_where_scope(ids_statement, scope, plane.line)).scalars()
     )
-    fx = db.execute(_where_scope(fx_statement, scope, plane.fx)).scalars().first()
+    predicate = plane.tax.document_id == document.id
+    if obligation_ids:
+        predicate = predicate | plane.tax.obligation_id.in_(obligation_ids)
+    taxes = tuple(
+        db.execute(
+            _where_scope(select(plane.tax).where(predicate), scope, plane.tax)
+        ).scalars()
+    )
+    if (
+        document.document_kind == "invoice"
+        and document.authoring_mode == "explicit_multiline"
+        and any(row.document_id == document.id for row in taxes)
+    ):
+        raise BillingRuleViolation(
+            "multiline_document_tax_forbidden",
+            "explicit multiline invoice tax must derive from its line obligations",
+        )
+    order = {key: index for index, key in enumerate(obligation_ids)}
+    taxes = tuple(
+        sorted(
+            taxes,
+            key=lambda row: (
+                order.get(row.obligation_id, len(order)),
+                row.treatment_code,
+                row.jurisdiction_code,
+                row.policy_id,
+                row.policy_version,
+                str(row.rate),
+                str(row.taxable_basis),
+                str(row.tax_amount),
+            ),
+        )
+    )
+    fx = _obligation_fx(db, scope=scope, plane=plane, obligation_ids=obligation_ids)
+    document_fx = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.fx).where(plane.fx.document_id == document.id),
+                scope,
+                plane.fx,
+            )
+        ).scalars()
+    )
+    if len(document_fx) > 1 or (
+        document_fx and obligation_ids and _fx_fact(document_fx[0]) != fx
+    ):
+        raise BillingRuleViolation(
+            "heterogeneous_fx", "document FX must agree with its obligation snapshots"
+        )
+    if document_fx:
+        fx = _fx_fact(document_fx[0])
     return (
         tuple(
             AppliedTaxSnapshotV1(
@@ -809,20 +1315,7 @@ def _document_financial_snapshots(
             )
             for row in taxes
         ),
-        None
-        if fx is None
-        else AppliedFxSnapshotV1(
-            observation_id=fx.observation_id,
-            observation_version=fx.observation_version,
-            base_currency=fx.base_currency,
-            quote_currency=fx.quote_currency,
-            rate=fx.rate,
-            rate_purpose=fx.rate_purpose,
-            observed_at=fx.observed_at,
-            effective_at=fx.effective_at,
-            rounding_policy=fx.rounding_policy,
-            provenance=fx.provenance,
-        ),
+        fx,
     )
 
 
@@ -1256,7 +1749,11 @@ def _document_fact(
     ).where(plane.document_fact.document_id == document.id)
     version_statement = _where_scope(version_statement, scope, plane.document_fact)
     fact_version = int(db.execute(version_statement).scalar_one()) + 1
-    lines_statement = select(plane.line).where(plane.line.document_id == document.id)
+    lines_statement = (
+        select(plane.line)
+        .where(plane.line.document_id == document.id)
+        .order_by(plane.line.line_number)
+    )
     lines = tuple(
         db.execute(_where_scope(lines_statement, scope, plane.line)).scalars()
     )
@@ -1409,6 +1906,10 @@ def issue_document(
         )
         if document.issued_at is not None:
             raise BillingConflict("already_issued", "document is already issued")
+        if document.document_kind == "invoice":
+            _validate_invoice_lines(
+                session, scope=scope, plane=plane, document=document
+            )
         number = numbering.allocate(
             session,
             scope=scope,
@@ -1670,14 +2171,20 @@ def issue_credit_note(
         _one(db, scope=scope, model=plane.account, row_id=original.billing_account_id),
         command.total_amount,
     )
-    outstanding = _document_outstanding(db, scope=scope, document=original)
-    if command.total_amount.amount <= 0 or command.total_amount.amount > outstanding:
-        raise BillingRuleViolation(
-            "credit_exceeds_receivable", "credit note exceeds the open receivable"
-        )
     offered = fingerprint_of(asdict(command))
 
     def operation(session: Session) -> dict[str, object]:
+        # Exact replay precedes mutable admission: a full credit has already
+        # consumed this receivable. The original remains locked across both
+        # idempotency lookup and first-time admission.
+        outstanding = _document_outstanding(session, scope=scope, document=original)
+        if (
+            command.total_amount.amount <= 0
+            or command.total_amount.amount > outstanding
+        ):
+            raise BillingRuleViolation(
+                "credit_exceeds_receivable", "credit note exceeds the open receivable"
+            )
         document_id = uuid4()
         number = numbering.allocate(
             session,
@@ -1695,9 +2202,9 @@ def issue_credit_note(
                     "obligation_id": None,
                     "document_kind": "credit_note",
                     "credits_document_id": original.id,
-                    "lifecycle": "issued",
+                    "lifecycle": "draft",
                     "series_code": command.series_code,
-                    "document_number": number,
+                    "document_number": None,
                     "currency": command.total_amount.currency.code,
                     "minor_units": command.total_amount.currency.minor_units,
                     "subtotal": command.pre_tax_amount.amount,
@@ -1713,11 +2220,12 @@ def issue_credit_note(
                     "brand_asset": original.brand_asset,
                     "locale": original.locale,
                     "timezone": original.timezone,
-                    "issued_at": command.occurred_at,
+                    "issued_at": None,
                 },
             )
         )
         session.add(document)
+        session.flush()
         session.add(
             plane.line(
                 **_values(
@@ -1725,6 +2233,7 @@ def issue_credit_note(
                     {
                         "id": uuid4(),
                         "document_id": document_id,
+                        "billing_account_id": original.billing_account_id,
                         "obligation_id": None,
                         "line_number": 1,
                         "description": command.reason,
@@ -1741,6 +2250,14 @@ def issue_credit_note(
                 )
             )
         )
+        # Finish authoring before freezing every issued document's line set.
+        # A flush orders the line INSERT before the parent becomes issued;
+        # transaction commit/rollback remains the caller's responsibility.
+        session.flush()
+        document.document_number = number
+        document.lifecycle = "issued"
+        document.issued_at = command.occurred_at
+        session.flush()
         session.add(
             plane.event(
                 **_values(
@@ -1944,14 +2461,45 @@ def accept_settlement(
         fingerprint=offered,
         operation=operation,
     )
+    settlement_id = UUID(str(outcome.result["settlement_id"]))
+    # Keep the published key and fingerprint above byte-for-byte compatible.
+    # Their historical omissions are bound against persisted scalars, never a
+    # retained ORM entity whose attributes may differ from immutable evidence.
+    binding = db.execute(
+        _where_scope(
+            select(
+                plane.settlement.billing_account_id,
+                plane.settlement.funding_lane,
+                plane.settlement.confirmation_evidence,
+                plane.settlement.source_system,
+                plane.settlement.source_settlement_key,
+            ).where(plane.settlement.id == settlement_id),
+            scope,
+            plane.settlement,
+        )
+    ).one()
+    if tuple(binding) != (
+        command.billing_account_id,
+        command.funding_lane.value,
+        command.confirmation_evidence,
+        command.source_system,
+        command.source_settlement_key,
+    ):
+        raise IdempotencyConflict(
+            "Idempotency key was already used in scope 'billing.settlement' "
+            "with a different request"
+        )
     return cast(
         _SettlementRow,
-        _one(
-            db,
-            scope=scope,
-            model=plane.settlement,
-            row_id=UUID(str(outcome.result["settlement_id"])),
-        ),
+        db.execute(
+            _where_scope(
+                select(plane.settlement)
+                .where(plane.settlement.id == settlement_id)
+                .execution_options(populate_existing=True),
+                scope,
+                plane.settlement,
+            )
+        ).scalar_one(),
     )
 
 
@@ -2007,6 +2555,235 @@ def _document_outstanding(
     )
 
 
+def _settlement_has_active_backing(
+    db: Session, *, scope: Scope, settlement: _SettlementRow
+) -> bool:
+    """Resolve the immutable acceptance/reversal chain, refusing ambiguity."""
+
+    plane = _models(scope)
+    statement = select(plane.group).where(
+        plane.group.source_ref == f"settlement:{settlement.id}",
+        plane.group.group_kind == "settlement_accepted",
+    )
+    roots = tuple(db.execute(_where_scope(statement, scope, plane.group)).scalars())
+    if len(roots) != 1:
+        raise BillingRuleViolation(
+            "settlement_backing_ambiguous",
+            "settlement acceptance evidence is ambiguous",
+        )
+    current = roots[0]
+    active = True
+    visited: set[UUID] = set()
+    expected = Decimal(settlement.amount)
+    while True:
+        if (
+            current.id in visited
+            or current.billing_account_id != settlement.billing_account_id
+            or current.currency != settlement.currency
+            or current.minor_units != settlement.minor_units
+            or (not visited and current.reverses_group_id is not None)
+            or (visited and current.group_kind != "reversal")
+        ):
+            raise BillingRuleViolation(
+                "settlement_backing_ambiguous",
+                "settlement reversal lineage is ambiguous",
+            )
+        visited.add(current.id)
+        effects_statement = select(plane.effect).where(
+            plane.effect.posting_group_id == current.id
+        )
+        effects = tuple(
+            db.execute(_where_scope(effects_statement, scope, plane.effect)).scalars()
+        )
+        if len(effects) != 1 or any(
+            row.billing_account_id != settlement.billing_account_id
+            or row.currency != settlement.currency
+            or row.minor_units != settlement.minor_units
+            or row.lane != settlement.funding_lane
+            or row.amount_delta != expected
+            for row in effects
+        ):
+            raise BillingRuleViolation(
+                "settlement_backing_ambiguous",
+                "settlement funding effects are ambiguous",
+            )
+        children_statement = select(plane.group).where(
+            plane.group.reverses_group_id == current.id
+        )
+        children = tuple(
+            db.execute(_where_scope(children_statement, scope, plane.group)).scalars()
+        )
+        if not children:
+            return active
+        if len(children) != 1:
+            raise BillingRuleViolation(
+                "settlement_backing_ambiguous", "settlement reversal lineage branches"
+            )
+        current = children[0]
+        active = not active
+        expected = -expected
+
+
+def _require_credit_target(
+    db: Session, *, scope: Scope, document: _DocumentRow, account_id: UUID
+) -> None:
+    if document.billing_account_id != account_id:
+        raise BillingRuleViolation(
+            "allocation_account_mismatch",
+            "invoice and funding must belong to the same account",
+        )
+    if document.issued_at is None or document.document_kind != "invoice":
+        raise BillingRuleViolation(
+            "allocation_target_invalid", "allocation requires an issued invoice"
+        )
+    plane = _models(scope)
+    statement = select(plane.event.id).where(
+        plane.event.document_id == document.id, plane.event.event_kind == "voided"
+    )
+    if db.execute(_where_scope(statement, scope, plane.event)).first() is not None:
+        raise BillingRuleViolation(
+            "document_cancelled", "a cancelled invoice cannot receive credit"
+        )
+
+
+def apply_available_credit(
+    db: Session, *, scope: Scope, command: ApplyAvailableCreditCommand
+) -> _PostingGroupRow:
+    """Draw exact confirmed-cash room into one invoice, without creating cash.
+
+    Extracted from Sub AccountCreditApplications.apply/_source_payments:
+    account serialization, account/source room caps and deterministic min loop.
+    """
+
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=command.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        _require_account_money(account, command.amount)
+        if command.amount.amount <= 0:
+            raise BillingRuleViolation(
+                "credit_amount_nonpositive", "credit draw amount must be positive"
+            )
+        document = _one(
+            session,
+            scope=scope,
+            model=plane.document,
+            row_id=command.document_id,
+            lock=True,
+        )
+        _require_credit_target(
+            session, scope=scope, document=document, account_id=account.id
+        )
+        _require_same_money(
+            command.amount,
+            _money(document.grand_total, document.currency, document.minor_units),
+        )
+        position = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency=account.currency,
+            minor_units=account.minor_units,
+        )
+        if command.amount.amount > position.available_credit:
+            raise BillingRuleViolation(
+                "credit_insufficient_backing",
+                "insufficient cash-backed available credit",
+            )
+        if command.amount.amount > _document_outstanding(
+            session, scope=scope, document=document
+        ):
+            raise BillingRuleViolation(
+                "allocation_exceeds_receivable",
+                "allocation exceeds document receivable",
+            )
+        statement = (
+            select(plane.settlement)
+            .where(
+                plane.settlement.billing_account_id == account.id,
+                plane.settlement.currency == command.amount.currency.code,
+                plane.settlement.minor_units == command.amount.currency.minor_units,
+                plane.settlement.funding_lane == EffectLane.AVAILABLE_CREDIT.value,
+            )
+            .order_by(plane.settlement.occurred_at, plane.settlement.id)
+        )
+        sources = session.execute(
+            _where_scope(statement, scope, plane.settlement)
+        ).scalars()
+        remaining = command.amount.amount
+        allocations: list[_AllocationInput] = []
+        for settlement in sources:
+            if not _settlement_has_active_backing(
+                session, scope=scope, settlement=settlement
+            ):
+                continue
+            used = _settlement_used(session, scope=scope, settlement_id=settlement.id)
+            if used < 0 or used > settlement.amount:
+                raise BillingRuleViolation(
+                    "settlement_room_ambiguous",
+                    "settlement consumption exceeds its evidence",
+                )
+            settlement_room = settlement.amount - used
+            amount = min(remaining, settlement_room)
+            if amount > 0:
+                allocations.append(
+                    _AllocationInput(
+                        settlement_id=settlement.id,
+                        document_id=document.id,
+                        effect_kind="allocation",
+                        amount_delta=amount,
+                    )
+                )
+                remaining -= amount
+            if remaining == 0:
+                break
+        if remaining != 0:
+            raise BillingRuleViolation(
+                "credit_insufficient_backing",
+                "insufficient cash-backed available credit",
+            )
+        group = _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="allocation",
+            currency=account.currency,
+            minor_units=account.minor_units,
+            source_ref=command.source_ref,
+            occurred_at=command.occurred_at,
+            effects=(
+                (EffectLane.RECEIVABLE, -command.amount.amount),
+                (EffectLane.AVAILABLE_CREDIT, -command.amount.amount),
+            ),
+            allocations=allocations,
+        )
+        return {"posting_group_id": str(group.id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.credit.apply",
+        key=command.source_ref,
+        fingerprint=fingerprint_of(asdict(command)),
+        operation=operation,
+    )
+    return cast(
+        _PostingGroupRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.group,
+            row_id=UUID(str(outcome.result["posting_group_id"])),
+        ),
+    )
+
+
 def allocate_settlement(
     db: Session, *, scope: Scope, command: AllocationCommand
 ) -> _PostingGroupRow:
@@ -2040,10 +2817,19 @@ def allocate_settlement(
             row_id=command.document_id,
             lock=True,
         )
-        if document.issued_at is None or document.document_kind != "invoice":
+        if not _settlement_has_active_backing(
+            session, scope=scope, settlement=settlement
+        ):
             raise BillingRuleViolation(
-                "allocation_target_invalid", "allocation requires an issued invoice"
+                "settlement_reversed",
+                "allocation requires active confirmed settlement backing",
             )
+        _require_credit_target(
+            session,
+            scope=scope,
+            document=document,
+            account_id=settlement.billing_account_id,
+        )
         _require_same_money(
             command.amount,
             _money(settlement.amount, settlement.currency, settlement.minor_units),
@@ -2463,11 +3249,19 @@ def rebuild_receivable_position(
     verify_latest: bool = True,
 ) -> PositionState:
     plane = _models(scope)
-    statement = select(plane.effect).where(
+    # Read persisted scalar values rather than identity-map entities. Newly
+    # flushed ORM amounts can retain the input exponent while NUMERIC(20,6)
+    # reads have six decimal places; mixing them changes the existing hash.
+    statement = select(
+        plane.effect.lane,
+        plane.effect.amount_delta,
+        plane.effect.currency,
+        plane.effect.minor_units,
+    ).where(
         plane.effect.billing_account_id == billing_account_id,
         plane.effect.currency == currency,
     )
-    rows = tuple(db.execute(_where_scope(statement, scope, plane.effect)).scalars())
+    rows = tuple(db.execute(_where_scope(statement, scope, plane.effect)).all())
     rebuilt = rebuild_position(
         (
             Effect(
@@ -2760,8 +3554,10 @@ __all__ = [
     "accept_rated_obligation",
     "accept_settlement",
     "allocate_settlement",
+    "apply_available_credit",
     "create_billing_account",
     "create_draft_document",
+    "create_multi_line_draft_document",
     "deallocate_settlement",
     "issue_credit_note",
     "issue_document",

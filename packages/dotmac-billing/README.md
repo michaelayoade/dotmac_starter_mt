@@ -33,6 +33,12 @@ file bytes. Artifact creation locks the invoice lifecycle and refuses a new
 medium after cancellation; a pre-existing idempotent command still replays its
 historical relation.
 
+Settlement replay preserves the published source-key and money/version
+fingerprint algorithm. Billing additionally compares persisted account, funding
+lane, confirmation evidence and exact source identifiers before returning a
+settlement, including after a concurrent acceptance. A retry's `observed_at` is
+transport receipt metadata and retains the original observation.
+
 The database enforces Billing's internal relationship graph on both planes:
 obligations and settlements belong to their account, document lines belong to
 the same obligation/document pair, posting and allocation effects cannot cross
@@ -62,7 +68,100 @@ invoice-grained exposures. An architecture canary derives the emitted set from
 the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
-The first release candidate is `0.1.0a1` and requires
+The historical first release candidate is `0.1.0a1`; the current unreleased
+development successor is `0.1.0a2` and requires
 `dotmac-kernel>=0.1.0a89` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.
+
+
+`ApplyAvailableCreditCommand` and `apply_available_credit` draw an explicit
+positive Money amount from one account into one issued, noncancelled invoice.
+They serialize the account, replay the exact command before checking current
+funding, and create one allocation posting group with per-settlement edges.
+Both the immutable account available-credit position and eligible source room
+cap the draw. Only independently confirmed `available_credit` settlements fund
+it; `prepaid_funding` is excluded. Sources sort by `occurred_at`, then UUID.
+An exact, linear acceptance/reversal chain determines whether cash backing is
+active: odd reversals exclude it, even reversals restore it, and ambiguous
+identity/effects/branches fail closed. Direct settlement allocation shares
+this backing and target guard. Existing accounting, position and exposure
+facts/events carry the effects; this adds no event vocabulary or settlement.
+
+The source is `dotmac_sub` commit
+`c7707880232c9298ef89c24a1aea66d35bd3a1e6` (local inspected snapshot,
+not a production revision claim),
+`app/services/billing/account_credit.py::_source_payments` and
+`AccountCreditApplications.apply`: account locking, per-currency account and
+source room caps, deterministic source selection, and the
+`min(remaining, settlement_room)` allocation loop. Source tests inspected:
+`tests/test_account_credit_deposits.py::test_eligible_invoice_statuses_consume_credit_in_fifo_order`,
+`tests/integration/test_account_credit_concurrency.py::test_two_applicators_cannot_spend_one_credit_source_twice`,
+and `_source_payments` characterization in
+`tests/test_opening_settlement_correction.py`. Fresh migrated PostgreSQL
+canaries cover both Billing planes; these are new extraction evidence, not a
+claim that Sub tests execute against this module.
+
+This slice targets one invoice and an explicit amount. It does not port Sub's
+automatic invoice sweep, reviewed opening positions, reserved-purchase or
+legacy-payment metadata branches, noncash credit grants, issuance funding
+reservations, or product-specific prepaid finalization. No new table, mutable
+balance, external contract or sibling-product import is introduced.
+
+The unpublished successor also adds `DraftDocumentLine`,
+`CreateMultiLineDraftDocument` and `create_multi_line_draft_document`. This
+command requires at least two accepted obligations with one account, Money
+identity, subject, service, collection timing and service period. Explicit unit
+prices and quantities must reproduce the rated amounts exactly. Tax snapshots
+retain their obligation provenance and must reconcile exactly; FX must be
+uniform. Issuance rechecks the aggregate and immutable authoring mode preserves
+the distinction from the shipped single-line command.
+
+The additive `bi_0002_multiline` migration introduces account-affinity line FKs,
+immutable document authoring provenance and issued-invoice insertion refusal.
+The additive `bi_0003_issued_line_freeze` extends insertion refusal to every
+issued document kind and serializes edits, deletion and reparenting with
+issuance by locking and checking both parents. Migration table locks drain
+predecessor writers before function replacement, with a five-second lock
+acquisition timeout. Credit notes stage
+their initial line under a draft parent before issuance and fact creation in
+the same transaction. Both earlier migrations and historical facts stay unchanged.
+Exact credit-note replay precedes mutable receivable admission, including
+after a full credit exhausts the invoice's outstanding amount.
+Downgrade after explicit multiline authoring is refused. Heterogeneous invoices and
+line-specific tax/FX wire attribution require a later contract design. See
+`docs/inventories/billing-multiline-extraction.md` for source dispositions,
+limits and required hosted proofs; no Sub adoption is claimed.
+
+Position rebuilds read persisted scalar effects, so freshly flushed ORM decimal
+representations cannot change the attestation hash. The existing hash algorithm
+and strict comparison with immutable position facts are preserved. Historical
+facts that already disagree with their persisted effects still fail closed;
+this change neither rewrites them nor supplies a compatibility fallback.
+
+
+`get_invoice_document_fact` accepts an explicit routed `scope` and frozen
+`GetInvoiceDocumentFactV1(scope, invoice_id, fact_version)` request. It returns
+`StoredInvoiceDocumentFactV1` with the persisted fact UUID, contract version,
+recording instant and typed `InvoiceDocumentFactV1`. Version selection is exact;
+a missing version, mismatched route, unsupported contract, malformed evidence
+or mismatched presentation digest raises a coded `BillingRuleViolation`.
+
+The query reads only immutable fact-table scalars under `no_autoflush`. Dirty
+ORM objects, later credit notes and cancellation cannot replace the requested
+historical evidence, and the caller retains transaction control. Every V1 field
+must be present, including explicit nulls and empty arrays. Stored decimal text
+and currency minor units are decoded exactly, with no current-settings lookup,
+coercion, default or rounding. Datetimes retain microsecond precision in both
+wall-clock time and UTC offset, including positive/negative subsecond offsets.
+The reader accepts the producer's full ISO datetime spelling, plus historical
+`Z`, space separators and comma fractions; unsupported or higher-precision
+forms fail closed with `billing.document_fact_corrupt` and generic diagnostics.
+Digest verification fingerprints the original
+stored JSON excluding `presentation_model_digest`, preserving the producer's
+historical algorithm and textual representations.
+
+This reader supplies Billing evidence only. The rendering adapter still needs
+an explicit provenance mapping and reconciliation between Billing's presentation
+digest and Rendering's projection digest. The Billing-owned official artifact
+relation remains the existing `RecordDocumentArtifactV1`/reconciler boundary.

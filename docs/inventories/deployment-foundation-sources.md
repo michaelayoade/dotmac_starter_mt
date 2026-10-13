@@ -280,3 +280,30 @@ Recorded so the descriptor adopts them rather than re-deciding them:
    `dotmac_integrator:.github/workflows/release-image.yml` builds once, audits,
    gates on approval and republishes the exact audited bytes. The foundation
    generalises what two products already do rather than proposing it.
+
+
+## Candidate material readiness extraction — 2026-10-13
+
+This source-only successor extracts the two-phase readiness order from Sub
+PR #3585, accepted at `aff0e7e2ccde0c4657e87aecd8f2d657726b1130`
+(tree `00d532e6cb484c3a3ee3ddf205dbad5955659e4e`). The evaluated head was
+`db551c69c5ed22d03f7503e39e5f7270d53df369`, hosted CI `38371746458`:
+requirements PostgreSQL job `115211069800` proved three cases and schema job
+`115211069576` proved fourteen (eight bootstrap, four shadow relation, two
+head/extension cases). These coordinates establish accepted source behavior,
+not live host adoption. Earlier inventory findings remain historical.
+
+| Product | Qualifying source and parity obligation |
+|---|---|
+| Sub | `scripts/deployment_secret_readiness.py`, `scripts/deploy.sh`, boot verifier and typed requirement/schema reducers establish immutable candidate checks before backup/bootstrap/DDL, then installed-schema checks before handoff. Product owns OpenBao semantics and optional-feature reduction. Preserve both phases, role coverage including an already-running zero-desired scheduler, and no raw diagnostics. |
+| ERP | Existing `scripts/deploy.sh` owns migration preflight and backup ordering. A product candidate probe supplies the same closed receipt without adding an OpenBao client to Foundation. Its source/host acceptance is separate; no retirement follows from these declarations. |
+| Starter | Foundation's generic typed protocol and bounded Compose effect own execution order and exact image/role binding. No runtime secret store or renewal owner is introduced. |
+| Integrator and future products | Product-owned probes must establish explicit inventory even when no requirements apply; silent/empty receipts are refused. Different-image auxiliary services are outside application-role coverage. |
+
+`ProductDeploymentSpec.v4` adds only descriptor-owned per-role phase/argv/timeout
+coordinates. V1–V3 omit the new field from canonical bytes and refuse it as input.
+`CandidateMaterialProbeResult.v1` is bounded to 16 KiB and 64 distinct named
+checks with closed statuses; the provider adds image/role/phase coordinates.
+Pre-phase failure precedes mutation; post-phase failure is reported after
+mutation and before candidate startup or handoff. No publication, product pin,
+Gate 0/D7 advance, host deployment, cutover or local engine retirement is claimed.

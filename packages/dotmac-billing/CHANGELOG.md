@@ -2,7 +2,41 @@
 
 All notable changes follow Semantic Versioning.
 
-## 0.1.0a1 — UNRELEASED
+## 0.1.0a2 — UNRELEASED
+
+- Close line insertion, reparenting, edits and deletion for every issued
+  document kind in additive `bi_0003_issued_line_freeze`, with parent-row
+  locking and bounded migration table locks. Stage credit-note
+  initial lines before issuance in the caller's transaction. Preserve both
+  earlier migrations and historical monetary/fact evidence.
+- Replay fully credited invoices' exact credit-note commands before mutable
+  receivable admission, preserving original keys, fingerprints and effects.
+- Add exact-version immutable invoice-fact queries with persisted identity and
+  recording metadata, strict typed decoding, scope/plane isolation and raw-JSON
+  presentation-digest verification. Reads preserve caller transactions and
+  ignore dirty ORM state; malformed or missing evidence fails closed.
+
+- Add typed homogeneous multiline drafts with structural account/obligation
+  affinity, exact explicit prices and immutable authoring provenance in an
+  additive migration. Keep the released root migration unchanged.
+- Preserve all line tax evidence and common FX, revalidate at issuance and
+  prevent adding lines to an issued invoice. Exclude unrelated document-owned
+  tax/FX rows from credit-note facts.
+- Add a typed, atomic cash-backed available-credit draw across confirmed
+  settlement sources, preserving allocation provenance and existing financial
+  events. Non-cash grants and opening-balance funding remain separate gaps.
+- Refuse allocation from reversed settlement funding while preserving exact
+  replay of a previously accepted command.
+- Rebuild position attestations from persisted numeric values, independent of
+  ORM cache scale, preserving the hash algorithm and strict drift refusal.
+- Reconcile Sub-first, pay-then-record and open-items-only cutover preparation.
+
+## 0.1.0a1 — historical publication
+
+Publication tag: `dotmac-billing-v0.1.0a1`, peeled commit
+`92a1626b16d7e068f92536d8cfcb2ef9b6f270c2`. The historical record is in
+`docs/inventories/module-release-legacy-unverified.json`; it does not constitute
+a modern wheel-verification receipt or evidence of product adoption.
 
 - First complete Billing V1: frozen obligation, settlement, receivable,
   accounting and invoice-document contracts; one pure financial engine; two

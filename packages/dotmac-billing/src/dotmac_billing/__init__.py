@@ -20,6 +20,7 @@ from dotmac_billing.contracts import (
     DueDateBasisStatus,
     DueDateBasisV1,
     FinancialState,
+    GetInvoiceDocumentFactV1,
     InvoiceDocumentFactV1,
     InvoiceLineFactV1,
     PartyDocumentSnapshotV1,
@@ -38,6 +39,7 @@ from dotmac_billing.contracts import (
     ServicePeriodEvidenceV1,
     ServicePeriodStatus,
     SettlementFundingLane,
+    StoredInvoiceDocumentFactV1,
 )
 from dotmac_billing.errors import BillingConflict, BillingError, BillingRuleViolation
 from dotmac_billing.linking import (
@@ -47,8 +49,9 @@ from dotmac_billing.linking import (
 )
 from dotmac_billing.manifest import module
 from dotmac_billing.migrations import versions_dir
+from dotmac_billing.queries import get_invoice_document_fact
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "AcceptRatedObligationV1",
@@ -68,6 +71,7 @@ __all__ = [
     "DueDateBasisStatus",
     "DueDateBasisV1",
     "DiscountSnapshotV1",
+    "GetInvoiceDocumentFactV1",
     "InvoiceDocumentFactV1",
     "InvoiceLineFactV1",
     "FinancialState",
@@ -87,9 +91,11 @@ __all__ = [
     "ServicePeriodEvidenceV1",
     "ServicePeriodStatus",
     "SettlementFundingLane",
+    "StoredInvoiceDocumentFactV1",
     "bind_commercial_authority",
     "commercial_authority",
     "drop_billing_account_link",
+    "get_invoice_document_fact",
     "link_platform_billing_account",
     "link_tenant_billing_account",
     "module",
