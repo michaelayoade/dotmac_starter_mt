@@ -1,5 +1,30 @@
 # Document rendering — extraction dossier
 
+
+> **Frozen fact successor addendum — 2026-10-13.** Accepted Starter source
+> `487a8bdc` exposes `dotmac_billing.get_invoice_document_fact` returning public
+> `StoredInvoiceDocumentFactV1`. The unpublished renderer `0.1.0a2` V2 source
+> maps this immutable stored envelope by value, preserving its fact UUID,
+> recording instant, exact version and original presentation digest separately
+> from cv1 V2 projection digests and `sha256:` byte checksums. Kernel103 supplies
+> the shared semantic encoding; V1 behavior remains fixed.
+>
+> Producer evidence is `dotmac_billing/contracts.py` and `queries.py`, with
+> hosted PostgreSQL query canaries in `tests/test_billing_isolation.py`. Billing
+> freezes structured parties/all identifiers, ordered financial lines, opaque
+> profile versions and payment bank/narrative fields. It does not freeze a
+> numbering series version, price-origin tags or payment URL. Verified
+> due-date bases freeze payment-terms code and version; the map preserves them.
+> An unknown/unverified basis can leave payment-terms evidence absent, and the
+> map never invents missing evidence. Linked renderer examples require
+> a future owner-qualified frozen HTTPS snapshot, never narrative parsing or
+> a live `brand.app_url`. Actual Billing V1 producer coverage is no-link.
+>
+> No release, install-back, Sub Kernel98 qualification, product reconciler,
+> writer retirement, migration or Billing/Numbering runtime adoption is claimed.
+> Historical reasoning below remains dated; the package dossier and accepted
+> source define the current boundary.
+
 > **Implementation addendum — 2026-08-19.** ADR-0017 P11 is now met and
 > ADR-0030 § 6 explicitly authorizes `dotmac-document-rendering`. The Sub and
 > ERP audits are complete, and the machine-checked dossier now lives at

@@ -3794,3 +3794,16 @@ a deferred unpublished-commit refusal. Existing a4 writers require a policy
 write fence before tx_0004; the a5 source API retains their signatures and DTOs.
 Downgrade refuses any nonempty rule or edge store. Package source support does not claim
 product UI delivery, publication, adoption or writer authority cutover.
+
+
+The unpublished Document Rendering a2 successor adds a separate V2 path for
+Billing-shaped stored invoice facts, with opaque profile versions, explicit
+unknown numbering versions and full structured parties and financial rows.
+Provenance remains typed fingerprint evidence; customer output uses business
+labels. V1 contracts, encoding and golden behavior remain unchanged. V2 uses
+Kernel a103 canonical encoding and strict in-memory PDF parsing; it performs no
+storage, network lookup or financial calculation. Actual Billing V1 input maps
+bank/narrative instructions with no payment link. A link requires its own frozen
+owner evidence; current Sub live URL construction is not qualified provenance.
+Publication, Kernel qualification, Files composition and Billing's sole official
+artifact reconciler remain separate adoption work.

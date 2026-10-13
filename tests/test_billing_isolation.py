@@ -4038,3 +4038,143 @@ def test_document_fact_query_hashes_raw_stored_json_not_decoder_reserialization(
             "Z", "+00:00"
         )
         session.rollback()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_persisted_public_document_fact_maps_to_complete_v2_render(scratch, plane):
+    """Real migrated query -> assembly map -> V2 bytes, on both security planes."""
+    from dotmac_billing import RegisteredIdentifierSnapshotV1
+    from dotmac_document_rendering import (
+        DeterministicHtmlRendererV2,
+        RenderOutcome,
+        render_document_v2,
+    )
+
+    from tests.document_rendering_fact_adapter import map_stored_fact
+    from tests.unit.test_billing_document_rendering_contract import projected_values
+    from tests.unit.test_document_rendering_v2 import catalog, request
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=f"render-v2:{uuid.uuid4()}",
+            currency="NGN",
+            minor_units=2,
+        )
+        obligations = tuple(
+            accept_rated_obligation(
+                session,
+                scope=scope,
+                command=_obligation_command(
+                    account.id, scope=scope, source_fact_id=f"render-v2:{uuid.uuid4()}"
+                ),
+                accepted_source_kinds=frozenset({"recurring_charge_occurrence"}),
+            )
+            for _ in range(9)
+        )
+        command = _multiline_command(account.id, obligations)
+        command = replace(
+            command,
+            document_profile_version="opaque:billing:v7",
+            seller_snapshot=replace(
+                command.seller_snapshot,
+                trading_name="Frozen seller trading name",
+                registered_identifiers=(
+                    RegisteredIdentifierSnapshotV1("company", "RC-QUERY", "NGA"),
+                    RegisteredIdentifierSnapshotV1("licence", "LIC-QUERY", "NGA"),
+                ),
+            ),
+            payment_instructions=replace(
+                command.payment_instructions, narrative="Frozen payment narrative"
+            ),
+        )
+        draft = create_multi_line_draft_document(session, scope=scope, command=command)
+        issued = issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        invoice_id = issued.id
+        session.commit()
+    with _session(url, scope) as fresh:
+        stored = get_invoice_document_fact(
+            fresh, scope=scope, request=GetInvoiceDocumentFactV1(scope, invoice_id, 1)
+        )
+        mapped = map_stored_fact(stored)
+        assert mapped.persisted_fact_id == stored.fact_id
+        assert mapped.recorded_at == stored.recorded_at
+        assert (
+            mapped.original_presentation_model_digest
+            == stored.fact.presentation_model_digest
+        )
+        assert mapped.series_version is None
+        assert mapped.document_profile_version == "opaque:billing:v7"
+        assert stored.fact.due_date_basis.payment_terms_code == "net_30"
+        assert stored.fact.due_date_basis.payment_terms_version == "1"
+        assert mapped.due_date_basis.payment_terms_code == "net_30"
+        assert mapped.due_date_basis.payment_terms_version == "1"
+        assert mapped.payment_instructions.payment_link is None
+        statements = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(fresh.get_bind(), "before_cursor_execute", capture)
+        try:
+            result = render_document_v2(
+                request(mapped),
+                catalog=catalog(mapped),
+                renderer=DeterministicHtmlRendererV2(),
+            )
+        finally:
+            event.remove(fresh.get_bind(), "before_cursor_execute", capture)
+        assert statements == []
+        assert result.outcome is RenderOutcome.RENDERED
+        assert result.scope == scope
+        assert result.persisted_fact_id == stored.fact_id
+        assert (
+            result.original_presentation_model_digest
+            == stored.fact.presentation_model_digest
+        )
+        assert result.projection is not None
+        assert (
+            result.projection.source_fact_fingerprint == result.source_fact_fingerprint
+        )
+        values = projected_values(result.projection)
+        assert (
+            values["seller_snapshot.trading_name"].raw == "Frozen seller trading name"
+        )
+        assert (
+            values["seller_snapshot.registered_identifiers[1].identifier_value"].raw
+            == "LIC-QUERY"
+        )
+        assert (
+            values["payment_instructions.narrative"].raw == "Frozen payment narrative"
+        )
+        assert values["grand_total"].raw == format(stored.fact.grand_total.amount, "f")
+        for index, line in enumerate(stored.fact.lines):
+            prefix = f"lines[{index}]"
+            assert values[f"{prefix}.line_number"].raw == str(index + 1)
+            assert mapped.lines[index].recorded_line.fact_id == stored.fact_id
+            assert mapped.lines[index].price_source_version == line.price_source_version
+            for field in (
+                "unit_amount",
+                "pre_tax_amount",
+                "discount_total",
+                "tax_amount",
+                "total_amount",
+            ):
+                assert values[f"{prefix}.{field}"].raw == format(
+                    getattr(line, field).amount, "f"
+                )
+            assert line.description.encode() in result.payload
+        assert len(stored.fact.lines) == 9
+        assert b"Frozen payment narrative" in result.payload
+        assert b"Source supplied bank" in result.payload
+        assert b"https://" not in result.payload

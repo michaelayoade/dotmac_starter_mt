@@ -792,19 +792,26 @@
       "package_dir": "packages/dotmac-document-rendering",
       "import_name": "dotmac_document_rendering",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a88",
+      "kernel_floor": "0.1.0a103",
       "db_schema": null,
       "tag_prefix": "dotmac-document-rendering-v",
       "wheel_contents": {
         "required": [
-          "dotmac_document_rendering/py.typed",
-          "dotmac_document_rendering/manifest.py",
           "dotmac_document_rendering/conformance.py",
+          "dotmac_document_rendering/conformance_v2.py",
           "dotmac_document_rendering/contracts.py",
+          "dotmac_document_rendering/contracts_v2.py",
+          "dotmac_document_rendering/manifest.py",
+          "dotmac_document_rendering/output_validation_v2.py",
           "dotmac_document_rendering/projection.py",
+          "dotmac_document_rendering/projection_v2.py",
+          "dotmac_document_rendering/py.typed",
           "dotmac_document_rendering/renderers.py",
+          "dotmac_document_rendering/renderers_v2.py",
           "dotmac_document_rendering/service.py",
-          "dotmac_document_rendering/templates.py"
+          "dotmac_document_rendering/service_v2.py",
+          "dotmac_document_rendering/templates.py",
+          "dotmac_document_rendering/templates_v2.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -814,7 +821,8 @@
         ],
         "allowed_requires": [
           "dotmac-kernel",
-          "python"
+          "python",
+          "pypdf"
         ]
       }
     },
@@ -3089,14 +3097,14 @@
         "required": [
           "dotmac_tax/py.typed",
           "dotmac_tax/contracts.py",
-        "dotmac_tax/_policy_query_contracts.py",
-        "dotmac_tax/_policy_queries.py",
+          "dotmac_tax/_policy_query_contracts.py",
+          "dotmac_tax/_policy_queries.py",
           "dotmac_tax/manifest.py",
           "dotmac_tax/migrations/__init__.py",
           "dotmac_tax/migrations/versions/tx_0001_tax.py",
           "dotmac_tax/migrations/versions/tx_0002_multi_tax.py",
           "dotmac_tax/migrations/versions/tx_0003_result_fingerprint.py",
-        "dotmac_tax/migrations/versions/tx_0004_rule_supersession.py",
+          "dotmac_tax/migrations/versions/tx_0004_rule_supersession.py",
           "dotmac_tax/models.py",
           "dotmac_tax/service.py"
         ],
