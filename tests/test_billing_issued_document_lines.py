@@ -13,11 +13,17 @@ from decimal import Decimal
 import pytest
 from dotmac_billing import models
 from dotmac_billing.commands import IssueCreditNote
-from dotmac_billing.service import issue_credit_note, issue_document
+from dotmac_billing.contracts import (
+    DOCUMENT_FACT_CONTRACT,
+    InvoiceDocumentFactV1,
+    InvoiceLineFactV1,
+)
+from dotmac_billing.service import _jsonable, issue_credit_note, issue_document
 from dotmac_kernel.cache import PlatformScope, TenantScope
+from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.idempotency import IdempotencyConflict
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import DBAPIError
 
 from tests import test_billing_isolation as billing
@@ -598,6 +604,408 @@ def test_caller_rollback_removes_billing_credit_rows_preserving_original_invoice
         )
 
 
+def _assert_fresh_issue(session, plane, document_id, account_id, amount, description):
+    fact_model = (
+        models.InvoiceDocumentFact
+        if plane == "tenant"
+        else models.PlatformInvoiceDocumentFact
+    )
+    effect_model = (
+        models.PostingEffect if plane == "tenant" else models.PlatformPostingEffect
+    )
+    outbox_model = (
+        billing.OutboxEvent if plane == "tenant" else billing.PlatformOutboxEvent
+    )
+    fact = session.scalars(
+        select(fact_model).where(fact_model.document_id == document_id)
+    ).one()
+    payload = fact.fact_payload
+    assert Decimal(payload["grand_total"]["amount"]) == amount
+    assert len(payload["lines"]) == 1
+    assert payload["lines"][0]["description"] == description
+    assert Decimal(payload["lines"][0]["total_amount"]["amount"]) == amount
+    assert (
+        session.scalars(
+            select(effect_model.amount_delta).where(
+                effect_model.billing_account_id == account_id,
+                effect_model.lane == "receivable",
+            )
+        ).one()
+        == amount
+    )
+    emitted = session.scalars(
+        select(outbox_model).where(
+            outbox_model.event_type == DOCUMENT_FACT_CONTRACT,
+            outbox_model.payload["invoice_id"].as_string() == str(document_id),
+        )
+    ).one()
+    assert emitted.payload == {"fact_id": str(fact.id), **payload}
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize("autoflush", [False, True])
+def test_issue_refreshes_retained_header_and_line_after_independent_commit(
+    scratch, plane, autoflush
+):
+    scope, url = _routing(scratch, plane)
+    with billing._session(url, scope) as session:
+        account_id, document_id = _draft(session, scope, "receipt")
+        session.commit()
+    document_model = (
+        models.BillingDocument if plane == "tenant" else models.PlatformBillingDocument
+    )
+    line_model = (
+        models.DocumentLine if plane == "tenant" else models.PlatformDocumentLine
+    )
+    with billing._session(url, scope) as issuer:
+        issuer.autoflush = autoflush
+        retained_document = issuer.get(document_model, document_id)
+        retained_line = issuer.scalars(
+            select(line_model).where(line_model.document_id == document_id)
+        ).one()
+        assert (
+            retained_document.grand_total
+            == retained_line.total_amount
+            == Decimal("120")
+        )
+        with billing._session(scratch[0], scope) as writer:
+            writer.execute(
+                document_model.__table__.update()
+                .where(document_model.id == document_id)
+                .values(
+                    subtotal=150,
+                    tax_total=0,
+                    grand_total=150,
+                )
+            )
+            writer.execute(
+                line_model.__table__.update()
+                .where(line_model.document_id == document_id)
+                .values(
+                    description="independently updated",
+                    unit_amount=150,
+                    pre_tax_amount=150,
+                    tax_amount=0,
+                    total_amount=150,
+                )
+            )
+            writer.commit()
+        assert (
+            retained_document.grand_total
+            == retained_line.total_amount
+            == Decimal("120")
+        )
+        issue_document(
+            issuer,
+            scope=scope,
+            command=billing._issue_command(document_id),
+            numbering=billing.NUMBERING,
+        )
+        assert issuer.autoflush is autoflush
+        assert (
+            retained_document.grand_total
+            == retained_line.total_amount
+            == Decimal("150")
+        )
+        _assert_fresh_issue(
+            issuer,
+            plane,
+            document_id,
+            account_id,
+            Decimal("150"),
+            "independently updated",
+        )
+        issuer.commit()
+    with billing._session(url, scope) as session:
+        _assert_fresh_issue(
+            session,
+            plane,
+            document_id,
+            account_id,
+            Decimal("150"),
+            "independently updated",
+        )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_issue_preserves_pending_owner_edits_and_open_transaction(scratch, plane):
+    scope, url = _routing(scratch, plane)
+    with billing._session(url, scope) as session:
+        account_id, document_id = _draft(session, scope, "receipt")
+        session.commit()
+    document_model = (
+        models.BillingDocument if plane == "tenant" else models.PlatformBillingDocument
+    )
+    line_model = (
+        models.DocumentLine if plane == "tenant" else models.PlatformDocumentLine
+    )
+    with billing._session(scratch[0], scope) as issuer:
+        issuer.autoflush = False
+        document = issuer.get(document_model, document_id)
+        line = issuer.scalars(
+            select(line_model).where(line_model.document_id == document_id)
+        ).one()
+        document.subtotal = document.grand_total = Decimal("150")
+        document.tax_total = Decimal("0")
+        line.unit_amount = line.pre_tax_amount = line.total_amount = Decimal("150")
+        line.tax_amount = Decimal("0")
+        line.description = "pending owner edit"
+        root_transaction = issuer.get_transaction()
+        completed = []
+
+        def record_completion(session, transaction):
+            if transaction.parent is None:
+                completed.append(transaction)
+
+        event.listen(issuer, "after_transaction_end", record_completion)
+        issue_document(
+            issuer,
+            scope=scope,
+            command=billing._issue_command(document_id),
+            numbering=billing.NUMBERING,
+        )
+        assert issuer.autoflush is False
+        assert issuer.get_transaction() is root_transaction
+        assert root_transaction.is_active
+        assert completed == []
+        _assert_fresh_issue(
+            issuer, plane, document_id, account_id, Decimal("150"), "pending owner edit"
+        )
+        issuer.commit()
+    with billing._session(url, scope) as session:
+        _assert_fresh_issue(
+            session,
+            plane,
+            document_id,
+            account_id,
+            Decimal("150"),
+            "pending owner edit",
+        )
+
+
+def _seed_bi0002_credit(connection, plane, scope):
+    """Seed only bi_0002 tables, without current WHT/noncash writer queries."""
+    if plane == "tenant":
+        account, document, line, group, effect, fact, position = (
+            models.BillingAccount,
+            models.BillingDocument,
+            models.DocumentLine,
+            models.PostingGroup,
+            models.PostingEffect,
+            models.InvoiceDocumentFact,
+            models.ReceivablePositionFact,
+        )
+    else:
+        account, document, line, group, effect, fact, position = (
+            models.PlatformBillingAccount,
+            models.PlatformBillingDocument,
+            models.PlatformDocumentLine,
+            models.PlatformPostingGroup,
+            models.PlatformPostingEffect,
+            models.PlatformInvoiceDocumentFact,
+            models.PlatformReceivablePositionFact,
+        )
+    scoped = {"tenant_id": scope.tenant_id} if isinstance(scope, TenantScope) else {}
+    account_id, invoice_id, credit_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    connection.execute(
+        account.__table__.insert().values(
+            id=account_id,
+            **scoped,
+            external_account_ref=f"bi2:{account_id}",
+            currency="NGN",
+            minor_units=2,
+        )
+    )
+    presentation = billing._draft_command(uuid.uuid4())
+    for version, (document_id, kind, amount, ar, balance) in enumerate(
+        (
+            (invoice_id, "invoice", "100", "100", "100"),
+            (credit_id, "credit_note", "20", "-20", "80"),
+        ),
+        1,
+    ):
+        number = f"{kind}:{document_id}"
+        values = dict(
+            id=document_id,
+            **scoped,
+            billing_account_id=account_id,
+            document_kind=kind,
+            credits_document_id=invoice_id if kind == "credit_note" else None,
+            lifecycle="draft",
+            series_code=kind,
+            document_number=None,
+            issued_at=None,
+            currency="NGN",
+            minor_units=2,
+            subtotal=Decimal(amount),
+            tax_total=Decimal("0"),
+            grand_total=Decimal(amount),
+            due_date_basis=_jsonable(presentation.due_date_basis),
+            document_profile_code=presentation.document_profile_code,
+            document_profile_version=presentation.document_profile_version,
+            seller_snapshot=_jsonable(presentation.seller_snapshot),
+            customer_snapshot=_jsonable(presentation.customer_snapshot),
+            payment_instructions=_jsonable(presentation.payment_instructions),
+            brand_asset=_jsonable(presentation.brand_asset),
+            locale=presentation.locale,
+            timezone=presentation.timezone,
+        )
+        connection.execute(document.__table__.insert().values(**values))
+        connection.execute(
+            line.__table__.insert().values(
+                id=uuid.uuid4(),
+                **scoped,
+                document_id=document_id,
+                billing_account_id=account_id,
+                line_number=1,
+                description="predecessor service",
+                quantity=Decimal("1"),
+                unit_code="each",
+                unit_amount=Decimal(amount),
+                pre_tax_amount=Decimal(amount),
+                tax_amount=Decimal("0"),
+                total_amount=Decimal(amount),
+                currency="NGN",
+                minor_units=2,
+                price_source_version="historical-price-v1",
+            )
+        )
+        connection.execute(
+            document.__table__.update()
+            .where(document.id == document_id)
+            .values(
+                lifecycle="issued",
+                document_number=number,
+                issued_at=billing.NOW,
+            )
+        )
+        group_id = uuid.uuid4()
+        connection.execute(
+            group.__table__.insert().values(
+                id=group_id,
+                **scoped,
+                billing_account_id=account_id,
+                group_kind="invoice_issued"
+                if kind == "invoice"
+                else "credit_note_issued",
+                currency="NGN",
+                minor_units=2,
+                source_version=version,
+                source_ref=f"document:{document_id}:issue"
+                if kind == "invoice"
+                else f"credit_note:{document_id}",
+                occurred_at=billing.NOW,
+            )
+        )
+        connection.execute(
+            effect.__table__.insert().values(
+                id=uuid.uuid4(),
+                **scoped,
+                billing_account_id=account_id,
+                posting_group_id=group_id,
+                lane="receivable",
+                amount_delta=Decimal(ar),
+                currency="NGN",
+                minor_units=2,
+            )
+        )
+        money = billing._money
+        provisional = InvoiceDocumentFactV1(
+            scope=scope,
+            invoice_id=document_id,
+            fact_version=1,
+            series_code=kind,
+            document_number=number,
+            document_kind=kind,
+            document_state="issued",
+            document_profile_code=presentation.document_profile_code,
+            document_profile_version=presentation.document_profile_version,
+            currency="NGN",
+            minor_units=2,
+            subtotal=money(amount),
+            tax_total=money("0"),
+            grand_total=money(amount),
+            due_at=None,
+            due_date_basis=presentation.due_date_basis,
+            seller_snapshot=presentation.seller_snapshot,
+            customer_snapshot=presentation.customer_snapshot,
+            payment_instructions=presentation.payment_instructions,
+            brand_asset=presentation.brand_asset,
+            locale=presentation.locale,
+            timezone=presentation.timezone,
+            lines=(
+                InvoiceLineFactV1(
+                    1,
+                    "predecessor service",
+                    Decimal("1"),
+                    "each",
+                    money(amount),
+                    money(amount),
+                    money("0"),
+                    money("0"),
+                    money(amount),
+                    "historical-price-v1",
+                ),
+            ),
+            tax_snapshots=(),
+            fx_snapshot=None,
+            party_tax_identities=(),
+            issued_at=billing.NOW,
+            frozen_at=billing.NOW,
+            source_authority="internal",
+            correlation_id=number,
+            presentation_model_digest="",
+        )
+        payload = _jsonable(provisional)
+        payload.pop("presentation_model_digest")
+        digest = fingerprint_of(payload)
+        payload["presentation_model_digest"] = digest
+        connection.execute(
+            fact.__table__.insert().values(
+                id=uuid.uuid4(),
+                **scoped,
+                document_id=document_id,
+                fact_version=1,
+                contract_version=DOCUMENT_FACT_CONTRACT,
+                presentation_model_digest=digest,
+                fact_payload=payload,
+            )
+        )
+        rebuild = fingerprint_of(
+            {
+                "collectible_receivable": f"{Decimal(balance):.6f}",
+                "available_credit": "0",
+                "prepaid_funding": "0",
+                "currency": "NGN",
+                "minor_units": 2,
+            }
+        )
+        connection.execute(
+            position.__table__.insert().values(
+                id=uuid.uuid4(),
+                **scoped,
+                billing_account_id=account_id,
+                source_owner="dotmac-billing",
+                source_version=version,
+                posting_group_watermark=group_id,
+                currency="NGN",
+                minor_units=2,
+                collectible_receivable=Decimal(balance),
+                available_credit=Decimal("0"),
+                prepaid_funding=Decimal("0"),
+                state_fingerprint=rebuild,
+                rebuild_fingerprint=rebuild,
+                source_authority="internal",
+                projection_mode="authoritative",
+                derived_from="posting_groups",
+                completeness="complete",
+                financial_state="open",
+                observed_at=billing.NOW,
+            )
+        )
+    return account_id, credit_id
+
+
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_real_bi0002_predecessor_upgrade_preserves_evidence_and_closes_credit_append(
     plane,
@@ -609,21 +1017,11 @@ def test_real_bi0002_predecessor_upgrade_preserves_evidence_and_closes_credit_ap
     with billing._scratch_database(
         (selection,), target_revision="bi_0002_multiline"
     ) as urls:
-        scope, url = _routing(urls, plane)
+        scope, _ = _routing(urls, plane)
         prefix = "" if plane == "tenant" else "platform_"
-        with billing._session(url, scope) as session:
-            account, _, invoice = billing._seed_invoice(
-                session, scope, suffix=str(uuid.uuid4())
-            )
-            credit = issue_credit_note(
-                session,
-                scope=scope,
-                command=_credit_command(invoice.id),
-                numbering=billing.NUMBERING,
-            )
-            account_id, credit_id = account.id, credit.id
-            session.commit()
         engine = create_engine(urls[0])
+        with engine.begin() as connection:
+            account_id, credit_id = _seed_bi0002_credit(connection, plane, scope)
 
         def snapshot():
             with engine.connect() as connection:
@@ -640,11 +1038,16 @@ def test_real_bi0002_predecessor_upgrade_preserves_evidence_and_closes_credit_ap
                         "documents",
                         "document_lines",
                         "posting_groups",
+                        "posting_effects",
                         "invoice_document_facts",
+                        "receivable_position_facts",
                     )
                 }
 
         before = snapshot()
+        assert (
+            len(before["invoice_document_facts"]) == len(before["posting_effects"]) == 2
+        )
         with engine.begin() as connection:
             # Sensitivity proof against the actual predecessor: its guard
             # admits an issued credit-note append. Roll it back immediately

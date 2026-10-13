@@ -4,6 +4,9 @@ All notable changes follow Semantic Versioning.
 
 ## 0.1.0a4 — UNRELEASED
 
+- Refresh the locked draft header and line identities before issuance so a
+  concurrent draft edit cannot leave emitted facts with stale totals. Preserve
+  pending caller edits and exact replay without completing its transaction.
 - Add append-only non-cash grants, applications, partial application reversals
   and unused-grant reductions, with separately linked replacement grants.
 - Keep cash funding and prepaid credit distinct. Ordinary account credits carry

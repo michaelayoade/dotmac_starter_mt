@@ -4378,6 +4378,7 @@ def test_withholding_cannot_replay_or_post_across_tenants(scratch):
         account, _, invoice = _seed_invoice(session, scope_a, suffix="wht-isolation")
         command = _withholding_command(account.id, invoice.id, scope=scope_a)
         row = accept_withholding_discharge(session, scope=scope_a, command=command)
+        discharge_id = row.id
         session.commit()
     with _session(tenant_url, scope_b) as session:
         with pytest.raises(BillingRuleViolation, match="scope"):
@@ -4392,7 +4393,7 @@ def test_withholding_cannot_replay_or_post_across_tenants(scratch):
         assert (
             session.execute(
                 select(models.WithholdingDischarge).where(
-                    models.WithholdingDischarge.id == row.id
+                    models.WithholdingDischarge.id == discharge_id
                 )
             ).first()
             is None
@@ -4446,7 +4447,13 @@ def test_withholding_rollback_removes_discharge_position_fact_and_retry(scratch,
         assert (
             session.execute(
                 select(outbox_model).where(
-                    outbox_model.event_type == "billing.accounting.fact.v2"
+                    outbox_model.event_type == "billing.accounting.fact.v2",
+                    outbox_model.payload["posting_group_id"].as_string()
+                    == str(group_id),
+                    outbox_model.payload["billing_account_id"].as_string()
+                    == str(account_id),
+                    outbox_model.payload["source_ref"].as_string()
+                    == command.source_ref,
                 )
             ).first()
             is None

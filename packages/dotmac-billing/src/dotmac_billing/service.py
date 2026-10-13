@@ -2201,6 +2201,21 @@ def issue_document(
             row_id=command.document_id,
             lock=True,
         )
+        # A locking SELECT does not replace an existing ORM identity. The
+        # pre-lock read may therefore still hold a draft header or lines from
+        # before a concurrent writer committed. Preserve this owner's pending
+        # edits, then read the locked persisted snapshot before issuing facts.
+        session.flush()
+        session.refresh(document)
+        session.execute(
+            _where_scope(
+                select(plane.line)
+                .where(plane.line.document_id == document.id)
+                .execution_options(populate_existing=True),
+                scope,
+                plane.line,
+            )
+        ).scalars().all()
         if document.issued_at is not None:
             raise BillingConflict("already_issued", "document is already issued")
         if document.document_kind == "invoice":

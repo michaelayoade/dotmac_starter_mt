@@ -555,7 +555,7 @@ def _position_guard(platform: bool) -> None:
           OR NEW.source_owner <> 'dotmac-billing' OR NEW.source_authority <> 'internal'
           OR NEW.projection_mode <> 'authoritative' OR NEW.derived_from <> 'posting_groups'
           OR NEW.completeness <> 'complete' OR NEW.completeness_reason_code IS NOT NULL
-          OR NEW.financial_state <> CASE WHEN NEW.collectible_receivable = 0 THEN 'resolved' ELSE 'open' END
+          OR NEW.financial_state <> (CASE WHEN NEW.collectible_receivable = 0 THEN 'resolved' ELSE 'open' END)
           OR NEW.state_fingerprint !~ '^[0-9a-f]{{64}}$' OR NEW.rebuild_fingerprint <> NEW.state_fingerprint
           OR NEW.collectible_receivable::text IN ('NaN', 'Infinity', '-Infinity')
           OR NEW.available_credit::text IN ('NaN', 'Infinity', '-Infinity')
@@ -673,7 +673,7 @@ def _posting_guard(platform: bool) -> None:
           WHERE x.posting_group_id = group_id{scope};
         IF EXISTS (SELECT 1 FROM mod_billing.{prefix}allocation_effects x WHERE x.posting_group_id = group_id{scope})
           OR n = 0 OR (grp.group_kind <> 'non_cash_credit_granted' AND n <> 1)
-          OR (SELECT count(*) FROM mod_billing.{prefix}posting_effects x WHERE x.posting_group_id = group_id{scope}) <> CASE WHEN ar = 0 THEN 0 ELSE 1 END
+          OR (SELECT count(*) FROM mod_billing.{prefix}posting_effects x WHERE x.posting_group_id = group_id{scope}) <> (CASE WHEN ar = 0 THEN 0 ELSE 1 END)
           OR (ar <> 0 AND NOT EXISTS (SELECT 1 FROM mod_billing.{prefix}posting_effects x
               WHERE x.posting_group_id = group_id{scope} AND x.lane = 'receivable' AND x.amount_delta = ar
                 AND x.currency = grp.currency AND x.minor_units = grp.minor_units
