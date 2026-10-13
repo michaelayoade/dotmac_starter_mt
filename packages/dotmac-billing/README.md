@@ -119,8 +119,16 @@ the distinction from the shipped single-line command.
 
 The additive `bi_0002_multiline` migration introduces account-affinity line FKs,
 immutable document authoring provenance and issued-invoice insertion refusal.
-It leaves `bi_0001_billing` and historical financial facts unchanged. Downgrade
-after explicit multiline authoring is refused. Heterogeneous invoices and
+The additive `bi_0003_issued_line_freeze` extends insertion refusal to every
+issued document kind and serializes edits, deletion and reparenting with
+issuance by locking and checking both parents. Migration table locks drain
+predecessor writers before function replacement, with a five-second lock
+acquisition timeout. Credit notes stage
+their initial line under a draft parent before issuance and fact creation in
+the same transaction. Both earlier migrations and historical facts stay unchanged.
+Exact credit-note replay precedes mutable receivable admission, including
+after a full credit exhausts the invoice's outstanding amount.
+Downgrade after explicit multiline authoring is refused. Heterogeneous invoices and
 line-specific tax/FX wire attribution require a later contract design. See
 `docs/inventories/billing-multiline-extraction.md` for source dispositions,
 limits and required hosted proofs; no Sub adoption is claimed.

@@ -4,6 +4,13 @@ All notable changes follow Semantic Versioning.
 
 ## 0.1.0a2 — UNRELEASED
 
+- Close line insertion, reparenting, edits and deletion for every issued
+  document kind in additive `bi_0003_issued_line_freeze`, with parent-row
+  locking and bounded migration table locks. Stage credit-note
+  initial lines before issuance in the caller's transaction. Preserve both
+  earlier migrations and historical monetary/fact evidence.
+- Replay fully credited invoices' exact credit-note commands before mutable
+  receivable admission, preserving original keys, fingerprints and effects.
 - Add typed homogeneous multiline drafts with structural account/obligation
   affinity, exact explicit prices and immutable authoring provenance in an
   additive migration. Keep the released root migration unchanged.

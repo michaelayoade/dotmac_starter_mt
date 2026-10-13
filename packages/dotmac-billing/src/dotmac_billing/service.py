@@ -2171,14 +2171,20 @@ def issue_credit_note(
         _one(db, scope=scope, model=plane.account, row_id=original.billing_account_id),
         command.total_amount,
     )
-    outstanding = _document_outstanding(db, scope=scope, document=original)
-    if command.total_amount.amount <= 0 or command.total_amount.amount > outstanding:
-        raise BillingRuleViolation(
-            "credit_exceeds_receivable", "credit note exceeds the open receivable"
-        )
     offered = fingerprint_of(asdict(command))
 
     def operation(session: Session) -> dict[str, object]:
+        # Exact replay precedes mutable admission: a full credit has already
+        # consumed this receivable. The original remains locked across both
+        # idempotency lookup and first-time admission.
+        outstanding = _document_outstanding(session, scope=scope, document=original)
+        if (
+            command.total_amount.amount <= 0
+            or command.total_amount.amount > outstanding
+        ):
+            raise BillingRuleViolation(
+                "credit_exceeds_receivable", "credit note exceeds the open receivable"
+            )
         document_id = uuid4()
         number = numbering.allocate(
             session,
@@ -2196,9 +2202,9 @@ def issue_credit_note(
                     "obligation_id": None,
                     "document_kind": "credit_note",
                     "credits_document_id": original.id,
-                    "lifecycle": "issued",
+                    "lifecycle": "draft",
                     "series_code": command.series_code,
-                    "document_number": number,
+                    "document_number": None,
                     "currency": command.total_amount.currency.code,
                     "minor_units": command.total_amount.currency.minor_units,
                     "subtotal": command.pre_tax_amount.amount,
@@ -2214,7 +2220,7 @@ def issue_credit_note(
                     "brand_asset": original.brand_asset,
                     "locale": original.locale,
                     "timezone": original.timezone,
-                    "issued_at": command.occurred_at,
+                    "issued_at": None,
                 },
             )
         )
@@ -2244,6 +2250,14 @@ def issue_credit_note(
                 )
             )
         )
+        # Finish authoring before freezing every issued document's line set.
+        # A flush orders the line INSERT before the parent becomes issued;
+        # transaction commit/rollback remains the caller's responsibility.
+        session.flush()
+        document.document_number = number
+        document.lifecycle = "issued"
+        document.issued_at = command.occurred_at
+        session.flush()
         session.add(
             plane.event(
                 **_values(

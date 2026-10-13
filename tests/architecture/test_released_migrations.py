@@ -7242,7 +7242,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
     "dotmac-subscriptions": frozenset(),
-    "dotmac-billing": frozenset({"bi_0002_multiline.py"}),
+    "dotmac-billing": frozenset(
+        {"bi_0002_multiline.py", "bi_0003_issued_line_freeze.py"}
+    ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),

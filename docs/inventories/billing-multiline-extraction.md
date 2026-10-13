@@ -60,8 +60,21 @@ anchors, documents, postings and facts are not corrected or rehashed.
 The migration locks affected tables and removes only the existing line-freeze
 trigger while filling the new structural account column, then restores that
 trigger. Selected tenant/platform planes retain their isolation and grants.
-An invoice-only insertion guard locks the parent and refuses new lines after
-issuance; credit-note initial construction remains supported.
+The original invoice-only insertion guard is broadened by the additive
+`bi_0003_issued_line_freeze`: every issued kind, including credit notes and
+receipts, refuses new lines. Both guards retain their parent `FOR UPDATE` lock,
+serializing line insertion against issuance. The existing UPDATE/DELETE guards
+also gain parent locks; reparenting checks both old and new parents in ID order
+so draft edits, deletion or reparenting cannot change an issued line set. The
+migration drains predecessor writers under parent-then-child table locks with
+a five-second acquisition timeout before replacing any function.
+Credit-note issuance creates a
+draft parent, flushes its initial line, then sets the number, issued lifecycle
+and issuance time before posting and freezing the document fact. All stages
+remain in the caller's transaction. Neither earlier migration changes.
+Exact credit-note replay precedes the mutable outstanding-receivable admission
+check, so a fully credited invoice returns its original credit without posting
+again. The existing key, fingerprint and immutable command validation remain.
 
 Downgrade is refused after explicit multiline authoring. Compatible readers and
 a forward fix are required after that point. Migration execution, deployment,
@@ -76,6 +89,14 @@ tax/FX mismatch, immutable mode, concurrent overlapping obligations and issued
 line insertion refusal. Fresh migration and real `bi_0001` predecessor-to-head
 rehearsals prove different properties; both are required. Existing cash-credit,
 credit-note, allocation, cancellation and exposure canaries remain required.
+The issued-line canaries also exercise the real `bi_0002` predecessor-to-`bi_0003`
+upgrade without changing monetary/document/fact rows, a safe migration timeout
+behind an in-flight predecessor writer, both lock-race orders for insert,
+update, delete and reparenting,
+owner-role raw SQL refusal, malformed issued parents with no initial lines,
+full-credit exact replay and Billing-only caller rollback. The rollback canary
+uses a stateless Numbering test adapter and claims no Numbering counter or
+cross-module rollback proof. These run on Git-hosted CI only.
 
 Tests are authored in this candidate. Static checks and read-only review do not
 prove runtime acceptance; no production or adoption claim follows from them.
