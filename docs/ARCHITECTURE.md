@@ -553,9 +553,18 @@ short-lived proof material and its systemd client; `lane3_campaign_transport.py`
 owns the exact-UID, exact-address SSH-only transport window. The identity helper
 owns only accounts it can prove it created. These operational helpers do not
 change the installed handoff controller or grant deployment authorization.
-Host-specific inputs and custody integration remain private adapters, pinned to
-the same source that hosted CI exercises. See [the campaign evidence
-boundary](LANE3_PROOF_CAMPAIGN.md). Shipping these helpers is not a live-proof,
+The issuer adapter owns its one-shot public certificate exchange and bounded
+supervisor; the bridge owns the ordered management stdio protocol; the runner
+owns qualification before matrix invocation; the remote adapter owns the public
+request/response exchange; and the composition adapter owns stage and cleanup
+ordering. Their canonical implementations are `lane3_campaign_issuer.py`,
+`lane3_campaign_bridge.py`, `lane3_campaign_runner.py`,
+`lane3_campaign_remote.py` and `lane3_campaign_composition.py`. Their JSON
+envelopes and digests describe these product-owned protocols, not Foundation
+leases or release-store records. Host-specific inputs, custody material and
+approval records remain private protected deployment inputs. Hosted CI tests
+the canonical source files whose hashes bind deployment. See [the campaign
+evidence boundary](LANE3_PROOF_CAMPAIGN.md). Shipping these helpers is not a live-proof,
 N3 acceptance, Gate-0 acceptance or Foundation allocation.
 
 ### Build and deployment execution: `dotmac-deployment-foundation` (as built, 2026-08-28)

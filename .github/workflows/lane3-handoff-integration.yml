@@ -80,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle, wireguard_broker, wireguard_kernel, installation_lifecycle, campaign_management, campaign_client, campaign_transport]
+        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle, wireguard_broker, wireguard_kernel, installation_lifecycle, campaign_management, campaign_client, campaign_transport, campaign_adapters]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
