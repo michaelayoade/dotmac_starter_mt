@@ -1246,12 +1246,15 @@ def test_positive_group_requires_present_unassigned_fields(key: str) -> None:
         co.prelaunch_binding(api_of(data), config(), RUN)
 
 
-@pytest.mark.parametrize("mutate", [
-    _set(JOBS, "total_count", value=2),
-    lambda d: d[JOBS]["jobs"].append({**d[JOBS]["jobs"][0], "id": JOB + 1})
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        _set(JOBS, "total_count", value=2),
+        lambda d: d[JOBS]["jobs"].append({**d[JOBS]["jobs"][0], "id": JOB + 1})
         or d[JOBS].update(total_count=2),
-    _set(f"{GROUP_PATH}/runners", "total_count", value=1),
-    _set(f"{GROUP_PATH}/runners", "runners", value=[{"id": RUNNER}]),
-])
+        _set(f"{GROUP_PATH}/runners", "total_count", value=1),
+        _set(f"{GROUP_PATH}/runners", "runners", value=[{"id": RUNNER}]),
+    ],
+)
 def test_null_group_does_not_relax_exclusivity(tmp_path: Any, mutate: Any) -> None:
     test_every_failed_prelaunch_predicate_prevents_effects(tmp_path, mutate)
