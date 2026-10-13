@@ -738,13 +738,21 @@ def _apply(*, upgrade: bool) -> None:
     """)  # nosec B608 -- closed qualified module table names
     if not upgrade:
         for prefix in prefixes:
-            for table in _TABLES:
-                if (
-                    connection.execute(
-                        sa.text(f"SELECT 1 FROM mod_billing.{prefix}{table} LIMIT 1")
-                    ).first()
-                    is not None
-                ):
+            probes = (
+                (
+                    "SELECT 1 FROM mod_billing.platform_non_cash_credit_grants LIMIT 1",
+                    "SELECT 1 FROM mod_billing.platform_non_cash_credit_effects LIMIT 1",
+                    "SELECT 1 FROM mod_billing.platform_receivable_position_facts_v2 LIMIT 1",
+                )
+                if prefix
+                else (
+                    "SELECT 1 FROM mod_billing.non_cash_credit_grants LIMIT 1",
+                    "SELECT 1 FROM mod_billing.non_cash_credit_effects LIMIT 1",
+                    "SELECT 1 FROM mod_billing.receivable_position_facts_v2 LIMIT 1",
+                )
+            )
+            for probe in probes:
+                if connection.execute(sa.text(probe)).first() is not None:
                     raise RuntimeError(
                         "cannot downgrade Billing while noncash or V2 position evidence exists"
                     )
