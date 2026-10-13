@@ -41,6 +41,22 @@ def put(path: pathlib.Path, raw: bytes, mode: int = 0o600) -> None:
     path.chmod(mode)
 
 
+def pinned_supplier() -> dict[str, bytes]:
+    """Keep the admitted supplier closure independent of current runtime edits."""
+    files = {}
+    for name in hi.SUPPLIER_HASHES:
+        result = subprocess.run(  # noqa: S603 - fixed immutable repository objects
+            ["/usr/bin/git", "show", hi.SUPPLIER_COMMIT + ":scripts/" + name],
+            cwd=SCRIPTS.parent,
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
+        files[name] = result.stdout
+    assert {name: hi.digest(raw) for name, raw in files.items()} == hi.SUPPLIER_HASHES
+    return files
+
+
 def snapshot(path: pathlib.Path) -> dict[str, tuple[bytes, int, int, int]]:
     """Compare bytes and authority metadata; no synthetic private value output."""
     result: dict[str, tuple[bytes, int, int, int]] = {}
@@ -131,10 +147,7 @@ class Installation:
             (self.paths.prefix / relative).mkdir(mode=0o700)
         self.bundle.mkdir(mode=0o700)
         runtime = {name: (SCRIPTS / name).read_bytes() for name in hi.RUNTIME_MODULES}
-        supplier = {name: (SCRIPTS / name).read_bytes() for name in hi.SUPPLIER_HASHES}
-        assert {
-            name: hi.digest(raw) for name, raw in supplier.items()
-        } == hi.SUPPLIER_HASHES
+        supplier = pinned_supplier()
         for name, files in (("runtime", runtime), ("supplier", supplier)):
             directory = self.bundle / name
             directory.mkdir(mode=0o700)
@@ -483,10 +496,7 @@ def install_real_legacy_closure(value: Installation):
         runtime[name] = result.stdout
     for group, files in (
         ("runtime", runtime),
-        (
-            "supplier",
-            {name: (SCRIPTS / name).read_bytes() for name in hi.SUPPLIER_HASHES},
-        ),
+        ("supplier", pinned_supplier()),
     ):
         directory = legacy / group
         directory.mkdir(mode=0o700)
@@ -544,6 +554,28 @@ def install_real_legacy_closure(value: Installation):
     assert set(prior["manifest"]["runtime"]) == set(hi.LEGACY_RUNTIME_MODULES)
     value.bundle, value.bundle_digest, value.worker = current
     return prior, old_installed, new_installed
+
+
+def test_current_runtime_and_pinned_supplier_have_distinct_measured_protocols(
+    installation: Installation,
+):
+    bundle = installation.bundle
+    manifest = hi.strict_json((bundle / "bundle.json").read_bytes())
+    hi.validate_manifest(manifest)
+    for group in ("runtime", "supplier"):
+        assert {
+            name: hi.digest((bundle / group / name).read_bytes())
+            for name in manifest[group]
+        } == manifest[group]
+    protocol = "lane3_handoff_protocol.py"
+    assert (bundle / "runtime" / protocol).read_bytes() == (
+        SCRIPTS / protocol
+    ).read_bytes()
+    assert (bundle / "runtime" / protocol).read_bytes() != (
+        bundle / "supplier" / protocol
+    ).read_bytes()
+    assert manifest["supplier"] == hi.SUPPLIER_HASHES
+    assert manifest["supplier_commit"] == hi.SUPPLIER_COMMIT
 
 
 @pytest.mark.parametrize("rollback", [False, True])
