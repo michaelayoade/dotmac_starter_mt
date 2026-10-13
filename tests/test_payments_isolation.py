@@ -617,3 +617,175 @@ def test_precision_upgrade_preserves_legacy_evidence_and_refuses_guessing(migrat
         cancel_payment_intent(session, scope=scope, intent_id=intent_id)
         session.commit()
     engine.dispose()
+
+
+def _confirmed_evidence(migrated, *, with_proof=False):
+    scope, intent_id, _, now = _seed_pending(migrated, with_proof=with_proof)
+    command = RecordConfirmation(
+        intent_id=intent_id,
+        source=ConfirmationSource.PROVIDER_CALLBACK,
+        external_reference="immutable-confirmation",
+        confirmed=Money.of("15000", currency("NGN")),
+        observed_at=now,
+    )
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        confirmation = record_confirmation(session, scope=scope, command=command)
+        confirmation_id = confirmation.id
+        assert (
+            record_confirmation(session, scope=scope, command=command).id
+            == confirmation_id
+        )
+        session.commit()
+    return scope, intent_id, confirmation_id
+
+
+@pytest.mark.parametrize("actor", ["app_user", "owner"])
+@pytest.mark.parametrize("operation", ["update", "noop", "delete", "cascade"])
+def test_confirmation_database_mutations_are_refused(migrated, actor, operation):
+    """Core DML bypasses the ORM listeners, including parent FK cascades."""
+    from sqlalchemy import delete, update
+    from sqlalchemy.exc import DBAPIError
+
+    scope, intent_id, confirmation_id = _confirmed_evidence(migrated)
+    confirmation = PaymentConfirmation.__table__
+    statements = {
+        "update": update(confirmation).values(confirmed_amount=1),
+        "noop": update(confirmation).values(
+            confirmed_amount=confirmation.c.confirmed_amount
+        ),
+        "delete": delete(confirmation),
+        "cascade": delete(PaymentIntent.__table__).where(PaymentIntent.id == intent_id),
+    }
+    engine = create_engine(migrated[1 if actor == "app_user" else 0])
+    try:
+        with engine.connect() as connection:
+            with connection.begin():
+                connection.execute(
+                    text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                    {"tenant": str(scope.tenant_id)},
+                )
+                with pytest.raises(DBAPIError) as refused, connection.begin_nested():
+                    connection.execute(statements[operation])
+                sqlstate = getattr(refused.value.orig, "sqlstate", None) or getattr(
+                    refused.value.orig, "pgcode", None
+                )
+                expected = (
+                    "23001" if actor == "owner" or operation == "cascade" else "42501"
+                )
+                assert sqlstate == expected
+                assert (
+                    connection.scalar(select(confirmation.c.confirmed_amount)) == 15000
+                )
+                assert connection.scalar(select(confirmation.c.id)) == confirmation_id
+                assert connection.scalar(select(PaymentIntent.id)) == intent_id
+    finally:
+        engine.dispose()
+
+
+def _payments_config():
+    from alembic.config import Config
+
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "alembic"))
+    cfg.set_main_option("version_locations", f"{KERNEL} {VERSIONS}")
+    return cfg
+
+
+@pytest.mark.parametrize("migrated", ["pm_0002_money_precision"], indirect=True)
+def test_immutability_upgrade_preserves_populated_predecessor(migrated):
+    from alembic import command
+
+    scope, _, confirmation_id = _confirmed_evidence(migrated, with_proof=True)
+    engine = create_engine(migrated[0])
+    with engine.begin() as connection:
+        # Include legacy NULL-scale evidence without inferring a repair.
+        connection.execute(
+            PaymentConfirmation.__table__.update().values(minor_units=None)
+        )
+        tables = (
+            PaymentIntent.__table__,
+            PaymentTransferProof.__table__,
+            PaymentConfirmation.__table__,
+        )
+        before = {
+            table.name: connection.execute(select(table)).all() for table in tables
+        }
+    command.upgrade(_payments_config(), "pm_0003_confirmation_immutable")
+    with engine.begin() as connection:
+        after = {
+            table.name: connection.execute(select(table)).all() for table in tables
+        }
+        assert after == before
+        assert after["payment_confirmations"][0]._mapping["minor_units"] is None
+    with pytest.raises(RuntimeError, match="confirmation evidence exists"):
+        command.downgrade(_payments_config(), "pm_0002_money_precision")
+    from dotmac_payments import (
+        GetConfirmedCashV1,
+        UnresolvedMoneyPrecision,
+        get_confirmed_cash_v1,
+    )
+    from sqlalchemy.exc import DBAPIError
+
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        assert session.get(PaymentConfirmation, confirmation_id) is not None
+        with pytest.raises(UnresolvedMoneyPrecision):
+            get_confirmed_cash_v1(
+                session, scope=scope, query=GetConfirmedCashV1(confirmation_id)
+            )
+    # Failed downgrade leaves both privileges and trigger protection installed.
+    with engine.begin() as connection:
+        with (
+            pytest.raises(DBAPIError, match="evidence is immutable"),
+            connection.begin_nested(),
+        ):
+            connection.execute(PaymentConfirmation.__table__.delete())
+        assert not connection.scalar(
+            text(
+                "SELECT has_table_privilege('app_user', "
+                "'mod_payments.payment_confirmations', 'UPDATE,DELETE')"
+            )
+        )
+    engine.dispose()
+
+
+def test_empty_immutability_downgrade_and_reupgrade(migrated):
+    from alembic import command
+
+    cfg = _payments_config()
+    command.downgrade(cfg, "pm_0002_money_precision")
+    engine = create_engine(migrated[0])
+    with engine.begin() as connection:
+        assert connection.scalar(
+            text(
+                "SELECT has_table_privilege('app_user', "
+                "'mod_payments.payment_confirmations', 'UPDATE,DELETE')"
+            )
+        )
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT to_regprocedure("
+                    "'mod_payments.refuse_confirmation_mutation()')"
+                )
+            )
+            is None
+        )
+    command.upgrade(cfg, "pm_0003_confirmation_immutable")
+    with engine.begin() as connection:
+        for privilege in ("UPDATE", "DELETE"):
+            assert not connection.scalar(
+                text(
+                    "SELECT has_table_privilege('app_user', "
+                    "'mod_payments.payment_confirmations', :privilege)"
+                ),
+                {"privilege": privilege},
+            )
+        for privilege in ("SELECT", "INSERT"):
+            assert connection.scalar(
+                text(
+                    "SELECT has_table_privilege('app_user', "
+                    "'mod_payments.payment_confirmations', :privilege)"
+                ),
+                {"privilege": privilege},
+            )
+    engine.dispose()
