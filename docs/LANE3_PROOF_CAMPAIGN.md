@@ -128,3 +128,46 @@ claim of total ceremony closure; the existing issuer's nested cleanup can exceed
 it and still needs separately approved independent root readback/recovery. No
 issuer recovery framework or automatic retry is introduced here. Static source
 checks are not hosted test evidence or permission to begin the live ceremony.
+
+### Canonical Mac control adapter
+
+`scripts/lane3_campaign_operator.py` owns the reusable parent-side protocol:
+`JsonPipe`, fixed-role `coordinator_cli` and `closure_read`, `ManagementStdio`,
+and `B8Stdio`. The separately reviewed private launcher installs an exact-key
+`configure(deployment)` record once, after checking its protected owner-only
+file, accepted source bytes and authorization packet. Defensive copies prevent
+later caller mutation. Runtime source, coordinator configuration and issuer
+source/deployment digests are external bindings; this module generates no pins,
+activation commands, credentials or approvals and has no live CLI entrypoint.
+
+The retained launch sequence runs in one parent call with a single 60-second
+absolute deadline established before retain: retain, gate prepare, existing
+pinned coordinator CLI prepare, gate bootstrap, existing CLI launch. Each gate
+checks the actual protected key-load receipt. The fixed CLI roles preserve the
+existing `--config` and prepare/launch-only `--run-id` formats. Measured coordinator
+configuration binds both its own GitHub reads and the final independent group
+read to the same organization/group, SSH alias, installed dispatcher and state
+path. Source verification does not authorize execution.
+
+Finalization invokes actual coordinator cleanup, then reads the same exact
+lease's archived CLOSED response through the installed dispatcher, validates the
+public handoff evidence schema and strict cleanup flags, reads a fresh complete
+empty GitHub group, and attempts finish once on the same live bridge. Early
+failure after a proved prepare follows this cleanup path too. A lost prepare or
+launch response permits only cleanup of an existing protected coordinator journal
+with the exact approved run qualification, after journal absence was established
+before the attempt. There is no retry of prepare/launch, remote lease adoption,
+receipt reconstruction or timer extension. Missing or ambiguous ownership,
+cleanup or response evidence leaves finalization UNPROVEN and preserves the
+independent backstop; it requires the separately approved recovery owner.
+
+The B8 exchange requires prepared custody in that parent before its one-shot
+public prepare/CSR/certificate exchange. It preserves the VM's remaining-budget
+protocol and refuses a late certificate send. Custody closes on every exchange
+exit. Internal CLI/read subprocess groups have bounded input/output, absolute
+deadlines, and kill/reap on failure. The trusted private launcher creates and owns
+the attached long-lived bridge and B8 SSH process groups, including their bounded
+EOF/termination/reaping policy; attachment does not confer permission to kill an
+unrelated group. EOF and transport loss do not prove root cleanup. The outstanding
+lost-root-response recovery and concrete host approvals remain blockers, and
+hosted tests of this canonical adapter are required before deployment acceptance.

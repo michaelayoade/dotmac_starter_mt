@@ -559,8 +559,11 @@ owns qualification before matrix invocation; the remote adapter owns the public
 request/response exchange; and the composition adapter owns stage and cleanup
 ordering. Their canonical implementations are `lane3_campaign_issuer.py`,
 `lane3_campaign_bridge.py`, `lane3_campaign_runner.py`,
-`lane3_campaign_remote.py` and `lane3_campaign_composition.py`. Their JSON
-envelopes and digests describe these product-owned protocols, not Foundation
+`lane3_campaign_remote.py` and `lane3_campaign_composition.py`. The operator
+adapter, `lane3_campaign_operator.py`, owns the bounded Mac control sequence
+and requires actual archived closure plus a fresh empty runner-group read before
+requesting management removal. Their JSON envelopes and digests describe these
+product-owned protocols, not Foundation
 leases or release-store records. Host-specific inputs, custody material and
 approval records remain private protected deployment inputs. Hosted CI tests
 the canonical source files whose hashes bind deployment. See [the campaign
