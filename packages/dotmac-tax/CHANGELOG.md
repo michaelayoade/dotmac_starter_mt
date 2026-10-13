@@ -1,5 +1,16 @@
 # Changelog — dotmac-tax
 
+## 0.1.0a6 — unreleased
+
+- Add typed `ensure_tax_*_in_transaction` APIs for authority, jurisdiction,
+  code and immutable rule authoring under an adopter's transaction owner.
+  Reuse Tax validation and exact replay; never complete an internal savepoint.
+- Refresh current catalog state, preserve caller autoflush configuration, and
+  require whole-owner rollback/retry after unique insert contention. Preserve
+  the existing public ensure/create/publish APIs and their savepoint behavior.
+- Add owner-event sensitivity, rollback, tenant and competing-author canary
+  source. No schema change or Sub policy UI adoption is implied.
+
 ## 0.1.0a5 — unreleased
 
 - Append evidenced effective-dated rule supersessions with exact source replay
