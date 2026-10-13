@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-billing"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "DotMac dual-plane operational receivables owner"
 authors = ["DotMac"]
 readme = "README.md"

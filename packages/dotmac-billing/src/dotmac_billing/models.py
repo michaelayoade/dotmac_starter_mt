@@ -500,6 +500,16 @@ class ConfirmedSettlement(Base, _TenantRow, _SettlementColumns):
             "source_settlement_key",
             name="uq_settlements_tenant_source_key",
         ),
+        UniqueConstraint(
+            "tenant_id",
+            "id",
+            "billing_account_id",
+            "source_system",
+            "source_settlement_key",
+            "currency",
+            "minor_units",
+            name="uq_settlements_claim_binding",
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -520,6 +530,104 @@ class PlatformConfirmedSettlement(Base, _SettlementColumns):
             "source_system",
             "source_settlement_key",
             name="uq_platform_settlements_source_key",
+        ),
+        UniqueConstraint(
+            "id",
+            "billing_account_id",
+            "source_system",
+            "source_settlement_key",
+            "currency",
+            "minor_units",
+            name="uq_platform_settlements_claim_binding",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class _CashSourceClaimColumns:
+    id: Mapped[UUID] = uuid_pk()
+    settlement_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    source_system: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_settlement_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Recording time, never a replacement for settlement confirmation time.
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CashSourceClaim(Base, _TenantRow, _CashSourceClaimColumns):
+    __tablename__ = "cash_source_claims"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "settlement_id", name="uq_cash_claim_settlement"),
+        UniqueConstraint(
+            "tenant_id",
+            "source_system",
+            "source_settlement_key",
+            name="uq_cash_claim_source",
+        ),
+        ForeignKeyConstraint(
+            [
+                "tenant_id",
+                "settlement_id",
+                "billing_account_id",
+                "source_system",
+                "source_settlement_key",
+                "currency",
+                "minor_units",
+            ],
+            [
+                f"{SCHEMA}.confirmed_settlements.{column}"
+                for column in (
+                    "tenant_id",
+                    "id",
+                    "billing_account_id",
+                    "source_system",
+                    "source_settlement_key",
+                    "currency",
+                    "minor_units",
+                )
+            ],
+            name="fk_cash_claim_settlement",
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformCashSourceClaim(Base, _CashSourceClaimColumns):
+    __tablename__ = "platform_cash_source_claims"
+    __table_args__ = (
+        UniqueConstraint("settlement_id", name="uq_platform_cash_claim_settlement"),
+        UniqueConstraint(
+            "source_system",
+            "source_settlement_key",
+            name="uq_platform_cash_claim_source",
+        ),
+        ForeignKeyConstraint(
+            [
+                "settlement_id",
+                "billing_account_id",
+                "source_system",
+                "source_settlement_key",
+                "currency",
+                "minor_units",
+            ],
+            [
+                f"{SCHEMA}.platform_confirmed_settlements.{column}"
+                for column in (
+                    "id",
+                    "billing_account_id",
+                    "source_system",
+                    "source_settlement_key",
+                    "currency",
+                    "minor_units",
+                )
+            ],
+            name="fk_platform_cash_claim_settlement",
+            ondelete="RESTRICT",
         ),
         schema_table_args(SCHEMA),
     )
@@ -1711,6 +1819,7 @@ class PlatformReceivablePositionFactV2(Base, _PositionFactV2Columns):
 
 
 TENANT_TABLES = (
+    "cash_source_claims",
     "non_cash_credit_grants",
     "non_cash_credit_effects",
     "receivable_position_facts_v2",
@@ -1735,6 +1844,7 @@ TENANT_TABLES = (
 )
 
 PLATFORM_TABLES = (
+    "platform_cash_source_claims",
     "platform_non_cash_credit_grants",
     "platform_non_cash_credit_effects",
     "platform_receivable_position_facts_v2",
@@ -1759,6 +1869,8 @@ PLATFORM_TABLES = (
 )
 
 __all__ = [
+    "CashSourceClaim",
+    "PlatformCashSourceClaim",
     "NonCashCreditGrant",
     "PlatformNonCashCreditGrant",
     "NonCashCreditEffect",

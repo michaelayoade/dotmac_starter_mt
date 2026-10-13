@@ -39,6 +39,26 @@ KERNEL_VERSIONS = (
 
 _INTERNAL_RELATIONS = (
     (
+        "cash_source_claims",
+        (
+            "settlement_id",
+            "billing_account_id",
+            "source_system",
+            "source_settlement_key",
+            "currency",
+            "minor_units",
+        ),
+        "confirmed_settlements",
+        (
+            "id",
+            "billing_account_id",
+            "source_system",
+            "source_settlement_key",
+            "currency",
+            "minor_units",
+        ),
+    ),
+    (
         "non_cash_credit_grants",
         ("posting_group_id", "billing_account_id"),
         "posting_groups",

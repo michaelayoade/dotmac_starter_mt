@@ -78,8 +78,8 @@
       "state": "never-published"
     },
     "dotmac-billing": {
-      "declared": "0.1.0a5",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a5 adds pure immutable complete-population opening evidence preflight on the a4 credit/WHT foundation, with trusted verifier bindings and typed blockers. It adds no opening writer, stored balance or production authority. Hosted acceptance, source approval, authorized publication and product qualification remain separate; no product pin changes.",
+      "declared": "0.1.0a6",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a6 adds immutable exact cash-source claims consumed by existing settlement acceptance, provenance-only historical claim backfill and deferred completeness fencing. It introduces no opening money or import writer. Hosted acceptance and Michael source approval are pending; package publication is already authorized by the closed allowlist and remains separate from product adoption and production activation. No product pins change.",
       "state": "declared-unpublished"
     },
     "dotmac-connector-flutterwave": {
