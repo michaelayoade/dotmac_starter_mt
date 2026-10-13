@@ -5,8 +5,6 @@ Historical document anchors and financial evidence remain unchanged.
 
 from __future__ import annotations
 
-# All SQL identifiers below are fixed migration-owned plane/table names.
-# ruff: noqa: S608
 import sqlalchemy as sa
 from dotmac_kernel.planes import ModulePlane, selected_module_planes
 
@@ -17,6 +15,40 @@ down_revision = "bi_0001_billing"
 branch_labels = None
 depends_on = None
 _SCHEMA = "mod_billing"
+_TENANT_ISSUED_INSERT_FUNCTION = """
+CREATE FUNCTION mod_billing.refuse_issued_invoice_line_insert() RETURNS trigger AS $$
+DECLARE
+    issued timestamptz;
+    kind text;
+BEGIN
+    SELECT issued_at, document_kind INTO issued, kind FROM mod_billing.documents
+     WHERE id = NEW.document_id AND tenant_id = NEW.tenant_id
+     FOR UPDATE;
+    IF issued IS NOT NULL AND kind = 'invoice' THEN
+        RAISE EXCEPTION 'issued invoice refuses additional lines'
+            USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+"""
+_PLATFORM_ISSUED_INSERT_FUNCTION = """
+CREATE FUNCTION mod_billing.refuse_platform_issued_invoice_line_insert() RETURNS trigger AS $$
+DECLARE
+    issued timestamptz;
+    kind text;
+BEGIN
+    SELECT issued_at, document_kind INTO issued, kind FROM mod_billing.platform_documents
+     WHERE id = NEW.document_id
+     FOR UPDATE;
+    IF issued IS NOT NULL AND kind = 'invoice' THEN
+        RAISE EXCEPTION 'issued invoice refuses additional lines'
+            USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+"""
 
 
 def _plane(platform: bool, *, upgrade: bool) -> None:
@@ -33,6 +65,26 @@ def _plane(platform: bool, *, upgrade: bool) -> None:
     )
     document_fk = f"fk_{prefix}document_lines_document_account"
     obligation_fk = f"fk_{prefix}document_lines_obligation_account"
+    line = sa.table(
+        table,
+        sa.column("document_id", sa.Uuid()),
+        sa.column("billing_account_id", sa.Uuid()),
+        sa.column("obligation_id", sa.Uuid()),
+        *(sa.column(name, sa.Uuid()) for name in scope_columns),
+        schema=_SCHEMA,
+    ).alias("line")
+    document = sa.table(
+        documents,
+        sa.column("id", sa.Uuid()),
+        sa.column("billing_account_id", sa.Uuid()),
+        sa.column("obligation_id", sa.Uuid()),
+        sa.column("authoring_mode", sa.String(24)),
+        *(sa.column(name, sa.Uuid()) for name in scope_columns),
+        schema=_SCHEMA,
+    ).alias("document")
+    same_document = line.c.document_id == document.c.id
+    if not platform:
+        same_document = sa.and_(same_document, line.c.tenant_id == document.c.tenant_id)
     # Exclude concurrent writers while the issued-line UPDATE guard is absent.
     op.execute(
         f"LOCK TABLE {_SCHEMA}.{documents}, {_SCHEMA}.{table} IN ACCESS EXCLUSIVE MODE"
@@ -73,9 +125,10 @@ def _plane(platform: bool, *, upgrade: bool) -> None:
             schema=_SCHEMA,
         )
         op.execute(f"DROP TRIGGER {table}_freeze ON {_SCHEMA}.{table}")
-        tenant_match = "AND line.tenant_id = document.tenant_id" if not platform else ""
         op.execute(
-            f"UPDATE {_SCHEMA}.{table} AS line SET billing_account_id = document.billing_account_id FROM {_SCHEMA}.{documents} AS document WHERE line.document_id = document.id {tenant_match}"
+            sa.update(line)
+            .values(billing_account_id=document.c.billing_account_id)
+            .where(same_document)
         )
         op.execute(
             f"CREATE TRIGGER {table}_freeze BEFORE UPDATE OR DELETE ON {_SCHEMA}.{table} FOR EACH ROW EXECUTE FUNCTION {_SCHEMA}.{freeze_function}()"
@@ -96,22 +149,12 @@ def _plane(platform: bool, *, upgrade: bool) -> None:
                 referent_schema=_SCHEMA,
                 ondelete="RESTRICT",
             )
-        tenant_match = "AND tenant_id = NEW.tenant_id" if not platform else ""
         function = f"refuse_{prefix}issued_invoice_line_insert"
-        op.execute(f"""CREATE FUNCTION {_SCHEMA}.{function}() RETURNS trigger AS $$
-        DECLARE
-            issued timestamptz;
-            kind text;
-        BEGIN
-            SELECT issued_at, document_kind INTO issued, kind FROM {_SCHEMA}.{documents}
-             WHERE id = NEW.document_id {tenant_match}
-             FOR UPDATE;
-            IF issued IS NOT NULL AND kind = 'invoice' THEN
-                RAISE EXCEPTION 'issued invoice refuses additional lines' USING ERRCODE = 'restrict_violation';
-            END IF;
-            RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql""")
+        op.execute(
+            _PLATFORM_ISSUED_INSERT_FUNCTION
+            if platform
+            else _TENANT_ISSUED_INSERT_FUNCTION
+        )
         op.execute(
             f"CREATE TRIGGER {table}_issued_insert BEFORE INSERT ON {_SCHEMA}.{table} FOR EACH ROW EXECUTE FUNCTION {_SCHEMA}.{function}()"
         )
@@ -119,9 +162,10 @@ def _plane(platform: bool, *, upgrade: bool) -> None:
         explicit = (
             op.get_bind()
             .execute(
-                sa.text(
-                    f"SELECT 1 FROM {_SCHEMA}.{documents} WHERE authoring_mode = 'explicit_multiline' LIMIT 1"
-                )
+                sa.select(sa.literal(1))
+                .select_from(document)
+                .where(document.c.authoring_mode == "explicit_multiline")
+                .limit(1)
             )
             .first()
         )
@@ -133,15 +177,10 @@ def _plane(platform: bool, *, upgrade: bool) -> None:
         invalid = (
             op.get_bind()
             .execute(
-                sa.text(
-                    f"SELECT 1 FROM {_SCHEMA}.{table} AS line JOIN {_SCHEMA}.{documents} AS document ON line.document_id = document.id "
-                    + (
-                        "AND line.tenant_id = document.tenant_id "
-                        if not platform
-                        else ""
-                    )
-                    + "WHERE line.obligation_id IS DISTINCT FROM document.obligation_id LIMIT 1"
-                )
+                sa.select(sa.literal(1))
+                .select_from(line.join(document, same_document))
+                .where(line.c.obligation_id.is_distinct_from(document.c.obligation_id))
+                .limit(1)
             )
             .first()
         )
