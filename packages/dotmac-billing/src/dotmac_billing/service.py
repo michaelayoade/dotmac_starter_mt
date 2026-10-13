@@ -137,6 +137,7 @@ class _PlaneModels:
     line: Any
     event: Any
     settlement: Any
+    cash_source_claim: Any
     group: Any
     effect: Any
     allocation: Any
@@ -174,6 +175,7 @@ _TENANT = _PlaneModels(
     models.DocumentLine,
     models.DocumentEvent,
     models.ConfirmedSettlement,
+    models.CashSourceClaim,
     models.PostingGroup,
     models.PostingEffect,
     models.AllocationEffect,
@@ -197,6 +199,7 @@ _PLATFORM = _PlaneModels(
     models.PlatformDocumentLine,
     models.PlatformDocumentEvent,
     models.PlatformConfirmedSettlement,
+    models.PlatformCashSourceClaim,
     models.PlatformPostingGroup,
     models.PlatformPostingEffect,
     models.PlatformAllocationEffect,
@@ -2716,6 +2719,82 @@ def issue_credit_note(
     )
 
 
+def _require_cash_source_unclaimed(
+    db: Session, *, scope: Scope, command: AcceptSettlementV1
+) -> None:
+    plane = _models(scope)
+    existing = db.execute(
+        _where_scope(
+            select(plane.cash_source_claim.id).where(
+                plane.cash_source_claim.source_system == command.source_system,
+                plane.cash_source_claim.source_settlement_key
+                == command.source_settlement_key,
+            ),
+            scope,
+            plane.cash_source_claim,
+        )
+    ).first()
+    if existing is not None:
+        raise BillingConflict(
+            "cash_source_claimed", "cash source identity is already claimed"
+        )
+
+
+def _claim_cash_source(
+    db: Session, *, scope: Scope, settlement: _SettlementRow
+) -> None:
+    """Append a real settlement's identity inside its existing Kernel operation."""
+    plane = _models(scope)
+    db.add(
+        plane.cash_source_claim(
+            **_values(
+                scope,
+                {
+                    "id": uuid4(),
+                    "settlement_id": settlement.id,
+                    "billing_account_id": settlement.billing_account_id,
+                    "source_system": settlement.source_system,
+                    "source_settlement_key": settlement.source_settlement_key,
+                    "currency": settlement.currency,
+                    "minor_units": settlement.minor_units,
+                },
+            )
+        )
+    )
+    db.flush()
+
+
+def _require_cash_source_claim(
+    db: Session, *, scope: Scope, settlement_id: UUID, command: AcceptSettlementV1
+) -> None:
+    """Persisted scalar evidence only; replay must never repair missing claims."""
+    plane = _models(scope)
+    binding = db.execute(
+        _where_scope(
+            select(
+                plane.cash_source_claim.billing_account_id,
+                plane.cash_source_claim.source_system,
+                plane.cash_source_claim.source_settlement_key,
+                plane.cash_source_claim.currency,
+                plane.cash_source_claim.minor_units,
+            ).where(plane.cash_source_claim.settlement_id == settlement_id),
+            scope,
+            plane.cash_source_claim,
+        )
+    ).one_or_none()
+    if binding is None or tuple(binding) != (
+        command.billing_account_id,
+        command.source_system,
+        command.source_settlement_key,
+        command.amount.currency.code,
+        command.amount.currency.minor_units,
+    ):
+        raise BillingRuleViolation(
+            "cash_source_claim_integrity",
+            "settlement cash-source claim is missing or inconsistent",
+        )
+
+
 def accept_settlement(
     db: Session,
     *,
@@ -2751,30 +2830,31 @@ def accept_settlement(
     )
 
     def operation(session: Session) -> dict[str, object]:
+        _require_cash_source_unclaimed(session, scope=scope, command=command)
         settlement_id = uuid4()
-        session.add(
-            plane.settlement(
-                **_values(
-                    scope,
-                    {
-                        "id": settlement_id,
-                        "billing_account_id": command.billing_account_id,
-                        "source_system": command.source_system,
-                        "source_settlement_key": command.source_settlement_key,
-                        "source_version": command.source_version,
-                        "request_fingerprint": offered,
-                        "amount": command.amount.amount,
-                        "currency": command.amount.currency.code,
-                        "minor_units": command.amount.currency.minor_units,
-                        "occurred_at": command.occurred_at,
-                        "observed_at": command.observed_at,
-                        "confirmation_evidence": command.confirmation_evidence,
-                        "funding_lane": command.funding_lane.value,
-                    },
-                )
+        settlement = plane.settlement(
+            **_values(
+                scope,
+                {
+                    "id": settlement_id,
+                    "billing_account_id": command.billing_account_id,
+                    "source_system": command.source_system,
+                    "source_settlement_key": command.source_settlement_key,
+                    "source_version": command.source_version,
+                    "request_fingerprint": offered,
+                    "amount": command.amount.amount,
+                    "currency": command.amount.currency.code,
+                    "minor_units": command.amount.currency.minor_units,
+                    "occurred_at": command.occurred_at,
+                    "observed_at": command.observed_at,
+                    "confirmation_evidence": command.confirmation_evidence,
+                    "funding_lane": command.funding_lane.value,
+                },
             )
         )
+        session.add(settlement)
         session.flush()
+        _claim_cash_source(session, scope=scope, settlement=settlement)
         group = _post_group(
             session,
             scope=scope,
@@ -2830,6 +2910,9 @@ def accept_settlement(
             "Idempotency key was already used in scope 'billing.settlement' "
             "with a different request"
         )
+    _require_cash_source_claim(
+        db, scope=scope, settlement_id=settlement_id, command=command
+    )
     return cast(
         _SettlementRow,
         db.execute(
