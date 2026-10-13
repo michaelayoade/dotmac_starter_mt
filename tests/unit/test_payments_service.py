@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -32,7 +33,7 @@ from dotmac_payments.service import (
     review_transfer_proof,
     submit_transfer_proof,
 )
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 TENANT_A = uuid.uuid4()
@@ -387,3 +388,292 @@ def test_another_tenants_intent_is_not_visible(db: Session) -> None:
                 observed_at=NOW,
             ),
         )
+
+
+@pytest.mark.parametrize("changed", ["amount", "currency", "source", "observed_at"])
+def test_confirmation_replay_refuses_changed_immutable_evidence(db, changed):
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    command = RecordConfirmation(
+        intent_id=intent.id,
+        source=ConfirmationSource.PROVIDER_CALLBACK,
+        external_reference="immutable-evidence",
+        confirmed=Money.of("15000", NGN),
+        observed_at=NOW,
+    )
+    first = record_confirmation(db, scope=scope, command=command)
+    changes = {
+        "amount": {"confirmed": Money.of("14999", NGN)},
+        "currency": {"confirmed": Money.of("15000", USD)},
+        "source": {"source": ConfirmationSource.MANUAL},
+        "observed_at": {"observed_at": NOW + timedelta(seconds=1)},
+    }
+    with pytest.raises(Conflict):
+        record_confirmation(
+            db, scope=scope, command=replace(command, **changes[changed])
+        )
+    assert first.confirmed_amount == Decimal("15000")
+    assert first.source is ConfirmationSource.PROVIDER_CALLBACK
+    assert intent.confirmed_amount == Decimal("15000")
+
+
+def test_confirmation_replay_omits_clock_and_survives_loaded_state_refresh(db):
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope, expires_at=NOW + timedelta(hours=1))
+    command = RecordConfirmation(
+        intent_id=intent.id,
+        source=ConfirmationSource.PROVIDER_CALLBACK,
+        external_reference="stored-clock",
+        confirmed=Money.of("15000", NGN),
+        observed_at=NOW,
+    )
+    first = record_confirmation(db, scope=scope, command=command)
+    first_id = first.id
+    db.expire_all()
+    assert record_confirmation(db, scope=scope, command=command).id == first_id
+    replay = record_confirmation(
+        db, scope=scope, command=replace(command, observed_at=None)
+    )
+    assert replay.id == first_id
+    assert replay.observed_at.replace(tzinfo=UTC) == NOW
+
+
+def test_failed_proof_acceptance_does_not_write_review_evidence(db):
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    proof = submit_transfer_proof(
+        db,
+        scope=scope,
+        command=SubmitTransferProof(
+            intent_id=intent.id,
+            declared=Money.of("15000", NGN),
+            document_reference="file:proof",
+            submitted_reference="proof-before-provider",
+            declared_at=NOW,
+        ),
+    )
+    record_confirmation(
+        db,
+        scope=scope,
+        command=RecordConfirmation(
+            intent_id=intent.id,
+            source=ConfirmationSource.PROVIDER_CALLBACK,
+            external_reference="provider-won",
+            confirmed=Money.of("15000", NGN),
+            observed_at=NOW,
+        ),
+    )
+    with pytest.raises(Conflict):
+        review_transfer_proof(
+            db,
+            scope=scope,
+            command=ReviewTransferProof(
+                proof_id=proof.id,
+                accept=True,
+                reviewer="agent:reviewer",
+                reviewed_at=NOW,
+            ),
+        )
+    db.flush()
+    db.refresh(proof)
+    assert proof.state is TransferProofState.SUBMITTED
+    assert proof.reviewer is None
+    assert proof.reviewed_at is None
+
+
+@pytest.mark.parametrize(
+    "code,scale,value",
+    [
+        ("JPY", 0, "123"),
+        ("NGN", 2, "123.45"),
+        ("BHD", 3, "123.456"),
+        ("XTS", 6, "123.456789"),
+    ],
+)
+def test_exact_scale_survives_proof_and_scalar_query(db, code, scale, value):
+    from dotmac_kernel.money import Currency
+    from dotmac_payments import GetConfirmedCashV1, get_confirmed_cash_v1
+
+    scope = TenantScope(TENANT_A)
+    money = Money.of(value, Currency(code, scale))
+    intent = open_payment_intent(
+        db,
+        scope=scope,
+        command=OpenPaymentIntent(
+            payer_reference="customer:precision",
+            purpose=PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT,
+            requested=money,
+            reference="precision",
+            provider_type="bank",
+            channel="transfer",
+            opened_at=NOW,
+        ),
+    )
+    proof = submit_transfer_proof(
+        db,
+        scope=scope,
+        command=SubmitTransferProof(
+            intent_id=intent.id,
+            declared=money,
+            document_reference="file:precision",
+            submitted_reference="precision-proof",
+        ),
+    )
+    review_transfer_proof(
+        db,
+        scope=scope,
+        command=ReviewTransferProof(
+            proof_id=proof.id, accept=True, reviewer="reviewer", reviewed_at=NOW
+        ),
+    )
+    confirmation = db.scalar(select(models.PaymentConfirmation))
+    confirmation_id = confirmation.id
+    # A dirty identity-map object is not authoritative query evidence, even
+    # before the caller rolls its transaction back.
+    confirmation.confirmed_amount = Decimal("9")
+    observation = get_confirmed_cash_v1(
+        db, scope=scope, query=GetConfirmedCashV1(confirmation_id)
+    )
+    assert observation.confirmed == money
+    assert observation.scope == scope
+    assert observation.intent_id == intent.id
+    assert observation.observed_at == NOW
+    db.expunge_all()
+    assert (
+        get_confirmed_cash_v1(
+            db, scope=scope, query=GetConfirmedCashV1(confirmation_id)
+        )
+        == observation
+    )
+    from dotmac_payments import ConfirmationNotFound
+
+    with pytest.raises(ConfirmationNotFound):
+        get_confirmed_cash_v1(
+            db, scope=TenantScope(TENANT_B), query=GetConfirmedCashV1(confirmation_id)
+        )
+
+
+@pytest.mark.parametrize(
+    "scale,value", [(7, "1.0000001"), (2, "100000000000000.00"), (2, "NaN")]
+)
+def test_unsupported_money_refuses_before_any_write(db, scale, value):
+    from dotmac_kernel.money import Currency
+
+    money = Money.of(value, Currency("XTS", scale))
+    with pytest.raises(Conflict):
+        open_payment_intent(
+            db,
+            scope=TenantScope(TENANT_A),
+            command=OpenPaymentIntent(
+                payer_reference="payer",
+                purpose=PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT,
+                requested=money,
+                reference="invalid",
+                provider_type="bank",
+                channel="transfer",
+            ),
+        )
+    assert db.scalar(select(func.count()).select_from(models.PaymentIntent)) == 0
+
+
+def test_same_code_different_scale_is_not_replay_or_correlation(db):
+    from dotmac_kernel.money import Currency
+
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    changed = Money.of("15000", Currency("NGN", 3))
+    with pytest.raises(Conflict):
+        open_payment_intent(
+            db,
+            scope=scope,
+            command=OpenPaymentIntent(
+                payer_reference="customer:1",
+                purpose=PaymentPurpose.INVOICE_SETTLEMENT,
+                requested=changed,
+                reference="ref-1",
+                provider_type="paystack",
+                channel="web",
+            ),
+        )
+    with pytest.raises(Conflict):
+        record_confirmation(
+            db,
+            scope=scope,
+            command=RecordConfirmation(
+                intent_id=intent.id,
+                source=ConfirmationSource.MANUAL,
+                external_reference="scale-conflict",
+                confirmed=changed,
+            ),
+        )
+
+
+def test_legacy_unknown_precision_refuses_acceptance_but_can_reject(db):
+    from dotmac_payments import UnresolvedMoneyPrecision
+
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    proof = submit_transfer_proof(
+        db,
+        scope=scope,
+        command=SubmitTransferProof(
+            intent_id=intent.id,
+            declared=Money.of("15000", NGN),
+            document_reference="legacy",
+            submitted_reference="legacy",
+        ),
+    )
+    proof.minor_units = None
+    db.flush()
+    with pytest.raises(UnresolvedMoneyPrecision):
+        review_transfer_proof(
+            db,
+            scope=scope,
+            command=ReviewTransferProof(
+                proof_id=proof.id, accept=True, reviewer="operator"
+            ),
+        )
+    assert proof.state is TransferProofState.SUBMITTED
+    assert proof.reviewer is None
+    review_transfer_proof(
+        db,
+        scope=scope,
+        command=ReviewTransferProof(
+            proof_id=proof.id,
+            accept=False,
+            reviewer="operator",
+            rejection_reason="unresolved",
+        ),
+    )
+    assert proof.state is TransferProofState.REJECTED
+
+
+def test_proof_acceptance_cannot_round_inconsistent_stored_precision(db):
+    from dotmac_payments import UnresolvedMoneyPrecision
+
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    proof = submit_transfer_proof(
+        db,
+        scope=scope,
+        command=SubmitTransferProof(
+            intent_id=intent.id,
+            declared=Money.of("15000", NGN),
+            document_reference="inconsistent",
+            submitted_reference="inconsistent",
+        ),
+    )
+    proof.declared_amount = Decimal("15000.001")
+    db.flush()
+    with pytest.raises(UnresolvedMoneyPrecision):
+        review_transfer_proof(
+            db,
+            scope=scope,
+            command=ReviewTransferProof(
+                proof_id=proof.id,
+                accept=True,
+                reviewer="operator",
+            ),
+        )
+    assert proof.state is TransferProofState.SUBMITTED
+    assert db.scalar(select(func.count()).select_from(models.PaymentConfirmation)) == 0

@@ -463,6 +463,8 @@
           "dotmac_billing/manifest.py",
           "dotmac_billing/migrations/__init__.py",
           "dotmac_billing/migrations/versions/bi_0001_billing.py",
+          "dotmac_billing/migrations/versions/bi_0002_multiline.py",
+          "dotmac_billing/migrations/versions/bi_0003_issued_line_freeze.py",
           "dotmac_billing/models.py",
           "dotmac_billing/py.typed",
           "dotmac_billing/service.py"
@@ -2339,6 +2341,8 @@
           "dotmac_payments/manifest.py",
           "dotmac_payments/migrations/__init__.py",
           "dotmac_payments/migrations/versions/pm_0001_payment_intents.py",
+          "dotmac_payments/migrations/versions/pm_0002_money_precision.py",
+          "dotmac_payments/migrations/versions/pm_0003_confirmation_immutable.py",
           "dotmac_payments/models.py",
           "dotmac_payments/service.py"
         ],

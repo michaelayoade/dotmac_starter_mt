@@ -18,19 +18,39 @@ ADR-0024, ADR-0022, ADR-0016, ADR-0014
 
 ---
 
-## Why this is a markdown document and not `packages/dotmac-billing/EXTRACTION.toml`
+## Current disposition — 2026-10-13
 
-Repository convention locates a dossier at its package root. **`packages/dotmac-billing/`
-does not exist and this document does not create it.** ADR-0017's P11 lineage
-gate is closed, no owner-directed exception has been granted for
-`dotmac-billing`, and the implementation plan is explicit that the three
-`EXTRACTION.toml` dossiers are created in **Stage E**, beside the package, before
-code (`2026-08-11-billing-subscriptions-collections.md`, Stage A).
+This is the historical 2026-08-14 source audit. The package now exists;
+[`packages/dotmac-billing/EXTRACTION.toml`](../../packages/dotmac-billing/EXTRACTION.toml)
+is its maintained dossier. Source coordinates and findings below describe that
+audit unless explicitly dated otherwise; they are not current production facts.
+The original P11/Stage E implementation hold is historical, not today's next action.
 
-This file therefore holds the **content** of that dossier — the same fields, the
-same names, verified against real source — so that Stage E is a move rather than
-an authoring exercise. Status is `audit-complete`. It is never `approved` and
-never `adopted` before a real cutover produces evidence.
+Michael's 2026-10-13 rulings select **Sub first** (M1, Vendor-first waived),
+**prepaid pay-then-record** (M6: obligation at confirmed funding with the final
+service period; wallet = `available_credit`; advance drafts become notices),
+and **open items plus opening lanes only** (M8). Closed history stays in Sub's
+read-only archive. Compose clean Starter-owned modules inside Sub and lift proven
+Sub/ERP logic behind contracts; exclude metadata identity, repair and
+reconciliation machinery. The no-mutations freeze remains in force. Production
+activation, financial data changes and writer retirement require their separate
+authority and evidence.
+
+The maintained package uses `source_mode = "greenfield-after-inventory"`:
+[billing-source-variance.md](billing-source-variance.md) records why the older
+product-first owner claim could not stand. This describes the clean shared core;
+it does not permit rewriting proven working logic selected for extraction.
+
+Billing's historical publication is recorded in
+[module-release-legacy-unverified.json](module-release-legacy-unverified.json):
+`dotmac-billing-v0.1.0a1`, tag object
+`3dbb4e171903d954d58cbc90a28069d976e9df1e`, peeled commit
+`92a1626b16d7e068f92536d8cfcb2ef9b6f270c2`. The newer
+[module-release-verifications.json](module-release-verifications.json) has no
+Billing receipt. A historical publication record proves neither modern wheel
+verification nor pinnable artifact evidence, adoption, production authority transfer
+or local-writer retirement.
+See [Sub cutover readiness](billing-sub-cutover-readiness.md) for the current gaps.
 
 Every path in the TOML block below was confirmed to exist by `ls`/`wc -l` during
 this audit. Where `billing-sources.md` cites a path that turned out to be stale
@@ -38,14 +58,14 @@ or wrong, § 5 records the correction and this dossier uses the verified path.
 
 ---
 
-## 1. Dossier content
+## 1. Historical dossier content (current sequencing fields amended 2026-10-13)
 
 ```toml
 schema_version = 1
 package = "dotmac-billing"
 classification = "optional-module"
 status = "audit-complete"
-source_mode = "product-first"
+source_mode = "greenfield-after-inventory"
 owner = "Operational receivables on explicit tenant and platform planes: rated-obligation acceptance, invoice and credit-note lifecycle, confirmed settlement facts, allocation and reversal, and separately derived per-currency positions"
 contract = "Accept an immutable pre-tax rated obligation under a database-enforced natural identity; issue and correct invoices and credit notes with frozen price/tax/FX snapshots; accept only independently confirmed, provider-neutral settlement observations exactly once; allocate, deallocate, reallocate, reverse and refund as immutable posting groups; derive collectible receivable, available customer credit and prepaid funding SEPARATELY per currency; derive payment coverage from amounts through one owner; publish versioned receivable, accounting and invoice-document facts; and record which stored object is the OFFICIAL artifact of a document fact version, as an opaque handle plus render provenance, written only by the assembly's reconciler through a typed command. NOT commercial contract lifecycle, NOT dunning policy or collections consequence, NOT general ledger / chart of accounts / journals / fiscal periods / statutory accounting or tax returns, NOT PSP clients / provider credentials / webhook signature verification, NOT document rendering, NOT byte storage, and NOT product access or entitlement mutation."
 source_repositories = [
@@ -103,7 +123,7 @@ source_paths = [
   "dotmac_erp:app/models/finance/core_fx/exchange_rate_type.py",
   "dotmac_erp:app/services/finance/platform/fx.py",
   "dotmac_erp:app/services/finance/money_boundary.py",
-  # --- Vendor CP: cutover-1 target shape (platform plane, exact money) ---
+  # --- Vendor CP: historical candidate shape (platform plane, exact money) ---
   "dotmac_vendor_control_plane:src/vendor_cp/offers/models.py",
   "dotmac_vendor_control_plane:src/vendor_cp/contracts/models.py",
   "dotmac_vendor_control_plane:src/vendor_cp/contracts/service.py",
@@ -187,10 +207,10 @@ inventory_evidence = [
   "docs/superpowers/specs/2026-08-14-billing-authority-profile-contract.md",
   "docs/superpowers/plans/2026-08-14-billing-vendor-cp-sub-cutover.md",
 ]
-first_cutover = "dotmac_vendor_control_plane is cutover 1 on the PLATFORM plane, per ADR-0020 § 6 and the focused cutover plan. It is greenfield on invoicing: an exhaustive grep of src/ and tests/ for invoice, payment, receivable, settlement, credit-note, allocation and ledger returns no table, model, service or writer, and the exclusion is documented in its own docs/design/domain-foundation.md. It has 18 owned tables, of which offer_versions, contracts and contract_lines are the priced commercial surface; it has no tenant_id column anywhere, no RLS, and isolation by GRANT/REVOKE — so it is a clean ADR-0023 platform-plane adopter with no sentinel tenant to inherit. It already consumes dotmac_kernel Money. dotmac_sub is cutover 2 on the TENANT plane and is the product-first source: ~36,000 LOC in app/services/billing/ alone plus the top-level payment/settlement/ledger services, and a mature estate with real money, imported history and customer-visible positions. The two cutovers are sequenced and evidenced by docs/superpowers/plans/2026-08-14-billing-vendor-cp-sub-cutover.md; this dossier does not restate that sequence."
+first_cutover = "dotmac_sub is cutover 1 on the tenant plane, per Michael’s 2026-10-13 M1 ruling; Vendor-first ordering is waived. Compose clean Starter-owned modules locally inside Sub, incrementally behind published contracts, with isolated shadow comparison and one coupled invoice/settlement/allocation watermark per accepted slice. M6: prepaid is pay-then-record, no financial document before funding; advance drafts become notices; create the obligation at funding with its final service period; wallet means available_credit and renewal draws from it. M8: migrate open items plus separately reconciled opening lanes only; closed history remains a provenance-labelled read-only Sub archive. Vendor CP remains a later platform-plane candidate with no sentinel tenant. Historical source/revalidation revisions above remain audit coordinates, not current deployment evidence. Production activation and authority transfer remain separately authorized."
 shadow_and_drift = "Vendor CP is greenfield, so there is no old invoice owner to shadow. Its substitutes are the cutover plan's V1 preview (one real contract's invoice previewed without persisting or numbering, finance-verified), the full same-currency scenario matrix against fakes, a proven platform-role/tenant-role privilege split, one real production flow, an exact per-account/per-currency position rebuild hash, and an idempotent ERP accounting-fact receipt. Sub runs a PURE behaviour shadow: the module's engine executes against captured immutable source inputs in an isolated shadow database unreachable from product routes, the legacy Sub writer remains sole authority, and financial commands are never dual-written. Comparison is exact and at source-identity level over documents, settlements, allocations, positions and accounting facts, with NO money tolerance; every mismatch is classified as source defect, known intentional correction, missing evidence, contract defect or shadow bug, and an unclassified difference blocks cutover. Acceptance requires all active cadences and settlement paths exercised plus three consecutive complete reconciliations with zero unclassified drift. The six known non-conformances (see this dossier's section 4) each carry a named shadow measurement because several change customer-visible numbers, and customer-debit, over-credit, tax and access-impacting deltas need explicit Finance/product acceptance before the switch. Post-cutover drift detection is a replay reconciler that rebuilds every per-currency position from immutable posting groups and hash-compares; under a provider_owned authority the projection additionally carries a source label and a drift report a collections ladder may refuse to act on when stale."
 local_copy_retirement = "Vendor CP has no local financial writer to retire; its obligation is to add one only through the module, never a second generic invoice facade. Sub retires its estate slice by slice under an ADR-0018 two-directional ratchet, and a slice is DONE ONLY WHEN THE LOCAL WRITER IS DELETED, not when the module can also do the work. The ratcheted slices are: (1) invoice and credit-note lifecycle plus invoice numbering — app/services/billing/invoices.py including next_invoice_number, app/services/billing/credit_notes.py, app/services/invoice_draft_authoring.py, app/services/advance_renewal_invoicing.py; (2) obligation creation/resolution — app/services/billing/obligations.py and the recurring-run dedupe path in app/services/billing_automation.py; (3) rating and tax application — app/services/billing/rating.py, app/services/billing/tax.py, app/services/tax_accounting.py's invoice-side decisions (statutory recognition stays ERP's); (4) settlement, allocation, refund and reversal — app/services/billing/payments.py, app/services/provider_payment_settlements.py, app/services/financial_import_batch_reversals.py, plus the PaymentUpdate.amount field in app/schemas/billing.py; (5) posting groups and per-currency positions — app/services/billing/customer_subledger.py, app/services/billing/subledger_opening.py, app/services/billing/ledger.py, app/services/customer_financial_position.py, app/services/customer_financial_ledger.py; (6) credit and adjustment writers — app/services/billing/account_credit.py, app/services/billing/adjustments.py, app/services/account_credit_deposits.py; (7) the derived-balance read surfaces — app/services/web_subscriber_details.py's current_balance computation and app/services/billing/reporting.py; (8) the invoice-document artifact relation — app/models/billing.py:856 InvoicePdfExport (table invoice_pdf_exports), app/services/billing_invoice_pdf.py and app/services/invoice_bank_details.py, which split three ways: the relation half to billing's document_artifacts, the rendering half to the Documents workstream, and the queued/processing/completed/failed job-state half to NOTHING, because it is a second at-most-once mechanism ADR-0014 forbids and it already shows the predicted stalled-processing failure. No replacement job table is created on any side. Each ratchet counts legacy model/service imports, direct invoice/payment/allocation/balance assignments, provider callbacks that mutate money, and jobs that bypass the module; each ships a sensitivity proof; and every removal lowers the baseline in the same change. Historical archives remain read-only and provenance-labelled and are never a fallback writer. Retaining tables for statutory retention does not retain their authority. ERP retires nothing to billing: its coverage owner app/services/finance/coverage.py retires to the KERNEL coverage slice (plan Stage B), which is a separate, independently adoptable cutover."
-next_action = "No implementation. The immediate next action is a decision, not code: ADR-0017 P11 must be evidenced by the kernel migration lineage running in Sub's PRODUCTION database (Sub S7, recorded in Sub's PLATFORM_ADOPTION_LEDGER.md), or Michael must grant dotmac-billing a named owner-directed exception in the same shape ADR-0026 granted dotmac-approvals. Independently and in parallel: P4 document numbering has no owner and Sub has NO test for next_invoice_number at all, so numbering is both a gap-listed prerequisite and an untested source; P3 durable timers remain gap-listed (Sub has app/models/durable_timer.py to port); P8a rendering remains a gap owned by the separate document workstream. When the gate opens, Stage E creates packages/dotmac-billing/ with this content as its EXTRACTION.toml, allocates the short code, schema, prefix and branch label IN THAT SAME CHANGE (never reserved ahead of it), ships both declared persistence planes in revision 1, and exposes versions_dir() from day one."
+next_action = "Implement the Sub-first extraction map and bounded contract gaps recorded in docs/inventories/billing-sub-cutover-readiness.md: lift proven Sub/ERP logic behind complete owner contracts, retain parity scenarios, and exclude metadata identity, repair and drift-reconciliation imports. Preserve the clean-core greenfield-after-inventory classification and historical coordinates; it does not authorize rewriting qualifying working logic. Billing 0.1.0a1 already has a historical publication record (module-release-legacy-unverified.json, tag dotmac-billing-v0.1.0a1, peeled commit 92a1626b16d7e068f92536d8cfcb2ef9b6f270c2); this is not a modern wheel-verification receipt or proof of adoption. Successor release/version decisions remain separate. No production mutation, backfill execution, deployment, authority switch or legacy deletion is authorized by this dossier; the no-mutations freeze remains in force."
 ```
 
 ---
@@ -659,13 +679,15 @@ much billing is there", and a reader will assume one is stale.
 
 ---
 
-## 6. Conflicts with the focused cutover plan
+## 6. Historical comparison with the focused cutover plan (2026-08-14)
 
 Read against
 `docs/superpowers/plans/2026-08-14-billing-vendor-cp-sub-cutover.md` in full.
-**No contradiction found.** This dossier's `first_cutover`, `shadow_and_drift`
-and `local_copy_retirement` are written to be consistent with it and deliberately
-do not restate its sequencing.
+**At that audit date, no contradiction was found.** The 2026-10-13 M1 ruling
+now supersedes Vendor-first sequencing; the plan is non-authoritative intent and
+its historical ordering is not a current entry gate. The historical `shadow_and_drift`
+and `local_copy_retirement` were written against that plan; their source-retirement
+requirements survive the changed adopter order.
 
 Four points of **tension** — not contradictions, but places where the plan and
 the verified evidence need each other and one of them should be updated by its
@@ -707,9 +729,14 @@ and duplicating them here would create a second copy to drift.
 
 ---
 
-## 7. Open questions needing Michael's decision
+## 7. Historical open questions (2026-08-14)
 
-1. **The gate itself.** P11 is not met. Does `dotmac-billing` get an
+The questions below preserve the audit record and are not a current approval
+checklist. P11/implementation-start claims are historical; package/publication
+evidence and current Sub-first readiness are stated above. Vendor-specific
+questions do not gate Sub-first preparation. No new approval is created here.
+
+1. **The gate itself (historical).** P11 was not met at this audit date. Does `dotmac-billing` get an
    owner-directed exception in the ADR-0026 shape, or does it wait for Sub's S7?
    Nothing below matters until this is answered.
 2. **Production issuance without a rendered document** (§ 6.3). May Vendor CP
