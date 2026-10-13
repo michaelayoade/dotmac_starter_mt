@@ -159,6 +159,7 @@
           "dotmac_accounting/manifest.py",
           "dotmac_accounting/migrations/__init__.py",
           "dotmac_accounting/migrations/versions/ac_0001_accounting.py",
+          "dotmac_accounting/migrations/versions/ac_0002_posted_content.py",
           "dotmac_accounting/models.py",
           "dotmac_accounting/service.py"
         ],
