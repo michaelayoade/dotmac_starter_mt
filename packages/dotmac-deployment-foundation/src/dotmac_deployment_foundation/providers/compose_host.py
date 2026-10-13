@@ -120,7 +120,7 @@ def _bounded_material_probe(
     """Collect only bounded stdout; child diagnostics are discarded at source."""
     process: subprocess.Popen[bytes] | None = None
     try:
-        process = subprocess.Popen(  # nosec B603 -- argv only, no shell
+        process = subprocess.Popen(  # nosec B603 -- argv only, no shell  # noqa: S603
             list(argv),
             shell=False,
             stdin=subprocess.DEVNULL,

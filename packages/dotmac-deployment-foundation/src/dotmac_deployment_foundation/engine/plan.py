@@ -517,7 +517,8 @@ def build_plan(
         steps.append(
             Step(
                 StepKind.VERIFY_POST_MIGRATION_MATERIALS,
-                "Verify candidate materials under each application role after migrations",
+                "Verify candidate materials under each application role "
+                "after migrations",
                 timeout_seconds=sum(
                     probe.timeout_seconds for probe in spec.material_probes
                 ),

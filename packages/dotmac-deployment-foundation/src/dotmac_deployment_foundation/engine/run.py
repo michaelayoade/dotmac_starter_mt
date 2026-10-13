@@ -966,7 +966,7 @@ class Executor:
     def _bootstrap_principals(self, outcome: DeploymentOutcome) -> None:
         """Install the credentials this plan was authorized to install.
 
-        For V1–V3, BEFORE the step loop. V4 first completes its read-only
+        For V1-V3, BEFORE the step loop. V4 first completes its read-only
         gates, including candidate material readiness, then bootstraps before
         the mutating step suffix. In every schema the ordering is deliberate:
         a migration may need the role to exist and be able to

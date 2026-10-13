@@ -37,16 +37,26 @@ from tests.unit.test_deployment_foundation_compose_topology import (
 )
 
 
+def probe_declaration(role: str, phase: str) -> str:
+    argv = ["/opt/venv/bin/python", "-m", "product.material_probe"]
+    return "\n".join(
+        (
+            "",
+            "[[material_probes]]",
+            f'role = "{role}"',
+            f'phase = "{phase}"',
+            "argv = " + json.dumps(argv),
+            "timeout_seconds = 30",
+            "",
+        )
+    )
+
+
 def descriptor() -> str:
     text = DESCRIPTOR.replace("ProductDeploymentSpec.v3", "ProductDeploymentSpec.v4")
     for role in ("app", "relay"):
         for phase in ("pre_mutation", "post_migration"):
-            text += f'''\n[[material_probes]]
-role = "{role}"
-phase = "{phase}"
-argv = ["/opt/venv/bin/python", "-m", "product.material_probe", "--phase", "{phase}"]
-timeout_seconds = 30
-'''
+            text += probe_declaration(role, phase)
     return text
 
 
@@ -58,6 +68,17 @@ def receipt(status: str = "ready") -> str:
             "checks": [{"name": "boot.jwt", "status": status}],
         }
     )
+
+
+def test_material_probe_capability_has_consistent_public_exports() -> None:
+    import dotmac_deployment_foundation as foundation
+    import dotmac_deployment_foundation.engine as engine
+    from dotmac_deployment_foundation.engine.run import CandidateMaterialProbeEffects
+
+    assert foundation.CandidateMaterialProbeEffects is CandidateMaterialProbeEffects
+    assert engine.CandidateMaterialProbeEffects is CandidateMaterialProbeEffects
+    assert "CandidateMaterialProbeEffects" in foundation.__all__
+    assert "CandidateMaterialProbeEffects" in engine.__all__
 
 
 def test_closed_receipt_positive_control() -> None:
@@ -168,7 +189,8 @@ def test_transport_timeout_reaps_child(tmp_path: Path) -> None:
         [
             sys.executable,
             "-c",
-            "import os,pathlib,sys,time;pathlib.Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(30)",
+            "import os,pathlib,sys,time;"
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(30)",
             str(pid_file),
         ],
         timeout_seconds=1,
@@ -415,7 +437,10 @@ def test_full_executor_material_gates_order_bootstrap_and_handoff(
     )
 
     text = BASE.replace("ProductDeploymentSpec.v1", "ProductDeploymentSpec.v4")
-    text += '\n[compose_topology]\nroles_depend_on_migrate = false\n[[compose_topology.networks]]\ncode = "back"\n'
+    text += (
+        "\n[compose_topology]\nroles_depend_on_migrate = false\n"
+        '[[compose_topology.networks]]\ncode = "back"\n'
+    )
     for role in ("app", "worker", "beat", "migrate"):
         text += (
             f'\n[[compose_topology.placements]]\ncode = "{role}"\nnetworks = ["back"]\n'
@@ -424,7 +449,7 @@ def test_full_executor_material_gates_order_bootstrap_and_handoff(
             text += 'profiles = ["ops"]\n'
     for role in ("app", "worker", "beat"):
         for phase in MaterialProbePhase:
-            text += f'\n[[material_probes]]\nrole = "{role}"\nphase = "{phase.value}"\nargv = ["/opt/venv/bin/python", "-m", "product.material_probe"]\ntimeout_seconds = 30\n'
+            text += probe_declaration(role, phase.value)
     spec = ProductDeploymentSpec.loads(text)
     plan = build_plan(spec)
     events = []
