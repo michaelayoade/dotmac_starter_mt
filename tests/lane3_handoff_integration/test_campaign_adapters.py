@@ -195,10 +195,21 @@ def test_actual_nonroot_pinned_runner_qualifies_before_matrix(
     }
     for path in (matrix, qualifier):
         path.chmod(0o644)
+    # The checkout may have root-only ancestors inside the integration image.
+    # Stage the exact canonical bytes in the fixture deployment directory;
+    # the nobody worker must read production code without checkout access.
+    canonical = (SCRIPTS / "lane3_campaign_runner.py").read_bytes()
+    deployed_runner = directory / "lane3_campaign_runner.py"
+    deployed_runner.write_bytes(canonical)
+    deployed_runner.chmod(0o644)
+    assert (
+        hashlib.sha256(deployed_runner.read_bytes()).digest()
+        == hashlib.sha256(canonical).digest()
+    )
     code = (
         "import sys,json\n"
         + "sys.path.insert(0,"
-        + repr(str(SCRIPTS))
+        + repr(str(directory))
         + ")\n"
         + "import lane3_campaign_runner as runner\n"
         + "runner.configure("
