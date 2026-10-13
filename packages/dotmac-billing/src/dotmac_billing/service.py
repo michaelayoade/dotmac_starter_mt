@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
-from dotmac_kernel.cache import Scope, TenantScope
+from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.idempotency import (
     IdempotencyConflict,
     IdempotentOutcome,
@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_billing import models
 from dotmac_billing.commands import (
+    AcceptWithholdingDischarge,
     AllocationCommand,
     ApplyAvailableCreditCommand,
     CreateDraftDocument,
@@ -38,6 +39,7 @@ from dotmac_billing.commands import (
     ReallocationCommand,
     RefundCommand,
     ReversePostingGroupCommand,
+    ReverseWithholdingDischarge,
 )
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
@@ -46,6 +48,7 @@ from dotmac_billing.contracts import (
     AccountingAllocationEffectV1,
     AccountingEffectV1,
     AccountingFactV1,
+    AccountingFactV2,
     AppliedFxSnapshotV1,
     AppliedTaxSnapshotV1,
     CollectionTiming,
@@ -66,11 +69,16 @@ from dotmac_billing.contracts import (
     RepairDocumentArtifactV1,
     ServicePeriodEvidenceV1,
     ServicePeriodStatus,
+    WithholdingDischargeEffectV1,
+    _withholding_money,
 )
 from dotmac_billing.engine import Effect, EffectLane, PositionState, rebuild_position
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
+from dotmac_billing.queries import get_withholding_discharge
 
 _AccountingEffectKind = Literal[
+    "withholding_accepted",
+    "withholding_reversed",
     "invoice_issued",
     "credit_note_issued",
     "settlement_accepted",
@@ -123,6 +131,7 @@ class _PlaneModels:
     accounting_fact: Any
     position_fact: Any
     exposure_fact: Any
+    withholding: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +165,7 @@ _TENANT = _PlaneModels(
     models.AccountingFact,
     models.ReceivablePositionFact,
     models.ReceivableExposureFact,
+    models.WithholdingDischarge,
 )
 _PLATFORM = _PlaneModels(
     models.PlatformBillingAccount,
@@ -175,6 +185,7 @@ _PLATFORM = _PlaneModels(
     models.PlatformAccountingFact,
     models.PlatformReceivablePositionFact,
     models.PlatformReceivableExposureFact,
+    models.PlatformWithholdingDischarge,
 )
 
 
@@ -1068,7 +1079,11 @@ def _receivable_exposure(
     )
     allocated = _document_allocated(db, scope=scope, document_id=document.id)
     credited = _document_credited(db, scope=scope, document_id=document.id)
-    resolved_amount = allocated + credited
+    resolved_amount = (
+        allocated
+        + credited
+        + _document_withheld(db, scope=scope, document_id=document.id)
+    )
     outstanding = max(document.grand_total - resolved_amount, Decimal("0"))
     financial_state: FinancialState
     if voided:
@@ -1335,6 +1350,8 @@ def _post_group(
     reverses_group_id: UUID | None = None,
     tax_snapshots: tuple[AppliedTaxSnapshotV1, ...] = (),
     fx_snapshot: AppliedFxSnapshotV1 | None = None,
+    withholding: WithholdingDischargeEffectV1 | None = None,
+    withholding_source_owner: str | None = None,
 ) -> _PostingGroupRow:
     plane = _models(scope)
     allocation_inputs = tuple(allocations)
@@ -1364,6 +1381,35 @@ def _post_group(
     # relationships. Persist the parent before its effect/allocation children
     # so PostgreSQL never has to infer an insertion order it cannot see.
     db.flush()
+    if withholding is not None:
+        db.add(
+            plane.withholding(
+                **_values(
+                    scope,
+                    {
+                        "id": withholding.discharge_id,
+                        "billing_account_id": account_id,
+                        "document_id": withholding.document_id,
+                        "posting_group_id": group_id,
+                        "source_owner": withholding_source_owner,
+                        "source_ref": source_ref,
+                        "tax_source_owner": withholding.tax_evidence.source_owner,
+                        "determination_ref": withholding.tax_evidence.determination_ref,
+                        "component_ref": withholding.tax_evidence.component_ref,
+                        "claim_ref": withholding.claim_ref,
+                        "claimed_amount": withholding.claimed_amount.amount,
+                        "amount_delta": withholding.accepted_delta.amount,
+                        "currency": currency,
+                        "minor_units": minor_units,
+                        "evidence": _jsonable(withholding),
+                        "settlement_id": withholding.settlement_id,
+                        "allocation_id": withholding.allocation_id,
+                        "reverses_discharge_id": withholding.reverses_discharge_id,
+                    },
+                )
+            )
+        )
+        db.flush()
     effect_rows = []
     for lane, amount in effects:
         row = plane.effect(
@@ -1529,56 +1575,97 @@ def _post_group(
     if reverses_group_id is not None:
         reversed_fact_statement = select(plane.accounting_fact.id).where(
             plane.accounting_fact.posting_group_id == reverses_group_id,
-            plane.accounting_fact.fact_version == 1,
         )
         reverses_fact_id = db.execute(
             _where_scope(reversed_fact_statement, scope, plane.accounting_fact)
         ).scalar_one()
-    typed_fact = AccountingFactV1(
-        scope=scope,
-        source_system="dotmac-billing",
-        fact_id=accounting_fact_id,
-        fact_version=1,
-        billing_account_id=account_id,
-        posting_group_id=group_id,
-        source_ref=source_ref,
-        source_authority="internal",
-        effect_kind=kind,
-        occurred_at=occurred_at,
-        committed_at=observed_at,
-        effects=tuple(
-            AccountingEffectV1(
-                lane=cast(
-                    Literal["receivable", "available_credit", "prepaid_funding"],
-                    row.lane,
-                ),
-                amount_delta=_money(row.amount_delta, currency, minor_units),
-            )
-            for row in effect_rows
-        ),
-        allocations=tuple(
-            AccountingAllocationEffectV1(
-                settlement_id=row.settlement_id,
-                document_id=row.document_id,
-                effect_kind=cast(
-                    Literal[
-                        "allocation",
-                        "deallocation",
-                        "reallocation",
-                        "refund",
-                        "reversal",
-                    ],
-                    row.effect_kind,
-                ),
-                amount_delta=_money(row.amount_delta, currency, minor_units),
-                offsets_allocation_id=row.offsets_allocation_id,
-            )
-            for row in allocation_rows
-        ),
-        reverses_fact_id=reverses_fact_id,
-        tax_snapshots=tax_snapshots,
-        fx_snapshot=fx_snapshot,
-    )
+    typed_fact: AccountingFactV1 | AccountingFactV2
+    if withholding is not None:
+        typed_fact = AccountingFactV2(
+            scope=scope,
+            source_system="dotmac-billing",
+            fact_id=accounting_fact_id,
+            fact_version=2,
+            billing_account_id=account_id,
+            posting_group_id=group_id,
+            source_ref=source_ref,
+            source_authority="internal",
+            effect_kind=cast(
+                Literal["withholding_accepted", "withholding_reversed"], kind
+            ),
+            occurred_at=occurred_at,
+            committed_at=observed_at,
+            effects=tuple(
+                AccountingEffectV1(
+                    lane=cast(
+                        Literal["receivable", "available_credit", "prepaid_funding"],
+                        row.lane,
+                    ),
+                    amount_delta=_money(row.amount_delta, currency, minor_units),
+                )
+                for row in effect_rows
+            ),
+            withholding_discharges=(withholding,),
+            reverses_fact_id=reverses_fact_id,
+        )
+    else:
+        typed_fact = AccountingFactV1(
+            scope=scope,
+            source_system="dotmac-billing",
+            fact_id=accounting_fact_id,
+            fact_version=1,
+            billing_account_id=account_id,
+            posting_group_id=group_id,
+            source_ref=source_ref,
+            source_authority="internal",
+            effect_kind=cast(
+                Literal[
+                    "invoice_issued",
+                    "credit_note_issued",
+                    "settlement_accepted",
+                    "allocation",
+                    "deallocation",
+                    "reallocation",
+                    "refund",
+                    "reversal",
+                ],
+                kind,
+            ),
+            occurred_at=occurred_at,
+            committed_at=observed_at,
+            effects=tuple(
+                AccountingEffectV1(
+                    lane=cast(
+                        Literal["receivable", "available_credit", "prepaid_funding"],
+                        row.lane,
+                    ),
+                    amount_delta=_money(row.amount_delta, currency, minor_units),
+                )
+                for row in effect_rows
+            ),
+            allocations=tuple(
+                AccountingAllocationEffectV1(
+                    settlement_id=row.settlement_id,
+                    document_id=row.document_id,
+                    effect_kind=cast(
+                        Literal[
+                            "allocation",
+                            "deallocation",
+                            "reallocation",
+                            "refund",
+                            "reversal",
+                        ],
+                        row.effect_kind,
+                    ),
+                    amount_delta=_money(row.amount_delta, currency, minor_units),
+                    offsets_allocation_id=row.offsets_allocation_id,
+                )
+                for row in allocation_rows
+            ),
+            reverses_fact_id=reverses_fact_id,
+            tax_snapshots=tax_snapshots,
+            fx_snapshot=fx_snapshot,
+        )
     fact_payload = _jsonable(typed_fact)
     digest = fingerprint_of(fact_payload)
     db.add(
@@ -1588,7 +1675,7 @@ def _post_group(
                 {
                     "id": accounting_fact_id,
                     "posting_group_id": group_id,
-                    "fact_version": 1,
+                    "fact_version": typed_fact.fact_version,
                     "source_system": "dotmac-billing",
                     "source_authority": "internal",
                     "effect_kind": kind,
@@ -1604,7 +1691,11 @@ def _post_group(
     _emit(
         db,
         scope=scope,
-        event_type="billing.accounting.fact.v1",
+        event_type=(
+            "billing.accounting.fact.v2"
+            if withholding is not None
+            else "billing.accounting.fact.v1"
+        ),
         payload=fact_payload,
     )
     _emit(
@@ -1883,6 +1974,16 @@ def issue_document(
     command.due_date_basis.require_collectible(
         native=command.native and command.collectible
     )
+    document_evidence = _one(
+        db, scope=scope, model=plane.document, row_id=command.document_id
+    )
+    _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=document_evidence.billing_account_id,
+        lock=True,
+    )
     # Serialize before consulting the idempotency ledger.  Otherwise two
     # issuers can both observe a missing key, the loser can wake after the
     # winner committed, and report ``already_issued`` instead of replaying the
@@ -2017,6 +2118,14 @@ def void_document(
     source_ref: str,
 ) -> _PostingGroupRow:
     plane = _models(scope)
+    document_evidence = _one(db, scope=scope, model=plane.document, row_id=document_id)
+    _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=document_evidence.billing_account_id,
+        lock=True,
+    )
     offered = fingerprint_of(
         {"document_id": document_id, "actor_ref": actor_ref, "occurred_at": occurred_at}
     )
@@ -2028,6 +2137,10 @@ def void_document(
         if document.issued_at is None:
             raise BillingRuleViolation(
                 "not_issued", "only an issued document can be voided"
+            )
+        if _document_withheld(session, scope=scope, document_id=document_id) != 0:
+            raise BillingRuleViolation(
+                "void_has_withholding", "reverse accepted withholding before voiding"
             )
         allocated = _document_allocated(session, scope=scope, document_id=document_id)
         if allocated != 0:
@@ -2129,6 +2242,16 @@ def issue_credit_note(
     numbering: NumberingProvider,
 ) -> _DocumentRow:
     plane = _models(scope)
+    original_evidence = _one(
+        db, scope=scope, model=plane.document, row_id=command.original_document_id
+    )
+    _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=original_evidence.billing_account_id,
+        lock=True,
+    )
     original = _one(
         db,
         scope=scope,
@@ -2544,13 +2667,24 @@ def _document_credited(db: Session, *, scope: Scope, document_id: UUID) -> Decim
     return total
 
 
+def _document_withheld(db: Session, *, scope: Scope, document_id: UUID) -> Decimal:
+    plane = _models(scope)
+    statement = select(
+        func.coalesce(func.sum(plane.withholding.amount_delta), 0)
+    ).where(plane.withholding.document_id == document_id)
+    return Decimal(
+        db.execute(_where_scope(statement, scope, plane.withholding)).scalar_one()
+    )
+
+
 def _document_outstanding(
     db: Session, *, scope: Scope, document: _DocumentRow
 ) -> Decimal:
     return max(
         Decimal(document.grand_total)
         - _document_allocated(db, scope=scope, document_id=document.id)
-        - _document_credited(db, scope=scope, document_id=document.id),
+        - _document_credited(db, scope=scope, document_id=document.id)
+        - _document_withheld(db, scope=scope, document_id=document.id),
         Decimal("0"),
     )
 
@@ -2644,6 +2778,330 @@ def _require_credit_target(
         raise BillingRuleViolation(
             "document_cancelled", "a cancelled invoice cannot receive credit"
         )
+
+
+def _require_withholding_command(
+    *, scope: Scope, command: AcceptWithholdingDischarge
+) -> None:
+    if not isinstance(scope, TenantScope | PlatformScope):
+        raise TypeError("withholding requires an explicit scope")
+    _require_scope_matches(routed=scope, declared=command.scope)
+    evidence = command.tax_evidence
+    _require_scope_matches(routed=scope, declared=evidence.scope)
+    if (
+        evidence.document_id != command.document_id
+        or evidence.billing_account_id != command.billing_account_id
+    ):
+        raise BillingRuleViolation(
+            "withholding_evidence_scope",
+            "Tax evidence must bind this invoice and account",
+        )
+    for text, maximum in (
+        (command.idempotency_key, 255),
+        (command.source_owner, 120),
+        (command.source_ref, 255),
+        (command.claim_ref, 255),
+        (command.authorization_actor_ref, 255),
+        (command.authorization_evidence_ref, 255),
+    ):
+        if not isinstance(text, str) or not text.strip() or len(text) > maximum:
+            raise BillingRuleViolation(
+                "withholding_evidence_required",
+                "withholding requires bounded source and audit evidence",
+            )
+    if command.occurred_at.tzinfo is None:
+        raise BillingRuleViolation(
+            "withholding_instant_invalid", "withholding requires an aware instant"
+        )
+    _withholding_money(command.claimed_amount, positive=True)
+    _withholding_money(command.accepted_amount, positive=True)
+    _require_same_money(
+        command.claimed_amount, command.accepted_amount, evidence.amount
+    )
+    if (
+        not command.accepted_amount.amount
+        <= command.claimed_amount.amount
+        <= evidence.amount.amount
+    ):
+        raise BillingRuleViolation(
+            "withholding_exceeds_evidence",
+            "accepted <= claimed <= determined withholding is required",
+        )
+    if command.allocation_id is not None and command.settlement_id is None:
+        raise BillingRuleViolation(
+            "withholding_cash_link_invalid",
+            "allocation evidence requires its actual settlement",
+        )
+
+
+def accept_withholding_discharge(
+    db: Session, *, scope: Scope, command: AcceptWithholdingDischarge
+) -> models.WithholdingDischarge | models.PlatformWithholdingDischarge:
+    """Accept one invoice's evidenced deduction as AR discharge, never as cash.
+
+    The trusted assembly must authorize finance acceptance. Actor and evidence
+    references are immutable audit inputs; this API cannot attest permissions.
+    """
+    _require_withholding_command(scope=scope, command=command)
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=command.billing_account_id,
+        lock=True,
+    )
+    document = _one(db, scope=scope, model=plane.document, row_id=command.document_id)
+    if document.billing_account_id != account.id:
+        raise BillingRuleViolation(
+            "withholding_account_mismatch", "withholding invoice and account must agree"
+        )
+    _require_account_money(account, command.accepted_amount)
+    _require_same_money(
+        command.accepted_amount,
+        _money(document.grand_total, document.currency, document.minor_units),
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        duplicate = select(plane.withholding.id).where(
+            plane.withholding.source_owner == command.source_owner,
+            plane.withholding.source_ref == command.source_ref,
+        )
+        if (
+            session.execute(_where_scope(duplicate, scope, plane.withholding)).first()
+            is not None
+        ):
+            raise BillingConflict(
+                "withholding_source_reused",
+                "withholding source already has an immutable acceptance",
+            )
+        tax_duplicate = select(plane.withholding.id).where(
+            plane.withholding.tax_source_owner == command.tax_evidence.source_owner,
+            plane.withholding.determination_ref
+            == command.tax_evidence.determination_ref,
+            plane.withholding.component_ref == command.tax_evidence.component_ref,
+            plane.withholding.reverses_discharge_id.is_(None),
+        )
+        if (
+            session.execute(
+                _where_scope(tax_duplicate, scope, plane.withholding)
+            ).first()
+            is not None
+        ):
+            raise BillingConflict(
+                "withholding_component_reused",
+                "Tax component already has an immutable acceptance",
+            )
+        invoice = _one(
+            session,
+            scope=scope,
+            model=plane.document,
+            row_id=command.document_id,
+            lock=True,
+        )
+        _require_credit_target(
+            session, scope=scope, document=invoice, account_id=account.id
+        )
+        if command.accepted_amount.amount > _document_outstanding(
+            session, scope=scope, document=invoice
+        ):
+            raise BillingRuleViolation(
+                "withholding_exceeds_receivable",
+                "accepted withholding exceeds the invoice's outstanding receivable",
+            )
+        if command.settlement_id is not None:
+            settlement = _one(
+                session,
+                scope=scope,
+                model=plane.settlement,
+                row_id=command.settlement_id,
+            )
+            if settlement.billing_account_id != account.id:
+                raise BillingRuleViolation(
+                    "withholding_cash_link_invalid",
+                    "actual cash belongs to another account",
+                )
+            _require_same_money(
+                command.accepted_amount,
+                _money(settlement.amount, settlement.currency, settlement.minor_units),
+            )
+            if not _settlement_has_active_backing(
+                session, scope=scope, settlement=settlement
+            ):
+                raise BillingRuleViolation(
+                    "withholding_cash_link_invalid",
+                    "linked settlement has no active actual-cash backing",
+                )
+        if command.allocation_id is not None:
+            allocation = _one(
+                session,
+                scope=scope,
+                model=plane.allocation,
+                row_id=command.allocation_id,
+            )
+            if (
+                allocation.billing_account_id != account.id
+                or allocation.document_id != invoice.id
+                or allocation.settlement_id != command.settlement_id
+                or allocation.amount_delta <= 0
+            ):
+                raise BillingRuleViolation(
+                    "withholding_cash_link_invalid",
+                    "cash allocation must bind the same invoice and actual settlement",
+                )
+        effect = WithholdingDischargeEffectV1(
+            discharge_id=uuid4(),
+            document_id=invoice.id,
+            claim_ref=command.claim_ref,
+            claimed_amount=command.claimed_amount,
+            accepted_delta=command.accepted_amount,
+            tax_evidence=command.tax_evidence,
+            authorization_actor_ref=command.authorization_actor_ref,
+            authorization_evidence_ref=command.authorization_evidence_ref,
+            certificate_observation=command.certificate_observation,
+            settlement_id=command.settlement_id,
+            allocation_id=command.allocation_id,
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="withholding_accepted",
+            currency=account.currency,
+            minor_units=account.minor_units,
+            source_ref=command.source_ref,
+            occurred_at=command.occurred_at,
+            effects=((EffectLane.RECEIVABLE, -command.accepted_amount.amount),),
+            exposure_document_ids=(invoice.id,),
+            withholding=effect,
+            withholding_source_owner=command.source_owner,
+        )
+        return {"discharge_id": str(effect.discharge_id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.withholding.accept",
+        key=command.idempotency_key,
+        fingerprint=fingerprint_of(asdict(command)),
+        operation=operation,
+    )
+    return cast(
+        models.WithholdingDischarge | models.PlatformWithholdingDischarge,
+        _one(
+            db,
+            scope=scope,
+            model=plane.withholding,
+            row_id=UUID(str(outcome.result["discharge_id"])),
+        ),
+    )
+
+
+def reverse_withholding_discharge(
+    db: Session, *, scope: Scope, command: ReverseWithholdingDischarge
+) -> models.WithholdingDischarge | models.PlatformWithholdingDischarge:
+    """Append the exact inverse with original Tax/claim/cash provenance retained."""
+    if not isinstance(scope, TenantScope | PlatformScope):
+        raise TypeError("withholding requires an explicit scope")
+    _require_scope_matches(routed=scope, declared=command.scope)
+    if (
+        any(
+            not isinstance(text, str) or not text.strip() or len(text) > 255
+            for text in (
+                command.idempotency_key,
+                command.source_ref,
+                command.authorization_actor_ref,
+                command.authorization_evidence_ref,
+            )
+        )
+        or command.occurred_at.tzinfo is None
+    ):
+        raise BillingRuleViolation(
+            "withholding_evidence_required",
+            "correction requires source, audit identity and aware instant",
+        )
+    plane = _models(scope)
+    original = _one(
+        db, scope=scope, model=plane.withholding, row_id=command.discharge_id
+    )
+    _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=original.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        if original.reverses_discharge_id is not None:
+            raise BillingRuleViolation(
+                "withholding_correction_terminal",
+                "a withholding correction cannot itself be reversed",
+            )
+        existing = select(plane.withholding.id).where(
+            plane.withholding.reverses_discharge_id == original.id
+        )
+        if (
+            session.execute(_where_scope(existing, scope, plane.withholding)).first()
+            is not None
+        ):
+            raise BillingRuleViolation(
+                "already_reversed", "withholding discharge already has its correction"
+            )
+        _one(
+            session,
+            scope=scope,
+            model=plane.document,
+            row_id=original.document_id,
+            lock=True,
+        )
+        frozen = get_withholding_discharge(
+            session, scope=scope, discharge_id=original.id
+        )
+        inverse = replace(
+            frozen,
+            discharge_id=uuid4(),
+            accepted_delta=_money(
+                -original.amount_delta, original.currency, original.minor_units
+            ),
+            reverses_discharge_id=original.id,
+            authorization_actor_ref=command.authorization_actor_ref,
+            authorization_evidence_ref=command.authorization_evidence_ref,
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=original.billing_account_id,
+            kind="withholding_reversed",
+            currency=original.currency,
+            minor_units=original.minor_units,
+            source_ref=command.source_ref,
+            occurred_at=command.occurred_at,
+            effects=((EffectLane.RECEIVABLE, original.amount_delta),),
+            exposure_document_ids=(original.document_id,),
+            reverses_group_id=original.posting_group_id,
+            withholding=inverse,
+            withholding_source_owner="dotmac-billing",
+        )
+        return {"discharge_id": str(inverse.discharge_id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.withholding.reverse",
+        key=command.idempotency_key,
+        fingerprint=fingerprint_of(asdict(command)),
+        operation=operation,
+    )
+    return cast(
+        models.WithholdingDischarge | models.PlatformWithholdingDischarge,
+        _one(
+            db,
+            scope=scope,
+            model=plane.withholding,
+            row_id=UUID(str(outcome.result["discharge_id"])),
+        ),
+    )
 
 
 def apply_available_credit(
@@ -3202,6 +3660,10 @@ def reverse_posting_group(
         row_id=original_evidence.billing_account_id,
         lock=True,
     )
+    if original_evidence.group_kind in ("withholding_accepted", "withholding_reversed"):
+        raise BillingRuleViolation(
+            "withholding_owner_required", "use the withholding correction command"
+        )
     offered = fingerprint_of(asdict(command))
 
     def operation(session: Session) -> dict[str, object]:
@@ -3551,6 +4013,8 @@ def repair_document_artifact(
 
 
 __all__ = [
+    "accept_withholding_discharge",
+    "reverse_withholding_discharge",
     "accept_rated_obligation",
     "accept_settlement",
     "allocate_settlement",

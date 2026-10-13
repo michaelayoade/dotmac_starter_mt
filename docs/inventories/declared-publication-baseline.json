@@ -73,8 +73,8 @@
       "state": "never-published"
     },
     "dotmac-billing": {
-      "declared": "0.1.0a2",
-      "reason": "DEVELOPMENT SUCCESSOR FOR SUB-FIRST CASH-BACKED CREDIT DRAW. Billing 0.1.0a1 is historically published at peeled commit 92a1626b16d7e068f92536d8cfcb2ef9b6f270c2. Its importable source cannot change under that released identity. 0.1.0a2 contains the typed available-credit draw and reversed-funding allocation guards, homogeneous multiline drafts, and additive bi_0003_issued_line_freeze enforcement for every issued document kind with draft-to-issued credit-note staging; it is not published or adopted. Remove this row only with the successor publication record after required hosted CI and release verification. No Sub dependency pin, production deployment or authority switch follows from this declaration.",
+      "declared": "0.1.0a3",
+      "reason": "DEVELOPMENT SUCCESSOR FOR INVOICE-BOUND WHT DISCHARGE. Billing 0.1.0a1 is historically published; a2 source PR808 adds cash-backed credit drawing, multiline invoices and immutable evidence guards. This stacked a3 candidate adds accepted non-cash withholding discharge and linked reversal, immutable Tax evidence, V2 WHT accounting facts and additive bi_0004. Existing V1 facts and cash credit semantics are preserved. Neither a3 publication nor Sub adoption is established here; remove this row only with the exact successor publication record after hosted acceptance and release verification. No production authority transfer follows from this declaration.",
       "state": "declared-unpublished"
     },
     "dotmac-connector-flutterwave": {

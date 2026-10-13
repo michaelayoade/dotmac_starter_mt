@@ -2,6 +2,17 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a3 — UNRELEASED
+
+- Add invoice-bound withholding acceptance and linked reversal with immutable
+  Tax determination evidence. Accepted withholding reduces receivables without
+  creating cash or spendable credit; claims and certificate observations remain
+  distinct from the accepted financial decision.
+- Add append-only withholding effects in `bi_0004_withholding_discharge`, scoped
+  account/document links and natural Tax-component duplicate prevention.
+- Publish WHT-specific accounting facts as V2 while preserving existing V1
+  events and fingerprints. Source presence is not release or Sub adoption.
+
 ## 0.1.0a2 — UNRELEASED
 
 - Close line insertion, reparenting, edits and deletion for every issued

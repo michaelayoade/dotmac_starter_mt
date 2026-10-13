@@ -617,8 +617,252 @@ class AccountingFactV1:
     fx_snapshot: AppliedFxSnapshotV1 | None = None
 
 
+ACCOUNTING_FACT_V2_CONTRACT = "billing.accounting.fact.v2"
+
+
+def _withholding_money(value: Money, *, positive: bool = False) -> None:
+    if not isinstance(value, Money):
+        raise TypeError("withholding amounts must be Money")
+    if (
+        not value.amount.is_finite()
+        or value.amount < 0
+        or (positive and value.amount == 0)
+    ):
+        raise ValueError("withholding money must be finite and non-negative")
+    if value.amount.adjusted() >= 14:
+        raise ValueError("withholding money exceeds Billing numeric precision")
+    if (
+        not 0 <= value.currency.minor_units <= 6
+        or value.amount
+        != value.amount.quantize(Decimal(1).scaleb(-value.currency.minor_units))
+    ):
+        raise ValueError("withholding money must have exact supported precision")
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingTaxLineV1:
+    sequence: int
+    taxable_amount: Money
+    rate: Decimal | None
+    tax_amount: Money
+
+    def __post_init__(self) -> None:
+        if type(self.sequence) is not int or self.sequence < 1:
+            raise ValueError("withholding line sequence must be positive")
+        _withholding_money(self.taxable_amount)
+        _withholding_money(self.tax_amount)
+        if self.taxable_amount.currency != self.tax_amount.currency:
+            raise ValueError("withholding line currency must agree")
+        if self.rate is not None and (
+            not isinstance(self.rate, Decimal)
+            or not self.rate.is_finite()
+            or self.rate < 0
+        ):
+            raise ValueError("withholding rate must be an exact finite Decimal")
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingTaxEvidenceV1:
+    """Assembly-mapped Tax result, never a Billing rate calculation.
+
+    Source fingerprints bind the full Tax result; component and ordered lines
+    retain its exact basis and amounts. References are audit evidence, not proof
+    that the caller is authorized or that a certificate is valid.
+    """
+
+    source_owner: str
+    determination_ref: str
+    source_version: str
+    source_fingerprint: str
+    result_fingerprint: str
+    evidence_ref: str
+    source_ref: str
+    component_ref: str
+    rule_ref: str
+    rule_version: str
+    treatment_code: str
+    calculation_base_code: str
+    inclusive: bool
+    taxable_basis: Money
+    amount: Money
+    lines: tuple[WithholdingTaxLineV1, ...]
+    scope: Scope
+    billing_account_id: UUID
+    document_id: UUID
+    recognition_basis_code: str
+    fact_kind: str
+    transaction_side: str
+    determined_at: datetime
+
+    def __post_init__(self) -> None:
+        texts = (
+            self.source_owner,
+            self.determination_ref,
+            self.evidence_ref,
+            self.source_ref,
+            self.component_ref,
+            self.rule_ref,
+            self.rule_version,
+            self.treatment_code,
+            self.calculation_base_code,
+            self.source_version,
+            self.source_fingerprint,
+            self.recognition_basis_code,
+            self.fact_kind,
+            self.transaction_side,
+        )
+        if any(not isinstance(value, str) or not value.strip() for value in texts):
+            raise ValueError("withholding Tax evidence requires complete provenance")
+        if (
+            not self.result_fingerprint.startswith("rv1:")
+            or len(self.result_fingerprint) != 68
+            or any(c not in "0123456789abcdef" for c in self.result_fingerprint[4:])
+        ):
+            raise ValueError(
+                "withholding evidence requires the sealed Tax rv1 fingerprint"
+            )
+        if len(self.source_owner) > 120 or any(
+            len(value) > 255 for value in (self.determination_ref, self.component_ref)
+        ):
+            raise ValueError("withholding Tax identities exceed persistence bounds")
+        if not isinstance(self.scope, TenantScope | PlatformScope):
+            raise TypeError("withholding Tax evidence requires an explicit scope")
+        if isinstance(self.scope, TenantScope) and not isinstance(
+            self.scope.tenant_id, UUID
+        ):
+            raise TypeError("withholding tenant scope requires a UUID")
+        if not isinstance(self.billing_account_id, UUID) or not isinstance(
+            self.document_id, UUID
+        ):
+            raise TypeError(
+                "withholding Tax evidence requires UUID account and invoice"
+            )
+        if self.determined_at.tzinfo is None:
+            raise ValueError("withholding determination requires an aware instant")
+        if type(self.inclusive) is not bool:
+            raise TypeError("withholding inclusive flag must be boolean")
+        _withholding_money(self.taxable_basis)
+        _withholding_money(self.amount, positive=True)
+        if self.taxable_basis.currency != self.amount.currency:
+            raise ValueError("withholding evidence currency must agree")
+        if not isinstance(self.lines, tuple) or not self.lines:
+            raise ValueError("withholding evidence requires ordered Tax lines")
+        sequences = tuple(line.sequence for line in self.lines)
+        if sequences != tuple(sorted(set(sequences))):
+            raise ValueError(
+                "withholding Tax lines must preserve increasing unique sequences"
+            )
+        if any(line.tax_amount.currency != self.amount.currency for line in self.lines):
+            raise ValueError("withholding Tax line currency must agree")
+        if (
+            sum((line.tax_amount.amount for line in self.lines), Decimal(0))
+            != self.amount.amount
+        ):
+            raise ValueError("withholding Tax lines must total the component amount")
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingCertificateObservationV1:
+    source_owner: str
+    observation_ref: str
+    status: str
+    evidence_ref: str
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            any(
+                not value.strip()
+                for value in (
+                    self.source_owner,
+                    self.observation_ref,
+                    self.status,
+                    self.evidence_ref,
+                )
+            )
+            or self.observed_at.tzinfo is None
+        ):
+            raise ValueError(
+                "certificate observation requires provenance and an aware instant"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingDischargeEffectV1:
+    discharge_id: UUID
+    document_id: UUID
+    claim_ref: str
+    claimed_amount: Money
+    accepted_delta: Money
+    tax_evidence: WithholdingTaxEvidenceV1
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    certificate_observation: WithholdingCertificateObservationV1 | None = None
+    settlement_id: UUID | None = None
+    allocation_id: UUID | None = None
+    reverses_discharge_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        _withholding_money(self.claimed_amount, positive=True)
+        delta = self.accepted_delta
+        if (
+            not isinstance(delta, Money)
+            or not delta.amount.is_finite()
+            or delta.amount == 0
+            or abs(delta.amount) > self.claimed_amount.amount
+        ):
+            raise ValueError(
+                "withholding effect requires a bounded nonzero exact delta"
+            )
+        if (
+            delta.currency != self.claimed_amount.currency
+            or delta.currency != self.tax_evidence.amount.currency
+            or self.claimed_amount.amount > self.tax_evidence.amount.amount
+        ):
+            raise ValueError("withholding effect must match its determined evidence")
+        if (delta.amount < 0) != (self.reverses_discharge_id is not None):
+            raise ValueError("withholding correction direction must match its linkage")
+        if self.tax_evidence.document_id != self.document_id:
+            raise ValueError("withholding effect must bind the Tax invoice")
+        if any(
+            not value.strip()
+            for value in (
+                self.claim_ref,
+                self.authorization_actor_ref,
+                self.authorization_evidence_ref,
+            )
+        ):
+            raise ValueError("withholding effect requires claim and audit evidence")
+
+
+@dataclass(frozen=True, slots=True)
+class AccountingFactV2:
+    """WHT-only successor; V1 fields, bytes and emissions remain unchanged."""
+
+    scope: Scope
+    source_system: str
+    fact_id: UUID
+    fact_version: int
+    billing_account_id: UUID
+    posting_group_id: UUID
+    source_ref: str
+    source_authority: Literal["internal", "provider_owned", "external_finance"]
+    effect_kind: Literal["withholding_accepted", "withholding_reversed"]
+    occurred_at: datetime
+    committed_at: datetime
+    effects: tuple[AccountingEffectV1, ...]
+    withholding_discharges: tuple[WithholdingDischargeEffectV1, ...]
+    reverses_fact_id: UUID | None = None
+
+
 __all__ = [
     "ACCOUNTING_FACT_CONTRACT",
+    "ACCOUNTING_FACT_V2_CONTRACT",
+    "AccountingFactV2",
+    "WithholdingTaxLineV1",
+    "WithholdingTaxEvidenceV1",
+    "WithholdingCertificateObservationV1",
+    "WithholdingDischargeEffectV1",
     "ARTIFACT_COMMAND_CONTRACT",
     "ARTIFACT_REPAIR_CONTRACT",
     "DOCUMENT_FACT_CONTRACT",

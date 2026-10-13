@@ -1399,7 +1399,120 @@ class PlatformReceivableExposureFact(Base, _ExposureFactColumns):
     )
 
 
+class _WithholdingDischargeColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    posting_group_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    tax_source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    determination_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    component_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    claim_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    claimed_amount: Mapped[Decimal] = money_column()
+    amount_delta: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    settlement_id: Mapped[UUID | None] = mapped_column(Uuid())
+    allocation_id: Mapped[UUID | None] = mapped_column(Uuid())
+    reverses_discharge_id: Mapped[UUID | None] = mapped_column(Uuid())
+
+
+def _withholding_constraints(*, tenant: bool) -> tuple[object, ...]:
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}withholding_discharges"
+    scope = ["tenant_id"] if tenant else []
+    constraints: list[object] = []
+    for column, target in (
+        ("posting_group_id", "posting_groups"),
+        ("document_id", "documents"),
+        ("settlement_id", "confirmed_settlements"),
+        ("allocation_id", "allocation_effects"),
+    ):
+        target_table = f"{SCHEMA}.{prefix}{target}"
+        constraints.append(
+            ForeignKeyConstraint(
+                [*scope, column, "billing_account_id"],
+                [
+                    *(f"{target_table}.{c}" for c in scope),
+                    f"{target_table}.id",
+                    f"{target_table}.billing_account_id",
+                ],
+                name=f"fk_{table}_{column}",
+                ondelete="RESTRICT",
+            )
+        )
+    constraints.extend(
+        (
+            UniqueConstraint(*scope, "id", name=f"uq_{table}_id"),
+            UniqueConstraint(
+                *scope,
+                "id",
+                "billing_account_id",
+                "document_id",
+                name=f"uq_{table}_document",
+            ),
+            UniqueConstraint(*scope, "posting_group_id", name=f"uq_{table}_group"),
+            UniqueConstraint(
+                *scope, "source_owner", "source_ref", name=f"uq_{table}_source"
+            ),
+            UniqueConstraint(
+                *scope, "reverses_discharge_id", name=f"uq_{table}_reversal"
+            ),
+            ForeignKeyConstraint(
+                [*scope, "reverses_discharge_id", "billing_account_id", "document_id"],
+                [
+                    *(f"{SCHEMA}.{table}.{c}" for c in scope),
+                    f"{SCHEMA}.{table}.id",
+                    f"{SCHEMA}.{table}.billing_account_id",
+                    f"{SCHEMA}.{table}.document_id",
+                ],
+                name=f"fk_{table}_correction",
+                ondelete="RESTRICT",
+            ),
+            CheckConstraint(
+                "claimed_amount > 0 AND amount_delta <> 0 "
+                "AND abs(amount_delta) <= claimed_amount",
+                name=f"ck_{table}_amount",
+            ),
+            CheckConstraint(
+                "(reverses_discharge_id IS NULL AND amount_delta > 0) "
+                "OR (reverses_discharge_id IS NOT NULL AND amount_delta < 0)",
+                name=f"ck_{table}_direction",
+            ),
+            CheckConstraint(
+                "minor_units BETWEEN 0 AND 6", name=f"ck_{table}_precision"
+            ),
+            Index(
+                f"uq_{prefix}withholding_tax_component",
+                *scope,
+                "tax_source_owner",
+                "determination_ref",
+                "component_ref",
+                unique=True,
+                postgresql_where=text("reverses_discharge_id IS NULL"),
+                sqlite_where=text("reverses_discharge_id IS NULL"),
+            ),
+            schema_table_args(SCHEMA),
+        )
+    )
+    return tuple(constraints)
+
+
+class WithholdingDischarge(Base, _TenantRow, _WithholdingDischargeColumns):
+    __tablename__ = "withholding_discharges"
+    __table_args__ = _withholding_constraints(tenant=True)
+
+
+class PlatformWithholdingDischarge(Base, _WithholdingDischargeColumns):
+    __tablename__ = "platform_withholding_discharges"
+    __table_args__ = _withholding_constraints(tenant=False)
+
+
 TENANT_TABLES = (
+    "withholding_discharges",
     "billing_accounts",
     "rated_obligations",
     "documents",
@@ -1420,6 +1533,7 @@ TENANT_TABLES = (
 )
 
 PLATFORM_TABLES = (
+    "platform_withholding_discharges",
     "platform_billing_accounts",
     "platform_rated_obligations",
     "platform_documents",
@@ -1440,6 +1554,8 @@ PLATFORM_TABLES = (
 )
 
 __all__ = [
+    "WithholdingDischarge",
+    "PlatformWithholdingDischarge",
     "PLATFORM_TABLES",
     "SCHEMA",
     "TENANT_TABLES",

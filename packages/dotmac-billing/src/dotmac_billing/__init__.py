@@ -8,12 +8,17 @@ from dotmac_billing.authority import (
     bind_commercial_authority,
     commercial_authority,
 )
+from dotmac_billing.commands import (
+    AcceptWithholdingDischarge,
+    ReverseWithholdingDischarge,
+)
 from dotmac_billing.contracts import (
     AcceptRatedObligationV1,
     AcceptSettlementV1,
     AccountingAllocationEffectV1,
     AccountingEffectV1,
     AccountingFactV1,
+    AccountingFactV2,
     AppliedFxSnapshotV1,
     AppliedTaxSnapshotV1,
     DiscountSnapshotV1,
@@ -40,6 +45,10 @@ from dotmac_billing.contracts import (
     ServicePeriodStatus,
     SettlementFundingLane,
     StoredInvoiceDocumentFactV1,
+    WithholdingCertificateObservationV1,
+    WithholdingDischargeEffectV1,
+    WithholdingTaxEvidenceV1,
+    WithholdingTaxLineV1,
 )
 from dotmac_billing.errors import BillingConflict, BillingError, BillingRuleViolation
 from dotmac_billing.linking import (
@@ -49,11 +58,19 @@ from dotmac_billing.linking import (
 )
 from dotmac_billing.manifest import module
 from dotmac_billing.migrations import versions_dir
-from dotmac_billing.queries import get_invoice_document_fact
+from dotmac_billing.queries import get_invoice_document_fact, get_withholding_discharge
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
+    "AcceptWithholdingDischarge",
+    "ReverseWithholdingDischarge",
+    "AccountingFactV2",
+    "WithholdingTaxEvidenceV1",
+    "WithholdingTaxLineV1",
+    "WithholdingCertificateObservationV1",
+    "WithholdingDischargeEffectV1",
+    "get_withholding_discharge",
     "AcceptRatedObligationV1",
     "AcceptSettlementV1",
     "AccountingAllocationEffectV1",

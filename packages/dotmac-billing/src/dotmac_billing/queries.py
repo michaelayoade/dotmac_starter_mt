@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+from decimal import DecimalException
+from typing import cast
+from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
@@ -10,11 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_billing import models
-from dotmac_billing._document_facts import decode_invoice_document_fact
+from dotmac_billing._document_facts import _decode, decode_invoice_document_fact
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
     GetInvoiceDocumentFactV1,
     StoredInvoiceDocumentFactV1,
+    WithholdingDischargeEffectV1,
 )
 from dotmac_billing.errors import BillingRuleViolation
 
@@ -98,4 +102,55 @@ def get_invoice_document_fact(
     )
 
 
-__all__ = ["get_invoice_document_fact"]
+__all__ = ["get_invoice_document_fact", "get_withholding_discharge"]
+
+
+def get_withholding_discharge(
+    db: Session, *, scope: Scope, discharge_id: UUID
+) -> WithholdingDischargeEffectV1:
+    """Read immutable discharge evidence; claims and certificates have no balance."""
+    if not isinstance(scope, TenantScope | PlatformScope):
+        raise TypeError("withholding query requires an explicit scope")
+    table = (
+        models.WithholdingDischarge.__table__
+        if isinstance(scope, TenantScope)
+        else models.PlatformWithholdingDischarge.__table__
+    )
+    statement = select(table).where(table.c.id == discharge_id)
+    if isinstance(scope, TenantScope):
+        statement = statement.where(table.c.tenant_id == scope.tenant_id)
+    with db.no_autoflush:
+        row = db.execute(statement).mappings().one_or_none()
+    if row is None:
+        raise BillingRuleViolation("not_found", "withholding discharge was not found")
+    try:
+        effect = cast(
+            WithholdingDischargeEffectV1,
+            _decode(row["evidence"], WithholdingDischargeEffectV1),
+        )
+        if (
+            effect.discharge_id != row["id"]
+            or effect.document_id != row["document_id"]
+            or effect.accepted_delta.amount != row["amount_delta"]
+            or effect.accepted_delta.currency.code != row["currency"]
+            or effect.accepted_delta.currency.minor_units != row["minor_units"]
+            or effect.claimed_amount.amount != row["claimed_amount"]
+            or effect.claimed_amount.currency != effect.accepted_delta.currency
+            or effect.claim_ref != row["claim_ref"]
+            or effect.settlement_id != row["settlement_id"]
+            or effect.allocation_id != row["allocation_id"]
+            or effect.reverses_discharge_id != row["reverses_discharge_id"]
+            or effect.tax_evidence.scope != scope
+            or effect.tax_evidence.document_id != row["document_id"]
+            or effect.tax_evidence.billing_account_id != row["billing_account_id"]
+            or effect.tax_evidence.amount.currency != effect.accepted_delta.currency
+            or effect.tax_evidence.source_owner != row["tax_source_owner"]
+            or effect.tax_evidence.determination_ref != row["determination_ref"]
+            or effect.tax_evidence.component_ref != row["component_ref"]
+        ):
+            raise ValueError("stored withholding identities disagree")
+        return effect
+    except (ValueError, TypeError, DecimalException) as exc:
+        raise BillingRuleViolation(
+            "withholding_evidence_corrupt", "stored withholding evidence is invalid"
+        ) from exc

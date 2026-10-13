@@ -24,6 +24,8 @@ from dotmac_billing.contracts import (
     PartyTaxIdentitySnapshotV1,
     PaymentInstructionsSnapshotV1,
     PresentationAssetReferenceV1,
+    WithholdingCertificateObservationV1,
+    WithholdingTaxEvidenceV1,
 )
 
 
@@ -167,7 +169,40 @@ class ReversePostingGroupCommand:
     source_ref: str
 
 
+@dataclass(frozen=True, slots=True)
+class AcceptWithholdingDischarge:
+    scope: Scope
+    billing_account_id: UUID
+    document_id: UUID
+    idempotency_key: str
+    source_owner: str
+    source_ref: str
+    claim_ref: str
+    claimed_amount: Money
+    accepted_amount: Money
+    tax_evidence: WithholdingTaxEvidenceV1
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    certificate_observation: WithholdingCertificateObservationV1 | None = None
+    settlement_id: UUID | None = None
+    allocation_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReverseWithholdingDischarge:
+    scope: Scope
+    discharge_id: UUID
+    idempotency_key: str
+    source_ref: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+
+
 __all__ = [
+    "AcceptWithholdingDischarge",
+    "ReverseWithholdingDischarge",
     "AllocationCommand",
     "ApplyAvailableCreditCommand",
     "CreateDraftDocument",
