@@ -8,12 +8,22 @@ from dotmac_billing.authority import (
     bind_commercial_authority,
     commercial_authority,
 )
+from dotmac_billing.commands import (
+    AcceptWithholdingDischarge,
+    ApplyNonCashCredit,
+    GrantNonCashCredit,
+    ReduceNonCashCreditGrant,
+    ReverseNonCashCreditApplication,
+    ReverseWithholdingDischarge,
+)
 from dotmac_billing.contracts import (
     AcceptRatedObligationV1,
     AcceptSettlementV1,
     AccountingAllocationEffectV1,
     AccountingEffectV1,
     AccountingFactV1,
+    AccountingFactV2,
+    AccountingFactV3,
     AppliedFxSnapshotV1,
     AppliedTaxSnapshotV1,
     DiscountSnapshotV1,
@@ -23,6 +33,10 @@ from dotmac_billing.contracts import (
     GetInvoiceDocumentFactV1,
     InvoiceDocumentFactV1,
     InvoiceLineFactV1,
+    NonCashCreditClassificationV1,
+    NonCashCreditEffectV1,
+    NonCashCreditGrantV1,
+    NonCashCreditPolicyParameterV1,
     PartyDocumentSnapshotV1,
     PartyTaxIdentitySnapshotV1,
     PaymentInstructionsSnapshotV1,
@@ -32,6 +46,7 @@ from dotmac_billing.contracts import (
     PresentationAssetReferenceV1,
     ReceivableExposureV1,
     ReceivablePositionV1,
+    ReceivablePositionV2,
     ReceivableSourceAuthority,
     RecordDocumentArtifactV1,
     RegisteredIdentifierSnapshotV1,
@@ -40,6 +55,10 @@ from dotmac_billing.contracts import (
     ServicePeriodStatus,
     SettlementFundingLane,
     StoredInvoiceDocumentFactV1,
+    WithholdingCertificateObservationV1,
+    WithholdingDischargeEffectV1,
+    WithholdingTaxEvidenceV1,
+    WithholdingTaxLineV1,
 )
 from dotmac_billing.errors import BillingConflict, BillingError, BillingRuleViolation
 from dotmac_billing.linking import (
@@ -49,11 +68,38 @@ from dotmac_billing.linking import (
 )
 from dotmac_billing.manifest import module
 from dotmac_billing.migrations import versions_dir
-from dotmac_billing.queries import get_invoice_document_fact
+from dotmac_billing.queries import (
+    get_invoice_document_fact,
+    get_non_cash_credit_effect,
+    get_non_cash_credit_grant,
+    get_receivable_position_v2,
+    get_withholding_discharge,
+)
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a4"
 
 __all__ = [
+    "get_receivable_position_v2",
+    "GrantNonCashCredit",
+    "ApplyNonCashCredit",
+    "ReverseNonCashCreditApplication",
+    "ReduceNonCashCreditGrant",
+    "AccountingFactV3",
+    "NonCashCreditGrantV1",
+    "NonCashCreditEffectV1",
+    "NonCashCreditClassificationV1",
+    "NonCashCreditPolicyParameterV1",
+    "ReceivablePositionV2",
+    "get_non_cash_credit_grant",
+    "get_non_cash_credit_effect",
+    "AcceptWithholdingDischarge",
+    "ReverseWithholdingDischarge",
+    "AccountingFactV2",
+    "WithholdingTaxEvidenceV1",
+    "WithholdingTaxLineV1",
+    "WithholdingCertificateObservationV1",
+    "WithholdingDischargeEffectV1",
+    "get_withholding_discharge",
     "AcceptRatedObligationV1",
     "AcceptSettlementV1",
     "AccountingAllocationEffectV1",

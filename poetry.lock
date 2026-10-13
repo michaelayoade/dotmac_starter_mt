@@ -667,7 +667,7 @@ url = "packages/dotmac-banking"
 
 [[package]]
 name = "dotmac-billing"
-version = "0.1.0a2"
+version = "0.1.0a4"
 description = "DotMac dual-plane operational receivables owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2072,7 +2072,7 @@ url = "packages/dotmac-surveys"
 
 [[package]]
 name = "dotmac-tax"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "Composable tax determination, statutory reporting and return-lifecycle owner"
 optional = false
 python-versions = ">=3.11,<3.14"

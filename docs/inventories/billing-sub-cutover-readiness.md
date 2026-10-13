@@ -1,6 +1,6 @@
 # Sub billing cutover readiness
 
-As of 2026-10-13, source baseline `e066dd07`. This is an implementation and
+As of 2026-10-13, this successor is stacked on PR #808 source `fd1f2feed85dbd5fb3fde2786410e6f8838f6ce0`. This is an implementation and
 evidence checklist, not production activation authority. Michael selected Sub
 first (M1; Vendor-first waived), prepaid pay-then-record (M6), and open items plus
 opening lanes only (M8). Clean Starter modules run locally inside Sub; the assembly
@@ -18,10 +18,10 @@ end-to-end adoption or retire any source writer.
 
 | Owner / module | Existing boundary and extraction target | Sub local retirement target | Known gap / next evidence gate |
 |---|---|---|---|
-| `dotmac-billing` | `AcceptRatedObligationV1`, `AcceptSettlementV1`; immutable documents, allocations, corrections, three per-currency positions, accounting/document facts. Lift qualifying Sub money behavior and ERP coverage logic behind those contracts. | Invoice/credit-note, settlement/allocation/refund/reversal and direct-balance writers listed in the package dossier. | Candidate: homogeneous multiline documents behind a new typed command and additive `bi_0002_multiline`, with account-affinity line FKs, immutable authoring mode and exact line/tax/FX checks; hosted proofs pending. Open: withholding-tax command/snapshot treatment and heterogeneous subject/service/period invoices. Open-item/opening-lane import commands, document-level correction/exception flow and full Sub composition remain unproved. The unreleased 0.1.0a2 foundation implements confirmed-cash-backed available-credit draw and reversed-funding guards. Both-plane PostgreSQL canaries are authored; hosted execution and Sub composition are pending. Non-cash grants and opening credit are not spendable through this command. |
+| `dotmac-billing` | `AcceptRatedObligationV1`, `AcceptSettlementV1`; immutable documents, allocations, corrections, three per-currency positions, accounting/document facts. Lift qualifying Sub money behavior and ERP coverage logic behind those contracts. | Invoice/credit-note, settlement/allocation/refund/reversal and direct-balance writers listed in the package dossier. | Candidate: homogeneous multiline documents behind a new typed command and additive `bi_0002_multiline`, with account-affinity line FKs, immutable authoring mode and exact line/tax/FX checks; hosted proofs pending. Unpublished a3 adds invoice-bound WHT acceptance/correction with immutable Tax evidence and distinct V2 accounting facts; [source and limits](billing-withholding-extraction.md). Heterogeneous subject/service/period invoices remain open. Open-item/opening-lane import commands, document-level correction/exception flow and full Sub composition remain unproved. The unreleased 0.1.0a2 foundation implements confirmed-cash-backed available-credit draw and reversed-funding guards. Both-plane PostgreSQL canaries are authored; hosted execution and Sub composition are pending. Non-cash grants and opening credit are not spendable through the cash-backed draw command. A separate source slice now implements ordinary non-cash grant/apply/partial application reversal/unused reduction, immutable classification, V3 accounting facts and a fourth independent V2 position balance; [source and hosted gates](billing-non-cash-credit-extraction.md). Sub UI permission/configuration binding, numbering/presentation, ERP V3 consumption and opening credit remain unproved. |
 | Prepaid product flow / Subscriptions + Sub assembly | Pay-then-record: confirmed funding → final service period and rated obligation → billing document/allocation → product consequence. Wallet is Billing `available_credit`; renewal draws from it. Advance drafts become notices. | Advance financial drafts, settlement-time period rewrites, metadata-based renewal identity and auto-repair, prepaid reconciliation writers. | Open: complete funding-time orchestration and replay/concurrency/period proofs; cash-backed available-credit draw does not implement non-cash grants, notices, renewal policy or access consequences. Recurrence needs Subscriptions' adopted durable timers before effective occurrences. |
 | `dotmac-payments` / Integrator intake | Payment intent, transfer proof and immutable confirmation correlation; assembly translates independently confirmed observations into `AcceptSettlementV1`. PSP credentials, verification, retries and checkpoints remain Integrator concerns. | Provider callbacks and intake paths that directly create money; retain source evidence, remove parallel business writers after accepted cutover. | Existing intent/confirmation API is present. Open: Sub confirmation-to-settlement binding, pending/unverified-proof refusal, duplicate/conflicting confirmation and ambiguous-outcome reconciliation evidence. A proof upload is not confirmed money. |
-| `dotmac-tax` / Billing applied snapshots | Tax determination contract and frozen `AppliedTaxSnapshotV1`; reuse qualifying calculation logic, with assembly mapping between owners. ERP retains statutory recognition, books and returns. | Sub invoice-side tax calculation/snapshot decisions only. | Open: accountant VAT ruling M7 for prepaid funding; final line/component snapshot mapping and exact tax parity. Module presence does not resolve policy. |
+| `dotmac-tax` / Billing applied snapshots | Tax determination contract and frozen `AppliedTaxSnapshotV1`; reuse qualifying calculation logic, with assembly mapping between owners. ERP retains statutory recognition, books and returns. | Sub invoice-side tax calculation/snapshot decisions only. | Open: immutable Tax line/component mapping and exact parity, Tax a5 composable versioned rate/basis UI, and trusted production adoption. The settled configuration direction does not impose a blanket pending category/rate ruling. |
 | `dotmac-numbering` | Assembly-supplied `NumberingProvider`; series state remains the numbering owner. | `next_invoice_number` and bypass callers. | Existing module/tag history; Open: released-package pin, tenant-lineage installation, settings/series seed, historical-number collision and counter reconciliation, all invoice/credit-note caller retirement, issuance/replay/concurrency and no-number-for-notice evidence. Historical absence of a source test is not proof the shared module is absent. |
 | `dotmac-document-rendering` + `dotmac-files` | `InvoiceDocumentFactV1` → assembly reconciler → rendered/stored bytes → `RecordDocumentArtifactV1`; replacements require `RepairDocumentArtifactV1` and semantic-digest match. | Rendering/storage portions of `InvoicePdfExport` flow; official relation moves to Billing. No replacement job-state table. | Existing modules/tag history; Open: Sub reconciler, suppressed-event convergence, official artifact/retrieval and render/storage provenance proofs. Rendering release is no longer described as blocked merely by the August release-lane gap. |
 | `dotmac-collections` | Assembly maps Billing exposure/position into narrow collections observations; policy/cases request consequences, service owner revalidates and acts. | Legacy dunning, prepaid/postpaid policy and sweep decisions for each accepted slice. | Open: Sub mapping, unknown due-date/stale/incomplete evidence fail-closed behavior, policy parity and consequence-owner proof. No billing-side access mutation. |
@@ -122,8 +122,21 @@ Completed source slices do not retire Sub's incumbent financial writer.
 | Intake and prepaid orchestration | Bind verified actual cash to Billing settlements, then exercise funding-time obligation, final period, invoice, allocation and service consequence with exact retry and concurrency proofs. No gross-payment substitution for WHT deductions. |
 | Remaining consumers and migration | Complete Tax, rendering/artifact convergence, Collections, existing ERP-feed mapping and Sub read projections; rehearse open items/opening lanes plus exceptions, closed-history archive and the coupled ledger switch. |
 
-WHT records must distinguish claimed deductions, accepted receivable discharge
-and tax-credit evidence. The accountant's applicability/rate/basis/VAT/rounding
-and recognition policy remains pending; a deduction never becomes spendable
-cash credit. This is distinct from the pending prepaid VAT ruling and non-cash
-promotional-credit decision.
+WHT records distinguish claimed deductions, accepted receivable discharge and
+tax-credit evidence. The a3 source implements the separate discharge/correction
+owner; Tax determines exact amounts from versioned policy. Immutable mapping,
+parity, composable rate/basis UI and trusted adopter finance authorization still
+need their own evidence. A deduction never becomes spendable cash credit.
+Non-cash grants, opening recognition and statutory accounting remain separate
+product/adoption work.
+
+
+## Current hosted predecessor evidence
+
+PR #808 at `fd1f2feed85dbd5fb3fde2786410e6f8838f6ce0` passed all 41 hosted
+checks against base `f483` (full coordinates retained by the coordinator's
+release/readiness register). Accounting PR #809 at `523b` also passed all 41
+checks. Sub Tax PR #3590 at `a5f` passed 31 checks with three mobile skips.
+Earlier pending statements above are historical slice status. They do not make
+this unpublished a3 successor green: its exact head/base hosted acceptance is
+still required. No complete cutover, policy UI or production adoption is claimed.

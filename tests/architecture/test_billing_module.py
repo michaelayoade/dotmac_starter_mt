@@ -38,6 +38,60 @@ KERNEL_VERSIONS = (
 )
 
 _INTERNAL_RELATIONS = (
+    (
+        "non_cash_credit_grants",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_grants",
+        ("restricted_document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_grants",
+        ("replaces_grant_id", "billing_account_id"),
+        "non_cash_credit_grants",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_grants",
+        ("replaces_effect_id", "billing_account_id"),
+        "non_cash_credit_effects",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_effects",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_effects",
+        ("grant_id", "billing_account_id"),
+        "non_cash_credit_grants",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_effects",
+        ("document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_effects",
+        ("original_application_id", "billing_account_id"),
+        "non_cash_credit_effects",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_position_facts_v2",
+        ("posting_group_watermark", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
     ("rated_obligations", ("billing_account_id",), "billing_accounts", ("id",)),
     (
         "rated_obligations",
@@ -148,6 +202,36 @@ _INTERNAL_RELATIONS = (
         "document_artifacts",
         ("id", "document_fact_id", "media_type"),
     ),
+    (
+        "withholding_discharges",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "withholding_discharges",
+        ("document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "withholding_discharges",
+        ("settlement_id", "billing_account_id"),
+        "confirmed_settlements",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "withholding_discharges",
+        ("allocation_id", "billing_account_id"),
+        "allocation_effects",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "withholding_discharges",
+        ("reverses_discharge_id", "billing_account_id", "document_id"),
+        "withholding_discharges",
+        ("id", "billing_account_id", "document_id"),
+    ),
     ("accounting_facts", ("posting_group_id",), "posting_groups", ("id",)),
     ("accounting_facts", ("reverses_fact_id",), "accounting_facts", ("id",)),
     (
@@ -246,6 +330,9 @@ def test_the_dossier_pins_timer_evidence_without_importing_a_timer_owner() -> No
         "dotmac_erp:2749ec5396cbbd7a1132b394e85855a1d133a7cd",
         "dotmac_vendor_control_plane:f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
         "dotmac_integrator:35167813c83ab0ec29c683259ad31479503d812f",
+    ]
+    assert dossier["withholding_evidence_revisions"] == [
+        "dotmac_sub:3ff8ab17ee64954c973568e930d8cfbf5c97df5f"
     ]
     assert dossier["dependency_evidence_revisions"] == [
         "dotmac_starter_mt/agent/dotmac-durable-timers:7e0543004864845f0035c9ec325e3f5064c281cc",
