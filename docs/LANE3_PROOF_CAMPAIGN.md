@@ -21,8 +21,12 @@ must prove no active lease before certificate issuance or B8 transport begins.
 Custody readiness precedes generation of ephemeral client keys. The client runs
 under its dedicated, proven-owned non-root identity, with no supplementary
 privilege, capabilities or privilege escalation. Its material lifetime is at
-most 240 seconds. Issuer, root-token and temporary-listener cleanup must be
-verified before the matrix runs.
+most 240 seconds, including a 45-second cleanup reserve. Usable execution ends
+earlier so worker termination cannot consume that reserve. The absolute
+monotonic deadline is fixed before key creation. Only verified first-attempt
+destruction within that deadline attests the material cap; failed or interrupted
+destruction remains unproven even if later cleanup closes all resources. Issuer,
+root-token and temporary-listener cleanup must be verified before the matrix runs.
 
 The transport helper permits only reviewed literal target addresses on TCP 22
 for that exact UID. It records state and arms an independent five-minute cleanup

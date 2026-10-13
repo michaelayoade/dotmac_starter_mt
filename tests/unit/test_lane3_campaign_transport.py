@@ -196,6 +196,71 @@ def test_lost_open_response_reconciles_actual_owned_rules():
     assert c.cleanup().rule_count == 0
 
 
+@pytest.mark.parametrize("operator", ["in", "=="])
+def test_hosted_numeric_new_state_allows_open_and_exact_revocation(operator):
+    h, c = prepared()
+    install = h.install
+
+    def numeric_install(specs, uid, anchor):
+        install(specs, uid, anchor)
+        for rule in h.rules:
+            # Hosted nft -n -j reports NEW as its kernel conntrack bit, 8.
+            rule["expr"][3] = {
+                "match": {
+                    "op": operator,
+                    "left": {"ct": {"key": "state"}},
+                    "right": 8,
+                }
+            }
+
+    h.install = numeric_install
+    assert c.open().rule_count == 3
+    assert c.cleanup().verdict == "CLOSED"
+    assert h.rules == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, False, 8.0, "8", 0, 1, 2, 4, 6, 9, 10, 12, 14, -8, [8], {"set": [8]}],
+)
+def test_numeric_conntrack_near_misses_never_authorize_deletion(value):
+    h, c = prepared()
+    c.open()
+    h.rules[0]["expr"][3]["match"].update(op="in", right=value)
+    with pytest.raises(t.Refused, match="ownership-unproven"):
+        c.cleanup()
+    assert "delete" not in h.effects
+    assert h.deadline is not None
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"op": "!="},
+        {"left": {"ct": {"key": "status"}}},
+        {"extra": "unapproved"},
+    ],
+)
+def test_numeric_new_state_requires_exact_match_shape(change):
+    h, c = prepared()
+    c.open()
+    h.rules[0]["expr"][3]["match"].update(op="in", right=8)
+    h.rules[0]["expr"][3]["match"].update(change)
+    with pytest.raises(t.Refused, match="ownership-unproven"):
+        c.cleanup()
+    assert "delete" not in h.effects
+
+
+def test_numeric_new_state_cannot_hide_an_extra_expression():
+    h, c = prepared()
+    c.open()
+    h.rules[0]["expr"][3]["match"].update(op="in", right=8)
+    h.rules[0]["expr"][3]["accept"] = None
+    with pytest.raises(t.Refused, match="ownership-unproven"):
+        c.cleanup()
+    assert "delete" not in h.effects
+
+
 def test_foreign_expression_with_own_comment_is_never_deleted():
     h, c = prepared()
     c.open()

@@ -252,7 +252,12 @@ class Env:
         return j["lease_id"]
 
     def journal(self) -> dict[str, Any] | None:
-        return self.controller().load()
+        # Observe under the same lock as atomic save/archive. Reading an old
+        # open inode during replacement can correctly fail the nlink guard;
+        # the harness must serialize, never relax Controller.load's checks.
+        controller = self.controller()
+        with controller.locked(create=True):
+            return controller.load()
 
     def closed(self, lease: str) -> dict[str, Any]:
         raw = (self.paths.state_root / "closed" / f"{lease}.json").read_bytes()

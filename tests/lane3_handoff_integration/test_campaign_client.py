@@ -503,24 +503,40 @@ def test_killed_child_cannot_prove_ssh_and_is_cleaned(client_fixture, monkeypatc
     assert not client.work.exists()
 
 
-def test_independent_root_timer_removes_keys_without_caller_finally(
+def short_material_window(c, started_ns, seconds, duration=18):
+    # Hosted-only backend seam. Operational Session/CLI expose no cleanup-margin
+    # knob: production remains 90..240 seconds with the fixed 45-second reserve.
+    cap = started_ns + duration * c.NS
+    due = cap - 7 * c.NS
+    return c.MaterialWindow(started_ns, cap, due, due - 3 * c.NS, 4, 1).validate()
+
+
+def test_independent_root_timer_measures_material_destruction_before_cap(
     client_fixture, monkeypatch
 ):
     c, make, certificates, identity, manifest, table = client_fixture
     client = make()
-    original = client.backend.arm
     monkeypatch.setattr(
-        client.backend, "arm", lambda control, seconds: original(control, 2)
+        client.backend,
+        "window",
+        lambda started, seconds: short_material_window(c, started, seconds),
     )
     prepare(client)
     work, control = client.work, client.control
-    assert work.exists()
-    deadline = time.monotonic() + 15
-    # No Session.cleanup call: the root systemd callback owns cleanup even if
-    # a caller abandons the object or exits without reaching its finally.
+    assert (work / "observer").exists()
+    cap = client.window.material_deadline_ns
+    deadline = time.monotonic() + 22
     while control.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
+        time.sleep(0.02)
+    observed = time.monotonic_ns()
     assert not control.exists() and not work.exists()
+    proof = json.loads(
+        (c.CLIENT_PROOF_ROOT / client.session_id / "closed.json").read_bytes()
+    )
+    assert proof["material_cap"] == "ATTESTED"
+    assert proof["first_cleanup"]["outcome"] == "succeeded"
+    assert proof["destroyed_ns"] <= observed <= cap
+    assert proof["destroyed_ns"] <= proof["material_window"]["material_deadline_ns"]
 
 
 def test_umask_077_exact_bundle_mode_allows_child_and_verified_cleanup(client_fixture):
@@ -583,9 +599,12 @@ def test_real_coordinator_sigkill_and_reversed_timer_order_keep_uid_reserved(
     client.approval_sha256 = c.approval_digest(
         identity, client.cfg, client.runner_sha256
     )
-    original_client_arm = client.backend.arm
     monkeypatch.setattr(
-        client.backend, "arm", lambda control, seconds: original_client_arm(control, 14)
+        client.backend,
+        "window",
+        lambda started, seconds: short_material_window(
+            c, started, seconds, duration=24
+        ),
     )
     prepare(client)
     certificates(client)
@@ -692,3 +711,100 @@ def test_root_held_socket_fd_keeps_uid_reserved_after_child_process_absence(
     make.identity_owner.cleanup()
     with pytest.raises(KeyError):
         pwd.getpwnam(identity.user)
+
+
+def test_actual_timer_starting_at_cap_is_refused_before_any_key(
+    client_fixture, monkeypatch
+):
+    c, make, certificates, identity, manifest, table = client_fixture
+    client = make()
+    original_arm = client.backend.arm
+    monkeypatch.setattr(
+        client.backend,
+        "window",
+        lambda started, seconds: short_material_window(c, started, seconds),
+    )
+
+    def late_timer(control, window):
+        # A temporary adapter defect schedules cleanup at the claimed material
+        # cap while retaining a valid (but different) internal timer window.
+        shifted = dataclasses.replace(
+            window,
+            material_deadline_ns=window.material_deadline_ns + 7 * c.NS,
+            cleanup_due_ns=window.material_deadline_ns,
+            execution_deadline_ns=window.material_deadline_ns - 3 * c.NS,
+        )
+        return original_arm(control, shifted)
+
+    monkeypatch.setattr(client.backend, "arm", late_timer)
+    original_command = c.command
+    keys = []
+
+    def record_key_generation(argv, **kwargs):
+        if argv[0] == "/usr/bin/ssh-keygen":
+            keys.append(True)
+        return original_command(argv, **kwargs)
+
+    monkeypatch.setattr(c, "command", record_key_generation)
+    with pytest.raises(c.ClientRefused, match="client.timer"):
+        prepare(client)
+    assert keys == []
+    assert not client.bundle.exists()
+
+
+def test_hung_first_destruction_remains_unproven_after_late_cleanup(
+    client_fixture, monkeypatch
+):
+    import signal
+
+    c, make, certificates, identity, manifest, table = client_fixture
+    client = make()
+    monkeypatch.setattr(
+        client.backend,
+        "window",
+        lambda started, seconds: short_material_window(c, started, seconds),
+    )
+    prepare(client)
+    original_stop = client.backend.stop
+
+    def hang(record):
+        while True:
+            signal.pause()
+
+    monkeypatch.setattr(client.backend, "stop", hang)
+    pid = os.fork()
+    if pid == 0:
+        try:
+            c.cleanup_control(client.control, backend=client.backend)
+        finally:
+            os._exit(1)
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            owner = json.loads((client.control / "owner.json").read_bytes())
+            if owner.get("first_cleanup", {}).get("outcome") == "started":
+                break
+            time.sleep(0.02)
+        assert owner["first_cleanup"]["outcome"] == "started"
+        while time.monotonic_ns() <= client.window.material_deadline_ns:
+            time.sleep(0.02)
+        assert (client.work / "observer").exists()
+        assert c.material_cap_verdict(owner) == "UNPROVEN"
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        pid = None
+        monkeypatch.setattr(client.backend, "stop", original_stop)
+        receipt = client.cleanup()
+        assert receipt == {"resource_closed": True, "material_cap": "UNPROVEN"}
+        assert not client.bundle.exists()
+        proof = json.loads(
+            (c.CLIENT_PROOF_ROOT / client.session_id / "closed.json").read_bytes()
+        )
+        assert proof["first_cleanup"]["outcome"] == "failed"
+        assert proof["destroyed_ns"] > client.window.material_deadline_ns
+        assert proof["material_cap"] == "UNPROVEN"
+    finally:
+        if pid is not None:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+        monkeypatch.setattr(client.backend, "stop", original_stop)

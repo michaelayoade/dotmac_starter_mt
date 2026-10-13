@@ -244,14 +244,19 @@ def expected_rule(spec: dict[str, Any], uid: int, *, handle: int = 1) -> dict[st
 def exact(rule: dict[str, Any], spec: dict[str, Any], uid: int) -> bool:
     expected = expected_rule(spec, uid)
     clean = stable([rule])[0]
-    # nft uses either equality or membership for a singleton conntrack state.
+    # nft uses equality or membership and, with -n, the kernel NEW state bit
+    # NF_CT_STATE_BIT(IP_CT_NEW) = 1 << (2 + 1) = 8. Accept only that exact int.
     expr = clean.get("expr", [])
-    if len(expr) == 5 and "match" in expr[3]:
+    if len(expr) == 5 and set(expr[3]) == {"match"}:
         match = expr[3]["match"]
         if (
-            match.get("left") == {"ct": {"key": "state"}}
+            set(match) == {"left", "op", "right"}
+            and match.get("left") == {"ct": {"key": "state"}}
             and match.get("op") in ("==", "in")
-            and match.get("right") in ("new", ["new"], {"set": ["new"]})
+            and (
+                match.get("right") in ("new", ["new"], {"set": ["new"]})
+                or (type(match.get("right")) is int and match["right"] == 8)
+            )
         ):
             expr[3] = {
                 "match": {"op": "==", "left": {"ct": {"key": "state"}}, "right": "new"}

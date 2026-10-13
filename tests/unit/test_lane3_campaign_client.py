@@ -286,10 +286,104 @@ def test_client_cleanup_timer_has_total_start_attempt_cap(monkeypatch):
     calls = []
     monkeypatch.setattr(c, "command", lambda argv, **kwargs: calls.append(argv))
     control = pathlib.Path("/synthetic") / (c.PREFIX + "e" * 32)
-    c.SystemBackend().arm(control, 240)
+    backend = c.SystemBackend()
+    monkeypatch.setattr(backend, "timer_verified", lambda control, window: True)
+    window = c.material_window(c.time.monotonic_ns(), 240)
+    backend.arm(control, window)
     argv = calls[0]
     assert "--property=StartLimitIntervalSec=infinity" in argv
     assert "--property=StartLimitBurst=30" in argv
     assert "--property=RuntimeMaxSec=30" in argv
+    assert "--property=TimeoutStopSec=3" in argv
+    assert "--on-boot=" + str(window.cleanup_due_ns // 1000) + "us" in argv
+    assert not any(arg.startswith("--on-active=") for arg in argv)
     assert "--collect" not in argv
     assert all("reset-failed" not in call for call in calls)
+
+
+@pytest.mark.parametrize("seconds", [0, 30, 89, 241, True])
+def test_material_window_reserves_cleanup_before_fixed_cap(seconds):
+    with pytest.raises(c.ClientRefused):
+        c.material_window(100 * c.NS, seconds)
+
+
+def test_material_window_absolute_trigger_precedes_cap_and_worker_stop():
+    window = c.material_window(100 * c.NS, 240)
+    assert window.material_deadline_ns == 340 * c.NS
+    assert window.cleanup_due_ns == 295 * c.NS
+    assert window.execution_deadline_ns == 292 * c.NS
+    assert window.cleanup_due_ns + (30 + 3) * c.NS < window.material_deadline_ns
+    # Sensitivity: starting cleanup at the cap fails the reserved-budget gate.
+    with pytest.raises(c.ClientRefused):
+        c.MaterialWindow(100 * c.NS, 340 * c.NS, 340 * c.NS, 337 * c.NS).validate()
+
+
+def test_material_cap_requires_first_observed_success_before_deadline():
+    window = dataclasses.asdict(c.material_window(100 * c.NS, 240))
+    record = {
+        "material_window": window,
+        "first_cleanup": {
+            "started_ns": 295 * c.NS,
+            "outcome": "succeeded",
+            "destroyed_ns": 339 * c.NS,
+        },
+    }
+    assert c.material_cap_verdict(record) == "ATTESTED"
+    record["first_cleanup"]["destroyed_ns"] = 341 * c.NS
+    assert c.material_cap_verdict(record) == "UNPROVEN"
+    record["first_cleanup"] = {"outcome": "failed", "destroyed_ns": 339 * c.NS}
+    assert c.material_cap_verdict(record) == "UNPROVEN"
+    record["first_cleanup"] = {"outcome": "started", "started_ns": 295 * c.NS}
+    assert c.material_cap_verdict(record) == "UNPROVEN"
+
+
+def test_timer_attestation_binds_actual_monotonic_expiry_and_callback(monkeypatch):
+    from types import SimpleNamespace
+
+    control = pathlib.Path("/synthetic") / (c.PREFIX + "f" * 32)
+    window = c.material_window(100 * c.NS, 240)
+    unit = control.name + "-cleanup"
+    timer = {
+        "ActiveState": "active",
+        "SubState": "waiting",
+        "Unit": unit + ".service",
+        "Transient": "yes",
+    }
+    service = {
+        "Transient": "yes",
+        "Type": "exec",
+        "RuntimeMaxUSec": "30s",
+        "TimeoutStopUSec": "3s",
+        "KillMode": "control-group",
+        "Restart": "on-failure",
+        "RestartUSec": "1s",
+        "StartLimitBurst": "30",
+        "StartLimitIntervalUSec": "infinity",
+        "RestartPreventExitStatus": "3",
+        "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -I "
+        + str(pathlib.Path(c.__file__).absolute())
+        + " cleanup "
+        + str(control)
+        + " ; ignore_errors=no ; start_time= ; stop_time= ; "
+        + "pid=0 ; code=(null) ; status=0/0 }",
+    }
+    elapsed_us = window.cleanup_due_ns // 1000
+
+    def read(argv, **kwargs):
+        if argv[0] == "/usr/bin/systemctl":
+            values = timer if argv[-1].endswith(".timer") else service
+            raw = "\n".join(key + "=" + value for key, value in values.items())
+        elif argv[1] == "call":
+            raw = 'o "/org/freedesktop/systemd1/unit/synthetic_2etimer"'
+        else:
+            raw = "t " + str(elapsed_us)
+        return SimpleNamespace(stdout=raw.encode())
+
+    monkeypatch.setattr(c, "command", read)
+    backend = c.SystemBackend()
+    assert backend.timer_verified(control, window)
+    elapsed_us = window.material_deadline_ns // 1000
+    assert not backend.timer_verified(control, window)  # active timer at cap is unsafe
+    elapsed_us = window.cleanup_due_ns // 1000
+    service["ExecStart"] = service["ExecStart"].replace(" cleanup ", " arbitrary ")
+    assert not backend.timer_verified(control, window)

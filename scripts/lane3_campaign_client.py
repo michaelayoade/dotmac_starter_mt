@@ -5,7 +5,7 @@ Install this module and the reviewed matrix runner in a root-owned, nonwritable
 code directory. A root timer owns cleanup independently of the caller. Child
 material is in a separate private workspace; root control state is never handed
 to the child. The cleanup unit permits at most 30 start attempts, including
-RuntimeMaxSec failures; failed cleanup retains its root evidence and material.
+RuntimeMaxSec failures; failed cleanup retains root evidence and unremoved material.
 No collection, timer rearm or reset-failed clears that limit. Returned errors
 contain category names only.
 """
@@ -49,7 +49,11 @@ CLIENT_PROOF_ROOT = Path("/var/lib/dotmac-lane3-campaign/client")
 IDENTITY_ROOT = Path("/var/lib/dotmac-lane3-campaign/identities")
 TRANSPORT_ROOT = Path("/run/dotmac-lane3-campaign/transport")
 PREFIX = "dotmac-b8-client-"
+NS = 1_000_000_000
 MAX_SECONDS = 240
+MIN_WINDOW_SECONDS = 90
+CLEANUP_RESERVE_SECONDS = 45
+WORKER_STOP_SECONDS = 3
 MIN_PROOF_SECONDS = 5
 CERTIFICATE_MARGIN_SECONDS = 31
 
@@ -104,6 +108,76 @@ class RunnerIdentity:
             or self.ownership != "external-owned"
         ):
             raise ClientRefused("client.identity")
+
+
+@dataclasses.dataclass(frozen=True)
+class MaterialWindow:
+    material_started_ns: int
+    material_deadline_ns: int
+    cleanup_due_ns: int
+    execution_deadline_ns: int
+    cleanup_runtime_seconds: int = 30
+    cleanup_stop_seconds: int = 3
+
+    def validate(self):
+        values = dataclasses.asdict(self)
+        reserve = self.material_deadline_ns - self.cleanup_due_ns
+        if (
+            any(type(value) is not int for value in values.values())
+            or self.material_started_ns < 0
+            or not 0
+            < self.material_deadline_ns - self.material_started_ns
+            <= MAX_SECONDS * NS
+            or not 1 <= self.cleanup_runtime_seconds <= 30
+            or not 1 <= self.cleanup_stop_seconds <= 3
+            or reserve
+            < (self.cleanup_runtime_seconds + self.cleanup_stop_seconds + 2) * NS
+            or self.execution_deadline_ns
+            != self.cleanup_due_ns - WORKER_STOP_SECONDS * NS
+            or self.execution_deadline_ns <= self.material_started_ns
+        ):
+            raise ClientRefused("client.material_window")
+        return self
+
+
+def material_window(started_ns, seconds):
+    if type(seconds) is not int or not MIN_WINDOW_SECONDS <= seconds <= MAX_SECONDS:
+        raise ClientRefused("client.window")
+    cap = started_ns + seconds * NS
+    due = cap - CLEANUP_RESERVE_SECONDS * NS
+    return MaterialWindow(
+        started_ns, cap, due, due - WORKER_STOP_SECONDS * NS
+    ).validate()
+
+
+def material_cap_verdict(record):
+    if "material_window" not in record:
+        return "NOT_STARTED"
+    window = MaterialWindow(**record["material_window"]).validate()
+    first = record.get("first_cleanup", {})
+    destroyed = first.get("destroyed_ns")
+    started = first.get("started_ns")
+    if (
+        first.get("outcome") == "succeeded"
+        and type(destroyed) is int
+        and type(started) is int
+        and window.material_started_ns
+        <= started
+        <= destroyed
+        <= window.material_deadline_ns
+    ):
+        return "ATTESTED"
+    return "UNPROVEN"
+
+
+def save_owner(control, record):
+    fd = os.open(control, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        write_at(fd, "owner.next", canonical(record))
+        os.replace("owner.next", "owner.json", src_dir_fd=fd, dst_dir_fd=fd)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def canonical(value):
@@ -294,22 +368,31 @@ def command(argv, *, timeout=10, check=True):
 class SystemBackend:
     """Exact systemd effectors; callers cannot supply a worker command."""
 
-    def arm(self, control, seconds):
+    def window(self, started_ns, seconds):
+        return material_window(started_ns, seconds)
+
+    def arm(self, control, window):
+        window.validate()
+        if window.cleanup_due_ns <= time.monotonic_ns():
+            raise ClientRefused("client.deadline")
         unit = control.name + "-cleanup"
         command(
             [
                 "/usr/bin/systemd-run",
                 "--quiet",
                 "--unit=" + unit,
-                "--on-active=" + str(seconds) + "s",
+                "--on-boot=" + str(window.cleanup_due_ns // 1000) + "us",
                 "--timer-property=AccuracySec=1us",
                 "--property=User=root",
                 "--property=Type=exec",
-                "--property=RuntimeMaxSec=30",
+                "--property=RuntimeMaxSec=" + str(window.cleanup_runtime_seconds),
+                "--property=TimeoutStopSec=" + str(window.cleanup_stop_seconds),
+                "--property=KillMode=control-group",
                 "--property=Restart=on-failure",
                 "--property=RestartSec=1",
                 "--property=StartLimitIntervalSec=infinity",
                 "--property=StartLimitBurst=30",
+                "--property=RestartPreventExitStatus=3",
                 "/usr/bin/python3",
                 "-I",
                 str(Path(__file__).absolute()),
@@ -317,8 +400,87 @@ class SystemBackend:
                 str(control),
             ]
         )
-        command(["/usr/bin/systemctl", "is-active", "--quiet", unit + ".timer"])
+        if not self.timer_verified(control, window):
+            raise ClientRefused("client.timer")
         return unit
+
+    def timer_verified(self, control, window):
+        unit = control.name + "-cleanup"
+
+        def show(name):
+            raw = command(["/usr/bin/systemctl", "show", name]).stdout.decode()
+            return dict(row.split("=", 1) for row in raw.splitlines() if "=" in row)
+
+        timer, service = show(unit + ".timer"), show(unit + ".service")
+        path = (
+            command(
+                [
+                    "/usr/bin/busctl",
+                    "call",
+                    "org.freedesktop.systemd1",
+                    "/org/freedesktop/systemd1",
+                    "org.freedesktop.systemd1.Manager",
+                    "GetUnit",
+                    "s",
+                    unit + ".timer",
+                ]
+            )
+            .stdout.decode()
+            .strip()
+        )
+        match = re.fullmatch(
+            r'o "(/org/freedesktop/systemd1/unit/[A-Za-z0-9_]+)"', path
+        )
+        if not match:
+            return False
+        raw = (
+            command(
+                [
+                    "/usr/bin/busctl",
+                    "get-property",
+                    "org.freedesktop.systemd1",
+                    match[1],
+                    "org.freedesktop.systemd1.Timer",
+                    "NextElapseUSecMonotonic",
+                ]
+            )
+            .stdout.decode()
+            .strip()
+        )
+        next_elapse = re.fullmatch(r"t ([0-9]+)", raw)
+        argv = (
+            "/usr/bin/python3 -I "
+            + str(Path(__file__).absolute())
+            + " cleanup "
+            + str(control)
+        )
+        expected = re.fullmatch(
+            r"\{ path=/usr/bin/python3 ; argv\[\]="
+            + re.escape(argv)
+            + r" ; ignore_errors=no ; start_time=[^;]* ; stop_time=[^;]* ; "
+            + r"pid=0 ; code=[^;]* ; status=[^;]* \}",
+            service.get("ExecStart", ""),
+        )
+        return bool(
+            next_elapse
+            and 0 <= window.cleanup_due_ns - int(next_elapse[1]) * 1000 < 1000
+            and timer.get("ActiveState") == "active"
+            and timer.get("SubState") == "waiting"
+            and timer.get("Unit") == unit + ".service"
+            and timer.get("Transient") == "yes"
+            and service.get("Transient") == "yes"
+            and service.get("Type") == "exec"
+            and service.get("RuntimeMaxUSec")
+            == str(window.cleanup_runtime_seconds) + "s"
+            and service.get("TimeoutStopUSec") == str(window.cleanup_stop_seconds) + "s"
+            and service.get("KillMode") == "control-group"
+            and expected
+            and service.get("Restart") == "on-failure"
+            and service.get("RestartUSec") == "1s"
+            and service.get("StartLimitBurst") == "30"
+            and service.get("StartLimitIntervalUSec") == "infinity"
+            and service.get("RestartPreventExitStatus") == "3"
+        )
 
     def disarm(self, timer):
         command(["/usr/bin/systemctl", "stop", timer + ".timer"])
@@ -581,6 +743,10 @@ def write_closure(record, status, phase):
         "control": record["control"],
         "bundle": record["bundle"],
         "network_namespace": record["network_namespace"],
+        "material_cap": material_cap_verdict(record),
+        "material_window": record.get("material_window"),
+        "first_cleanup": record.get("first_cleanup"),
+        "destroyed_ns": record.get("destroyed_ns"),
     }
     fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -635,6 +801,7 @@ class Session:
         self.workfd = None
         self.deadline = self.certificate_until = None
         self.intent = None
+        self.cleanup_receipt = None
 
     @value_free
     def preflight(self):
@@ -717,7 +884,7 @@ class Session:
         if (
             self.control is not None
             or type(seconds) is not int
-            or not 30 <= seconds <= MAX_SECONDS
+            or not MIN_WINDOW_SECONDS <= seconds <= MAX_SECONDS
         ):
             raise ClientRefused("client.window")
         if (
@@ -755,9 +922,13 @@ class Session:
         self.work = self.bundle / "work"
         self.work.mkdir(mode=0o700)
         self.workfd = os.open(self.work, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        self.deadline = self.clock() + seconds
+        self.window = self.backend.window(
+            math.floor(self.clock() * NS), seconds
+        ).validate()
+        self.deadline = self.window.execution_deadline_ns / NS
         self.record = {
             "version": 1,
+            "material_window": dataclasses.asdict(self.window),
             "session_id": self.session_id,
             "network_namespace": self.network_namespace,
             "identity": dataclasses.asdict(self.identity),
@@ -776,16 +947,16 @@ class Session:
         try:
             write_at(cfd, "owner.json", canonical(self.record))
             write_at(cfd, "cleanup.lock", b"")
+            write_closure(self.record, "active", "started")
         finally:
             os.close(cfd)
         try:
             # Record exists before arming. Arm attempt may commit and lose its
             # response: cleanup always addresses the deterministic timer name.
             self.timer = name + "-cleanup"
-            if (
-                self.backend.arm(self.control, math.floor(self.remaining()))
-                != self.timer
-            ):
+            if self.backend.arm(self.control, self.window) != self.timer:
+                raise ClientRefused("client.timer")
+            if not self.backend.timer_verified(self.control, self.window):
                 raise ClientRefused("client.timer")
             public, material = {}, {}
             for keyname in NAMES:
@@ -920,11 +1091,14 @@ class Session:
     @value_free
     def execute(self):
         try:
-            return self._execute()
+            result = self._execute()
         except (OSError, ValueError, KeyError, subprocess.SubprocessError):
             raise ClientRefused("client.execution") from None
         finally:
-            self.cleanup()
+            receipt = self.cleanup()
+        if receipt and receipt["material_cap"] == "UNPROVEN":
+            raise ClientRefused("client.material_cap_unproven")
+        return result
 
     def _execute(self):
         if self.certificate_until is None:
@@ -1006,9 +1180,12 @@ class Session:
 
     @value_free
     def cleanup(self):
+        if self.workfd is not None:
+            os.close(self.workfd)
+            self.workfd = None
         if self.record is None:
             if self.intent is None:
-                return
+                return closed_receipt(self.session_id) if self.cleanup_receipt else None
             self.backend.stop({"unit": PREFIX + self.session_id + "-matrix"})
             no_uid_resources(self.identity.uid, self.network_namespace)
             for field in ("bundle", "control"):
@@ -1033,14 +1210,16 @@ class Session:
                     path.rmdir()
             write_closure(self.intent, "closed", "finished")
             self.intent = None
-            return
-        if self.workfd is not None:
-            os.close(self.workfd)
-            self.workfd = None
-        cleanup_control(self.control, backend=self.backend)
+            self.cleanup_receipt = {
+                "resource_closed": True,
+                "material_cap": "NOT_STARTED",
+            }
+            return self.cleanup_receipt
+        self.cleanup_receipt = cleanup_control(self.control, backend=self.backend)
         self.record = None
         self.timer = None
         self.intent = None
+        return self.cleanup_receipt
 
 
 @value_free
@@ -1053,13 +1232,13 @@ def cleanup_control(control, *, backend=None):
     trusted_parent(control.parent)
     checked_directory(control.parent, 0, 0o700)
     if not control.exists():
-        return
+        return closed_receipt(control.name[len(PREFIX) :])
     try:
         checked_directory(control, 0, 0o700)
         lockfd = os.open(control / "cleanup.lock", os.O_RDWR | os.O_NOFOLLOW)
     except FileNotFoundError:
         if not control.exists():
-            return
+            return closed_receipt(control.name[len(PREFIX) :])
         raise
     try:
         lockstat = os.fstat(lockfd)
@@ -1072,7 +1251,7 @@ def cleanup_control(control, *, backend=None):
             raise ClientRefused("client.cleanup")
         fcntl.flock(lockfd, fcntl.LOCK_EX)
         if not control.exists():
-            return
+            return closed_receipt(control.name[len(PREFIX) :])
         record = json.loads(read_private(control / "owner.json"))
         identity = RunnerIdentity(**record["identity"])
         identity.validate()
@@ -1085,33 +1264,78 @@ def cleanup_control(control, *, backend=None):
             or not bundle.is_absolute()
         ):
             raise ClientRefused("client.cleanup_scope")
-        checked_workspace_root(bundle.parent)
-        backend.stop(record)
-        no_uid_resources(identity.uid, record["network_namespace"])
-        # Stop is proved before any material disappears; failed stop retains timer.
-        if bundle.exists():
-            s = checked_directory(bundle, 0, 0o711)
-            if s.st_ino != record["bundle_inode"]:
-                raise ClientRefused("client.cleanup")
-            if work.exists():
-                s = work.lstat()
-                if (
-                    not stat.S_ISDIR(s.st_mode)
-                    or s.st_ino != record["work_inode"]
-                    or s.st_uid not in (0, identity.uid)
-                ):
+        MaterialWindow(**record["material_window"]).validate()
+        first_attempt = "first_cleanup" not in record
+        if first_attempt:
+            record["first_cleanup"] = {
+                "started_ns": time.monotonic_ns(),
+                "outcome": "started",
+                "destroyed_ns": None,
+            }
+        elif record["first_cleanup"].get("outcome") == "started":
+            record["first_cleanup"]["outcome"] = "failed"
+        save_owner(control, record)
+        write_closure(record, "active", "started")
+        try:
+            checked_workspace_root(bundle.parent)
+            backend.stop(record)
+            no_uid_resources(identity.uid, record["network_namespace"])
+            # Stop is proved before any material disappears; failed stop retains timer.
+            if bundle.exists():
+                s = checked_directory(bundle, 0, 0o711)
+                if s.st_ino != record["bundle_inode"]:
                     raise ClientRefused("client.cleanup")
-            if not shutil.rmtree.avoids_symlink_attacks:
+                if work.exists():
+                    s = work.lstat()
+                    if (
+                        not stat.S_ISDIR(s.st_mode)
+                        or s.st_ino != record["work_inode"]
+                        or s.st_uid not in (0, identity.uid)
+                    ):
+                        raise ClientRefused("client.cleanup")
+                if not shutil.rmtree.avoids_symlink_attacks:
+                    raise ClientRefused("client.cleanup")
+                shutil.rmtree(bundle)
+            if bundle.exists() or bundle.is_symlink():
                 raise ClientRefused("client.cleanup")
-            shutil.rmtree(bundle)
-        if bundle.exists() or bundle.is_symlink():
-            raise ClientRefused("client.cleanup")
-        no_uid_resources(identity.uid, record["network_namespace"])
-        write_closure(record, "closed", "finished")
-        shutil.rmtree(control)
-        backend.disarm(control.name + "-cleanup")
+            no_uid_resources(identity.uid, record["network_namespace"])
+            destroyed = time.monotonic_ns()
+            record.setdefault("destroyed_ns", destroyed)
+            if first_attempt:
+                record["first_cleanup"].update(
+                    outcome="succeeded", destroyed_ns=destroyed
+                )
+            save_owner(control, record)
+            write_closure(record, "closed", "finished")
+            shutil.rmtree(control)
+            backend.disarm(control.name + "-cleanup")
+            return {
+                "resource_closed": True,
+                "material_cap": material_cap_verdict(record),
+            }
+        except BaseException:
+            if control.exists() and record["first_cleanup"].get("outcome") == "started":
+                record["first_cleanup"]["outcome"] = "failed"
+                save_owner(control, record)
+                write_closure(record, "active", "started")
+            raise
+
     finally:
         os.close(lockfd)
+
+
+def closed_receipt(session):
+    directory = CLIENT_PROOF_ROOT / session
+    trusted_parent(directory)
+    checked_directory(directory, 0, 0o700)
+    proof = json.loads(read_private(directory / "closed.json"))
+    if (
+        proof.get("session_id") != session
+        or proof.get("status") != "closed"
+        or proof.get("material_cap") not in ("ATTESTED", "UNPROVEN", "NOT_STARTED")
+    ):
+        raise ClientRefused("client.cleanup_unproven")
+    return {"resource_closed": True, "material_cap": proof["material_cap"]}
 
 
 def child_main(work, runner, runner_sha256, ready_socket):
@@ -1161,7 +1385,9 @@ def child_main(work, runner, runner_sha256, ready_socket):
 def main():
     try:
         if len(sys.argv) == 3 and sys.argv[1] == "cleanup":
-            cleanup_control(sys.argv[2])
+            receipt = cleanup_control(sys.argv[2])
+            print(canonical(receipt).decode())
+            return 3 if receipt["material_cap"] == "UNPROVEN" else 0
         elif len(sys.argv) == 6 and sys.argv[1] == "child":
             child_main(*sys.argv[2:])
         else:
