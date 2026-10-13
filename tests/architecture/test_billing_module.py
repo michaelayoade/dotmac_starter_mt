@@ -38,6 +38,60 @@ KERNEL_VERSIONS = (
 )
 
 _INTERNAL_RELATIONS = (
+    (
+        "non_cash_credit_grants",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_grants",
+        ("restricted_document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_grants",
+        ("replaces_grant_id", "billing_account_id"),
+        "non_cash_credit_grants",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_grants",
+        ("replaces_effect_id", "billing_account_id"),
+        "non_cash_credit_effects",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_effects",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_effects",
+        ("grant_id", "billing_account_id"),
+        "non_cash_credit_grants",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_effects",
+        ("document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "non_cash_credit_effects",
+        ("original_application_id", "billing_account_id"),
+        "non_cash_credit_effects",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_position_facts_v2",
+        ("posting_group_watermark", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
     ("rated_obligations", ("billing_account_id",), "billing_accounts", ("id",)),
     (
         "rated_obligations",

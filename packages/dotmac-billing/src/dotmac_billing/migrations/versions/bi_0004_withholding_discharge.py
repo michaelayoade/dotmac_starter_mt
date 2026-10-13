@@ -168,6 +168,80 @@ def _guards(platform: bool) -> None:
     table = f"{prefix}withholding_discharges"
     # Every relation alias below is x, and each query is scope qualified.
     scope = "" if platform else " AND x.tenant_id = NEW.tenant_id"
+    tenant_arg = "" if platform else ", scope_id uuid"
+    tenant_call = "" if platform else ", NEW.tenant_id"
+    issuance_scope = "" if platform else " AND g.tenant_id = scope_id"
+    relation_scope = "" if platform else " AND x.tenant_id = g.tenant_id"
+    # SQLAlchemy text() removes the escaped colon before sending SQL; the
+    # persisted source suffix remains ':issue', rather than becoming a bind.
+    op.execute(f"""
+    CREATE FUNCTION mod_billing.has_{prefix}live_invoice_issuance(
+        invoice_id uuid, account_id uuid, currency_code text, scale integer{tenant_arg}
+    ) RETURNS boolean AS $$
+        SELECT count(*) = 1 AND (SELECT count(*) FROM mod_billing.{prefix}posting_groups g
+            WHERE g.group_kind = 'invoice_issued' AND g.reverses_group_id IS NULL
+              AND g.billing_account_id = account_id AND g.currency = currency_code
+              AND g.minor_units = scale AND g.source_ref = 'document:' || invoice_id::text || '\\:issue'
+              {issuance_scope}) = 1
+        FROM mod_billing.{prefix}posting_groups g
+        WHERE g.group_kind = 'invoice_issued' AND g.reverses_group_id IS NULL
+          AND g.billing_account_id = account_id AND g.currency = currency_code
+          AND g.minor_units = scale AND g.source_ref = 'document:' || invoice_id::text || '\\:issue'
+          {issuance_scope}
+          AND EXISTS (SELECT 1 FROM mod_billing.{prefix}receivable_exposure_facts x
+              WHERE x.document_id = invoice_id AND x.billing_account_id = account_id
+                AND x.posting_group_watermark = g.id AND x.source_version = g.source_version
+                AND x.currency = currency_code AND x.minor_units = scale{relation_scope})
+          AND NOT EXISTS (SELECT 1 FROM mod_billing.{prefix}posting_groups x
+              WHERE x.reverses_group_id = g.id{relation_scope})
+          AND (SELECT count(*) FROM mod_billing.{prefix}posting_effects x
+              WHERE x.posting_group_id = g.id{relation_scope}) = 1
+          AND EXISTS (SELECT 1 FROM mod_billing.{prefix}posting_effects x
+              JOIN mod_billing.{prefix}documents d ON d.id = invoice_id
+                {'' if platform else 'AND d.tenant_id = g.tenant_id'}
+              WHERE x.posting_group_id = g.id AND x.lane = 'receivable'
+                AND x.billing_account_id = account_id AND x.currency = currency_code
+                AND x.minor_units = scale AND x.amount_delta = d.grand_total
+                AND d.billing_account_id = account_id AND d.currency = currency_code
+                AND d.minor_units = scale AND d.document_kind = 'invoice'
+                AND d.issued_at IS NOT NULL{relation_scope});
+    $$ LANGUAGE sql;
+    CREATE FUNCTION mod_billing.guard_{prefix}withholding_invoice_reversal() RETURNS trigger AS $$
+    DECLARE original record;
+    BEGIN
+        -- Raw SQL reversal and acceptance use the same account-first serialization.
+        PERFORM 1 FROM mod_billing.{prefix}billing_accounts x
+          WHERE x.id = NEW.billing_account_id{scope} FOR UPDATE;
+        IF NEW.reverses_group_id IS NOT NULL THEN
+            SELECT * INTO original FROM mod_billing.{prefix}posting_groups x
+              WHERE x.id = NEW.reverses_group_id{scope};
+            IF original.group_kind = 'withholding_reversed'
+               OR (original.group_kind = 'withholding_accepted'
+                   AND NEW.group_kind <> 'withholding_reversed') THEN
+                RAISE EXCEPTION 'withholding reversal requires the dedicated exact inverse owner'
+                  USING ERRCODE = 'check_violation';
+            END IF;
+            IF original.group_kind = 'invoice_issued' AND EXISTS (
+                SELECT 1 FROM mod_billing.{table} x
+                WHERE x.billing_account_id = NEW.billing_account_id{scope}
+                  AND EXISTS (SELECT 1 FROM mod_billing.{prefix}receivable_exposure_facts e
+                      WHERE e.document_id = x.document_id
+                        AND e.billing_account_id = x.billing_account_id
+                        AND e.posting_group_watermark = original.id
+                        {'' if platform else 'AND e.tenant_id = x.tenant_id'})
+                GROUP BY x.document_id HAVING sum(x.amount_delta) > 0
+            ) THEN
+                RAISE EXCEPTION 'invoice issuance with active withholding requires its correction owner'
+                  USING ERRCODE = 'check_violation';
+            END IF;
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER {prefix}posting_groups_withholding_invoice_reversal
+      BEFORE INSERT ON mod_billing.{prefix}posting_groups
+      FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{prefix}withholding_invoice_reversal();
+    """)  # nosec B608 -- fixed plane names and scope predicates only
     op.execute(f"""
     CREATE FUNCTION mod_billing.admit_{prefix}withholding() RETURNS trigger AS $$
     DECLARE
@@ -183,8 +257,11 @@ def _guards(platform: bool) -> None:
          WHERE x.id = NEW.billing_account_id{scope} FOR UPDATE;
         SELECT * INTO doc FROM mod_billing.{prefix}documents x
          WHERE x.id = NEW.document_id{scope} FOR UPDATE;
+        -- Immutable groups/discharges require no row UPDATE privilege. Every
+        -- admission/correction already holds its scoped account lock; the
+        -- original evidence cannot change while that account serializes peers.
         SELECT * INTO grp FROM mod_billing.{prefix}posting_groups x
-         WHERE x.id = NEW.posting_group_id{scope} FOR UPDATE;
+         WHERE x.id = NEW.posting_group_id{scope};
         IF account.id IS NULL OR doc.id IS NULL OR grp.id IS NULL
            OR account.currency <> NEW.currency OR account.minor_units <> NEW.minor_units
            OR doc.billing_account_id IS DISTINCT FROM NEW.billing_account_id
@@ -254,7 +331,7 @@ def _guards(platform: bool) -> None:
         END IF;
         IF NEW.reverses_discharge_id IS NOT NULL THEN
             SELECT * INTO original FROM mod_billing.{table} x
-             WHERE x.id = NEW.reverses_discharge_id{scope} FOR UPDATE;
+             WHERE x.id = NEW.reverses_discharge_id{scope};
             IF original.id IS NULL OR original.reverses_discharge_id IS NOT NULL
                OR NEW.id = original.id OR original.billing_account_id <> NEW.billing_account_id
                OR original.document_id <> NEW.document_id OR original.currency <> NEW.currency
@@ -269,6 +346,12 @@ def _guards(platform: bool) -> None:
                 RAISE EXCEPTION 'withholding correction must exactly reverse original evidence' USING ERRCODE = 'check_violation';
             END IF;
         ELSE
+            IF NOT mod_billing.has_{prefix}live_invoice_issuance(
+                NEW.document_id, NEW.billing_account_id, NEW.currency, NEW.minor_units{tenant_call}
+            ) THEN
+                RAISE EXCEPTION 'withholding requires one unreversed structurally bound invoice issuance'
+                  USING ERRCODE = 'check_violation';
+            END IF;
             IF grp.group_kind <> 'withholding_accepted' OR grp.reverses_group_id IS NOT NULL THEN
                 RAISE EXCEPTION 'withholding acceptance needs its own posting' USING ERRCODE = 'check_violation';
             END IF;
@@ -311,6 +394,33 @@ def _guards(platform: bool) -> None:
         IF grp.group_kind NOT IN ('withholding_accepted', 'withholding_reversed') THEN RETURN NEW; END IF;
         SELECT * INTO discharge FROM mod_billing.{table} x
          WHERE x.posting_group_id = group_id{scope};
+        IF grp.group_kind = 'withholding_reversed' AND NOT EXISTS (
+            SELECT 1 FROM mod_billing.{table} x
+            JOIN mod_billing.{prefix}posting_groups original_group
+              ON original_group.id = x.posting_group_id
+              {'' if platform else 'AND original_group.tenant_id = x.tenant_id'}
+            WHERE x.id = discharge.reverses_discharge_id{scope}
+              AND original_group.id = grp.reverses_group_id
+              AND original_group.group_kind = 'withholding_accepted'
+              AND x.reverses_discharge_id IS NULL
+              AND x.document_id = discharge.document_id
+              AND x.billing_account_id = discharge.billing_account_id
+              AND x.amount_delta = -discharge.amount_delta
+              AND x.currency = discharge.currency AND x.minor_units = discharge.minor_units
+        ) THEN
+            RAISE EXCEPTION 'withholding reversal requires its actual exact inverse discharge row'
+              USING ERRCODE = 'check_violation';
+        END IF;
+        IF discharge.id IS NOT NULL AND discharge.reverses_discharge_id IS NULL
+           AND (SELECT coalesce(sum(x.amount_delta), 0) FROM mod_billing.{table} x
+                WHERE x.document_id = discharge.document_id{scope}) > 0
+           AND NOT mod_billing.has_{prefix}live_invoice_issuance(
+                discharge.document_id, discharge.billing_account_id,
+                discharge.currency, discharge.minor_units{tenant_call}
+           ) THEN
+            RAISE EXCEPTION 'active withholding requires live invoice issuance'
+              USING ERRCODE = 'check_violation';
+        END IF;
         IF discharge.id IS NULL OR
            EXISTS (SELECT 1 FROM mod_billing.{prefix}allocation_effects x
              WHERE x.posting_group_id = group_id{scope}) OR
@@ -359,6 +469,7 @@ def _apply(*, upgrade: bool) -> None:
             "posting_effects",
             "confirmed_settlements",
             "allocation_effects",
+            "receivable_exposure_facts",
             *(("withholding_discharges",) if not upgrade else ()),
         )
         for prefix in prefixes
@@ -391,6 +502,7 @@ def _apply(*, upgrade: bool) -> None:
             _create(bool(prefix))
         else:
             op.execute(f"""
+                DROP TRIGGER {prefix}posting_groups_withholding_invoice_reversal ON mod_billing.{prefix}posting_groups;
                 DROP TRIGGER {prefix}posting_groups_withholding ON mod_billing.{prefix}posting_groups;
                 DROP TRIGGER {prefix}posting_effects_withholding ON mod_billing.{prefix}posting_effects;
                 DROP TRIGGER {prefix}allocation_effects_withholding ON mod_billing.{prefix}allocation_effects;
@@ -399,6 +511,8 @@ def _apply(*, upgrade: bool) -> None:
             op.execute(f"""
                 DROP FUNCTION mod_billing.admit_{prefix}withholding();
                 DROP FUNCTION mod_billing.check_{prefix}withholding_posting();
+                DROP FUNCTION mod_billing.guard_{prefix}withholding_invoice_reversal();
+                DROP FUNCTION mod_billing.has_{prefix}live_invoice_issuance(uuid, uuid, text, integer{", uuid" if not prefix else ""});
             """)  # nosec B608 -- fixed plane names only
     for name, value in previous.items():
         connection.execute(

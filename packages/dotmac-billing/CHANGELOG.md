@@ -2,6 +2,18 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a4 — UNRELEASED
+
+- Add append-only non-cash grants, applications, partial application reversals
+  and unused-grant reductions, with separately linked replacement grants.
+- Keep cash funding and prepaid credit distinct. Ordinary account credits carry
+  zero tax; immutable versioned classification evidence records policy authority.
+- Add bi_0005 grant/effect and V2 position evidence in both persistence planes,
+  source-version and per-invoice capacity guards, and V3 accounting facts while
+  preserving prior V1/V2 contracts. Older writers require a fenced upgrade.
+- Source candidate only; publication, product UI/adoption and production writer
+  acceptance remain separate gates.
+
 ## 0.1.0a3 — UNRELEASED
 
 - Add invoice-bound withholding acceptance and linked reversal with immutable

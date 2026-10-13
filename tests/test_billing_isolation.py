@@ -560,7 +560,12 @@ def test_catalog_proves_force_rls_and_exact_platform_revoke(scratch) -> None:
                 columns
                 if table_name in ONLINE_MUTABLE_TABLES
                 else {"id"}
-                if table_name == "billing_accounts"
+                if table_name
+                in {
+                    "billing_accounts",
+                    "non_cash_credit_grants",
+                    "non_cash_credit_effects",
+                }
                 else set()
             )
             assert update_columns == expected_update_columns
@@ -616,7 +621,12 @@ def test_catalog_proves_force_rls_and_exact_platform_revoke(scratch) -> None:
                 columns
                 if table_name.removeprefix("platform_") in ONLINE_MUTABLE_TABLES
                 else {"id"}
-                if table_name == "platform_billing_accounts"
+                if table_name
+                in {
+                    "platform_billing_accounts",
+                    "platform_non_cash_credit_grants",
+                    "platform_non_cash_credit_effects",
+                }
                 else set()
             )
             assert update_columns == expected_update_columns
@@ -4611,3 +4621,209 @@ def test_withholding_and_credit_note_serialize_invoice_room(scratch, plane):
             == position.prepaid_funding
             == 0
         )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_invoice_generic_reversal_cannot_borrow_another_invoice_ar(scratch, plane):
+    from dotmac_billing.service import accept_withholding_discharge
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"wht-two-invoices-{plane}"
+        )
+        draft = _additional_credit_invoice(
+            session, scope, account.id, f"second-ar-{plane}"
+        )
+        issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        group_model = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        issuance = session.execute(
+            select(group_model).where(
+                group_model.source_ref == f"document:{invoice.id}:issue"
+            )
+        ).scalar_one()
+        reverse = ReversePostingGroupCommand(
+            issuance.id, NOW, f"generic-issue-reverse:{plane}"
+        )
+        with pytest.raises(BillingRuleViolation, match="void_document"):
+            reverse_posting_group(session, scope=scope, command=reverse)
+        command = _withholding_command(
+            account.id, invoice.id, scope=scope, suffix=f"two-ar-{plane}"
+        )
+        row = accept_withholding_discharge(session, scope=scope, command=command)
+        with pytest.raises(BillingRuleViolation, match="void_document"):
+            reverse_posting_group(session, scope=scope, command=reverse)
+        assert (
+            accept_withholding_discharge(session, scope=scope, command=command).id
+            == row.id
+        )
+        assert rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        ).collectible_receivable == Decimal("235")
+        session.commit()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_legacy_invoice_reverse_exact_replay_precedes_new_owner_refusal(scratch, plane):
+    from dataclasses import asdict
+
+    from dotmac_billing.service import (
+        _idempotent,
+        _reverse_group,
+        accept_withholding_discharge,
+    )
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"legacy-reverse-{plane}"
+        )
+        draft = _additional_credit_invoice(
+            session, scope, account.id, f"legacy-second-{plane}"
+        )
+        issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        group_model = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        original = session.execute(
+            select(group_model).where(
+                group_model.source_ref == f"document:{invoice.id}:issue"
+            )
+        ).scalar_one()
+        command = ReversePostingGroupCommand(
+            original.id, NOW, f"legacy-invoice-reverse:{plane}"
+        )
+
+        def predecessor_operation(db):
+            # Seed the exact previous public operation, not a fabricated replay result.
+            reversal = _reverse_group(
+                db,
+                scope=scope,
+                original=original,
+                occurred_at=command.occurred_at,
+                source_ref=command.source_ref,
+            )
+            return {"posting_group_id": str(reversal.id)}
+
+        outcome = _idempotent(
+            session,
+            scope=scope,
+            operation_scope="billing.posting.reverse",
+            key=command.source_ref,
+            fingerprint=fingerprint_of(asdict(command)),
+            operation=predecessor_operation,
+        )
+        session.commit()
+        assert reverse_posting_group(
+            session, scope=scope, command=command
+        ).id == uuid.UUID(str(outcome.result["posting_group_id"]))
+        with pytest.raises(BillingRuleViolation, match="void_document"):
+            reverse_posting_group(
+                session,
+                scope=scope,
+                command=replace(command, source_ref="new-invoice-reverse"),
+            )
+        wht = _withholding_command(
+            account.id, invoice.id, scope=scope, suffix=f"legacy-reversed-wht-{plane}"
+        )
+        with pytest.raises(BillingRuleViolation, match="structurally bound"):
+            accept_withholding_discharge(session, scope=scope, command=wht)
+        assert rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        ).collectible_receivable == Decimal("120")
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_private_generic_reverse_cannot_bypass_withholding_inverse_owner(
+    scratch, plane
+):
+    from dotmac_billing.commands import ReverseWithholdingDischarge
+    from dotmac_billing.service import (
+        _reverse_group,
+        accept_withholding_discharge,
+        reverse_withholding_discharge,
+    )
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"private-wht-reverse-{plane}"
+        )
+        row = accept_withholding_discharge(
+            session,
+            scope=scope,
+            command=_withholding_command(
+                account.id, invoice.id, scope=scope, suffix=f"private-reverse-{plane}"
+            ),
+        )
+        group = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        original = session.get(group, row.posting_group_id)
+        with pytest.raises(BillingRuleViolation, match="withholding correction"):
+            _reverse_group(
+                session,
+                scope=scope,
+                original=original,
+                occurred_at=NOW,
+                source_ref="private-wht-bypass",
+            )
+        correction = ReverseWithholdingDischarge(
+            scope,
+            row.id,
+            f"dedicated-retry:{plane}",
+            f"dedicated-reverse:{plane}",
+            "finance:fixture",
+            "audit:fixture",
+            NOW,
+        )
+        inverse = reverse_withholding_discharge(
+            session, scope=scope, command=correction
+        )
+        assert inverse.amount_delta == -row.amount_delta
+        assert inverse.reverses_discharge_id == row.id
+        assert (
+            reverse_withholding_discharge(session, scope=scope, command=correction).id
+            == inverse.id
+        )
+        with pytest.raises(BillingRuleViolation, match="withholding correction"):
+            _reverse_group(
+                session,
+                scope=scope,
+                original=session.get(group, inverse.posting_group_id),
+                occurred_at=NOW,
+                source_ref="private-inverse-bypass",
+            )
+        session.commit()

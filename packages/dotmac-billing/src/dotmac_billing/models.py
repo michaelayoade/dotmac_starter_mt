@@ -1511,7 +1511,209 @@ class PlatformWithholdingDischarge(Base, _WithholdingDischargeColumns):
     __table_args__ = _withholding_constraints(tenant=False)
 
 
+class _NonCashCreditGrantColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    posting_group_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    restricted_document_id: Mapped[UUID | None] = mapped_column(Uuid())
+    replaces_grant_id: Mapped[UUID | None] = mapped_column(Uuid())
+    replaces_effect_id: Mapped[UUID | None] = mapped_column(Uuid())
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_amount: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String(120), nullable=False)
+    config_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    config_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    config_version: Mapped[str] = mapped_column(String(255), nullable=False)
+    config_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    authorization_actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    authorization_evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+
+class _NonCashCreditEffectColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    grant_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    posting_group_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    document_id: Mapped[UUID | None] = mapped_column(Uuid())
+    original_application_id: Mapped[UUID | None] = mapped_column(Uuid())
+    effect_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    availability_delta: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(255), nullable=False)
+    authorization_actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    authorization_evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+
+def _non_cash_constraints(*, tenant: bool, effect: bool) -> tuple[object, ...]:
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}non_cash_credit_{'effects' if effect else 'grants'}"
+    scope = ["tenant_id"] if tenant else []
+    constraints: list[object] = [
+        UniqueConstraint(*scope, "id", name=f"uq_{table}_id"),
+        UniqueConstraint(
+            *scope, "id", "billing_account_id", name=f"uq_{table}_account"
+        ),
+        UniqueConstraint(
+            *scope, "source_owner", "source_ref", name=f"uq_{table}_source"
+        ),
+        CheckConstraint("minor_units BETWEEN 0 AND 6", name=f"ck_{table}_precision"),
+    ]
+    links = [("posting_group_id", "posting_groups")]
+    if effect:
+        links += [
+            ("grant_id", "non_cash_credit_grants"),
+            ("document_id", "documents"),
+            ("original_application_id", "non_cash_credit_effects"),
+        ]
+        constraints += [
+            CheckConstraint("availability_delta <> 0", name=f"ck_{table}_amount"),
+            CheckConstraint(
+                "(effect_kind = 'grant' AND availability_delta > 0 "
+                "AND document_id IS NULL "
+                "AND original_application_id IS NULL) OR "
+                "(effect_kind = 'application' AND availability_delta < 0 "
+                "AND document_id IS NOT NULL "
+                "AND original_application_id IS NULL) OR "
+                "(effect_kind = 'application_reversal' AND availability_delta > 0 "
+                "AND document_id IS NOT NULL "
+                "AND original_application_id IS NOT NULL) OR "
+                "(effect_kind = 'unused_reduction' AND availability_delta < 0 "
+                "AND document_id IS NULL "
+                "AND original_application_id IS NULL)",
+                name=f"ck_{table}_direction",
+            ),
+        ]
+    else:
+        links += [
+            ("restricted_document_id", "documents"),
+            ("replaces_grant_id", "non_cash_credit_grants"),
+        ]
+        constraints.append(
+            CheckConstraint("original_amount > 0", name=f"ck_{table}_amount")
+        )
+        constraints.append(
+            UniqueConstraint(*scope, "posting_group_id", name=f"uq_{table}_group")
+        )
+    if not effect:
+        target = f"{SCHEMA}.{prefix}non_cash_credit_effects"
+        constraints.extend(
+            (
+                ForeignKeyConstraint(
+                    [*scope, "replaces_effect_id", "billing_account_id"],
+                    [
+                        *(f"{target}.{c}" for c in scope),
+                        f"{target}.id",
+                        f"{target}.billing_account_id",
+                    ],
+                    name=f"fk_{table}_replaces_effect_id",
+                    ondelete="RESTRICT",
+                    use_alter=True,
+                ),
+                CheckConstraint(
+                    "(replaces_grant_id IS NULL) = (replaces_effect_id IS NULL)",
+                    name=f"ck_{table}_replacement_pair",
+                ),
+            )
+        )
+    for column, target in links:
+        target_table = f"{SCHEMA}.{prefix}{target}"
+        constraints.append(
+            ForeignKeyConstraint(
+                [*scope, column, "billing_account_id"],
+                [
+                    *(f"{target_table}.{c}" for c in scope),
+                    f"{target_table}.id",
+                    f"{target_table}.billing_account_id",
+                ],
+                name=f"fk_{table}_{column}",
+                ondelete="RESTRICT",
+            )
+        )
+    constraints.append(schema_table_args(SCHEMA))
+    return tuple(constraints)
+
+
+class NonCashCreditGrant(Base, _TenantRow, _NonCashCreditGrantColumns):
+    __tablename__ = "non_cash_credit_grants"
+    __table_args__ = _non_cash_constraints(tenant=True, effect=False)
+
+
+class PlatformNonCashCreditGrant(Base, _NonCashCreditGrantColumns):
+    __tablename__ = "platform_non_cash_credit_grants"
+    __table_args__ = _non_cash_constraints(tenant=False, effect=False)
+
+
+class NonCashCreditEffect(Base, _TenantRow, _NonCashCreditEffectColumns):
+    __tablename__ = "non_cash_credit_effects"
+    __table_args__ = _non_cash_constraints(tenant=True, effect=True)
+
+
+class PlatformNonCashCreditEffect(Base, _NonCashCreditEffectColumns):
+    __tablename__ = "platform_non_cash_credit_effects"
+    __table_args__ = _non_cash_constraints(tenant=False, effect=True)
+
+
+class _PositionFactV2Columns(_PositionFactColumns):
+    available_non_cash_credit: Mapped[Decimal] = money_column()
+
+
+def _position_v2_constraints(*, tenant: bool) -> tuple[object, ...]:
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}receivable_position_facts_v2"
+    scope = ["tenant_id"] if tenant else []
+    target = f"{SCHEMA}.{prefix}posting_groups"
+    return (
+        UniqueConstraint(*scope, "id", name=f"uq_{table}_id"),
+        UniqueConstraint(
+            *scope,
+            "source_owner",
+            "billing_account_id",
+            "currency",
+            "source_version",
+            name=f"uq_{table}_version",
+        ),
+        ForeignKeyConstraint(
+            [*scope, "posting_group_watermark", "billing_account_id"],
+            [
+                *(f"{target}.{c}" for c in scope),
+                f"{target}.id",
+                f"{target}.billing_account_id",
+            ],
+            name=f"fk_{table}_watermark",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("available_non_cash_credit >= 0", name=f"ck_{table}_noncash"),
+        schema_table_args(SCHEMA),
+    )
+
+
+class ReceivablePositionFactV2(Base, _TenantRow, _PositionFactV2Columns):
+    __tablename__ = "receivable_position_facts_v2"
+    __table_args__ = _position_v2_constraints(tenant=True)
+
+
+class PlatformReceivablePositionFactV2(Base, _PositionFactV2Columns):
+    __tablename__ = "platform_receivable_position_facts_v2"
+    __table_args__ = _position_v2_constraints(tenant=False)
+
+
 TENANT_TABLES = (
+    "non_cash_credit_grants",
+    "non_cash_credit_effects",
+    "receivable_position_facts_v2",
     "withholding_discharges",
     "billing_accounts",
     "rated_obligations",
@@ -1533,6 +1735,9 @@ TENANT_TABLES = (
 )
 
 PLATFORM_TABLES = (
+    "platform_non_cash_credit_grants",
+    "platform_non_cash_credit_effects",
+    "platform_receivable_position_facts_v2",
     "platform_withholding_discharges",
     "platform_billing_accounts",
     "platform_rated_obligations",
@@ -1554,6 +1759,12 @@ PLATFORM_TABLES = (
 )
 
 __all__ = [
+    "NonCashCreditGrant",
+    "PlatformNonCashCreditGrant",
+    "NonCashCreditEffect",
+    "PlatformNonCashCreditEffect",
+    "ReceivablePositionFactV2",
+    "PlatformReceivablePositionFactV2",
     "WithholdingDischarge",
     "PlatformWithholdingDischarge",
     "PLATFORM_TABLES",

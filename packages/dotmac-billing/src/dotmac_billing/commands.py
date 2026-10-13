@@ -20,6 +20,7 @@ from dotmac_billing.contracts import (
     AppliedFxSnapshotV1,
     AppliedTaxSnapshotV1,
     DueDateBasisV1,
+    NonCashCreditClassificationV1,
     PartyDocumentSnapshotV1,
     PartyTaxIdentitySnapshotV1,
     PaymentInstructionsSnapshotV1,
@@ -200,7 +201,73 @@ class ReverseWithholdingDischarge:
     occurred_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class GrantNonCashCredit:
+    scope: Scope
+    billing_account_id: UUID
+    amount: Money
+    classification: NonCashCreditClassificationV1
+    idempotency_key: str
+    source_owner: str
+    source_ref: str
+    source_version: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    restricted_document_id: UUID | None = None
+    apply_on_issue: bool = False
+    replaces_grant_id: UUID | None = None
+    replaces_effect_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyNonCashCredit:
+    scope: Scope
+    grant_id: UUID
+    document_id: UUID
+    idempotency_key: str
+    source_owner: str
+    source_ref: str
+    source_version: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    amount: Money | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReverseNonCashCreditApplication:
+    scope: Scope
+    application_id: UUID
+    idempotency_key: str
+    source_owner: str
+    source_ref: str
+    source_version: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    amount: Money | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReduceNonCashCreditGrant:
+    scope: Scope
+    grant_id: UUID
+    idempotency_key: str
+    source_owner: str
+    source_ref: str
+    source_version: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    amount: Money | None = None
+
+
 __all__ = [
+    "GrantNonCashCredit",
+    "ApplyNonCashCredit",
+    "ReverseNonCashCreditApplication",
+    "ReduceNonCashCreditGrant",
     "AcceptWithholdingDischarge",
     "ReverseWithholdingDischarge",
     "AllocationCommand",

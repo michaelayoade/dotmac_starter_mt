@@ -855,7 +855,231 @@ class AccountingFactV2:
     reverses_fact_id: UUID | None = None
 
 
+ACCOUNTING_FACT_V3_CONTRACT = "billing.accounting.fact.v3"
+RECEIVABLE_POSITION_V2_CONTRACT = "billing.receivable.position.v2"
+NonCashCreditEffectKind = Literal[
+    "grant", "application", "application_reversal", "unused_reduction"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashCreditPolicyParameterV1:
+    name: str
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.name.strip() or not isinstance(self.value, str):
+            raise ValueError("policy parameters require a name and textual value")
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashCreditClassificationV1:
+    """Accepted policy snapshot; references are evidence, never permission proof."""
+
+    category: str
+    config_owner: str
+    config_ref: str
+    config_version: str
+    config_digest: str
+    accepted_snapshot: tuple[NonCashCreditPolicyParameterV1, ...]
+
+    def __post_init__(self) -> None:
+        import re
+
+        for text, limit in (
+            (self.category, 120),
+            (self.config_owner, 120),
+            (self.config_ref, 255),
+            (self.config_version, 255),
+        ):
+            if not isinstance(text, str) or not text.strip() or len(text) > limit:
+                raise ValueError(
+                    "noncash classification requires bounded policy identity"
+                )
+        if re.fullmatch(r"[0-9a-f]{64}", self.config_digest) is None:
+            raise ValueError("noncash classification requires a SHA256 digest")
+        if (
+            not isinstance(self.accepted_snapshot, tuple)
+            or any(
+                not isinstance(value, NonCashCreditPolicyParameterV1)
+                for value in self.accepted_snapshot
+            )
+            or len({value.name for value in self.accepted_snapshot})
+            != len(self.accepted_snapshot)
+        ):
+            raise ValueError(
+                "accepted policy snapshot requires unique immutable typed parameters"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashCreditGrantV1:
+    scope: Scope
+    grant_id: UUID
+    billing_account_id: UUID
+    original_amount: Money
+    classification: NonCashCreditClassificationV1
+    source_owner: str
+    source_ref: str
+    source_version: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    restricted_document_id: UUID | None = None
+    replaces_grant_id: UUID | None = None
+    replaces_effect_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        _withholding_money(self.original_amount, positive=True)
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or self.occurred_at.tzinfo is None
+        ):
+            raise ValueError("grant requires explicit scope and aware instant")
+        _non_cash_identity(
+            self.source_owner,
+            self.source_ref,
+            self.source_version,
+            self.authorization_actor_ref,
+            self.authorization_evidence_ref,
+        )
+        if not isinstance(self.classification, NonCashCreditClassificationV1):
+            raise TypeError("grant requires typed accepted classification")
+
+    @property
+    def subtotal(self) -> Money:
+        return self.original_amount
+
+    @property
+    def total(self) -> Money:
+        return self.original_amount
+
+    @property
+    def tax_total(self) -> Money:
+        return Money.of(Decimal("0"), self.original_amount.currency)
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashCreditEffectV1:
+    scope: Scope
+    effect_id: UUID
+    grant_id: UUID
+    billing_account_id: UUID
+    effect_kind: NonCashCreditEffectKind
+    availability_delta: Money
+    source_owner: str
+    source_ref: str
+    source_version: str
+    authorization_actor_ref: str
+    authorization_evidence_ref: str
+    occurred_at: datetime
+    document_id: UUID | None = None
+    original_application_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.availability_delta, Money):
+            raise TypeError("noncash delta requires Money")
+        _withholding_money(
+            Money(abs(self.availability_delta.amount), self.availability_delta.currency)
+        )
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or self.occurred_at.tzinfo is None
+        ):
+            raise ValueError("effect requires explicit scope and aware instant")
+        _non_cash_identity(
+            self.source_owner,
+            self.source_ref,
+            self.source_version,
+            self.authorization_actor_ref,
+            self.authorization_evidence_ref,
+        )
+        positive = self.effect_kind in ("grant", "application_reversal")
+        if (
+            self.effect_kind
+            not in ("grant", "application", "application_reversal", "unused_reduction")
+            or (self.availability_delta.amount > 0) != positive
+            or self.availability_delta.amount == 0
+        ):
+            raise ValueError("noncash effect direction is invalid")
+        if (self.document_id is not None) != (
+            self.effect_kind in ("application", "application_reversal")
+        ):
+            raise ValueError("only application effects require an invoice")
+        if (self.original_application_id is not None) != (
+            self.effect_kind == "application_reversal"
+        ):
+            raise ValueError(
+                "only an application reversal links its original application"
+            )
+
+
+def _non_cash_identity(owner: str, *values: str) -> None:
+    if (
+        not isinstance(owner, str)
+        or not owner.strip()
+        or len(owner) > 120
+        or any(
+            not isinstance(value, str) or not value.strip() or len(value) > 255
+            for value in values
+        )
+    ):
+        raise ValueError(
+            "noncash facts require bounded source and authorization evidence"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReceivablePositionV2(ReceivablePositionV1):
+    """Four independent balances; V1 fingerprints retain their original meaning."""
+
+    available_non_cash_credit: Money
+
+    def __post_init__(self) -> None:
+        ReceivablePositionV1.__post_init__(self)
+        _withholding_money(self.available_non_cash_credit)
+        if (
+            self.available_non_cash_credit.amount < 0
+            or self.available_non_cash_credit.currency != self.available_credit.currency
+        ):
+            raise ValueError(
+                "available noncash credit must be nonnegative in the position currency"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class AccountingFactV3:
+    scope: Scope
+    source_system: str
+    fact_id: UUID
+    fact_version: int
+    billing_account_id: UUID
+    posting_group_id: UUID
+    source_ref: str
+    source_authority: Literal["internal"]
+    effect_kind: Literal[
+        "non_cash_credit_granted",
+        "non_cash_credit_applied",
+        "non_cash_credit_application_reversed",
+        "non_cash_credit_reduced",
+    ]
+    occurred_at: datetime
+    committed_at: datetime
+    effects: tuple[AccountingEffectV1, ...]
+    non_cash_credit_effects: tuple[NonCashCreditEffectV1, ...]
+    non_cash_credit_grant: NonCashCreditGrantV1 | None = None
+
+
 __all__ = [
+    "ACCOUNTING_FACT_V3_CONTRACT",
+    "RECEIVABLE_POSITION_V2_CONTRACT",
+    "NonCashCreditEffectKind",
+    "NonCashCreditPolicyParameterV1",
+    "NonCashCreditClassificationV1",
+    "NonCashCreditGrantV1",
+    "NonCashCreditEffectV1",
+    "ReceivablePositionV2",
+    "AccountingFactV3",
     "ACCOUNTING_FACT_CONTRACT",
     "ACCOUNTING_FACT_V2_CONTRACT",
     "AccountingFactV2",
