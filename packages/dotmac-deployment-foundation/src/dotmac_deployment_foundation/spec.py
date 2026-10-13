@@ -56,6 +56,7 @@ from .database_catalog import (
     DatabaseCatalogScope,
 )
 from .errors import SpecError, UnknownFieldError, UnknownSchemaError
+from .material_readiness import MaterialProbePhase
 from .recovery import EXTERNAL_ONLY_VERIFICATIONS
 from .recovery_identity import (
     PRIVILEGE_VERIFICATIONS,
@@ -119,7 +120,8 @@ if TYPE_CHECKING:  # pragma: no cover - the runtime import is inside the method
 SCHEMA_V1: Final = "ProductDeploymentSpec.v1"
 SCHEMA_V2: Final = "ProductDeploymentSpec.v2"
 SCHEMA_V3: Final = "ProductDeploymentSpec.v3"
-SCHEMAS: Final = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3)
+SCHEMA_V4: Final = "ProductDeploymentSpec.v4"
+SCHEMAS: Final = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
 # Backwards-compatible public name: existing callers importing SCHEMA mean the
 # schema their current descriptors use, not "whichever schema is newest".
 SCHEMA: Final = SCHEMA_V1
@@ -1829,7 +1831,7 @@ class DatabaseContract:
             IsolationInvariant.parse(item) for item in table.tables("isolation")
         )
         catalogs: tuple[DatabaseCatalogCoordinateV1, ...] = ()
-        if descriptor_schema in (SCHEMA_V2, SCHEMA_V3):
+        if descriptor_schema in (SCHEMA_V2, SCHEMA_V3, SCHEMA_V4):
             parsed_catalogs: list[DatabaseCatalogCoordinateV1] = []
             for catalog_table in table.tables("catalogs"):
                 try:
@@ -2579,6 +2581,52 @@ class ProductAlert:
 
 
 @dataclass(frozen=True, slots=True)
+class MaterialProbe:
+    """Immutable candidate argv for one role and one readiness phase."""
+
+    role: str
+    phase: MaterialProbePhase
+    argv: tuple[str, ...] = field(repr=False)
+    timeout_seconds: int
+
+    def __post_init__(self) -> None:
+        if not _CODE.fullmatch(self.role) or not isinstance(
+            self.phase, MaterialProbePhase
+        ):
+            raise SpecError("invalid material probe role or phase")
+        if not isinstance(self.argv, tuple) or not 1 <= len(self.argv) <= 64:
+            raise SpecError("material probe requires bounded argv")
+        if any(
+            not isinstance(arg, str) or not arg or len(arg) > 1024 or "\x00" in arg
+            for arg in self.argv
+        ):
+            raise SpecError("invalid material probe argv")
+        if (
+            not PurePosixPath(self.argv[0]).is_absolute()
+            or self.argv[0].startswith("//")
+            or ".." in PurePosixPath(self.argv[0]).parts
+        ):
+            raise SpecError("material probe executable must be absolute")
+        if (
+            type(self.timeout_seconds) is not int
+            or not 1 <= self.timeout_seconds <= 300
+        ):
+            raise SpecError("material probe timeout must be 1..300 seconds")
+
+    @classmethod
+    def parse(cls, table: _Table) -> MaterialProbe:
+        role = table.str_("role", pattern=_CODE)
+        try:
+            phase = MaterialProbePhase(table.str_("phase"))
+        except ValueError:
+            raise SpecError("invalid material probe phase", where=table.path) from None
+        argv = table.str_list("argv")
+        timeout = table.int_("timeout_seconds", minimum=1, maximum=300)
+        table.done()
+        return cls(role, phase, argv, timeout)
+
+
+@dataclass(frozen=True, slots=True)
 class ProductDeploymentSpec:
     """A strictly parsed ``ProductDeploymentSpec.v1`` or ``.v2`` document."""
 
@@ -2605,6 +2653,9 @@ class ProductDeploymentSpec:
     compose_topology: ComposeTopology | None = field(
         default=None, metadata={"descriptor_since": SCHEMA_V3}
     )
+    material_probes: tuple[MaterialProbe, ...] = field(
+        default=(), metadata={"descriptor_since": SCHEMA_V4}
+    )
     source: str = field(default="", compare=False)
     descriptor_schema: str = field(
         default=SCHEMA_V1, repr=False, metadata={"canonical_root_only": True}
@@ -2616,13 +2667,38 @@ class ProductDeploymentSpec:
                 f"schema is {self.descriptor_schema!r}, this facility reads "
                 f"{list(SCHEMAS)!r}"
             )
+        if self.descriptor_schema != SCHEMA_V4 and self.material_probes:
+            raise SpecError("material_probes requires ProductDeploymentSpec.v4")
+        if self.descriptor_schema == SCHEMA_V4:
+            if (
+                not isinstance(self.material_probes, tuple)
+                or len(self.material_probes) > 128
+            ):
+                raise SpecError("invalid material probe declarations")
+            declared = {(probe.role, probe.phase) for probe in self.material_probes}
+            if len(declared) != len(self.material_probes):
+                raise SpecError("duplicate material probe role and phase")
+            codes = {role.code for role in self.roles}
+            if any(probe.role not in codes for probe in self.material_probes):
+                raise SpecError("material probe references unknown application role")
+            covered = {probe.role for probe in self.material_probes}
+            required = {
+                (role.code, phase)
+                for role in self.roles
+                if role.replicas > 0 or role.code in covered
+                for phase in MaterialProbePhase
+            }
+            if required - declared:
+                raise SpecError(
+                    "material probes must cover each active role in both phases"
+                )
         catalogs = self.database.catalogs if self.database is not None else ()
         if self.descriptor_schema == SCHEMA_V1 and catalogs:
             raise SpecError(
                 "ProductDeploymentSpec.v1 cannot carry database catalogs; use v2"
             )
         if (
-            self.descriptor_schema in (SCHEMA_V2, SCHEMA_V3)
+            self.descriptor_schema in (SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
             and self.database is not None
             and not catalogs
         ):
@@ -2630,16 +2706,22 @@ class ProductDeploymentSpec:
                 "ProductDeploymentSpec.v2/v3 [database] requires at least one "
                 "database catalog coordinate"
             )
-        if self.descriptor_schema != SCHEMA_V3 and any(
+        if self.descriptor_schema not in (SCHEMA_V3, SCHEMA_V4) and any(
             not role.command for role in self.roles
         ):
             raise SpecError(
                 "an empty role command (use the image default) requires "
                 "ProductDeploymentSpec.v3"
             )
-        if self.descriptor_schema == SCHEMA_V3 and self.compose_topology is None:
+        if (
+            self.descriptor_schema in (SCHEMA_V3, SCHEMA_V4)
+            and self.compose_topology is None
+        ):
             raise SpecError("ProductDeploymentSpec.v3 requires [compose_topology]")
-        if self.descriptor_schema != SCHEMA_V3 and self.compose_topology is not None:
+        if (
+            self.descriptor_schema not in (SCHEMA_V3, SCHEMA_V4)
+            and self.compose_topology is not None
+        ):
             raise SpecError("compose_topology requires ProductDeploymentSpec.v3")
         if self.compose_topology is not None:
             expected = {role.code for role in self.roles}
@@ -2663,8 +2745,7 @@ class ProductDeploymentSpec:
                 )
             if not self.compose_topology.placement("migrate").profiles:
                 raise SpecError(
-                    "migrate must be profile-gated; a bare compose up must "
-                    "not run DDL"
+                    "migrate must be profile-gated; a bare compose up must not run DDL"
                 )
             for role in self.roles:
                 if role.security.host_network:
@@ -2878,6 +2959,11 @@ class ProductDeploymentSpec:
             )
             rollout.done()
 
+        material_probes = (
+            tuple(MaterialProbe.parse(item) for item in root.tables("material_probes"))
+            if declared == SCHEMA_V4
+            else ()
+        )
         root.done()
 
         spec = cls(
@@ -2902,6 +2988,7 @@ class ProductDeploymentSpec:
             stability_window_seconds=stability,
             rollback_images_retained=retained,
             compose_topology=compose_topology,
+            material_probes=material_probes,
             source=source,
             descriptor_schema=str(declared),
         )

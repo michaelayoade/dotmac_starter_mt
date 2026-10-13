@@ -1,8 +1,8 @@
 """Payment intent persistence contract.
 
 Money is `Numeric`, never float, and every amount column travels with its own
-ISO-4217 code — the module refuses to compare or add amounts across currencies
-rather than assuming a tenant default (ADR-0003).
+ISO-4217 code and authoritative minor-unit scale — the module refuses to compare
+or add amounts across currencies rather than assuming a tenant default (ADR-0003).
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
@@ -64,6 +65,9 @@ class PaymentIntent(Base, TimestampMixin):
             "length(currency_code) = 3", name="ck_payment_intents_currency"
         ),
         CheckConstraint(
+            "minor_units BETWEEN 0 AND 6", name="ck_payment_intents_minor_units"
+        ),
+        CheckConstraint(
             "requested_amount > 0", name="ck_payment_intents_requested_positive"
         ),
         Index("ix_payment_intents_tenant_payer", "tenant_id", "payer_reference"),
@@ -83,6 +87,7 @@ class PaymentIntent(Base, TimestampMixin):
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
     channel: Mapped[str] = mapped_column(String(40), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
     requested_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     confirmed_amount: Mapped[Decimal | None] = mapped_column(MONEY, nullable=True)
     status: Mapped[PaymentIntentStatus] = mapped_column(
@@ -110,6 +115,9 @@ class PaymentTransferProof(Base, TimestampMixin):
             "length(currency_code) = 3", name="ck_transfer_proofs_currency"
         ),
         CheckConstraint(
+            "minor_units BETWEEN 0 AND 6", name="ck_transfer_proofs_minor_units"
+        ),
+        CheckConstraint(
             "declared_amount > 0", name="ck_transfer_proofs_declared_positive"
         ),
         ForeignKeyConstraint(
@@ -129,6 +137,7 @@ class PaymentTransferProof(Base, TimestampMixin):
     submitted_reference: Mapped[str] = mapped_column(String(120), nullable=False)
     document_reference: Mapped[str] = mapped_column(String(160), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
     declared_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     state: Mapped[TransferProofState] = mapped_column(
         _enum(TransferProofState, "transfer_proof_state"), nullable=False
@@ -164,6 +173,9 @@ class PaymentConfirmation(Base, TimestampMixin):
             "length(currency_code) = 3", name="ck_payment_confirmations_currency"
         ),
         CheckConstraint(
+            "minor_units BETWEEN 0 AND 6", name="ck_payment_confirmations_minor_units"
+        ),
+        CheckConstraint(
             "confirmed_amount > 0", name="ck_payment_confirmations_amount_positive"
         ),
         ForeignKeyConstraint(
@@ -191,6 +203,7 @@ class PaymentConfirmation(Base, TimestampMixin):
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
     external_reference: Mapped[str] = mapped_column(String(160), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confirmed_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
