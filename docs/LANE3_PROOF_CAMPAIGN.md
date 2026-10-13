@@ -171,3 +171,83 @@ EOF/termination/reaping policy; attachment does not confer permission to kill an
 unrelated group. EOF and transport loss do not prove root cleanup. The outstanding
 lost-root-response recovery and concrete host approvals remain blockers, and
 hosted tests of this canonical adapter are required before deployment acceptance.
+
+### Bounded owner invocation and separate proof review
+
+`scripts/lane3_campaign_invoker.py` supplies the missing owner of the attached
+SSH groups. It has no activation CLI or import-time operations. The independently
+approved root orchestrator measures this file in the accepted source tree and
+passes the actual configured canonical operator returned by its measured private
+factory. It must refresh that external invoker pin after hosted qualification;
+the invoker does not embed a pin of itself or manufacture authorization.
+
+The concrete API is `supervised_harness(operator, tools, evidence_leaf)`,
+`management_checkpoint(operator)`, and, after separate human acceptance,
+`b8_exchange(operator)`. These functions are execution, not dry-run inspection.
+No caller-supplied command, SSH destination, module name, root path or remote
+argument is accepted. `owned_ssh` permits only the bridge and remote fixed roles
+at `pve-vm-124`, using the installed canonical libexec paths. Every attached group
+is created with `start_new_session=True`; finally closes stdin, signals the owned
+group, waits boundedly, kills remaining descendants even after leader exit, and
+reaps. Killing SSH never proves cleanup on either host.
+
+Before any activation the root owner must have reviewed and measured the source,
+all fourteen tools, root-protected deployment records, real approved run and
+qualification, baseline, staging and independent keeper/recovery availability.
+The existing packet's original 220-second activation/removal commands remain
+operator-run; this module does not activate, reset or extend that timer. After
+activation root measures the actual created marker and stages the bridge input,
+performs the fixed readbacks/baseline comparisons, and calls
+`supervised_harness(operator, tools, exclusive_evidence_leaf)` for the existing
+`l3mgmt-tests.sh full <installed-bundle> <exclusive-leaf>` command. It requires the
+measured harness, successful exit and exact `L3MGMT_TESTS_OK` output line. Its
+180-second absolute parent limit bounds output and owns process cleanup. The
+root owner then closes the exact fail2ban exemption, verifies safe readback and
+reloads the presence key before immediately invoking management. Expired
+activation or delayed presence ends the attempt; it does not permit rearming.
+
+`management_checkpoint(operator)` starts the bridge and makes one uninterrupted
+canonical `retained_launch()` call. Its original 60-second retained sequence and
+key-age gates are unchanged. It calls the fixed coordinator `decide` role once;
+the actual success enum is `GRANTED`. This is broker grant evidence only. A fresh
+fixed GitHub run read waits for scheduling completion, binding repository ID/name,
+run ID, attempt one and workflow commit. This read is not workflow proof review.
+The observation deadline is established before bridge creation and includes
+launch: 420 seconds, then canonical finish has its existing 180-second bound.
+Retain itself must occur before original start+220; these bounds leave room before
+original start+840 cleanup. No timer or material clock is reset.
+
+Canonical `finish()` performs owned cleanup, authenticated archive comparison,
+strict public cleanup evidence, fresh full empty group read and same-pipe finish.
+The returned checkpoint contains that actual closure result, qualification and
+actual run coordinates. Exceptions attempt only canonical failure finalization
+when its state permits and no finish attempt has occurred. Ambiguous closure is
+UNPROVEN and the independent recovery owner/backstop remains authoritative. No
+Receipt survives the function or is reconstructed for a later process.
+
+The root must save the value-free CLOSED checkpoint owner-only and independently
+review the exact run/jobs/logs against its qualification: dispatch grammar and
+OIDC-to-KV steps succeeded, the recorded proof is `BOUNDED_PROOF` with KV version
+one and exact supplier/source bindings, and only the final deliberate refusal
+step failed. Overall failure alone is insufficient. The authenticated archive
+must record `BOUNDED_PROOF` and the expected token-request/cleanup facts. Root
+also performs the packet's management/key/fail2ban and baseline closure readbacks.
+Any refusal, timeout, skipped proof, mismatch or unknown closure stops the campaign.
+Neither a grant nor a scheduling-completed checkpoint authorizes B8.
+
+Only after recording that independent review does the root separately invoke
+`b8_exchange(operator)` in the same protected owner context. It has no approval
+boolean and no automatic call from management. It constructs the real canonical
+`B8Stdio`, prepares custody before starting the fixed remote SSH process, exchanges
+only the canonical public protocol, and closes custody on every exit in that same
+process. The existing issuer and VM material deadlines/finally blocks remain the
+authority; the invoker does not copy their cleanup or proof behavior. The known
+committed-root/lost-response residual remains explicitly UNPROVEN: stop, no
+matrix, no Gate0, no retry, and independently authorized root/console forensics.
+Listener closure is not root revocation evidence.
+
+This invoker's lifecycle and failure tests must pass on Git-hosted CI for the
+accepted head/base before any live invocation. Static checks and prior operator
+tests do not qualify this new supervision code. The module deliberately leaves
+the already reviewed activation/staging/readbacks and the separate human proof
+decision with the root orchestrator; source presence is not deployment readiness.
