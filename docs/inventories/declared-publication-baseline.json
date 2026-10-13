@@ -78,8 +78,8 @@
       "state": "never-published"
     },
     "dotmac-billing": {
-      "declared": "0.1.0a4",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a4 adds immutable non-cash grant/effect and V2 position evidence in additive bi_0005, preserving cash and prepaid funding separation and prior wire contracts. Hosted acceptance, authorized publication and product qualification remain separate; this allocation changes no product pin or production writer authority.",
+      "declared": "0.1.0a5",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a5 adds pure immutable complete-population opening evidence preflight on the a4 credit/WHT foundation, with trusted verifier bindings and typed blockers. It adds no opening writer, stored balance or production authority. Hosted acceptance, source approval, authorized publication and product qualification remain separate; no product pin changes.",
       "state": "declared-unpublished"
     },
     "dotmac-connector-flutterwave": {
@@ -120,6 +120,11 @@
     "dotmac-deployment-foundation": {
       "declared": "0.4.0a1",
       "reason": "BUILT ONCE; UNRECORDED AND DRIFTED. 0.4.0a1 was allocated on 2026-09-04 for the new authorized failed-system recovery capability. Run 33920058598 built it once from protected-main source 753a004e7f8dbab034d5d6ca565c680d931a5309 as artifact 9954731961 (built source tree 504bc8f71b62646a5e20a22c41827b20ddd88d33). Its CandidateArtifact.v1 receipt remained in the workflow artifact and never entered this repository; #628 and #631 then changed the facility's importable source under the unchanged version. tests/architecture/candidate_window_baseline.json therefore records both unrecorded and drifted from the external build oracle. 0.4.0a1 is unpublished, untagged and not an admissible rehearsal or publication coordinate; it must not be rebuilt or published. The latest published Foundation remains 0.2.0a2. This row records that tag-level publication fact only: it does not authorize committing the old receipt, writing a disposition, or allocating a successor. Michael has reserved those lifecycle decisions. recover remains absent from authorization.OPERATIONS; Control can issue that operation but Foundation refuses it at AuthorizationReceipt construction before any grant, plan or effect, and no recover-specific settlement contract exists. The predecessor 0.3.0a6 remains a separate never-built name spent by documents, with no receipt or disposition. The earlier 0.3.0a5 candidate remains recorded superseded and publishable=false at CandidateDisposition.v1 sequence 4. Remove this row only through an authorized release-record transition for a valid successor, never by editing the declaration down or treating the drifted a1 artifact as current bytes.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-document-rendering": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Released a1 remains unchanged. Candidate a2 adds separate Billing-shaped V2 rendering with honest recorded provenance, shared Kernel a103 canonical encoding and strict in-memory PDF validation. Hosted acceptance, authorized publication and install-back verification precede product qualification; no Sub pin, official-artifact authority or financial writer activation changes here.",
       "state": "declared-unpublished"
     },
     "dotmac-inbox": {

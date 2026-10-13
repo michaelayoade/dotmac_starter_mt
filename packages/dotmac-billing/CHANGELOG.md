@@ -2,6 +2,14 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a5 — UNRELEASED
+
+- Add immutable complete-population opening-manifest contracts and a pure
+  cash-only evidence preflight with exact minor-unit controls, ordered cash
+  provenance, target bindings and counted refusals. Require an assembly-owned
+  verifier for source/cash/migration evidence; candidate hashes establish no
+  authority. No opening writer, storage, spendable funding or activation.
+
 ## 0.1.0a4 — UNRELEASED
 
 - Refresh the locked draft header and line identities before issuance so a

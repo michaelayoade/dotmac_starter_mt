@@ -419,13 +419,12 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
 # newest capability it imports. Keeping this separate from the allocation maps
 # avoids inventing a namespace merely to fit their shape.
 STATELESS_CAPABILITY_FLOORS: dict[str, str] = {
-    # `dotmac_kernel.fingerprints` entered kernel SOURCE at a87 but first
-    # SHIPPED in a88: a87 was never dispatched ("NOT PUBLISHED SEPARATELY;
-    # INCLUDED IN 0.1.0a88") and carries no tag. A floor must name an
-    # installable release, so it is a88. Importing the legacy re-export from
-    # `dotmac_kernel.idempotency` would instead pull the database-backed ledger
-    # across Document Rendering's persistence-free boundary.
-    "dotmac-document-rendering": "0.1.0a88",
+    # V1 fingerprints are historical at a88; the new V2 public
+    # `semantic_encoding` capability first shipped at a103. Source commit
+    # 2e6613322c386e996565c8449b6c3672c9efd956 has a verified receipt for that
+    # release. The latest capability floor is therefore a103, with no fake DB
+    # namespace for this stateless module.
+    "dotmac-document-rendering": "0.1.0a103",
 }
 
 
