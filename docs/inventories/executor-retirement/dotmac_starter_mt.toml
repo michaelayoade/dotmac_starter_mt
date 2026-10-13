@@ -284,6 +284,19 @@ disposition = "not_an_executor"
 premise = "commands no deployment verb, directly or through any in-tree callee"
 
 [[entrypoint]]
+name = "workflow:lane3-handoff-integration"
+family = "workflow"
+path = ".github/workflows/lane3-handoff-integration.yml"
+trigger = "push, pull_request"
+credential = "none"
+disposition = "not_an_executor"
+premise = """
+Hosted-runner tests only: root inside a disposable network namespace on the
+GitHub-hosted VM itself, with synthetic addresses, DNS, TLS and identities.
+Reaches no fleet host, uses no secret and commands no deployment verb.
+"""
+
+[[entrypoint]]
 name = "workflow:foundation-candidate"
 family = "workflow"
 path = ".github/workflows/foundation-candidate.yml"
@@ -446,6 +459,23 @@ premise = """
 Creates the registry, database and containers it uses and tears them down
 again; its own header states it runs only on disposable infrastructure.
 Checked: it names no declared production target.
+"""
+
+[[entrypoint]]
+name = "script:lane3_rehearse.sh"
+family = "script"
+path = "scripts/lane3_rehearse.sh"
+trigger = "`workflow:exposure-rehearsal` (D-S2c C1), and later the org Lane 3 launcher (C3)"
+credential = "probe-host-ssh-key"
+disposition = "non_production_executor"
+targets = ["disposable-probe-host", "lane3-rehearsal-target"]
+premise = """
+The Lane 3 rehearsal steps moved out of `workflow:exposure-rehearsal`
+(D-S2c C1). It reaches the probe vantage point through
+`script:collect_probe_evidence.sh` and the leased rehearsal target through
+`exposure_rehearsal_runner.py`, the same two targets those callees already
+declare, and adds no target of its own. Checked: it names no declared
+production target.
 """
 
 [[entrypoint]]

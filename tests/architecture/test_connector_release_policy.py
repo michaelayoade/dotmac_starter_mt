@@ -669,6 +669,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
         "dotmac-connector-paystack",
         "dotmac-connector-remita",
         "dotmac-connector-sub-accounting",
+        "dotmac-connector-traccar",
         "dotmac-connector-whatsapp",
     }
     gate = _gate()
@@ -686,6 +687,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
         "dotmac-connector-mono",
         "dotmac-connector-paystack",
         "dotmac-connector-remita",
+        "dotmac-connector-traccar",
         "dotmac-connector-whatsapp",
     }
     resolved_keys = {
@@ -695,6 +697,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
                 "dotmac-integration-v0.1.0a10",
                 "dotmac-integration-v0.1.0a11",
                 "dotmac-integration-v0.1.0a14",
+                "dotmac-integration-v0.1.0a18",
             },
         )["connector_key"]
         for distribution in enabled
@@ -706,6 +709,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
         "dotmac-connector-mono": "mono",
         "dotmac-connector-paystack": "paystack",
         "dotmac-connector-remita": "remita",
+        "dotmac-connector-traccar": "traccar",
         "dotmac-connector-whatsapp": "meta_whatsapp",
     }
     with pytest.raises(SystemExit) as held_back:
@@ -942,6 +946,12 @@ def test_the_workflow_matches_the_release_security_sequence() -> None:
     verify = source.split("verify:", 1)[1]
     assert "git tag" in verify
     assert verify.index("verify-wheel") < verify.index("git tag")
+    # Connector plugins are stateless protocol adapters: the control plane owns
+    # their state and migration lineage. The recorder requires this fact to be
+    # explicit rather than inferred from an empty package directory.
+    recorder = verify.split("- name: Open the post-release record", 1)[1]
+    assert "--no-lineage" in recorder
+    assert "--package-dir" not in recorder
 
 
 def test_the_published_bytes_are_conformance_checked_not_just_installed() -> None:

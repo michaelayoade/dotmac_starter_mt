@@ -218,7 +218,7 @@ Two rules travel with it:
 | `dotmac_kernel.security` | `hash_password`, `verify_password`, `password_needs_rehash`, `hash_token`, `issue_access_token`, `decode_access_token` |
 | `dotmac_kernel.setting_domains` | `SettingDomainRegistry`, `SettingDomainsNotInstalledError`, `DuplicateSettingDomainError`, `UndeclaredSettingDomainError`, `install_setting_domains`, `active_setting_domains` |
 | `dotmac_kernel.settings_models` | `SettingDomain`, `SettingValueType`, `DomainSetting`, `KERNEL_SETTING_DOMAINS` |
-| `dotmac_kernel.settings_resolver` | `SettingSpec`, `register_specs`, `resolve_value` |
+| `dotmac_kernel.settings_resolver` | `SettingSpec`, `register_specs`, `resolve`, `resolve_strict`, `resolve_value`, `StrictSettingResolutionError`, `StrictSettingResolutionReason` |
 | `dotmac_kernel.settings_cache` | `MISS`, `install_settings_cache`, `active_settings_cache`, `cached`, `store_resolved`, `invalidate`, `setting_cache_key`, `setting_key_prefix` (scoped read cache for resolved settings; OFF until a store is installed) |
 | `dotmac_kernel.settings_crypto` | `ENCRYPTED_PREFIX`, `DEFAULT_KEY_ID`, `KEYRING_ENV_VAR`, `KEY_ENV_VAR`, `KEY_FILE_ENV_VAR`, `EncryptionKey`, `KeyStatus`, `Keyring`, `KeyringError`, `SettingsEncryptionError`, `encrypt_value`, `decrypt_value`, `encrypted_key_id`, `encryption_configured`, `is_encrypted`, `keyring`, `reencrypt_secrets` (at-rest encryption of secret settings, with a rotatable keyring; needs the `settings-crypto` extra) |
 | `dotmac_kernel.settings_admin` | `all_specs`, `get_spec`, `resolve_with_source`, `upsert_by_key`, `ensure_by_key`, `validate_spec_value` |
@@ -820,8 +820,9 @@ health/diagnostics surface.
 
 ### Settings: two distinct surfaces
 
-- **Read / declare (general API):** `settings_resolver.{resolve_value,
-  register_specs, SettingSpec}` + `settings_models.{SettingDomain,
+- **Read / declare (general API):** `settings_resolver.{resolve, resolve_strict,
+  resolve_value, register_specs, SettingSpec, StrictSettingResolutionError,
+  StrictSettingResolutionReason}` + `settings_models.{SettingDomain,
   SettingValueType}`. Any feature reads a value or declares a spec through these.
 - **Admin / registry (narrow API):** `dotmac_kernel.settings_admin` — the
   write-path and registry-introspection helpers (`upsert_by_key`, `ensure_by_key`,
@@ -830,6 +831,30 @@ health/diagnostics surface.
   `settings_resolver` (so features can reach them without importing another
   feature) but are re-exported here to keep the write path from being mistaken
   for general API.
+
+`resolve_strict(db, spec, *, scope: SettingScope) -> T` is the general read for
+decisions that require a fresh validated value. The spec must match the current
+registered declaration; the registered declaration, scope kinds and profile
+defaults remain authoritative. It shares the normal scope chain and `inherits`
+policy, and validates through the same type codec, allowed set, range and
+validator. The first active row wins: an invalid or null winner raises instead
+of selecting a less-specific row or default. With no active row, the installed
+profile default wins over the spec fallback; that candidate must also be usable
+and non-null. False, zero and empty strings remain valid when their spec allows
+them.
+
+This API bypasses cache reads and writes and selects database columns rather
+than ORM identity-map values. It runs under `no_autoflush`, preserves pending
+edits and sees explicitly flushed writes. It never opens a session, commits,
+rolls back or reads the environment. Freshness is bounded by the caller's
+transaction isolation; it does not promise a globally linearized flag flip.
+Database, decryption, registry and validation failures refuse with
+`StrictSettingResolutionError`. Its fields are `domain`, `key`, `scope_kind`
+and a `StrictSettingResolutionReason` enum; no values, scope IDs, SQL parameters
+or underlying exception text/chain are exposed. Existing `resolve`,
+`resolve_value`, `resolve_with_source` and `resolve_many` retain their cache and
+degrade-to-default behavior. The strict API is exported from the supported
+`settings_resolver` submodule; no top-level import is required.
 
 ### Provisioning provider (`dotmac_kernel.providers.provisioning`)
 

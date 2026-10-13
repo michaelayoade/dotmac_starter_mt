@@ -519,6 +519,50 @@
         ]
       }
     },
+    "dotmac-connector-traccar": {
+      "$comment": [
+        "Traccar 6.15.3 read-only REQUEST transport, service-session auth and",
+        "provider-neutral fleet telemetry normalization. It preserves four",
+        "fixed capabilities: provider health, exact device lookup, latest",
+        "position and bounded position history. It owns no vehicle, tracker",
+        "mapping, tenant, organization, Fleet permission or telemetry store.",
+        "",
+        "RELEASE ENABLED after dotmac-integration 0.1.0a18 was published and",
+        "verified at dotmac-integration-v0.1.0a18 from protected main. Hosted",
+        "CI is green and the manifest pins all four reviewed ERP-owner contract",
+        "digests. Publication remains gated by the connector release workflow,",
+        "installed-wheel conformance, and the exact a18 integration floor."
+      ],
+      "package_dir": "packages/dotmac-connector-traccar",
+      "release_enabled": true,
+      "import_name": "dotmac_connector_traccar",
+      "plugin_attr": "PLUGIN",
+      "connector_key": "traccar",
+      "spi_range": ">=1.6,<2.0",
+      "integration_floor": "0.1.0a18",
+      "tag_prefix": "dotmac-connector-traccar-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_connector_traccar/__init__.py",
+          "dotmac_connector_traccar/client.py",
+          "dotmac_connector_traccar/mapping.py",
+          "dotmac_connector_traccar/plugin.py",
+          "dotmac_connector_traccar/query.py",
+          "dotmac_connector_traccar/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-integration",
+          "httpx",
+          "python"
+        ]
+      }
+    },
     "dotmac-connector-whatsapp": {
       "$comment": [
         "Meta WhatsApp Cloud API translation, authentication and delivery I/O.",

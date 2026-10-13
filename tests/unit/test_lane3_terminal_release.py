@@ -1617,15 +1617,34 @@ def test_the_job_can_prove_its_workload_identity() -> None:
 
 
 def test_the_run_is_bound_to_a_slot_and_a_candidate() -> None:
-    """A record naming an address would bind a value the restoration can change."""
+    """The dispatch names a Fleet host; the SLOT comes from the topology record.
+
+    A record naming an address would bind a value the restoration can change, so
+    the release binds the `node/vmid` slot. Since the vantage-topology record
+    (docs/LANE3_EXECUTION_TOPOLOGY.md section 4) neither the address nor the slot
+    is a dispatch input: the dispatch carries the Fleet `host_id` and the runner
+    installs the slot from the bound record (`install_bound_topology`).
+    """
     document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     inputs = document[True]["workflow_dispatch"]["inputs"]
-    assert inputs["vm_slot"]["required"] is True
-    assert "default" not in inputs["vm_slot"]
+    assert "vm_slot" not in inputs and "target" not in inputs
+    assert inputs["host_id"]["required"] is True
+    assert "default" not in inputs["host_id"]
     assert inputs["candidate_version"]["required"] is True
-    body = WORKFLOW.read_text(encoding="utf-8")
-    assert "--vm-slot" in body
-    assert "--candidate-version" in body
+    from tests.architecture import lane3_rehearse_script as rehearse_script
+
+    execute = next(
+        unit["run"]
+        for unit in rehearse_script.units("rehearse")
+        if "scripts/exposure_rehearsal_runner.py" in unit["run"]
+    )
+    assert '--host-id "${LANE3_HOST_ID}"' in execute
+    assert "--vm-slot" not in execute and "--target" not in execute
+    assert '--candidate-version "${LANE3_CANDIDATE_VERSION}"' in execute
+    (call,) = rehearse_script.script_calls(document, "rehearse")
+    assert call["env"]["LANE3_HOST_ID"] == "${{ inputs.host_id }}"
+    assert call["env"]["LANE3_CANDIDATE_VERSION"] == "${{ inputs.candidate_version }}"
+    assert "LANE3_VM_SLOT" not in call["env"] and "LANE3_TARGET" not in call["env"]
 
 
 def test_the_release_lands_beside_its_lease_and_nowhere_else(

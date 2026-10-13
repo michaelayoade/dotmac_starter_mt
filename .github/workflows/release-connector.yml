@@ -98,6 +98,7 @@ on:
           - dotmac-connector-mono
           - dotmac-connector-paystack
           - dotmac-connector-remita
+          - dotmac-connector-traccar
           - dotmac-connector-whatsapp
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
@@ -369,6 +370,6 @@ jobs:
             --distribution "${{ inputs.connector }}" \
             --version "${{ inputs.version }}" \
             --tag "${{ needs.build.outputs.tag }}" \
-            --package-dir "${{ needs.build.outputs.package_dir }}" \
+            --no-lineage \
             --manifest-python /tmp/connector-registry/bin/python \
             --release-run "${{ github.run_id }}"

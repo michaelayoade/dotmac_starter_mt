@@ -1,0 +1,22 @@
+{
+  "schema": "Lane3ExecutionTopology.v1",
+  "starter_repository": "michaelayoade/dotmac_starter_mt",
+  "execution_repository": "dotmac-tech/lane3-exposure-execution",
+  "execution_repository_id": 1406738001,
+  "execution_owner_id": 335992433,
+  "workflow_path": ".github/workflows/lane3-exposure-rehearsal.yml",
+  "environment": {
+    "name": "lane3-rehearsal-protected",
+    "id": 23551908838,
+    "reviewer": "michaelayoade"
+  },
+  "runner_group": {
+    "name": "lane3-exposure-protected",
+    "id": 4
+  },
+  "admitted_launcher_revisions": [
+    "0f3db810bca29a9b0a6f82319a7ecef39cf53a3e"
+  ],
+  "receipt_artifact": "lane3-rehearsal-receipt",
+  "admission_evidence": null
+}

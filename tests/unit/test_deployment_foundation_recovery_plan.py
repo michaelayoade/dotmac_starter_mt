@@ -719,7 +719,10 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "credential_lifecycle_sweep.py": 1,
     "declared_publication_sweep.py": 1,
     "executor_retirement.py": 2,
-    "exposure_rehearsal_runner.py": 2,
+    # 2 -> 1 at D-S2c C2: the v1 receipt writer (`json.dumps(receipt.content,
+    # sort_keys=True)`) was removed; RehearsalReceipt.v2 is written by
+    # `lane3_receipt_v2.write_receipt`. The one left is the terminal evidence.
+    "exposure_rehearsal_runner.py": 1,
     "external_connector_sweep.py": 2,
     "facet_navigation_baseline.py": 1,
     "fleet_decomposition_sweep.py": 2,
@@ -727,6 +730,19 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "foundation_candidate.py": 1,
     "foundation_disposition.py": 1,
     "kernel_release_authorization.py": 1,
+    # The pre-import bootstrap hashes the supplier module map before protocol
+    # code is trusted; it cannot import that code to serialize its own admission
+    # input. This digest is not a Foundation store or host-lease release record.
+    "lane3_handoff_bootstrap.py": 1,
+    # The Lane 3 broker-handoff wire contract's canonical JSON
+    # (`lane3_handoff_protocol.canonical_json`): it defines `grant_digest` and
+    # every handoff digest, is owned by that protocol module, and is written to
+    # no Foundation store; it is not a host-lease release record.
+    # The host installer owns its immutable bundle/config and transaction
+    # encoding; these are local installation records, not Foundation release
+    # documents. It must verify runtime bytes before importing the protocol.
+    "lane3_handoff_install.py": 1,
+    "lane3_handoff_protocol.py": 1,
     "lane3_runner_capability.py": 1,
     "palette_debt_baseline.py": 1,
     "release_artifact_verification.py": 1,

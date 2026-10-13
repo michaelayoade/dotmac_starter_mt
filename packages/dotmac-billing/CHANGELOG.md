@@ -9,6 +9,8 @@ All notable changes follow Semantic Versioning.
   events. Non-cash grants and opening-balance funding remain separate gaps.
 - Refuse allocation from reversed settlement funding while preserving exact
   replay of a previously accepted command.
+- Rebuild position attestations from persisted numeric values, independent of
+  ORM cache scale, preserving the hash algorithm and strict drift refusal.
 - Reconcile Sub-first, pay-then-record and open-items-only cutover preparation.
 
 ## 0.1.0a1 — historical publication

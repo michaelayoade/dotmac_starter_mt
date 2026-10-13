@@ -101,3 +101,9 @@ automatic invoice sweep, reviewed opening positions, reserved-purchase or
 legacy-payment metadata branches, noncash credit grants, issuance funding
 reservations, or product-specific prepaid finalization. No new table, mutable
 balance, external contract or sibling-product import is introduced.
+
+Position rebuilds read persisted scalar effects, so freshly flushed ORM decimal
+representations cannot change the attestation hash. The existing hash algorithm
+and strict comparison with immutable position facts are preserved. Historical
+facts that already disagree with their persisted effects still fail closed;
+this change neither rewrites them nor supplies a compatibility fallback.

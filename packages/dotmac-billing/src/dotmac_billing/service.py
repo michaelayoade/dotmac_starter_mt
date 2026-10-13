@@ -2702,11 +2702,19 @@ def rebuild_receivable_position(
     verify_latest: bool = True,
 ) -> PositionState:
     plane = _models(scope)
-    statement = select(plane.effect).where(
+    # Read persisted scalar values rather than identity-map entities. Newly
+    # flushed ORM amounts can retain the input exponent while NUMERIC(20,6)
+    # reads have six decimal places; mixing them changes the existing hash.
+    statement = select(
+        plane.effect.lane,
+        plane.effect.amount_delta,
+        plane.effect.currency,
+        plane.effect.minor_units,
+    ).where(
         plane.effect.billing_account_id == billing_account_id,
         plane.effect.currency == currency,
     )
-    rows = tuple(db.execute(_where_scope(statement, scope, plane.effect)).scalars())
+    rows = tuple(db.execute(_where_scope(statement, scope, plane.effect)).all())
     rebuilt = rebuild_position(
         (
             Effect(

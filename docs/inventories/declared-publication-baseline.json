@@ -127,9 +127,9 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-integration": {
-      "declared": "0.1.0a18",
-      "reason": "ALLOCATED AHEAD OF SOURCE, TO KEEP THIS GUARD HONEST. a17 IS published (peeled tag dotmac-integration-v0.1.0a17 -> 2cab76b442e6cc6c8ed81a409d943ba250351c3d). a18 was allocated before the durable provisioning-runtime work began, precisely so that source divergence never had to share a version number with a17's published contract -- allocating first is what keeps this guard from becoming the thing it exists to catch. The provisioning-runtime source (the PROVISION mode and its plan/apply/observe/cancel contract) has now landed under the unreleased a18 declaration; this is additive SPI 1.5 source only, still unpublished. Source presence is not registry evidence. It is NOT to be repaired by editing the version down: remove this row only when the protected module release installs, verifies, registers and tags exact 0.1.0a18; nothing may exact-pin or lock a18 before that tag exists.",
+    "dotmac-kernel": {
+      "declared": "0.1.0a104+dev",
+      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a104 IS published and tagged (dotmac-kernel-v0.1.0a104). This source adds strict fresh settings resolution, so continuing to declare bare 0.1.0a104 would make one released version name two importable contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only through a separately authorized allocation of the next public version at release time; never remove the marker merely to quiet a gate.",
       "state": "declared-unpublished"
     },
     "dotmac-platform-health": {

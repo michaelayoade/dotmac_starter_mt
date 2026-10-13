@@ -204,11 +204,10 @@ with a discriminated text/template/media content shape, replacing both
 vocabularies at once), `social.comment.reply.v1` (public Facebook/Instagram
 comment consequences — a different business act) and `social.profile.read.v1`
 (caller-initiated profile observation through a REQUEST mode). Sub migrates to
-them; v1 is kept for a bounded compatibility window and then retired. As built,
-none of the three exists, and `spi.ConnectorMode` is still the closed union
-`INGRESS | POLL | DELIVERY` with no REQUEST member — which is the same gap
-`dotmac-connector-meta-social`'s dossier records for its withheld contact
-profile lookup.
+them; v1 is kept for a bounded compatibility window and then retired. The
+declared, unpublished `dotmac-integration` a18 source now supplies SPI 1.6's
+provider-neutral REQUEST machinery; the three named capability contracts and
+their connector/product cutovers still do not exist.
 
 Consequence, stated plainly: **payout traffic cannot be switched between
 providers by changing a binding today.** `payments.payout.v1` has exactly one
@@ -1599,6 +1598,25 @@ level that actually answered: the scope kind (`"tenant"`, `"platform"`, …),
 `"profile"`, or `"default"`. It tells the settings admin API whether to mask a
 secret's value (masked whenever a real row exists; never for the built-in
 default — there's nothing to hide there).
+
+**Fresh strict reads** are owned by the same resolver through the general
+`resolve_strict(db, spec, *, scope: SettingScope) -> T` API. A matching registered
+declaration and declared explicit scope are required. The shared chain walk and
+validation core retain the same scope/profile/spec precedence and `inherits`
+policy. An invalid or null winning row refuses rather than falling through;
+profile/spec defaults are considered only when no active row exists and must
+also validate as non-null. Database, decryption and type-registry failures never
+become defaults. `StrictSettingResolutionError` carries only domain, key, scope
+kind and an enum reason, without original exception text or chain.
+
+Strict reads bypass both cache operations and select scalar database columns,
+so a preloaded ORM object cannot supply stale values. `no_autoflush` protects
+the caller's pending changes; explicitly flushed changes remain visible. The
+resolver neither opens nor completes a session and has no environment fallback.
+Freshness remains subject to the caller's transaction isolation, rather than
+promising a globally linearized configuration flip. Compatibility reads retain
+their existing caching and degradation behavior. Source acceptance is covered by
+`tests/unit/test_settings_strict_resolution.py`; hosted CI owns test execution.
 
 Finer levels than `tenant` are possible — a spec resolves through the
 declared scope chain (`dotmac_kernel.setting_scopes`), most specific first,
@@ -3679,3 +3697,55 @@ image on registry → `pg_dump` backup → pin `APP_IMAGE` in `.env` → pull �
 (retries/interval/timeout all config knobs) → auto-rollback to the previous
 pin on health-gate failure (migrations are not auto-reverted; new revisions
 must stay backward-compatible with the previous release).
+
+Lane 3's product-owned private-topology I/O adapter is
+`scripts/lane3_openbao_topology.py`, composed explicitly by
+`lane3_topology_source.openbao_source` and consumed through the existing
+resolver/runner source-injection seam. The parser and host binding remain in
+`lane3_topology.py` and `lane3_topology_source.py`. This preparation introduces
+no Foundation network I/O, automatic runtime activation or new credential
+custody owner; the launcher supplies authenticated transport and a fresh B7
+JWT, and unconfigured execution refuses.
+Its Actions-specific fresh-JWT adapter is `scripts/lane3_github_oidc.py`,
+consumed by `lane3_topology_source.github_openbao_source`. The protected
+launcher owns the exact approved broker/configuration and job permissions;
+OpenBao owns JWT signature/claim verification. The default source remains
+refusing until deployment is explicitly composed.
+
+The explicit encrypted-private-channel adapter is
+`scripts/lane3_wireguard_topology.py`, composed by
+`lane3_topology_source.wireguard_github_openbao_source`. It owns public peer,
+source/route/handshake checks and source-bound HTTP over that existing channel;
+it owns no tunnel provisioning, privilege grants or runtime activation. Host
+root/kernel/configuration remain in its stated trust boundary.
+
+The broker-handoff preparation is product-owned source, not an installed
+runtime or Gate 0 acceptance. Its owners and consumers are:
+
+| Component | Owner and responsibility | Consumer |
+|---|---|---|
+| `lane3_broker_origin.py`, `lane3_handoff_protocol.py` | Starter: exact-origin grammar and bounded, value-free protocol | Controller, coordinator and job client |
+| `lane3_handoff_coordinator.py`, `lane3_handoff_resolver.py` | Starter: authoritative GitHub qualification, immutable source installation, exact DNS capture and durable JIT cleanup | Independently approved host ceremony |
+| `lane3_handoff_controller.py` | Starter: root lease journal, task identity, UID-scoped firewall, launch budget, exact-owned rollback and fresh read-only WireGuard checks | Coordinator and authenticated consumed-lease client over the private socket |
+| `lane3_handoff_install.py` | Starter: immutable installation bundle, protected independent configuration, locked management dispatch, durable install rollback, explicit uninstall and boot-readiness barrier | Host administrator and the fixed coordinator management channel |
+| `lane3_handoff_bootstrap.py`, `lane3_handoff_client.py` | Starter: verify staged bytes before supplier imports; consume the job-bound grant using the original launch budget | Protected launcher amendment, separately reviewed |
+| `lane3_github_oidc.py` pinned transport | Starter: TLS identity and exact numeric destination; persist request-start evidence before sending credentials | Explicit topology-source composition |
+
+The launcher must wire request-start and proof-outcome events explicitly.
+The KV proof outcome is runner-reported, not independently observed by root.
+After request start, issuance remains `UNKNOWN`; a bounded KV proof records
+its own result and does not prove whether an issuance occurred. Root-owned
+configuration, finite independently approved origins, GitHub API authority,
+host kernel and custody remain trust assumptions. Hosted synthetic coverage
+does not establish the composed production rollback/reboot proof. Installation,
+human review of the launcher and its source-policy change, protected-run
+approval and Gate 0 acceptance remain separate; `admission_evidence` is null.
+
+The pinned WireGuard composition requires the lease client's root-check
+callback; missing or failed checks never fall back to job-side sudo. Each
+request compares the consumer's canonical five-field channel digest with the
+fixed protected live configuration, performs fresh public-state checks and
+returns only a fixed status. No caller-selected command or path crosses this
+boundary. Runner `NoNewPrivileges` remains enabled. Synthetic root command
+metadata proves callback/socket behavior, not real kernel WireGuard state or
+the complete production systemd composition.

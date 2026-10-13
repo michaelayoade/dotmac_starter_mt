@@ -1437,6 +1437,157 @@ def _additional_credit_invoice(session, scope, account_id, suffix):
 
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_position_hash_uses_persisted_values_and_still_detects_drift(
+    scratch, plane
+) -> None:
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    effect_model = (
+        models.PostingEffect if plane == "tenant" else models.PlatformPostingEffect
+    )
+    group_model = (
+        models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+    )
+    retained = []
+
+    def retain_effect(_session: Session, instance: object) -> None:
+        if isinstance(instance, effect_model):
+            retained.append(instance)
+
+    with _session(url, scope) as session:
+        account, _, _ = _seed_invoice(session, scope, suffix=f"hash-cache-{plane}")
+        account_id = account.id
+        invoice_group_id = session.execute(
+            select(group_model.id).where(
+                group_model.billing_account_id == account_id,
+                group_model.group_kind == "invoice_issued",
+            )
+        ).scalar_one()
+        event.listen(session, "pending_to_persistent", retain_effect)
+        try:
+            settlement = accept_settlement(
+                session,
+                scope=scope,
+                command=_settlement_command(
+                    account_id,
+                    scope=scope,
+                    source_key=f"hash-cache-{plane}",
+                    amount="12.34",
+                ),
+                accepted_confirmation_evidence=frozenset({"provider_settled"}),
+            )
+        finally:
+            event.remove(session, "pending_to_persistent", retain_effect)
+        # Keep the freshly flushed two-decimal entity alive: a scalar database
+        # read must still hash the same six-decimal values as a fresh session.
+        assert len(retained) == 1
+        assert retained[0].amount_delta.as_tuple().exponent == -2
+        before = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        )
+        acceptance = session.execute(
+            select(group_model).where(
+                group_model.source_ref == f"settlement:{settlement.id}"
+            )
+        ).scalar_one()
+        acceptance_id = acceptance.id
+        session.expire_all()
+        after = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert before.state_fingerprint == after.state_fingerprint
+        reversal = reverse_posting_group(
+            session,
+            scope=scope,
+            command=ReversePostingGroupCommand(
+                acceptance_id, NOW, f"hash-zero-{plane}"
+            ),
+        )
+        zero = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert zero.available_credit == 0
+        # Restore and reverse again so the touched-zero lane is also rebuilt
+        # after a real reversal chain, expiration and a session boundary.
+        restoration = reverse_posting_group(
+            session,
+            scope=scope,
+            command=ReversePostingGroupCommand(
+                reversal.id, NOW, f"hash-restored-{plane}"
+            ),
+        )
+        reverse_posting_group(
+            session,
+            scope=scope,
+            command=ReversePostingGroupCommand(
+                restoration.id, NOW, f"hash-zero-again-{plane}"
+            ),
+        )
+        session.expire_all()
+        final = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert final.state_fingerprint == zero.state_fingerprint
+        session.commit()
+
+    with _session(url, scope) as fresh:
+        rebuilt = rebuild_receivable_position(
+            fresh,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert rebuilt.state_fingerprint == final.state_fingerprint
+        # A planted unmatched effect must still fail the strict attestation
+        # comparison. The scalar-read repair never accepts or rewrites drift.
+        with fresh.begin_nested() as savepoint:
+            values = {
+                "id": uuid.uuid4(),
+                "posting_group_id": invoice_group_id,
+                "billing_account_id": account_id,
+                "lane": "available_credit",
+                "amount_delta": Decimal("1.00"),
+                "currency": "NGN",
+                "minor_units": 2,
+            }
+            if isinstance(scope, TenantScope):
+                values["tenant_id"] = scope.tenant_id
+            fresh.add(effect_model(**values))
+            fresh.flush()
+            with pytest.raises(BillingConflict, match="rebuild hash differs"):
+                rebuild_receivable_position(
+                    fresh,
+                    scope=scope,
+                    billing_account_id=account_id,
+                    currency="NGN",
+                    minor_units=2,
+                )
+            savepoint.rollback()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_available_credit_draw_is_exact_backed_and_replayable(scratch, plane) -> None:
     admin_url, tenant_url, platform_url = scratch
     scope = (
@@ -1727,13 +1878,7 @@ def test_available_credit_global_cap_survives_reversed_spent_source(
                 group_model.source_ref == f"settlement:{first.id}"
             )
         ).scalar_one()
-        reverse_posting_group(
-            session,
-            scope=scope,
-            command=ReversePostingGroupCommand(
-                acceptance.id, NOW, f"cap-reverse-{plane}"
-            ),
-        )
+        # Replenish first: every committed position must stay nonnegative.
         accept_settlement(
             session,
             scope=scope,
@@ -1741,6 +1886,13 @@ def test_available_credit_global_cap_survives_reversed_spent_source(
                 account.id, scope=scope, source_key=f"cap-second-{plane}"
             ),
             accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        reverse_posting_group(
+            session,
+            scope=scope,
+            command=ReversePostingGroupCommand(
+                acceptance.id, NOW, f"cap-reverse-{plane}"
+            ),
         )
         draft = _additional_credit_invoice(
             session, scope, account.id, f"cap-target-{plane}"
