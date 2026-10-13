@@ -30,6 +30,9 @@ def client_fixture(request):
     name = "b8it" + uuid.uuid4().hex[:12]
     root = Path("/run") / name
     root.mkdir(mode=0o755)
+    # unshare --net starts with lo down. The synthetic UDP proof must reach nft
+    # and its drop anchor, rather than fail earlier with no usable local route.
+    sh("/usr/sbin/ip", "link", "set", "lo", "up")
     table = name
     identity_path = root / "lane3_campaign_identity.py"
     shutil.copyfile(SCRIPTS / identity_path.name, identity_path)
@@ -77,7 +80,17 @@ def client_fixture(request):
     user = created["user"]
     account = pwd.getpwnam(user)
     module_path = root / "lane3_campaign_client.py"
-    shutil.copyfile(SCRIPTS / module_path.name, module_path)
+    client_source = (SCRIPTS / module_path.name).read_text()
+    marker = (
+        "        # No traceback, argv, material, host or stderr is exposed by this CLI."
+    )
+    assert client_source.count(marker) == 1
+    # Fixture-only synthetic launcher diagnostics. Production still suppresses
+    # private diagnostics; this copy handles only this test's generated material.
+    client_source = client_source.replace(
+        marker, "        import traceback\n        traceback.print_exc()\n" + marker
+    )
+    module_path.write_text(client_source)
     module_path.chmod(0o644)
     spec = importlib.util.spec_from_file_location(name, module_path)
     c = importlib.util.module_from_spec(spec)
@@ -262,6 +275,93 @@ def client_fixture(request):
     sh("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(ca))
     sessions = []
 
+    def unit_diagnostic(unit):
+        expected = {
+            c.PREFIX + owned_identity.session_id + "-matrix.service",
+            "dotmac-b8-identity-" + owned_identity.session_id + ".timer",
+            "dotmac-b8-identity-" + owned_identity.session_id + ".service",
+        }
+        assert unit in expected
+        for command in (
+            [
+                "/usr/bin/systemctl",
+                "show",
+                "--property=Id",
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=Result",
+                "--property=ExecMainStatus",
+                unit,
+            ],
+            [
+                "/usr/bin/journalctl",
+                "--no-pager",
+                "--output=cat",
+                "-n",
+                "30",
+                "-u",
+                unit,
+            ],
+        ):
+            output = subprocess.run(  # noqa: S603 - exact owned synthetic unit
+                command, capture_output=True, timeout=5, check=False
+            )
+            print(
+                json.dumps(
+                    {
+                        "synthetic_unit_diagnostic": unit,
+                        "tool": command[0],
+                        "returncode": output.returncode,
+                        "stdout": output.stdout.decode(errors="replace"),
+                        "stderr": output.stderr.decode(errors="replace"),
+                    },
+                    sort_keys=True,
+                )
+            )
+
+    class FixtureSession(c.Session):
+        def _execute(self):
+            try:
+                return super()._execute()
+            except Exception as error:
+                import traceback
+
+                print(
+                    json.dumps(
+                        {
+                            "synthetic_execute_exception": type(error).__name__,
+                            "errno": getattr(error, "errno", None),
+                            "message": str(error),
+                            "traceback": traceback.format_exc(limit=8),
+                        },
+                        sort_keys=True,
+                    )
+                )
+                unit_diagnostic(c.PREFIX + self.session_id + "-matrix.service")
+                raise
+
+    original_identity_command = im.command
+
+    def identity_command(argv, **kwargs):
+        result = original_identity_command(argv, **kwargs)
+        if argv[:2] == ["/usr/bin/systemctl", "stop"] and result.returncode:
+            print(
+                json.dumps(
+                    {
+                        "synthetic_identity_stop_returncode": result.returncode,
+                        "stderr": result.stderr.decode(errors="replace"),
+                    },
+                    sort_keys=True,
+                )
+            )
+            unit_diagnostic(
+                "dotmac-b8-identity-" + owned_identity.session_id + ".timer"
+            )
+        return result
+
+    im.command = identity_command
+
     def session(**changes):
         args = {
             "identity": identity,
@@ -275,7 +375,7 @@ def client_fixture(request):
             "workspace_root": workspace,
         }
         args.update(changes)
-        client = c.Session(**args)
+        client = FixtureSession(**args)
         sessions.append(client)
         return client
 

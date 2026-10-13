@@ -287,3 +287,95 @@ def test_independent_timer_limits_total_start_attempts_including_runtime_kills(
     assert "--property=RuntimeMaxSec=30" in argv
     assert "--property=Restart=on-failure" in argv
     assert all("reset-failed" not in call for call in calls)
+
+
+@pytest.mark.parametrize("stop_returncode", [0, 1, 5])
+@pytest.mark.parametrize("load_state", ["loaded", "not-found"])
+def test_timer_disarm_requires_positive_exact_inactive_readback(
+    monkeypatch, stop_returncode, load_state
+):
+    from types import SimpleNamespace
+
+    session = "e" * 32
+    unit = "dotmac-b8-identity-" + session + ".timer"
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if argv[1] == "stop":
+            return SimpleNamespace(
+                returncode=stop_returncode,
+                stdout=b"",
+                stderr=b"synthetic stop response",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "Id="
+                + unit
+                + "\nLoadState="
+                + load_state
+                + "\nActiveState=inactive\nSubState=dead\n"
+            ).encode(),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(identity, "command", run)
+    identity.SystemBackend().disarm(session)
+    assert len(calls) == 2 and calls[0][1]["check"] is False
+    assert calls[1][0][-1] == unit
+
+
+@pytest.mark.parametrize(
+    "state,query_code",
+    [
+        ("Id=wrong.timer\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n", 0),
+        ("Id={unit}\nLoadState=loaded\nActiveState=active\nSubState=waiting\n", 0),
+        ("Id={unit}\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n", 1),
+        ("", 0),
+        ("Id={unit}\nLoadState=not-found\n", 0),
+    ],
+)
+def test_timer_disarm_never_accepts_failed_unknown_or_active_readback(
+    monkeypatch, state, query_code
+):
+    from types import SimpleNamespace
+
+    session = "f" * 32
+    unit = "dotmac-b8-identity-" + session + ".timer"
+
+    def run(argv, **kwargs):
+        if argv[1] == "stop":
+            return SimpleNamespace(
+                returncode=5, stdout=b"", stderr=b"synthetic failed stop"
+            )
+        return SimpleNamespace(
+            returncode=query_code, stdout=state.format(unit=unit).encode(), stderr=b""
+        )
+
+    monkeypatch.setattr(identity, "command", run)
+    with pytest.raises(identity.IdentityRefused, match="identity.timer_unproven"):
+        identity.SystemBackend().disarm(session)
+
+
+def test_timer_disarm_lost_stop_reply_still_requires_fresh_inactive_state(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    session = "d" * 32
+    unit = "dotmac-b8-identity-" + session + ".timer"
+
+    def run(argv, **kwargs):
+        if argv[1] == "stop":
+            raise subprocess.TimeoutExpired(argv, 10)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "Id="
+                + unit
+                + "\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n"
+            ).encode(),
+        )
+
+    monkeypatch.setattr(identity, "command", run)
+    identity.SystemBackend().disarm(session)

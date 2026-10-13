@@ -59,7 +59,7 @@ def trusted_directory(path, *, private=False):
         raise IdentityRefused("identity.files")
 
 
-def command(argv, *, timeout=10):
+def command(argv, *, timeout=10, check=True):
     result = subprocess.run(
         argv,
         capture_output=True,
@@ -67,7 +67,7 @@ def command(argv, *, timeout=10):
         check=False,
         env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
     )
-    if result.returncode:
+    if check and result.returncode:
         raise IdentityRefused("identity.effector")
     return result
 
@@ -356,13 +356,38 @@ class SystemBackend:
         command(["/usr/bin/systemctl", "is-active", "--quiet", unit + ".timer"])
 
     def disarm(self, session_id):
-        command(
+        validate(session_id, 1, 1)
+        unit = "dotmac-b8-identity-" + session_id + ".timer"
+        try:
+            command(["/usr/bin/systemctl", "stop", unit], check=False)
+        except subprocess.TimeoutExpired:
+            # A stop may commit before its reply is lost. No return code or
+            # absence of stdout can prove disarm: require fresh exact readback.
+            pass
+        result = command(
             [
                 "/usr/bin/systemctl",
-                "stop",
-                "dotmac-b8-identity-" + session_id + ".timer",
-            ]
+                "show",
+                "--property=Id",
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=SubState",
+                unit,
+            ],
+            check=False,
         )
+        rows = result.stdout.decode().splitlines()
+        values = dict(row.split("=", 1) for row in rows if "=" in row)
+        if (
+            result.returncode != 0
+            or len(rows) != len(values)
+            or set(values) != {"Id", "LoadState", "ActiveState", "SubState"}
+            or values["Id"] != unit
+            or values["LoadState"] not in ("loaded", "not-found")
+            or values["ActiveState"] != "inactive"
+            or values["SubState"] != "dead"
+        ):
+            raise IdentityRefused("identity.timer_unproven")
 
     def create_group(self, name, gid, *, timeout=10):
         command(["/usr/sbin/groupadd", "--gid", str(gid), name], timeout=timeout)
