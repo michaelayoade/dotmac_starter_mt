@@ -130,3 +130,30 @@ representations cannot change the attestation hash. The existing hash algorithm
 and strict comparison with immutable position facts are preserved. Historical
 facts that already disagree with their persisted effects still fail closed;
 this change neither rewrites them nor supplies a compatibility fallback.
+
+
+`get_invoice_document_fact` accepts an explicit routed `scope` and frozen
+`GetInvoiceDocumentFactV1(scope, invoice_id, fact_version)` request. It returns
+`StoredInvoiceDocumentFactV1` with the persisted fact UUID, contract version,
+recording instant and typed `InvoiceDocumentFactV1`. Version selection is exact;
+a missing version, mismatched route, unsupported contract, malformed evidence
+or mismatched presentation digest raises a coded `BillingRuleViolation`.
+
+The query reads only immutable fact-table scalars under `no_autoflush`. Dirty
+ORM objects, later credit notes and cancellation cannot replace the requested
+historical evidence, and the caller retains transaction control. Every V1 field
+must be present, including explicit nulls and empty arrays. Stored decimal text
+and currency minor units are decoded exactly, with no current-settings lookup,
+coercion, default or rounding. Datetimes retain microsecond precision in both
+wall-clock time and UTC offset, including positive/negative subsecond offsets.
+The reader accepts the producer's full ISO datetime spelling, plus historical
+`Z`, space separators and comma fractions; unsupported or higher-precision
+forms fail closed with `billing.document_fact_corrupt` and generic diagnostics.
+Digest verification fingerprints the original
+stored JSON excluding `presentation_model_digest`, preserving the producer's
+historical algorithm and textual representations.
+
+This reader supplies Billing evidence only. The rendering adapter still needs
+an explicit provenance mapping and reconciliation between Billing's presentation
+digest and Rendering's projection digest. The Billing-owned official artifact
+relation remains the existing `RecordDocumentArtifactV1`/reconciler boundary.

@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Literal
 from uuid import UUID
 
-from dotmac_kernel.cache import Scope
+from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.money import Money
 
 from dotmac_billing.errors import BillingRuleViolation
@@ -311,6 +311,37 @@ class InvoiceDocumentFactV1:
 
 
 @dataclass(frozen=True, slots=True)
+class GetInvoiceDocumentFactV1:
+    """Read one exact historical fact; no implicit latest-version selection."""
+
+    scope: Scope
+    invoice_id: UUID
+    fact_version: int
+
+    def __post_init__(self) -> None:
+        if type(self.fact_version) is not int or self.fact_version < 1:
+            raise ValueError("document fact version must be a positive integer")
+        if not isinstance(self.invoice_id, UUID):
+            raise TypeError("invoice_id must be a UUID")
+        if not isinstance(self.scope, TenantScope | PlatformScope):
+            raise TypeError("document fact query requires an explicit scope")
+        if isinstance(self.scope, TenantScope) and not isinstance(
+            self.scope.tenant_id, UUID
+        ):
+            raise TypeError("tenant scope requires a UUID")
+
+
+@dataclass(frozen=True, slots=True)
+class StoredInvoiceDocumentFactV1:
+    """Persisted fact identity and recording instant, separate from issuance."""
+
+    fact_id: UUID
+    contract_version: Literal["billing.invoice.document.fact.v1"]
+    recorded_at: datetime
+    fact: InvoiceDocumentFactV1
+
+
+@dataclass(frozen=True, slots=True)
 class RecordDocumentArtifactV1:
     scope: Scope
     fact_id: UUID
@@ -605,6 +636,7 @@ __all__ = [
     "DueDateBasisStatus",
     "DueDateBasisV1",
     "DiscountSnapshotV1",
+    "GetInvoiceDocumentFactV1",
     "InvoiceLineFactV1",
     "InvoiceDocumentFactV1",
     "FinancialState",
@@ -624,4 +656,5 @@ __all__ = [
     "ServicePeriodEvidenceV1",
     "ServicePeriodStatus",
     "SettlementFundingLane",
+    "StoredInvoiceDocumentFactV1",
 ]
