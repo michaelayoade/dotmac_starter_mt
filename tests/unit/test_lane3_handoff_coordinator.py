@@ -41,6 +41,7 @@ ADMISSION = hp.canonical_json(
         "workflow_path": WF,
         "admitted_launcher_revisions": [SHA],
         "admission_evidence": None,
+        "runner_group": {"id": GROUP, "name": "synthetic-protected"},
     }
 )
 ADMISSION_DIGEST = hashlib.sha256(ADMISSION).hexdigest()
@@ -164,6 +165,17 @@ def world() -> dict[str, Any]:
             "busy": True,
             "labels": [{"name": "self-hosted"}, {"name": "synthetic"}],
         },
+        f"orgs/synthetic-org/actions/runner-groups/{GROUP}": {
+            "id": GROUP,
+            "name": "synthetic-protected",
+            "visibility": "selected",
+            "restricted_to_workflows": True,
+            "selected_workflows": [f"{REPO}/{WF}@refs/heads/main"],
+        },
+        f"orgs/synthetic-org/actions/runner-groups/{GROUP}/repositories?per_page=100": {
+            "total_count": 1,
+            "repositories": [{"id": 9}],
+        },
         f"orgs/synthetic-org/actions/runner-groups/{GROUP}/runners": {
             "total_count": 1,
             "runners": [{"id": RUNNER}],
@@ -286,15 +298,19 @@ MODPATH = f"repos/{STARTER}/contents/scripts/lane3_github_oidc.py?ref={STARTER_S
         ),
         (_set(JOBS, "total_count", value=2), "assignment.ambiguous"),
         (
-            lambda d: d[JOBS]["jobs"].append({**d[JOBS]["jobs"][0], "id": JOB + 1})
-            or d[JOBS].update(total_count=2),
+            lambda d: (
+                d[JOBS]["jobs"].append({**d[JOBS]["jobs"][0], "id": JOB + 1})
+                or d[JOBS].update(total_count=2)
+            ),
             "assignment.ambiguous",
         ),
         (
-            lambda d: d[JOBS]["jobs"].append(
-                {"id": JOB + 1, "status": "queued", "runner_id": None}
-            )
-            or d[JOBS].update(total_count=2),
+            lambda d: (
+                d[JOBS]["jobs"].append(
+                    {"id": JOB + 1, "status": "queued", "runner_id": None}
+                )
+                or d[JOBS].update(total_count=2)
+            ),
             "assignment.ambiguous",
         ),
         (
@@ -639,7 +655,16 @@ def test_prelaunch_missing_approval_has_no_jit_or_bootstrap(
 
 def prelaunch_world() -> dict[str, Any]:
     data = world()
-    data[JOBS]["jobs"][0].update(status="queued", runner_id=0)
+    # Documented queued/unassigned JSON null shape; no live snapshot is claimed.
+    data[JOBS]["jobs"][0].update(
+        status="queued",
+        runner_id=None,
+        runner_name=None,
+        runner_group_id=None,
+        runner_group_name=None,
+        labels=[],
+        steps=[],
+    )
     data[f"orgs/synthetic-org/actions/runner-groups/{GROUP}/runners"] = {
         "total_count": 0,
         "runners": [],
@@ -984,3 +1009,252 @@ def test_historical_runs_do_not_block_complete_active_exclusivity() -> None:
     data[pending] = {"total_count": 101, "workflow_runs": []}
     with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
         binding(data)
+
+
+GROUP_PATH = f"orgs/synthetic-org/actions/runner-groups/{GROUP}"
+REPOSITORIES = f"{GROUP_PATH}/repositories?per_page=100"
+GROUP_DRIFT = [
+    *[_set(GROUP_PATH, "id", value=v) for v in (GROUP + 1, True, 4.0, None)],
+    _set(GROUP_PATH, "name", value="renamed"),
+    _set(GROUP_PATH, "visibility", value="all"),
+    *[_set(GROUP_PATH, "restricted_to_workflows", value=v) for v in (False, 1, None)],
+    *[
+        _set(GROUP_PATH, "selected_workflows", value=v)
+        for v in (
+            [],
+            [f"{REPO}/{WF}@main"],
+            [f"{REPO}/{WF}@refs/heads/other"],
+            [f"{REPO}/{WF}@{SHA}"],
+            [f"{REPO}/{WF}@refs/tags/main"],
+            [f"other/repository/{WF}@refs/heads/main"],
+            [f"{REPO}/{WF}@refs/heads/main", "extra"],
+        )
+    ],
+    *[
+        _set(REPOSITORIES, "repositories", value=v)
+        for v in (
+            [],
+            [{"id": 10}],
+            [{"id": True}],
+            [{"id": 9.0}],
+            [{}],
+            [{"id": 9}, {"id": 10}],
+        )
+    ],
+    *[_set(REPOSITORIES, "total_count", value=v) for v in (2, True, 1.0, None)],
+    lambda d: d.pop(GROUP_PATH),
+    lambda d: d.pop(REPOSITORIES),
+    *[
+        lambda d, key=key: d[GROUP_PATH].pop(key)
+        for key in (
+            "id",
+            "name",
+            "visibility",
+            "restricted_to_workflows",
+            "selected_workflows",
+        )
+    ],
+    lambda d: d[REPOSITORIES].pop("total_count"),
+    lambda d: d[REPOSITORIES].pop("repositories"),
+]
+
+
+@pytest.mark.parametrize("mutate", GROUP_DRIFT)
+def test_group_drift_refuses_prepare_launch_and_decide_without_effects(
+    tmp_path: Any, mutate: Any
+) -> None:
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    good = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    data = prelaunch_world()
+    mutate(data)
+    effects: list[Any] = []
+
+    def api(path: str, *args: Any) -> Any:
+        if args:
+            effects.append(path)
+        return api_of(data)(path)
+
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        co.op_prepare(cfg, lambda *args: effects.append(args), api, RUN)
+    assert not cfg.state_path.exists()
+    co.save_state(
+        cfg.state_path,
+        {
+            "schema": co.STATE_SCHEMA,
+            "lease_id": LEASE,
+            "qualification": good,
+        },
+    )
+    before = cfg.state_path.read_bytes()
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        co.op_launch(cfg, lambda *args: effects.append(args), api, RUN)
+    assert effects == [] and cfg.state_path.read_bytes() == before
+    assigned = world()
+    mutate(assigned)
+    channel = Channel(report())
+    decision = decide(channel, data=assigned)
+    assert decision.category == "assignment.ambiguous"
+    assert "grant" not in channel.ops() and channel.resolved == []
+    assert binding()  # the same fully bound world remains reachable
+
+
+QUEUED_DRIFT = [
+    *[
+        _set(JOBS, "jobs", 0, key, value=value)
+        for key, values in {
+            "runner_group_id": [0, False, 0.0, 4.0, True, GROUP + 1],
+            "runner_id": [0, False, 0.0, RUNNER],
+            "runner_name": ["", "hosted-runner"],
+            "runner_group_name": ["", "other-group"],
+            "labels": [["ubuntu-latest"], None],
+            "steps": [[{"name": "started"}], None],
+            "run_id": [True, float(RUN), RUN + 1],
+            "run_attempt": [True, 1.0, 2],
+            "head_sha": [None, "f" * 40],
+            "status": ["waiting", "in_progress"],
+        }.items()
+        for value in values
+    ],
+    *[
+        lambda d, key=key: d[JOBS]["jobs"][0].pop(key)
+        for key in (
+            "runner_id",
+            "runner_name",
+            "runner_group_id",
+            "runner_group_name",
+            "labels",
+            "steps",
+            "run_id",
+            "run_attempt",
+            "head_sha",
+            "status",
+        )
+    ],
+]
+
+
+@pytest.mark.parametrize("mutate", QUEUED_DRIFT)
+def test_null_group_requires_explicit_typed_unassigned_shape(
+    tmp_path: Any, mutate: Any
+) -> None:
+    data = prelaunch_world()
+    mutate(data)
+    cfg = dataclasses.replace(config(), state_path=tmp_path / "state.json")
+    effects: list[Any] = []
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        co.op_prepare(cfg, lambda *args: effects.append(args), api_of(data), RUN)
+    assert effects == [] and not cfg.state_path.exists()
+    test_every_failed_prelaunch_predicate_prevents_effects(tmp_path, mutate)
+    data = prelaunch_world()
+    mutate(data)
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        co.prelaunch_binding(api_of(data), config(), RUN)
+    assert co.prelaunch_binding(api_of(prelaunch_world()), config(), RUN)
+
+
+@pytest.mark.parametrize("runner_id", [0, None])
+@pytest.mark.parametrize("runner_name", [None, ""])
+def test_explicit_positive_group_prelaunch_remains_supported(
+    runner_id: Any, runner_name: Any
+) -> None:
+    data = prelaunch_world()
+    data[JOBS]["jobs"][0].update(
+        runner_group_id=GROUP, runner_id=runner_id, runner_name=runner_name
+    )
+    assert co.prelaunch_binding(api_of(data), config(), RUN)
+
+
+@pytest.mark.parametrize(
+    "group",
+    [
+        None,
+        {},
+        {"id": GROUP},
+        {"id": GROUP + 1, "name": "synthetic-protected"},
+        {"id": True, "name": "synthetic-protected"},
+        {"id": 4.0, "name": "synthetic-protected"},
+        {"id": GROUP, "name": None},
+        {"id": GROUP, "name": ""},
+    ],
+)
+def test_pinned_admission_must_bind_the_configured_group(group: Any) -> None:
+    import json
+
+    data = prelaunch_world()
+    admitted = json.loads(ADMISSION)
+    admitted["runner_group"] = group
+    raw = hp.canonical_json(admitted)
+    data[ADMISSION_PATH]["content"] = base64.b64encode(raw).decode()
+    cfg = dataclasses.replace(
+        config(),
+        admission={
+            **config().admission,
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        },
+    )
+    with pytest.raises(co.CoordinatorRefused, match="binding.mismatch"):
+        co.prelaunch_binding(api_of(data), cfg, RUN)
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("runner_id", False),
+        ("runner_id", 0.0),
+        ("runner_name", "assigned"),
+        ("runner_name", False),
+        ("steps", [{"name": "started"}]),
+        ("steps", None),
+    ],
+)
+def test_positive_group_still_requires_a_never_started_job(
+    key: str, value: Any
+) -> None:
+    data = prelaunch_world()
+    data[JOBS]["jobs"][0].update(runner_group_id=GROUP, runner_id=0)
+    data[JOBS]["jobs"][0][key] = value
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        co.prelaunch_binding(api_of(data), config(), RUN)
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("runner_id", float(RUNNER)),
+        ("runner_id", True),
+        ("runner_group_id", 4.0),
+        ("runner_group_id", True),
+        ("run_id", float(RUN)),
+        ("run_attempt", True),
+    ],
+)
+def test_decide_rejects_coercible_assigned_job_fields(key: str, value: Any) -> None:
+    data = world()
+    data[JOBS]["jobs"][0][key] = value
+    channel = Channel(report())
+    decision = decide(channel, data=data)
+    assert decision.category == "assignment.ambiguous"
+    assert "grant" not in channel.ops() and channel.resolved == []
+
+
+@pytest.mark.parametrize("key", ["runner_id", "runner_name", "steps"])
+def test_positive_group_requires_present_unassigned_fields(key: str) -> None:
+    data = prelaunch_world()
+    data[JOBS]["jobs"][0].update(runner_group_id=GROUP, runner_id=0)
+    data[JOBS]["jobs"][0].pop(key)
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        co.prelaunch_binding(api_of(data), config(), RUN)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        _set(JOBS, "total_count", value=2),
+        lambda d: d[JOBS]["jobs"].append({**d[JOBS]["jobs"][0], "id": JOB + 1})
+        or d[JOBS].update(total_count=2),
+        _set(f"{GROUP_PATH}/runners", "total_count", value=1),
+        _set(f"{GROUP_PATH}/runners", "runners", value=[{"id": RUNNER}]),
+    ],
+)
+def test_null_group_does_not_relax_exclusivity(tmp_path: Any, mutate: Any) -> None:
+    test_every_failed_prelaunch_predicate_prevents_effects(tmp_path, mutate)
