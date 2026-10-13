@@ -7,7 +7,10 @@ import hashlib
 import inspect
 import json
 import pathlib
+import stat
 import sys
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -206,3 +209,56 @@ def test_uninstall_never_touches_firewall_or_accounts():
     source = inspect.getsource(hi.Installer.uninstall)
     for forbidden in ("nft", "userdel", "useradd", "rmtree", "shutil"):
         assert forbidden not in source
+
+
+@pytest.mark.parametrize(
+    ("target_kind", "owner", "accepted"),
+    [
+        ("relative", 0, True),
+        ("absolute", 0, True),
+        ("foreign", 0, False),
+        ("relative", 1000, False),
+        ("absolute", 1000, False),
+    ],
+)
+def test_wants_link_validation_preserves_only_exact_root_owned_links(
+    monkeypatch, target_kind, owner, accepted
+):
+    installer = hi.Installer(hi.Paths(prefix=pathlib.Path("/synthetic-host")))
+    link = installer.paths.wants
+    target = {
+        "relative": "../" + hi.UNIT_NAME,
+        "absolute": str(installer.paths.unit),
+        "foreign": "/nonexistent-synthetic-target",
+    }[target_kind]
+    # Model only the descriptor boundary; exercise the actual ownership and
+    # exact-target decision without requiring root or touching systemd.
+    descriptor = 17
+    filesystem = SimpleNamespace(
+        stat=Mock(return_value=SimpleNamespace(st_mode=stat.S_IFLNK, st_uid=owner)),
+        readlink=Mock(return_value=target),
+        unlink=Mock(),
+        fsync=Mock(),
+        close=Mock(),
+    )
+    parent = Mock(return_value=descriptor)
+    monkeypatch.setattr(hi, "exists", lambda path: path == link)
+    monkeypatch.setattr(hi, "directory", parent)
+    monkeypatch.setattr(hi, "os", filesystem)
+    if accepted:
+        installer.remove_wants_link(remove=False)
+    else:
+        with pytest.raises(hi.InstallRefused, match="installation.drift"):
+            installer.remove_wants_link(remove=False)
+    parent.assert_called_once_with(link.parent)
+    filesystem.stat.assert_called_once_with(
+        link.name, dir_fd=descriptor, follow_symlinks=False
+    )
+    filesystem.readlink.assert_called_once_with(link.name, dir_fd=descriptor)
+    filesystem.close.assert_called_once_with(descriptor)
+    filesystem.unlink.assert_not_called()
+    filesystem.fsync.assert_not_called()
+    if accepted:
+        installer.remove_wants_link()
+        filesystem.unlink.assert_called_once_with(link.name, dir_fd=descriptor)
+        filesystem.fsync.assert_called_once_with(descriptor)

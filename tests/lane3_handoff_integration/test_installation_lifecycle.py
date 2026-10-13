@@ -58,6 +58,21 @@ def snapshot(path: pathlib.Path) -> dict[str, tuple[bytes, int, int, int]]:
     return result
 
 
+def link_snapshot(
+    path: pathlib.Path,
+) -> tuple[pathlib.Path, int, int, int, int, int, int]:
+    info = path.lstat()
+    return (
+        path.readlink(),
+        info.st_ino,
+        info.st_mode,
+        info.st_uid,
+        info.st_gid,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 class FixtureSystem(hi.System):
     def __init__(self, unit: str, crash: str | None = None) -> None:
         self.unit = unit
@@ -470,10 +485,13 @@ def test_real_reconcile_unit_publishes_current_boot_readiness(
 @pytest.mark.parametrize(
     "phase", ["intent", "staged", "activated", "awaiting_reconcile"]
 )
+@pytest.mark.parametrize("enabled", [False, True])
 def test_sigkill_install_requires_explicit_exact_restore(
-    installation: Installation, phase: str
+    installation: Installation, phase: str, enabled: bool
 ) -> None:
     installation.install(installation.inputs(1))
+    wants = installation.link("wants", "../" + hi.UNIT_NAME) if enabled else None
+    link_before = link_snapshot(wants) if wants is not None else None
     before = installation.live_snapshot()
     replacement = installation.inputs(2)
     kill_install(installation, replacement, phase)
@@ -484,6 +502,8 @@ def test_sigkill_install_requires_explicit_exact_restore(
         installation.installer.verify()
     installation.installer.recover()
     assert installation.live_snapshot() == before
+    if wants is not None:
+        assert link_snapshot(wants) == link_before
     assert not installation.paths.transaction.exists()
     assert (
         not installation.paths.stage.exists() and not installation.paths.backup.exists()
@@ -646,6 +666,57 @@ def test_exact_prior_inputs_can_be_reinstalled(installation: Installation) -> No
     assert (
         not installation.paths.stage.exists() and not installation.paths.backup.exists()
     )
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_install_and_upgrade_preserve_preexisting_exact_wants_link(
+    installation: Installation, absolute: bool
+) -> None:
+    target = str(installation.paths.unit) if absolute else "../" + hi.UNIT_NAME
+    wants = installation.link("wants", target)
+    link_before = link_snapshot(wants)
+    # An exact link may be dangling before the first installation creates its unit.
+    assert wants.is_symlink() and not wants.exists()
+    for revision in (1, 2):
+        inputs = installation.inputs(revision)
+        installation.install(inputs)
+        record = installation.installer.verify()
+        assert record["config_digest"] == inputs[1]
+        installation.installer.require_ready(record)
+        assert link_snapshot(wants) == link_before
+        assert wants.resolve() == installation.paths.unit
+        assert not installation.paths.transaction.exists()
+        assert not installation.paths.stage.exists()
+        assert not installation.paths.backup.exists()
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_upgrade_refuses_foreign_wants_link_without_replacing_prior_installation(
+    installation: Installation, dangling: bool
+) -> None:
+    installation.install(installation.inputs(1))
+    foreign = installation.root / "foreign-unit.service"
+    if not dangling:
+        put(foreign, b"synthetic foreign unit must remain untouched", 0o644)
+    wants = installation.link("wants", str(foreign))
+    link_before = link_snapshot(wants)
+    foreign_before = snapshot(foreign)
+    before = installation.live_snapshot()
+    replacement = installation.inputs(2)
+    with pytest.raises(hi.InstallRefused, match="installation.drift"):
+        installation.install(replacement)
+    assert installation.live_snapshot() == before
+    assert link_snapshot(wants) == link_before
+    assert snapshot(foreign) == foreign_before
+    assert not installation.paths.transaction.exists()
+    assert not installation.paths.stage.exists()
+    assert not installation.paths.backup.exists()
+    assert command("/usr/bin/systemctl", "is-active", installation.unit) == "active"
+    # Sensitivity: replacing only the foreign link admits the same upgrade.
+    wants.unlink()
+    wants.symlink_to("../" + hi.UNIT_NAME)
+    installation.install(replacement)
+    assert installation.installer.verify()["config_digest"] == replacement[1]
 
 
 def test_dynamic_approval_does_not_block_installed_status_dispatch(

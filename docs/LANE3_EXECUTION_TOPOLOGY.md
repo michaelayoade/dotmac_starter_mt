@@ -691,3 +691,46 @@ and Observe remain trusted. Re-reading metadata is not a route lock and does
 not claim resistance to malicious host administrators or their races. No live
 JWT/OpenBao credential has been sent by this preparation or its read-only
 metadata qualification.
+
+
+## Queued-job routing and assigned-run authority (2026-10-13 amendment)
+
+The coordinator distinguishes routing evidence before runner assignment from
+execution evidence after assignment. The completed-run oracle in § 6 retains
+its exact runner-group requirement. A queued job's absent assignment is not
+proof that it belongs to another group, and a null group field alone is never
+proof of its intended route.
+
+Before `prepare` and again before JIT creation in `launch`, a job may have an
+explicit JSON null group only with the narrowly defined unassigned shape:
+queued status, explicit null runner ID, runner name and group name, empty
+labels and empty steps, and the exact run ID, attempt and workflow revision.
+Missing fields, booleans, numeric zero used as a null substitute, a hosted-job
+shape, another group, another pending job, or unreadable evidence refuse.
+The existing exact configured-group branch remains available subject to its
+own unassigned-shape checks.
+
+Routing is bound through the digest-verified admission record's group ID and
+name, the pinned workflow revision and blob, and fresh organization API
+readback. The group must have selected visibility, workflow restrictions
+explicitly enabled, exactly the pinned repository/workflow at
+`@refs/heads/main`, and exactly the selected execution repository. Incomplete
+listings or any mismatch refuse. The group must be empty before launch.
+
+`decide` repeats the group-policy binding and retains the strict in-progress
+job, exact JIT runner ID, configured group ID, busy runner with exact labels,
+and sole group membership checks before any grant. This amendment does not
+relax protected human approval, lease limits, source pins, or cleanup.
+
+The seven older diagnostic launcher revisions are removed from the checked-in
+admitted list; the current refusal-only launcher remains. Admission evidence
+stays null. Historical run records are retained, but are not new authority.
+
+This source amendment replaces the separate probe-first/probe-again preparation
+sequence. Synthetic fixtures are test inputs, not observations of GitHub.
+The first bounded live campaign must read the actual queued shape before JIT
+creation and refuse if it does not satisfy the revised contract. No successful
+K1 qualification, runtime upgrade, OIDC read, B8 proof or Gate-0 acceptance is
+claimed by this source change. Runtime bundle/configuration pins and upgrade
+recovery must be reviewed before installation; final authority remains the
+assigned-run check and the completed-run oracle.

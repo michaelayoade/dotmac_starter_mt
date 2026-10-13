@@ -364,13 +364,41 @@ def readback_binding(
             raise refused(ambiguous)
         job = pending_jobs[0]
         if (
-            job.get("runner_id") not in (0, None)
-            or job.get("status") != "queued"
-            or job.get("run_id") != run_id
-            or job.get("run_attempt") != attempt
-            or job.get("head_sha") != cfg.workflow_sha
-            or job.get("runner_group_id") != cfg.runner_group_id
+            _field(job, "status", str, ambiguous) != "queued"
+            or _field(job, "run_id", int, ambiguous) != run_id
+            or _field(job, "run_attempt", int, ambiguous) != attempt
+            or _field(job, "head_sha", str, ambiguous) != cfg.workflow_sha
+            or "runner_group_id" not in job
         ):
+            raise refused(ambiguous)
+        if job["runner_group_id"] is None:
+            # Explicit null is schema-supported; the live shape must still
+            # qualify. Missing, zero/False/floats and hosted/started shapes refuse.
+            if (
+                any(
+                    key not in job or job[key] is not None
+                    for key in ("runner_id", "runner_name", "runner_group_name")
+                )
+                or _field(job, "labels", list, ambiguous) != []
+                or _field(job, "steps", list, ambiguous) != []
+            ):
+                raise refused(ambiguous)
+        elif (
+            _field(job, "runner_group_id", int, ambiguous) != cfg.runner_group_id
+            or "runner_id" not in job
+            or "runner_name" not in job
+            or not (
+                job["runner_name"] is None
+                or (type(job["runner_name"]) is str and job["runner_name"] == "")
+            )
+            or _field(job, "steps", list, ambiguous) != []
+            or not (
+                job["runner_id"] is None
+                or (type(job["runner_id"]) is int and job["runner_id"] == 0)
+            )
+        ):
+            # Retain the exact positive-group branch for API representations
+            # that already identify the configured group before assignment.
             raise refused(ambiguous)
         group = _api(
             api,
@@ -390,7 +418,8 @@ def readback_binding(
             raise refused(ambiguous)
         job = mine[0]
         if (
-            _field(job, "status", str, ambiguous) != "in_progress"
+            _field(job, "runner_id", int, ambiguous) != runner_id
+            or _field(job, "status", str, ambiguous) != "in_progress"
             or _field(job, "run_id", int, ambiguous) != run_id
             or _field(job, "run_attempt", int, ambiguous) != attempt
             or _field(job, "head_sha", str, ambiguous) != cfg.workflow_sha
@@ -526,6 +555,36 @@ def readback_binding(
         or cfg.workflow_sha not in revisions
     ):
         raise refused(mismatch)
+    # The digest-pinned admission owns the group name/id. Fresh API reads
+    # prove its current routing restrictions at prepare, launch and decide.
+    admitted_group = _field(admitted, "runner_group", dict, mismatch)
+    group_name = _field(admitted_group, "name", str, mismatch)
+    if (
+        _field(admitted_group, "id", int, mismatch) != cfg.runner_group_id
+        or not group_name
+    ):
+        raise refused(mismatch)
+    group_path = f"orgs/{cfg.runner_org}/actions/runner-groups/{cfg.runner_group_id}"
+    routing = _api(api, group_path, ambiguous)
+    if (
+        _field(routing, "id", int, ambiguous) != cfg.runner_group_id
+        or _field(routing, "name", str, ambiguous) != group_name
+        or _field(routing, "visibility", str, ambiguous) != "selected"
+        or _field(routing, "restricted_to_workflows", bool, ambiguous) is not True
+        or _field(routing, "selected_workflows", list, ambiguous)
+        != [f"{cfg.repository}/{cfg.workflow_path}@refs/heads/main"]
+    ):
+        raise refused(ambiguous)
+    allowed = _api(api, f"{group_path}/repositories?per_page=100", ambiguous)
+    repositories = _field(allowed, "repositories", list, ambiguous)
+    if (
+        _field(allowed, "total_count", int, ambiguous) != len(repositories)
+        or len(repositories) != 1
+        or _field(repositories[0], "id", int, ambiguous) != cfg.repository_id
+    ):
+        # A complete sole repository is required: no truncated first page,
+        # duplicate, foreign repository or unreadable allowlist can qualify.
+        raise refused(ambiguous)
     supplier = {
         path.rsplit("/", 1)[-1]: digest for path, digest in cfg.supplier_modules.items()
     }
