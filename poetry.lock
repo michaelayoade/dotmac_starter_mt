@@ -506,7 +506,7 @@ wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
 name = "dotmac-accounting"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant chart, fiscal-period and immutable balanced-ledger authority"
 optional = false
 python-versions = ">=3.11,<3.14"
