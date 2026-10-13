@@ -20,6 +20,7 @@ from uuid import UUID
 from dotmac_kernel.money import Currency
 from sqlalchemy import ColumnElement, RowMapping, Table, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import FromClause
 
 from dotmac_tax._policy_query_contracts import (
     ListTaxAuthoritiesV1,
@@ -63,7 +64,9 @@ _Request = (
 )
 
 
-def _require_id(db: Session, table: Table, tenant_id: UUID, record_id: UUID) -> None:
+def _require_id(
+    db: Session, table: FromClause, tenant_id: UUID, record_id: UUID
+) -> None:
     if (
         db.scalar(
             select(table.c.id).where(
@@ -75,7 +78,9 @@ def _require_id(db: Session, table: Table, tenant_id: UUID, record_id: UUID) -> 
         raise TaxNotFound("tax policy filter record not found")
 
 
-def _context(table: Table, tenant_id: UUID, request: _Request, order: str) -> str:
+def _context(table: FromClause, tenant_id: UUID, request: _Request, order: str) -> str:
+    if not isinstance(table, Table):
+        raise TypeError("tax policy cursor context requires a schema table")
     filters = asdict(request)
     filters.pop("cursor")
     filters.pop("page_size")
@@ -113,7 +118,7 @@ def _after(cursor: str | None, context: str, order: str) -> UUID | int | None:
 
 def _page(
     db: Session,
-    table: Table,
+    table: FromClause,
     *,
     tenant_id: UUID,
     request: _Request,

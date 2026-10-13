@@ -585,31 +585,59 @@ def test_postgres_downgrade_waits_for_concurrent_evidence_before_deciding(
         observer_engine.dispose()
 
 
-def test_scheduled_policy_correction_at_same_boundary_keeps_sealed_replay(db):
-    tenant_id, _, fact, command = _setup(db)
-    edge = supersede_tax_rule(db, tenant_id=tenant_id, command=command)
-    fact = replace(fact, occurred_on=command.effective_from)
-    original = determine_tax_set(db, tenant_id=tenant_id, fact=fact, determined_at=NOW)
-    correction = replace(
-        command,
-        predecessor_rule_id=edge.replacement.rule_id,
-        predecessor_version=2,
-        source_ref="correction",
-        replacement=replace(command.replacement, version=3, rate=Decimal("0.3")),
+def test_scheduled_policy_correction_at_same_boundary_keeps_sealed_replay(
+    upgraded_policy_database,
+):
+    tenant_id, _, fact, command, seeded_original, _, _, app_url = (
+        upgraded_policy_database
     )
-    corrected = supersede_tax_rule(db, tenant_id=tenant_id, command=correction)
-    assert supersede_tax_rule(db, tenant_id=tenant_id, command=correction) == corrected
-    assert (
-        determine_tax_set(db, tenant_id=tenant_id, fact=fact, determined_at=NOW)
-        == original
-    )
-    new = determine_tax_set(
-        db,
-        tenant_id=tenant_id,
-        fact=replace(fact, source_ref="corrected-new-fact"),
-        determined_at=NOW,
-    )
-    assert new.tax_amount == Money.of("30", NGN)
+    session, engine = _online_session(app_url, tenant_id)
+    try:
+        edge = supersede_tax_rule(session, tenant_id=tenant_id, command=command)
+        scheduled_fact = replace(
+            fact, occurred_on=command.effective_from, source_ref="scheduled-policy-fact"
+        )
+        original = determine_tax_set(
+            session, tenant_id=tenant_id, fact=scheduled_fact, determined_at=NOW
+        )
+        session.commit()
+        _reset_tenant(session, tenant_id)
+        correction = replace(
+            command,
+            predecessor_rule_id=edge.replacement.rule_id,
+            predecessor_version=2,
+            source_ref="correction",
+            replacement=replace(command.replacement, version=3, rate=Decimal("0.3")),
+        )
+        corrected = supersede_tax_rule(session, tenant_id=tenant_id, command=correction)
+        session.commit()
+        _reset_tenant(session, tenant_id)
+        assert (
+            supersede_tax_rule(session, tenant_id=tenant_id, command=correction)
+            == corrected
+        )
+        assert (
+            determine_tax_set(
+                session, tenant_id=tenant_id, fact=scheduled_fact, determined_at=NOW
+            )
+            == original
+        )
+        assert (
+            determine_tax_set(
+                session, tenant_id=tenant_id, fact=fact, determined_at=NOW
+            )
+            == seeded_original
+        )
+        new = determine_tax_set(
+            session,
+            tenant_id=tenant_id,
+            fact=replace(scheduled_fact, source_ref="corrected-new-fact"),
+            determined_at=NOW,
+        )
+        assert new.tax_amount == Money.of("30", NGN)
+    finally:
+        session.close()
+        engine.dispose()
 
 
 def test_postgres_hidden_evidence_makes_downgrade_fail_closed(upgraded_policy_database):
@@ -848,7 +876,7 @@ def test_postgres_public_progressive_replacement_refuses_band_mutation(
     from dotmac_tax import TaxRuleBandInput
     from sqlalchemy.exc import DBAPIError
 
-    tenant_id, _, fact, command, _, _, _, app_url = upgraded_policy_database
+    tenant_id, _, fact, command, original, _, _, app_url = upgraded_policy_database
     session, engine = _online_session(app_url, tenant_id)
     try:
         command = replace(
@@ -864,10 +892,20 @@ def test_postgres_public_progressive_replacement_refuses_band_mutation(
         result = determine_tax_set(
             session,
             tenant_id=tenant_id,
-            fact=replace(fact, occurred_on=command.effective_from),
+            fact=replace(
+                fact,
+                occurred_on=command.effective_from,
+                source_ref="progressive-replacement-fact",
+            ),
             determined_at=NOW,
         )
         assert result.tax_amount == Money.of("20", NGN)
+        assert (
+            determine_tax_set(
+                session, tenant_id=tenant_id, fact=fact, determined_at=NOW
+            )
+            == original
+        )
         session.commit()
         for sql in (
             "UPDATE mod_tax.tax_rule_bands SET rate = 0.9 WHERE rule_id = :rule",
