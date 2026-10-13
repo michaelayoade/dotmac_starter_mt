@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from dotmac_billing import models
 from dotmac_billing.commands import (
     AllocationCommand,
+    ApplyAvailableCreditCommand,
     CreateDraftDocument,
     DeallocationCommand,
     IssueCreditNote,
@@ -2007,6 +2008,235 @@ def _document_outstanding(
     )
 
 
+def _settlement_has_active_backing(
+    db: Session, *, scope: Scope, settlement: _SettlementRow
+) -> bool:
+    """Resolve the immutable acceptance/reversal chain, refusing ambiguity."""
+
+    plane = _models(scope)
+    statement = select(plane.group).where(
+        plane.group.source_ref == f"settlement:{settlement.id}",
+        plane.group.group_kind == "settlement_accepted",
+    )
+    roots = tuple(db.execute(_where_scope(statement, scope, plane.group)).scalars())
+    if len(roots) != 1:
+        raise BillingRuleViolation(
+            "settlement_backing_ambiguous",
+            "settlement acceptance evidence is ambiguous",
+        )
+    current = roots[0]
+    active = True
+    visited: set[UUID] = set()
+    expected = Decimal(settlement.amount)
+    while True:
+        if (
+            current.id in visited
+            or current.billing_account_id != settlement.billing_account_id
+            or current.currency != settlement.currency
+            or current.minor_units != settlement.minor_units
+            or (not visited and current.reverses_group_id is not None)
+            or (visited and current.group_kind != "reversal")
+        ):
+            raise BillingRuleViolation(
+                "settlement_backing_ambiguous",
+                "settlement reversal lineage is ambiguous",
+            )
+        visited.add(current.id)
+        effects_statement = select(plane.effect).where(
+            plane.effect.posting_group_id == current.id
+        )
+        effects = tuple(
+            db.execute(_where_scope(effects_statement, scope, plane.effect)).scalars()
+        )
+        if len(effects) != 1 or any(
+            row.billing_account_id != settlement.billing_account_id
+            or row.currency != settlement.currency
+            or row.minor_units != settlement.minor_units
+            or row.lane != settlement.funding_lane
+            or row.amount_delta != expected
+            for row in effects
+        ):
+            raise BillingRuleViolation(
+                "settlement_backing_ambiguous",
+                "settlement funding effects are ambiguous",
+            )
+        children_statement = select(plane.group).where(
+            plane.group.reverses_group_id == current.id
+        )
+        children = tuple(
+            db.execute(_where_scope(children_statement, scope, plane.group)).scalars()
+        )
+        if not children:
+            return active
+        if len(children) != 1:
+            raise BillingRuleViolation(
+                "settlement_backing_ambiguous", "settlement reversal lineage branches"
+            )
+        current = children[0]
+        active = not active
+        expected = -expected
+
+
+def _require_credit_target(
+    db: Session, *, scope: Scope, document: _DocumentRow, account_id: UUID
+) -> None:
+    if document.billing_account_id != account_id:
+        raise BillingRuleViolation(
+            "allocation_account_mismatch",
+            "invoice and funding must belong to the same account",
+        )
+    if document.issued_at is None or document.document_kind != "invoice":
+        raise BillingRuleViolation(
+            "allocation_target_invalid", "allocation requires an issued invoice"
+        )
+    plane = _models(scope)
+    statement = select(plane.event.id).where(
+        plane.event.document_id == document.id, plane.event.event_kind == "voided"
+    )
+    if db.execute(_where_scope(statement, scope, plane.event)).first() is not None:
+        raise BillingRuleViolation(
+            "document_cancelled", "a cancelled invoice cannot receive credit"
+        )
+
+
+def apply_available_credit(
+    db: Session, *, scope: Scope, command: ApplyAvailableCreditCommand
+) -> _PostingGroupRow:
+    """Draw exact confirmed-cash room into one invoice, without creating cash.
+
+    Extracted from Sub AccountCreditApplications.apply/_source_payments:
+    account serialization, account/source room caps and deterministic min loop.
+    """
+
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=command.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        _require_account_money(account, command.amount)
+        if command.amount.amount <= 0:
+            raise BillingRuleViolation(
+                "credit_amount_nonpositive", "credit draw amount must be positive"
+            )
+        document = _one(
+            session,
+            scope=scope,
+            model=plane.document,
+            row_id=command.document_id,
+            lock=True,
+        )
+        _require_credit_target(
+            session, scope=scope, document=document, account_id=account.id
+        )
+        _require_same_money(
+            command.amount,
+            _money(document.grand_total, document.currency, document.minor_units),
+        )
+        position = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency=account.currency,
+            minor_units=account.minor_units,
+        )
+        if command.amount.amount > position.available_credit:
+            raise BillingRuleViolation(
+                "credit_insufficient_backing",
+                "insufficient cash-backed available credit",
+            )
+        if command.amount.amount > _document_outstanding(
+            session, scope=scope, document=document
+        ):
+            raise BillingRuleViolation(
+                "allocation_exceeds_receivable",
+                "allocation exceeds document receivable",
+            )
+        statement = (
+            select(plane.settlement)
+            .where(
+                plane.settlement.billing_account_id == account.id,
+                plane.settlement.currency == command.amount.currency.code,
+                plane.settlement.minor_units == command.amount.currency.minor_units,
+                plane.settlement.funding_lane == EffectLane.AVAILABLE_CREDIT.value,
+            )
+            .order_by(plane.settlement.occurred_at, plane.settlement.id)
+        )
+        sources = session.execute(
+            _where_scope(statement, scope, plane.settlement)
+        ).scalars()
+        remaining = command.amount.amount
+        allocations: list[_AllocationInput] = []
+        for settlement in sources:
+            if not _settlement_has_active_backing(
+                session, scope=scope, settlement=settlement
+            ):
+                continue
+            used = _settlement_used(session, scope=scope, settlement_id=settlement.id)
+            if used < 0 or used > settlement.amount:
+                raise BillingRuleViolation(
+                    "settlement_room_ambiguous",
+                    "settlement consumption exceeds its evidence",
+                )
+            settlement_room = settlement.amount - used
+            amount = min(remaining, settlement_room)
+            if amount > 0:
+                allocations.append(
+                    _AllocationInput(
+                        settlement_id=settlement.id,
+                        document_id=document.id,
+                        effect_kind="allocation",
+                        amount_delta=amount,
+                    )
+                )
+                remaining -= amount
+            if remaining == 0:
+                break
+        if remaining != 0:
+            raise BillingRuleViolation(
+                "credit_insufficient_backing",
+                "insufficient cash-backed available credit",
+            )
+        group = _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="allocation",
+            currency=account.currency,
+            minor_units=account.minor_units,
+            source_ref=command.source_ref,
+            occurred_at=command.occurred_at,
+            effects=(
+                (EffectLane.RECEIVABLE, -command.amount.amount),
+                (EffectLane.AVAILABLE_CREDIT, -command.amount.amount),
+            ),
+            allocations=allocations,
+        )
+        return {"posting_group_id": str(group.id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.credit.apply",
+        key=command.source_ref,
+        fingerprint=fingerprint_of(asdict(command)),
+        operation=operation,
+    )
+    return cast(
+        _PostingGroupRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.group,
+            row_id=UUID(str(outcome.result["posting_group_id"])),
+        ),
+    )
+
+
 def allocate_settlement(
     db: Session, *, scope: Scope, command: AllocationCommand
 ) -> _PostingGroupRow:
@@ -2040,10 +2270,19 @@ def allocate_settlement(
             row_id=command.document_id,
             lock=True,
         )
-        if document.issued_at is None or document.document_kind != "invoice":
+        if not _settlement_has_active_backing(
+            session, scope=scope, settlement=settlement
+        ):
             raise BillingRuleViolation(
-                "allocation_target_invalid", "allocation requires an issued invoice"
+                "settlement_reversed",
+                "allocation requires active confirmed settlement backing",
             )
+        _require_credit_target(
+            session,
+            scope=scope,
+            document=document,
+            account_id=settlement.billing_account_id,
+        )
         _require_same_money(
             command.amount,
             _money(settlement.amount, settlement.currency, settlement.minor_units),
@@ -2760,6 +2999,7 @@ __all__ = [
     "accept_rated_obligation",
     "accept_settlement",
     "allocate_settlement",
+    "apply_available_credit",
     "create_billing_account",
     "create_draft_document",
     "deallocate_settlement",

@@ -23,6 +23,7 @@ def test_the_coherent_financial_path_exists() -> None:
         "issue_credit_note",
         "accept_settlement",
         "allocate_settlement",
+        "apply_available_credit",
         "deallocate_settlement",
         "reallocate_settlement",
         "refund_settlement",

@@ -2,7 +2,21 @@
 
 All notable changes follow Semantic Versioning.
 
-## 0.1.0a1 — UNRELEASED
+## 0.1.0a2 — UNRELEASED
+
+- Add a typed, atomic cash-backed available-credit draw across confirmed
+  settlement sources, preserving allocation provenance and existing financial
+  events. Non-cash grants and opening-balance funding remain separate gaps.
+- Refuse allocation from reversed settlement funding while preserving exact
+  replay of a previously accepted command.
+- Reconcile Sub-first, pay-then-record and open-items-only cutover preparation.
+
+## 0.1.0a1 — historical publication
+
+Publication tag: `dotmac-billing-v0.1.0a1`, peeled commit
+`92a1626b16d7e068f92536d8cfcb2ef9b6f270c2`. The historical record is in
+`docs/inventories/module-release-legacy-unverified.json`; it does not constitute
+a modern wheel-verification receipt or evidence of product adoption.
 
 - First complete Billing V1: frozen obligation, settlement, receivable,
   accounting and invoice-document contracts; one pure financial engine; two

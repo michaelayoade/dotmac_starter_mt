@@ -22,9 +22,12 @@ import pytest
 from dotmac_billing import models
 from dotmac_billing.commands import (
     AllocationCommand,
+    ApplyAvailableCreditCommand,
     CreateDraftDocument,
     IssueCreditNote,
     IssueDocument,
+    RefundCommand,
+    ReversePostingGroupCommand,
 )
 from dotmac_billing.contracts import (
     AcceptRatedObligationV1,
@@ -49,13 +52,16 @@ from dotmac_billing.service import (
     accept_rated_obligation,
     accept_settlement,
     allocate_settlement,
+    apply_available_credit,
     create_billing_account,
     create_draft_document,
     issue_credit_note,
     issue_document,
     rebuild_receivable_position,
     record_document_artifact,
+    refund_settlement,
     repair_document_artifact,
+    reverse_posting_group,
     void_document,
 )
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
@@ -1415,3 +1421,541 @@ def test_void_and_credit_append_corrections_without_editing_the_invoice(
         assert restored_exposure.financial_state == "open"
         assert restored_exposure.collectible_receivable == Decimal("120.000000")
         session.commit()
+
+
+def _additional_credit_invoice(session, scope, account_id, suffix):
+    obligation = accept_rated_obligation(
+        session,
+        scope=scope,
+        command=_obligation_command(account_id, scope=scope, source_fact_id=suffix),
+        accepted_source_kinds=frozenset({"recurring_charge_occurrence"}),
+    )
+    draft = create_draft_document(
+        session, scope=scope, command=_draft_command(obligation.id)
+    )
+    return draft
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_available_credit_draw_is_exact_backed_and_replayable(scratch, plane) -> None:
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(session, scope, suffix=f"draw-{plane}")
+        sources = []
+        for index, amount in enumerate(("30.00", "110.00")):
+            sources.append(
+                accept_settlement(
+                    session,
+                    scope=scope,
+                    command=replace(
+                        _settlement_command(
+                            account.id,
+                            scope=scope,
+                            source_key=f"draw-{plane}-{index}",
+                            amount=amount,
+                        ),
+                        occurred_at=NOW.replace(minute=index),
+                    ),
+                    accepted_confirmation_evidence=frozenset({"provider_settled"}),
+                )
+            )
+        refund_settlement(
+            session,
+            scope=scope,
+            command=RefundCommand(
+                sources[1].id, _money("20.00"), NOW, f"draw-refund:{plane}"
+            ),
+        )
+        command = ApplyAvailableCreditCommand(
+            account.id, invoice.id, _money("120.00"), NOW, f"draw:{plane}"
+        )
+        group = apply_available_credit(session, scope=scope, command=command)
+        allocation = (
+            models.AllocationEffect
+            if plane == "tenant"
+            else models.PlatformAllocationEffect
+        )
+        rows = (
+            session.execute(
+                select(allocation).where(allocation.posting_group_id == group.id)
+            )
+            .scalars()
+            .all()
+        )
+        assert {row.settlement_id: row.amount_delta for row in rows} == {
+            sources[0].id: Decimal("30"),
+            sources[1].id: Decimal("90"),
+        }
+        assert all(row.document_id == invoice.id for row in rows)
+        assert (
+            apply_available_credit(session, scope=scope, command=command).id == group.id
+        )
+        with pytest.raises(IdempotencyConflict):
+            apply_available_credit(
+                session, scope=scope, command=replace(command, amount=_money("1.00"))
+            )
+        position = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert position.available_credit == 0
+        assert position.collectible_receivable == 0
+        session.commit()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_available_credit_refuses_ineligible_sources_and_targets(
+    scratch, plane
+) -> None:
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"draw-guards-{plane}"
+        )
+        command = ApplyAvailableCreditCommand(
+            account.id, invoice.id, _money("1.00"), NOW, f"draw-guards:{plane}"
+        )
+        prepaid = replace(
+            _settlement_command(account.id, scope=scope, source_key=f"prepaid-{plane}"),
+            funding_lane=SettlementFundingLane.PREPAID_FUNDING,
+        )
+        accept_settlement(
+            session,
+            scope=scope,
+            command=prepaid,
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        with pytest.raises(BillingRuleViolation, match="cash-backed"):
+            apply_available_credit(session, scope=scope, command=command)
+        settlement = accept_settlement(
+            session,
+            scope=scope,
+            command=_settlement_command(
+                account.id, scope=scope, source_key=f"guard-cash-{plane}"
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        for amount in (
+            _money("0.00"),
+            _money("-1.00"),
+            _money("121.00"),
+            _money("1.00", "USD"),
+            Money.of("1.000", Currency("NGN", 3)),
+        ):
+            with pytest.raises(BillingRuleViolation):
+                apply_available_credit(
+                    session, scope=scope, command=replace(command, amount=amount)
+                )
+        _, _, other_invoice = _seed_invoice(
+            session, scope, suffix=f"draw-other-{plane}"
+        )
+        with pytest.raises(BillingRuleViolation, match="account"):
+            apply_available_credit(
+                session,
+                scope=scope,
+                command=replace(command, document_id=other_invoice.id),
+            )
+        void_document(
+            session,
+            scope=scope,
+            document_id=invoice.id,
+            actor_ref="test",
+            occurred_at=NOW,
+            source_ref=f"draw-void-{plane}",
+        )
+        with pytest.raises(BillingRuleViolation, match="cancelled"):
+            apply_available_credit(session, scope=scope, command=command)
+        group_model = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        acceptance = session.execute(
+            select(group_model).where(
+                group_model.source_ref == f"settlement:{settlement.id}"
+            )
+        ).scalar_one()
+        reversal = reverse_posting_group(
+            session,
+            scope=scope,
+            command=ReversePostingGroupCommand(
+                acceptance.id, NOW, f"draw-reverse-{plane}"
+            ),
+        )
+        draft = _additional_credit_invoice(
+            session, scope, account.id, f"draw-second-{plane}"
+        )
+        with pytest.raises(BillingRuleViolation, match="issued invoice"):
+            apply_available_credit(
+                session, scope=scope, command=replace(command, document_id=draft.id)
+            )
+        target = issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        # The reversed source has room on its allocation edges but no cash.
+        with pytest.raises(BillingRuleViolation, match="active confirmed"):
+            allocate_settlement(
+                session,
+                scope=scope,
+                command=AllocationCommand(
+                    settlement.id,
+                    target.id,
+                    _money("1.00"),
+                    NOW,
+                    f"direct-reversed-{plane}",
+                ),
+            )
+        with pytest.raises(BillingRuleViolation, match="cash-backed"):
+            apply_available_credit(
+                session, scope=scope, command=replace(command, document_id=target.id)
+            )
+        second = accept_settlement(
+            session,
+            scope=scope,
+            command=replace(
+                _settlement_command(
+                    account.id,
+                    scope=scope,
+                    source_key=f"second-cash-{plane}",
+                    amount="10.00",
+                ),
+                occurred_at=NOW.replace(minute=1),
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        draw = apply_available_credit(
+            session,
+            scope=scope,
+            command=replace(command, document_id=target.id, amount=_money("10.00")),
+        )
+        allocation_model = (
+            models.AllocationEffect
+            if plane == "tenant"
+            else models.PlatformAllocationEffect
+        )
+        edges = (
+            session.execute(
+                select(allocation_model).where(
+                    allocation_model.posting_group_id == draw.id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [(edge.settlement_id, edge.amount_delta) for edge in edges] == [
+            (second.id, Decimal("10.00"))
+        ]
+        # Reversal-of-reversal restores A, and the exhausted B cannot fund this.
+        reverse_posting_group(
+            session,
+            scope=scope,
+            command=ReversePostingGroupCommand(
+                reversal.id, NOW, f"draw-restore-{plane}"
+            ),
+        )
+        restored = apply_available_credit(
+            session,
+            scope=scope,
+            command=replace(
+                command,
+                document_id=target.id,
+                amount=_money("110.00"),
+                source_ref=f"draw-restored-{plane}",
+            ),
+        )
+        edges = (
+            session.execute(
+                select(allocation_model).where(
+                    allocation_model.posting_group_id == restored.id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [(edge.settlement_id, edge.amount_delta) for edge in edges] == [
+            (settlement.id, Decimal("110.00"))
+        ]
+        session.commit()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_available_credit_global_cap_survives_reversed_spent_source(
+    scratch, plane
+) -> None:
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(session, scope, suffix=f"draw-cap-{plane}")
+        first = accept_settlement(
+            session,
+            scope=scope,
+            command=_settlement_command(
+                account.id, scope=scope, source_key=f"cap-first-{plane}"
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        allocate_settlement(
+            session,
+            scope=scope,
+            command=AllocationCommand(
+                first.id, invoice.id, _money("60.00"), NOW, f"cap-spend-{plane}"
+            ),
+        )
+        group_model = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        acceptance = session.execute(
+            select(group_model).where(
+                group_model.source_ref == f"settlement:{first.id}"
+            )
+        ).scalar_one()
+        reverse_posting_group(
+            session,
+            scope=scope,
+            command=ReversePostingGroupCommand(
+                acceptance.id, NOW, f"cap-reverse-{plane}"
+            ),
+        )
+        accept_settlement(
+            session,
+            scope=scope,
+            command=_settlement_command(
+                account.id, scope=scope, source_key=f"cap-second-{plane}"
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        draft = _additional_credit_invoice(
+            session, scope, account.id, f"cap-target-{plane}"
+        )
+        target = issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        command = ApplyAvailableCreditCommand(
+            account.id, target.id, _money("61.00"), NOW, f"cap-draw-{plane}"
+        )
+        with pytest.raises(BillingRuleViolation, match="cash-backed"):
+            apply_available_credit(session, scope=scope, command=command)
+        apply_available_credit(
+            session, scope=scope, command=replace(command, amount=_money("60.00"))
+        )
+        assert (
+            rebuild_receivable_position(
+                session,
+                scope=scope,
+                billing_account_id=account.id,
+                currency="NGN",
+                minor_units=2,
+            ).available_credit
+            == 0
+        )
+        session.commit()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_concurrent_available_credit_draws_cannot_spend_twice(scratch, plane) -> None:
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"draw-concurrent-{plane}"
+        )
+        accept_settlement(
+            session,
+            scope=scope,
+            command=_settlement_command(
+                account.id, scope=scope, source_key=f"draw-concurrent-{plane}"
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        draft = _additional_credit_invoice(
+            session, scope, account.id, f"draw-race-target-{plane}"
+        )
+        second_invoice = issue_document(
+            session, scope=scope, command=_issue_command(draft.id), numbering=NUMBERING
+        )
+        session.commit()
+        account_id, document_ids = account.id, (invoice.id, second_invoice.id)
+    barrier = threading.Barrier(2)
+    results: list[uuid.UUID] = []
+    rejected: list[BillingRuleViolation] = []
+    errors: list[BaseException] = []
+
+    def runner(index: int) -> None:
+        try:
+            with _session(url, scope) as session:
+                barrier.wait(timeout=20)
+                try:
+                    group = apply_available_credit(
+                        session,
+                        scope=scope,
+                        command=ApplyAvailableCreditCommand(
+                            account_id,
+                            document_ids[index],
+                            _money("120.00"),
+                            NOW,
+                            f"draw-race-{plane}-{index}",
+                        ),
+                    )
+                    session.commit()
+                    results.append(group.id)
+                except BillingRuleViolation as exc:
+                    rejected.append(exc)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=runner, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "available-credit draw deadlocked"
+    assert errors == []
+    assert len(results) == len(rejected) == 1
+    with _session(url, scope) as session:
+        position = rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account_id,
+            currency="NGN",
+            minor_units=2,
+        )
+        assert position.available_credit == 0
+        assert position.collectible_receivable == Decimal("120")
+        allocation_model = (
+            models.AllocationEffect
+            if plane == "tenant"
+            else models.PlatformAllocationEffect
+        )
+        assert session.scalar(
+            select(func.sum(allocation_model.amount_delta)).where(
+                allocation_model.billing_account_id == account_id
+            )
+        ) == Decimal("120")
+
+
+def test_available_credit_draw_cannot_cross_tenants(scratch) -> None:
+    admin_url, tenant_url, _ = scratch
+    left, right = _create_tenants(admin_url)
+    with _session(tenant_url, TenantScope(left)) as session:
+        account, _, invoice = _seed_invoice(
+            session, TenantScope(left), suffix="draw-private"
+        )
+        accept_settlement(
+            session,
+            scope=TenantScope(left),
+            command=_settlement_command(account.id, scope=TenantScope(left)),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        session.commit()
+        account_id, invoice_id = account.id, invoice.id
+    with _session(tenant_url, TenantScope(right)) as session:
+        own, _, _ = _seed_invoice(session, TenantScope(right), suffix="draw-private")
+        command = ApplyAvailableCreditCommand(
+            account_id, invoice_id, _money("1.00"), NOW, "draw-private"
+        )
+        with pytest.raises(BillingRuleViolation, match="not found"):
+            apply_available_credit(session, scope=TenantScope(right), command=command)
+        with pytest.raises(BillingRuleViolation, match="not found"):
+            apply_available_credit(
+                session,
+                scope=TenantScope(right),
+                command=replace(command, billing_account_id=own.id),
+            )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_available_credit_refuses_unbacked_position_without_posting(
+    scratch, plane
+) -> None:
+    # Synthetic noncash evidence exercises the fail-closed boundary; this is
+    # deliberately not a public grant command or an adopter migration path.
+    from dotmac_billing.engine import EffectLane
+    from dotmac_billing.service import _post_group
+
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    with _session(url, scope) as session:
+        account, _, invoice = _seed_invoice(
+            session, scope, suffix=f"draw-unbacked-{plane}"
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="credit_note_issued",
+            currency="NGN",
+            minor_units=2,
+            source_ref=f"test-unbacked-{plane}",
+            occurred_at=NOW,
+            effects=((EffectLane.AVAILABLE_CREDIT, Decimal("10")),),
+        )
+        accept_settlement(
+            session,
+            scope=scope,
+            command=_settlement_command(
+                account.id,
+                scope=scope,
+                source_key=f"unbacked-partial-{plane}",
+                amount="5.00",
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        group_model = (
+            models.PostingGroup if plane == "tenant" else models.PlatformPostingGroup
+        )
+        before = session.scalar(select(func.count()).select_from(group_model))
+        command = ApplyAvailableCreditCommand(
+            account.id, invoice.id, _money("10.00"), NOW, f"draw-unbacked-{plane}"
+        )
+        with pytest.raises(BillingRuleViolation, match="cash-backed"):
+            apply_available_credit(session, scope=scope, command=command)
+        assert session.scalar(select(func.count()).select_from(group_model)) == before
+        assert rebuild_receivable_position(
+            session,
+            scope=scope,
+            billing_account_id=account.id,
+            currency="NGN",
+            minor_units=2,
+        ).available_credit == Decimal("15")
+        # Reusing the failed command after real funding arrives must succeed;
+        # no failed idempotency result or partial allocation was recorded.
+        accept_settlement(
+            session,
+            scope=scope,
+            command=_settlement_command(
+                account.id,
+                scope=scope,
+                source_key=f"unbacked-now-cash-{plane}",
+                amount="5.00",
+            ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        assert apply_available_credit(session, scope=scope, command=command).id

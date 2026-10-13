@@ -575,20 +575,10 @@ def test_money_storage_is_exact_and_never_float() -> None:
 
 
 def test_runtime_version_and_authorized_kernel_floor_agree() -> None:
-    """Authorized for release, not yet published — and those differ.
+    """The current declaration agrees across all release surfaces.
 
-    This asserted `"dotmac-billing" not in release_modules` until 2026-08-23,
-    encoding the withholding decision as a test. That decision was retired
-    because it was circular: it withheld publication until Dotmac Cloud
-    composed the module, while Cloud's composition gate imports only owners it
-    has exact-pinned, which needs a published artifact.
-
-    So the assertion is inverted rather than deleted. The allowlist entry must
-    now AGREE with the package it names — a floor, schema or requires-policy
-    that drifts from pyproject would otherwise surface at release time, against
-    bytes CI had already accepted. The publication row must still read
-    `never-published`, because allowlisting is permission to publish and never
-    evidence that anything was.
+    The historical a1 publication stays recorded when source advances to an
+    unpublished successor. Allowlisting alone never proves publication.
     """
     package = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))
     declared = package["tool"]["poetry"]["version"]
@@ -610,19 +600,22 @@ def test_runtime_version_and_authorized_kernel_floor_agree() -> None:
 
     assert re.fullmatch(r"0\.1\.0a\d+", declared)
 
-    # Published on 2026-08-23, so the excusing row is GONE rather than saying
-    # `never-published`. Absence alone would also be true of a distribution
-    # nobody ever declared, so the positive evidence is the released-tag entry:
-    # a row and a tag are mutually exclusive, and this asserts which side it is
-    # on rather than merely that one side is empty.
+    # Preserve historical publication while recording an unreleased successor
+    # independently. Published source identity is guarded across the repository.
     unpublished = json.loads(
         (REPO_ROOT / "docs/inventories/declared-publication-baseline.json").read_text(
             encoding="utf-8"
         )
     )["unpublished"]
-    assert "dotmac-billing" not in unpublished
     released = {
         tag: distribution
         for tag, (distribution, *_rest) in released_migrations.RELEASED_TAGS.items()
     }
-    assert released.get(f"dotmac-billing-v{declared}") == "dotmac-billing"
+    assert released.get("dotmac-billing-v0.1.0a1") == "dotmac-billing"
+    if f"dotmac-billing-v{declared}" in released:
+        assert "dotmac-billing" not in unpublished
+    else:
+        successor = unpublished["dotmac-billing"]
+        assert successor["declared"] == declared
+        assert successor["state"] == "declared-unpublished"
+        assert successor["reason"].strip()

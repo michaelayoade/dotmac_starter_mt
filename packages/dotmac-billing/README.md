@@ -62,7 +62,42 @@ invoice-grained exposures. An architecture canary derives the emitted set from
 the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
-The first release candidate is `0.1.0a1` and requires
+The historical first release candidate is `0.1.0a1`; the current unreleased
+development successor is `0.1.0a2` and requires
 `dotmac-kernel>=0.1.0a89` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.
+
+
+`ApplyAvailableCreditCommand` and `apply_available_credit` draw an explicit
+positive Money amount from one account into one issued, noncancelled invoice.
+They serialize the account, replay the exact command before checking current
+funding, and create one allocation posting group with per-settlement edges.
+Both the immutable account available-credit position and eligible source room
+cap the draw. Only independently confirmed `available_credit` settlements fund
+it; `prepaid_funding` is excluded. Sources sort by `occurred_at`, then UUID.
+An exact, linear acceptance/reversal chain determines whether cash backing is
+active: odd reversals exclude it, even reversals restore it, and ambiguous
+identity/effects/branches fail closed. Direct settlement allocation shares
+this backing and target guard. Existing accounting, position and exposure
+facts/events carry the effects; this adds no event vocabulary or settlement.
+
+The source is `dotmac_sub` commit
+`c7707880232c9298ef89c24a1aea66d35bd3a1e6` (local inspected snapshot,
+not a production revision claim),
+`app/services/billing/account_credit.py::_source_payments` and
+`AccountCreditApplications.apply`: account locking, per-currency account and
+source room caps, deterministic source selection, and the
+`min(remaining, settlement_room)` allocation loop. Source tests inspected:
+`tests/test_account_credit_deposits.py::test_eligible_invoice_statuses_consume_credit_in_fifo_order`,
+`tests/integration/test_account_credit_concurrency.py::test_two_applicators_cannot_spend_one_credit_source_twice`,
+and `_source_payments` characterization in
+`tests/test_opening_settlement_correction.py`. Fresh migrated PostgreSQL
+canaries cover both Billing planes; these are new extraction evidence, not a
+claim that Sub tests execute against this module.
+
+This slice targets one invoice and an explicit amount. It does not port Sub's
+automatic invoice sweep, reviewed opening positions, reserved-purchase or
+legacy-payment metadata branches, noncash credit grants, issuance funding
+reservations, or product-specific prepaid finalization. No new table, mutable
+balance, external contract or sibling-product import is introduced.

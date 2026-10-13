@@ -100,6 +100,15 @@ class AllocationCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class ApplyAvailableCreditCommand:
+    billing_account_id: UUID
+    document_id: UUID
+    amount: Money
+    occurred_at: datetime
+    source_ref: str
+
+
+@dataclass(frozen=True, slots=True)
 class DeallocationCommand:
     allocation_id: UUID
     amount: Money
@@ -134,6 +143,7 @@ class ReversePostingGroupCommand:
 
 __all__ = [
     "AllocationCommand",
+    "ApplyAvailableCreditCommand",
     "CreateDraftDocument",
     "DeallocationCommand",
     "IssueCreditNote",
