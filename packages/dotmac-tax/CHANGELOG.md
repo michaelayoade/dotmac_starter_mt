@@ -1,5 +1,15 @@
 # Changelog — dotmac-tax
 
+## 0.1.0a5 — unreleased
+
+- Append evidenced effective-dated rule supersessions with exact source replay
+  and tenant/code author serialization; keep sealed financial facts unchanged.
+- Add tenant-isolated append-only tx_0004 edges; seal rule/band membership in
+  the creating transaction and refuse downgrade with any rule or edge evidence.
+- Require a policy write fence: old a4 binaries cannot publish after tx_0004.
+- Expose distinct advisory preview through the shared calculation path.
+- Add bounded policy listing and rule history for UI consumers.
+
 ## 0.1.0a4 — unreleased
 
 ### Added

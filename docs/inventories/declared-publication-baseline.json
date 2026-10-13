@@ -157,6 +157,11 @@
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
     },
+    "dotmac-tax": {
+      "declared": "0.1.0a5",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adoption baseline. Candidate a5 adds explicit immutable rule supersession and bounded policy read/preview contracts for the user-directed composable rate and basis editor. Sub must consume a verified published successor before its authoring UI can adopt these commands; this source candidate changes no product pin or financial writer authority. Remove this row only in the authorized oracle-backed a5 release record; allocation is not publication.",
+      "state": "declared-unpublished"
+    },
     "dotmac-usage": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill, dedupe proof and aggregate shadow; it does not compose the module, move usage authority, or retire Sub's writer. Raw AAA, rating, billing and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",

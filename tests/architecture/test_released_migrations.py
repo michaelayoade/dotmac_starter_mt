@@ -7249,7 +7249,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
-    "dotmac-tax": frozenset(),
+    "dotmac-tax": frozenset({"tx_0004_rule_supersession.py"}),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
     "dotmac-fx-policy": frozenset(),
