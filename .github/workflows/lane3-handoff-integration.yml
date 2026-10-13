@@ -15,6 +15,9 @@ defaults:
 # and socket with root-only synthetic metadata, not actual kernel WireGuard.
 # wireguard_kernel measures real synthetic kernel peers; installation_lifecycle
 # measures isolated installer transactions and temporary boot-recovery units.
+# Campaign suites exercise retained management callbacks, SSH-only UID
+# containment and the actual client/identity/transport cleanup composition.
+# They use unique synthetic accounts and explicitly namespaced service children.
 # Nothing here contacts OpenBao, a fleet host, a self-hosted runner or the
 # GitHub API, and nothing dispatches a protected workflow. No secret is used.
 
@@ -54,6 +57,8 @@ jobs:
         run: |
           files=(
             scripts/lane3_handoff_[a-z]*.py
+            scripts/lane3_campaign_[a-z]*.py
+            tests/unit/test_lane3_campaign_*.py
             scripts/lane3_github_oidc.py
             scripts/lane3_topology_source.py
             tests/unit/test_lane3_handoff_client.py
@@ -75,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle, wireguard_broker, wireguard_kernel, installation_lifecycle]
+        suite: [local_socket_files, dns_network, firewall_lifecycle, systemd_lifecycle, wireguard_broker, wireguard_kernel, installation_lifecycle, campaign_management, campaign_client, campaign_transport]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
