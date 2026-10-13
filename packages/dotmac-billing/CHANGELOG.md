@@ -11,6 +11,11 @@ All notable changes follow Semantic Versioning.
   earlier migrations and historical monetary/fact evidence.
 - Replay fully credited invoices' exact credit-note commands before mutable
   receivable admission, preserving original keys, fingerprints and effects.
+- Add exact-version immutable invoice-fact queries with persisted identity and
+  recording metadata, strict typed decoding, scope/plane isolation and raw-JSON
+  presentation-digest verification. Reads preserve caller transactions and
+  ignore dirty ORM state; malformed or missing evidence fails closed.
+
 - Add typed homogeneous multiline drafts with structural account/obligation
   affinity, exact explicit prices and immutable authoring provenance in an
   additive migration. Keep the released root migration unchanged.

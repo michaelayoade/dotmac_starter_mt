@@ -15,13 +15,14 @@ import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from dotmac_billing import models
+from dotmac_billing import GetInvoiceDocumentFactV1, get_invoice_document_fact, models
 from dotmac_billing.commands import (
     AllocationCommand,
     ApplyAvailableCreditCommand,
@@ -3670,3 +3671,370 @@ def test_multiline_rejects_document_owned_tax_and_issue_key_survives_rollback(
         assert issued.document_number is not None
         assert len(calls) == 1
         session.commit()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_document_fact_query_is_exact_and_isolated(scratch, plane):
+    admin_url, tenant_url, platform_url = scratch
+    left, right = _create_tenants(admin_url)
+    scope = TenantScope(left) if plane == "tenant" else PlatformScope()
+    url = tenant_url if plane == "tenant" else platform_url
+    fact_model = (
+        models.InvoiceDocumentFact
+        if plane == "tenant"
+        else models.PlatformInvoiceDocumentFact
+    )
+    with _session(url, scope) as session:
+        _, _, invoice = _seed_invoice(session, scope, suffix=f"fact-query-{plane}")
+        invoice_id = invoice.id
+        request = GetInvoiceDocumentFactV1(scope, invoice_id, 1)
+        persisted = session.scalars(
+            select(fact_model).where(fact_model.document_id == invoice_id)
+        ).one()
+        original = get_invoice_document_fact(session, scope=scope, request=request)
+        assert original.fact_id == persisted.id
+        assert original.recorded_at == persisted.created_at
+        assert original.contract_version == "billing.invoice.document.fact.v1"
+        assert original.fact.invoice_id == invoice_id
+        assert original.fact.fact_version == 1
+        assert original.fact.document_state == "issued"
+        assert original.fact.grand_total.amount == Decimal("120.00")
+        for missing in (
+            replace(request, invoice_id=uuid.uuid4()),
+            replace(request, fact_version=2),
+        ):
+            with pytest.raises(BillingRuleViolation) as error:
+                get_invoice_document_fact(session, scope=scope, request=missing)
+            assert error.value.code == "billing.document_fact_not_found"
+
+        # Reject routed-scope mismatch before touching the database, even when
+        # that route would select a table forbidden to the connected role.
+        statements = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(session.get_bind(), "before_cursor_execute", capture)
+        try:
+            wrong_scopes = (
+                (TenantScope(right), PlatformScope())
+                if plane == "tenant"
+                else (TenantScope(left),)
+            )
+            for wrong_scope in wrong_scopes:
+                with pytest.raises(BillingRuleViolation) as error:
+                    get_invoice_document_fact(
+                        session,
+                        scope=scope,
+                        request=replace(request, scope=wrong_scope),
+                    )
+                assert error.value.code == "billing.scope_mismatch"
+            assert statements == []
+        finally:
+            event.remove(session.get_bind(), "before_cursor_execute", capture)
+
+        credit = issue_credit_note(
+            session,
+            scope=scope,
+            command=IssueCreditNote(
+                original_document_id=invoice_id,
+                pre_tax_amount=_money("20.00"),
+                tax_amount=_money("0.00"),
+                total_amount=_money("20.00"),
+                reason="historical correction",
+                series_code="credit",
+                reference_date=date(2026, 8, 17),
+                actor_ref="billing-test",
+                correlation_id=f"fact-query-credit-{plane}",
+                occurred_at=NOW,
+                document_profile_code="credit.standard",
+                document_profile_version="1",
+            ),
+            numbering=NUMBERING,
+        )
+        assert (
+            get_invoice_document_fact(session, scope=scope, request=request) == original
+        )
+        void_document(
+            session,
+            scope=scope,
+            document_id=credit.id,
+            actor_ref="billing-test",
+            occurred_at=NOW + timedelta(days=1),
+            source_ref=f"fact-query-void-credit-{plane}",
+        )
+        assert (
+            get_invoice_document_fact(session, scope=scope, request=request) == original
+        )
+        void_document(
+            session,
+            scope=scope,
+            document_id=invoice_id,
+            actor_ref="billing-test",
+            occurred_at=NOW + timedelta(days=1),
+            source_ref=f"fact-query-void-{plane}",
+        )
+        cancelled = get_invoice_document_fact(
+            session, scope=scope, request=replace(request, fact_version=2)
+        )
+        assert cancelled.fact.document_state == "cancelled"
+        assert cancelled.fact_id != original.fact_id
+        assert (
+            get_invoice_document_fact(session, scope=scope, request=request) == original
+        )
+        session.commit()
+    with _session(url, scope) as fresh:
+        assert (
+            get_invoice_document_fact(fresh, scope=scope, request=request) == original
+        )
+    if plane == "tenant":
+        with _session(tenant_url, TenantScope(right)) as other:
+            with pytest.raises(BillingRuleViolation) as error:
+                get_invoice_document_fact(
+                    other,
+                    scope=TenantScope(right),
+                    request=replace(request, scope=TenantScope(right)),
+                )
+            assert error.value.code == "billing.document_fact_not_found"
+        with _session(platform_url, PlatformScope()) as other_plane:
+            with pytest.raises(BillingRuleViolation) as error:
+                get_invoice_document_fact(
+                    other_plane,
+                    scope=PlatformScope(),
+                    request=replace(request, scope=PlatformScope()),
+                )
+            assert error.value.code == "billing.document_fact_not_found"
+    else:
+        with _session(tenant_url, TenantScope(left)) as other_plane:
+            with pytest.raises(BillingRuleViolation) as error:
+                get_invoice_document_fact(
+                    other_plane,
+                    scope=TenantScope(left),
+                    request=replace(request, scope=TenantScope(left)),
+                )
+            assert error.value.code == "billing.document_fact_not_found"
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_document_fact_query_ignores_dirty_orm_and_preserves_caller_rollback(
+    scratch, plane
+):
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    fact_model = (
+        models.InvoiceDocumentFact
+        if plane == "tenant"
+        else models.PlatformInvoiceDocumentFact
+    )
+    with _session(url, scope) as session:
+        _, _, invoice = _seed_invoice(session, scope, suffix=f"fact-dirty-{plane}")
+        request = GetInvoiceDocumentFactV1(scope, invoice.id, 1)
+        original = get_invoice_document_fact(session, scope=scope, request=request)
+        pending_account = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=f"query-rollback-{plane}",
+            currency="NGN",
+            minor_units=2,
+        )
+        pending_id = pending_account.id
+        fact_row = session.get(fact_model, original.fact_id)
+        fact_row.fact_payload = {"corrupt": "identity-map-only"}
+        fact_row.presentation_model_digest = "b" * 64
+        invoice.document_number = "dirty-unflushed-number"
+        assert fact_row in session.dirty
+        assert invoice in session.dirty
+        assert (
+            get_invoice_document_fact(session, scope=scope, request=request) == original
+        )
+        assert fact_row in session.dirty
+        assert invoice in session.dirty
+        session.rollback()
+        assert (
+            get_invoice_document_fact(session, scope=scope, request=request) == original
+        )
+    account_model = (
+        models.BillingAccount if plane == "tenant" else models.PlatformBillingAccount
+    )
+    with _session(url, scope) as fresh:
+        assert fresh.get(account_model, pending_id) is None
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize(
+    "fault,code",
+    [
+        ("unsupported_contract", "document_fact_contract_unsupported"),
+        ("payload_not_object", "document_fact_corrupt"),
+        ("missing_field", "document_fact_corrupt"),
+        ("wrong_scope", "document_fact_corrupt"),
+        ("wrong_invoice", "document_fact_corrupt"),
+        ("wrong_version", "document_fact_corrupt"),
+        ("wrong_nested_type", "document_fact_corrupt"),
+        ("instant_precision", "document_fact_corrupt"),
+        ("offset_precision", "document_fact_corrupt"),
+        ("digest_and_payload", "document_fact_digest_mismatch"),
+        ("payload_digest", "document_fact_digest_mismatch"),
+        ("envelope_digest", "document_fact_digest_mismatch"),
+        ("changed_content", "document_fact_digest_mismatch"),
+    ],
+)
+def test_document_fact_query_refuses_persisted_corruption(scratch, plane, fault, code):
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    fact_model = (
+        models.InvoiceDocumentFact
+        if plane == "tenant"
+        else models.PlatformInvoiceDocumentFact
+    )
+    with _session(url, scope) as session:
+        _, _, invoice = _seed_invoice(
+            session, scope, suffix=f"fact-corrupt-{plane}-{fault}"
+        )
+        source = session.scalars(
+            select(fact_model).where(fact_model.document_id == invoice.id)
+        ).one()
+        payload = deepcopy(source.fact_payload)
+        payload["fact_version"] = 2
+        if fault == "missing_field":
+            del payload["payment_instructions"]
+        elif fault == "wrong_scope":
+            payload["scope"] = (
+                {} if plane == "tenant" else {"tenant_id": str(uuid.uuid4())}
+            )
+        elif fault == "wrong_invoice":
+            payload["invoice_id"] = str(uuid.uuid4())
+        elif fault == "wrong_version":
+            payload["fact_version"] = 3
+        elif fault == "wrong_nested_type":
+            payload["lines"][0]["quantity"] = 1.5
+        elif fault == "instant_precision":
+            payload["issued_at"] = "2026-08-17T10:00:00.1234567+00:00"
+        elif fault == "offset_precision":
+            payload["fx_snapshot"]["observed_at"] = (
+                "2026-08-17T10:00:00+01:00:00.1234567"
+            )
+        semantic = {
+            key: value
+            for key, value in payload.items()
+            if key != "presentation_model_digest"
+        }
+        digest = fingerprint_of(semantic)
+        payload["presentation_model_digest"] = digest
+        if fault == "payload_digest":
+            payload["presentation_model_digest"] = "a" * 64
+        elif fault == "envelope_digest":
+            digest = "b" * 64
+        elif fault == "changed_content":
+            payload["document_number"] = "different-content-with-original-hash"
+        elif fault == "payload_not_object":
+            payload = []
+        elif fault == "digest_and_payload":
+            # Both are corrupt: original JSON digest verification must refuse
+            # before decoding this invalid nested value.
+            payload["lines"][0]["quantity"] = 1.5
+        values = {
+            "id": uuid.uuid4(),
+            "document_id": invoice.id,
+            "fact_version": 2,
+            "contract_version": "billing.invoice.document.fact.v99"
+            if fault == "unsupported_contract"
+            else source.contract_version,
+            "fact_payload": payload,
+            "presentation_model_digest": digest,
+        }
+        if isinstance(scope, TenantScope):
+            values["tenant_id"] = scope.tenant_id
+        # Append a deliberately bad version through the same INSERT permission
+        # as the producer. Historical immutable rows are never edited for tests.
+        session.add(fact_model(**values))
+        session.flush()
+        with pytest.raises(BillingRuleViolation) as error:
+            get_invoice_document_fact(
+                session,
+                scope=scope,
+                request=GetInvoiceDocumentFactV1(scope, invoice.id, 2),
+            )
+        assert error.value.code == f"billing.{code}"
+        assert error.value.details == {}
+        assert "2026-08-17" not in str(error.value)
+        session.rollback()
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize(
+    "offset,microseconds",
+    [
+        ("Z", 0),
+        ("+00:00:00.123456", 123456),
+        ("-00:00:00.123456", -123456),
+    ],
+)
+def test_document_fact_query_hashes_raw_stored_json_not_decoder_reserialization(
+    scratch, plane, offset, microseconds
+):
+    admin_url, tenant_url, platform_url = scratch
+    scope = (
+        TenantScope(_create_tenants(admin_url, 1)[0])
+        if plane == "tenant"
+        else PlatformScope()
+    )
+    url = tenant_url if plane == "tenant" else platform_url
+    fact_model = (
+        models.InvoiceDocumentFact
+        if plane == "tenant"
+        else models.PlatformInvoiceDocumentFact
+    )
+    with _session(url, scope) as session:
+        _, _, invoice = _seed_invoice(
+            session, scope, suffix=f"fact-raw-hash-{plane}-{offset}"
+        )
+        source = session.scalars(
+            select(fact_model).where(fact_model.document_id == invoice.id)
+        ).one()
+        payload = deepcopy(source.fact_payload)
+        payload["fact_version"] = 2
+        payload["issued_at"] = payload["issued_at"].replace("+00:00", offset)
+        payload["grand_total"]["amount"] += "e0"
+        digest = fingerprint_of(
+            {
+                key: value
+                for key, value in payload.items()
+                if key != "presentation_model_digest"
+            }
+        )
+        payload["presentation_model_digest"] = digest
+        values = {
+            "id": uuid.uuid4(),
+            "document_id": invoice.id,
+            "fact_version": 2,
+            "contract_version": source.contract_version,
+            "fact_payload": payload,
+            "presentation_model_digest": digest,
+        }
+        if isinstance(scope, TenantScope):
+            values["tenant_id"] = scope.tenant_id
+        session.add(fact_model(**values))
+        session.flush()
+        result = get_invoice_document_fact(
+            session, scope=scope, request=GetInvoiceDocumentFactV1(scope, invoice.id, 2)
+        )
+        assert result.fact.presentation_model_digest == digest
+        assert str(result.fact.grand_total.amount) == "120.00"
+        expected_offset = timedelta(microseconds=microseconds)
+        assert result.fact.issued_at.utcoffset() == expected_offset
+        assert result.fact.issued_at == NOW.replace(tzinfo=timezone(expected_offset))
+        assert result.fact.issued_at.isoformat() == payload["issued_at"].replace(
+            "Z", "+00:00"
+        )
+        session.rollback()

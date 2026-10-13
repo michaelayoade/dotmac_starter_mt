@@ -2,6 +2,10 @@
 
 ## 0.1.0a2 — 2026-10-13 (declared, unpublished)
 
+- Enforce confirmed-cash UPDATE/DELETE refusal at the PostgreSQL boundary,
+  including deletion cascades, while preserving intent/proof lifecycle writes.
+  Bound migration locking and refuse downgrade while confirmation evidence exists.
+
 - Persists exact Money currency scale in additive `pm_0002_money_precision`;
   legacy NULL precision remains unresolved without an inferred default/backfill.
 - Exposes frozen tenant-scoped confirmed-cash observations from persisted scalar
