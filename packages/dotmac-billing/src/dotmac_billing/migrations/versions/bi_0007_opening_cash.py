@@ -788,7 +788,7 @@ def _historical_invoice_room(platform: bool) -> None:
         expected_issue := CASE WHEN doc.document_kind = 'invoice' THEN doc.grand_total ELSE -doc.grand_total END;
         IF issuance.billing_account_id <> account_id OR issuance.currency <> invoice.currency OR issuance.minor_units <> invoice.minor_units
           OR issuance.reverses_group_id IS NOT NULL
-          OR issuance.group_kind <> CASE WHEN doc.document_kind = 'invoice' THEN 'invoice_issued' ELSE 'credit_note_issued' END
+          OR issuance.group_kind <> (CASE WHEN doc.document_kind = 'invoice' THEN 'invoice_issued' ELSE 'credit_note_issued' END)
           OR (doc.id = invoice_id AND issuance.source_version > target_version)
           OR (SELECT count(*) FROM mod_billing.{prefix}posting_effects e WHERE e.posting_group_id = issuance.id{effects_scope}) <> 1
           OR NOT EXISTS (SELECT 1 FROM mod_billing.{prefix}posting_effects e WHERE e.posting_group_id = issuance.id{effects_scope}
