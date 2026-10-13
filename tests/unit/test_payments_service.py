@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -387,3 +388,94 @@ def test_another_tenants_intent_is_not_visible(db: Session) -> None:
                 observed_at=NOW,
             ),
         )
+
+
+@pytest.mark.parametrize("changed", ["amount", "currency", "source", "observed_at"])
+def test_confirmation_replay_refuses_changed_immutable_evidence(db, changed):
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    command = RecordConfirmation(
+        intent_id=intent.id,
+        source=ConfirmationSource.PROVIDER_CALLBACK,
+        external_reference="immutable-evidence",
+        confirmed=Money.of("15000", NGN),
+        observed_at=NOW,
+    )
+    first = record_confirmation(db, scope=scope, command=command)
+    changes = {
+        "amount": {"confirmed": Money.of("14999", NGN)},
+        "currency": {"confirmed": Money.of("15000", USD)},
+        "source": {"source": ConfirmationSource.MANUAL},
+        "observed_at": {"observed_at": NOW + timedelta(seconds=1)},
+    }
+    with pytest.raises(Conflict):
+        record_confirmation(
+            db, scope=scope, command=replace(command, **changes[changed])
+        )
+    assert first.confirmed_amount == Decimal("15000")
+    assert first.source is ConfirmationSource.PROVIDER_CALLBACK
+    assert intent.confirmed_amount == Decimal("15000")
+
+
+def test_confirmation_replay_omits_clock_and_survives_loaded_state_refresh(db):
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope, expires_at=NOW + timedelta(hours=1))
+    command = RecordConfirmation(
+        intent_id=intent.id,
+        source=ConfirmationSource.PROVIDER_CALLBACK,
+        external_reference="stored-clock",
+        confirmed=Money.of("15000", NGN),
+        observed_at=NOW,
+    )
+    first = record_confirmation(db, scope=scope, command=command)
+    first_id = first.id
+    db.expire_all()
+    assert record_confirmation(db, scope=scope, command=command).id == first_id
+    replay = record_confirmation(
+        db, scope=scope, command=replace(command, observed_at=None)
+    )
+    assert replay.id == first_id
+    assert replay.observed_at.replace(tzinfo=UTC) == NOW
+
+
+def test_failed_proof_acceptance_does_not_write_review_evidence(db):
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    proof = submit_transfer_proof(
+        db,
+        scope=scope,
+        command=SubmitTransferProof(
+            intent_id=intent.id,
+            declared=Money.of("15000", NGN),
+            document_reference="file:proof",
+            submitted_reference="proof-before-provider",
+            declared_at=NOW,
+        ),
+    )
+    record_confirmation(
+        db,
+        scope=scope,
+        command=RecordConfirmation(
+            intent_id=intent.id,
+            source=ConfirmationSource.PROVIDER_CALLBACK,
+            external_reference="provider-won",
+            confirmed=Money.of("15000", NGN),
+            observed_at=NOW,
+        ),
+    )
+    with pytest.raises(Conflict):
+        review_transfer_proof(
+            db,
+            scope=scope,
+            command=ReviewTransferProof(
+                proof_id=proof.id,
+                accept=True,
+                reviewer="agent:reviewer",
+                reviewed_at=NOW,
+            ),
+        )
+    db.flush()
+    db.refresh(proof)
+    assert proof.state is TransferProofState.SUBMITTED
+    assert proof.reviewer is None
+    assert proof.reviewed_at is None

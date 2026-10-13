@@ -70,13 +70,23 @@ def _positive(money: Money, field: str) -> Money:
 
 def _intent(db: Session, tenant_id: UUID, intent_id: UUID) -> PaymentIntent:
     row = db.scalar(
-        select(PaymentIntent).where(
-            PaymentIntent.tenant_id == tenant_id, PaymentIntent.id == intent_id
-        )
+        select(PaymentIntent)
+        .where(PaymentIntent.tenant_id == tenant_id, PaymentIntent.id == intent_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if row is None:
         raise Conflict("payment intent was not found in the tenant")
     return row
+
+
+def _utc_moment(value: datetime) -> datetime:
+    """Compare persisted instants consistently across timezone-aware drivers.
+
+    SQLite's test adapter returns naive UTC values for timezone-bearing columns;
+    production PostgreSQL returns aware instants. This changes no stored fact.
+    """
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def _same_currency(intent: PaymentIntent, money: Money, field: str) -> None:
@@ -156,7 +166,7 @@ def cancel_payment_intent(
     moment = cancelled_at or datetime.now(UTC)
     if intent.status is not _OPEN:
         raise Conflict("only a pending payment intent can be cancelled")
-    if moment < intent.opened_at:
+    if _utc_moment(moment) < _utc_moment(intent.opened_at):
         raise Conflict("cancellation cannot precede the opening time")
     intent.status = PaymentIntentStatus.CANCELLED
     intent.settled_at = moment
@@ -171,7 +181,9 @@ def expire_payment_intent(
     moment = now or datetime.now(UTC)
     if intent.status is not _OPEN:
         raise Conflict("only a pending payment intent can expire")
-    if intent.expires_at is None or intent.expires_at > moment:
+    if intent.expires_at is None or _utc_moment(intent.expires_at) > _utc_moment(
+        moment
+    ):
         raise Conflict("payment intent has not reached its expiry")
     intent.status = PaymentIntentStatus.EXPIRED
     intent.settled_at = moment
@@ -215,40 +227,59 @@ def review_transfer_proof(
     place an intent can become CONFIRMED.
     """
     tenant_id = _tenant(scope)
-    proof = db.scalar(
-        select(PaymentTransferProof).where(
+    # Discover the parent without taking a child lock. Every lifecycle writer
+    # acquires the intent first, then its proof, so provider and review paths
+    # cannot invert lock order or confirm from a stale PENDING ORM instance.
+    intent_id = db.scalar(
+        select(PaymentTransferProof.intent_id).where(
             PaymentTransferProof.tenant_id == tenant_id,
             PaymentTransferProof.id == command.proof_id,
         )
+    )
+    if intent_id is None:
+        raise Conflict("transfer proof was not found in the tenant")
+    _intent(db, tenant_id, intent_id)
+    proof = db.scalar(
+        select(PaymentTransferProof)
+        .where(
+            PaymentTransferProof.tenant_id == tenant_id,
+            PaymentTransferProof.id == command.proof_id,
+            PaymentTransferProof.intent_id == intent_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if proof is None:
         raise Conflict("transfer proof was not found in the tenant")
     if proof.state is not TransferProofState.SUBMITTED:
         raise Conflict("transfer proof has already been reviewed")
+    reviewer = _required(command.reviewer, "reviewer")
     reviewed_at = command.reviewed_at or datetime.now(UTC)
-    proof.reviewer = _required(command.reviewer, "reviewer")
-    proof.reviewed_at = reviewed_at
+    rejection_reason: str | None = None
     if not command.accept:
-        proof.state = TransferProofState.REJECTED
-        proof.rejection_reason = _required(
-            command.rejection_reason or "", "rejection reason"
-        )
-        db.flush()
-        return proof
-    proof.state = TransferProofState.ACCEPTED
-    record_confirmation(
-        db,
-        scope=scope,
-        command=RecordConfirmation(
-            intent_id=proof.intent_id,
-            source=ConfirmationSource.TRANSFER_PROOF,
-            external_reference=proof.submitted_reference,
-            confirmed=Money.of(
-                Decimal(proof.declared_amount), currency(proof.currency_code)
+        rejection_reason = _required(command.rejection_reason or "", "rejection reason")
+    else:
+        # Validate/correlate before mutating proof evidence: an expected
+        # confirmation conflict must not autoflush an ACCEPTED proof.
+        record_confirmation(
+            db,
+            scope=scope,
+            command=RecordConfirmation(
+                intent_id=proof.intent_id,
+                source=ConfirmationSource.TRANSFER_PROOF,
+                external_reference=proof.submitted_reference,
+                confirmed=Money.of(
+                    Decimal(proof.declared_amount), currency(proof.currency_code)
+                ),
+                observed_at=reviewed_at,
             ),
-            observed_at=reviewed_at,
-        ),
+        )
+    proof.reviewer = reviewer
+    proof.reviewed_at = reviewed_at
+    proof.state = (
+        TransferProofState.ACCEPTED if command.accept else TransferProofState.REJECTED
     )
+    proof.rejection_reason = rejection_reason
     db.flush()
     return proof
 
@@ -275,12 +306,28 @@ def record_confirmation(
             raise Conflict(
                 "external reference is already correlated to a different intent"
             )
+        if (
+            replay.confirmed_amount != confirmed.amount
+            or replay.currency_code != confirmed.currency.code
+            or replay.source != command.source
+        ):
+            raise Conflict(
+                "external reference was reused for different confirmation evidence"
+            )
+        if command.observed_at is not None and _utc_moment(
+            command.observed_at
+        ) != _utc_moment(replay.observed_at):
+            raise Conflict(
+                "external reference was reused for a different observation time"
+            )
         return replay
 
     if intent.status is not _OPEN:
         raise Conflict("only a pending payment intent can be confirmed")
     observed_at = command.observed_at or datetime.now(UTC)
-    if intent.expires_at is not None and observed_at > intent.expires_at:
+    if intent.expires_at is not None and _utc_moment(observed_at) > _utc_moment(
+        intent.expires_at
+    ):
         raise Conflict("payment intent had already expired when this was observed")
 
     row = PaymentConfirmation(

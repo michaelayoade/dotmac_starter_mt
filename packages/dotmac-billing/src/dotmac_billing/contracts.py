@@ -257,6 +257,12 @@ class SettlementFundingLane(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class AcceptSettlementV1:
+    """Accept a confirmed source fact bound to one account and funding lane.
+
+    Replay retains the original receipt observation (`observed_at`); account,
+    lane, confirmation evidence and both exact source identifiers must match.
+    """
+
     scope: Scope
     billing_account_id: UUID
     source_system: str

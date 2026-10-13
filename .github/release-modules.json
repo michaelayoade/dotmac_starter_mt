@@ -463,6 +463,7 @@
           "dotmac_billing/manifest.py",
           "dotmac_billing/migrations/__init__.py",
           "dotmac_billing/migrations/versions/bi_0001_billing.py",
+          "dotmac_billing/migrations/versions/bi_0002_multiline.py",
           "dotmac_billing/models.py",
           "dotmac_billing/py.typed",
           "dotmac_billing/service.py"
