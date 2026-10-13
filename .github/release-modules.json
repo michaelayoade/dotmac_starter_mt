@@ -469,6 +469,8 @@
           "dotmac_billing/migrations/versions/bi_0004_withholding_discharge.py",
           "dotmac_billing/migrations/versions/bi_0005_non_cash_credit.py",
           "dotmac_billing/models.py",
+          "dotmac_billing/opening_contracts.py",
+          "dotmac_billing/opening_validation.py",
           "dotmac_billing/py.typed",
           "dotmac_billing/queries.py",
           "dotmac_billing/service.py"

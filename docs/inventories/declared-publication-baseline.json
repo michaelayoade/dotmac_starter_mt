@@ -78,8 +78,8 @@
       "state": "never-published"
     },
     "dotmac-billing": {
-      "declared": "0.1.0a4",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a4 adds immutable non-cash grant/effect and V2 position evidence in additive bi_0005, preserving cash and prepaid funding separation and prior wire contracts. Hosted acceptance, authorized publication and product qualification remain separate; this allocation changes no product pin or production writer authority.",
+      "declared": "0.1.0a5",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a5 adds pure immutable complete-population opening evidence preflight on the a4 credit/WHT foundation, with trusted verifier bindings and typed blockers. It adds no opening writer, stored balance or production authority. Hosted acceptance, source approval, authorized publication and product qualification remain separate; no product pin changes.",
       "state": "declared-unpublished"
     },
     "dotmac-connector-flutterwave": {
