@@ -161,6 +161,39 @@ class TaxRuleV1:
 
 
 @dataclass(frozen=True, slots=True)
+class TaxRuleSupersessionInput:
+    """Explicit replacement of one leaf policy; source identity is retry-stable."""
+
+    predecessor_rule_id: UUID
+    predecessor_version: int
+    replacement: TaxRuleInput
+    effective_from: date
+    actor_id: UUID
+    published_by_ref: str
+    reason: str
+    evidence_ref: str
+    source_ref: str
+    source_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleSupersessionV1:
+    tenant_id: UUID
+    supersession_id: UUID
+    predecessor_rule_id: UUID
+    predecessor_version: int
+    replacement: TaxRuleV1
+    effective_from: date
+    actor_id: UUID
+    published_by_ref: str
+    reason: str
+    evidence_ref: str
+    source_ref: str
+    source_version: str
+    published_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class TaxFact:
     jurisdiction_id: UUID
     occurred_on: date
@@ -436,6 +469,36 @@ class TaxDeterminationSetV1:
 
 
 @dataclass(frozen=True, slots=True)
+class TaxPolicyPreviewComponentV1:
+    component_sequence: int
+    tax_code_id: UUID
+    rule_id: UUID
+    rule_version: int
+    treatment_code: str
+    calculation_base_code: str
+    inclusive: bool
+    base_amount: Money
+    tax_amount: Money
+    recoverable_amount: Money
+    non_recoverable_amount: Money
+    lines: tuple[TaxDeterminationLineV1, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TaxPolicyPreviewV1:
+    """Advisory current-policy calculation, never durable financial evidence."""
+
+    tenant_id: UUID
+    jurisdiction_id: UUID
+    occurred_on: date
+    source_amount: Money
+    net_amount: Money
+    tax_amount: Money
+    gross_amount: Money
+    components: tuple[TaxPolicyPreviewComponentV1, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class TaxSubjectClassificationInput:
     tax_code_id: UUID
     subject_kind: str
@@ -492,11 +555,15 @@ __all__ = [
     "TaxDeterminationLineV1",
     "TaxDeterminationSetV1",
     "TaxFact",
+    "TaxPolicyPreviewV1",
+    "TaxPolicyPreviewComponentV1",
     "TaxJurisdictionInput",
     "TaxJurisdictionV1",
     "TaxRuleBandInput",
     "TaxRuleBandV1",
     "TaxRuleInput",
+    "TaxRuleSupersessionInput",
+    "TaxRuleSupersessionV1",
     "TaxRuleV1",
     "TaxSubjectClassificationInput",
     "TaxSubjectClassificationV1",

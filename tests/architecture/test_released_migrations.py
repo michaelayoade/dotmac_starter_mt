@@ -7249,7 +7249,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
-    "dotmac-tax": frozenset(),
+    "dotmac-tax": frozenset({"tx_0004_rule_supersession.py"}),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
     "dotmac-fx-policy": frozenset(),
@@ -7265,7 +7265,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
         {"ib_0002_supplied_identity.py", "ib_0003_transport_refs.py"}
     ),
     "dotmac-kernel": frozenset(),
-    "dotmac-accounting": frozenset(),
+    "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),

@@ -11,7 +11,7 @@ from dotmac_accounting.models import TABLES
 
 module = ModuleManifest(
     code="accounting",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="accounting",
     migration_prefix="ac",

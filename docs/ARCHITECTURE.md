@@ -1472,7 +1472,7 @@ map is
 
 | Package | Sole owned decision/state surface | Qualifying provenance |
 |---|---|---|
-| `dotmac-accounting` | Tenant chart, fiscal periods/dimensions, balanced posting, reversal and immutable ledger evidence | ERP GL behavior and tests |
+| `dotmac-accounting` | Tenant chart, fiscal periods/dimensions, balanced posting, reversal and immutable ledger evidence and posted source ancestry (`ac_0002_posted_content`, candidate `0.1.0a2`) | ERP GL behavior and tests |
 | `dotmac-analytics` | Declared aggregate observations and deterministic rebuildable current-point projections | ERP metric storage/computers; fleet projection requirements |
 | `dotmac-banking` | Bank-account masters, statement/cash observations, matching decisions and reconciliation evidence | ERP banking behavior |
 | `dotmac-documents` | Controlled document identity, immutable exact-content versions, lifecycle, collaboration and acknowledgements | ERP handbook base plus Sub immutable quote delta |
@@ -1511,7 +1511,7 @@ local copy and no cross-application or sibling-module foreign key is implied.
 | `dotmac-projects` | `Project`, `ProjectTemplate`, `ProjectTemplateTask`, `ProjectTemplateTaskDependency`, `ProjectTask`, `ProjectTaskDependency`, `ProjectTaskAssignee` | `projects`, `project_templates`, `project_template_tasks`, `project_template_task_dependencies`, `project_tasks`, `project_task_dependencies`, `project_task_assignees` | Sub product-first; ADR-0051 |
 | `dotmac-records` | `RetentionScheduleVersion`, `RecordSeriesVersion`, `Record`, `RecordTriggerObservation`, `LegalHoldCase`, `LegalHoldTarget`, `DispositionBatch`, `DispositionItem`, `CustodyTransfer`, `PreservationCheck`, `RecordEvent` | `retention_schedule_versions`, `record_series_versions`, `records`, `record_trigger_observations`, `legal_hold_cases`, `legal_hold_targets`, `disposition_batches`, `disposition_items`, `custody_transfers`, `preservation_checks`, `record_events` | Greenfield after exact fleet inventory; ADR-0049 |
 | `dotmac-surveys` | `Survey`, `SurveyInvitation`, `SurveyResponse` | `surveys`, `survey_invitations`, `survey_responses` | Sub product-first; ADR-0053 |
-| `dotmac-tax` | `TaxAuthority`, `TaxJurisdiction`, `TaxCode`, `TaxRule`, `TaxRuleBand`, `TaxDeterminationSet`, `TaxDetermination`, `TaxDeterminationLine`, `StatutoryReportDefinition`, `StatutoryReportBox`, `TaxFilingObligation`, `StatutoryReport`, `StatutoryReportValue`, `TaxReturn`, `TaxReturnEvent` | `tax_authorities`, `tax_jurisdictions`, `tax_codes`, `tax_rules`, `tax_rule_bands`, `tax_determination_sets`, `tax_determinations`, `tax_determination_lines`, `statutory_report_definitions`, `statutory_report_boxes`, `tax_filing_obligations`, `statutory_reports`, `statutory_report_values`, `tax_returns`, `tax_return_events` | ERP product-first; ADR-0045 |
+| `dotmac-tax` | `TaxAuthority`, `TaxJurisdiction`, `TaxCode`, `TaxRule`, `TaxRuleBand`, `TaxRuleSupersession`, `TaxDeterminationSet`, `TaxDetermination`, `TaxDeterminationLine`, `StatutoryReportDefinition`, `StatutoryReportBox`, `TaxFilingObligation`, `StatutoryReport`, `StatutoryReportValue`, `TaxReturn`, `TaxReturnEvent` | `tax_authorities`, `tax_jurisdictions`, `tax_codes`, `tax_rules`, `tax_rule_bands`, `tax_rule_supersessions`, `tax_determination_sets`, `tax_determinations`, `tax_determination_lines`, `statutory_report_definitions`, `statutory_report_boxes`, `tax_filing_obligations`, `statutory_reports`, `statutory_report_values`, `tax_returns`, `tax_return_events` | ERP product-first; ADR-0045 |
 | `dotmac-work-orders` | `WorkOrder`, `WorkOrderAssignment`, `WorkOrderEvent`, `WorkOrderWorkLog`, `WorkOrderNote`, `WorkOrderEvidence` | `work_orders`, `work_order_assignments`, `work_order_events`, `work_order_worklogs`, `work_order_notes`, `work_order_evidence` | Sub product-first; ADR-0054 |
 
 Canonical writers are equally explicit. These services accept the caller's
@@ -3778,3 +3778,19 @@ returns only a fixed status. No caller-selected command or path crosses this
 boundary. Runner `NoNewPrivileges` remains enabled. Synthetic root command
 metadata proves callback/socket behavior, not real kernel WireGuard state or
 the complete production systemd composition.
+
+### Tax policy adjustment provenance (2026-10-13)
+
+Tax a5 owns append-only `TaxRuleSupersession` policy edges, sourced from ERP's
+qualifying tax policy behavior and Sub's billing facts inventory (ADR-0045;
+`packages/dotmac-tax/EXTRACTION.toml`). `supersede_tax_rule` is a flush-only
+command with tenant/code serialization, exact source replay and an explicit
+effective boundary. Published rules and sealed financial facts retain their
+original identity and content. `preview_tax_policy` shares the actual selector
+and calculation builder and returns an advisory `TaxPolicyPreviewV1`, without
+durable determination identity or seals. Published rules also seal band
+membership through a transaction-local build/sole publication transition and
+a deferred unpublished-commit refusal. Existing a4 writers require a policy
+write fence before tx_0004; the a5 source API retains their signatures and DTOs.
+Downgrade refuses any nonempty rule or edge store. Package source support does not claim
+product UI delivery, publication, adoption or writer authority cutover.
