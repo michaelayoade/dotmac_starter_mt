@@ -568,6 +568,30 @@ def test_committed_withholding_group_refuses_later_cash_children(scratch, plane,
             if "tenant_id" in original:
                 source["tenant_id"] = original["tenant_id"]
             connection.execute(settlement.insert().values(**source))
+            # This is a valid raw receipt fixture; supply its exact provenance
+            # claim so the assertion below still isolates the WHT cash-child guard.
+            claim = (
+                models.CashSourceClaim
+                if plane == "tenant"
+                else models.PlatformCashSourceClaim
+            ).__table__
+            connection.execute(
+                claim.insert().values(
+                    id=uuid.uuid4(),
+                    settlement_id=settlement_id,
+                    **{
+                        key: source[key]
+                        for key in (
+                            *(("tenant_id",) if "tenant_id" in source else ()),
+                            "billing_account_id",
+                            "source_system",
+                            "source_settlement_key",
+                            "currency",
+                            "minor_units",
+                        )
+                    },
+                )
+            )
             values.update(
                 settlement_id=settlement_id,
                 document_id=original["document_id"],

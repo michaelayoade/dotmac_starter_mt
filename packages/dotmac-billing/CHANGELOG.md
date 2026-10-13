@@ -2,6 +2,15 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a6 — UNRELEASED
+
+- Add provenance-only immutable cash-source claims for real settlements on both
+  planes, consumed inside existing settlement acceptance and verified on replay.
+  Add `bi_0006_cash_source_claim` after accepted `bi_0005`, backfilling exact
+  stored identities without changing money, confirmation or retry evidence.
+  Fence older writers: new settlements need their claim at transaction completion.
+  No opening money, import command or activation is introduced.
+
 ## 0.1.0a5 — UNRELEASED
 
 - Add immutable complete-population opening-manifest contracts and a pure
