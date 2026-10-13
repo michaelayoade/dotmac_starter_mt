@@ -277,7 +277,11 @@ Exchange = Callable[[bytes], bytes]
 
 
 def tcp_exchange(
-    resolver: str, port: int = 53, deadline_s: float = QUERY_DEADLINE_S
+    resolver: str,
+    port: int = 53,
+    deadline_s: float = QUERY_DEADLINE_S,
+    *,
+    deadline_ns: int | None = None,
 ) -> Exchange:
     """One DNS-over-TCP exchange per query to ONE numeric resolver address."""
     address = ipaddress.ip_address(resolver)
@@ -285,9 +289,19 @@ def tcp_exchange(
 
     def exchange(query: bytes) -> bytes:
         deadline = time.monotonic() + deadline_s
+        if deadline_ns is not None:
+            deadline = min(deadline, deadline_ns / 1_000_000_000)
+
+        def remaining() -> float:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise SnapshotRefused("dns.timeout")
+            return left
+
         with socket.socket(family, socket.SOCK_STREAM) as sock:
-            sock.settimeout(deadline_s)
+            sock.settimeout(remaining())
             sock.connect((str(address), port))
+            sock.settimeout(remaining())
             sock.sendall(struct.pack(">H", len(query)) + query)
             header = _recv(sock, 2, deadline)
             (length,) = struct.unpack(">H", header)

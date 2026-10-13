@@ -71,6 +71,22 @@ CONTROLLER_MODULES = (
 RUNTIME_MODULES = (
     *CONTROLLER_MODULES,
     "lane3_handoff_coordinator.py",
+    "lane3_campaign_bootstrap.py",
+    "lane3_handoff_install.py",
+)
+# The previously installed closure is recognized only as rollback/prior
+# evidence. Every new target and every new dispatcher still requires the
+# complete current closure, including the bootstrap generator.
+LEGACY_RUNTIME_MODULES = (
+    "lane3_broker_origin.py",
+    "lane3_handoff_controller.py",
+    "lane3_handoff_protocol.py",
+    "lane3_handoff_resolver.py",
+    "lane3_wireguard_topology.py",
+    "lane3_openbao_topology.py",
+    "lane3_topology_source.py",
+    "lane3_topology.py",
+    "lane3_handoff_coordinator.py",
     "lane3_handoff_install.py",
 )
 MANAGEMENT_OPS = frozenset(
@@ -136,12 +152,20 @@ def hex_value(value: Any, size: int = 64) -> str:
     return value
 
 
-def validate_manifest(value: dict[str, Any]) -> None:
+def validate_manifest(
+    value: dict[str, Any], *, allow_legacy_runtime: bool = False
+) -> None:
     exact(value, {"schema", "runtime_commit", "supplier_commit", "runtime", "supplier"})
     if value["schema"] != BUNDLE_SCHEMA or value["supplier_commit"] != SUPPLIER_COMMIT:
         raise InstallRefused()
     hex_value(value["runtime_commit"], 40)
-    exact(value["runtime"], set(RUNTIME_MODULES))
+    runtime = value["runtime"]
+    if not (
+        allow_legacy_runtime
+        and type(runtime) is dict
+        and set(runtime) == set(LEGACY_RUNTIME_MODULES)
+    ):
+        exact(runtime, set(RUNTIME_MODULES))
     for checksum in value["runtime"].values():
         hex_value(checksum)
     if value["supplier"] != SUPPLIER_HASHES:
@@ -523,9 +547,9 @@ class Installer:
         if exists(self.paths.intent):
             raise InstallRefused("installation.pending")
 
-    def record(self) -> dict[str, Any]:
+    def record(self, *, allow_legacy_runtime: bool = False) -> dict[str, Any]:
         value = strict_json(read_file(self.paths.record, 0o600))
-        self.validate_record_value(value)
+        self.validate_record_value(value, allow_legacy_runtime=allow_legacy_runtime)
         return value
 
     def validate_input(self, value: dict[str, Any]) -> None:
@@ -700,7 +724,11 @@ class Installer:
             self.no_uninstall()
             self.no_lease()
             cleanup_temp(self.paths.transaction, 0o600)
-            prior = self.record() if exists(self.paths.record) else None
+            prior = (
+                self.record(allow_legacy_runtime=True)
+                if exists(self.paths.record)
+                else None
+            )
             if prior is not None:
                 self.verify_record(prior)
             elif exists(self.paths.config) or exists(self.paths.unit):
@@ -792,12 +820,14 @@ class Installer:
             raise InstallRefused()
         # Records carry only reviewed file names and checksums. Validate by the
         # same parser without trusting any path from a transaction document.
-        for record in (value["prior"], value["target"]):
-            if record is not None:
-                self.validate_record_value(record)
+        if value["prior"] is not None:
+            self.validate_record_value(value["prior"], allow_legacy_runtime=True)
+        self.validate_record_value(value["target"])
         return value
 
-    def validate_record_value(self, value: dict[str, Any]) -> None:
+    def validate_record_value(
+        self, value: dict[str, Any], *, allow_legacy_runtime: bool = False
+    ) -> None:
         exact(
             value,
             {
@@ -810,7 +840,7 @@ class Installer:
                 "unit_sha256",
             },
         )
-        validate_manifest(value["manifest"])
+        validate_manifest(value["manifest"], allow_legacy_runtime=allow_legacy_runtime)
         self.validate_input(value["input"])
         expected = {
             **value["input"]["files"],
@@ -947,7 +977,7 @@ class Installer:
                 }:
                     raise InstallRefused("installation.drift")
             if exists(self.paths.record):
-                current = self.record()
+                current = self.record(allow_legacy_runtime=True)
                 if current not in (prior, target):
                     raise InstallRefused("installation.drift")
             if exists(self.paths.ready):

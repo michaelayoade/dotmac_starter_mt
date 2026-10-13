@@ -14,7 +14,6 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-BUNDLE = "85edaf15e8eb97f5900986d7f1246d25274eede2c20e35deda607ffb244b2499"
 HARNESS_SHA256 = "29f003a56baca7b00e8ccb3e75096c5219e805994a4e7add96b44c82cb7dc9cc"
 SSH_DESTINATION = "pve-vm-124"
 COORDINATOR_ALIAS = "vm124-l3mgmt"
@@ -98,9 +97,13 @@ def supervised_harness(operator, tools, evidence_leaf):
         raise InvokerRefused("harness-evidence-present")
     script = tools / "l3mgmt-tests.sh"
     operator.measured(script, HARNESS_SHA256)
+    operator.coordinator_binding()
+    bundle = operator.deployment_inputs()["bundle_digest"]
+    if type(bundle) is not str or re.fullmatch(r"[0-9a-f]{64}", bundle) is None:
+        raise InvokerRefused("harness-bundle")
     deadline = time.monotonic() + 180
     with _owned_process(
-        ["/bin/bash", str(script), "full", BUNDLE, str(evidence_leaf)]
+        ["/bin/bash", str(script), "full", bundle, str(evidence_leaf)]
     ) as process:
         process.stdin.close()
         output = bytearray()

@@ -13,9 +13,11 @@ import json
 import socket
 import struct
 import threading
+import time
 from collections.abc import Iterator
 from typing import Any
 
+import lane3_campaign_bootstrap as cb
 import lane3_handoff_protocol as hp
 import lane3_handoff_resolver as hr
 import pytest
@@ -41,11 +43,12 @@ def _name(name: str) -> bytes:
 class DnsServer:
     """TCP-only synthetic resolver; ``zone[qtype]`` lists answer records."""
 
-    def __init__(self) -> None:
+    def __init__(self, resolver: str = RESOLVER) -> None:
         self.zone: dict[int, list[tuple[str, int, int, str]]] = {}
+        self.queries: list[int] = []
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind((RESOLVER, 53))
+        self.server.bind((resolver, 53))
         self.server.listen(8)
         self.server.settimeout(0.2)
         self.stopped = False
@@ -65,6 +68,7 @@ class DnsServer:
                     query += conn.recv(length - len(query))
                 qid = struct.unpack(">H", query[:2])[0]
                 qtype = struct.unpack(">H", query[-4:-2])[0]
+                self.queries.append(qtype)
                 answers = self.zone.get(qtype, [])
                 out = struct.pack(">HHHHHH", qid, 0x8180, 1, len(answers), 0, 0)
                 out += _name(BROKER_HOST) + struct.pack(">HH", qtype, 1)
@@ -112,6 +116,47 @@ def a(
     address: str, ttl: int = 300, owner: str = BROKER_HOST
 ) -> tuple[str, int, int, str]:
     return (owner, hr.TYPE_A, ttl, address)
+
+
+def test_bootstrap_generator_uses_both_real_tcp_resolvers_with_original_expiry(dns):
+    second_address = "127.0.0.54"
+    second = DnsServer(second_address)
+    try:
+        for server in (dns, second):
+            server.queries.clear()
+            server.zone = {
+                hr.TYPE_A: [
+                    (BROKER_HOST, hr.TYPE_CNAME, 45, "edge.example.net"),
+                    a(TLS_ADDRESS, 45, owner="edge.example.net"),
+                ],
+                hr.TYPE_AAAA: [(BROKER_HOST, hr.TYPE_CNAME, 45, "edge.example.net")],
+            }
+        # Hosted-only transport injection: the production parser admits only
+        # the independently measured proposal's global resolver addresses.
+        config = cb.BootstrapConfig(
+            (RESOLVER, second_address), ((BROKER, ALIASES),), "a" * 64
+        )
+        frozen = cb.capture(
+            config,
+            deadline_ns=time.monotonic_ns() + 60_000_000_000,
+            routable=documentation_routable,
+        )
+        assert (
+            sorted(dns.queries) == sorted(second.queries) == [hr.TYPE_A, hr.TYPE_AAAA]
+        )
+        assert len(frozen.snapshots) == 2
+        assert all(snapshot.ttl_s == 45 for snapshot in frozen.snapshots)
+        assert all(
+            snapshot.chain == (BROKER_HOST, "edge.example.net")
+            for snapshot in frozen.snapshots
+        )
+        assert frozen.expires_at_monotonic_ns == min(
+            snapshot.captured_at_monotonic_ns + 45_000_000_000
+            for snapshot in frozen.snapshots
+        )
+        assert frozen.manifest["destinations"][0]["address"] == TLS_ADDRESS
+    finally:
+        second.stop()
 
 
 @pytest.mark.parametrize(

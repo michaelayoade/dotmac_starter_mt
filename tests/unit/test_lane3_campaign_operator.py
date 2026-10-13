@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import os
@@ -9,6 +10,7 @@ import pathlib
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 
@@ -517,6 +519,160 @@ def test_actual_coordinator_cli_measures_source_before_fixed_prepare_command(
         )
         with pytest.raises(module.CampaignRefused):
             module.coordinator_cli("prepare", 160, 13)
+
+
+def test_actual_launch_cli_inherits_the_original_parent_deadline(monkeypatch):
+    module = operator()
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "deployment_inputs",
+        lambda: {
+            "runtime": pathlib.Path("/synthetic"),
+            "runtime_pins": {"lane3_campaign_bootstrap.py": "a" * 64},
+            "coordinator_config": pathlib.Path("/synthetic/config.json"),
+            "github_run_id": 12,
+        },
+    )
+    monkeypatch.setattr(module, "measured", lambda *args: b"synthetic")
+    monkeypatch.setattr(module, "coordinator_binding", lambda: {})
+    monkeypatch.setattr(
+        module, "_run_owned", lambda args, deadline: calls.append((args, deadline))
+    )
+    module.coordinator_cli("launch", 160.125, 12)
+    assert calls[0][0][-4:] == [
+        "--run-id",
+        "12",
+        "--deadline-monotonic-ns",
+        "160125000000",
+    ]
+    assert calls[0][1] == 160.125
+
+
+@pytest.fixture
+def real_owned_journal(monkeypatch):
+    """Exercise actual protected reads under hosted runner-owned safe parents."""
+    module = operator()
+    protocol = importlib.import_module("lane3_handoff_protocol")
+    with tempfile.TemporaryDirectory(
+        prefix=".lane3-state-", dir=pathlib.Path.home()
+    ) as rawdir:
+        directory = pathlib.Path(rawdir)
+        runtime = directory / "runtime"
+        runtime.mkdir(mode=0o700)
+        raw = pathlib.Path(protocol.__file__).read_bytes()
+        staged = runtime / "lane3_handoff_protocol.py"
+        staged.write_bytes(raw)
+        staged.chmod(0o600)
+        qualification = {
+            "repository_id": 1,
+            "run_id": 12,
+            "run_attempt": 1,
+            "environment_id": 2,
+            "workflow_sha": "a" * 40,
+            "workflow_blob": "b" * 40,
+            "starter_commit": "c" * 40,
+            "approval_digest": "d" * 64,
+            "admission_digest": "e" * 64,
+            "supplier_digest": "f" * 64,
+        }
+        state_path = directory / "state.json"
+        config_path = directory / "coordinator.json"
+        config = {
+            "state_path": str(state_path),
+            "runner_org": "synthetic-org",
+            "runner_group_id": 4,
+            "management": {
+                "ssh_alias": "synthetic-host",
+                "controller_path": "/opt/dotmac-lane3-handoff/"
+                + "a" * 64
+                + "/lane3_handoff_install.py",
+            },
+            **{
+                key: qualification[key]
+                for key in (
+                    "repository_id",
+                    "workflow_sha",
+                    "workflow_blob",
+                    "starter_commit",
+                    "environment_id",
+                )
+            },
+            "bootstrap_manifest_sha256": "b" * 64,
+            "bootstrap_proposal_sha256": "c" * 64,
+        }
+        config_raw = protocol.canonical_json(config)
+        config_path.write_bytes(config_raw)
+        config_path.chmod(0o600)
+        binding = {
+            "runtime": runtime,
+            "runtime_pins": {staged.name: hashlib.sha256(raw).hexdigest()},
+            "state_path": state_path,
+            "qualification": qualification,
+            "coordinator_config": config_path,
+            "coordinator_config_sha256": hashlib.sha256(config_raw).hexdigest(),
+            "bundle_digest": "a" * 64,
+            "runner_org": "synthetic-org",
+            "runner_group_id": 4,
+            "ssh_destination": "synthetic-host",
+            "github_run_id": 12,
+        }
+        monkeypatch.setattr(module, "deployment_inputs", lambda: binding)
+        prepared = {
+            "schema": "dotmac.lane3.handoff-coordinator-state.v1",
+            "lease_id": "d" * 32,
+            "qualification": qualification,
+            "bootstrap_manifest_digest": "b" * 64,
+            "bootstrap_proposal_sha256": "c" * 64,
+        }
+
+        def persist(value):
+            state_path.write_bytes(protocol.canonical_json(value))
+            state_path.chmod(0o600)
+
+        yield module, protocol, state_path, prepared, persist
+
+
+@pytest.mark.parametrize("post_jit", [False, True])
+def test_actual_owned_journal_validates_prepared_and_post_jit_without_provenance_file(
+    real_owned_journal, post_jit
+):
+    module, protocol, path, state, persist = real_owned_journal
+    if post_jit:
+        state.update(
+            run_id=12,
+            runner_id=77,
+            bootstrap_provenance_digest="e" * 64,
+            launch_intent={
+                "name": "lane3-handoff-" + state["lease_id"],
+                "runner_group_id": 4,
+                "run_id": 12,
+                "qualification_digest": protocol.digest(state["qualification"]),
+            },
+        )
+    persist(state)
+    assert not path.with_name(
+        path.name + "." + state["lease_id"] + ".bootstrap-provenance.json"
+    ).exists()
+    assert module.durable_owned_state() == state
+
+
+@pytest.mark.parametrize("defect", ["manifest", "proposal", "missing", "unknown"])
+def test_actual_owned_journal_refuses_hash_drift_missing_binding_and_unknown_keys(
+    real_owned_journal, defect
+):
+    module, _, _, state, persist = real_owned_journal
+    if defect == "manifest":
+        state["bootstrap_manifest_digest"] = "f" * 64
+    elif defect == "proposal":
+        state["bootstrap_proposal_sha256"] = "f" * 64
+    elif defect == "missing":
+        state.pop("bootstrap_manifest_digest")
+    else:
+        state["unreviewed"] = "fixed synthetic value"
+    persist(state)
+    with pytest.raises(module.CampaignRefused, match="state-ownership-unproved"):
+        module.durable_owned_state()
 
 
 @pytest.mark.parametrize(

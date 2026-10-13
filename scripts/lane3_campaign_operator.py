@@ -27,6 +27,7 @@ DEPLOYMENT = None
 RUNTIME_ROLES = frozenset(
     {
         "lane3_handoff_install.py",
+        "lane3_campaign_bootstrap.py",
         "lane3_handoff_resolver.py",
         "lane3_wireguard_topology.py",
         "lane3_openbao_topology.py",
@@ -446,6 +447,8 @@ def coordinator_cli(operation, deadline, run_id=None):
         if type(run_id) is not int or run_id != binding["github_run_id"]:
             raise CampaignRefused("actual-run-required")
         args += ["--run-id", str(run_id)]
+        if operation == "launch":
+            args += ["--deadline-monotonic-ns", str(int(deadline * 1_000_000_000))]
     elif run_id is not None:
         raise CampaignRefused("coordinator-role")
     return _run_owned(args, deadline)
@@ -515,16 +518,47 @@ def durable_owned_state():
     binding = deployment_inputs()
     coordinator_binding()
     state = decode(owned(binding["state_path"], 262144, 0o600))
-    base = {"schema", "lease_id", "qualification"}
+    base = {
+        "schema",
+        "lease_id",
+        "qualification",
+        "bootstrap_manifest_digest",
+        "bootstrap_proposal_sha256",
+    }
     if (
         not base <= set(state)
-        or set(state) - base - {"run_id", "runner_id", "launch_intent"}
+        or set(state)
+        - base
+        - {
+            "run_id",
+            "runner_id",
+            "launch_intent",
+            "bootstrap_manifest_digest",
+            "bootstrap_proposal_sha256",
+            "bootstrap_provenance_digest",
+        }
         or state["schema"] != "dotmac.lane3.handoff-coordinator-state.v1"
         or state["qualification"] != binding["qualification"]
     ):
         raise CampaignRefused("state-ownership-unproved")
     protocol = load_module("protocol")
     protocol.lease_id(state["lease_id"])
+    config = coordinator_binding()
+    if state.get("bootstrap_manifest_digest") != config.get(
+        "bootstrap_manifest_sha256"
+    ) or state.get("bootstrap_proposal_sha256") != config.get(
+        "bootstrap_proposal_sha256"
+    ):
+        raise CampaignRefused("state-ownership-unproved")
+    for key in (
+        "bootstrap_manifest_digest",
+        "bootstrap_proposal_sha256",
+        "bootstrap_provenance_digest",
+    ):
+        if key in state:
+            protocol.hex64(state[key])
+    if "launch_intent" in state and "bootstrap_provenance_digest" not in state:
+        raise CampaignRefused("state-ownership-unproved")
     if "run_id" in state and (
         type(state["run_id"]) is not int or state["run_id"] != binding["github_run_id"]
     ):

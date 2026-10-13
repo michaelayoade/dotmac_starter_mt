@@ -43,6 +43,19 @@ def test_bundle_requires_exact_original_supplier_and_complete_runtime():
         hi.validate_manifest(changed)
 
 
+def test_legacy_closure_is_prior_evidence_and_cannot_be_a_new_target():
+    legacy = manifest()
+    legacy["runtime"].pop("lane3_campaign_bootstrap.py")
+    assert set(legacy["runtime"]) == set(hi.LEGACY_RUNTIME_MODULES)
+    hi.validate_manifest(legacy, allow_legacy_runtime=True)
+    with pytest.raises(hi.InstallRefused):
+        hi.validate_manifest(legacy)
+    incomplete = copy.deepcopy(legacy)
+    incomplete["runtime"].pop("lane3_handoff_coordinator.py")
+    with pytest.raises(hi.InstallRefused):
+        hi.validate_manifest(incomplete, allow_legacy_runtime=True)
+
+
 @pytest.mark.parametrize("raw", [b'{"x":1,"x":2}', b'{"x":NaN}', b"[]"])
 def test_strict_json_rejects_ambiguous_records(raw):
     with pytest.raises(hi.InstallRefused):
