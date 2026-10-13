@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import Scope, TenantScope
 from dotmac_kernel.idempotency import (
+    IdempotencyConflict,
     IdempotentOutcome,
     Operation,
     execute_once,
@@ -2446,14 +2447,45 @@ def accept_settlement(
         fingerprint=offered,
         operation=operation,
     )
+    settlement_id = UUID(str(outcome.result["settlement_id"]))
+    # Keep the published key and fingerprint above byte-for-byte compatible.
+    # Their historical omissions are bound against persisted scalars, never a
+    # retained ORM entity whose attributes may differ from immutable evidence.
+    binding = db.execute(
+        _where_scope(
+            select(
+                plane.settlement.billing_account_id,
+                plane.settlement.funding_lane,
+                plane.settlement.confirmation_evidence,
+                plane.settlement.source_system,
+                plane.settlement.source_settlement_key,
+            ).where(plane.settlement.id == settlement_id),
+            scope,
+            plane.settlement,
+        )
+    ).one()
+    if tuple(binding) != (
+        command.billing_account_id,
+        command.funding_lane.value,
+        command.confirmation_evidence,
+        command.source_system,
+        command.source_settlement_key,
+    ):
+        raise IdempotencyConflict(
+            "Idempotency key was already used in scope 'billing.settlement' "
+            "with a different request"
+        )
     return cast(
         _SettlementRow,
-        _one(
-            db,
-            scope=scope,
-            model=plane.settlement,
-            row_id=UUID(str(outcome.result["settlement_id"])),
-        ),
+        db.execute(
+            _where_scope(
+                select(plane.settlement)
+                .where(plane.settlement.id == settlement_id)
+                .execution_options(populate_existing=True),
+                scope,
+                plane.settlement,
+            )
+        ).scalar_one(),
     )
 
 
