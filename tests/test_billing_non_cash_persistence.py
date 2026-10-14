@@ -779,6 +779,61 @@ def test_later_resolution_cannot_overdraw_invoice_masked_by_second_invoice(
         )
         settlement_id = settlement.id if settlement else None
         other_invoice_id = draft.id
+        if later == "credit_note":
+            from dotmac_billing.commands import IssueCreditNote
+            from dotmac_billing.service import issue_credit_note
+
+            document_model, line_model, fact_model = (
+                (
+                    models.BillingDocument,
+                    models.DocumentLine,
+                    models.InvoiceDocumentFact,
+                )
+                if plane == "tenant"
+                else (
+                    models.PlatformBillingDocument,
+                    models.PlatformDocumentLine,
+                    models.PlatformInvoiceDocumentFact,
+                )
+            )
+            # Author a real eighty credit against the other invoice, then roll
+            # it back. Its complete first-fact evidence is reused below to probe
+            # target capacity, rather than failing the source-claim guard first.
+            with session.begin_nested() as template_savepoint:
+                template = issue_credit_note(
+                    session,
+                    scope=scope,
+                    command=IssueCreditNote(
+                        original_document_id=other_invoice_id,
+                        pre_tax_amount=billing._money("80"),
+                        tax_amount=billing._money("0"),
+                        total_amount=billing._money("80"),
+                        reason="target capacity probe",
+                        series_code="credit",
+                        reference_date=billing.NOW.date(),
+                        actor_ref="finance:fixture",
+                        correlation_id=str(uuid4()),
+                        occurred_at=billing.NOW,
+                        document_profile_code="credit.standard",
+                        document_profile_version="1",
+                    ),
+                    numbering=billing.NUMBERING,
+                )
+                credit_rows = [
+                    _clean(
+                        session.execute(
+                            select(model.__table__).where(column == template.id)
+                        )
+                        .mappings()
+                        .one()
+                    )
+                    for model, column in (
+                        (document_model, document_model.id),
+                        (line_model, line_model.document_id),
+                        (fact_model, fact_model.document_id),
+                    )
+                ]
+                template_savepoint.rollback()
         session.commit()
     with engine.begin() as connection:
         with pytest.raises(DBAPIError) as error, connection.begin_nested():
@@ -835,29 +890,50 @@ def test_later_resolution_cannot_overdraw_invoice_masked_by_second_invoice(
                     )
                 _snapshots(connection, plane, group)
             else:
-                documents = (
-                    models.BillingDocument
-                    if plane == "tenant"
-                    else models.PlatformBillingDocument
-                ).__table__
-                original = (
-                    connection.execute(
-                        select(documents).where(documents.c.id == invoice)
-                    )
-                    .mappings()
-                    .one()
-                )
-                note = _clean(original)
-                note.update(
-                    id=uuid4(),
-                    document_kind="credit_note",
-                    credits_document_id=invoice,
-                    subtotal=Decimal("80"),
-                    tax_total=Decimal("0"),
-                    grand_total=Decimal("80"),
-                    document_number=str(uuid4()),
-                )
+                note, line, fact = credit_rows
+                note["credits_document_id"] = invoice
+                number, issued_at = note["document_number"], note["issued_at"]
+                note.update(lifecycle="draft", document_number=None, issued_at=None)
+                documents = document_model.__table__
                 connection.execute(documents.insert().values(**note))
+                line["price_source_version"] = f"credit:{invoice}"
+                connection.execute(line_model.__table__.insert().values(**line))
+                connection.execute(
+                    documents.update()
+                    .where(documents.c.id == note["id"])
+                    .values(
+                        lifecycle="issued", document_number=number, issued_at=issued_at
+                    )
+                )
+                group = _group(connection, plane, grant, "credit_note_issued")
+                group["source_ref"] = f"credit_note:{note['id']}"
+                connection.execute(_models(plane)[3].__table__.insert().values(**group))
+                effect = {
+                    key: group[key]
+                    for key in ("billing_account_id", "currency", "minor_units")
+                }
+                effect.update(
+                    id=uuid4(),
+                    posting_group_id=group["id"],
+                    lane="receivable",
+                    amount_delta=Decimal("-80"),
+                )
+                if "tenant_id" in grant:
+                    effect["tenant_id"] = grant["tenant_id"]
+                connection.execute(
+                    _models(plane)[4].__table__.insert().values(**effect)
+                )
+                payload = fact["fact_payload"]
+                payload["lines"][0]["price_source_version"] = line[
+                    "price_source_version"
+                ]
+                payload.pop("presentation_model_digest")
+                digest = fingerprint_of(payload)
+                payload["presentation_model_digest"] = digest
+                fact["presentation_model_digest"] = digest
+                # The normal fact INSERT trigger creates the permanent keeper.
+                connection.execute(fact_model.__table__.insert().values(**fact))
+                _snapshots(connection, plane, group)
             connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
         assert error.value.orig.sqlstate == "23514"
         assert "invoice resolution exceeds" in str(error.value.orig)

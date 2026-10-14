@@ -3325,7 +3325,10 @@ def _require_live_invoice_issuance(
     backing = resolve_receivable_backing(db, scope=scope, document_id=document.id)
     if not backing.active:
         raise BillingRuleViolation(
-            "invoice_issuance_not_live", "invoice backing is no longer active"
+            "invoice_issuance_not_live",
+            "invoice requires one unreversed, structurally bound issuance posting"
+            if backing.basis_id is None
+            else "invoice backing is no longer active",
         )
 
 

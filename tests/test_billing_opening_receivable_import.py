@@ -34,6 +34,7 @@ from dotmac_billing.opening_receivable_validation import (
     opening_manifest_fingerprint_v2,
     opening_withholding_component_identity,
 )
+from dotmac_billing.queries import get_receivable_position_v2
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import IdempotencyConflict
 from dotmac_kernel.planes import ModulePlane
@@ -174,6 +175,73 @@ def _remaining(session, scope, basis):
 
 def _model(plane, name):
     return getattr(models, ("Platform" if plane == "platform" else "") + name)
+
+
+def _available_non_cash_credit(db, scope, account_id):
+    selected = s._models(scope)
+    version = db.execute(
+        s._where_scope(
+            select(selected.position_fact_v2.source_version)
+            .where(selected.position_fact_v2.billing_account_id == account_id)
+            .order_by(selected.position_fact_v2.source_version.desc())
+            .limit(1),
+            scope,
+            selected.position_fact_v2,
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        # A pristine account has no financial snapshot. Prove absence of actual
+        # noncash effects before reporting its zero fixture balance.
+        assert (
+            db.execute(
+                s._where_scope(
+                    select(selected.non_cash_effect.id).where(
+                        selected.non_cash_effect.billing_account_id == account_id
+                    ),
+                    scope,
+                    selected.non_cash_effect,
+                )
+            ).first()
+            is None
+        )
+        return Decimal("0")
+    return get_receivable_position_v2(
+        db,
+        scope=scope,
+        billing_account_id=account_id,
+        source_version=version,
+    ).available_non_cash_credit.amount
+
+
+def _disable_fixture_append_before_insert(db, *tables):
+    # Arrange deliberate late corruption before any INSERT queues deferred
+    # events. Only UPDATE/DELETE append guards are disabled; admission and
+    # production completeness triggers remain active. The fixture rolls this
+    # transactional DDL back together with the rejected monetary operation.
+    for table in tables:
+        db.execute(
+            text(
+                f"ALTER TABLE mod_billing.{table.name} "
+                f"DISABLE TRIGGER {table.name}_append_only"
+            )
+        )
+
+
+def _assert_fixture_append_restored(db, *tables):
+    for table in tables:
+        assert (
+            db.scalar(
+                text(
+                    "SELECT tgenabled FROM pg_trigger "
+                    "WHERE tgrelid=CAST(:table AS regclass) AND tgname=:name"
+                ),
+                {
+                    "table": f"mod_billing.{table.name}",
+                    "name": f"{table.name}_append_only",
+                },
+            )
+            == "O"
+        )
 
 
 def _counts(session, plane, account_id):
@@ -1185,7 +1253,7 @@ def test_full_unwind_requires_all_owner_inverses_and_never_releases_natural_clai
         assert inverse.receipt_kind == "unwind"
         assert cash._position(db, scope, account).collectible_receivable == 0
         assert cash._position(db, scope, account).available_credit == 0
-        assert cash._position(db, scope, account).available_non_cash_credit == 0
+        assert _available_non_cash_credit(db, scope, account) == 0
         for basis in (first, second):
             position = q.get_opening_receivable_position(
                 db, scope=scope, basis_id=basis.basis_id
@@ -1243,6 +1311,13 @@ def test_owner_and_online_sql_cannot_amend_or_delete_documentary_history(
         table = _model(plane, name).__table__
         for role_url in (url, scratch[0]):
             with b._session(role_url, scope) as db:
+                if isinstance(scope, TenantScope):
+                    # Persist the harness's session-level tenant GUC before a
+                    # deliberate failing statement can roll its bootstrap back.
+                    assert db.scalar(
+                        text("SELECT current_setting('app.current_tenant', true)")
+                    ) == str(scope.tenant_id)
+                    db.commit()
                 count = db.scalar(
                     select(func.count())
                     .select_from(table)
@@ -1331,7 +1406,13 @@ def test_raw_sql_claim_affinity_has_an_exact_insertable_positive_control(
                 connection.execute(
                     table.insert().values(**{**original, "id": uuid4(), **changes})
                 )
-            assert error.value.orig.sqlstate == "23503"
+            # Immediate owner admission is stronger than the later FK: it
+            # verifies both existence and the exact account/evidence binding.
+            assert error.value.orig.sqlstate == "23514"
+            assert (
+                "historical replay claim requires its exact immutable owner binding"
+                in str(error.value.orig)
+            )
             connection.rollback()
         with pytest.raises(DBAPIError) as error:
             connection.execute(table.insert().values(**{**original, "id": uuid4()}))
@@ -1445,7 +1526,8 @@ def test_deferred_completeness_refuses_missing_real_opening_artifacts(
 ):
     scope, url = noncash._scope_url(scratch, plane)
     omitted_model = _model(plane, missing)
-    with b._session(url, scope) as db:
+    role_url = scratch[0] if missing == "OpeningHistoricalDischargeClaim" else url
+    with b._session(role_url, scope) as db:
         account = cash._new_account(db, scope)
         before = _counts(db, plane, account)
         actual_add = db.add
@@ -1457,14 +1539,34 @@ def test_deferred_completeness_refuses_missing_real_opening_artifacts(
                 return None
             return actual_add(instance, *args, **kwargs)
 
-        with monkeypatch.context() as fault:
-            fault.setattr(db, "add", omit_actual_artifact)
+        restored_tables = ()
+        if missing == "OpeningHistoricalDischargeClaim":
+            history = omitted_model.__table__
+            keeper = _model(plane, "ReceivableSourceClaim").__table__
+            restored_tables = (history, keeper)
+            _disable_fixture_append_before_insert(db, *restored_tables)
+            # First pass all genuine runtime proof reads, then remove one real
+            # stored binding. Early service verification is intentionally kept.
             receipt = _import(db, scope, account)[1]
+            identity = db.scalar(
+                select(history.c.id)
+                .where(history.c.billing_account_id == account)
+                .limit(1)
+            )
+            assert identity is not None
+            omitted.append(identity)
+            db.execute(keeper.delete().where(keeper.c.historical_claim_id == identity))
+            db.execute(history.delete().where(history.c.id == identity))
+        else:
+            with monkeypatch.context() as fault:
+                fault.setattr(db, "add", omit_actual_artifact)
+                receipt = _import(db, scope, account)[1]
         assert omitted
         with pytest.raises(DBAPIError) as error:
             db.commit()
         assert error.value.orig.sqlstate == "23514"
         db.rollback()
+        _assert_fixture_append_restored(db, *restored_tables)
         assert _counts(db, plane, account) == before
         with pytest.raises(BillingRuleViolation):
             q.get_opening_import_receipt_v2(
@@ -1743,9 +1845,7 @@ def test_historical_credit_and_noncash_sources_refuse_live_replay_across_version
             _remaining(db, scope, value) for value in (first_basis, second_basis)
         ] == [Decimal("70"), Decimal("50")]
         assert cash._position(db, scope, account).available_credit == Decimal("60")
-        assert cash._position(db, scope, account).available_non_cash_credit == Decimal(
-            "10"
-        )
+        assert _available_non_cash_credit(db, scope, account) == Decimal("10")
         db.commit()
 
 
@@ -2517,7 +2617,9 @@ def _source_rows(db, plane, binding):
 
 def _ar_and_noncash(db, scope, account):
     position = cash._position(db, scope, account)
-    return position.collectible_receivable, position.available_non_cash_credit
+    return position.collectible_receivable, _available_non_cash_credit(
+        db, scope, account
+    )
 
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
@@ -2788,8 +2890,10 @@ def test_v5_sql_duplicate_arrays_cannot_omit_actual_sources_with_matching_outbox
     scope, _ = noncash._scope_url(scratch, plane)
     with b._session(scratch[0], scope) as db:
         account = cash._new_account(db, scope)
-        _, receipt = _import(db, scope, account)
         table = _model(plane, "AccountingFact").__table__
+        if attack != "positive":
+            _disable_fixture_append_before_insert(db, table)
+        _, receipt = _import(db, scope, account)
         row = (
             db.execute(
                 select(table).where(
@@ -2829,21 +2933,9 @@ def test_v5_sql_duplicate_arrays_cannot_omit_actual_sources_with_matching_outbox
             assert payload[key][0] != payload[key][1]
             payload[key][1] = deepcopy(payload[key][0])
             db.execute(
-                text(
-                    f"ALTER TABLE mod_billing.{table.name} "
-                    f"DISABLE TRIGGER {table.name}_append_only"
-                )
-            )
-            db.execute(
                 table.update()
                 .where(table.c.id == row["id"])
                 .values(fact_payload=payload, fact_digest=b.fingerprint_of(payload))
-            )
-            db.execute(
-                text(
-                    f"ALTER TABLE mod_billing.{table.name} "
-                    f"ENABLE TRIGGER {table.name}_append_only"
-                )
             )
             db.execute(
                 outbox.__table__.update()
@@ -2879,6 +2971,7 @@ def test_v5_sql_duplicate_arrays_cannot_omit_actual_sources_with_matching_outbox
                 == receipt
             )
         db.rollback()
+        _assert_fixture_append_restored(db, table)
         assert _counts(db, plane, account)["OpeningImportReceipt"] == 0
 
 
@@ -3374,29 +3467,19 @@ def test_pending_opening_cannot_commit_without_its_actual_source_occupancy(
     scope, _ = noncash._scope_url(scratch, plane)
     with b._session(scratch[0], scope) as owner:
         account = cash._new_account(owner, scope)
-        receipt = _import(owner, scope, account)[1]
         table = _model(plane, "ReceivableSourceClaim").__table__
+        _disable_fixture_append_before_insert(owner, table)
+        receipt = _import(owner, scope, account)[1]
         identities = owner.scalars(
             select(table.c.id).where(table.c.billing_account_id == account)
         ).all()
         assert identities
-        owner.execute(
-            text(
-                f"ALTER TABLE mod_billing.{table.name} "
-                f"DISABLE TRIGGER {table.name}_append_only"
-            )
-        )
         owner.execute(table.delete().where(table.c.id == identities[0]))
-        owner.execute(
-            text(
-                f"ALTER TABLE mod_billing.{table.name} "
-                f"ENABLE TRIGGER {table.name}_append_only"
-            )
-        )
         with pytest.raises(DBAPIError) as error:
             owner.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
         assert error.value.orig.sqlstate == "23514"
         owner.rollback()
+        _assert_fixture_append_restored(owner, table)
         assert _counts(owner, plane, account)["ReceivableSourceClaim"] == 0
         with pytest.raises(BillingRuleViolation):
             q.get_opening_import_receipt_v2(

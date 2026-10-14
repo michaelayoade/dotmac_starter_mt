@@ -388,9 +388,9 @@ def opening_account_import_blockers_v2(
             and not collection.automated_collection_allowed
         ):
             block("collection_evidence_incomplete", key)
-    for key, count in identities.items():
+    for identity_key, count in identities.items():
         if count != 1:
-            block("receivable_identity_duplicate", str(key))
+            block("receivable_identity_duplicate", str(identity_key))
     for key, count in invoice_keys.items():
         if count != 1:
             block("receivable_invoice_duplicate", key)
