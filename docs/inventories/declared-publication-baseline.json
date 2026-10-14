@@ -137,11 +137,6 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a105",
-      "reason": "This row tracks Kernel source whose protected publication-record transition is not yet complete, including strict fresh settings resolution and the exact-root conflict-savepoint completion protocol. A +dev declaration is deliberately unpublishable and does not allocate a successor. Separately authorized allocation replaces +dev with the exact next public version while the row remains declared-unpublished; remove the row only after protected publication verifies and records that exact release.",
-      "state": "declared-unpublished"
-    },
     "dotmac-payments": {
       "declared": "0.1.0a2",
       "reason": "DECLARED FOR THE CONFIRMED-INTAKE SAFETY PREREQUISITE, NOT YET RELEASED. Published a1 peels from dotmac-payments-v0.1.0a1 to 04b9771320b865b66d1322660fc6d3590605c973; the tag oracle on 2026-10-13 contained no a2 tag. a2 adds exact immutable confirmation replay and serialized intent/proof lifecycle mutations, so those behaviors cannot silently replace the published a1 artifact. Remove this row only after the protected module release installs, verifies and tags exact 0.1.0a2. Declaration and hosted source tests are not publication or Sub writer-switch evidence; Sub remains authoritative pending backfill, zero-drift shadow and separately authorized cutover.",
