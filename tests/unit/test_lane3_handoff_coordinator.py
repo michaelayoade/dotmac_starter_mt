@@ -1238,6 +1238,67 @@ def test_explicit_positive_group_prelaunch_remains_supported(
     assert co.prelaunch_binding(api_of(data), config(), RUN)
 
 
+def zero_shape_world() -> dict[str, Any]:
+    # Live GitHub shape for a queued, never-assigned job (run 38526558257,
+    # job 115728197720): explicit zeros and empty strings, not nulls.
+    data = prelaunch_world()
+    data[JOBS]["jobs"][0].update(
+        runner_group_id=0,
+        runner_id=0,
+        runner_name="",
+        runner_group_name="",
+        labels=[],
+        steps=[],
+    )
+    return data
+
+
+def test_explicit_zero_group_prelaunch_accepts_fully_unassigned_shape() -> None:
+    zero = co.prelaunch_binding(api_of(zero_shape_world()), config(), RUN)
+    null = co.prelaunch_binding(api_of(prelaunch_world()), config(), RUN)
+    assert zero
+    # The unassigned representation carries no runner/group data into the
+    # qualification, so both shapes bind identically downstream.
+    assert zero == null
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("runner_group_id", False),
+        ("runner_group_id", 0.0),
+        ("runner_group_id", GROUP + 1),
+        ("runner_id", None),
+        ("runner_id", False),
+        ("runner_id", 0.0),
+        ("runner_id", RUNNER),
+        ("runner_name", None),
+        ("runner_name", "assigned"),
+        ("runner_group_name", None),
+        ("runner_group_name", "other-group"),
+        ("labels", ["ubuntu-latest"]),
+        ("labels", None),
+        ("steps", [{"name": "started"}]),
+        ("steps", None),
+    ],
+)
+def test_zero_group_refuses_any_mixed_or_started_shape(key: str, value: Any) -> None:
+    data = zero_shape_world()
+    data[JOBS]["jobs"][0][key] = value
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        co.prelaunch_binding(api_of(data), config(), RUN)
+
+
+@pytest.mark.parametrize(
+    "key", ["runner_id", "runner_name", "runner_group_name", "labels", "steps"]
+)
+def test_zero_group_requires_present_unassigned_fields(key: str) -> None:
+    data = zero_shape_world()
+    data[JOBS]["jobs"][0].pop(key)
+    with pytest.raises(co.CoordinatorRefused, match="assignment.ambiguous"):
+        co.prelaunch_binding(api_of(data), config(), RUN)
+
+
 @pytest.mark.parametrize(
     "group",
     [
