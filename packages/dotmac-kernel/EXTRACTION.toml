@@ -39,6 +39,11 @@ request_evidence_context_source_revisions = [
   "dotmac_sub:7c1d271dad54ad178fb90083305363f855622175",
 ]
 source_paths = [
+  # Conflict-savepoint composition (2026-10-14): bounded existing facility
+  # extension; Sub's exact-handle guarded completion is the product source.
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/_transactions.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/transactions.py",
+  "dotmac_erp:app/db/__init__.py",
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel",
   "dotmac_sub:app/composition.py",
   "dotmac_erp:app/models/domain_settings.py",
@@ -71,6 +76,8 @@ source_paths = [
   # `key_hash` in place, so the old secret dies at once.
   "dotmac_sub:app/api/crm.py",
   "dotmac_sub:app/services/web_system_api_key_mutations.py",
+  # Also the qualifying conflict-savepoint composition source (2026-10-14),
+  # pinned and inventoried in kernel-conflict-savepoint-composition.md.
   "dotmac_sub:app/services/owner_commands.py",
   # Tenant-scope lifecycle (2026-08-26, `session_runtime.DatabaseRuntime`).
   # ERP is the only source with a scope that SURVIVES a commit without also
@@ -198,6 +205,9 @@ preserved_tests = [
   # SEMANTIC ENCODING note in shadow_and_drift. This is the facility's own
   # test, and it pins the cv1 bytes as literals.
   "dotmac_starter_mt:tests/unit/test_semantic_encoding.py",
+  "dotmac_sub:tests/test_owner_commands.py",
+  "dotmac_starter_mt:tests/unit/test_conflict_savepoint_protocol.py",
+  "dotmac_starter_mt:tests/test_conflict_savepoint_protocol.py",
 ]
 contract_consumers = ["dotmac_starter_mt"]
 candidate_consumers = [
@@ -212,6 +222,7 @@ candidate_consumers = [
   "dotmac_academy_app",
 ]
 inventory_evidence = [
+  "docs/inventories/kernel-conflict-savepoint-composition.md",
   # Semantic encoding (2026-09-02). The negative inventory licensing the
   # greenfield classification: seven repositories at immutable origin/main
   # revisions, no qualifying encoder in any of them, every near-miss

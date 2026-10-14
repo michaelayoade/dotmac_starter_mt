@@ -1,14 +1,16 @@
-"""Concurrency canaries for tax-policy idempotent ensure seams."""
+"""Scripted race outcomes for tax-policy idempotent ensure seams.
+
+These backendless unit fixtures exercise Tax replay decisions through the real
+Kernel helper. PostgreSQL canaries own database concurrency and tenant-GUC proof.
+"""
 
 from __future__ import annotations
 
 import ast
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
-from types import TracebackType
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -29,7 +31,7 @@ from dotmac_tax.models import (
     TaxSubjectClassification,
 )
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, SessionTransaction
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE_PATH = ROOT / "packages/dotmac-tax/src/dotmac_tax/service.py"
@@ -43,38 +45,32 @@ NOW = datetime(2026, 8, 26, 12, tzinfo=UTC)
 CONFLICT_SAVEPOINT_SOURCE_MODULE = "dotmac_kernel.transactions"
 
 
-class _NestedSavepoint(AbstractContextManager[None]):
-    def __init__(self, session: _RaceSession) -> None:
-        self.session = session
-
-    def __enter__(self) -> None:
-        assert not self.session.in_savepoint
-        self.session.in_savepoint = True
-        self.session.savepoint_entries += 1
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> bool:
-        self.session.in_savepoint = False
-        return False
-
-
-class _RaceSession:
-    """Small Session protocol fake that makes the protected flush lose a race."""
+class _RaceSession(Session):
+    """Real transaction handles with scripted reads and a simulated unique race."""
 
     def __init__(self, *, before: list[object | None], after: list[object | None]):
+        super().__init__()
         self._before: Iterator[object | None] = iter(before)
         self._after: Iterator[object | None] = iter(after)
         self.race_lost = False
-        self.in_savepoint = False
+        self._entering_savepoint = False
         self.savepoint_entries = 0
+        self.outer_transaction = self.begin()
         self.outer_transaction_marker = "tenant-scope-still-installed"
 
-    def begin_nested(self) -> _NestedSavepoint:
-        return _NestedSavepoint(self)
+    @property
+    def in_savepoint(self) -> bool:
+        return self.in_nested_transaction()
+
+    def begin_nested(self) -> SessionTransaction:
+        assert not self.in_savepoint
+        self._entering_savepoint = True
+        try:
+            savepoint = super().begin_nested()
+        finally:
+            self._entering_savepoint = False
+        self.savepoint_entries += 1
+        return savepoint
 
     def scalar(self, statement: object) -> object | None:
         del statement
@@ -85,6 +81,10 @@ class _RaceSession:
         assert self.in_savepoint, "the raced mutation escaped its SAVEPOINT"
 
     def flush(self) -> None:
+        # SQLAlchemy preflushes on nested entry. This fixture has no pending ORM
+        # state: only the service's explicit protected flush simulates a race.
+        if self._entering_savepoint:
+            return
         assert self.in_savepoint, "the raced flush escaped its SAVEPOINT"
         self.race_lost = True
         raise IntegrityError("INSERT", {}, RuntimeError("simulated unique race"))
@@ -251,6 +251,9 @@ def _assert_outer_transaction_survived(session: _RaceSession) -> None:
     assert session.savepoint_entries == 1
     assert not session.in_savepoint
     assert session.outer_transaction_marker == "tenant-scope-still-installed"
+    assert session.get_transaction() is session.outer_transaction
+    assert session.outer_transaction.is_active
+    assert session.info == {}
 
 
 def test_identical_races_replay_all_five_tax_policy_identities() -> None:

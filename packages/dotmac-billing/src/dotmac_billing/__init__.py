@@ -127,6 +127,39 @@ from dotmac_billing.opening_queries import (
     get_opening_cash_target,
     get_opening_import_receipt,
 )
+from dotmac_billing.opening_receivable_contracts import (
+    AccountingFactV5,
+    ImportOpeningAccountV2,
+    OpeningAccountImportVerifierV2,
+    OpeningCollectionEvidenceV1,
+    OpeningHistoricalDischargeV1,
+    OpeningImportPreviewV2,
+    OpeningImportReceiptV2,
+    OpeningImportReversalVerificationRequestV2,
+    OpeningImportReversalVerificationV2,
+    OpeningImportVerificationRequestV2,
+    OpeningImportVerificationV2,
+    OpeningManifestV2,
+    OpeningOriginalDocumentV1,
+    OpeningReceivableBasisV1,
+    OpeningReceivableItemV1,
+    OpeningReceivablePositionV1,
+    OpeningReplayBindingV1,
+    ReceivableExposureV2,
+)
+from dotmac_billing.opening_receivable_queries import (
+    get_accounting_fact_v5,
+    get_opening_import_receipt_v2,
+    get_opening_receivable_basis,
+    get_opening_receivable_exposure,
+    get_opening_receivable_position,
+)
+from dotmac_billing.opening_receivable_validation import (
+    opening_account_command_digest_v2,
+    opening_manifest_fingerprint_v2,
+    opening_withholding_component_identity,
+    preview_opening_account_import_v2,
+)
 from dotmac_billing.opening_validation import (
     opening_manifest_fingerprint,
     preview_opening_account_import,
@@ -139,9 +172,36 @@ from dotmac_billing.queries import (
     get_withholding_discharge,
 )
 
-__version__ = "0.1.0a7"
+__version__ = "0.1.0a8"
 
 __all__ = [
+    "OpeningCollectionEvidenceV1",
+    "OpeningOriginalDocumentV1",
+    "OpeningReplayBindingV1",
+    "OpeningHistoricalDischargeV1",
+    "OpeningReceivableItemV1",
+    "OpeningManifestV2",
+    "ImportOpeningAccountV2",
+    "OpeningImportVerificationRequestV2",
+    "OpeningImportVerificationV2",
+    "OpeningAccountImportVerifierV2",
+    "OpeningImportReversalVerificationRequestV2",
+    "OpeningImportReversalVerificationV2",
+    "OpeningImportPreviewV2",
+    "OpeningReceivableBasisV1",
+    "OpeningReceivablePositionV1",
+    "ReceivableExposureV2",
+    "OpeningImportReceiptV2",
+    "AccountingFactV5",
+    "get_opening_import_receipt_v2",
+    "get_opening_receivable_basis",
+    "get_opening_receivable_position",
+    "get_opening_receivable_exposure",
+    "get_accounting_fact_v5",
+    "opening_manifest_fingerprint_v2",
+    "opening_account_command_digest_v2",
+    "opening_withholding_component_identity",
+    "preview_opening_account_import_v2",
     "opening_cash_command_digest",
     "OpeningImportVerificationRequestV1",
     "OpeningImportVerificationV1",

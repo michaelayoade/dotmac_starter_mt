@@ -34,8 +34,9 @@ same coherent release. That prevents an import-only repair from silently
 changing bytes that a published version already names, without inventing a
 standalone `+dev` marker or publication-ledger row for a tagless package.
 
-`dotmac_kernel.transactions` (`__all__ = ["conflict_savepoint"]`, re-exporting
-from the internal `dotmac_kernel._transactions`) is the engine-free public
+`dotmac_kernel.transactions` explicitly exports `conflict_savepoint` and its
+guarded lifecycle protocol from the internal `dotmac_kernel._transactions`.
+It is the engine-free public
 owner and the one sanctioned import source regardless of scope (see hard rule
 9 in `AGENTS.md` and `tests/architecture/test_no_feature_rollback.py`). Every
 scan below is source-derived — an AST sweep, not a hardcoded file list — so a

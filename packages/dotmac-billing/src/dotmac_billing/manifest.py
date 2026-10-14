@@ -13,7 +13,7 @@ from dotmac_billing.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="billing",
-    version="0.1.0a7",
+    version="0.1.0a8",
     core=False,
     short_code="billing",
     migration_prefix="bi",
@@ -26,6 +26,8 @@ module = ModuleManifest(
         OUTBOX_RELAY_V1.name,
     ),
     outbox_event_types=(
+        "billing.accounting.fact.v5",
+        "billing.receivable.exposure.v2",
         "billing.accounting.fact.v4",
         "billing.accounting.fact.v1",
         "billing.accounting.fact.v2",

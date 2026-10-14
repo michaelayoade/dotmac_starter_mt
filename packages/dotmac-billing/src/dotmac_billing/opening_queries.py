@@ -35,6 +35,7 @@ from dotmac_billing.opening_cash_contracts import (
     OpeningImportReceiptV1,
 )
 from dotmac_billing.opening_contracts import OpeningTargetV1
+from dotmac_billing.opening_receivable_contracts import OpeningImportReceiptV2
 from dotmac_billing.opening_validation import opening_manifest_fingerprint
 
 _T = TypeVar("_T")
@@ -118,6 +119,11 @@ def get_opening_import_receipt(
     db: Session, *, scope: Scope, receipt_id: UUID
 ) -> OpeningImportReceiptV1:
     row = _row(db, scope, "opening_import_receipts", receipt_id)
+    if isinstance(row["evidence"], dict) and "total_receivable" in row["evidence"]:
+        raise BillingRuleViolation(
+            "opening_receipt_version_unsupported",
+            "complete account receipt requires the explicit V2 query",
+        )
     fact = _decode_row(row, OpeningImportReceiptV1)
     _require(
         fact.scope == scope
@@ -231,6 +237,19 @@ def get_opening_import_receipt(
     return fact
 
 
+def _opening_cash_receipt(
+    db: Session, *, scope: Scope, receipt_id: UUID
+) -> OpeningImportReceiptV1 | OpeningImportReceiptV2:
+    row = _row(db, scope, "opening_import_receipts", receipt_id)
+    if isinstance(row["evidence"], dict) and "total_receivable" in row["evidence"]:
+        from dotmac_billing.opening_receivable_queries import (
+            get_opening_import_receipt_v2,
+        )
+
+        return get_opening_import_receipt_v2(db, scope=scope, receipt_id=receipt_id)
+    return get_opening_import_receipt(db, scope=scope, receipt_id=receipt_id)
+
+
 def get_opening_cash_lot(
     db: Session, *, scope: Scope, lot_id: UUID
 ) -> OpeningCashLotFactV1:
@@ -265,7 +284,7 @@ def get_opening_cash_lot(
         ).amount
         == row["historical_consumed"]
     )
-    receipt = get_opening_import_receipt(db, scope=scope, receipt_id=fact.receipt_id)
+    receipt = _opening_cash_receipt(db, scope=scope, receipt_id=fact.receipt_id)
     _require(
         receipt.receipt_kind == "import"
         and fact.lot_id in receipt.lot_ids

@@ -488,6 +488,10 @@ def test_genuine_bi0005_upgrade_preserves_all_history_and_backfills_exact_identi
             "opening_import_receipts",
             "opening_cash_lots",
             "opening_cash_effects",
+            "opening_receivable_bases",
+            "opening_historical_discharge_claims",
+            "receivable_exposure_facts_v2",
+            "receivable_source_claims",
         }
         names = tuple(
             name for name in names if name.removeprefix("platform_") not in later_tables

@@ -462,6 +462,10 @@ def test_owner_sql_admission_cannot_bypass_command_invariants(scratch, plane, fa
                 _snapshots(connection, plane, posting)
             connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
         assert error.value.orig.sqlstate in {"23514", "23505"}
+        if fault == "wrong_account":
+            # The FK probe is complete; its raw issued-header fixture has no
+            # financial backing and must not survive the outer transaction.
+            connection.rollback()
     engine.dispose()
 
 

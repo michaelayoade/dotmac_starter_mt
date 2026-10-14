@@ -32,6 +32,7 @@ from dotmac_billing._opening_values import (
     minor_units_of,
     money_from_minor,
 )
+from dotmac_billing._receivable_backing import resolve_receivable_backing
 from dotmac_billing.commands import (
     AcceptWithholdingDischarge,
     AllocationCommand,
@@ -133,6 +134,28 @@ from dotmac_billing.opening_queries import (
     get_opening_cash_target,
     get_opening_import_receipt,
 )
+from dotmac_billing.opening_receivable_contracts import (
+    AccountingFactV5,
+    ImportOpeningAccountV2,
+    OpeningAccountImportVerifierV2,
+    OpeningImportReceiptV2,
+    OpeningImportReversalVerificationRequestV2,
+    OpeningImportReversalVerificationV2,
+    OpeningReceivableBasisV1,
+    ReceivableExposureV2,
+)
+from dotmac_billing.opening_receivable_queries import (
+    get_opening_import_receipt_v2,
+    get_opening_receivable_basis,
+    get_opening_receivable_position,
+)
+from dotmac_billing.opening_receivable_validation import (
+    _opening_replay_identity,
+    opening_account_command_digest_v2,
+    opening_account_import_blockers_v2,
+    opening_withholding_component_identity,
+    verify_opening_account_import_v2,
+)
 from dotmac_billing.opening_validation import (
     opening_manifest_fingerprint,
     preview_opening_account_import,
@@ -144,6 +167,8 @@ from dotmac_billing.queries import (
 )
 
 _AccountingEffectKind = Literal[
+    "opening_account_imported",
+    "opening_account_import_reversed",
     "opening_cash_imported",
     "opening_cash_applied",
     "cash_credit_draw_reversed",
@@ -1190,23 +1215,11 @@ def _receivable_exposure(
     voided = (
         db.execute(_where_scope(void_statement, scope, plane.event)).first() is not None
     )
-    allocated = _document_allocated(db, scope=scope, document_id=document.id)
-    credited = _document_credited(db, scope=scope, document_id=document.id)
-    resolved_amount = (
-        allocated
-        + credited
-        + _document_withheld(db, scope=scope, document_id=document.id)
-        + _document_non_cash_applied(db, scope=scope, document_id=document.id)
+    backing = resolve_receivable_backing(
+        db, scope=scope, document_id=document.id, source_version=source_version
     )
-    if (
-        not resolved_amount.is_finite()
-        or resolved_amount < 0
-        or resolved_amount > document.grand_total
-    ):
-        raise BillingRuleViolation(
-            "invoice_room_integrity", "invoice resolution exceeds exact room"
-        )
-    outstanding = document.grand_total - resolved_amount
+    outstanding = backing.remaining
+    resolved_amount = backing.initial_amount - outstanding
     financial_state: FinancialState
     if voided:
         outstanding = Decimal("0")
@@ -1479,7 +1492,8 @@ def _post_group(
     non_cash_effects: tuple[NonCashCreditEffectV1, ...] = (),
     non_cash_request_digest: str | None = None,
     opening_group_id: UUID | None = None,
-    opening_receipt: OpeningImportReceiptV1 | None = None,
+    opening_receipt: OpeningImportReceiptV1 | OpeningImportReceiptV2 | None = None,
+    opening_bases: tuple[OpeningReceivableBasisV1, ...] = (),
     opening_lots: tuple[OpeningCashLotFactV1, ...] = (),
     opening_effects: tuple[OpeningCashEffectV1, ...] = (),
     cash_source_order: tuple[CashCreditSourceOrderV1, ...] = (),
@@ -1521,6 +1535,7 @@ def _post_group(
         lots=opening_lots,
         effects=opening_effects,
     )
+    _persist_opening_receivables(db, scope=scope, bases=opening_bases)
     if non_cash_grant is not None:
         payload = _jsonable(non_cash_grant)
         db.add(
@@ -1767,6 +1782,7 @@ def _post_group(
         )
     )
     affected_documents = {
+        *(item.document_id for item in opening_bases),
         *(item.document_id for item in opening_effects if item.document_id is not None),
         *exposure_document_ids,
         *(
@@ -1776,7 +1792,21 @@ def _post_group(
         ),
     }
     exposure_facts: list[tuple[UUID, ReceivableExposureV1]] = []
+    imported_exposure_facts: list[ReceivableExposureV2] = []
     for document_id in sorted(affected_documents, key=str):
+        candidate = _one(db, scope=scope, model=plane.document, row_id=document_id)
+        if candidate.authoring_mode == "imported_open_item":
+            imported_exposure_facts.append(
+                _persist_imported_exposure(
+                    db,
+                    scope=scope,
+                    document_id=document_id,
+                    source_version=source_version,
+                    group_id=group_id,
+                    observed_at=observed_at,
+                )
+            )
+            continue
         exposure = _receivable_exposure(
             db,
             scope=scope,
@@ -1833,9 +1863,41 @@ def _post_group(
             _where_scope(reversed_fact_statement, scope, plane.accounting_fact)
         ).scalar_one()
     typed_fact: (
-        AccountingFactV1 | AccountingFactV2 | AccountingFactV3 | AccountingFactV4
+        AccountingFactV1
+        | AccountingFactV2
+        | AccountingFactV3
+        | AccountingFactV4
+        | AccountingFactV5
     )
-    if opening_effects or kind == "cash_credit_draw_reversed":
+    if isinstance(opening_receipt, OpeningImportReceiptV2):
+        typed_fact = AccountingFactV5(
+            scope,
+            "dotmac-billing",
+            accounting_fact_id,
+            5,
+            account_id,
+            group_id,
+            source_ref,
+            "internal",
+            cast(Any, kind),
+            occurred_at,
+            observed_at,
+            tuple(
+                AccountingEffectV1(
+                    cast(Any, row.lane), _money(row.amount_delta, currency, minor_units)
+                )
+                for row in effect_rows
+            ),
+            opening_receipt,
+            opening_bases
+            or tuple(
+                get_opening_receivable_basis(db, scope=scope, basis_id=value)
+                for value in opening_receipt.basis_ids
+            ),
+            opening_effects,
+            corrects_posting_group_id,
+        )
+    elif opening_effects or kind == "cash_credit_draw_reversed":
         typed_fact = AccountingFactV4(
             scope,
             "dotmac-billing",
@@ -2031,7 +2093,14 @@ def _post_group(
         )
     )
     db.flush()
-    if isinstance(typed_fact, AccountingFactV4):
+    if isinstance(typed_fact, AccountingFactV5):
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.accounting.fact.v5",
+            payload=fact_payload,
+        )
+    elif isinstance(typed_fact, AccountingFactV4):
         _emit(
             db,
             scope=scope,
@@ -2086,6 +2155,13 @@ def _post_group(
                 "exposure_fact_id": str(exposure_fact_id),
                 **_jsonable(exposure),
             },
+        )
+    for imported_exposure in imported_exposure_facts:
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.receivable.exposure.v2",
+            payload=_jsonable(imported_exposure),
         )
     return cast(_PostingGroupRow, group)
 
@@ -2519,6 +2595,11 @@ def void_document(
         document = _one(
             session, scope=scope, model=plane.document, row_id=document_id, lock=True
         )
+        if document.authoring_mode == "imported_open_item":
+            raise BillingRuleViolation(
+                "opening_account_owner_required",
+                "imported principal requires its full opening unwind owner",
+            )
         if document.issued_at is None:
             raise BillingRuleViolation(
                 "not_issued", "only an issued document can be voided"
@@ -2692,6 +2773,13 @@ def issue_credit_note(
         # Exact replay precedes mutable admission: a full credit has already
         # consumed this receivable. The original remains locked across both
         # idempotency lookup and first-time admission.
+        _require_historical_source_unclaimed(
+            session,
+            scope=scope,
+            operation="billing.credit_note.issue",
+            source_owner="dotmac-billing",
+            source_ref=command.correlation_id,
+        )
         outstanding = _document_outstanding(session, scope=scope, document=original)
         if (
             command.total_amount.amount <= 0
@@ -3157,17 +3245,8 @@ def _document_withheld(db: Session, *, scope: Scope, document_id: UUID) -> Decim
 def _document_outstanding(
     db: Session, *, scope: Scope, document: _DocumentRow
 ) -> Decimal:
-    resolved = (
-        _document_allocated(db, scope=scope, document_id=document.id)
-        + _document_credited(db, scope=scope, document_id=document.id)
-        + _document_withheld(db, scope=scope, document_id=document.id)
-        + _document_non_cash_applied(db, scope=scope, document_id=document.id)
-    )
-    if not resolved.is_finite() or resolved < 0 or resolved > document.grand_total:
-        raise BillingRuleViolation(
-            "invoice_room_integrity", "invoice resolution exceeds exact room"
-        )
-    return document.grand_total - resolved
+    backing = resolve_receivable_backing(db, scope=scope, document_id=document.id)
+    return backing.remaining
 
 
 def _settlement_has_active_backing(
@@ -3242,60 +3321,14 @@ def _settlement_has_active_backing(
 def _require_live_invoice_issuance(
     db: Session, *, scope: Scope, document: _DocumentRow
 ) -> None:
-    """Use the persisted exposure FK as the invoice-to-issuance relation.
-
-    Canonical source provenance and exact issued AR effects qualify that link;
-    aggregate account AR cannot prove that this invoice remains collectible.
-    The caller holds the account lock before its document lock.
-    """
-    plane = _models(scope)
-    statement = select(plane.group).where(
-        plane.group.group_kind == "invoice_issued",
-        plane.group.billing_account_id == document.billing_account_id,
-        plane.group.currency == document.currency,
-        plane.group.minor_units == document.minor_units,
-        plane.group.source_ref == f"document:{document.id}:issue",
-        plane.group.reverses_group_id.is_(None),
-    )
-    candidates = tuple(
-        db.execute(_where_scope(statement, scope, plane.group)).scalars()
-    )
-    if len(candidates) != 1:
+    """Require either genuine live issuance or an authenticated opening basis."""
+    backing = resolve_receivable_backing(db, scope=scope, document_id=document.id)
+    if not backing.active:
         raise BillingRuleViolation(
             "invoice_issuance_not_live",
-            "invoice requires one unreversed, structurally bound issuance posting",
-        )
-    valid = []
-    for group in candidates:
-        exposure = select(plane.exposure_fact.id).where(
-            plane.exposure_fact.document_id == document.id,
-            plane.exposure_fact.billing_account_id == document.billing_account_id,
-            plane.exposure_fact.posting_group_watermark == group.id,
-            plane.exposure_fact.source_version == group.source_version,
-            plane.exposure_fact.currency == document.currency,
-            plane.exposure_fact.minor_units == document.minor_units,
-        )
-        reversal = select(plane.group.id).where(
-            plane.group.reverses_group_id == group.id
-        )
-        effects = select(plane.effect).where(plane.effect.posting_group_id == group.id)
-        rows = tuple(db.execute(_where_scope(effects, scope, plane.effect)).scalars())
-        if (
-            db.execute(_where_scope(exposure, scope, plane.exposure_fact)).first()
-            is not None
-            and db.execute(_where_scope(reversal, scope, plane.group)).first() is None
-            and len(rows) == 1
-            and rows[0].lane == "receivable"
-            and rows[0].amount_delta == document.grand_total
-            and rows[0].billing_account_id == document.billing_account_id
-            and rows[0].currency == document.currency
-            and rows[0].minor_units == document.minor_units
-        ):
-            valid.append(group.id)
-    if len(valid) != 1:
-        raise BillingRuleViolation(
-            "invoice_issuance_not_live",
-            "invoice requires one unreversed, structurally bound issuance posting",
+            "invoice requires one unreversed, structurally bound issuance posting"
+            if backing.basis_id is None
+            else "invoice backing is no longer active",
         )
 
 
@@ -3492,6 +3525,16 @@ def _non_cash_replay(
     with db.no_autoflush:
         row = db.execute(statement).one_or_none()
     if row is None:
+        if isinstance(command, _NonCashCommand):
+            _require_historical_source_unclaimed(
+                db,
+                scope=scope,
+                operation="billing.non_cash_credit.grant"
+                if grant
+                else "billing.non_cash_credit.apply",
+                source_owner=command.source_owner,
+                source_ref=command.source_ref,
+            )
         return None
     if row.request_digest != digest:
         raise BillingConflict(
@@ -3984,6 +4027,26 @@ def accept_withholding_discharge(
     )
 
     def operation(session: Session) -> dict[str, object]:
+        _require_historical_source_unclaimed(
+            session,
+            scope=scope,
+            operation="billing.withholding.accept",
+            source_owner=command.source_owner,
+            source_ref=command.source_ref,
+        )
+        _require_historical_source_unclaimed(
+            session,
+            scope=scope,
+            operation="billing.withholding.tax_component",
+            source_owner=command.tax_evidence.source_owner,
+            source_ref=opening_withholding_component_identity(
+                tax_source_owner=command.tax_evidence.source_owner,
+                determination_ref=command.tax_evidence.determination_ref,
+                component_ref=command.tax_evidence.component_ref,
+            ),
+            determination_ref=command.tax_evidence.determination_ref,
+            component_ref=command.tax_evidence.component_ref,
+        )
         duplicate = select(plane.withholding.id).where(
             plane.withholding.source_owner == command.source_owner,
             plane.withholding.source_ref == command.source_ref,
@@ -5311,7 +5374,7 @@ def _persist_opening_records(
     *,
     scope: Scope,
     group_id: UUID,
-    receipt: OpeningImportReceiptV1 | None,
+    receipt: OpeningImportReceiptV1 | OpeningImportReceiptV2 | None,
     lots: tuple[OpeningCashLotFactV1, ...],
     effects: tuple[OpeningCashEffectV1, ...],
 ) -> None:
@@ -5507,6 +5570,8 @@ def _require_opening_reversal_owner(
         "opening_cash_refunded",
         "opening_cash_refund_corrected",
         "opening_cash_import_reversed",
+        "opening_account_imported",
+        "opening_account_import_reversed",
     }:
         raise BillingRuleViolation(
             "opening_cash_owner_required",
@@ -5600,7 +5665,10 @@ def _qualified_import(
 
 
 def _require_pristine_opening_target(
-    db: Session, *, scope: Scope, command: ImportOpeningAccountV1
+    db: Session,
+    *,
+    scope: Scope,
+    command: ImportOpeningAccountV1 | ImportOpeningAccountV2,
 ) -> None:
     plane = _models(scope)
     actual = get_opening_cash_target(
@@ -6319,6 +6387,10 @@ def reverse_opening_account_import(
     original = get_opening_import_receipt(
         db, scope=scope, receipt_id=command.receipt_id
     )
+    if isinstance(original, OpeningImportReceiptV2):
+        raise BillingRuleViolation(
+            "opening_account_owner_required", "use the complete V2 account unwind owner"
+        )
     if original.receipt_kind != "import":
         raise BillingRuleViolation(
             "opening_import_reverse_invalid",
@@ -6616,3 +6688,662 @@ def _require_mixed_settlement_chain_owner(
                 "reverse complete mixed draws before correcting "
                 "their settlement backing",
             )
+
+
+def _receivable_model(scope: Scope, name: str) -> Any:
+    return getattr(
+        models, ("Platform" if isinstance(scope, PlatformScope) else "") + name
+    )
+
+
+def _persist_opening_receivables(
+    db: Session,
+    *,
+    scope: Scope,
+    bases: tuple[OpeningReceivableBasisV1, ...],
+) -> None:
+    model = _receivable_model(scope, "OpeningReceivableBasis")
+    claims = _receivable_model(scope, "OpeningHistoricalDischargeClaim")
+    seen: set[tuple[str, str, str, str]] = set()
+    for basis in bases:
+        payload = _jsonable(basis)
+        db.add(
+            model(
+                **_values(
+                    scope,
+                    {
+                        "id": basis.basis_id,
+                        "receipt_id": basis.receipt_id,
+                        "document_id": basis.document_id,
+                        "billing_account_id": basis.billing_account_id,
+                        "posting_group_id": basis.posting_group_id,
+                        "source_version": basis.source_version,
+                        "sequence": basis.sequence,
+                        "installation_id": basis.installation_id,
+                        "source_system": basis.source_system,
+                        "source_invoice_key": basis.source_invoice_key,
+                        "currency": basis.initial_receivable.currency.code,
+                        "minor_units": basis.initial_receivable.currency.minor_units,
+                        "initial_receivable": basis.initial_receivable.amount,
+                        "evidence": payload,
+                        "evidence_digest": fingerprint_of(payload),
+                        "recorded_at": basis.recorded_at,
+                    },
+                )
+            )
+        )
+    if bases:
+        db.flush()
+    for basis in bases:
+        for discharge in basis.source.historical_discharges:
+            for binding in discharge.replay_bindings:
+                key = _opening_replay_identity(binding)
+                if key in seen:
+                    continue
+                seen.add(key)
+                _require_historical_source_unclaimed(
+                    db,
+                    scope=scope,
+                    operation=binding.operation,
+                    source_owner=binding.source_owner,
+                    source_ref=binding.source_ref,
+                    determination_ref=binding.determination_ref,
+                    component_ref=binding.component_ref,
+                )
+                db.add(
+                    claims(
+                        **_values(
+                            scope,
+                            {
+                                "id": uuid4(),
+                                "basis_id": basis.basis_id,
+                                "billing_account_id": basis.billing_account_id,
+                                "operation": binding.operation,
+                                "source_owner": binding.source_owner,
+                                "source_ref": binding.source_ref,
+                                "evidence_digest": binding.evidence_digest,
+                                "determination_ref": binding.determination_ref,
+                                "component_ref": binding.component_ref,
+                            },
+                        )
+                    )
+                )
+    if bases:
+        db.flush()
+
+
+def _require_historical_source_unclaimed(
+    db: Session,
+    *,
+    scope: Scope,
+    operation: str,
+    source_owner: str,
+    source_ref: str,
+    determination_ref: str | None = None,
+    component_ref: str | None = None,
+) -> None:
+    # A friendly early refusal only. The shared immediate physical unique index
+    # remains the serialization authority even under an older RR snapshot.
+    namespace = {
+        "billing.withholding.accept": "withholding.source",
+        "billing.withholding.tax_component": "withholding.tax_component",
+        "billing.non_cash_credit.grant": "non_cash.grant",
+        "billing.non_cash_credit.apply": "non_cash.effect",
+        "billing.credit_note.issue": "credit_note.issue",
+    }[operation]
+    if operation == "billing.withholding.tax_component":
+        if determination_ref is None or component_ref is None:
+            raise BillingRuleViolation(
+                "historical_replay_mapping_incomplete",
+                "raw Tax component identity is required",
+            )
+        key1, key2 = determination_ref, component_ref
+    else:
+        key1, key2 = source_ref, ""
+    model = _receivable_model(scope, "ReceivableSourceClaim")
+    exists = db.execute(
+        _where_scope(
+            select(model.id).where(
+                model.namespace == namespace,
+                model.source_owner == source_owner,
+                model.key1 == key1,
+                model.key2 == key2,
+            ),
+            scope,
+            model,
+        )
+    ).first()
+    if exists is not None:
+        raise BillingConflict(
+            "historical_discharge_source_claimed",
+            "receivable source identity is permanently occupied",
+        )
+
+
+def _persist_imported_exposure(
+    db: Session,
+    *,
+    scope: Scope,
+    document_id: UUID,
+    source_version: int,
+    group_id: UUID,
+    observed_at: datetime,
+) -> ReceivableExposureV2:
+    model = _receivable_model(scope, "OpeningReceivableBasis")
+    basis_id = db.execute(
+        _where_scope(
+            select(model.id).where(model.document_id == document_id), scope, model
+        )
+    ).scalar_one()
+    basis = get_opening_receivable_basis(db, scope=scope, basis_id=basis_id)
+    backing = resolve_receivable_backing(
+        db, scope=scope, document_id=document_id, source_version=source_version
+    )
+    remaining = _money(
+        backing.remaining,
+        basis.initial_receivable.currency.code,
+        basis.initial_receivable.currency.minor_units,
+    )
+    state: FinancialState = (
+        "cancelled"
+        if not backing.active
+        else "resolved"
+        if backing.remaining == 0
+        else "partially_resolved"
+        if backing.remaining < backing.initial_amount
+        else "open"
+    )
+    fact = ReceivableExposureV2(
+        scope,
+        "dotmac-billing",
+        "internal",
+        "authoritative",
+        "posting_groups",
+        "complete",
+        None,
+        f"document:{document_id}",
+        document_id,
+        basis.billing_account_id,
+        basis_id,
+        source_version,
+        group_id,
+        basis.source.collection,
+        state,
+        remaining,
+        "pending",
+        observed_at,
+    )
+    semantic = _jsonable(fact)
+    semantic.pop("state_fingerprint")
+    fact = replace(fact, state_fingerprint=fingerprint_of(semantic))
+    payload = _jsonable(fact)
+    exposure = _receivable_model(scope, "ReceivableExposureFactV2")
+    db.add(
+        exposure(
+            **_values(
+                scope,
+                {
+                    "id": uuid4(),
+                    "basis_id": basis_id,
+                    "billing_account_id": basis.billing_account_id,
+                    "document_id": document_id,
+                    "posting_group_id": group_id,
+                    "source_version": source_version,
+                    "currency": remaining.currency.code,
+                    "minor_units": remaining.currency.minor_units,
+                    "collectible_receivable": remaining.amount,
+                    "evidence": payload,
+                    "evidence_digest": fingerprint_of(payload),
+                    "recorded_at": observed_at,
+                },
+            )
+        )
+    )
+    db.flush()
+    return fact
+
+
+@_exact_cash_operation
+def import_opening_account_v2(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ImportOpeningAccountV2,
+    verifier: OpeningAccountImportVerifierV2 | None = None,
+) -> OpeningImportReceiptV2:
+    if type(command) is not ImportOpeningAccountV2:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected ImportOpeningAccountV2"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    try:
+        verified = verify_opening_account_import_v2(command, verifier)
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "import qualification is unavailable"
+        ) from exc
+    if verified is None:
+        raise BillingRuleViolation(
+            "opening_authority_binding",
+            "trusted V2 qualification must bind this complete command",
+        )
+    blockers = opening_account_import_blockers_v2(command)
+    if blockers:
+        raise BillingRuleViolation(
+            "opening_manifest_blocked",
+            "opening manifest has counted blockers",
+            blockers=tuple((x.code, x.count) for x in blockers),
+        )
+    sources = tuple(
+        x for x in command.manifest.cash_lots if x.partition == command.partition
+    )
+    items = tuple(
+        x for x in command.manifest.receivables if x.partition == command.partition
+    )
+    cash_minor, ar_minor = (
+        sum(x.residual_minor for x in sources),
+        sum(x.residual_minor for x in items),
+    )
+    if cash_minor < 0 or ar_minor < 0 or cash_minor + ar_minor <= 0:
+        raise BillingRuleViolation(
+            "opening_partition_nonpositive",
+            "selected complete partition must recognize positive backing",
+        )
+    amount = money_from_minor(
+        cash_minor, command.partition.currency, command.partition.precision
+    )
+    ar = money_from_minor(
+        ar_minor, command.partition.currency, command.partition.precision
+    )
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=command.partition.account_id,
+        lock=True,
+    )
+    _require_account_money(account, amount)
+    digest = opening_account_command_digest_v2(command)
+
+    def operation(session: Session) -> dict[str, object]:
+        _require_pristine_opening_target(session, scope=scope, command=command)
+        for source in sources:
+            if (
+                session.execute(
+                    _where_scope(
+                        select(plane.cash_source_claim.id).where(
+                            plane.cash_source_claim.source_system
+                            == source.source_system,
+                            plane.cash_source_claim.source_settlement_key
+                            == source.source_settlement_key,
+                        ),
+                        scope,
+                        plane.cash_source_claim,
+                    )
+                ).first()
+                is not None
+            ):
+                raise BillingConflict(
+                    "cash_source_claimed", "cash source identity is permanently claimed"
+                )
+        basis_model = _receivable_model(scope, "OpeningReceivableBasis")
+        for item in items:
+            occupied = session.execute(
+                _where_scope(
+                    select(basis_model.id).where(
+                        basis_model.installation_id
+                        == command.manifest.capture.installation_id,
+                        basis_model.source_system
+                        == command.manifest.capture.source_system,
+                        basis_model.source_invoice_key == item.source_invoice_key,
+                    ),
+                    scope,
+                    basis_model,
+                )
+            ).first()
+            if occupied is not None:
+                raise BillingConflict(
+                    "opening_invoice_source_claimed",
+                    "original invoice identity is permanently claimed",
+                )
+        receipt_id, group_id, recorded_at = uuid4(), uuid4(), datetime.now(UTC)
+        bases = []
+        for index, item in enumerate(items, 1):
+            original = item.original
+            if original is None:
+                raise BillingRuleViolation(
+                    "original_documentary_evidence_missing",
+                    "original document is required",
+                )
+            document_id = uuid4()
+            session.add(
+                plane.document(
+                    **_values(
+                        scope,
+                        {
+                            "id": document_id,
+                            "billing_account_id": account.id,
+                            "obligation_id": None,
+                            "authoring_mode": "imported_open_item",
+                            "document_kind": "invoice",
+                            "lifecycle": "issued",
+                            "series_code": None,
+                            "document_number": original.document_number,
+                            "currency": account.currency,
+                            "minor_units": account.minor_units,
+                            "subtotal": original.subtotal.amount,
+                            "tax_total": original.tax_total.amount,
+                            "grand_total": original.grand_total.amount,
+                            "due_at": item.collection.due_at,
+                            "due_date_basis": _jsonable(item.collection.due_date_basis),
+                            "document_profile_code": original.document_profile_code,
+                            "document_profile_version": (
+                                original.document_profile_version
+                            ),
+                            "seller_snapshot": _jsonable(original.seller),
+                            "customer_snapshot": _jsonable(original.customer),
+                            "payment_instructions": _jsonable(
+                                original.payment_instructions
+                            ),
+                            "brand_asset": _jsonable(original.brand_asset),
+                            "locale": original.locale,
+                            "timezone": original.timezone,
+                            "issued_at": original.issued_at,
+                        },
+                    )
+                )
+            )
+            bases.append(
+                OpeningReceivableBasisV1(
+                    scope,
+                    uuid4(),
+                    receipt_id,
+                    document_id,
+                    account.id,
+                    group_id,
+                    1,
+                    index,
+                    command.manifest.capture.installation_id,
+                    command.manifest.capture.source_system,
+                    item.source_invoice_key,
+                    item,
+                    money_from_minor(
+                        item.residual_minor, account.currency, account.minor_units
+                    ),
+                    verified.manifest_fingerprint,
+                    recorded_at,
+                )
+            )
+        session.flush()
+        lots = tuple(
+            OpeningCashLotFactV1(
+                scope,
+                uuid4(),
+                receipt_id,
+                account.id,
+                group_id,
+                index,
+                source,
+                money_from_minor(
+                    source.residual_minor, account.currency, account.minor_units
+                ),
+                recorded_at,
+            )
+            for index, source in enumerate(sources, 1)
+        )
+        receipt = OpeningImportReceiptV2(
+            scope,
+            receipt_id,
+            "import",
+            account.id,
+            command.manifest,
+            verified.manifest_fingerprint,
+            command.partition,
+            command.target,
+            verified,
+            amount,
+            ar,
+            tuple(x.lot_id for x in lots),
+            tuple(x.basis_id for x in bases),
+            group_id,
+            None,
+            command.idempotency_key,
+            digest,
+            command.occurred_at,
+            recorded_at,
+        )
+        opening = tuple(
+            _opening_effect(
+                scope=scope,
+                lot=lot,
+                group_id=group_id,
+                sequence=index,
+                kind="recognition",
+                amount=lot.initial_amount,
+                source_ref=command.idempotency_key,
+                request_digest=digest,
+                occurred_at=command.occurred_at,
+                authorization_ref=command.migration_authority_ref,
+            )
+            for index, lot in enumerate(lots, 1)
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="opening_account_imported",
+            currency=account.currency,
+            minor_units=account.minor_units,
+            source_ref=command.idempotency_key,
+            occurred_at=command.occurred_at,
+            effects=(
+                (EffectLane.AVAILABLE_CREDIT, amount.amount),
+                (EffectLane.RECEIVABLE, ar.amount),
+            ),
+            opening_group_id=group_id,
+            opening_receipt=receipt,
+            opening_lots=lots,
+            opening_effects=opening,
+            opening_bases=tuple(bases),
+        )
+        return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
+
+    outcome = _idempotent_cash_claim(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.import.v2",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return get_opening_import_receipt_v2(
+        db, scope=scope, receipt_id=UUID(str(outcome.result["receipt_id"]))
+    )
+
+
+@_exact_cash_operation
+def reverse_opening_account_import_v2(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ReverseOpeningAccountImportV1,
+    verifier: OpeningAccountImportVerifierV2 | None = None,
+) -> OpeningImportReceiptV2:
+    if type(command) is not ReverseOpeningAccountImportV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected opening unwind command"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    if len(command.idempotency_key) > 255 or len(command.migration_authority_ref) > 255:
+        raise BillingRuleViolation(
+            "opening_command_storage_invalid", "opening unwind identity exceeds storage"
+        )
+    original = get_opening_import_receipt_v2(
+        db, scope=scope, receipt_id=command.receipt_id
+    )
+    if original.receipt_kind != "import":
+        raise BillingRuleViolation(
+            "opening_import_reverse_invalid",
+            "only original complete principal can unwind",
+        )
+    digest = fingerprint_of(
+        {"domain": "billing.opening.account.reverse.v2", "command": _jsonable(command)}
+    )
+    original_digest = fingerprint_of(_jsonable(original))
+    if verifier is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "fresh migration authority is required"
+        )
+    request = OpeningImportReversalVerificationRequestV2(
+        command,
+        digest,
+        original_digest,
+        original.posting_group_id,
+        original.billing_account_id,
+        original.total_residual.currency.code,
+        original.total_residual.currency.minor_units,
+    )
+    try:
+        verified = verifier.verify_import_reversal_v2(request)
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "unwind qualification is unavailable"
+        ) from exc
+    if (
+        type(verified) is not OpeningImportReversalVerificationV2
+        or verified.operation != "billing.opening.import.reverse.v2"
+        or verified.scope != scope
+        or verified.command_digest != digest
+        or verified.receipt_id != original.receipt_id
+        or verified.receipt_evidence_digest != original_digest
+        or verified.original_posting_group_id != original.posting_group_id
+        or verified.billing_account_id != original.billing_account_id
+        or (verified.currency, verified.precision)
+        != (request.currency, request.precision)
+        or verified.migration_authority_ref != command.migration_authority_ref
+    ):
+        raise BillingRuleViolation(
+            "opening_authority_binding",
+            "unwind proof must bind the exact original complete principal",
+        )
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=original.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        if (
+            session.execute(
+                _where_scope(
+                    select(plane.opening_receipt.id).where(
+                        plane.opening_receipt.original_receipt_id
+                        == original.receipt_id,
+                    ),
+                    scope,
+                    plane.opening_receipt,
+                )
+            ).first()
+            is not None
+        ):
+            raise BillingConflict(
+                "opening_import_already_unwound", "complete principal already unwound"
+            )
+        for basis_id in original.basis_ids:
+            receivable_position = get_opening_receivable_position(
+                session, scope=scope, basis_id=basis_id
+            )
+            if (
+                receivable_position.unwound
+                or receivable_position.remaining
+                != receivable_position.basis.initial_receivable
+            ):
+                raise BillingRuleViolation(
+                    "opening_import_has_dependents",
+                    "reverse all post-import receivable effects through their owners",
+                )
+        lots = tuple(
+            get_opening_cash_lot(session, scope=scope, lot_id=value)
+            for value in original.lot_ids
+        )
+        for lot in lots:
+            cash_position = get_opening_cash_lot_position(
+                session, scope=scope, lot_id=lot.lot_id
+            )
+            if cash_position.unwound or cash_position.remaining != lot.initial_amount:
+                raise BillingRuleViolation(
+                    "opening_import_has_dependents",
+                    "reverse all post-import cash uses and refunds "
+                    "through their owners",
+                )
+        receipt_id, group_id = uuid4(), uuid4()
+        receipt = replace(
+            original,
+            receipt_id=receipt_id,
+            receipt_kind="unwind",
+            verification=verified,
+            posting_group_id=group_id,
+            original_receipt_id=original.receipt_id,
+            request_identity=command.idempotency_key,
+            request_digest=digest,
+            occurred_at=command.occurred_at,
+            recorded_at=datetime.now(UTC),
+        )
+        opening = tuple(
+            _opening_effect(
+                scope=scope,
+                lot=lot,
+                group_id=group_id,
+                sequence=index,
+                kind="import_unwind",
+                amount=lot.initial_amount,
+                source_ref=command.idempotency_key,
+                request_digest=digest,
+                occurred_at=command.occurred_at,
+                authorization_ref=command.migration_authority_ref,
+            )
+            for index, lot in enumerate(
+                (x for x in lots if minor_units_of(x.initial_amount) > 0), 1
+            )
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="opening_account_import_reversed",
+            currency=account.currency,
+            minor_units=account.minor_units,
+            source_ref=command.idempotency_key,
+            occurred_at=command.occurred_at,
+            effects=(
+                (EffectLane.AVAILABLE_CREDIT, -original.total_residual.amount),
+                (EffectLane.RECEIVABLE, -original.total_receivable.amount),
+            ),
+            exposure_document_ids=tuple(
+                get_opening_receivable_basis(
+                    session, scope=scope, basis_id=x
+                ).document_id
+                for x in original.basis_ids
+            ),
+            opening_group_id=group_id,
+            opening_receipt=receipt,
+            opening_effects=opening,
+            corrects_posting_group_id=original.posting_group_id,
+        )
+        return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.import.reverse.v2",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return get_opening_import_receipt_v2(
+        db, scope=scope, receipt_id=UUID(str(outcome.result["receipt_id"]))
+    )

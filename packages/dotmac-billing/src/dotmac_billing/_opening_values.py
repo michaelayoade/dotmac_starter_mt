@@ -15,7 +15,7 @@ from decimal import (
     localcontext,
 )
 from types import UnionType
-from typing import Literal, get_args, get_origin, get_type_hints
+from typing import Literal, Union, get_args, get_origin, get_type_hints
 
 from dotmac_kernel.money import Currency, Money, MoneyError
 
@@ -95,7 +95,7 @@ def cash_decimal_context() -> Context:
 
 def _validate_closed(value: object, expected: object) -> None:
     origin = get_origin(expected)
-    if origin is UnionType:
+    if origin is UnionType or origin is Union:
         for member in get_args(expected):
             try:
                 _validate_closed(value, member)

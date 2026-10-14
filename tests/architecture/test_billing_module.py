@@ -39,6 +39,79 @@ KERNEL_VERSIONS = (
 
 _INTERNAL_RELATIONS = (
     (
+        "opening_receivable_bases",
+        ("receipt_id", "billing_account_id"),
+        "opening_import_receipts",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "opening_receivable_bases",
+        ("document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "opening_receivable_bases",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "opening_historical_discharge_claims",
+        ("basis_id", "billing_account_id"),
+        "opening_receivable_bases",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_exposure_facts_v2",
+        ("basis_id", "billing_account_id"),
+        "opening_receivable_bases",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_exposure_facts_v2",
+        ("document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_exposure_facts_v2",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    ("receivable_source_claims", ("billing_account_id",), "billing_accounts", ("id",)),
+    (
+        "receivable_source_claims",
+        ("historical_claim_id", "billing_account_id"),
+        "opening_historical_discharge_claims",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_source_claims",
+        ("withholding_discharge_id", "billing_account_id"),
+        "withholding_discharges",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_source_claims",
+        ("non_cash_grant_id", "billing_account_id"),
+        "non_cash_credit_grants",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_source_claims",
+        ("non_cash_effect_id", "billing_account_id"),
+        "non_cash_credit_effects",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "receivable_source_claims",
+        ("credit_document_fact_id",),
+        "invoice_document_facts",
+        ("id",),
+    ),
+    (
         "cash_source_claims",
         (
             "opening_cash_lot_id",

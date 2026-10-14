@@ -1561,7 +1561,13 @@
     "dotmac_kernel.transactions": {
       "classification": "supported",
       "exports": [
-        "conflict_savepoint"
+        "ConflictSavepointPhase",
+        "ConflictSavepointProtocolError",
+        "ConflictSavepointState",
+        "claim_conflict_savepoint_commit",
+        "conflict_savepoint",
+        "conflict_savepoint_requires_rollback",
+        "current_conflict_savepoint"
       ],
       "status": "declared"
     },

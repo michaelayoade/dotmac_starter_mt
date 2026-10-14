@@ -18,6 +18,7 @@ import pytest
 from dotmac_billing import models
 from dotmac_billing import opening_queries as q
 from dotmac_billing import service as s
+from dotmac_billing._receivable_backing import ReceivableBacking
 from dotmac_billing.commands import (
     ApplyAvailableCreditCommand,
     DeallocationCommand,
@@ -1332,11 +1333,72 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
                 values,
             )
 
+        def native_predecessor_backing(db, *, scope, document_id, source_version=None):
+            # Only the historical fixture uses the accepted native backing math.
+            # bi6 cannot contain an imported AR basis. Restore the real resolver
+            # before the actual additive upgrade or any successor admission.
+            selected = s._models(scope)
+            document = s._one(
+                db, scope=scope, model=selected.document, row_id=document_id
+            )
+            assert document.authoring_mode != "imported_open_item"
+            resolved = (
+                s._document_allocated(db, scope=scope, document_id=document_id)
+                + s._document_credited(db, scope=scope, document_id=document_id)
+                + s._document_withheld(db, scope=scope, document_id=document_id)
+                + s._document_non_cash_applied(db, scope=scope, document_id=document_id)
+            )
+            remaining = document.grand_total - resolved
+            assert 0 <= remaining <= document.grand_total
+            group = db.execute(
+                s._where_scope(
+                    select(selected.group)
+                    .where(
+                        selected.group.billing_account_id == document.billing_account_id
+                    )
+                    .order_by(selected.group.source_version.desc())
+                    .limit(1),
+                    scope,
+                    selected.group,
+                )
+            ).scalar_one()
+            arguments = [
+                document_id,
+                document.billing_account_id,
+                document.currency,
+                document.minor_units,
+            ]
+            if plane == "tenant":
+                arguments.append(scope.tenant_id)
+            active = bool(
+                db.scalar(
+                    select(
+                        getattr(func.mod_billing, f"has_{prefix}live_invoice_issuance")(
+                            *arguments
+                        )
+                    )
+                )
+            )
+            return ReceivableBacking(
+                None,
+                document.grand_total,
+                remaining,
+                group.source_version,
+                group.id,
+                active,
+            )
+
         # Source-compatible predecessor fixture adaptations only. The new
         # runtime is not claimed to support arbitrary execution on old schema.
         # bi6 cannot contain an opening contribution; retain every V1-V3 guard.
         with monkeypatch.context() as historical:
             historical.setattr(s, "_claim_cash_source", predecessor_claim)
+            historical.setattr(
+                s, "resolve_receivable_backing", native_predecessor_backing
+            )
+            historical.setattr(
+                s, "_require_historical_source_unclaimed", lambda *args, **kwargs: None
+            )
             historical.setattr(
                 s, "_opening_document_applied", lambda *a, **k: Decimal(0)
             )
@@ -1385,7 +1447,7 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
                     command=runtime._apply(scope, grant.grant_id, invoice.id, "20.00"),
                 )
                 session.commit()
-        # Both temporary adaptations end before upgrade, replay or new admission.
+        # All predecessor-only adaptations end before upgrade or new admission.
         engine = create_engine(urls[0])
         with engine.connect() as connection:
             names = (
@@ -1449,6 +1511,11 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
                 connection.execute(select(outbox.__table__)).mappings().all()
                 == outbox_before
             )
+        # Preserve the exact bi6-to-bi7 assertions above; current runtime then
+        # executes only after its additional immutable AR lineage is installed.
+        alembic_command.upgrade(
+            predecessor._config((selection,)), "bi_0008_opening_receivables"
+        )
         with b._session(url, scope) as session:
             assert (
                 s.accept_settlement(

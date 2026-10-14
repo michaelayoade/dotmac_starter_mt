@@ -2,6 +2,21 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a8 — UNRELEASED
+
+- Add atomic V2 opening receivables plus cash, preserving original documentary
+  invoice totals, individually evidenced historical discharges and exact
+  residuals without native issuance, new revenue or historical cash replay.
+- Resolve native and imported receivable backing through one owner across
+  current allocations, WHT, non-cash, eligible credits and linked inverses.
+- Add immutable historical bases, replay evidence, shared live/historical
+  source-claim occupancy and truthful imported ExposureV2 on both planes.
+- Add distinct V5 opening recognition/full-unwind facts and verified immutable
+  queries; retain prior command/fact shapes and permanent source claims.
+- Add bi8 scoped affinity, isolation, append-only, current/historical capacity,
+  completeness and source-identity enforcement. Source and hosted acceptance
+  remain pending; no package adoption or production activation is implied.
+
 ## 0.1.0a7 — UNRELEASED
 
 - Add verified cash-only opening import into pristine accounts with immutable

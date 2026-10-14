@@ -238,6 +238,31 @@ or revenue. No storage, schema, release, import or production switch is enabled
 by this source candidate.
 
 
+### Historical receivables opening (unpublished a8 candidate)
+
+`ImportOpeningAccountV2` and `service.import_opening_account_v2` extend the
+cash-only V1 lifecycle to one atomic authenticated AR-plus-cash account
+partition. Original documentary total, exact historical discharges, opening
+residual, party/tax/FX and collection provenance are sealed in immutable
+invoice backing. No rated obligation, new invoice number, native issuance,
+new revenue or historical cash acceptance is invented. Unsupported or
+fractional-attribution evidence is refused rather than defaulted or clamped.
+
+Current allocation, WHT, non-cash, eligible credit-note and cash-draw commands
+use the same native/imported backing resolver and their existing accounting
+facts. Opening AR recognition and full unwind use `AccountingFactV5`.
+`ReceivableExposureV2` preserves unknown legacy collection provenance without
+allowing automated collection. Permanent physical source claims prevent live
+and historical WHT/non-cash/credit identities from being spent twice, across
+accounts and transaction snapshots; claims survive every inverse.
+
+Use `opening_receivable_queries` for exact immutable V2 receipts, bases,
+positions, exposures and V5 accounting facts. Public V1–V4 shapes remain
+unchanged. This is source implementation pending independent review, hosted
+acceptance and owner approval; it does not publish/adopt a package or switch
+production authority. The source inventory records qualifying Sub rules and
+the explicit ERP importer exclusions.
+
 ### Cash-only opening lifecycle (unpublished a7 candidate)
 
 `ImportOpeningAccountV1` admits verified residual cash into a financially pristine
