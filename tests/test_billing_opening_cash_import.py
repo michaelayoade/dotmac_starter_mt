@@ -2399,3 +2399,269 @@ def test_exposure_cutoff_handles_wht_noncash_credit_and_credit_void_between_draw
             "75"
         )
         assert _position(session, scope, account_id).available_credit == Decimal("70")
+
+
+def _native_target_write(session, scope, account_id, kind):
+    """Prepare a legal unposted native write, with target mutation still pending."""
+    prefix = "" if isinstance(scope, TenantScope) else "Platform"
+    obligation_model = getattr(models, prefix + "RatedObligation")
+    document_model = getattr(models, prefix + "BillingDocument")
+    if kind == "obligation":
+        command = b._obligation_command(
+            account_id, scope=scope, source_fact_id=str(uuid4())
+        )
+
+        def write(db):
+            row = s.accept_rated_obligation(
+                db,
+                scope=scope,
+                command=command,
+                accepted_source_kinds=frozenset({"recurring_charge_occurrence"}),
+            )
+            return row.id
+
+        return write, obligation_model
+
+    source_account = _new_account(session, scope)
+    obligation = s.accept_rated_obligation(
+        session,
+        scope=scope,
+        command=b._obligation_command(
+            source_account, scope=scope, source_fact_id=str(uuid4())
+        ),
+        accepted_source_kinds=frozenset({"recurring_charge_occurrence"}),
+    )
+    draft = s.create_draft_document(
+        session, scope=scope, command=b._draft_command(obligation.id)
+    )
+    table = document_model.__table__
+    row = dict(
+        session.execute(select(table).where(table.c.id == draft.id)).mappings().one()
+    )
+    # A draft may be unlinked; no issued evidence, lines, obligation or money is
+    # moved. Copy the actual authored snapshots to isolate the documents guard.
+    row.update(id=uuid4(), obligation_id=None)
+    assert row["lifecycle"] == "draft" and row["issued_at"] is None
+    session.commit()
+    if kind == "draft_move":
+        session.execute(table.insert().values(**row))
+        session.commit()
+
+        def write(db):
+            result = db.execute(
+                table.update()
+                .where(
+                    table.c.id == row["id"],
+                    table.c.lifecycle == "draft",
+                    table.c.issued_at.is_(None),
+                )
+                .values(billing_account_id=account_id)
+            )
+            assert result.rowcount == 1
+            return row["id"]
+    else:
+        row["billing_account_id"] = account_id
+
+        def write(db):
+            db.execute(table.insert().values(**row))
+            return row["id"]
+
+    return write, document_model
+
+
+def _native_target_count(session, model, account_id):
+    return session.scalar(
+        select(func.count())
+        .select_from(model)
+        .where(model.billing_account_id == account_id)
+    )
+
+
+def _assert_target_isolation(session, isolation):
+    assert isolation in {"READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"}
+    # The harness sets tenant context on connect. Finish that bootstrap
+    # transaction, then prove the isolation of the transaction under test.
+    session.execute(
+        text(
+            "SET SESSION CHARACTERISTICS AS TRANSACTION " f"ISOLATION LEVEL {isolation}"
+        )
+    )
+    session.commit()
+    assert (
+        session.scalar(text("SELECT current_setting('transaction_isolation')"))
+        == isolation.lower()
+    )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize("kind", ["obligation", "draft_insert", "draft_move"])
+@pytest.mark.parametrize("native_commits", [True, False])
+@pytest.mark.parametrize(
+    "isolation", ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"]
+)
+def test_unposted_native_write_after_acquired_snapshot_cannot_hide_from_import(
+    scratch, plane, kind, native_commits, isolation
+):
+    scope, url = runtime._scope_url(scratch, plane)
+    with b._session(url, scope) as db:
+        account_id = _new_account(db, scope)
+        command = _command(db, scope, account_id)
+        write, native_model = _native_target_write(db, scope, account_id, kind)
+        db.commit()
+    acquired, completed = Barrier(2), Barrier(2)
+    snapshots, native_ids, receipts, refusals, writer_errors = [], [], [], [], []
+
+    def importer():
+        try:
+            with b._session(url, scope) as db:
+                _assert_target_isolation(db, isolation)
+                assert _native_target_count(db, native_model, account_id) == 0
+                assert _counts(db, plane, account_id)["PostingGroup"] == 0
+                snapshots.append(db.scalar(text("SELECT pg_current_snapshot()::text")))
+                acquired.wait(timeout=30)
+                completed.wait(timeout=30)
+                receipt = s.import_opening_account(
+                    db, scope=scope, command=command, verifier=TrustedVerifier()
+                )
+                db.commit()
+                receipts.append(receipt)
+        except Exception as error:
+            refusals.append(error)
+
+    def native_writer():
+        try:
+            with b._session(url, scope) as db:
+                acquired.wait(timeout=30)
+                native_ids.append(write(db))
+                if native_commits:
+                    db.commit()
+                else:
+                    db.rollback()
+                completed.wait(timeout=30)
+        except Exception as error:
+            writer_errors.append(error)
+            acquired.abort()
+            completed.abort()
+
+    threads = [Thread(target=importer), Thread(target=native_writer)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+        assert not thread.is_alive()
+    assert snapshots and snapshots[0]
+    assert len(native_ids) == 1 and writer_errors == []
+    with b._session(url, scope) as db:
+        assert _native_target_count(db, native_model, account_id) == int(native_commits)
+        if native_commits:
+            assert receipts == [] and len(refusals) == 1
+            if isolation in {"REPEATABLE READ", "SERIALIZABLE"}:
+                assert isinstance(refusals[0], DBAPIError), refusals
+                assert refusals[0].orig.sqlstate == "40001"
+            else:
+                assert isinstance(refusals[0], BillingRuleViolation), refusals
+                assert refusals[0].code == "billing.opening_target_not_pristine"
+            assert _counts(db, plane, account_id)["OpeningImportReceipt"] == 0
+            assert _counts(db, plane, account_id)["PostingGroup"] == 0
+            assert _position(db, scope, account_id).available_credit == 0
+            # A serialization refusal needs a new transaction. The new snapshot
+            # now sees the unposted native evidence and truthfully refuses it.
+            with pytest.raises(BillingRuleViolation) as fresh:
+                s.import_opening_account(
+                    db, scope=scope, command=command, verifier=TrustedVerifier()
+                )
+            assert fresh.value.code == "billing.opening_target_not_pristine"
+        else:
+            assert refusals == [] and len(receipts) == 1
+            assert _position(db, scope, account_id).available_credit == Decimal("60")
+            assert (
+                s.import_opening_account(
+                    db, scope=scope, command=command, verifier=TrustedVerifier()
+                )
+                == receipts[0]
+            )
+            assert _counts(db, plane, account_id)["OpeningImportReceipt"] == 1
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize("kind", ["obligation", "draft_insert", "draft_move"])
+@pytest.mark.parametrize("import_first", [True, False])
+def test_same_outer_transaction_import_and_native_write_have_explicit_order(
+    scratch, plane, kind, import_first
+):
+    scope, url = runtime._scope_url(scratch, plane)
+    with b._session(url, scope) as db:
+        account_id = _new_account(db, scope)
+        command = _command(db, scope, account_id)
+        write, native_model = _native_target_write(db, scope, account_id, kind)
+        db.commit()
+        if import_first:
+            receipt = s.import_opening_account(
+                db, scope=scope, command=command, verifier=TrustedVerifier()
+            )
+            write(db)
+            assert _native_target_count(db, native_model, account_id) == 1
+            db.commit()
+            assert (
+                q.get_opening_import_receipt(
+                    db, scope=scope, receipt_id=receipt.receipt_id
+                )
+                == receipt
+            )
+            assert _position(db, scope, account_id).available_credit == Decimal("60")
+        else:
+            write(db)
+            with pytest.raises(BillingRuleViolation) as refusal:
+                s.import_opening_account(
+                    db, scope=scope, command=command, verifier=TrustedVerifier()
+                )
+            assert refusal.value.code == "billing.opening_target_not_pristine"
+            assert _native_target_count(db, native_model, account_id) == 1
+            db.commit()
+            assert _counts(db, plane, account_id)["OpeningImportReceipt"] == 0
+            assert _position(db, scope, account_id).available_credit == 0
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize("kind", ["obligation", "draft_insert", "draft_move"])
+def test_read_committed_prior_native_state_is_refused_by_service_and_sql_admission(
+    scratch, plane, kind, monkeypatch
+):
+    scope, url = runtime._scope_url(scratch, plane)
+    with b._session(url, scope) as db:
+        account_id = _new_account(db, scope)
+        command = _command(db, scope, account_id)
+        write, native_model = _native_target_write(db, scope, account_id, kind)
+        write(db)
+        db.commit()
+        _assert_target_isolation(db, "READ COMMITTED")
+        assert _native_target_count(db, native_model, account_id) == 1
+        before = _counts(db, plane, account_id)
+        with pytest.raises(BillingRuleViolation) as refusal:
+            s.import_opening_account(
+                db, scope=scope, command=command, verifier=TrustedVerifier()
+            )
+        assert refusal.value.code == "billing.opening_target_not_pristine"
+        # This one fixture bypasses only the friendly service pristine check to
+        # reach actual SQL receipt admission. Authority, exact target, sources,
+        # group/effects/outbox and every database guard remain active. It is a
+        # rejected SQL attack, never an approved public import success.
+        with monkeypatch.context() as direct_sql_probe:
+            direct_sql_probe.setattr(
+                s, "_require_pristine_opening_target", lambda *args, **kwargs: None
+            )
+            with pytest.raises(DBAPIError) as error:
+                s.import_opening_account(
+                    db, scope=scope, command=command, verifier=TrustedVerifier()
+                )
+        assert error.value.orig.sqlstate == "23514"
+        assert "pristine" in str(error.value.orig).lower()
+        assert _counts(db, plane, account_id) == before
+        assert _native_target_count(db, native_model, account_id) == 1
+        assert (
+            _retry_count(
+                db, plane, "billing.opening.import.v1", command.idempotency_key
+            )
+            == 0
+        )
+        assert _position(db, scope, account_id).available_credit == 0

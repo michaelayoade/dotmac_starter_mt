@@ -261,6 +261,7 @@ def _create(platform: bool) -> None:
     _admission(platform)
     _completeness(platform)
     _invoice_guards(platform, restore=False)
+    _account_generation_guards(platform, restore=False)
 
 
 def _admission(platform: bool) -> None:
@@ -1077,7 +1078,66 @@ _EMPTY_PROBES = {
 }
 
 
+def _account_generation_guards(platform: bool, *, restore: bool) -> None:
+    """Serialize pristine admission against even unposted account activity.
+
+    A lock alone does not change an account's MVCC generation. Touching its
+    existing primary key makes an old REPEATABLE READ writer fail rather than
+    inspect a snapshot predating another account owner's committed activity.
+    """
+    prefix = "platform_" if platform else ""
+    function = f"touch_{prefix}opening_account_generation"
+    tables = (
+        "rated_obligations",
+        "documents",
+        "confirmed_settlements",
+        "posting_groups",
+        "withholding_discharges",
+        "non_cash_credit_grants",
+        "opening_import_receipts",
+    )
+    if restore:
+        for table in tables:
+            op.execute(
+                f"DROP TRIGGER a0_{prefix}{table}_opening_account_touch ON mod_billing.{prefix}{table};"
+            )  # nosec B608 -- closed qualified module table names
+        op.execute(f"""
+            DROP TRIGGER a0_{prefix}documents_opening_account_move ON mod_billing.{prefix}documents;
+            DROP FUNCTION mod_billing.{function}();
+        """)  # nosec B608 -- fixed qualified plane names
+        return
+    scope = "" if platform else " AND x.tenant_id = NEW.tenant_id"
+    op.execute(f"""
+        CREATE FUNCTION mod_billing.{function}() RETURNS trigger
+        LANGUAGE plpgsql VOLATILE SECURITY INVOKER AS $$
+        BEGIN
+          UPDATE mod_billing.{prefix}billing_accounts AS x
+            SET id = x.id WHERE x.id = NEW.billing_account_id{scope};
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'opening account generation requires an actual scoped account'
+              USING ERRCODE = '23503';
+          END IF;
+          RETURN NEW;
+        END $$;
+    """)  # nosec B608 -- closed qualified module owner and scope
+    for table in tables:
+        # PostgreSQL orders same-event triggers lexically: a0 precedes every
+        # existing monetary admission/owner trigger in bi1 through bi7.
+        op.execute(f"""
+            CREATE TRIGGER a0_{prefix}{table}_opening_account_touch
+            BEFORE INSERT ON mod_billing.{prefix}{table}
+            FOR EACH ROW EXECUTE FUNCTION mod_billing.{function}();
+        """)  # nosec B608 -- closed qualified module table names
+    columns = "billing_account_id" if platform else "billing_account_id, tenant_id"
+    op.execute(f"""
+        CREATE TRIGGER a0_{prefix}documents_opening_account_move
+        BEFORE UPDATE OF {columns} ON mod_billing.{prefix}documents
+        FOR EACH ROW EXECUTE FUNCTION mod_billing.{function}();
+    """)  # nosec B608 -- fixed plane columns and owner
+
+
 def _drop(platform: bool) -> None:
+    _account_generation_guards(platform, restore=True)
     prefix = "platform_" if platform else ""
     for table in (
         "posting_groups",
@@ -1136,6 +1196,8 @@ def _apply(*, upgrade: bool) -> None:
     }
     names = (
         "billing_accounts",
+        "rated_obligations",
+        "non_cash_credit_grants",
         "cash_source_claims",
         "confirmed_settlements",
         "posting_groups",
