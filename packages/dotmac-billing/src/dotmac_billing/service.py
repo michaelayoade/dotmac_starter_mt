@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, localcontext
 from enum import Enum
-from typing import Any, Literal, cast
+from functools import wraps
+from typing import Any, Literal, ParamSpec, TypeVar, cast
 from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
@@ -22,9 +23,15 @@ from dotmac_kernel.idempotency import (
 from dotmac_kernel.messaging import enqueue_event, enqueue_platform_event
 from dotmac_kernel.money import Currency, Money
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_billing import models
+from dotmac_billing._opening_values import (
+    cash_decimal_context,
+    minor_units_of,
+    money_from_minor,
+)
 from dotmac_billing.commands import (
     AcceptWithholdingDischarge,
     AllocationCommand,
@@ -83,6 +90,53 @@ from dotmac_billing.contracts import (
 )
 from dotmac_billing.engine import Effect, EffectLane, PositionState, rebuild_position
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
+from dotmac_billing.opening_authority import (
+    OpeningCashRefundCorrectionVerificationRequestV1,
+    OpeningCashRefundCorrectionVerificationV1,
+    OpeningCashRefundSubjectV1,
+    OpeningCashRefundVerificationRequestV1,
+    OpeningCashRefundVerificationV1,
+    OpeningCashRefundVerifier,
+    OpeningImportReversalVerificationRequestV1,
+    OpeningImportReversalVerificationV1,
+    OpeningImportVerificationRequestV1,
+    OpeningImportVerificationV1,
+    OpeningImportVerifier,
+    opening_cash_command_digest,
+)
+from dotmac_billing.opening_cash_contracts import (
+    AccountingFactV4,
+    AccountingSettlementAllocationV4,
+    CashCreditSourceOrderV1,
+    OpeningCashEffectV1,
+    OpeningCashLotFactV1,
+    OpeningCashPostingKind,
+    OpeningImportReceiptV1,
+)
+from dotmac_billing.opening_commands import (
+    CorrectOpeningCashRefundV1,
+    ImportOpeningAccountV1,
+    OpeningCashMovementEvidenceV1,
+    RecordOpeningCashRefundV1,
+    ReverseCashCreditDrawV1,
+    ReverseOpeningAccountImportV1,
+)
+from dotmac_billing.opening_contracts import (
+    OpeningPreviewRequestV1,
+    OpeningVerificationUnavailable,
+)
+from dotmac_billing.opening_queries import (
+    get_accounting_fact_v4,
+    get_opening_cash_effect,
+    get_opening_cash_lot,
+    get_opening_cash_lot_position,
+    get_opening_cash_target,
+    get_opening_import_receipt,
+)
+from dotmac_billing.opening_validation import (
+    opening_manifest_fingerprint,
+    preview_opening_account_import,
+)
 from dotmac_billing.queries import (
     get_non_cash_credit_effect,
     get_non_cash_credit_grant,
@@ -90,6 +144,12 @@ from dotmac_billing.queries import (
 )
 
 _AccountingEffectKind = Literal[
+    "opening_cash_imported",
+    "opening_cash_applied",
+    "cash_credit_draw_reversed",
+    "opening_cash_refunded",
+    "opening_cash_refund_corrected",
+    "opening_cash_import_reversed",
     "non_cash_credit_granted",
     "non_cash_credit_applied",
     "non_cash_credit_application_reversed",
@@ -115,6 +175,19 @@ _DocumentFactRow = models.InvoiceDocumentFact | models.PlatformInvoiceDocumentFa
 _ArtifactRow = models.DocumentArtifact | models.PlatformDocumentArtifact
 
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _exact_cash_operation(function: Callable[_P, _R]) -> Callable[_P, _R]:
+    @wraps(function)
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with localcontext(cash_decimal_context()):
+            return function(*args, **kwargs)
+
+    return wrapped
+
+
 def _money(amount: Decimal, currency_code: str, minor_units: int) -> Money:
     """Rehydrate persisted exact money through the kernel-owned value type."""
 
@@ -138,6 +211,9 @@ class _PlaneModels:
     event: Any
     settlement: Any
     cash_source_claim: Any
+    opening_receipt: Any
+    opening_lot: Any
+    opening_effect: Any
     group: Any
     effect: Any
     allocation: Any
@@ -166,6 +242,7 @@ class _AllocationInput:
     ]
     amount_delta: Decimal
     offsets_allocation_id: UUID | None = None
+    allocation_id: UUID | None = None
 
 
 _TENANT = _PlaneModels(
@@ -176,6 +253,9 @@ _TENANT = _PlaneModels(
     models.DocumentEvent,
     models.ConfirmedSettlement,
     models.CashSourceClaim,
+    models.OpeningImportReceipt,
+    models.OpeningCashLot,
+    models.OpeningCashEffect,
     models.PostingGroup,
     models.PostingEffect,
     models.AllocationEffect,
@@ -200,6 +280,9 @@ _PLATFORM = _PlaneModels(
     models.PlatformDocumentEvent,
     models.PlatformConfirmedSettlement,
     models.PlatformCashSourceClaim,
+    models.PlatformOpeningImportReceipt,
+    models.PlatformOpeningCashLot,
+    models.PlatformOpeningCashEffect,
     models.PlatformPostingGroup,
     models.PlatformPostingEffect,
     models.PlatformAllocationEffect,
@@ -1068,6 +1151,7 @@ def _next_source_version(
     return int(db.execute(statement).scalar_one()) + 1
 
 
+@_exact_cash_operation
 def _receivable_exposure(
     db: Session,
     *,
@@ -1114,7 +1198,15 @@ def _receivable_exposure(
         + _document_withheld(db, scope=scope, document_id=document.id)
         + _document_non_cash_applied(db, scope=scope, document_id=document.id)
     )
-    outstanding = max(document.grand_total - resolved_amount, Decimal("0"))
+    if (
+        not resolved_amount.is_finite()
+        or resolved_amount < 0
+        or resolved_amount > document.grand_total
+    ):
+        raise BillingRuleViolation(
+            "invoice_room_integrity", "invoice resolution exceeds exact room"
+        )
+    outstanding = document.grand_total - resolved_amount
     financial_state: FinancialState
     if voided:
         outstanding = Decimal("0")
@@ -1364,6 +1456,7 @@ def _document_financial_snapshots(
     )
 
 
+@_exact_cash_operation
 def _post_group(
     db: Session,
     *,
@@ -1385,11 +1478,17 @@ def _post_group(
     non_cash_grant: NonCashCreditGrantV1 | None = None,
     non_cash_effects: tuple[NonCashCreditEffectV1, ...] = (),
     non_cash_request_digest: str | None = None,
+    opening_group_id: UUID | None = None,
+    opening_receipt: OpeningImportReceiptV1 | None = None,
+    opening_lots: tuple[OpeningCashLotFactV1, ...] = (),
+    opening_effects: tuple[OpeningCashEffectV1, ...] = (),
+    cash_source_order: tuple[CashCreditSourceOrderV1, ...] = (),
+    corrects_posting_group_id: UUID | None = None,
 ) -> _PostingGroupRow:
     plane = _models(scope)
     allocation_inputs = tuple(allocations)
     _one(db, scope=scope, model=plane.account, row_id=account_id, lock=True)
-    group_id = uuid4()
+    group_id = opening_group_id or uuid4()
     source_version = _next_source_version(
         db, scope=scope, plane=plane, account_id=account_id
     )
@@ -1414,6 +1513,14 @@ def _post_group(
     # relationships. Persist the parent before its effect/allocation children
     # so PostgreSQL never has to infer an insertion order it cannot see.
     db.flush()
+    _persist_opening_records(
+        db,
+        scope=scope,
+        group_id=group_id,
+        receipt=opening_receipt,
+        lots=opening_lots,
+        effects=opening_effects,
+    )
     if non_cash_grant is not None:
         payload = _jsonable(non_cash_grant)
         db.add(
@@ -1546,7 +1653,7 @@ def _post_group(
             **_values(
                 scope,
                 {
-                    "id": uuid4(),
+                    "id": allocation.allocation_id or uuid4(),
                     "posting_group_id": group_id,
                     "billing_account_id": account_id,
                     "currency": currency,
@@ -1660,6 +1767,7 @@ def _post_group(
         )
     )
     affected_documents = {
+        *(item.document_id for item in opening_effects if item.document_id is not None),
         *exposure_document_ids,
         *(
             allocation.document_id
@@ -1724,8 +1832,64 @@ def _post_group(
         reverses_fact_id = db.execute(
             _where_scope(reversed_fact_statement, scope, plane.accounting_fact)
         ).scalar_one()
-    typed_fact: AccountingFactV1 | AccountingFactV2 | AccountingFactV3
-    if non_cash_effects:
+    typed_fact: (
+        AccountingFactV1 | AccountingFactV2 | AccountingFactV3 | AccountingFactV4
+    )
+    if opening_effects or kind == "cash_credit_draw_reversed":
+        typed_fact = AccountingFactV4(
+            scope,
+            "dotmac-billing",
+            accounting_fact_id,
+            4,
+            account_id,
+            group_id,
+            source_ref,
+            "internal",
+            cast(OpeningCashPostingKind, kind),
+            occurred_at,
+            observed_at,
+            tuple(
+                AccountingEffectV1(
+                    cast(
+                        Literal["receivable", "available_credit", "prepaid_funding"],
+                        row.lane,
+                    ),
+                    _money(row.amount_delta, currency, minor_units),
+                )
+                for row in effect_rows
+            ),
+            tuple(
+                AccountingSettlementAllocationV4(
+                    row.id,
+                    AccountingAllocationEffectV1(
+                        row.settlement_id,
+                        row.document_id,
+                        cast(
+                            Literal[
+                                "allocation",
+                                "deallocation",
+                                "reallocation",
+                                "refund",
+                                "reversal",
+                            ],
+                            row.effect_kind,
+                        ),
+                        _money(row.amount_delta, currency, minor_units),
+                        row.offsets_allocation_id,
+                    ),
+                )
+                for row in allocation_rows
+            ),
+            opening_effects,
+            cash_source_order
+            or tuple(
+                CashCreditSourceOrderV1(index, None, item.effect_id)
+                for index, item in enumerate(opening_effects, 1)
+            ),
+            opening_receipt,
+            corrects_posting_group_id,
+        )
+    elif non_cash_effects:
         typed_fact = AccountingFactV3(
             scope=scope,
             source_system="dotmac-billing",
@@ -1867,7 +2031,14 @@ def _post_group(
         )
     )
     db.flush()
-    if non_cash_effects:
+    if isinstance(typed_fact, AccountingFactV4):
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.accounting.fact.v4",
+            payload=fact_payload,
+        )
+    elif non_cash_effects:
         _emit(
             db,
             scope=scope,
@@ -2874,7 +3045,7 @@ def accept_settlement(
         )
         return {"settlement_id": str(settlement_id), "posting_group_id": str(group.id)}
 
-    outcome = _idempotent(
+    outcome = _idempotent_cash_claim(
         db,
         scope=scope,
         operation_scope="billing.settlement",
@@ -2937,13 +3108,17 @@ def _settlement_used(db: Session, *, scope: Scope, settlement_id: UUID) -> Decim
     )
 
 
+@_exact_cash_operation
 def _document_allocated(db: Session, *, scope: Scope, document_id: UUID) -> Decimal:
     plane = _models(scope)
     statement = select(func.coalesce(func.sum(plane.allocation.amount_delta), 0)).where(
         plane.allocation.document_id == document_id
     )
-    return Decimal(
+    ordinary = Decimal(
         db.execute(_where_scope(statement, scope, plane.allocation)).scalar_one()
+    )
+    return ordinary + _opening_document_applied(
+        db, scope=scope, document_id=document_id
     )
 
 
@@ -2978,17 +3153,21 @@ def _document_withheld(db: Session, *, scope: Scope, document_id: UUID) -> Decim
     )
 
 
+@_exact_cash_operation
 def _document_outstanding(
     db: Session, *, scope: Scope, document: _DocumentRow
 ) -> Decimal:
-    return max(
-        Decimal(document.grand_total)
-        - _document_allocated(db, scope=scope, document_id=document.id)
-        - _document_credited(db, scope=scope, document_id=document.id)
-        - _document_withheld(db, scope=scope, document_id=document.id)
-        - _document_non_cash_applied(db, scope=scope, document_id=document.id),
-        Decimal("0"),
+    resolved = (
+        _document_allocated(db, scope=scope, document_id=document.id)
+        + _document_credited(db, scope=scope, document_id=document.id)
+        + _document_withheld(db, scope=scope, document_id=document.id)
+        + _document_non_cash_applied(db, scope=scope, document_id=document.id)
     )
+    if not resolved.is_finite() or resolved < 0 or resolved > document.grand_total:
+        raise BillingRuleViolation(
+            "invoice_room_integrity", "invoice resolution exceeds exact room"
+        )
+    return document.grand_total - resolved
 
 
 def _settlement_has_active_backing(
@@ -4047,6 +4226,7 @@ def reverse_withholding_discharge(
     )
 
 
+@_exact_cash_operation
 def apply_available_credit(
     db: Session, *, scope: Scope, command: ApplyAvailableCreditCommand
 ) -> _PostingGroupRow:
@@ -4118,7 +4298,11 @@ def apply_available_credit(
             _where_scope(statement, scope, plane.settlement)
         ).scalars()
         remaining = command.amount.amount
+        group_id = uuid4()
+        digest = fingerprint_of(asdict(command))
         allocations: list[_AllocationInput] = []
+        opening: list[OpeningCashEffectV1] = []
+        source_order: list[CashCreditSourceOrderV1] = []
         for settlement in sources:
             if not _settlement_has_active_backing(
                 session, scope=scope, settlement=settlement
@@ -4139,11 +4323,77 @@ def apply_available_credit(
                         document_id=document.id,
                         effect_kind="allocation",
                         amount_delta=amount,
+                        allocation_id=uuid4(),
+                    )
+                )
+                source_order.append(
+                    CashCreditSourceOrderV1(
+                        len(source_order) + 1, allocations[-1].allocation_id, None
                     )
                 )
                 remaining -= amount
             if remaining == 0:
                 break
+        if remaining > 0:
+            lot_ids = tuple(
+                session.execute(
+                    _where_scope(
+                        select(plane.opening_lot.id)
+                        .where(
+                            plane.opening_lot.billing_account_id == account.id,
+                            plane.opening_lot.currency == account.currency,
+                            plane.opening_lot.minor_units == account.minor_units,
+                        )
+                        .order_by(
+                            plane.opening_lot.created_at,
+                            plane.opening_lot.receipt_id,
+                            plane.opening_lot.sequence,
+                            plane.opening_lot.id,
+                        ),
+                        scope,
+                        plane.opening_lot,
+                    )
+                ).scalars()
+            )
+            for lot_id in lot_ids:
+                room = get_opening_cash_lot_position(
+                    session, scope=scope, lot_id=lot_id
+                )
+                if room.unwound:
+                    continue
+                quantity = min(
+                    minor_units_of(
+                        _money(remaining, account.currency, account.minor_units)
+                    ),
+                    minor_units_of(room.remaining),
+                )
+                if quantity == 0:
+                    continue
+                amount = money_from_minor(
+                    quantity, account.currency, account.minor_units
+                )
+                effect = _opening_effect(
+                    scope=scope,
+                    lot=room.lot,
+                    group_id=group_id,
+                    sequence=len(opening) + 1,
+                    kind="application",
+                    amount=amount,
+                    source_ref=command.source_ref,
+                    request_digest=digest,
+                    occurred_at=command.occurred_at,
+                    authorization_ref="billing.finance.assembly",
+                    document_id=document.id,
+                )
+                opening.append(effect)
+                source_order.append(
+                    CashCreditSourceOrderV1(
+                        len(source_order) + 1, None, effect.effect_id
+                    )
+                )
+                remaining -= amount.amount
+                if remaining == 0:
+                    break
         if remaining != 0:
             raise BillingRuleViolation(
                 "credit_insufficient_backing",
@@ -4153,7 +4403,7 @@ def apply_available_credit(
             session,
             scope=scope,
             account_id=account.id,
-            kind="allocation",
+            kind="opening_cash_applied" if opening else "allocation",
             currency=account.currency,
             minor_units=account.minor_units,
             source_ref=command.source_ref,
@@ -4163,6 +4413,9 @@ def apply_available_credit(
                 (EffectLane.AVAILABLE_CREDIT, -command.amount.amount),
             ),
             allocations=allocations,
+            opening_group_id=group_id if opening else None,
+            opening_effects=tuple(opening),
+            cash_source_order=tuple(source_order) if opening else (),
         )
         return {"posting_group_id": str(group.id)}
 
@@ -4343,6 +4596,7 @@ def deallocate_settlement(
         fingerprint=fingerprint_of(asdict(command)),
         account_id=settlement.billing_account_id,
         kind="deallocation",
+        opening_allocation_group_id=original.posting_group_id,
         money=command.amount,
         occurred_at=command.occurred_at,
         effects=(
@@ -4410,6 +4664,7 @@ def reallocate_settlement(
         fingerprint=fingerprint_of(asdict(command)),
         account_id=settlement.billing_account_id,
         kind="reallocation",
+        opening_document_id=source.id,
         money=command.amount,
         occurred_at=command.occurred_at,
         effects=(),
@@ -4490,10 +4745,18 @@ def _posting_command(
     occurred_at: datetime,
     effects: Iterable[tuple[EffectLane, Decimal]],
     allocations: Iterable[_AllocationInput],
+    opening_allocation_group_id: UUID | None = None,
+    opening_document_id: UUID | None = None,
 ) -> _PostingGroupRow:
     plane = _models(scope)
 
     def operation(session: Session) -> dict[str, object]:
+        _require_legacy_opening_guard(
+            session,
+            scope=scope,
+            allocation_group_id=opening_allocation_group_id,
+            document_id=opening_document_id,
+        )
         group = _post_group(
             session,
             scope=scope,
@@ -4567,6 +4830,7 @@ def _require_non_cash_reversal_owner(
                 )
 
 
+@_exact_cash_operation
 def _reverse_group(
     db: Session,
     *,
@@ -4581,6 +4845,7 @@ def _reverse_group(
             "withholding_owner_required", "use the withholding correction command"
         )
     _require_non_cash_reversal_owner(db, scope=scope, original=original)
+    _require_opening_reversal_owner(db, scope=scope, original=original)
     plane = _models(scope)
     already_statement = select(plane.group.id).where(
         plane.group.reverses_group_id == original.id
@@ -4649,6 +4914,7 @@ def reverse_posting_group(
         lock=True,
     )
     _require_non_cash_reversal_owner(db, scope=scope, original=original_evidence)
+    _require_opening_reversal_owner(db, scope=scope, original=original_evidence)
     offered = fingerprint_of(asdict(command))
 
     def operation(session: Session) -> dict[str, object]:
@@ -4696,6 +4962,7 @@ def reverse_posting_group(
     )
 
 
+@_exact_cash_operation
 def rebuild_receivable_position(
     db: Session,
     *,
@@ -5008,6 +5275,11 @@ def repair_document_artifact(
 
 
 __all__ = [
+    "import_opening_account",
+    "record_opening_cash_refund",
+    "correct_opening_cash_refund",
+    "reverse_cash_credit_draw",
+    "reverse_opening_account_import",
     "grant_non_cash_credit",
     "apply_non_cash_credit",
     "reverse_non_cash_credit_application",
@@ -5032,3 +5304,1315 @@ __all__ = [
     "reverse_posting_group",
     "void_document",
 ]
+
+
+def _persist_opening_records(
+    db: Session,
+    *,
+    scope: Scope,
+    group_id: UUID,
+    receipt: OpeningImportReceiptV1 | None,
+    lots: tuple[OpeningCashLotFactV1, ...],
+    effects: tuple[OpeningCashEffectV1, ...],
+) -> None:
+    if receipt is None and not lots and not effects:
+        return
+    plane = _models(scope)
+    if receipt is not None:
+        if receipt.scope != scope or receipt.posting_group_id != group_id:
+            raise BillingRuleViolation(
+                "opening_evidence_integrity", "opening receipt group binding disagrees"
+            )
+        payload = _jsonable(receipt)
+        db.add(
+            plane.opening_receipt(
+                **_values(
+                    scope,
+                    {
+                        "id": receipt.receipt_id,
+                        "receipt_kind": receipt.receipt_kind,
+                        "original_receipt_id": receipt.original_receipt_id,
+                        "billing_account_id": receipt.billing_account_id,
+                        "posting_group_id": group_id,
+                        "manifest_fingerprint": receipt.manifest_fingerprint,
+                        "request_identity": receipt.request_identity,
+                        "request_digest": receipt.request_digest,
+                        "currency": receipt.total_residual.currency.code,
+                        "minor_units": receipt.total_residual.currency.minor_units,
+                        "total_residual": receipt.total_residual.amount,
+                        "expected_target_fingerprint": (
+                            receipt.target.expected_position_fingerprint
+                        ),
+                        "expected_target_watermark": receipt.target.posting_watermark,
+                        "migration_authority_ref": (
+                            receipt.verification.migration_authority_ref
+                        ),
+                        "recorded_at": receipt.recorded_at,
+                        "evidence": payload,
+                        "evidence_digest": fingerprint_of(payload),
+                    },
+                )
+            )
+        )
+        db.flush()
+    for lot in lots:
+        if lot.scope != scope or lot.posting_group_id != group_id:
+            raise BillingRuleViolation(
+                "opening_evidence_integrity", "opening lot group binding disagrees"
+            )
+        source = lot.source
+        currency, units = (
+            lot.initial_amount.currency.code,
+            lot.initial_amount.currency.minor_units,
+        )
+        payload = _jsonable(lot)
+        db.add(
+            plane.opening_lot(
+                **_values(
+                    scope,
+                    {
+                        "id": lot.lot_id,
+                        "receipt_id": lot.receipt_id,
+                        "billing_account_id": lot.billing_account_id,
+                        "posting_group_id": group_id,
+                        "sequence": lot.sequence,
+                        "source_system": source.source_system,
+                        "source_settlement_key": source.source_settlement_key,
+                        "currency": currency,
+                        "minor_units": units,
+                        "gross_amount": money_from_minor(
+                            source.gross_minor, currency, units
+                        ).amount,
+                        "historical_consumed": money_from_minor(
+                            sum(item.amount_minor for item in source.consumptions),
+                            currency,
+                            units,
+                        ).amount,
+                        "residual_amount": lot.initial_amount.amount,
+                        "recorded_at": lot.recorded_at,
+                        "evidence": payload,
+                        "evidence_digest": fingerprint_of(payload),
+                    },
+                )
+            )
+        )
+    if lots:
+        db.flush()
+    for lot in sorted(
+        lots,
+        key=lambda item: (item.source.source_system, item.source.source_settlement_key),
+    ):
+        db.add(
+            plane.cash_source_claim(
+                **_values(
+                    scope,
+                    {
+                        "id": uuid4(),
+                        "settlement_id": None,
+                        "opening_cash_lot_id": lot.lot_id,
+                        "billing_account_id": lot.billing_account_id,
+                        "source_system": lot.source.source_system,
+                        "source_settlement_key": lot.source.source_settlement_key,
+                        "currency": lot.initial_amount.currency.code,
+                        "minor_units": lot.initial_amount.currency.minor_units,
+                    },
+                )
+            )
+        )
+    if lots:
+        db.flush()
+    for effect in effects:
+        if effect.scope != scope or effect.posting_group_id != group_id:
+            raise BillingRuleViolation(
+                "opening_evidence_integrity", "opening effect group binding disagrees"
+            )
+        payload = _jsonable(effect)
+        db.add(
+            plane.opening_effect(
+                **_values(
+                    scope,
+                    {
+                        "id": effect.effect_id,
+                        "lot_id": effect.lot_id,
+                        "billing_account_id": effect.billing_account_id,
+                        "posting_group_id": group_id,
+                        "sequence": effect.sequence,
+                        "effect_kind": effect.effect_kind,
+                        "amount_delta": effect.availability_delta.amount,
+                        "currency": effect.amount.currency.code,
+                        "minor_units": effect.amount.currency.minor_units,
+                        "document_id": effect.document_id,
+                        "original_effect_id": effect.original_effect_id,
+                        "source_ref": effect.source_ref,
+                        "authorization_ref": effect.authorization_ref,
+                        "request_digest": effect.request_digest,
+                        "recorded_at": effect.recorded_at,
+                        "evidence": payload,
+                        "evidence_digest": fingerprint_of(payload),
+                    },
+                )
+            )
+        )
+    if effects:
+        db.flush()
+
+
+def _opening_document_applied(
+    db: Session, *, scope: Scope, document_id: UUID
+) -> Decimal:
+    plane = _models(scope)
+    ids = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.opening_effect.id).where(
+                    plane.opening_effect.document_id == document_id
+                ),
+                scope,
+                plane.opening_effect,
+            )
+        ).scalars()
+    )
+    values = tuple(
+        get_opening_cash_effect(db, scope=scope, effect_id=value) for value in ids
+    )
+    if not values:
+        return Decimal("0")
+    amount = -sum(minor_units_of(item.availability_delta) for item in values)
+    if amount < 0:
+        raise BillingRuleViolation(
+            "opening_room_integrity", "opening invoice consumption cannot be negative"
+        )
+    currency = values[0].amount.currency
+    return money_from_minor(amount, currency.code, currency.minor_units).amount
+
+
+def _require_opening_reversal_owner(
+    db: Session, *, scope: Scope, original: _PostingGroupRow
+) -> None:
+    _require_mixed_settlement_chain_owner(db, scope=scope, original=original)
+    plane = _models(scope)
+    present = db.execute(
+        _where_scope(
+            select(plane.opening_effect.id).where(
+                plane.opening_effect.posting_group_id == original.id
+            ),
+            scope,
+            plane.opening_effect,
+        )
+    ).first()
+    if present is not None or original.group_kind in {
+        "opening_cash_imported",
+        "opening_cash_applied",
+        "cash_credit_draw_reversed",
+        "opening_cash_refunded",
+        "opening_cash_refund_corrected",
+        "opening_cash_import_reversed",
+    }:
+        raise BillingRuleViolation(
+            "opening_cash_owner_required",
+            "use the complete opening cash correction owner",
+        )
+
+
+def _opening_effect(
+    *,
+    scope: Scope,
+    lot: OpeningCashLotFactV1,
+    group_id: UUID,
+    sequence: int,
+    kind: Literal[
+        "recognition",
+        "application",
+        "application_inverse",
+        "refund",
+        "refund_correction",
+        "import_unwind",
+    ],
+    amount: Money,
+    source_ref: str,
+    request_digest: str,
+    occurred_at: datetime,
+    authorization_ref: str,
+    document_id: UUID | None = None,
+    original_effect_id: UUID | None = None,
+    movement_evidence: OpeningCashMovementEvidenceV1 | None = None,
+    movement_verification: OpeningCashRefundVerificationV1
+    | OpeningCashRefundCorrectionVerificationV1
+    | None = None,
+) -> OpeningCashEffectV1:
+    return OpeningCashEffectV1(
+        scope,
+        uuid4(),
+        lot.lot_id,
+        lot.billing_account_id,
+        group_id,
+        sequence,
+        kind,
+        amount,
+        document_id,
+        original_effect_id,
+        source_ref,
+        authorization_ref,
+        movement_evidence,
+        movement_verification,
+        request_digest,
+        occurred_at,
+        datetime.now(UTC),
+    )
+
+
+def _qualified_import(
+    command: ImportOpeningAccountV1,
+    verifier: OpeningImportVerifier | None,
+) -> OpeningImportVerificationV1:
+    if verifier is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "trusted import qualification is required"
+        )
+    digest = opening_cash_command_digest(command)
+    manifest_digest = opening_manifest_fingerprint(command.manifest)
+    try:
+        verified = verifier.verify_import(
+            OpeningImportVerificationRequestV1(command, digest, manifest_digest)
+        )
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "import qualification is unavailable"
+        ) from exc
+    if (
+        type(verified) is not OpeningImportVerificationV1
+        or verified.operation != "billing.opening.import.v1"
+        or verified.scope != command.scope
+        or verified.command_digest != digest
+        or verified.manifest_fingerprint != manifest_digest
+        or verified.partition != command.partition
+        or verified.target != command.target
+        or verified.installation_id != command.manifest.capture.installation_id
+        or verified.migration_authority_ref != command.migration_authority_ref
+        or verified.source_authority_ref
+        != command.manifest.capture.source_authority_ref
+    ):
+        raise BillingRuleViolation(
+            "opening_authority_binding",
+            "import qualification does not bind this exact command",
+        )
+    return verified
+
+
+def _require_pristine_opening_target(
+    db: Session, *, scope: Scope, command: ImportOpeningAccountV1
+) -> None:
+    plane = _models(scope)
+    actual = get_opening_cash_target(
+        db, scope=scope, billing_account_id=command.partition.account_id
+    )
+    if actual != command.target:
+        raise BillingConflict(
+            "opening_target_changed",
+            "opening target fingerprint or posting watermark changed",
+        )
+    for model in (
+        plane.group,
+        plane.settlement,
+        plane.obligation,
+        plane.document,
+        plane.withholding,
+        plane.non_cash_grant,
+        plane.opening_receipt,
+    ):
+        if (
+            db.execute(
+                _where_scope(
+                    select(model.id).where(
+                        model.billing_account_id == command.partition.account_id
+                    ),
+                    scope,
+                    model,
+                )
+            ).first()
+            is not None
+        ):
+            raise BillingRuleViolation(
+                "opening_target_not_pristine",
+                "opening import requires a financially pristine account",
+            )
+
+
+@_exact_cash_operation
+def import_opening_account(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ImportOpeningAccountV1,
+    verifier: OpeningImportVerifier | None = None,
+) -> OpeningImportReceiptV1:
+    if type(command) is not ImportOpeningAccountV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected ImportOpeningAccountV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    if (
+        command.manifest.scope != scope
+        or command.target.scope != scope
+        or command.target.account_id != command.partition.account_id
+        or (command.target.currency, command.target.precision)
+        != (command.partition.currency, command.partition.precision)
+    ):
+        raise BillingRuleViolation(
+            "opening_scope_binding", "opening command scope and partition must agree"
+        )
+    verified = _qualified_import(command, verifier)
+    # The trusted import operation above qualifies proof independently. Reuse
+    # preview structural/cash checks without inventing a permissive preview port.
+    preview = preview_opening_account_import(
+        OpeningPreviewRequestV1(
+            command.manifest,
+            command.partition,
+            command.target,
+            command.migration_authority_ref,
+        )
+    )
+    blockers = tuple(
+        item for item in preview.blockers if item.code != "verifier_unavailable"
+    )
+    if blockers:
+        raise BillingRuleViolation(
+            "opening_manifest_blocked",
+            "opening manifest has counted blockers",
+            blockers=tuple((item.code, item.count) for item in blockers),
+        )
+    for control in command.manifest.controls:
+        for field in fields(control):
+            if (
+                field.name not in {"partition", "available_cash_credit_minor"}
+                and getattr(control, field.name) != 0
+            ):
+                raise BillingRuleViolation(
+                    "opening_lane_unsupported",
+                    "complete opening manifest contains unsupported lanes",
+                )
+    sources = tuple(
+        item
+        for item in command.manifest.cash_lots
+        if item.partition == command.partition
+    )
+    total = sum(item.residual_minor for item in sources)
+    if total <= 0:
+        raise BillingRuleViolation(
+            "opening_cash_nonpositive",
+            "selected opening cash partition must be positive",
+        )
+    amount = money_from_minor(
+        total, command.partition.currency, command.partition.precision
+    )
+    for item in sources:
+        money_from_minor(
+            item.gross_minor, command.partition.currency, command.partition.precision
+        )
+        money_from_minor(
+            sum(effect.amount_minor for effect in item.consumptions),
+            command.partition.currency,
+            command.partition.precision,
+        )
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=command.partition.account_id,
+        lock=True,
+    )
+    _require_account_money(account, amount)
+    digest = opening_cash_command_digest(command)
+
+    def operation(session: Session) -> dict[str, object]:
+        _require_pristine_opening_target(session, scope=scope, command=command)
+        for source in sources:
+            existing = session.execute(
+                _where_scope(
+                    select(plane.cash_source_claim.id).where(
+                        plane.cash_source_claim.source_system == source.source_system,
+                        plane.cash_source_claim.source_settlement_key
+                        == source.source_settlement_key,
+                    ),
+                    scope,
+                    plane.cash_source_claim,
+                )
+            ).first()
+            if existing is not None:
+                raise BillingConflict(
+                    "cash_source_claimed",
+                    "opening cash source identity is permanently claimed",
+                )
+        receipt_id, group_id = uuid4(), uuid4()
+        recorded_at = datetime.now(UTC)
+        lots = tuple(
+            OpeningCashLotFactV1(
+                scope,
+                uuid4(),
+                receipt_id,
+                account.id,
+                group_id,
+                index,
+                source,
+                money_from_minor(
+                    source.residual_minor, account.currency, account.minor_units
+                ),
+                recorded_at,
+            )
+            for index, source in enumerate(sources, 1)
+        )
+        receipt = OpeningImportReceiptV1(
+            scope,
+            receipt_id,
+            "import",
+            account.id,
+            command.manifest,
+            verified.manifest_fingerprint,
+            command.partition,
+            command.target,
+            verified,
+            amount,
+            tuple(lot.lot_id for lot in lots),
+            group_id,
+            None,
+            command.idempotency_key,
+            digest,
+            command.occurred_at,
+            recorded_at,
+        )
+        opening = tuple(
+            _opening_effect(
+                scope=scope,
+                lot=lot,
+                group_id=group_id,
+                sequence=index,
+                kind="recognition",
+                amount=lot.initial_amount,
+                source_ref=command.idempotency_key,
+                request_digest=digest,
+                occurred_at=command.occurred_at,
+                authorization_ref=command.migration_authority_ref,
+            )
+            for index, lot in enumerate(lots, 1)
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="opening_cash_imported",
+            currency=account.currency,
+            minor_units=account.minor_units,
+            source_ref=command.idempotency_key,
+            occurred_at=command.occurred_at,
+            effects=((EffectLane.AVAILABLE_CREDIT, amount.amount),),
+            opening_group_id=group_id,
+            opening_receipt=receipt,
+            opening_lots=lots,
+            opening_effects=opening,
+        )
+        return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
+
+    outcome = _idempotent_cash_claim(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.import.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return get_opening_import_receipt(
+        db, scope=scope, receipt_id=UUID(str(outcome.result["receipt_id"]))
+    )
+
+
+def _refund_subject(lot: OpeningCashLotFactV1) -> OpeningCashRefundSubjectV1:
+    return OpeningCashRefundSubjectV1(
+        lot.scope,
+        lot.billing_account_id,
+        lot.initial_amount.currency.code,
+        lot.initial_amount.currency.minor_units,
+        lot.lot_id,
+        fingerprint_of(_jsonable(lot)),
+        lot.source.source_system,
+        lot.source.source_settlement_key,
+    )
+
+
+@_exact_cash_operation
+def record_opening_cash_refund(
+    db: Session,
+    *,
+    scope: Scope,
+    command: RecordOpeningCashRefundV1,
+    verifier: OpeningCashRefundVerifier | None = None,
+) -> OpeningCashEffectV1:
+    if type(command) is not RecordOpeningCashRefundV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected RecordOpeningCashRefundV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    lot = get_opening_cash_lot(db, scope=scope, lot_id=command.lot_id)
+    _require_same_money(command.amount, lot.initial_amount)
+    if verifier is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "refund outcome qualification is required"
+        )
+    digest = opening_cash_command_digest(command)
+    subject = _refund_subject(lot)
+    try:
+        verified = verifier.verify_refund(
+            OpeningCashRefundVerificationRequestV1(command, digest, subject)
+        )
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "refund qualification is unavailable"
+        ) from exc
+    if (
+        type(verified) is not OpeningCashRefundVerificationV1
+        or verified.operation != "billing.opening.cash.refund.v1"
+        or verified.command_digest != digest
+        or verified.subject != subject
+    ):
+        raise BillingRuleViolation(
+            "opening_authority_binding",
+            "refund qualification does not bind this exact outcome",
+        )
+    plane = _models(scope)
+    _one(db, scope=scope, model=plane.account, row_id=lot.billing_account_id, lock=True)
+
+    def operation(session: Session) -> dict[str, object]:
+        position = get_opening_cash_lot_position(
+            session, scope=scope, lot_id=lot.lot_id
+        )
+        if position.unwound or minor_units_of(command.amount) > minor_units_of(
+            position.remaining
+        ):
+            raise BillingRuleViolation(
+                "opening_refund_exceeds_room",
+                "refund exceeds unused active opening cash",
+            )
+        group_id = uuid4()
+        effect = _opening_effect(
+            scope=scope,
+            lot=lot,
+            group_id=group_id,
+            sequence=1,
+            kind="refund",
+            amount=command.amount,
+            source_ref=command.idempotency_key,
+            request_digest=digest,
+            occurred_at=command.occurred_at,
+            authorization_ref=command.authorization_ref,
+            movement_evidence=command.evidence,
+            movement_verification=verified,
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=lot.billing_account_id,
+            kind="opening_cash_refunded",
+            currency=command.amount.currency.code,
+            minor_units=command.amount.currency.minor_units,
+            source_ref=command.idempotency_key,
+            occurred_at=command.occurred_at,
+            effects=((EffectLane.AVAILABLE_CREDIT, -command.amount.amount),),
+            opening_group_id=group_id,
+            opening_effects=(effect,),
+        )
+        return {"effect_id": str(effect.effect_id), "posting_group_id": str(group_id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.cash.refund.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return get_opening_cash_effect(
+        db, scope=scope, effect_id=UUID(str(outcome.result["effect_id"]))
+    )
+
+
+@_exact_cash_operation
+def correct_opening_cash_refund(
+    db: Session,
+    *,
+    scope: Scope,
+    command: CorrectOpeningCashRefundV1,
+    verifier: OpeningCashRefundVerifier | None = None,
+) -> OpeningCashEffectV1:
+    if type(command) is not CorrectOpeningCashRefundV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected CorrectOpeningCashRefundV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    original = get_opening_cash_effect(
+        db, scope=scope, effect_id=command.refund_effect_id
+    )
+    if original.effect_kind != "refund" or original.amount != command.amount:
+        raise BillingRuleViolation(
+            "opening_refund_correction_invalid",
+            "only the full exact named refund can be corrected",
+        )
+    lot = get_opening_cash_lot(db, scope=scope, lot_id=original.lot_id)
+    digest = opening_cash_command_digest(command)
+    subject = _refund_subject(lot)
+    original_digest = fingerprint_of(_jsonable(original))
+    if verifier is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable",
+            "independent refund correction proof is required",
+        )
+    try:
+        verified = verifier.verify_refund_correction(
+            OpeningCashRefundCorrectionVerificationRequestV1(
+                command, digest, subject, original.effect_id, original_digest
+            )
+        )
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable",
+            "refund correction qualification is unavailable",
+        ) from exc
+    if (
+        type(verified) is not OpeningCashRefundCorrectionVerificationV1
+        or verified.operation != "billing.opening.cash.refund.correct.v1"
+        or verified.command_digest != digest
+        or verified.subject != subject
+        or verified.refund_effect_id != original.effect_id
+        or verified.refund_evidence_digest != original_digest
+        or original.movement_evidence is None
+        or command.evidence.digest == original.movement_evidence.digest
+        or type(original.movement_verification) is not OpeningCashRefundVerificationV1
+        or verified.correction_outcome_proof_ref
+        == original.movement_verification.outcome_proof_ref
+    ):
+        raise BillingRuleViolation(
+            "opening_authority_binding",
+            "new independent correction proof must bind the original refund",
+        )
+    plane = _models(scope)
+    _one(db, scope=scope, model=plane.account, row_id=lot.billing_account_id, lock=True)
+
+    def operation(session: Session) -> dict[str, object]:
+        position = get_opening_cash_lot_position(
+            session, scope=scope, lot_id=lot.lot_id
+        )
+        if (
+            position.unwound
+            or session.execute(
+                _where_scope(
+                    select(plane.opening_effect.id).where(
+                        plane.opening_effect.original_effect_id == original.effect_id,
+                        plane.opening_effect.effect_kind == "refund_correction",
+                    ),
+                    scope,
+                    plane.opening_effect,
+                )
+            ).first()
+            is not None
+        ):
+            raise BillingConflict(
+                "opening_refund_already_corrected",
+                "refund correction is full and one-time",
+            )
+        group_id = uuid4()
+        effect = _opening_effect(
+            scope=scope,
+            lot=lot,
+            group_id=group_id,
+            sequence=1,
+            kind="refund_correction",
+            amount=command.amount,
+            source_ref=command.idempotency_key,
+            request_digest=digest,
+            occurred_at=command.occurred_at,
+            authorization_ref=command.authorization_ref,
+            original_effect_id=original.effect_id,
+            movement_evidence=command.evidence,
+            movement_verification=verified,
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=lot.billing_account_id,
+            kind="opening_cash_refund_corrected",
+            currency=command.amount.currency.code,
+            minor_units=command.amount.currency.minor_units,
+            source_ref=command.idempotency_key,
+            occurred_at=command.occurred_at,
+            effects=((EffectLane.AVAILABLE_CREDIT, command.amount.amount),),
+            opening_group_id=group_id,
+            opening_effects=(effect,),
+            corrects_posting_group_id=original.posting_group_id,
+        )
+        return {"effect_id": str(effect.effect_id), "posting_group_id": str(group_id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.cash.refund.correct.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return get_opening_cash_effect(
+        db, scope=scope, effect_id=UUID(str(outcome.result["effect_id"]))
+    )
+
+
+def _cash_draw_remaining(
+    db: Session,
+    *,
+    scope: Scope,
+    fact: AccountingFactV4,
+) -> tuple[dict[UUID, int], dict[UUID, int]]:
+    plane = _models(scope)
+    ordinary: dict[UUID, int] = {}
+    opening: dict[UUID, int] = {}
+    for item in fact.settlement_allocations:
+        allocation = item.allocation
+        if allocation.effect_kind != "allocation" or allocation.document_id is None:
+            raise BillingRuleViolation(
+                "opening_draw_integrity",
+                "cash draw must bind positive original allocations",
+            )
+        offsets = Decimal(
+            db.execute(
+                _where_scope(
+                    select(
+                        func.coalesce(func.sum(plane.allocation.amount_delta), 0)
+                    ).where(
+                        plane.allocation.offsets_allocation_id
+                        == item.allocation_effect_id
+                    ),
+                    scope,
+                    plane.allocation,
+                )
+            ).scalar_one()
+        )
+        original = minor_units_of(allocation.amount_delta)
+        room = original + minor_units_of(
+            _money(
+                offsets,
+                allocation.amount_delta.currency.code,
+                allocation.amount_delta.currency.minor_units,
+            )
+        )
+        if original <= 0 or not 0 <= room <= original:
+            raise BillingRuleViolation(
+                "opening_draw_integrity",
+                "ordinary inverse exceeds its concrete original",
+            )
+        ordinary[item.allocation_effect_id] = room
+    for effect in fact.opening_cash_effects:
+        if effect.effect_kind != "application" or effect.document_id is None:
+            raise BillingRuleViolation(
+                "opening_draw_integrity",
+                "cash draw must bind original opening applications",
+            )
+        restored = Decimal(
+            db.execute(
+                _where_scope(
+                    select(
+                        func.coalesce(func.sum(plane.opening_effect.amount_delta), 0)
+                    ).where(
+                        plane.opening_effect.original_effect_id == effect.effect_id,
+                        plane.opening_effect.effect_kind == "application_inverse",
+                    ),
+                    scope,
+                    plane.opening_effect,
+                )
+            ).scalar_one()
+        )
+        original = minor_units_of(effect.amount)
+        room = original - minor_units_of(
+            _money(
+                restored,
+                effect.amount.currency.code,
+                effect.amount.currency.minor_units,
+            )
+        )
+        if not 0 <= room <= original:
+            raise BillingRuleViolation(
+                "opening_draw_integrity",
+                "opening inverse exceeds its concrete original",
+            )
+        opening[effect.effect_id] = room
+    return ordinary, opening
+
+
+@_exact_cash_operation
+def reverse_cash_credit_draw(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ReverseCashCreditDrawV1,
+) -> _PostingGroupRow:
+    """Finance assembly authorization remains the ordinary Billing perimeter.
+
+    authorization_ref retains its audit binding; it is not itself a permission.
+    This command restores credit/AR and never attests external cash receipt.
+    """
+    if type(command) is not ReverseCashCreditDrawV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected ReverseCashCreditDrawV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    fact = get_accounting_fact_v4(
+        db, scope=scope, posting_group_id=command.draw_posting_group_id
+    )
+    if fact.effect_kind != "opening_cash_applied":
+        raise BillingRuleViolation(
+            "opening_draw_invalid",
+            "inverse requires an original opening-bearing cash draw",
+        )
+    plane = _models(scope)
+    account = _one(
+        db, scope=scope, model=plane.account, row_id=fact.billing_account_id, lock=True
+    )
+    _require_account_money(account, command.amount)
+    digest = opening_cash_command_digest(command)
+
+    def operation(session: Session) -> dict[str, object]:
+        ordinary_room, opening_room = _cash_draw_remaining(
+            session, scope=scope, fact=fact
+        )
+        remaining = minor_units_of(command.amount)
+        if remaining > sum(ordinary_room.values()) + sum(opening_room.values()):
+            raise BillingRuleViolation(
+                "opening_draw_inverse_exceeds_room",
+                "inverse exceeds remaining original draw",
+            )
+        group_id = uuid4()
+        ordinary_by_id = {
+            item.allocation_effect_id: item.allocation
+            for item in fact.settlement_allocations
+        }
+        opening_by_id = {item.effect_id: item for item in fact.opening_cash_effects}
+        allocations: list[_AllocationInput] = []
+        opening: list[OpeningCashEffectV1] = []
+        order: list[CashCreditSourceOrderV1] = []
+        for source in fact.cash_source_order:
+            if remaining == 0:
+                break
+            if source.allocation_effect_id is not None:
+                original_id = source.allocation_effect_id
+                original = ordinary_by_id[original_id]
+                quantity = min(remaining, ordinary_room[original_id])
+                if quantity == 0:
+                    continue
+                allocation_id = uuid4()
+                amount = money_from_minor(
+                    -quantity, account.currency, account.minor_units
+                )
+                allocations.append(
+                    _AllocationInput(
+                        original.settlement_id,
+                        original.document_id,
+                        "reversal",
+                        amount.amount,
+                        original_id,
+                        allocation_id,
+                    )
+                )
+                order.append(
+                    CashCreditSourceOrderV1(len(order) + 1, allocation_id, None)
+                )
+            else:
+                original_id = cast(UUID, source.opening_effect_id)
+                original_opening = opening_by_id[original_id]
+                quantity = min(remaining, opening_room[original_id])
+                if quantity == 0:
+                    continue
+                lot = get_opening_cash_lot(
+                    session, scope=scope, lot_id=original_opening.lot_id
+                )
+                if get_opening_cash_lot_position(
+                    session, scope=scope, lot_id=lot.lot_id
+                ).unwound:
+                    raise BillingRuleViolation(
+                        "opening_import_unwound",
+                        "cannot restore an unwound opening principal",
+                    )
+                effect = _opening_effect(
+                    scope=scope,
+                    lot=lot,
+                    group_id=group_id,
+                    sequence=len(opening) + 1,
+                    kind="application_inverse",
+                    amount=money_from_minor(
+                        quantity, account.currency, account.minor_units
+                    ),
+                    source_ref=command.idempotency_key,
+                    request_digest=digest,
+                    occurred_at=command.occurred_at,
+                    authorization_ref=command.authorization_ref,
+                    document_id=original_opening.document_id,
+                    original_effect_id=original_id,
+                )
+                opening.append(effect)
+                order.append(
+                    CashCreditSourceOrderV1(len(order) + 1, None, effect.effect_id)
+                )
+            remaining -= quantity
+        if remaining != 0:
+            raise BillingRuleViolation(
+                "opening_draw_integrity",
+                "draw source order does not cover its exact room",
+            )
+        group = _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="cash_credit_draw_reversed",
+            currency=account.currency,
+            minor_units=account.minor_units,
+            source_ref=command.idempotency_key,
+            occurred_at=command.occurred_at,
+            effects=(
+                (EffectLane.RECEIVABLE, command.amount.amount),
+                (EffectLane.AVAILABLE_CREDIT, command.amount.amount),
+            ),
+            allocations=allocations,
+            opening_group_id=group_id,
+            opening_effects=tuple(opening),
+            cash_source_order=tuple(order),
+            corrects_posting_group_id=fact.posting_group_id,
+        )
+        return {"posting_group_id": str(group.id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.cash.credit.draw.reverse.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return cast(
+        _PostingGroupRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.group,
+            row_id=UUID(str(outcome.result["posting_group_id"])),
+        ),
+    )
+
+
+@_exact_cash_operation
+def reverse_opening_account_import(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ReverseOpeningAccountImportV1,
+    verifier: OpeningImportVerifier | None = None,
+) -> OpeningImportReceiptV1:
+    if type(command) is not ReverseOpeningAccountImportV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected ReverseOpeningAccountImportV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    original = get_opening_import_receipt(
+        db, scope=scope, receipt_id=command.receipt_id
+    )
+    if original.receipt_kind != "import":
+        raise BillingRuleViolation(
+            "opening_import_reverse_invalid",
+            "only an original opening import can unwind",
+        )
+    digest = opening_cash_command_digest(command)
+    original_digest = fingerprint_of(_jsonable(original))
+    if verifier is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable",
+            "fresh migration authority is required for unwind",
+        )
+    request = OpeningImportReversalVerificationRequestV1(
+        command,
+        digest,
+        original_digest,
+        original.posting_group_id,
+        original.billing_account_id,
+        original.total_residual.currency.code,
+        original.total_residual.currency.minor_units,
+    )
+    try:
+        verified = verifier.verify_import_reversal(request)
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "import unwind qualification is unavailable"
+        ) from exc
+    if (
+        type(verified) is not OpeningImportReversalVerificationV1
+        or verified.operation != "billing.opening.import.reverse.v1"
+        or verified.scope != scope
+        or verified.command_digest != digest
+        or verified.receipt_id != original.receipt_id
+        or verified.receipt_evidence_digest != original_digest
+        or verified.original_posting_group_id != original.posting_group_id
+        or verified.billing_account_id != original.billing_account_id
+        or (verified.currency, verified.precision)
+        != (
+            original.total_residual.currency.code,
+            original.total_residual.currency.minor_units,
+        )
+        or verified.migration_authority_ref != command.migration_authority_ref
+    ):
+        raise BillingRuleViolation(
+            "opening_authority_binding",
+            "unwind qualification does not bind the exact original import",
+        )
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=original.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        if (
+            session.execute(
+                _where_scope(
+                    select(plane.opening_receipt.id).where(
+                        plane.opening_receipt.original_receipt_id == original.receipt_id
+                    ),
+                    scope,
+                    plane.opening_receipt,
+                )
+            ).first()
+            is not None
+        ):
+            raise BillingConflict(
+                "opening_import_already_unwound",
+                "opening principal has already been unwound",
+            )
+        lots = tuple(
+            get_opening_cash_lot(session, scope=scope, lot_id=value)
+            for value in original.lot_ids
+        )
+        for lot in lots:
+            room = get_opening_cash_lot_position(
+                session, scope=scope, lot_id=lot.lot_id
+            )
+            if room.unwound or room.remaining != lot.initial_amount:
+                raise BillingRuleViolation(
+                    "opening_import_has_dependents",
+                    "reverse all net opening uses and refunds before unwind",
+                )
+        receipt_id, group_id = uuid4(), uuid4()
+        receipt = OpeningImportReceiptV1(
+            scope,
+            receipt_id,
+            "unwind",
+            account.id,
+            original.manifest,
+            original.manifest_fingerprint,
+            original.partition,
+            original.target,
+            verified,
+            original.total_residual,
+            original.lot_ids,
+            group_id,
+            original.receipt_id,
+            command.idempotency_key,
+            digest,
+            command.occurred_at,
+            datetime.now(UTC),
+        )
+        # Zero-residual sources retain their claims and provenance; no invalid
+        # zero-quantity unwind effect is invented for them.
+        opening = tuple(
+            _opening_effect(
+                scope=scope,
+                lot=lot,
+                group_id=group_id,
+                sequence=index,
+                kind="import_unwind",
+                amount=lot.initial_amount,
+                source_ref=command.idempotency_key,
+                request_digest=digest,
+                occurred_at=command.occurred_at,
+                authorization_ref=command.migration_authority_ref,
+            )
+            for index, lot in enumerate(
+                (item for item in lots if minor_units_of(item.initial_amount) > 0), 1
+            )
+        )
+        _post_group(
+            session,
+            scope=scope,
+            account_id=account.id,
+            kind="opening_cash_import_reversed",
+            currency=account.currency,
+            minor_units=account.minor_units,
+            source_ref=command.idempotency_key,
+            occurred_at=command.occurred_at,
+            effects=((EffectLane.AVAILABLE_CREDIT, -original.total_residual.amount),),
+            opening_group_id=group_id,
+            opening_receipt=receipt,
+            opening_effects=opening,
+            corrects_posting_group_id=original.posting_group_id,
+        )
+        return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.import.reverse.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return get_opening_import_receipt(
+        db, scope=scope, receipt_id=UUID(str(outcome.result["receipt_id"]))
+    )
+
+
+def _require_legacy_opening_guard(
+    db: Session,
+    *,
+    scope: Scope,
+    allocation_group_id: UUID | None = None,
+    document_id: UUID | None = None,
+) -> None:
+    plane = _models(scope)
+    if allocation_group_id is not None:
+        original = _one(db, scope=scope, model=plane.group, row_id=allocation_group_id)
+        _require_opening_reversal_owner(db, scope=scope, original=original)
+    if document_id is not None:
+        groups = tuple(
+            db.execute(
+                _where_scope(
+                    select(plane.opening_effect.posting_group_id).where(
+                        plane.opening_effect.document_id == document_id,
+                        plane.opening_effect.effect_kind == "application",
+                    ),
+                    scope,
+                    plane.opening_effect,
+                )
+            ).scalars()
+        )
+        for group_id in set(groups):
+            fact = get_accounting_fact_v4(db, scope=scope, posting_group_id=group_id)
+            ordinary, opening = _cash_draw_remaining(db, scope=scope, fact=fact)
+            if sum(ordinary.values()) + sum(opening.values()) > 0:
+                raise BillingRuleViolation(
+                    "opening_cash_owner_required",
+                    "reverse the complete mixed draw before legacy reallocation",
+                )
+
+
+def _idempotent_cash_claim(
+    db: Session,
+    *,
+    scope: Scope,
+    operation_scope: str,
+    key: str,
+    fingerprint: str,
+    operation: Operation,
+) -> IdempotentOutcome:
+    try:
+        return _idempotent(
+            db,
+            scope=scope,
+            operation_scope=operation_scope,
+            key=key,
+            fingerprint=fingerprint,
+            operation=operation,
+        )
+    except IntegrityError as exc:
+        diagnostic = getattr(exc.orig, "diag", None)
+        expected = (
+            "uq_cash_claim_source"
+            if isinstance(scope, TenantScope)
+            else "uq_platform_cash_claim_source"
+        )
+        if (
+            getattr(exc.orig, "sqlstate", None) == "23505"
+            and getattr(diagnostic, "constraint_name", None) == expected
+        ):
+            raise BillingConflict(
+                "cash_source_claimed", "cash source identity is permanently claimed"
+            ) from exc
+        raise
+
+
+def _require_mixed_settlement_chain_owner(
+    db: Session,
+    *,
+    scope: Scope,
+    original: _PostingGroupRow,
+) -> None:
+    plane = _models(scope)
+    root = original
+    visited: set[UUID] = set()
+    while root.reverses_group_id is not None:
+        if root.id in visited:
+            raise BillingRuleViolation(
+                "settlement_backing_ambiguous", "posting reversal lineage is ambiguous"
+            )
+        visited.add(root.id)
+        root = _one(db, scope=scope, model=plane.group, row_id=root.reverses_group_id)
+    if root.group_kind != "settlement_accepted":
+        return
+    prefix = "settlement:"
+    try:
+        settlement_id = UUID(root.source_ref.removeprefix(prefix))
+    except (ValueError, AttributeError) as exc:
+        raise BillingRuleViolation(
+            "settlement_backing_ambiguous", "settlement root reference is malformed"
+        ) from exc
+    settlement = db.execute(
+        _where_scope(
+            select(plane.settlement).where(plane.settlement.id == settlement_id),
+            scope,
+            plane.settlement,
+        )
+    ).scalar_one_or_none()
+    if (
+        settlement is None
+        or root.source_ref != f"settlement:{settlement_id}"
+        or settlement.billing_account_id != root.billing_account_id
+        or settlement.currency != root.currency
+        or settlement.minor_units != root.minor_units
+    ):
+        raise BillingRuleViolation(
+            "settlement_backing_ambiguous",
+            "settlement root has no exact actual receipt",
+        )
+    rows = db.execute(
+        _where_scope(
+            select(plane.allocation.id, plane.allocation.amount_delta)
+            .join(plane.group, plane.group.id == plane.allocation.posting_group_id)
+            .where(
+                plane.allocation.settlement_id == settlement_id,
+                plane.group.group_kind == "opening_cash_applied",
+            ),
+            scope,
+            plane.allocation,
+        )
+    ).all()
+    for row in rows:
+        offsets = Decimal(
+            db.execute(
+                _where_scope(
+                    select(
+                        func.coalesce(func.sum(plane.allocation.amount_delta), 0)
+                    ).where(plane.allocation.offsets_allocation_id == row.id),
+                    scope,
+                    plane.allocation,
+                )
+            ).scalar_one()
+        )
+        if row.amount_delta != offsets.copy_negate():
+            raise BillingRuleViolation(
+                "opening_cash_owner_required",
+                "reverse complete mixed draws before correcting "
+                "their settlement backing",
+            )

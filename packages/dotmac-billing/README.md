@@ -236,3 +236,31 @@ refund and reversal. This query does not call ordinary settlement acceptance or
 invoice issuance and does not invent settlement IDs or repost historical cash
 or revenue. No storage, schema, release, import or production switch is enabled
 by this source candidate.
+
+
+### Cash-only opening lifecycle (unpublished a7 candidate)
+
+`ImportOpeningAccountV1` admits verified residual cash into a financially pristine
+account/currency through `service.import_opening_account`. The injected
+`OpeningImportVerifier` qualifies the exact import operation, full manifest,
+source namespace, command digest and target fingerprint/watermark. A preview
+attestation, actor label or content hash cannot authorize import.
+
+Shared permanent receipt claims prevent later settlement callbacks from accepting
+imported sources again. Existing credit drawing spends ordinary settlements and
+opening lots; `ReverseCashCreditDrawV1` reverses a partial or full mixed draw
+atomically. Qualified unused refunds and full linked refund corrections have
+separate commands. Full import unwind requires fresh migration evidence and zero
+net dependent consumption; claims remain occupied. Partial principal changes and
+automatic reimport are unsupported.
+
+`opening_queries` returns immutable receipt, lot, effect and V4 accounting facts,
+with original digests, structural bindings, remaining room and posting watermark.
+V4 distinguishes carried-in backing from new payment or invoice/revenue events;
+existing V1–V3 contracts remain unchanged. Exact persistence supports currency
+precision zero through six within `Numeric(20,6)`, without rounding.
+
+All writes participate in the caller's transaction. Source acceptance, published
+artifact verification, real Sub source-proof adapters, ERP mapping, other opening
+lanes and production cutover remain separate gates. This candidate has not been
+used to import operational balances.

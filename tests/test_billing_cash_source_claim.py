@@ -345,7 +345,19 @@ def _raw_rows(connection, plane, settlement_id):
     )
     proof = dict(
         connection.execute(
-            select(claim.__table__).where(claim.settlement_id == settlement_id)
+            # This helper also reads a genuine bi6 predecessor. Select its
+            # original columns; opening_cash_lot_id is introduced only by bi7.
+            select(
+                *((claim.tenant_id,) if plane == "tenant" else ()),
+                claim.id,
+                claim.settlement_id,
+                claim.billing_account_id,
+                claim.source_system,
+                claim.source_settlement_key,
+                claim.currency,
+                claim.minor_units,
+                claim.recorded_at,
+            ).where(claim.settlement_id == settlement_id)
         )
         .mappings()
         .one()
@@ -469,7 +481,17 @@ def test_genuine_bi0005_upgrade_preserves_all_history_and_backfills_exact_identi
                 session.commit()
         engine = create_engine(urls[0])
         names = (*b.TENANT_TABLES,) if plane == "tenant" else b.PLATFORM_TABLES
-        names = tuple(name for name in names if "cash_source_claims" not in name)
+        # Preserve the complete bi5 history inventory. Later opening tables
+        # do not exist at either endpoint of this bi5 -> bi6 upgrade canary.
+        later_tables = {
+            "cash_source_claims",
+            "opening_import_receipts",
+            "opening_cash_lots",
+            "opening_cash_effects",
+        }
+        names = tuple(
+            name for name in names if name.removeprefix("platform_") not in later_tables
+        )
         with engine.connect() as connection:
             before = {
                 name: connection.execute(
