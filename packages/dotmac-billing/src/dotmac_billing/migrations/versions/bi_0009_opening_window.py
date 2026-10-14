@@ -289,7 +289,7 @@ def _guards(platform: bool) -> None:
       IF opening THEN window_id := mod_billing.touch_{prefix}opening_window({argument}); END IF;
       RETURN NEW;
     END $$;
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed scope/manifest expressions
     for table in (
         "documents",
         "opening_import_receipts",
@@ -392,7 +392,7 @@ def _guards(platform: bool) -> None:
     END $$;
     CREATE TRIGGER opening_window_seal_guard BEFORE INSERT ON mod_billing.{prefix}opening_window_seals
       FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{prefix}opening_seal();
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed scope/manifest expressions
     for table in ("opening_window_admissions", "opening_window_seals"):
         op.execute(
             f"CREATE TRIGGER {prefix}{table}_append_only BEFORE UPDATE OR DELETE ON mod_billing.{prefix}{table} FOR EACH ROW EXECUTE FUNCTION mod_billing.refuse_mutation();"
