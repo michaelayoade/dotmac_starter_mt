@@ -293,3 +293,32 @@ module vocabulary and creates multiple connector control planes.
 **Fold general observability into Network Observability.** The production
 telemetry control plane already exists and has a different operational owner;
 duplicating it creates drift rather than a reusable network domain.
+
+## Amendment, 2026-10-14: composed device desired configuration has an owner outside the suite
+
+Section 1 names nine modules, and none of them owns the desired configuration of
+a device composed from layered documents. Michael decided on 2026-10-14
+(ADR-0074) that:
+
+1. `dotmac-network-config` is the owner of composed device desired
+   configuration: layer revisions, profiles, policy tags, subject bindings,
+   assignments, dated exceptions, blast radius and the assurance (health-policy)
+   projection. It is a tenth network module. It is plug-in agnostic: provider
+   plug-ins are registered by the assembly, and subjects are opaque references
+   with no product foreign keys (section 5).
+2. It is **outside the `network-suite-v1` cohort**. It displaces no existing Sub
+   writer and holds no command, approval or dispatch state, so sections 2 and 3
+   (build together, adopt together, one coordinated suite cutover) do not apply
+   to it, and the suite's nine-module set, order and gates are unchanged.
+3. The RouterOS plug-in (`dotmac-routeros-config`) is a provider adapter composed
+   by the assembly, as section 6 requires. It stays I/O-free, so it is not a
+   connector. It adds no provider enum, import or mode flag to any suite module.
+4. Change-set execution (commands, dispatches, execution evidence,
+   reconciliation) stays in `dotmac-network-control` and arrives with the suite
+   cutover.
+
+Because `network-module-dispositions.toml` and its architecture canary are the
+mechanical record of the nine-module set, they are deliberately **not** changed:
+the tenth module is not part of that set. The ledger, the canary and this record
+are changed together in the review that adds `dotmac-network-config` source,
+should that review find the set needs to name it.
