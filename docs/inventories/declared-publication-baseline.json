@@ -138,7 +138,7 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a104+dev",
+      "declared": "0.1.0a105",
       "reason": "This row tracks Kernel source whose protected publication-record transition is not yet complete, including strict fresh settings resolution and the exact-root conflict-savepoint completion protocol. A +dev declaration is deliberately unpublishable and does not allocate a successor. Separately authorized allocation replaces +dev with the exact next public version while the row remains declared-unpublished; remove the row only after protected publication verifies and records that exact release.",
       "state": "declared-unpublished"
     },
