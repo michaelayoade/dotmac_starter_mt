@@ -6,6 +6,43 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a105 — Release inventory
+
+This section inventories the source proposed for the next numeric alpha after
+the published `0.1.0a104` tag. Its presence allocates no version and proves no
+publication. Exact protected authorization, verified artifacts, the annotated
+tag and the permanent verification record establish any eventual release.
+
+### Added
+
+- **Fresh validated settings reads.** `settings_resolver.resolve_strict` uses
+  the registered spec, normal scope chain and installed profile defaults,
+  bypassing both cache and ORM identity-map values. An unusable winning row
+  refuses instead of selecting a less-specific fallback. Reads preserve
+  pending edits under `no_autoflush`; freshness follows caller isolation.
+  `StrictSettingResolutionError` and `StrictSettingResolutionReason` expose
+  bounded declaration diagnostics without values or underlying exception text.
+  Existing resolver behavior is retained.
+
+- **Exact conflict-savepoint completion protocol.** The supported
+  `transactions` module exports `ConflictSavepointState`,
+  `ConflictSavepointPhase`, `ConflictSavepointProtocolError`,
+  `current_conflict_savepoint`, `claim_conflict_savepoint_commit` and
+  `conflict_savepoint_requires_rollback`. Assemblies can observe exact root,
+  child and phase, and consume one claim during Kernel's own release after
+  validating their stored root. Observation and participant BODY grant no
+  completion permission. Public-export and compatibility declarations cover
+  both new surfaces.
+
+### Fixed
+
+- Conflict-savepoint recovery requires successful rollback of the exact child
+  and restoration of the same active enclosing transaction. Unproven cleanup
+  or post-release callback failure latches the exact root and prevents commit,
+  even if the original error is caught. Only that root ending clears the
+  latch. Cleanup preserves the original exception and cause; Kernel never
+  completes the caller's outer transaction.
+
 ## 0.1.0a104 — Release inventory
 
 This section inventories the source intended to ship first in `0.1.0a104`.
