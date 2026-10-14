@@ -385,12 +385,26 @@ def readback_binding(
             raise refused(ambiguous)
         if job["runner_group_id"] is None:
             # Explicit null is schema-supported; the live shape must still
-            # qualify. Missing, zero/False/floats and hosted/started shapes refuse.
+            # qualify. Missing, False/floats and hosted/started shapes refuse.
             if (
                 any(
                     key not in job or job[key] is not None
                     for key in ("runner_id", "runner_name", "runner_group_name")
                 )
+                or _field(job, "labels", list, ambiguous) != []
+                or _field(job, "steps", list, ambiguous) != []
+            ):
+                raise refused(ambiguous)
+        elif type(job["runner_group_id"]) is int and job["runner_group_id"] == 0:
+            # Live GitHub shape for a queued, never-assigned job: explicit
+            # zeros and empty strings. Only the fully-unassigned form
+            # qualifies; any mixed, assigned or started field refuses. This
+            # asserts no group: the separate empty-group check below and the
+            # post-assignment group binding remain unchanged.
+            if (
+                _field(job, "runner_id", int, ambiguous) != 0
+                or _field(job, "runner_name", str, ambiguous) != ""
+                or _field(job, "runner_group_name", str, ambiguous) != ""
                 or _field(job, "labels", list, ambiguous) != []
                 or _field(job, "steps", list, ambiguous) != []
             ):
