@@ -374,6 +374,37 @@ recorded AST and parity digests remain evidence of the implementation initially
 carried into the kernel, not a claim that an unshipped local copy remains the
 authority after the kernel owner repaired it.
 
+## Context-dependent financial encoding correction — 2026-10-14
+
+The full Kernel adoption review found another injectivity defect in the owned
+implementation: `canonical_decimal` called `Decimal.normalize()`, which rounds
+under the ambient context before rendering. At precision two, distinct exact
+values `1.01` and `1.02` could produce the same frame. The Money branch used
+`scaleb().to_integral_value()` and could similarly round an already constructed
+value when encoded under a different context. Construction with clamping can
+also pad coefficient zeroes; exact minor-unit conversion must account for the
+stored exponent as well as the currency scale.
+
+This is a repair of the existing Kernel owner, not a new extraction or a change
+to the qualifying-source conclusion above. Exact fixed-point rendering and
+coefficient/exponent handling preserve the intended `cv1` frames. New authored
+canaries cover all rounding modes, precision, exponent limits, clamping, traps,
+unchanged context flags, literal frozen frames and distinct amount digests.
+They require hosted CI; no local runtime proof or production impact audit is
+claimed here.
+
+The earlier pre-release framing correction does not imply this defect was
+also repaired before publication. Published artifacts remain immutable.
+Previously rounded-context identities may differ after this fix, and formerly
+trapped inputs can encode. Consumers must establish actual context and
+persistence evidence before adoption; ambiguous collided identities require
+reviewed authoritative reconciliation, never automatic rehashing or fallback
+acceptance. The migration-owner ledger's string/bool/integer inputs and the
+renderer wrapper's explicit context are useful source observations, not proof
+that all consumers or all persisted identities are unaffected. The proposed
+successor release input must be reviewed and approved again after this change;
+the earlier approval binds the earlier tree only.
+
 ## The pin question, refused
 
 Nothing in this file is a pin, and no pin is recorded anywhere in the dossier
