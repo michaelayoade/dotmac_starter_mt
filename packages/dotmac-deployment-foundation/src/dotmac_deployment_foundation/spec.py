@@ -3050,12 +3050,14 @@ class ProductDeploymentSpec:
         _validate_cross_field(spec, source)
         try:
             _execution_plain_input(document)
-            retained = json.dumps(document, allow_nan=False).encode("utf-8")
+            retained_input: bytes | None = json.dumps(document, allow_nan=False).encode(
+                "utf-8"
+            )
         except (ValueError, TypeError, RecursionError, OverflowError):
             # Preserve planning acceptance for exotic Mapping inputs. Mutation
             # gives a precise missing-input refusal rather than guessing a copy.
-            retained = None
-        object.__setattr__(spec, "_execution_parse_input", retained)
+            retained_input = None
+        object.__setattr__(spec, "_execution_parse_input", retained_input)
         return spec
 
     # ── derived, so two products cannot disagree ────────────────────────────
