@@ -37,8 +37,8 @@
     "that stops drifting disappears, reason and all.",
     "Regenerate: make published-source-drift-baseline"
   ],
-  "released_total": 74,
-  "drifted_total": 3,
+  "released_total": 72,
+  "drifted_total": 2,
   "drifted": [
     {
       "distribution": "dotmac-brand-profiles",
@@ -57,15 +57,6 @@
       "head_tree": "b87541286f8a85219ea52dac2c60e879655b05cf",
       "disposition": "not-actionable-here",
       "reason": "This directory is a RETIRED COPY awaiting extraction step 10, and the consuming assembly pins a6 rather than the a2 declared here. Nothing to repair in this repository: the row disappears when the copy is removed by that extraction step. Do NOT re-release to make it match."
-    },
-    {
-      "distribution": "dotmac-numbering",
-      "version": "0.1.0a2",
-      "tag": "dotmac-numbering-v0.1.0a2",
-      "published_tree": "e02b93ea3ce4f04308f8a47a1cb30c247e6dec5d",
-      "head_tree": "ad94c961af35571f876f4a7810494bda95b7c7cc",
-      "disposition": "code-debt-migration-repaired",
-      "reason": "TWO SEPARATE THINGS, and only one was a defect. The DEFECT: nu_0001_numbering.py, a RELEASED migration, was edited in place after a2 shipped; dotmac_erp pins a2 AND composes this lineage, so one revision id named two file contents. Repaired -- the file is restored to its released bytes and the distribution is enrolled in tests/architecture/test_released_migrations.py, which is the gate that owns that question. THE REMAINING ROW: service.py is ahead of the tag (ordinary post-release code drift). A drift row holds that steady; it never spoke to the migration. Clears at the next release."
     }
   ]
 }
