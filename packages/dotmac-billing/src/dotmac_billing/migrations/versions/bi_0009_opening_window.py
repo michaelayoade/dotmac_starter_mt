@@ -207,7 +207,7 @@ def _guards(platform: bool) -> None:
           THEN RAISE EXCEPTION 'ordinary opening INSERT privilege remains effective' USING ERRCODE = '42501'; END IF;
           FOREACH privilege IN ARRAY ARRAY['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
             IF pg_catalog.has_table_privilege(online, relation, privilege)
-              OR CASE WHEN privilege IN ('UPDATE','REFERENCES') THEN pg_catalog.has_any_column_privilege(online, relation, privilege) ELSE false END
+              OR (CASE WHEN privilege IN ('UPDATE','REFERENCES') THEN pg_catalog.has_any_column_privilege(online, relation, privilege) ELSE false END)
             THEN RAISE EXCEPTION 'ordinary custody mutation privilege remains effective' USING ERRCODE = '42501'; END IF;
           END LOOP;
         END LOOP;
@@ -314,7 +314,7 @@ def _guards(platform: bool) -> None:
       IF NEW.receipt_kind <> 'import' THEN RETURN NEW; END IF;
       SELECT * INTO bound FROM mod_billing.{prefix}opening_windows x WHERE true{new_scope};
       IF NEW.manifest_fingerprint <> bound.manifest_fingerprint
-        OR bound.manifest_version <> CASE WHEN NEW.evidence::jsonb ? 'total_receivable' THEN 2 ELSE 1 END
+        OR bound.manifest_version <> (CASE WHEN NEW.evidence::jsonb ? 'total_receivable' THEN 2 ELSE 1 END)
         OR NEW.evidence::jsonb->'manifest' IS DISTINCT FROM bound.evidence::jsonb->'window'->'manifest'
       THEN RAISE EXCEPTION 'opening window binds one complete manifest' USING ERRCODE = '23514'; END IF;
       INSERT INTO mod_billing.{prefix}opening_window_admissions
