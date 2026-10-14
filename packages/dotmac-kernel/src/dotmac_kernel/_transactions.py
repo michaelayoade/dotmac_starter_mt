@@ -165,7 +165,8 @@ def conflict_savepoint(db: Session) -> Generator[None, None, None]:
     enclosing_savepoint = db.get_nested_transaction()
     savepoint = db.begin_nested()
     root = db.get_transaction()
-    assert root is not None
+    if root is None:
+        raise ConflictSavepointProtocolError("Conflict savepoint has no owning root")
     frame = _Frame(ConflictSavepointState(root, savepoint, ConflictSavepointPhase.BODY))
     stack: list[_Frame] = db.info.setdefault(_STACK_KEY, [])
     stack.append(frame)
