@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "dotmac-config-layers"
+version = "0.1.0a1"
+description = "Generic layered configuration composition: weighted layers, deterministic merge, provenance, conflicts and dated exceptions"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_config_layers", from = "src" }]
+include = [
+    { path = "src/dotmac_config_layers/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# The manifest is the only kernel import. a88 is the first kernel that registers
+# a stateless ModuleManifest (the dotmac-document-rendering a1 floor); Sub pins
+# a98, so this floor never forces Sub to raise its kernel pin.
+dotmac-kernel = ">=0.1.0a88"
+pydantic = ">=2.7.4,<3.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

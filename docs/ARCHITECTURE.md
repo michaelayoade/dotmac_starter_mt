@@ -1409,6 +1409,15 @@ packages/dotmac-pon-access/      network-suite-v1: OLT/ONT commissioning,
                  opaquely. BUILT AND TESTED HERE AS ONE COHORT, NOT COMPOSED
                  by this reference assembly and not released before Sub's
                  first-authority cutover (ADR-0038).
+packages/dotmac-config-layers/   optional STATELESS composition engine (ADR-0074)
+  src/dotmac_config_layers/      weighted, tiered layers merged into one
+                 effective state with per-leaf provenance, typed conflicts,
+                 dated exceptions and widening classification, through a
+                 provider-neutral plug-in protocol. No lineage, no tables, no
+                 I/O; imports only the standard library, pydantic and itself.
+                 audit-complete, no adopter yet (Sub is the candidate). NOT
+                 part of network-suite-v1; its stateful owner,
+                 `dotmac-network-config`, is a later separate module.
 packages/dotmac-positioning/     optional tenant position-evidence owner
   pyproject.toml                 distribution dotmac-positioning;
   EXTRACTION.toml                audit-complete, no adopter yet (ADR-0039)

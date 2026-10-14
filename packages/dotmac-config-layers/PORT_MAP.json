@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "source_repository": "dotmac_sub",
+  "source_revision": "ab2d08e0e8f4cadca0fd4b3c2e65d334ea03bcdc",
+  "source_note": "Sub draft PR 3625 head. The composition paths are byte-identical to aa0c1057e (review fix H1) and the local clone.",
+  "files": [
+    {
+      "source": "dotmac_sub:app/services/composition/__init__.py",
+      "source_blob": "e51444e6defb2b37602e729a7a93d1ee4f3ef9ae",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/__init__.py",
+      "destination_blob": "7023908c2f36a248016654c20dd0d8654bf06c29",
+      "lines_added": 172,
+      "lines_removed": 2,
+      "allowed_deltas": [
+        "rewritten: public API re-exports and __all__; docstring edited to name no Sub document"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/compose.py",
+      "source_blob": "fd2c755eba5ed48ae862cf91304053553ec79e79",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/compose.py",
+      "destination_blob": "be4ea0ddcee86e11e713d1c64e8d83f6bb636e67",
+      "lines_added": 17,
+      "lines_removed": 17,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/derive.py",
+      "source_blob": "40cb576c1850dff152e07b5eb1e7dc61552bb5fe",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/derive.py",
+      "destination_blob": "fb456e71901a37b9d149779d4cd10be3689c9e22",
+      "lines_added": 2,
+      "lines_removed": 2,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/document.py",
+      "source_blob": "8ff8ac07f9f78205466ccf7d797f6551db0e6153",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/document.py",
+      "destination_blob": "b8a73f2ce3d90bdfd9f59b148ae797431eab50aa",
+      "lines_added": 4,
+      "lines_removed": 4,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/drift.py",
+      "source_blob": "ed9254051dd6dd6d3cb53fc1b62fff1ff2100084",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/drift.py",
+      "destination_blob": "60eb08c71863a6a838915981778ca53de02012cf",
+      "lines_added": 1,
+      "lines_removed": 1,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/evaluate.py",
+      "source_blob": "3bfaafb81f2f153722130766079244a44c94fccc",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/evaluate.py",
+      "destination_blob": "3bfaafb81f2f153722130766079244a44c94fccc",
+      "lines_added": 0,
+      "lines_removed": 0,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/exceptions.py",
+      "source_blob": "39a187b4d58ca717f52f2d5f4c6f84cc03dd1e6e",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/exceptions.py",
+      "destination_blob": "4b16155280c8e3fce545bca9058054edd4a18ce4",
+      "lines_added": 1,
+      "lines_removed": 1,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/fields.py",
+      "source_blob": "c9f019ba3d590e9f87a4f250589c0b7f37f16924",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/fields.py",
+      "destination_blob": "3cdeee92ab9f2b1b10b6c1b66369139b2e95c240",
+      "lines_added": 8,
+      "lines_removed": 8,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/layers.py",
+      "source_blob": "5525fcb1ccca0a3b20fc3838134767ab786c1539",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/layers.py",
+      "destination_blob": "858a063552f9129e7b3111c94798f35a11c53dfa",
+      "lines_added": 1,
+      "lines_removed": 1,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/merge.py",
+      "source_blob": "900655e98f27abf99e403b0bcc70c21f8847f21b",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/merge.py",
+      "destination_blob": "265147114664711023cc4a61971ddcb8348845d3",
+      "lines_added": 26,
+      "lines_removed": 26,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/plugin.py",
+      "source_blob": "8bb95ed58695981a4be5a5d5d8371a59da57328f",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/plugin.py",
+      "destination_blob": "f8d12dfb278d48f9653fff1a58f4ad29b094072e",
+      "lines_added": 1,
+      "lines_removed": 1,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+      ]
+    },
+    {
+      "source": "dotmac_sub:app/services/composition/widening.py",
+      "source_blob": "adcaea2699a20fdbcc0b5aa7ad1741b78bb4e033",
+      "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/widening.py",
+      "destination_blob": "3a9c0a5bc2606016b747c057841ed481984ac281",
+      "lines_added": 5,
+      "lines_removed": 5,
+      "allowed_deltas": [
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates",
+        "bool() wrap on secure_bool comparison for strict mypy no-any-return"
+      ]
+    },
+    {
+      "source": "dotmac_sub:tests/services/composition/demo_plugin.py",
+      "source_blob": "c1926dc29837351fd0c98914ac3995217f23971f",
+      "destination": "tests/unit/config_layers/demo_plugin.py",
+      "destination_blob": "69e8c6f662663938ac58db4ce8dbf071f671a196",
+      "lines_added": 8,
+      "lines_removed": 9,
+      "allowed_deltas": [
+        "import rewrite: app.services.composition to dotmac_config_layers",
+        "lint-only: ruff 0.6.9 autofix and format"
+      ]
+    },
+    {
+      "source": "dotmac_sub:tests/services/composition/test_equal_rank.py",
+      "source_blob": "1ac0d22ce0713cbaa6f3d8b6d63d3dc63de94d95",
+      "destination": "tests/unit/config_layers/test_equal_rank.py",
+      "destination_blob": "a0929061634907b444a812d6f00fc6ce0f4b2ec9",
+      "lines_added": 1,
+      "lines_removed": 1,
+      "allowed_deltas": [
+        "import rewrite: app.services.composition to dotmac_config_layers",
+        "lint-only: ruff 0.6.9 autofix and format"
+      ]
+    },
+    {
+      "source": "dotmac_sub:tests/services/composition/test_spec_vectors.py",
+      "source_blob": "376080345b46a9a1b28aa7bd6511b12ce1d8b3b5",
+      "destination": "tests/unit/config_layers/test_spec_vectors.py",
+      "destination_blob": "0e34d0d365f1a55cc67be1b55ea506d879fc6b63",
+      "lines_added": 12,
+      "lines_removed": 57,
+      "allowed_deltas": [
+        "import rewrite: app.services.composition to dotmac_config_layers",
+        "lint-only: ruff 0.6.9 autofix and format",
+        "removed test_input_widening_key_is_ignored_by_the_parser and test_t14_snmp_write_access_default_override_needs_approval: they import Sub router_control and move to the dotmac-routeros-config slice"
+      ]
+    },
+    {
+      "source": "dotmac_sub:tests/services/composition/test_widening.py",
+      "source_blob": "6c5ff06c538668ea47a25ef06d6e303a5e290caf",
+      "destination": "tests/unit/config_layers/test_widening.py",
+      "destination_blob": "4b2c9e4e62bcd24257ccdb49dd3e426bfcb7b744",
+      "lines_added": 2,
+      "lines_removed": 2,
+      "allowed_deltas": [
+        "import rewrite: app.services.composition to dotmac_config_layers",
+        "lint-only: ruff 0.6.9 autofix and format"
+      ]
+    }
+  ]
+}

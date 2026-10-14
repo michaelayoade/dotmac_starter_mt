@@ -1,0 +1,71 @@
+schema_version = 1
+package = "dotmac-config-layers"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+source_mode_note = "No qualifying production-used composition engine exists in Sub, ERP or Starter (docs/inventories/device-config-composition-sources.md section 2). The initial code is Dotmac Sub draft PR 3625 at ab2d08e0e8f4cadca0fd4b3c2e65d334ea03bcdc, ported with its review fixes H1 and L1-L4 and its spec tests; that PR was never merged or used in production and is reviewed initial code, not a qualifying source."
+owner = "Stateless layered-configuration composition: deterministic merge of weighted, tiered layers into an effective state with per-leaf provenance, typed conflicts, dated exceptions, widening classification and a drift vocabulary, through a provider-neutral plug-in protocol"
+contract = "Accept immutable layer revisions, a subject, dated exceptions and a caller-supplied date by value; apply the plug-in's tiers, field specs, derived rules and module schemas; return an Effective state with per-module effective parameters, provenance for every effective leaf, conflicts, exception statuses, lapsed exceptions and stable hashes. Same inputs give the same output in any input order. The engine owns no rows, transactions, clocks, environment, external I/O, credentials or provider vocabulary; the plug-in supplies every domain fact and the consuming assembly supplies storage and decisions."
+
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
+
+source_revisions = [
+  "dotmac_sub:ab2d08e0e8f4cadca0fd4b3c2e65d334ea03bcdc",
+  "dotmac_erp:93d7e111d9278b8377bac311e78308c99f51da79",
+]
+# Sub production main, re-read to confirm no product writer composes device
+# desired configuration. The code source above is the unmerged draft PR head.
+revalidation_revisions = [
+  "dotmac_sub:c837d2277af7b95fe15848b4071333582d320596",
+]
+source_paths = [
+  "dotmac_sub:app/services/composition/__init__.py",
+  "dotmac_sub:app/services/composition/compose.py",
+  "dotmac_sub:app/services/composition/derive.py",
+  "dotmac_sub:app/services/composition/document.py",
+  "dotmac_sub:app/services/composition/drift.py",
+  "dotmac_sub:app/services/composition/evaluate.py",
+  "dotmac_sub:app/services/composition/exceptions.py",
+  "dotmac_sub:app/services/composition/fields.py",
+  "dotmac_sub:app/services/composition/layers.py",
+  "dotmac_sub:app/services/composition/merge.py",
+  "dotmac_sub:app/services/composition/plugin.py",
+  "dotmac_sub:app/services/composition/widening.py",
+  "dotmac_starter_mt:docs/inventories/device-config-composition-sources.md",
+  "dotmac_starter_mt:docs/adr/0074-device-desired-configuration-is-composed-from-layered-documents.md",
+]
+preserved_tests = [
+  "dotmac_sub:tests/services/composition/demo_plugin.py",
+  "dotmac_sub:tests/services/composition/test_equal_rank.py",
+  "dotmac_sub:tests/services/composition/test_spec_vectors.py",
+  "dotmac_sub:tests/services/composition/test_widening.py",
+  "dotmac_starter_mt:tests/unit/config_layers/demo_plugin.py",
+  "dotmac_starter_mt:tests/unit/config_layers/test_equal_rank.py",
+  "dotmac_starter_mt:tests/unit/config_layers/test_spec_vectors.py",
+  "dotmac_starter_mt:tests/unit/config_layers/test_widening.py",
+  "dotmac_starter_mt:tests/architecture/test_config_layers_module.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_sub"]
+authority_boundary = "ADR-0074 and its ADR-0017 owner-directed exception. dotmac-config-layers owns only deterministic composition. A plug-in (dotmac-routeros-config for RouterOS) owns the domain's tiers, field specs and module vocabulary; dotmac-network-config owns durable layer revisions and commands; dotmac-network-control owns change-set execution. No product vocabulary, credential, transport or provider client enters this package."
+inventory_evidence = [
+  "docs/inventories/device-config-composition-sources.md",
+]
+first_cutover = "Dotmac Sub router control plane is the first candidate: Sub pins the released engine and the RouterOS plug-in and runs composition and drift reports from its CLI. Sub has no local engine to retire, so the cutover is a first adoption and not a replacement; nothing is adopted until a Sub commit exercises the released package in a running system."
+shadow_and_drift = "Port parity: every ported source file equals Sub draft PR 3625 at the recorded revision after the declared lint-only deltas. The spec vectors T1 to T25, the M10 and M11 permutation and idempotence checks, provenance completeness, equal-rank ties and widening classification run against this package unchanged. At adoption, Sub compares composed effective state and hashes for the same layers and subjects against its own reports before any enforcement."
+local_copy_retirement = "None required: Sub holds no local copy once draft PR 3625 is closed in favour of this package. Sub must not keep a fork of the engine; any engine change lands here first."
+next_action = "Hosted CI green on the first slice; architect review; Michael merges. Release only by the named release captain in a gap between billing releases, before dotmac-routeros-config. Product adoption additionally requires an exact Sub pin and adoption evidence at an immutable Sub commit."
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "93d7e111d9278b8377bac311e78308c99f51da79"
+evidence_paths = ["app"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "no_writer"
+retirement_required = false
+revision = "c837d2277af7b95fe15848b4071333582d320596"
+evidence_paths = ["app/services/captive_access_policy.py", "app/services/router_health/policy.py"]
