@@ -1086,13 +1086,18 @@ def test_atomic_fault_after_cash_ar_claims_and_outbox_preserves_outer_work(
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 @pytest.mark.parametrize("conflicting", [False, True])
+@pytest.mark.parametrize("version", [1, 2])
 def test_concurrent_same_key_retries_converge_or_refuse_changed_evidence(
-    scratch, plane, conflicting
+    scratch, plane, conflicting, version, monkeypatch
 ):
     scope, url = noncash._scope_url(scratch, plane)
     with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
-        command = _command(db, scope, account)
+        command = (
+            cash._command(db, scope, account, amounts=(3000, 3000))
+            if version == 1
+            else _command(db, scope, account)
+        )
         cash._prepare_window(db, scope, command)
     commands = (
         command,
@@ -1101,6 +1106,15 @@ def test_concurrent_same_key_retries_converge_or_refuse_changed_evidence(
         else command,
     )
     barrier = Barrier(2)
+    admission_barrier = Barrier(2)
+    real_admit = s._admit_opening_window
+
+    def synchronize_admission(*args, **kwargs):
+        # Both Kernel lookups must miss before either waits on custody.
+        admission_barrier.wait(timeout=20)
+        return real_admit(*args, **kwargs)
+
+    monkeypatch.setattr(s, "_admit_opening_window", synchronize_admission)
     results, failures = [], []
 
     def run(cmd):
@@ -1112,8 +1126,12 @@ def test_concurrent_same_key_retries_converge_or_refuse_changed_evidence(
                     db,
                     scope=scope,
                     command=cmd,
-                    verifier=evidence.TrustedVerifier(),
-                    version=2,
+                    verifier=(
+                        cash.TrustedVerifier()
+                        if version == 1
+                        else evidence.TrustedVerifier()
+                    ),
+                    version=version,
                 )
                 db.commit()
                 results.append(receipt)
@@ -1128,7 +1146,7 @@ def test_concurrent_same_key_retries_converge_or_refuse_changed_evidence(
         assert not thread.is_alive()
     if conflicting:
         assert len(results) == len(failures) == 1
-        assert isinstance(failures[0], IdempotencyConflict | BillingConflict)
+        assert isinstance(failures[0], IdempotencyConflict)
     else:
         assert failures == []
         assert len(results) == 2
@@ -1136,15 +1154,16 @@ def test_concurrent_same_key_retries_converge_or_refuse_changed_evidence(
     with cash._session(scratch, url, scope) as db:
         counts = _counts(db, plane, account)
         assert counts["OpeningImportReceipt"] == 1
-        assert counts["OpeningReceivableBasis"] == counts["OpeningCashLot"] == 2
+        assert counts["OpeningReceivableBasis"] == (0 if version == 1 else 2)
+        assert counts["OpeningCashLot"] == 2
         assert (
             cash._retry_count(
-                db, plane, "billing.opening.import.v2", command.idempotency_key
+                db, plane, f"billing.opening.import.v{version}", command.idempotency_key
             )
             == 1
         )
         assert cash._position(db, scope, account).collectible_receivable == Decimal(
-            "120"
+            "0" if version == 1 else "120"
         )
         assert cash._position(db, scope, account).available_credit == Decimal("60")
 
@@ -1455,12 +1474,25 @@ def test_raw_sql_claim_affinity_has_an_exact_insertable_positive_control(
                 )
             )
 
+        def select_opening_principal():
+            # Fixture surgery is technical-owner work; candidate admission must
+            # exercise the actual restricted principal bound to this window.
+            principal = scratch.principals[plane][0]
+            connection.execute(text(f'SET LOCAL ROLE "{principal}"'))
+            if isinstance(scope, TenantScope):
+                connection.execute(
+                    text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                    {"tenant": str(scope.tenant_id)},
+                )
+
         remove_fixture_claim()
+        select_opening_principal()
         connection.execute(table.insert().values(**{**original, "id": uuid4()}))
         connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
         connection.rollback()
         for changes in ({"billing_account_id": other_account}, {"basis_id": uuid4()}):
             remove_fixture_claim()
+            select_opening_principal()
             with pytest.raises(DBAPIError) as error:
                 connection.execute(
                     table.insert().values(**{**original, "id": uuid4(), **changes})
@@ -1473,6 +1505,7 @@ def test_raw_sql_claim_affinity_has_an_exact_insertable_positive_control(
                 in str(error.value.orig)
             )
             connection.rollback()
+        select_opening_principal()
         with pytest.raises(DBAPIError) as error:
             connection.execute(table.insert().values(**{**original, "id": uuid4()}))
         assert error.value.orig.sqlstate == "23505"
@@ -2362,18 +2395,19 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
             assert cash._position(db, scope, account).available_credit == Decimal("50")
             fresh_account = cash._new_account(db, scope)
             new_command = _command(db, scope, fresh_account)
-            with pytest.raises(BillingRuleViolation) as missing:
-                s.import_opening_account_v2(
-                    db,
-                    scope=scope,
-                    command=new_command,
-                    verifier=evidence.TrustedVerifier(),
-                )
-            assert missing.value.code == "billing.opening_window_missing"
             db.commit()
-        # Existing immutable receipts cannot be silently adopted into a new
-        # window, even by a genuine migrator with a genuine restricted role.
         with cash.window_fixture._principal(urls, plane) as principal:
+            with cash.window_fixture._restricted_session(urls, scope, principal) as db:
+                with pytest.raises(BillingRuleViolation) as missing:
+                    s.import_opening_account_v2(
+                        db,
+                        scope=scope,
+                        command=new_command,
+                        verifier=evidence.TrustedVerifier(),
+                    )
+                assert missing.value.code == "billing.opening_window_missing"
+            # Existing immutable receipts cannot be silently adopted into a new
+            # window, even by a genuine migrator with a genuine restricted role.
             with pytest.raises(DBAPIError) as bootstrap:
                 cash.window_fixture._provision(urls, scope, principal, new_command)
             assert bootstrap.value.orig.sqlstate == "42501"

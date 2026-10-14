@@ -58,6 +58,14 @@ posting or admitting again. New keys, accounts, receipts and opening principal
 after sealing refuse. A changed payload still conflicts. Sealing neither frees
 a permanent source claim nor grants authority to unwind.
 
+Two concurrent requests can both miss the initial Kernel retry lookup before
+one waits on the window. If that wait ends in a changed-target or closed-window
+refusal, Billing rechecks the same Kernel identity only after its savepoint has
+restored the same active caller root and enclosing savepoint, with no
+rollback-required latch. A visible winner replays or conflicts by fingerprint;
+an absent winner raises the original refusal without repeating financial work.
+Database and serialization failures still require the caller's normal recovery.
+
 Full unwind remains a separately verified append-only inverse. Accounting facts
 V1–V5 remain distinct. No legacy financial history is replayed as new cash,
 revenue or native invoice issuance. No reopening, destructive evidence deletion

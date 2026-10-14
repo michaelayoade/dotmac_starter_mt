@@ -7,7 +7,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
-from threading import Event, Thread
+from threading import Barrier, Event, Thread
 from time import monotonic, sleep
 from uuid import uuid4
 
@@ -488,6 +488,132 @@ def _wait_for_database_lock(scratch, pid):
 
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
+@pytest.mark.parametrize("changed_fingerprint", [False, True])
+def test_concurrent_seal_retry_rechecks_winner_after_window_wait(
+    scratch, plane, changed_fingerprint, monkeypatch
+):
+    scope, url = cash.runtime._scope_url(scratch, plane)
+    with b._session(url, scope) as session:
+        account = cash._new_account(session, scope)
+        opening = cash._command(session, scope, account)
+    with _principal(scratch, plane) as principal:
+        window = _provision(scratch, scope, principal, opening)
+        with _restricted_session(scratch, scope, principal) as session:
+            receipt = s.import_opening_account(
+                session, scope=scope, command=opening, verifier=cash.TrustedVerifier()
+            )
+            session.commit()
+            command = _seal_command(session, scope, window)
+            admissions = get_opening_window_admissions(session, scope=scope)
+            money = cash._counts(session, plane, account)
+            positions = tuple(
+                cash.q.get_opening_cash_lot_position(
+                    session, scope=scope, lot_id=lot_id
+                )
+                for lot_id in receipt.lot_ids
+            )
+        retry = (
+            replace(command, authority_ref="fixture:changed-seal-authority")
+            if changed_fingerprint
+            else command
+        )
+        both_missed = Barrier(2)
+        locked = Event()
+        release = Event()
+        original_touch = s._touch_opening_window
+        results = [{}, {}]
+
+        def touch(session, *, scope):
+            index = session.info["seal_contender"]
+            # Reaching this callback proves the real Kernel initial lookup missed.
+            both_missed.wait(15)
+            if index == 1:
+                assert locked.wait(15)
+                return original_touch(session, scope=scope)
+            value = original_touch(session, scope=scope)
+            locked.set()
+            assert release.wait(20)
+            return value
+
+        monkeypatch.setattr(s, "_touch_opening_window", touch)
+
+        def seal(index, frozen_command):
+            try:
+                with _restricted_session(scratch, scope, principal) as session:
+                    session.info["seal_contender"] = index
+                    results[index]["pid"] = session.scalar(
+                        text("SELECT pg_backend_pid()")
+                    )
+                    try:
+                        results[index]["seal"] = s.seal_opening_window(
+                            session,
+                            scope=scope,
+                            command=frozen_command,
+                            verifier=TrustedWindowVerifier(),
+                        )
+                        session.commit()
+                    except Exception:
+                        session.rollback()
+                        raise
+            except Exception as exc:
+                results[index]["error"] = exc
+
+        threads = [
+            Thread(target=seal, args=(0, command)),
+            Thread(target=seal, args=(1, retry)),
+        ]
+        for thread in threads:
+            thread.start()
+        try:
+            assert locked.wait(15)
+            _wait_for_database_lock(scratch, results[1]["pid"])
+        finally:
+            release.set()
+            for thread in threads:
+                thread.join(25)
+        assert all(not thread.is_alive() for thread in threads)
+        assert "error" not in results[0], results
+        if changed_fingerprint:
+            assert isinstance(
+                results[1].get("error"), cash.IdempotencyConflict
+            ), results
+        else:
+            assert "error" not in results[1], results
+            assert results[1]["seal"] == results[0]["seal"]
+        with _restricted_session(scratch, scope, principal) as observer:
+            assert get_opening_window_seal(observer, scope=scope) == results[0]["seal"]
+            assert get_opening_window_admissions(observer, scope=scope) == admissions
+            assert cash._counts(observer, plane, account) == money
+            assert (
+                tuple(
+                    cash.q.get_opening_cash_lot_position(
+                        observer, scope=scope, lot_id=lot_id
+                    )
+                    for lot_id in receipt.lot_ids
+                )
+                == positions
+            )
+            assert (
+                cash._retry_count(
+                    observer,
+                    plane,
+                    "billing.opening.window.seal.v1",
+                    command.command_key,
+                )
+                == 1
+            )
+            prefix = "platform_" if plane == "platform" else ""
+            assert (
+                observer.scalar(
+                    text(
+                        f"SELECT count(*) FROM mod_billing.{prefix}opening_window_seals"
+                    )
+                )
+                == 1
+            )
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
 @pytest.mark.parametrize("version", [1, 2])
 def test_raw_restricted_receipt_cannot_substitute_manifest_under_frozen_fingerprint(
     scratch, plane, version
@@ -565,6 +691,9 @@ def test_copied_qualified_receipt_json_cannot_authorize_ordinary_raw_sql(
                 .one()
             )
         with b._session(url, scope) as session:
+            baseline = cash._counts(session, plane, account)
+            admissions = get_opening_window_admissions(session, scope=scope)
+            assert len(admissions) == 1
             row["id"] = uuid4()
             row["request_identity"] = "forged-new-request"
             # Shared receipt INSERT remains for legitimate append-only inverses.
@@ -576,7 +705,11 @@ def test_copied_qualified_receipt_json_cannot_authorize_ordinary_raw_sql(
                 session.execute(insert(table).values(**row))
             assert refused.value.orig.sqlstate == "42501"
             session.rollback()
-            assert len(get_opening_window_admissions(session, scope=scope)) == 1
+        # The failed caller rolled back its initial connection tenant setting.
+        # A fresh scoped observer establishes the canonical context for reads.
+        with b._session(url, scope) as observer:
+            assert cash._counts(observer, plane, account) == baseline
+            assert get_opening_window_admissions(observer, scope=scope) == admissions
 
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])

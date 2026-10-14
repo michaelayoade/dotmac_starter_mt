@@ -22,9 +22,10 @@ from dotmac_kernel.idempotency import (
 )
 from dotmac_kernel.messaging import enqueue_event, enqueue_platform_event
 from dotmac_kernel.money import Currency, Money
+from dotmac_kernel.transactions import conflict_savepoint_requires_rollback
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, SessionTransaction
 
 from dotmac_billing import models
 from dotmac_billing._opening_values import (
@@ -5881,7 +5882,7 @@ def seal_opening_window(
         session.flush()
         return {"window_id": str(window.window_id)}
 
-    _idempotent(
+    _idempotent_opening_admission(
         db,
         scope=scope,
         operation_scope="billing.opening.window.seal.v1",
@@ -6857,6 +6858,73 @@ def _require_legacy_opening_guard(
                 )
 
 
+def _idempotent_opening_admission(
+    db: Session,
+    *,
+    scope: Scope,
+    operation_scope: str,
+    key: str,
+    fingerprint: str,
+    operation: Operation,
+) -> IdempotentOutcome:
+    """Recheck a concurrent winner after an opening-custody wait.
+
+    The initial Kernel lookup must remain before admission so authenticated
+    historical and post-seal retries need no new window. A concurrent winner
+    can commit while this operation waits on the window row; a later domain
+    refusal then needs a ledger recheck after Kernel restores its savepoint.
+    The fallback never repeats the financial operation or finishes the root.
+    """
+    enclosing = db.get_nested_transaction()
+    root: SessionTransaction | None = None
+
+    def admit(session: Session) -> Mapping[str, object] | None:
+        nonlocal root
+        root = session.get_transaction()
+        return operation(session)
+
+    try:
+        return _idempotent(
+            db,
+            scope=scope,
+            operation_scope=operation_scope,
+            key=key,
+            fingerprint=fingerprint,
+            operation=admit,
+        )
+    except (BillingConflict, BillingRuleViolation) as exc:
+        if (
+            exc.code
+            not in {
+                "billing.opening_target_changed",
+                "billing.opening_target_not_pristine",
+                "billing.opening_window_sealed",
+                "billing.opening_window_manifest",
+            }
+            or root is None
+            or db.get_transaction() is not root
+            or not root.is_active
+            or db.get_nested_transaction() is not enclosing
+            or conflict_savepoint_requires_rollback(db, expected_root=root)
+        ):
+            raise
+
+        def refuse_missing_winner(
+            session: Session,
+            refusal: BillingConflict | BillingRuleViolation = exc,
+        ) -> Mapping[str, object] | None:
+            raise refusal
+
+        return _idempotent(
+            db,
+            scope=scope,
+            operation_scope=operation_scope,
+            key=key,
+            fingerprint=fingerprint,
+            operation=refuse_missing_winner,
+        )
+
+
 def _idempotent_cash_claim(
     db: Session,
     *,
@@ -6867,7 +6935,7 @@ def _idempotent_cash_claim(
     operation: Operation,
 ) -> IdempotentOutcome:
     try:
-        return _idempotent(
+        return _idempotent_opening_admission(
             db,
             scope=scope,
             operation_scope=operation_scope,
