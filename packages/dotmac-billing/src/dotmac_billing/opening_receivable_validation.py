@@ -145,18 +145,21 @@ def opening_account_import_blockers_v2(
             cash, command.partition, command.target, command.migration_authority_ref
         )
     )
-    for item in result.blockers:
-        if item.code == "verifier_unavailable":
+    for cash_blocker in result.blockers:
+        if cash_blocker.code == "verifier_unavailable":
             continue
-        for reference in item.references:
-            if item.code == "eligible_source_unrepresented" and reference in ar_keys:
+        for reference in cash_blocker.references:
+            if (
+                cash_blocker.code == "eligible_source_unrepresented"
+                and reference in ar_keys
+            ):
                 continue
-            if item.code == "unsupported_lane" and reference in {
+            if cash_blocker.code == "unsupported_lane" and reference in {
                 "collectible_receivable_minor",
                 "open_ar_minor",
             }:
                 continue
-            block(item.code, reference)
+            block(cash_blocker.code, reference)
     if command.scope != manifest.scope or command.scope != command.target.scope:
         block("target_binding_mismatch", "scope")
     eligible = {
@@ -174,20 +177,23 @@ def opening_account_import_blockers_v2(
     replay_keys: dict[tuple[str, str, str, str], str] = {}
     replay_partitions: dict[tuple[str, str, str, str], object] = {}
     ar_totals: Counter[object] = Counter()
-    for lot in manifest.cash_lots:
-        if len(lot.source_system) > 120 or len(lot.source_settlement_key) > 255:
-            block("cash_source_identity_invalid", lot.lot_id)
+    for cash_lot in manifest.cash_lots:
+        if (
+            len(cash_lot.source_system) > 120
+            or len(cash_lot.source_settlement_key) > 255
+        ):
+            block("cash_source_identity_invalid", cash_lot.lot_id)
         try:
             for amount in (
-                lot.gross_minor,
-                lot.residual_minor,
-                sum(x.amount_minor for x in lot.consumptions),
+                cash_lot.gross_minor,
+                cash_lot.residual_minor,
+                sum(x.amount_minor for x in cash_lot.consumptions),
             ):
                 money_from_minor(
-                    amount, lot.partition.currency, lot.partition.precision
+                    amount, cash_lot.partition.currency, cash_lot.partition.precision
                 )
         except OpeningEvidenceError:
-            block("cash_storage_precision_invalid", lot.lot_id)
+            block("cash_storage_precision_invalid", cash_lot.lot_id)
     for item in manifest.receivables:
         key = item.source_invoice_key
         if (

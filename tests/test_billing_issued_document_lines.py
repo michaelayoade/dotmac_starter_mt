@@ -194,7 +194,7 @@ def test_every_issued_kind_refuses_even_its_first_line(scratch, plane, kind):
         account_id, document_id = _draft(session, scope, kind)
         session.commit()
     engine = create_engine(scratch[0])
-    with engine.begin() as connection:
+    with engine.connect() as connection:
         # Construct malformed issued evidence deliberately: absence of an
         # initial line must never become an exception to immutability.
         connection.execute(
@@ -219,6 +219,10 @@ def test_every_issued_kind_refuses_even_its_first_line(scratch, plane, kind):
                 account_id=account_id,
             )
         assert error.value.orig.sqlstate == "23001"
+        # This deliberately malformed header is never admitted as financial
+        # history. Roll it back after the immediate line-immutability probe;
+        # independent deferred issuance completeness must still reject it.
+        connection.rollback()
     engine.dispose()
 
 

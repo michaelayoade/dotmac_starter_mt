@@ -7251,12 +7251,13 @@ def reverse_opening_account_import_v2(
                 "opening_import_already_unwound", "complete principal already unwound"
             )
         for basis_id in original.basis_ids:
-            position = get_opening_receivable_position(
+            receivable_position = get_opening_receivable_position(
                 session, scope=scope, basis_id=basis_id
             )
             if (
-                position.unwound
-                or position.remaining != position.basis.initial_receivable
+                receivable_position.unwound
+                or receivable_position.remaining
+                != receivable_position.basis.initial_receivable
             ):
                 raise BillingRuleViolation(
                     "opening_import_has_dependents",
@@ -7267,10 +7268,10 @@ def reverse_opening_account_import_v2(
             for value in original.lot_ids
         )
         for lot in lots:
-            position = get_opening_cash_lot_position(
+            cash_position = get_opening_cash_lot_position(
                 session, scope=scope, lot_id=lot.lot_id
             )
-            if position.unwound or position.remaining != lot.initial_amount:
+            if cash_position.unwound or cash_position.remaining != lot.initial_amount:
                 raise BillingRuleViolation(
                     "opening_import_has_dependents",
                     "reverse all post-import cash uses and refunds "

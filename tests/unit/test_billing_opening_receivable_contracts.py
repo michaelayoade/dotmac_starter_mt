@@ -1,12 +1,16 @@
 """Complete source evidence fixtures; trusted stubs are never production proof."""
 
 from dataclasses import FrozenInstanceError, replace
+from datetime import timedelta
 from decimal import Decimal
+from typing import Union, get_origin, get_type_hints
 from uuid import uuid4
 
 import pytest
+from dotmac_billing._opening_values import _validate_closed
 from dotmac_billing.contracts import (
     AppliedTaxSnapshotV1,
+    DueDateBasisStatus,
     DueDateBasisV1,
     PartyDocumentSnapshotV1,
     PartyTaxIdentitySnapshotV1,
@@ -728,3 +732,58 @@ def test_same_payment_reference_in_another_currency_partition_cannot_back_ar():
     result = preview_opening_account_import_v2(changed, verifier=TrustedVerifier())
     assert not result.admissible
     assert "historical_cash_source_unclaimed" in {item.code for item in result.blockers}
+
+
+def test_collection_timing_optional_literal_keeps_none_and_valid_members_closed():
+    unknown = _candidate().manifest.receivables[0].collection
+    assert unknown.collection_timing is None
+    assert not unknown.automated_collection_allowed
+    basis = DueDateBasisV1(
+        status=DueDateBasisStatus.VERIFIED,
+        source_authority="contract.v1",
+        evidence_ref="contract:line:1:v1",
+        payment_terms_code="net_30",
+        payment_terms_version="1",
+        issued_at=NOW,
+        effective_at=NOW,
+        timezone="Africa/Lagos",
+        derivation_policy="calendar_days",
+        derivation_version="1",
+    )
+    for timing in ("advance", "arrears"):
+        verified = replace(
+            unknown,
+            status="verified",
+            subject_ref="customer:1",
+            service_ref="service:1",
+            collection_timing=timing,
+            due_at=NOW,
+            due_date_basis=basis,
+            service_period=ServicePeriodEvidenceV1(
+                ServicePeriodStatus.VERIFIED, NOW - timedelta(days=30), NOW
+            ),
+        )
+        assert verified.collection_timing == timing
+        assert verified.automated_collection_allowed
+        for malformed in ("unknown", "", True, 1, object()):
+            with pytest.raises(OpeningEvidenceError):
+                replace(verified, collection_timing=malformed)
+    original = _candidate().manifest.receivables[0].original
+    # Reused party DTOs are recursively closed at the real outer boundary.
+    with pytest.raises(OpeningEvidenceError):
+        replace(original, seller=replace(original.seller, registered_identifiers=[]))
+
+
+def test_closed_union_validation_covers_both_python_union_representations():
+    literal_optional = get_type_hints(OpeningCollectionEvidenceV1)["collection_timing"]
+    assert get_origin(literal_optional) is Union
+    for value in (None, "advance", "arrears"):
+        _validate_closed(value, literal_optional)
+    for value in ("unknown", "", True, 1, object()):
+        with pytest.raises(OpeningEvidenceError):
+            _validate_closed(value, literal_optional)
+    for value in (None, 0, 1):
+        _validate_closed(value, int | None)
+    for value in (True, False, 1.0, "1", object()):
+        with pytest.raises(OpeningEvidenceError):
+            _validate_closed(value, int | None)

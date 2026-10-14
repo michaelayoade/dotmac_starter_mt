@@ -2249,7 +2249,6 @@ def _receivable_source_claim_constraints(tenant: bool) -> tuple[object, ...]:
             "key1",
             "key2",
             name=f"uq_{table}_identity",
-            deferrable=False,
         ),
         CheckConstraint(
             " + ".join(

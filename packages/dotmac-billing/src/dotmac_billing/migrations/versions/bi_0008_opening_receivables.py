@@ -608,13 +608,15 @@ def _historical_invoice_room(platform: bool) -> None:
       IF room IS NULL OR room::text IN ('NaN', 'Infinity', '-Infinity') OR room < 0 OR room > opening_base THEN
         RAISE EXCEPTION 'historical invoice resolution exceeds exact room' USING ERRCODE = 'check_violation';
       END IF;
-      IF invoice.authoring_mode = 'imported_open_item' AND EXISTS (
-          SELECT 1 FROM mod_billing.{prefix}opening_import_receipts x
-            JOIN mod_billing.{prefix}posting_groups g ON g.id = x.posting_group_id {'' if platform else 'AND g.tenant_id = x.tenant_id'}
-          WHERE x.original_receipt_id = backing.receipt_id AND g.source_version <= target_version{tenant}
-      ) THEN
-        IF room <> opening_base THEN RAISE EXCEPTION 'opening unwind retains active discharges' USING ERRCODE = 'check_violation'; END IF;
-        RETURN 0;
+      IF invoice.authoring_mode = 'imported_open_item' THEN
+        IF EXISTS (
+            SELECT 1 FROM mod_billing.{prefix}opening_import_receipts x
+              JOIN mod_billing.{prefix}posting_groups g ON g.id = x.posting_group_id {'' if platform else 'AND g.tenant_id = x.tenant_id'}
+            WHERE x.original_receipt_id = backing.receipt_id AND g.source_version <= target_version{tenant}
+        ) THEN
+          IF room <> opening_base THEN RAISE EXCEPTION 'opening unwind retains active discharges' USING ERRCODE = 'check_violation'; END IF;
+          RETURN 0;
+        END IF;
       END IF;
       IF invoice_void THEN RETURN 0; END IF;
       RETURN room;
@@ -888,7 +890,7 @@ def _backing_guards(platform: bool) -> None:
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed owner predicates
 
 
 def _successor_admission(platform: bool) -> None:
@@ -1020,7 +1022,7 @@ def _successor_admission(platform: bool) -> None:
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed owner predicates
     for table in (
         "document_events",
         "posting_groups",
@@ -1097,7 +1099,7 @@ def _exposure_admission(platform: bool) -> None:
     $$ LANGUAGE plpgsql;
     CREATE TRIGGER {prefix}receivable_exposure_v2_admission BEFORE INSERT ON mod_billing.{prefix}receivable_exposure_facts_v2
       FOR EACH ROW EXECUTE FUNCTION mod_billing.admit_{prefix}opening_exposure();
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed owner predicates
 
 
 def _successor_completeness(platform: bool) -> None:
@@ -1285,7 +1287,7 @@ def _successor_completeness(platform: bool) -> None:
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed owner predicates
     for table in (
         "posting_groups",
         "posting_effects",
@@ -1537,7 +1539,7 @@ def _source_registry(platform: bool) -> None:
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed owner predicates
     for source in (
         "withholding_discharges",
         "non_cash_credit_grants",
@@ -1563,7 +1565,7 @@ def _source_registry(platform: bool) -> None:
         SELECT gen_random_uuid(), {scope_select}d.billing_account_id, 'credit_note.issue', 'dotmac-billing', x.fact_payload::jsonb->>'correlation_id', '', x.id
         FROM mod_billing.{prefix}invoice_document_facts x JOIN mod_billing.{prefix}documents d ON d.id = x.document_id {'' if platform else 'AND d.tenant_id = x.tenant_id'}
         WHERE d.document_kind = 'credit_note' AND x.fact_version = 1 AND x.fact_payload::jsonb->>'document_state' = 'issued';
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed owner predicates
 
     op.execute(f"""
       DO $$ BEGIN
@@ -1599,7 +1601,7 @@ def _source_registry(platform: bool) -> None:
         DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION mod_billing.check_{prefix}credit_issue_claim();
       CREATE CONSTRAINT TRIGGER {prefix}posting_groups_credit_source_complete AFTER INSERT ON mod_billing.{prefix}posting_groups
         DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION mod_billing.check_{prefix}credit_issue_claim();
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed owner predicates
 
     op.execute(f"""
       CREATE FUNCTION mod_billing.check_{prefix}receivable_source_occupancy() RETURNS trigger AS $$
@@ -1648,7 +1650,7 @@ def _source_registry(platform: bool) -> None:
         RETURN NEW;
       END;
       $$ LANGUAGE plpgsql;
-    """)
+    """)  # nosec B608 -- closed plane identifiers and fixed owner predicates
     for source in (
         "withholding_discharges",
         "non_cash_credit_grants",
