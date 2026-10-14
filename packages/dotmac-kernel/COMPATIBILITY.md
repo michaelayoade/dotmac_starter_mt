@@ -1373,6 +1373,33 @@ into a runtime one for exactly the consumers the lowering is meant to serve.
 Writing the probe immediately caught four API misuses in it — which is the
 level of coverage the claim needs to be worth anything.
 
+## Canonical financial encoding correction — 2026-10-14
+
+`semantic_encoding.canonical_decimal` and the Money branch of `encode` must
+depend on the supplied exact value, not the caller's decimal context. The
+previous `normalize()` and `scaleb().to_integral_value()` operations could round
+distinct amounts to the same frame, change frames with precision or rounding,
+set caller flags, or fail under ambient traps. The correction uses exact text
+and coefficient/exponent handling, including valid clamped Money construction.
+
+Correct exact `cv1` bytes and the frozen corpus are preserved. Previously
+rounded outputs change and previously trapped inputs can succeed. This is an
+observable compatibility correction, not a claim that every historical digest
+is unchanged. Published predecessors are immutable; their artifacts and
+verification records are not edited or reissued.
+
+Before adopting this correction for persisted identities, the consumer must
+establish its actual input/context history and authoritative persisted values.
+An ambiguous old digest cannot prove which formerly colliding value was
+intended. Do not automatically rehash records, accept the old digest as an
+equivalent fallback, or infer a correction from it. Any affected persisted
+identity requires the consumer owner's reviewed reconciliation. No such
+production audit, migration, or reconciliation is claimed by this source fix.
+See the dated amendment in
+[`semantic-encoder-sources.md`](../../docs/inventories/semantic-encoder-sources.md).
+Hosted regression canaries are required before acceptance; local static checks
+are not runtime evidence. No release is established by this amendment.
+
 ## Versioning & deprecation policy
 
 `dotmac-kernel` follows **Semantic Versioning** for its public surface:

@@ -29,7 +29,19 @@ from __future__ import annotations
 
 import ast
 from datetime import UTC, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import (
+    ROUND_05UP,
+    ROUND_CEILING,
+    ROUND_DOWN,
+    ROUND_FLOOR,
+    ROUND_HALF_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    ROUND_UP,
+    Decimal,
+    DivisionByZero,
+    localcontext,
+)
 from enum import Enum
 from pathlib import Path
 from uuid import UUID
@@ -240,6 +252,102 @@ def test_absence_is_a_typed_sentinel_and_none_is_refused() -> None:
 
 def test_money_of_equal_magnitude_differs_by_currency_scale() -> None:
     assert encode(Money.of("100", JPY)) != encode(Money.of("100.00", NGN))
+
+
+@pytest.mark.parametrize(
+    "rounding",
+    [
+        ROUND_05UP,
+        ROUND_CEILING,
+        ROUND_DOWN,
+        ROUND_FLOOR,
+        ROUND_HALF_DOWN,
+        ROUND_HALF_EVEN,
+        ROUND_HALF_UP,
+        ROUND_UP,
+    ],
+)
+@pytest.mark.parametrize("trapped", [False, True])
+def test_decimal_and_existing_money_encoding_ignore_the_ambient_context(
+    rounding: str, trapped: bool
+) -> None:
+    """Precision two used to collapse 1.01/1.02 and change existing Money.
+
+    Construct Money before narrowing the context: this tests encoding an exact
+    value, not the independent rounding policy of Money construction. Literal
+    bytes pin the contract even when the ambient context would round or trap.
+    """
+    decimal_cases = [
+        (Decimal("1.0100"), "1.01", b"d4:1.01"),
+        (Decimal("1.02"), "1.02", b"d4:1.02"),
+        (Decimal("-1234567890.012300"), "-1234567890.0123", b"d16:-1234567890.0123"),
+        (Decimal("1E+9"), "1000000000", b"d10:1000000000"),
+        (Decimal("1E-9"), "0.000000001", b"d11:0.000000001"),
+        (Decimal("-0E-99"), "0", b"d1:0"),
+        (Decimal("0E+99"), "0", b"d1:0"),
+    ]
+    with localcontext(prec=60):
+        money_cases = [
+            (Money.of("1.01", NGN), b"m16:s3:NGNi1:2i3:101"),
+            (Money.of("1.02", NGN), b"m16:s3:NGNi1:2i3:102"),
+            (Money.of("1234567890.01", NGN), b"m26:s3:NGNi1:2i12:123456789001"),
+            (Money.of("-100", JPY), b"m17:s3:JPYi1:0i4:-100"),
+            (Money.of("1.234", BHD), b"m17:s3:BHDi1:3i4:1234"),
+            (Money.of("-0.00", NGN), b"m14:s3:NGNi1:2i1:0"),
+            (Money.of("1.010", Currency("NGN", 3)), b"m17:s3:NGNi1:3i4:1010"),
+        ]
+    with localcontext(prec=60, Emin=-2, Emax=2, clamp=1):
+        # Valid clamping can pad the coefficient beyond the currency scale.
+        money_cases.append((Money.of("1.01", NGN), b"m16:s3:NGNi1:2i3:101"))
+
+    with localcontext(prec=2, rounding=rounding, Emin=-2, Emax=2, clamp=1) as ctx:
+        for signal in ctx.traps:
+            ctx.traps[signal] = trapped
+        ctx.clear_flags()
+        ctx.flags[DivisionByZero] = True  # Neither clear nor add flags.
+        before = repr(ctx)
+        for value, text, expected in decimal_cases:
+            assert canonical_decimal(value) == text
+            assert encode(value) == expected
+        for money, expected in money_cases:
+            assert encode(money) == expected
+        for label, value, expected in FROZEN_ENCODINGS:
+            assert encode(value) == expected, label
+        assert digest_of("amount", encode(decimal_cases[0][0])) != digest_of(
+            "amount", encode(decimal_cases[1][0])
+        )
+        assert digest_of("amount", encode(money_cases[0][0])) != digest_of(
+            "amount", encode(money_cases[1][0])
+        )
+        assert repr(ctx) == before
+
+
+def test_nonfinite_money_is_still_refused() -> None:
+    # Money accepts a quiet NaN; it must not become a zero coefficient frame.
+    with pytest.raises(CanonicalEncodingError):
+        encode(Money.of("NaN", NGN))
+
+
+@pytest.mark.parametrize(
+    "text", ["0E-999999999", "-0E-999999999", "0E+999999999", "-0E+999999999"]
+)
+def test_zero_with_an_extreme_exponent_bypasses_fixed_point_formatting(
+    text: str,
+) -> None:
+    class UnformattedZero(Decimal):
+        def __format__(self, format_spec: str) -> str:
+            raise RuntimeError("Zero must not expand its exponent into formatted text.")
+
+    # The sentinel fails safely if formatting is attempted; it never allocates
+    # the gigabyte-sized fixed-point string this exponent could otherwise make.
+    value = UnformattedZero(text)
+    with localcontext(prec=2, Emin=-2, Emax=2, clamp=1) as ctx:
+        for signal in ctx.traps:
+            ctx.traps[signal] = True
+        before = repr(ctx)
+        assert canonical_decimal(value) == "0"
+        assert encode(value) == b"d1:0"
+        assert repr(ctx) == before
 
 
 @pytest.mark.parametrize(
