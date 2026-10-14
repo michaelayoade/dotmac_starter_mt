@@ -2452,6 +2452,9 @@ made concrete — every model has exactly one declared owner.
 | `DocumentEvent` / `PlatformDocumentEvent` | `mod_billing.document_events` / `platform_document_events` | `dotmac-billing` optional module | Append-only issuance/void evidence; corrections append and never rewrite the issued document. |
 | `ConfirmedSettlement` / `PlatformConfirmedSettlement` | `mod_billing.confirmed_settlements` / `platform_confirmed_settlements` | `dotmac-billing` optional module | Independently confirmed, provider-neutral kernel-Money evidence keyed by source settlement identity and fingerprint. Cash-backed available-credit draws retain each source settlement's allocation edge, serialize on the account and cap spending against both the rebuilt credit lane and eligible source room; reversed funding cannot back a new allocation. Non-cash grants and opening-balance credit require separate source contracts. |
 | `CashSourceClaim` / `PlatformCashSourceClaim` | `mod_billing.cash_source_claims` / `platform_cash_source_claims` | `dotmac-billing` optional module | Permanent exact source-receipt identity, structurally bound to exactly one confirmed settlement or opening cash lot in its scope/account/currency/precision. The settlement or opening import owner records the claim; unwind retains it, and historical backfill copies provenance without rewriting money. |
+| `OpeningWindow` / `PlatformOpeningWindow` | `mod_billing.opening_windows` / `platform_opening_windows` | `dotmac-billing` optional module | Permanent single opening namespace per scope, holding the exact frozen manifest and independently restricted migration principal. Technical provisioning and trusted operation verification are required; an epoch cannot create a second window. |
+| `OpeningWindowAdmission` / `PlatformOpeningWindowAdmission` | `mod_billing.opening_window_admissions` / `platform_opening_window_admissions` | `dotmac-billing` optional module | Immutable receipt admission into the exact frozen window manifest, serialized through the physical window row before account mutation. Historical receipts cannot bootstrap an admitted window. |
+| `OpeningWindowSeal` / `PlatformOpeningWindowSeal` | `mod_billing.opening_window_seals` / `platform_opening_window_seals` | `dotmac-billing` optional module | Permanent one-way seal checked against freshly verified authority and complete local admissions under the window lock. New imports, including history-less accounts, fail after sealing; authenticated exact retries and separately guarded inverses preserve their evidence. |
 | `OpeningImportReceipt` / `PlatformOpeningImportReceipt` | `mod_billing.opening_import_receipts` / `platform_opening_import_receipts` | `dotmac-billing` optional module | Immutable cash-only V1 or atomic receivables-plus-cash V2 import and full unwind, complete manifest and import-specific verification, target precondition and resulting posting watermark. |
 | `OpeningCashLot` / `PlatformOpeningCashLot` | `mod_billing.opening_cash_lots` / `platform_opening_cash_lots` | `dotmac-billing` optional module | Qualified historical cash backing, original consumption and residual provenance, structurally bound to its permanent shared source claim and import receipt. |
 | `OpeningCashEffect` / `PlatformOpeningCashEffect` | `mod_billing.opening_cash_effects` / `platform_opening_cash_effects` | `dotmac-billing` optional module | Immutable recognition, invoice application, refund or linked correction with exact lot, posting group and original effect identity. |
@@ -2594,6 +2597,7 @@ write:
 | Subscription offers, versions, prices, contracts, lines and recurring occurrences | `dotmac_subscriptions.service` is the sole writer on both declared planes through its typed publish/withdraw, record/end, resolve, generate and acknowledge operations. It uses the caller's session and flushes only. The occurrence and Subscriptions-owned `RatedObligationOutputV1` stage atomically; Billing owns only its distinct `AcceptRatedObligationV1` input, and access/Billing owners are assembly-wired consumers, never sibling imports. No product is claimed as cut over. |
 | Billing obligations, documents, settlements, withholding discharges, posting effects, account positions, invoice exposures, official artifact relations and accounting facts | `dotmac_billing.service` is the sole writer on both declared planes through its typed accept/issue/void/credit/allocation/correction/rebuild/artifact-record/artifact-repair operations. It uses the caller's session and flushes only, and every emitted kernel-outbox routing code is declared by its module manifest. Dedicated withholding accept/reverse commands reduce only AR and append exact corrections; V2 accounting facts carry their distinct evidence while V1 remains unchanged. Ordinary non-cash grants, source-specific applications, partial application reversals and unused reductions append immutable typed evidence on a separate balance lane; their AccountingFactV3 and four-balance ReceivablePositionV2 preserve historical V1 and WHT V2 meaning. Every subsequent posting group produces a fresh V2 position. Grant/effect and exact V2 queries verify stored scalar evidence without autoflush or live configuration reconstruction. Finance permission and genuine Tax-evidence mapping belong to the trusted adopter. Billing owns both aggregate and exposure financial state; Collections receives only an assembly-translated `ReceivableExposureV1`, and ERP receives immutable accounting facts. |
 | Billing confirmed-cash receipt identity | `dotmac_billing.service.accept_settlement` creates and verifies immutable cash-source claims within its existing caller-owned idempotent operation. Exact source-system/key uniqueness spans accounts in each scope; deferred database completeness and structural FKs bind every settlement to its claim. No separate reservation API or opening funding writer is introduced. |
+| Billing opening window, admissions and seal | `dotmac_billing.service` owns technical provisioning, verified import admission and `seal_opening_window`; `bi_0009_opening_window` owns structural immutability, scope uniqueness, role closure and database guards. The assembly independently qualifies each operation and the restricted migration principal; the caller alone completes its outer transaction. No ordinary runtime writer can open or reopen the migration window. |
 | Billing opening cash and its dependent uses | `dotmac_billing.service` owns import, mixed-source credit draw, atomic mixed draw inverse, evidenced refund and refund correction, and full import unwind. Its opening queries return verified immutable evidence and remaining room. The existing caller owns the outer transaction; the assembly verifier owns source, refund and migration evidence qualification. No provider transfer or production authority activation occurs in these commands. |
 | Collections policy, cases, arrangements, grace, notice/action request evidence and receipts | `dotmac_collections.service` is the sole writer on both declared planes. A typed `Scope` selects mirrored models and the matching kernel idempotency ledger; `CollectionCaseService.assess` and `process_step_due` reread `ReceivableObservationV1` and fail closed before action. Case transitions stage exact timer schedule/cancel operations through the caller-owned `CollectionsTimer` port. Accepted requests and manifest-declared kernel outbox intents flush atomically; accepted or retryable owner receipts schedule only the next immutable policy step/retry. Replay emits no duplicate. Collections never writes Billing financial state or the owning product's service state, and neither candidate adopter is claimed as cut over. |
 | Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |
@@ -3428,6 +3432,15 @@ commit even if the original error was swallowed. Only the matching root ending
 clears it. The caller must abort the root, and Kernel preserves the original
 failure across cleanup errors. Ordinary flush conflicts that prove exact
 savepoint rollback remain recoverable.
+Billing opening-window refusal recovery is a source consumer of
+`conflict_savepoint_requires_rollback`: before rechecking a refused opening
+operation it verifies that the same root remains active, the enclosing savepoint
+is restored, and Kernel has not latched that root for rollback. Billing declares
+Kernel `>=0.1.0a105`; its namespace allocation remains a89. Published a98-a104
+contain the transaction module but export only `conflict_savepoint`. The source
+dependency is not publication evidence: verified a105 artifacts and hosted floor
+checks are required before Billing release/adoption. Sub Numbering remains a
+separate composition gate below.
 No service receives authority to commit or roll back the outer transaction.
 `ConflictSavepointProtocolError` refuses replaced or prematurely completed
 helper state. The Sub command bridge still requires a verified released
@@ -3919,6 +3932,43 @@ runtime participants flush the caller's transaction; no second transaction
 or replay engine is introduced. Publication, verified adoption, source-proof
 adapters, full-population closure and production authority transfer remain
 separate gates. Source qualification: [receivables inventory](inventories/billing-opening-receivables-extraction.md).
+
+### Billing opening-window custody and rehearsal (unpublished candidate)
+
+`dotmac_billing.service.provision_opening_window` and `seal_opening_window`
+own one permanent window per Billing scope. Additive `bi_0009` adds window,
+admission and seal tables on both planes; platform uses a real singleton.
+Provisioning requires the schema operator plus a trusted operation-specific
+verification port. It binds one complete V1/V2 manifest and an actual restricted
+principal's name/OID, without creating a LOGIN role or granting import rights.
+Product provisioning supplies the narrowly scoped DML closure separately.
+
+Database admission rejects ordinary roles, unsafe role-membership paths and
+receipt manifests differing from the frozen window. Every new opening path
+physically touches that window before account admission; sealing serializes
+through the same row, freshly verifies external authority under that boundary,
+and compares the complete local admission population. Missing windows and new
+imports after sealing fail closed, including history-less accounts. Epochs
+cannot reopen admission. Exact authenticated retries retain their original
+receipt without a new posting. Existing guarded linked inverses remain distinct
+from opening or activation authority. Downgrade refuses to erase custody.
+
+`report_opening_rehearsal` and `compare_opening_rehearsals` are pure observations
+over typed source projections, exact mappings and real V2 preflight results.
+They keep original documentary/discharge totals and financial residuals
+separate, expose unclassified deltas, and bind three distinct complete capture
+reports. They never qualify cash, import money, seal a window or authorize
+activation. Current Sub V2 lacks authentic full original-documentary and some
+historical-discharge evidence: nonempty eligible-invoice rehearsals therefore
+remain explicitly blocked. A matching net balance or admissible import preview
+does not remove that limitation. The source-to-observation assembly adapter,
+real capture and trusted qualification remain owed.
+
+Source inventories: [opening window](inventories/billing-opening-window-extraction.md)
+and [rehearsal report](inventories/billing-opening-rehearsal-report-extraction.md).
+Authored canaries include both-plane role/SQL refusals, exact replay, concurrent
+admission/seal, whole-caller rollback and ordinary post-seal lifecycle. Static
+review is not hosted runtime acceptance or a production authority switch.
 
 ### Billing cash-only opening lifecycle (unpublished candidate)
 

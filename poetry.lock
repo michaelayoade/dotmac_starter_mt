@@ -677,7 +677,7 @@ develop = true
 
 [package.dependencies]
 alembic = ">=1.13"
-dotmac-kernel = ">=0.1.0a89"
+dotmac-kernel = ">=0.1.0a105"
 sqlalchemy = "^2.0"
 
 [package.source]

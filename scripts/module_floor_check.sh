@@ -70,7 +70,7 @@ FLOOR_PYTHON="${FLOOR_PYTHON:-python3}"
 # field names modules BEYOND the manifest that consume the declared floor --
 # see the fourth refusal family in `probe` below. Omit it and the probe is
 # manifest-only, exactly as before.
-MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service}"
+MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service packages/dotmac-billing:dotmac_billing:dotmac_billing.service}"
 
 # Overrides for a one-off investigation. Left unset in CI: a hand-set pair is
 # a claim about a module that the module itself can contradict, which is the
@@ -161,7 +161,9 @@ build_kernel_wheel() {
 # one -- it reports OK below the floor and then cannot tell "the floor is too
 # high" from "this probe proves nothing". `dotmac-files` is exactly this shape:
 # its service imports `dotmac_kernel.transactions.conflict_savepoint`, first
-# published in a98, while its manifest loads happily under a97.
+# published in a98, while its manifest loads happily under a97. Billing instead
+# imports conflict_savepoint_requires_rollback, added to the existing public
+# module in a105: a104 ships the module but lacks the required symbol.
 #
 # So an entry may DECLARE the modules that consume its floor, and the probe
 # imports them after the manifest. Declared rather than derived from the wheel
@@ -175,11 +177,42 @@ build_kernel_wheel() {
 # and absence is reported as BROKEN.
 probe() {
   local wheel="$1" package_dir="$2" import_name="$3" venv="$4" extra="${5:-}"
-  "${FLOOR_PYTHON}" -m venv "${venv}"
-  "${venv}/bin/pip" install --quiet --upgrade pip
-  "${venv}/bin/pip" install --quiet "${wheel}"
-  "${venv}/bin/pip" install --quiet --no-deps "${repo_root}/${package_dir}"
-  "${venv}/bin/pip" install --quiet "sqlalchemy>=2.0,<3"
+  "${FLOOR_PYTHON}" -m venv "${venv}" || return
+  "${venv}/bin/pip" install --quiet --upgrade pip || return
+  "${venv}/bin/pip" install --quiet "${wheel}" || return
+  "${venv}/bin/pip" install --quiet --no-deps "${repo_root}/${package_dir}" || return
+  # Only the kernel requirement is intentionally violated by the below-floor
+  # control. Install every other runtime requirement FROM THE BUILT METADATA,
+  # preserving extras and markers rather than translating Poetry constraints.
+  # Billing's public linking helpers import its declared Alembic dependency;
+  # installing SQLAlchemy alone left those imports broken under BOTH kernels.
+  "${venv}/bin/python" - "${repo_root}/${package_dir}/pyproject.toml" "${venv}" <<'PY' || return
+import re
+import sys
+import tomllib
+from importlib.metadata import distribution, version
+from pathlib import Path
+
+project = tomllib.loads(Path(sys.argv[1]).read_text())
+requirements = distribution(project["tool"]["poetry"]["name"]).requires or []
+runtime = []
+for requirement in requirements:
+    match = re.match(r"[A-Za-z0-9_.-]+", requirement)
+    if match is None:
+        raise ValueError(f"Malformed runtime requirement: {requirement}")
+    name = re.sub(r"[-_.]+", "-", match.group()).lower()
+    if name != "dotmac-kernel":
+        runtime.append(requirement)
+venv = Path(sys.argv[2])
+(venv / "module-runtime.txt").write_text("\n".join(runtime) + "\n")
+# A transitive dependency must not replace the exact tagged kernel under test.
+(venv / "kernel-constraint.txt").write_text(
+    f"dotmac-kernel=={version('dotmac-kernel')}\n"
+)
+PY
+  "${venv}/bin/pip" install --quiet \
+    --constraint "${venv}/kernel-constraint.txt" \
+    --requirement "${venv}/module-runtime.txt" || return
   "${venv}/bin/python" - "$import_name" "$extra" <<'PY'
 import importlib
 import sys
@@ -312,6 +345,12 @@ PY
   if [[ "${result}" != REFUSED* ]]; then
     echo "!! the previous published kernel loaded this manifest, so the floor" >&2
     echo "   is higher than it needs to be — or this probe proves nothing." >&2
+    status=1
+  elif [[ "${import_name}" == dotmac_billing && \
+    "${result}" != "REFUSED ImportError: cannot import name 'conflict_savepoint_requires_rollback' from 'dotmac_kernel.transactions'"* ]]; then
+    # Billing's service consumes this exact a105 export. An unrelated import
+    # failure (for example missing Alembic) cannot establish its kernel floor.
+    echo "!! Billing must refuse because Kernel lacks conflict_savepoint_requires_rollback" >&2
     status=1
   fi
 done

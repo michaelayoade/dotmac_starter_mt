@@ -105,6 +105,15 @@ ONLINE_MUTABLE_TABLES = frozenset({"documents", "document_artifacts"})
 def _expected_online_privileges(table_name: str) -> frozenset[str]:
     base_name = table_name.removeprefix("platform_")
     privileges = {"SELECT", "INSERT"}
+    if base_name in {
+        "opening_windows",
+        "opening_window_admissions",
+        "opening_window_seals",
+        "opening_cash_lots",
+        "opening_receivable_bases",
+        "opening_historical_discharge_claims",
+    }:
+        privileges.remove("INSERT")
     if base_name in ONLINE_MUTABLE_TABLES:
         privileges.add("UPDATE")
     return frozenset(privileges)

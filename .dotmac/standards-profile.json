@@ -41,6 +41,17 @@
       "canonical_writer_paths": ["packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/engine/run.py"],
       "adapter_paths": ["packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/providers/compose_host.py"],
       "drift_test_paths": ["tests/unit/test_deployment_foundation_material_readiness.py"]
+    },
+    {
+      "authority_id": "billing-opening-window",
+      "subject": "Permanent scope-wide opening admission and closure with independently verified population and restricted database principal binding.",
+      "protected_resources": ["billing-opening-window", "billing-opening-admission", "billing-opening-seal"],
+      "owner_component": "dotmac-billing",
+      "owner_implementation": "packages/dotmac-billing/src/dotmac_billing/service.py",
+      "decision_interface": "dotmac_billing.service.seal_opening_window",
+      "canonical_writer_paths": ["packages/dotmac-billing/src/dotmac_billing/service.py", "packages/dotmac-billing/src/dotmac_billing/migrations/versions/bi_0009_opening_window.py"],
+      "adapter_paths": [],
+      "drift_test_paths": ["tests/test_billing_opening_window.py", "tests/test_billing_opening_cash_import.py", "tests/test_billing_opening_receivable_import.py"]
     }
   ],
   "typed_contract_surfaces": [
@@ -54,6 +65,20 @@
     {
       "surface_id": "candidate-material-probe-contract",
       "paths": ["packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/material_readiness.py"],
+      "require_public_annotations": true,
+      "forbid_any": true,
+      "require_immutable_records": true
+    },
+    {
+      "surface_id": "billing-opening-window-contract",
+      "paths": ["packages/dotmac-billing/src/dotmac_billing/opening_window_contracts.py", "packages/dotmac-billing/src/dotmac_billing/opening_window_queries.py"],
+      "require_public_annotations": true,
+      "forbid_any": true,
+      "require_immutable_records": true
+    },
+    {
+      "surface_id": "billing-opening-rehearsal-contract",
+      "paths": ["packages/dotmac-billing/src/dotmac_billing/opening_rehearsal_contracts.py", "packages/dotmac-billing/src/dotmac_billing/opening_rehearsal.py"],
       "require_public_annotations": true,
       "forbid_any": true,
       "require_immutable_records": true
