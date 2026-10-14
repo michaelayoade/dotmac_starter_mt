@@ -228,7 +228,8 @@ class BillingDocument(Base, _TenantRow, _DocumentColumns):
     __tablename__ = "documents"
     __table_args__ = (
         CheckConstraint(
-            "authoring_mode IN ('legacy_single', 'explicit_multiline')",
+            "authoring_mode IN ('legacy_single', 'explicit_multiline', "
+            "'imported_open_item')",
             name="ck_documents_authoring_mode",
         ),
         ForeignKeyConstraint(
@@ -278,7 +279,8 @@ class PlatformBillingDocument(Base, _DocumentColumns):
     __tablename__ = "platform_documents"
     __table_args__ = (
         CheckConstraint(
-            "authoring_mode IN ('legacy_single', 'explicit_multiline')",
+            "authoring_mode IN ('legacy_single', 'explicit_multiline', "
+            "'imported_open_item')",
             name="ck_platform_documents_authoring_mode",
         ),
         ForeignKeyConstraint(
@@ -1613,6 +1615,9 @@ def _withholding_constraints(*, tenant: bool) -> tuple[object, ...]:
         (
             UniqueConstraint(*scope, "id", name=f"uq_{table}_id"),
             UniqueConstraint(
+                *scope, "id", "billing_account_id", name=f"uq_{table}_account"
+            ),
+            UniqueConstraint(
                 *scope,
                 "id",
                 "billing_account_id",
@@ -2071,7 +2076,297 @@ class PlatformOpeningCashEffect(Base, _OpeningCashEffectColumns):
     __table_args__ = _opening_constraints(tenant=False, kind="cash_effects")
 
 
+class _OpeningReceivableBasisColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    posting_group_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    source_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    installation_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_system: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_invoice_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    initial_receivable: Mapped[Decimal] = money_column()
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+def _receivable_basis_constraints(tenant: bool) -> tuple[object, ...]:
+    scope = ["tenant_id"] if tenant else []
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}opening_receivable_bases"
+    return (
+        UniqueConstraint(
+            *scope, "id", "billing_account_id", name=f"uq_{table}_account"
+        ),
+        UniqueConstraint(*scope, "document_id", name=f"uq_{table}_document"),
+        UniqueConstraint(*scope, "receipt_id", "sequence", name=f"uq_{table}_sequence"),
+        UniqueConstraint(
+            *scope,
+            "installation_id",
+            "source_system",
+            "source_invoice_key",
+            name=f"uq_{table}_source",
+        ),
+        CheckConstraint(
+            "initial_receivable > 0 AND minor_units BETWEEN 0 AND 6",
+            name=f"ck_{table}_amount",
+        ),
+        *(
+            ForeignKeyConstraint(
+                [*scope, column, "billing_account_id"],
+                [
+                    f"{SCHEMA}.{prefix}{parent}.{key}"
+                    for key in (*scope, "id", "billing_account_id")
+                ],
+                name=f"fk_{table}_{column}",
+                ondelete="RESTRICT",
+            )
+            for column, parent in (
+                ("receipt_id", "opening_import_receipts"),
+                ("document_id", "documents"),
+                ("posting_group_id", "posting_groups"),
+            )
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class OpeningReceivableBasis(Base, _TenantRow, _OpeningReceivableBasisColumns):
+    __tablename__ = "opening_receivable_bases"
+    __table_args__ = _receivable_basis_constraints(True)
+
+
+class PlatformOpeningReceivableBasis(Base, _OpeningReceivableBasisColumns):
+    __tablename__ = "platform_opening_receivable_bases"
+    __table_args__ = _receivable_basis_constraints(False)
+
+
+class _OpeningHistoricalClaimColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    basis_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    operation: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(512), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    determination_ref: Mapped[str | None] = mapped_column(String(255))
+    component_ref: Mapped[str | None] = mapped_column(String(255))
+
+
+def _historical_claim_constraints(tenant: bool) -> tuple[object, ...]:
+    scope = ["tenant_id"] if tenant else []
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}opening_historical_discharge_claims"
+    return (
+        UniqueConstraint(
+            *scope, "id", "billing_account_id", name=f"uq_{table}_account"
+        ),
+        UniqueConstraint(
+            *scope,
+            "operation",
+            "source_owner",
+            "determination_ref",
+            "component_ref",
+            name=f"uq_{table}_taxcomponent",
+        ),
+        CheckConstraint(
+            "(operation = 'billing.withholding.tax_component' AND "
+            "determination_ref IS NOT NULL AND component_ref IS NOT NULL) OR "
+            "(operation <> 'billing.withholding.tax_component' AND "
+            "determination_ref IS NULL AND component_ref IS NULL)",
+            name=f"ck_{table}_taxcomponent",
+        ),
+        Index(
+            f"uq_{table}_source",
+            *scope,
+            "operation",
+            "source_owner",
+            "source_ref",
+            unique=True,
+            postgresql_where=text("operation <> 'billing.withholding.tax_component'"),
+            sqlite_where=text("operation <> 'billing.withholding.tax_component'"),
+        ),
+        ForeignKeyConstraint(
+            [*scope, "basis_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.{prefix}opening_receivable_bases.{key}"
+                for key in (*scope, "id", "billing_account_id")
+            ],
+            name=f"fk_{table}_basis",
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class OpeningHistoricalDischargeClaim(Base, _TenantRow, _OpeningHistoricalClaimColumns):
+    __tablename__ = "opening_historical_discharge_claims"
+    __table_args__ = _historical_claim_constraints(True)
+
+
+class PlatformOpeningHistoricalDischargeClaim(Base, _OpeningHistoricalClaimColumns):
+    __tablename__ = "platform_opening_historical_discharge_claims"
+    __table_args__ = _historical_claim_constraints(False)
+
+
+class _ReceivableSourceClaimColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    namespace: Mapped[str] = mapped_column(String(80), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    key1: Mapped[str] = mapped_column(String(512), nullable=False)
+    key2: Mapped[str] = mapped_column(String(255), nullable=False)
+    historical_claim_id: Mapped[UUID | None] = mapped_column(Uuid())
+    withholding_discharge_id: Mapped[UUID | None] = mapped_column(Uuid())
+    non_cash_grant_id: Mapped[UUID | None] = mapped_column(Uuid())
+    non_cash_effect_id: Mapped[UUID | None] = mapped_column(Uuid())
+    credit_document_fact_id: Mapped[UUID | None] = mapped_column(Uuid())
+
+
+def _receivable_source_claim_constraints(tenant: bool) -> tuple[object, ...]:
+    scope = ["tenant_id"] if tenant else []
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}receivable_source_claims"
+    owners = (
+        ("historical_claim_id", "opening_historical_discharge_claims"),
+        ("withholding_discharge_id", "withholding_discharges"),
+        ("non_cash_grant_id", "non_cash_credit_grants"),
+        ("non_cash_effect_id", "non_cash_credit_effects"),
+        ("credit_document_fact_id", "invoice_document_facts"),
+    )
+    return (
+        UniqueConstraint(
+            *scope,
+            "namespace",
+            "source_owner",
+            "key1",
+            "key2",
+            name=f"uq_{table}_identity",
+            deferrable=False,
+        ),
+        CheckConstraint(
+            " + ".join(
+                f"(CASE WHEN {column} IS NULL THEN 0 ELSE 1 END)"
+                for column, _ in owners
+            )
+            + " = 1",
+            name=f"ck_{table}_owner",
+        ),
+        ForeignKeyConstraint(
+            [*scope, "billing_account_id"],
+            [f"{SCHEMA}.{prefix}billing_accounts.{key}" for key in (*scope, "id")],
+            name=f"fk_{table}_account",
+            ondelete="RESTRICT",
+        ),
+        *(
+            ForeignKeyConstraint(
+                [
+                    *scope,
+                    column,
+                    *(
+                        ()
+                        if parent == "invoice_document_facts"
+                        else ("billing_account_id",)
+                    ),
+                ],
+                [
+                    f"{SCHEMA}.{prefix}{parent}.{key}"
+                    for key in (
+                        *scope,
+                        "id",
+                        *(
+                            ()
+                            if parent == "invoice_document_facts"
+                            else ("billing_account_id",)
+                        ),
+                    )
+                ],
+                name=f"fk_{table}_{column}",
+                ondelete="RESTRICT",
+            )
+            for column, parent in owners
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class ReceivableSourceClaim(Base, _TenantRow, _ReceivableSourceClaimColumns):
+    __tablename__ = "receivable_source_claims"
+    __table_args__ = _receivable_source_claim_constraints(True)
+
+
+class PlatformReceivableSourceClaim(Base, _ReceivableSourceClaimColumns):
+    __tablename__ = "platform_receivable_source_claims"
+    __table_args__ = _receivable_source_claim_constraints(False)
+
+
+class _OpeningExposureColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    basis_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    posting_group_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    source_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    collectible_receivable: Mapped[Decimal] = money_column()
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+def _opening_exposure_constraints(tenant: bool) -> tuple[object, ...]:
+    scope = ["tenant_id"] if tenant else []
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}receivable_exposure_facts_v2"
+    return (
+        UniqueConstraint(
+            *scope, "basis_id", "source_version", name=f"uq_{table}_version"
+        ),
+        *(
+            ForeignKeyConstraint(
+                [*scope, column, "billing_account_id"],
+                [
+                    f"{SCHEMA}.{prefix}{parent}.{key}"
+                    for key in (*scope, "id", "billing_account_id")
+                ],
+                name=f"fk_{table}_{column}",
+                ondelete="RESTRICT",
+            )
+            for column, parent in (
+                ("basis_id", "opening_receivable_bases"),
+                ("document_id", "documents"),
+                ("posting_group_id", "posting_groups"),
+            )
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class ReceivableExposureFactV2(Base, _TenantRow, _OpeningExposureColumns):
+    __tablename__ = "receivable_exposure_facts_v2"
+    __table_args__ = _opening_exposure_constraints(True)
+
+
+class PlatformReceivableExposureFactV2(Base, _OpeningExposureColumns):
+    __tablename__ = "platform_receivable_exposure_facts_v2"
+    __table_args__ = _opening_exposure_constraints(False)
+
+
 TENANT_TABLES = (
+    "receivable_source_claims",
+    "opening_receivable_bases",
+    "opening_historical_discharge_claims",
+    "receivable_exposure_facts_v2",
     "opening_import_receipts",
     "opening_cash_lots",
     "opening_cash_effects",
@@ -2100,6 +2395,10 @@ TENANT_TABLES = (
 )
 
 PLATFORM_TABLES = (
+    "platform_receivable_source_claims",
+    "platform_opening_receivable_bases",
+    "platform_opening_historical_discharge_claims",
+    "platform_receivable_exposure_facts_v2",
     "platform_opening_import_receipts",
     "platform_opening_cash_lots",
     "platform_opening_cash_effects",

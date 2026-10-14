@@ -2452,9 +2452,13 @@ made concrete — every model has exactly one declared owner.
 | `DocumentEvent` / `PlatformDocumentEvent` | `mod_billing.document_events` / `platform_document_events` | `dotmac-billing` optional module | Append-only issuance/void evidence; corrections append and never rewrite the issued document. |
 | `ConfirmedSettlement` / `PlatformConfirmedSettlement` | `mod_billing.confirmed_settlements` / `platform_confirmed_settlements` | `dotmac-billing` optional module | Independently confirmed, provider-neutral kernel-Money evidence keyed by source settlement identity and fingerprint. Cash-backed available-credit draws retain each source settlement's allocation edge, serialize on the account and cap spending against both the rebuilt credit lane and eligible source room; reversed funding cannot back a new allocation. Non-cash grants and opening-balance credit require separate source contracts. |
 | `CashSourceClaim` / `PlatformCashSourceClaim` | `mod_billing.cash_source_claims` / `platform_cash_source_claims` | `dotmac-billing` optional module | Permanent exact source-receipt identity, structurally bound to exactly one confirmed settlement or opening cash lot in its scope/account/currency/precision. The settlement or opening import owner records the claim; unwind retains it, and historical backfill copies provenance without rewriting money. |
-| `OpeningImportReceipt` / `PlatformOpeningImportReceipt` | `mod_billing.opening_import_receipts` / `platform_opening_import_receipts` | `dotmac-billing` optional module | Immutable cash-only import or full unwind, complete manifest and import-specific verification, target precondition and resulting posting watermark. |
+| `OpeningImportReceipt` / `PlatformOpeningImportReceipt` | `mod_billing.opening_import_receipts` / `platform_opening_import_receipts` | `dotmac-billing` optional module | Immutable cash-only V1 or atomic receivables-plus-cash V2 import and full unwind, complete manifest and import-specific verification, target precondition and resulting posting watermark. |
 | `OpeningCashLot` / `PlatformOpeningCashLot` | `mod_billing.opening_cash_lots` / `platform_opening_cash_lots` | `dotmac-billing` optional module | Qualified historical cash backing, original consumption and residual provenance, structurally bound to its permanent shared source claim and import receipt. |
 | `OpeningCashEffect` / `PlatformOpeningCashEffect` | `mod_billing.opening_cash_effects` / `platform_opening_cash_effects` | `dotmac-billing` optional module | Immutable recognition, invoice application, refund or linked correction with exact lot, posting group and original effect identity. |
+| `OpeningReceivableBasis` / `PlatformOpeningReceivableBasis` | `mod_billing.opening_receivable_bases` / `platform_opening_receivable_bases` | `dotmac-billing` optional module | Immutable original documentary invoice, individual historical discharges, exact opening residual and frozen tax/FX/party/collection provenance, bound to the actual V2 receipt and imported document. No rated obligation or native issuance is manufactured. |
+| `OpeningHistoricalDischargeClaim` / `PlatformOpeningHistoricalDischargeClaim` | `mod_billing.opening_historical_discharge_claims` / `platform_opening_historical_discharge_claims` | `dotmac-billing` optional module | Sealed historical application and replay-mapping evidence linked to its receivable basis. Shared parent money identity is distinct from individual invoice application identity. |
+| `ReceivableSourceClaim` / `PlatformReceivableSourceClaim` | `mod_billing.receivable_source_claims` / `platform_receivable_source_claims` | `dotmac-billing` optional module | Permanent shared live/historical WHT, raw Tax-component, non-cash grant/effect and credit-issuance identity occupancy. Nondeferrable scoped uniqueness excludes account identity; each claim has one actual typed backing and survives corrections and unwind. |
+| `ReceivableExposureFactV2` / `PlatformReceivableExposureFactV2` | `mod_billing.receivable_exposure_facts_v2` / `platform_receivable_exposure_facts_v2` | `dotmac-billing` optional module | Immutable imported-invoice residual at an actual source version. Authority, projection mode and completeness remain explicit; unknown collection subject/timing/due evidence is retained and cannot authorize automated Collections. |
 | `PostingGroup` / `PlatformPostingGroup` | `mod_billing.posting_groups` / `platform_posting_groups` | `dotmac-billing` optional module | Immutable operational-receivable mutation group and monotonic per-account source version. Refund, chargeback and reversal are movements that append and may reopen; none is a position state. |
 | `PostingEffect` / `PlatformPostingEffect` | `mod_billing.posting_effects` / `platform_posting_effects` | `dotmac-billing` optional module | Exact signed effect in one of three distinct lanes: receivable, available credit or prepaid funding. |
 | `AllocationEffect` / `PlatformAllocationEffect` | `mod_billing.allocation_effects` / `platform_allocation_effects` | `dotmac-billing` optional module | Internal immutable settlement→document allocation/correction detail; intentionally not a published peer contract. |
@@ -3869,6 +3873,27 @@ writer must extend this same identity owner before creating funding, and must
 qualify historical cash and consumption independently. Reversing financial effects
 does not release receipt identity.
 
+
+### Billing historical receivables opening (unpublished a8 candidate)
+
+`dotmac_billing.service.import_opening_account_v2` owns one atomic pristine
+account/currency import of authenticated historical invoice residuals and
+supported cash. `reverse_opening_account_import_v2` appends a full inverse
+only after subsequent discharges are reversed by their owners. Native and
+imported invoices share one internal backing resolver; original historical
+payments, WHT and credits remain documentary evidence and never become new
+current allocations or cash. Generic document void refuses imported backing.
+
+Opening recognition/unwind publish distinct `AccountingFactV5`. Genuine
+post-import allocations, WHT, non-cash and cash-lot operations keep their
+existing V1–V4 accounting contracts and publish separate imported
+`ReceivableExposureV2`; no synthetic obligation, due basis or native exposure
+is created. One shared physical source-claim namespace arbitrates live and
+historical identity use across accounts and caller isolation levels. All
+runtime participants flush the caller's transaction; no second transaction
+or replay engine is introduced. Publication, verified adoption, source-proof
+adapters, full-population closure and production authority transfer remain
+separate gates. Source qualification: [receivables inventory](inventories/billing-opening-receivables-extraction.md).
 
 ### Billing cash-only opening lifecycle (unpublished candidate)
 
