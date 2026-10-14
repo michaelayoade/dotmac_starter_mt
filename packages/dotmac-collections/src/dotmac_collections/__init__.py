@@ -122,7 +122,7 @@ from dotmac_collections.timers import (
     assert_collections_timer_conformance,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "ActionApplied",

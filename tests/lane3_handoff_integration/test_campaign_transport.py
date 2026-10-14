@@ -424,7 +424,9 @@ def test_real_established_stream_stops_under_retained_uid_guard(transport, tmp_p
         "while True:\n"
         " data=c.recv(4096)\n"
         " if not data: break\n"
-        f" n+=len(data); pathlib.Path({str(received)!r}).write_text(str(n))\n"
+        f" n+=len(data); counter=pathlib.Path({str(received)!r})\n"
+        " staged=counter.with_suffix('.next'); staged.write_text(str(n))\n"
+        " staged.replace(counter)\n"
     )
     server = subprocess.Popen(  # noqa: S603 - owned fixture stream server
         [
