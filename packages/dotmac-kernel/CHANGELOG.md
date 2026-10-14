@@ -36,6 +36,18 @@ tag and the permanent verification record establish any eventual release.
 
 ### Fixed
 
+- **Context-independent canonical financial values (2026-10-14).** Decimal
+  encoding renders the exact coefficient and exponent without `normalize()`;
+  Money encoding derives integer minor units without context-sensitive
+  arithmetic, including values constructed with clamping. Correct exact `cv1`
+  frames retain their bytes. Previously rounded frames change, and values
+  previously rejected by ambient traps can now encode. This is an observable
+  correction for those callers: persisted identities need the compatibility
+  review below, never automatic rehashing or acceptance of a collided digest.
+  [Compatibility](COMPATIBILITY.md#canonical-financial-encoding-correction--2026-10-14)
+  and the dated source inventory record the limits. This inventory is source
+  evidence, not a verified publication.
+
 - Conflict-savepoint recovery requires successful rollback of the exact child
   and restoration of the same active enclosing transaction. Unproven cleanup
   or post-release callback failure latches the exact root and prevents commit,

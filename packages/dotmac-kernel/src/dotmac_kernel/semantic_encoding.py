@@ -105,7 +105,13 @@ def canonical_decimal(value: Decimal) -> str:
         raise CanonicalEncodingError("A canonical decimal is never built from float.")
     if not isinstance(value, Decimal) or not value.is_finite():
         raise CanonicalEncodingError("A canonical decimal must be a finite Decimal.")
-    rendered = format(value.normalize(), "f")
+    # Zero's exponent is insignificant; avoid expanding an arbitrarily large
+    # negative exponent into fixed-point text before stripping it back to zero.
+    if value.is_zero():
+        return "0"
+    # Fixed-point formatting reads the exact coefficient/exponent. normalize()
+    # first would round to the ambient precision, merging distinct decisions.
+    rendered = format(value, "f")
     if "." in rendered:
         rendered = rendered.rstrip("0").rstrip(".")
     return "0" if rendered in {"-0", ""} else rendered
@@ -144,12 +150,22 @@ def encode(value: object) -> bytes:
             "so that a missing value and a null-valued field cannot collide."
         )
     if isinstance(value, Money):
-        # Exact at currency scale: integer minor units, never a rendered float.
-        minor = int(value.amount.scaleb(value.currency.minor_units).to_integral_value())
+        amount = value.amount.as_tuple()
+        if not isinstance(amount.exponent, int):
+            raise CanonicalEncodingError("Canonical money must have a finite amount.")
+        # Move the exact coefficient to currency scale using text, not scaleb()
+        # arithmetic that rounds under the ambient context. Money construction
+        # quantizes to currency scale; clamping may pad it with further zeroes.
+        minor = "".join(str(digit) for digit in amount.digits)
+        shift = amount.exponent + value.currency.minor_units
+        minor = minor + "0" * shift if shift >= 0 else minor[:shift]
+        minor = minor.lstrip("0") or "0"
+        if amount.sign and minor != "0":
+            minor = "-" + minor
         body = (
             _text(value.currency.code)
             + _frame("i", str(value.currency.minor_units).encode("ascii"))
-            + _frame("i", str(minor).encode("ascii"))
+            + _frame("i", minor.encode("ascii"))
         )
         return _frame("m", body)
     if isinstance(value, Enum):
