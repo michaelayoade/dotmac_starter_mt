@@ -3412,6 +3412,31 @@ emit the conflicting statement with no savepoint yet in place to protect
 the outer transaction, reintroducing the exact bug this helper exists to
 fix.
 
+The public transaction module also exposes `ConflictSavepointState` and its
+`BODY`, `RELEASE` and `ROLLBACK` phases for assemblies that enforce command
+transaction ownership. `current_conflict_savepoint(db)` observes exact root
+and savepoint identities; observation grants no completion authority.
+`claim_conflict_savepoint_commit(db, expected_root=owner_root)` consumes one
+claim only during Kernel's own release of the exact active savepoint, after
+validating the assembly's stored root. The yielded participant body receives
+no claim. Rollback observation lasts through completion events, including a
+failed-flush child, and nested helpers restore their parent's state on exit.
+A cleanup or post-release callback failure that cannot prove savepoint recovery
+latches the exact root. `conflict_savepoint_requires_rollback(db,
+expected_root=owner_root)` exposes that state; Kernel's completion guard refuses
+commit even if the original error was swallowed. Only the matching root ending
+clears it. The caller must abort the root, and Kernel preserves the original
+failure across cleanup errors. Ordinary flush conflicts that prove exact
+savepoint rollback remain recoverable.
+No service receives authority to commit or roll back the outer transaction.
+`ConflictSavepointProtocolError` refuses replaced or prematurely completed
+helper state. The Sub command bridge still requires a verified released
+Kernel artifact; this source change does not activate that bridge or Numbering.
+See `docs/inventories/kernel-conflict-savepoint-composition.md` for product
+provenance and `tests/test_conflict_savepoint_protocol.py` for real PostgreSQL
+conflict recovery; event-order and reentrant refusal canaries are in
+`tests/unit/test_conflict_savepoint_protocol.py`.
+
 Enforcement: `tests/architecture/test_no_feature_rollback.py` bans a bare
 `db.rollback()` anywhere in `app/features/*/service.py` (this is also
 CLAUDE.md's hard rule). `tests/test_conflict_rls_context.py` is the
