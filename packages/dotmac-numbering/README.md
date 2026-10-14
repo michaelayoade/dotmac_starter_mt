@@ -4,6 +4,13 @@ Concurrency-safe allocation and formatting of **explicitly configured** document
 series, on separate tenant and platform planes, with one immutable receipt per
 allocation.
 
+`0.1.0a3` is an unpublished successor proposal, held pending review and
+Michael's source/release authorization after the Kernel a105 release. It
+includes accepted source changes since the published a2 artifact and requires
+a new build and modern release provenance; it must not be treated as available
+for adoption. The public API and Kernel floor (`>=0.1.0a66`) are unchanged.
+See [the unreleased changelog](CHANGELOG.md).
+
 ## What it owns
 
 Given a `TenantScope` or `PlatformScope`, an open registered `series_code`, an

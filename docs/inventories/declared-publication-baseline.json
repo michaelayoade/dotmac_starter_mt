@@ -82,6 +82,11 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a8 extends cash-only V1 with an atomic evidenced open-receivables plus cash V2 import, immutable historical invoice backing and discharge replay bindings, distinct V5 accounting, truthful collection-provenance V2 exposure and full inverse lifecycle. Original documentary facts and qualified live source identity are mandatory; unsupported opening lanes remain refused. Implementation review, hosted acceptance and Michael source approval are pending. Publication is already authorized by the closed allowlist; verified artifact adoption and production activation remain separate. No product pins change.",
       "state": "declared-unpublished"
     },
+    "dotmac-collections": {
+      "declared": "0.1.0a2",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 proposes a fresh modern-provenance build under a new version; runtime behavior, public API and migrations remain unchanged from the published a1 source, and the Kernel floor remains >=0.1.0a89. The legacy a1 release is not reissued or relabeled. Hold pending root review and Michael's source/release authorization, acceptance of the Kernel a105 publication record on main, and a refreshed tag/census check before integration. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due; this proposal does not switch product authority. Remove this row only with the verified a2 publication record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
@@ -140,6 +145,11 @@
     "dotmac-kernel": {
       "declared": "0.1.0a105",
       "reason": "This row tracks Kernel source whose protected publication-record transition is not yet complete, including strict fresh settings resolution and the exact-root conflict-savepoint completion protocol. A +dev declaration is deliberately unpublishable and does not allocate a successor. Separately authorized allocation replaces +dev with the exact next public version while the row remains declared-unpublished; remove the row only after protected publication verifies and records that exact release.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-numbering": {
+      "declared": "0.1.0a3",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a3 proposes a new modern-provenance candidate over the accepted source, including typed tenant/platform construction and strict idempotency-result validation since the published a2 source; it is not identical to the retained a2 artifact. Public API and Kernel floor >=0.1.0a66 remain unchanged. Hold through the Kernel a105 release and until root review plus Michael's new-source/release authorization; integrate the accepted record on main before any new build/release. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due. The legacy a2 tag/evidence are not rewritten. Remove this row only with the verified a3 publication record.",
       "state": "declared-unpublished"
     },
     "dotmac-payments": {
