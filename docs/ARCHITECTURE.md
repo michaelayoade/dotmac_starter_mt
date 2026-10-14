@@ -3970,6 +3970,24 @@ Authored canaries include both-plane role/SQL refusals, exact replay, concurrent
 admission/seal, whole-caller rollback and ordinary post-seal lifecycle. Static
 review is not hosted runtime acceptance or a production authority switch.
 
+### Billing opening import qualification (unpublished candidate)
+
+`dotmac_billing.opening_qualification.qualify_opening_account_import_v2`
+composes independently authenticated complete source evidence and a fresh grant
+for the exact V2 import command. Billing's existing digest and complete-manifest
+preflight owners validate the bindings and financial population. Proof references
+come from trusted injected providers; matching caller strings are not authority.
+Missing providers or unavailable evidence cannot qualify an import. This pure
+boundary creates no session, financial state, principal or admission window.
+
+Source custody, issuer trust, revocation and expiry verification remain provider
+responsibilities. Original documents, historical discharge/cash evidence and
+approved account mapping remain operational prerequisites. Import qualification
+does not implement or authorize reversal, provisioning or sealing; those retain
+their separate fresh-authority ports. The reusable qualification boundary and its
+test providers do not establish live source authentication. Source disposition:
+[qualification inventory](inventories/billing-opening-qualification-extraction.md).
+
 ### Billing cash-only opening lifecycle (unpublished candidate)
 
 The candidate imports independently qualified residual cash into a financially

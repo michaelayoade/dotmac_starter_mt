@@ -119,6 +119,13 @@ from dotmac_billing.opening_contracts import (
     OpeningVerificationUnavailable,
     OpeningVerificationV1,
 )
+from dotmac_billing.opening_qualification import (
+    OpeningImportGrantProviderV2,
+    OpeningImportGrantV2,
+    OpeningSourceEvidenceProviderV2,
+    OpeningSourceEvidenceV2,
+    qualify_opening_account_import_v2,
+)
 from dotmac_billing.opening_queries import (
     get_accounting_fact_v4,
     get_opening_cash_effect,
@@ -259,6 +266,11 @@ __all__ = [
     "OpeningImportVerificationRequestV2",
     "OpeningImportVerificationV2",
     "OpeningAccountImportVerifierV2",
+    "OpeningImportGrantProviderV2",
+    "OpeningImportGrantV2",
+    "OpeningSourceEvidenceProviderV2",
+    "OpeningSourceEvidenceV2",
+    "qualify_opening_account_import_v2",
     "OpeningImportReversalVerificationRequestV2",
     "OpeningImportReversalVerificationV2",
     "OpeningImportPreviewV2",
