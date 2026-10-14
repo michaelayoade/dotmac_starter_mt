@@ -71,6 +71,13 @@ V1–V5 remain distinct. No legacy financial history is replayed as new cash,
 revenue or native invoice issuance. No reopening, destructive evidence deletion
 or automatic reimport is introduced.
 
+Policy confirmation — 2026-10-14: Michael selected “Retain guarded immutable
+inverses,” superseding the earlier extraction-plan proposal to delete opening
+unwind. A seal permanently closes admissions; a later correction requires fresh
+inverse authority and appends linked facts while preserving the original receipt,
+source claims and seal. Hosted canaries also cover a committed seal followed by
+an inverse in a fresh ordinary-role transaction for V1/V2 on both planes.
+
 ## Planned source disposition and evidence
 
 New typed window contracts/queries and additive `bi_0009` belong to Billing.

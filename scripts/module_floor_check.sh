@@ -70,7 +70,7 @@ FLOOR_PYTHON="${FLOOR_PYTHON:-python3}"
 # field names modules BEYOND the manifest that consume the declared floor --
 # see the fourth refusal family in `probe` below. Omit it and the probe is
 # manifest-only, exactly as before.
-MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service}"
+MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service packages/dotmac-billing:dotmac_billing:dotmac_billing.service}"
 
 # Overrides for a one-off investigation. Left unset in CI: a hand-set pair is
 # a claim about a module that the module itself can contradict, which is the
@@ -161,7 +161,9 @@ build_kernel_wheel() {
 # one -- it reports OK below the floor and then cannot tell "the floor is too
 # high" from "this probe proves nothing". `dotmac-files` is exactly this shape:
 # its service imports `dotmac_kernel.transactions.conflict_savepoint`, first
-# published in a98, while its manifest loads happily under a97.
+# published in a98, while its manifest loads happily under a97. Billing instead
+# imports conflict_savepoint_requires_rollback, added to the existing public
+# module in a105: a104 ships the module but lacks the required symbol.
 #
 # So an entry may DECLARE the modules that consume its floor, and the probe
 # imports them after the manifest. Declared rather than derived from the wheel

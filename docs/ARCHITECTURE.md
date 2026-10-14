@@ -3432,6 +3432,15 @@ commit even if the original error was swallowed. Only the matching root ending
 clears it. The caller must abort the root, and Kernel preserves the original
 failure across cleanup errors. Ordinary flush conflicts that prove exact
 savepoint rollback remain recoverable.
+Billing opening-window refusal recovery is a source consumer of
+`conflict_savepoint_requires_rollback`: before rechecking a refused opening
+operation it verifies that the same root remains active, the enclosing savepoint
+is restored, and Kernel has not latched that root for rollback. Billing declares
+Kernel `>=0.1.0a105`; its namespace allocation remains a89. Published a98-a104
+contain the transaction module but export only `conflict_savepoint`. The source
+dependency is not publication evidence: verified a105 artifacts and hosted floor
+checks are required before Billing release/adoption. Sub Numbering remains a
+separate composition gate below.
 No service receives authority to commit or roll back the outer transaction.
 `ConflictSavepointProtocolError` refuses replaced or prematurely completed
 helper state. The Sub command bridge still requires a verified released

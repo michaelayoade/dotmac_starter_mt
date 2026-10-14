@@ -39,6 +39,7 @@ from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import IdempotencyConflict
 from dotmac_kernel.planes import ModulePlane
 from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
 from tests import test_billing_isolation as b
@@ -1433,7 +1434,11 @@ def test_raw_sql_claim_affinity_has_an_exact_insertable_positive_control(
         db.commit()
     table = _model(plane, "OpeningHistoricalDischargeClaim").__table__
     keeper = _model(plane, "ReceivableSourceClaim").__table__
-    engine = create_engine(scratch[0])
+    # Only the isolated test harness may select the restricted opening role;
+    # the real schema owner and runtime roles cannot assume it.
+    engine = create_engine(
+        b._url_for(b._superuser_url(), make_url(scratch[0]).database)
+    )
     with engine.connect() as connection:
         original = dict(
             connection.execute(
@@ -1479,6 +1484,7 @@ def test_raw_sql_claim_affinity_has_an_exact_insertable_positive_control(
             # exercise the actual restricted principal bound to this window.
             principal = scratch.principals[plane][0]
             connection.execute(text(f'SET LOCAL ROLE "{principal}"'))
+            assert connection.scalar(text("SELECT current_user")) == principal
             if isinstance(scope, TenantScope):
                 connection.execute(
                     text("SELECT set_config('app.current_tenant', :tenant, true)"),
