@@ -47,10 +47,11 @@ from tests import test_billing_opening_cash_import as cash
 from tests.unit import test_billing_opening_receivable_contracts as evidence
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def scratch():
     with b._scratch_database((ModulePlane.TENANT, ModulePlane.PLATFORM)) as urls:
-        yield urls
+        with cash._opening_scratch(urls) as scoped:
+            yield scoped
 
 
 def _command(session, scope, account_id):
@@ -155,8 +156,13 @@ def _command(session, scope, account_id):
 
 def _import(session, scope, account_id):
     cmd = _command(session, scope, account_id)
-    return cmd, s.import_opening_account_v2(
-        session, scope=scope, command=cmd, verifier=evidence.TrustedVerifier()
+    cash._prepare_window(session, scope, cmd)
+    return cmd, cash._import_command(
+        session,
+        scope=scope,
+        command=cmd,
+        verifier=evidence.TrustedVerifier(),
+        version=2,
     )
 
 
@@ -263,7 +269,7 @@ def _counts(session, plane, account_id):
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_complete_partition_recognizes_residual_without_issuing_history(scratch, plane):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd, receipt = _import(db, scope, account)
         bases = _bases(db, scope, receipt)
@@ -310,9 +316,14 @@ def test_complete_partition_recognizes_residual_without_issuing_history(scratch,
         assert all(row.authoring_mode == "imported_open_item" for row in documents)
         assert {row.document_number for row in documents} == {"LEGACY-0", "LEGACY-1"}
         db.commit()
+        cash._prepare_window(db, scope, cmd)
         assert (
-            s.import_opening_account_v2(
-                db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier()
+            cash._import_command(
+                db,
+                scope=scope,
+                command=cmd,
+                verifier=evidence.TrustedVerifier(),
+                version=2,
             )
             == receipt
         )
@@ -336,7 +347,7 @@ def test_complete_partition_recognizes_residual_without_issuing_history(scratch,
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_cross_scope_replay_and_both_role_boundaries_are_refused(scratch, plane):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd, receipt = _import(db, scope, account)
         basis = _bases(db, scope, receipt)[0]
@@ -400,7 +411,7 @@ def test_exact_replay_still_requires_full_operation_qualified_verifier(
     scratch, plane, field
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd, receipt = _import(db, scope, account)
         db.commit()
@@ -437,8 +448,9 @@ def test_exact_replay_still_requires_full_operation_qualified_verifier(
         before = _counts(db, plane, account)
         for verifier in (None, evidence.TrustedVerifier(mutate)):
             with pytest.raises(BillingRuleViolation):
-                s.import_opening_account_v2(
-                    db, scope=scope, command=cmd, verifier=verifier
+                cash._prepare_window(db, scope, cmd)
+                cash._import_command(
+                    db, scope=scope, command=cmd, verifier=verifier, version=2
                 )
         assert _counts(db, plane, account) == before
         assert (
@@ -454,7 +466,7 @@ def test_stale_target_key_conflict_and_natural_invoice_identity_are_permanent(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd = _command(db, scope, account)
         before = _counts(db, plane, account)
@@ -463,25 +475,34 @@ def test_stale_target_key_conflict_and_natural_invoice_identity_are_permanent(
             replace(cmd.target, expected_position_fingerprint="f" * 64),
         ):
             with pytest.raises((BillingRuleViolation, BillingConflict)):
-                s.import_opening_account_v2(
+                cash._prepare_window(db, scope, replace(cmd, target=target))
+                cash._import_command(
                     db,
                     scope=scope,
                     command=replace(cmd, target=target),
                     verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
         assert _counts(db, plane, account) == before
-        receipt = s.import_opening_account_v2(
-            db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier()
+        cash._prepare_window(db, scope, cmd)
+        receipt = cash._import_command(
+            db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier(), version=2
         )
         db.commit()
         with pytest.raises((IdempotencyConflict, BillingConflict)):
-            s.import_opening_account_v2(
+            cash._prepare_window(
+                db,
+                scope,
+                replace(cmd, occurred_at=cmd.occurred_at + b.timedelta(seconds=1)),
+            )
+            cash._import_command(
                 db,
                 scope=scope,
                 command=replace(
                     cmd, occurred_at=cmd.occurred_at + b.timedelta(seconds=1)
                 ),
                 verifier=evidence.TrustedVerifier(),
+                version=2,
             )
         other_account = cash._new_account(db, scope)
         other = _command(db, scope, other_account)
@@ -521,13 +542,30 @@ def test_stale_target_key_conflict_and_natural_invoice_identity_are_permanent(
         assert evidence.preview_opening_account_import_v2(
             other, verifier=evidence.TrustedVerifier()
         ).admissible
-        with pytest.raises(BillingConflict):
-            s.import_opening_account_v2(
+        # The second independently admissible candidate is outside the frozen
+        # whole-scope manifest; refusal now precedes natural-source admission.
+        with pytest.raises(BillingRuleViolation) as outside:
+            cash._prepare_window(db, scope, other)
+            cash._import_command(
                 db,
                 scope=scope,
                 command=other,
                 verifier=evidence.TrustedVerifier(),
+                version=2,
             )
+        assert outside.value.code == "billing.opening_window_manifest"
+        source_table = _model(plane, "ReceivableSourceClaim").__table__
+        original_claim = dict(
+            db.execute(select(source_table).limit(1)).mappings().one()
+        )
+        duplicate_claim = {**original_claim, "id": uuid4()}
+        # Exact backing survives; the permanent physical source key alone
+        # differs from the primary key and must remain occupied.
+        with cash._as_opening_principal(db):
+            with pytest.raises(DBAPIError) as occupied:
+                with db.begin_nested():
+                    db.execute(source_table.insert().values(**duplicate_claim))
+            assert occupied.value.orig.sqlstate == "23505"
         assert (
             q.get_opening_import_receipt_v2(
                 db, scope=scope, receipt_id=receipt.receipt_id
@@ -541,7 +579,7 @@ def test_historical_payment_and_withholding_cannot_be_replayed_as_live_money(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd, receipt = _import(db, scope, account)
         bases = _bases(db, scope, receipt)
@@ -625,7 +663,7 @@ def test_ordinary_allocate_reallocate_and_deallocate_use_imported_residual(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
         first, second = _bases(db, scope, receipt)
@@ -709,9 +747,10 @@ def test_mixed_cash_draw_partial_and_full_inverse_restore_imported_basis(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
+        cash._seal_window(db, scope)
         basis = _bases(db, scope, receipt)[0]
         ordinary = s.accept_settlement(
             db,
@@ -767,9 +806,10 @@ def test_withholding_noncash_credit_and_credit_note_room_and_owner_inverses(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
+        cash._seal_window(db, scope)
         basis = _bases(db, scope, receipt)[0]
         # Historical WHT is documentary; only this new discharge consumes room.
         wht_cmd = b._withholding_command(
@@ -867,7 +907,7 @@ def test_one_outer_transaction_preserves_each_draws_historical_source_version(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
         basis = _bases(db, scope, receipt)[0]
@@ -979,7 +1019,7 @@ def test_atomic_fault_after_cash_ar_claims_and_outbox_preserves_outer_work(
     scratch, plane, monkeypatch
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd = _command(db, scope, account)
         pending = s.create_billing_account(
@@ -1011,8 +1051,13 @@ def test_atomic_fault_after_cash_ar_claims_and_outbox_preserves_outer_work(
         with monkeypatch.context() as fault:
             fault.setattr(s, "_emit", fail_after_actual_event)
             with pytest.raises(RuntimeError, match="fault after both opening lanes"):
-                s.import_opening_account_v2(
-                    db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier()
+                cash._prepare_window(db, scope, cmd)
+                cash._import_command(
+                    db,
+                    scope=scope,
+                    command=cmd,
+                    verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
         assert observed
         assert _counts(db, plane, account) == before
@@ -1024,8 +1069,9 @@ def test_atomic_fault_after_cash_ar_claims_and_outbox_preserves_outer_work(
             == 0
         )
         assert db.get(_model(plane, "BillingAccount"), pending_id) is not None
-        receipt = s.import_opening_account_v2(
-            db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier()
+        cash._prepare_window(db, scope, cmd)
+        receipt = cash._import_command(
+            db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier(), version=2
         )
         assert len(receipt.basis_ids) == len(receipt.lot_ids) == 2
         db.rollback()
@@ -1044,9 +1090,10 @@ def test_concurrent_same_key_retries_converge_or_refuse_changed_evidence(
     scratch, plane, conflicting
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         command = _command(db, scope, account)
+        cash._prepare_window(db, scope, command)
     commands = (
         command,
         replace(command, occurred_at=command.occurred_at + b.timedelta(seconds=1))
@@ -1058,10 +1105,15 @@ def test_concurrent_same_key_retries_converge_or_refuse_changed_evidence(
 
     def run(cmd):
         try:
-            with b._session(url, scope) as db:
+            with cash._session(scratch, url, scope) as db:
                 barrier.wait(timeout=20)
-                receipt = s.import_opening_account_v2(
-                    db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier()
+                cash._prepare_window(db, scope, cmd)
+                receipt = cash._import_command(
+                    db,
+                    scope=scope,
+                    command=cmd,
+                    verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
                 db.commit()
                 results.append(receipt)
@@ -1081,7 +1133,7 @@ def test_concurrent_same_key_retries_converge_or_refuse_changed_evidence(
         assert failures == []
         assert len(results) == 2
         assert results[0] == results[1]
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         counts = _counts(db, plane, account)
         assert counts["OpeningImportReceipt"] == 1
         assert counts["OpeningReceivableBasis"] == counts["OpeningCashLot"] == 2
@@ -1102,7 +1154,7 @@ def test_full_unwind_requires_all_owner_inverses_and_never_releases_natural_clai
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd, receipt = _import(db, scope, account)
         first, second = _bases(db, scope, receipt)
@@ -1266,18 +1318,25 @@ def test_full_unwind_requires_all_owner_inverses_and_never_releases_natural_clai
             )
             == inverse
         )
+        cash._prepare_window(db, scope, cmd)
         assert (
-            s.import_opening_account_v2(
-                db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier()
+            cash._import_command(
+                db,
+                scope=scope,
+                command=cmd,
+                verifier=evidence.TrustedVerifier(),
+                version=2,
             )
             == receipt
         )
         with pytest.raises((BillingConflict, BillingRuleViolation)):
-            s.import_opening_account_v2(
+            cash._prepare_window(db, scope, replace(cmd, idempotency_key=str(uuid4())))
+            cash._import_command(
                 db,
                 scope=scope,
                 command=replace(cmd, idempotency_key=str(uuid4())),
                 verifier=evidence.TrustedVerifier(),
+                version=2,
             )
         for name, expected in (("OpeningReceivableBasis", 2), ("CashSourceClaim", 2)):
             model = _model(plane, name)
@@ -1298,7 +1357,7 @@ def test_owner_and_online_sql_cannot_amend_or_delete_documentary_history(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _import(db, scope, account)
         db.commit()
@@ -1348,7 +1407,7 @@ def test_raw_sql_claim_affinity_has_an_exact_insertable_positive_control(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         other_account = cash._new_account(db, scope)
         _import(db, scope, account)
@@ -1426,7 +1485,7 @@ def test_raw_sql_cash_draw_capacity_uses_residual_not_original_invoice_gross(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd = _command(db, scope, account)
         first_lot, second_lot = cmd.manifest.cash_lots
@@ -1450,11 +1509,13 @@ def test_raw_sql_cash_draw_capacity_uses_residual_not_original_invoice_gross(
                 replace(cmd.manifest.controls[0], available_cash_credit_minor=20000),
             ),
         )
-        receipt = s.import_opening_account_v2(
+        cash._prepare_window(db, scope, replace(cmd, manifest=manifest))
+        receipt = cash._import_command(
             db,
             scope=scope,
             command=replace(cmd, manifest=manifest),
             verifier=evidence.TrustedVerifier(),
+            version=2,
         )
         basis = _bases(db, scope, receipt)[0]
         draw = s.apply_available_credit(
@@ -1527,7 +1588,7 @@ def test_deferred_completeness_refuses_missing_real_opening_artifacts(
     scope, url = noncash._scope_url(scratch, plane)
     omitted_model = _model(plane, missing)
     role_url = scratch[0] if missing == "OpeningHistoricalDischargeClaim" else url
-    with b._session(role_url, scope) as db:
+    with cash._session(scratch, role_url, scope) as db:
         account = cash._new_account(db, scope)
         before = _counts(db, plane, account)
         actual_add = db.add
@@ -1592,7 +1653,7 @@ def test_public_queries_refuse_semantic_corruption_with_recomputed_kernel_hash(
     scratch, plane, tamper
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
         basis = _bases(db, scope, receipt)[0]
@@ -1634,7 +1695,7 @@ def test_public_queries_refuse_semantic_corruption_with_recomputed_kernel_hash(
                 db, scope=scope, basis_id=basis.basis_id
             )
 
-    with b._session(scratch[0], scope) as owner:
+    with cash._session(scratch, scratch[0], scope) as owner:
         untouched = read(owner)
         original = owner.execute(select(table).where(predicate)).mappings().one()
         payload = deepcopy(original[payload_column])
@@ -1694,7 +1755,7 @@ def test_accounting_v5_distinguishes_residual_recognition_from_new_cash_or_reven
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
         fact = q.get_accounting_fact_v5(
@@ -1732,7 +1793,7 @@ def test_historical_credit_and_noncash_sources_refuse_live_replay_across_version
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd = _command(db, scope, account)
         first, second = cmd.manifest.receivables
@@ -1789,11 +1850,13 @@ def test_historical_credit_and_noncash_sources_refuse_live_replay_across_version
                 ),
             ),
         )
-        receipt = s.import_opening_account_v2(
+        cash._prepare_window(db, scope, replace(cmd, manifest=manifest))
+        receipt = cash._import_command(
             db,
             scope=scope,
             command=replace(cmd, manifest=manifest),
             verifier=evidence.TrustedVerifier(),
+            version=2,
         )
         first_basis, second_basis = _bases(db, scope, receipt)
         db.commit()
@@ -1854,7 +1917,7 @@ def test_expired_retry_record_cannot_free_receivable_or_historical_source_identi
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         cmd, receipt = _import(db, scope, account)
         db.commit()
@@ -1869,11 +1932,16 @@ def test_expired_retry_record_cannot_free_receivable_or_historical_source_identi
         )
         assert deleted.rowcount == 1
     engine.dispose()
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         before = _counts(db, plane, account)
         with pytest.raises((BillingConflict, BillingRuleViolation)):
-            s.import_opening_account_v2(
-                db, scope=scope, command=cmd, verifier=evidence.TrustedVerifier()
+            cash._prepare_window(db, scope, cmd)
+            cash._import_command(
+                db,
+                scope=scope,
+                command=cmd,
+                verifier=evidence.TrustedVerifier(),
+                version=2,
             )
         assert _counts(db, plane, account) == before
         assert (
@@ -1957,7 +2025,19 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
                 active,
             )
 
+        original_window_admission = s._admit_opening_window
+        with b._session(urls[0], scope) as catalog:
+            assert (
+                catalog.scalar(
+                    text("SELECT to_regclass(:table)"),
+                    {"table": f"mod_billing.{prefix}opening_windows"},
+                )
+                is None
+            )
         with monkeypatch.context() as historical:
+            # Source-compatibility for the verified bi7 fixture only. Its real
+            # role, trust, money and existing SQL guards remain unchanged.
+            historical.setattr(s, "_admit_opening_window", lambda *args, **kwargs: None)
             historical.setattr(
                 s, "resolve_receivable_backing", native_predecessor_backing
             )
@@ -1966,7 +2046,13 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
             )
             with b._session(url, scope) as db:
                 account = cash._new_account(db, scope)
-                old_command, old_receipt = cash._import(db, scope, account)
+                old_command = cash._command(db, scope, account)
+                old_receipt = s.import_opening_account(
+                    db,
+                    scope=scope,
+                    command=old_command,
+                    verifier=cash.TrustedVerifier(),
+                )
                 invoice = cash._invoice(db, scope, account)
                 s.apply_available_credit(
                     db,
@@ -2183,8 +2269,9 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
                     row,
                     "credit_document_fact_id",
                 )
+        assert s._admit_opening_window is original_window_admission
         alembic_command.upgrade(
-            cash.predecessor._config((selection,)), "bi_0008_opening_receivables"
+            cash.predecessor._config((selection,)), "bi_0009_opening_window"
         )
         with engine.connect() as connection:
             for name in names:
@@ -2274,9 +2361,23 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
             )
             assert cash._position(db, scope, account).available_credit == Decimal("50")
             fresh_account = cash._new_account(db, scope)
-            new_receipt = _import(db, scope, fresh_account)[1]
-            assert new_receipt.total_receivable == b._money("120")
+            new_command = _command(db, scope, fresh_account)
+            with pytest.raises(BillingRuleViolation) as missing:
+                s.import_opening_account_v2(
+                    db,
+                    scope=scope,
+                    command=new_command,
+                    verifier=evidence.TrustedVerifier(),
+                )
+            assert missing.value.code == "billing.opening_window_missing"
             db.commit()
+        # Existing immutable receipts cannot be silently adopted into a new
+        # window, even by a genuine migrator with a genuine restricted role.
+        with cash.window_fixture._principal(urls, plane) as principal:
+            with pytest.raises(DBAPIError) as bootstrap:
+                cash.window_fixture._provision(urls, scope, principal, new_command)
+            assert bootstrap.value.orig.sqlstate == "42501"
+            assert "historical bootstrap" in str(bootstrap.value.orig)
         engine.dispose()
 
 
@@ -2285,7 +2386,7 @@ def test_snapshot_reads_ignore_dirty_orm_without_inventing_collection_identity(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
         basis = _bases(db, scope, receipt)[0]
@@ -2334,7 +2435,7 @@ def test_actual_imported_position_is_exact_under_hostile_decimal_context(
     from decimal import Inexact, Overflow, Rounded, getcontext, localcontext
 
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
         basis = _bases(db, scope, receipt)[0]
@@ -2628,7 +2729,7 @@ def test_live_first_source_blocks_same_historical_identity_on_pristine_other_acc
     scratch, plane, kind
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         live_account, execute, binding, delta = _source_case(db, scope, kind)
         before_ar, before_nc = _ar_and_noncash(db, scope, live_account)
         actual = execute(db)
@@ -2655,8 +2756,13 @@ def test_live_first_source_blocks_same_historical_identity_on_pristine_other_acc
         )
         before = _counts(db, plane, imported_account)
         with pytest.raises((BillingConflict, DBAPIError)):
-            s.import_opening_account_v2(
-                db, scope=scope, command=command, verifier=evidence.TrustedVerifier()
+            cash._prepare_window(db, scope, command)
+            cash._import_command(
+                db,
+                scope=scope,
+                command=command,
+                verifier=evidence.TrustedVerifier(),
+                version=2,
             )
         assert _counts(db, plane, imported_account) == before
         assert _ar_and_noncash(db, scope, imported_account) == (
@@ -2681,13 +2787,14 @@ def test_live_history_cross_account_race_uses_one_physical_unique_source_claim(
     from sqlalchemy import event
 
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         live_account, execute, binding, delta = _source_case(db, scope, kind)
         before_ar, before_nc = _ar_and_noncash(db, scope, live_account)
         imported_account = cash._new_account(db, scope)
         command = _with_historical_binding(
             _command(db, scope, imported_account), binding
         )
+        cash._prepare_window(db, scope, command)
     snapshots, mutations = Barrier(2), Barrier(2)
     successes, failures, acquired = [], [], []
     prefix = "platform_" if plane == "platform" else ""
@@ -2703,7 +2810,7 @@ def test_live_history_cross_account_race_uses_one_physical_unique_source_claim(
 
     def run(branch):
         try:
-            with b._session(url, scope) as db:
+            with cash._session(scratch, url, scope) as db:
                 assert isolation in {
                     "READ COMMITTED",
                     "REPEATABLE READ",
@@ -2770,14 +2877,16 @@ def test_live_history_cross_account_race_uses_one_physical_unique_source_claim(
 
                 event.listen(db.get_bind(), "before_cursor_execute", before_insert)
                 try:
+                    cash._prepare_window(db, scope, command)
                     result = (
                         execute(db)
                         if branch == "live"
-                        else s.import_opening_account_v2(
+                        else cash._import_command(
                             db,
                             scope=scope,
                             command=command,
                             verifier=evidence.TrustedVerifier(),
+                            version=2,
                         )
                     )
                     assert reached
@@ -2798,7 +2907,7 @@ def test_live_history_cross_account_race_uses_one_physical_unique_source_claim(
     assert len(successes) == len(failures) == 1
     assert isinstance(failures[0][1], DBAPIError), failures
     assert failures[0][1].orig.sqlstate in {"23505", "40001"}
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         rows = _source_rows(db, plane, binding)
         assert len(rows) == 1
         claim = rows[0]
@@ -2842,7 +2951,7 @@ def test_historical_tax_component_blocks_a_new_remittance_source_on_another_acco
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         live_account, execute, binding, _ = _source_case(
             db, scope, "withholding_tax_component"
         )
@@ -2851,8 +2960,13 @@ def test_historical_tax_component_blocks_a_new_remittance_source_on_another_acco
         command = _with_historical_binding(
             _command(db, scope, imported_account), binding
         )
-        receipt = s.import_opening_account_v2(
-            db, scope=scope, command=command, verifier=evidence.TrustedVerifier()
+        cash._prepare_window(db, scope, command)
+        receipt = cash._import_command(
+            db,
+            scope=scope,
+            command=command,
+            verifier=evidence.TrustedVerifier(),
+            version=2,
         )
         db.commit()
         claim = _source_rows(db, plane, binding)
@@ -2888,7 +3002,7 @@ def test_v5_sql_duplicate_arrays_cannot_omit_actual_sources_with_matching_outbox
     scratch, plane, attack
 ):
     scope, _ = noncash._scope_url(scratch, plane)
-    with b._session(scratch[0], scope) as db:
+    with cash._session(scratch, scratch[0], scope) as db:
         account = cash._new_account(db, scope)
         table = _model(plane, "AccountingFact").__table__
         if attack != "positive":
@@ -2984,7 +3098,7 @@ def test_extra_exposure_sql_must_match_an_actual_impacted_basis_and_group(
     scratch, plane, attack
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         _, receipt = _import(db, scope, account)
         first, second = _bases(db, scope, receipt)
@@ -3012,7 +3126,7 @@ def test_extra_exposure_sql_must_match_an_actual_impacted_basis_and_group(
         unrelated_id, unrelated_version = unrelated.id, unrelated.source_version
         db.commit()
     table = _model(plane, "ReceivableExposureFactV2").__table__
-    with b._session(scratch[0], scope) as owner:
+    with cash._session(scratch, scratch[0], scope) as owner:
         row = dict(
             owner.execute(
                 select(table).where(
@@ -3089,7 +3203,7 @@ def test_rolled_back_source_winner_allows_fresh_legitimate_exact_retry(
     scratch, plane, kind, branch
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         live_account, execute, binding, delta = _source_case(db, scope, kind)
         before_ar, before_nc = _ar_and_noncash(db, scope, live_account)
         imported_account = cash._new_account(db, scope)
@@ -3098,14 +3212,16 @@ def test_rolled_back_source_winner_allows_fresh_legitimate_exact_retry(
         )
 
         def winning_operation():
+            cash._prepare_window(db, scope, command)
             return (
                 execute(db)
                 if branch == "live"
-                else s.import_opening_account_v2(
+                else cash._import_command(
                     db,
                     scope=scope,
                     command=command,
                     verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
             )
 
@@ -3131,11 +3247,13 @@ def test_rolled_back_source_winner_allows_fresh_legitimate_exact_retry(
                 before_nc + delta[1],
             )
             with pytest.raises((BillingConflict, DBAPIError)):
-                s.import_opening_account_v2(
+                cash._prepare_window(db, scope, command)
+                cash._import_command(
                     db,
                     scope=scope,
                     command=command,
                     verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
         else:
             assert cash._position(
@@ -3154,15 +3272,20 @@ def test_historical_source_occupancy_covers_noncash_correction_namespace(
     scratch, plane, kind
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         live_account, execute, binding, _ = _source_case(db, scope, kind)
         before = _ar_and_noncash(db, scope, live_account)
         imported_account = cash._new_account(db, scope)
         command = _with_historical_binding(
             _command(db, scope, imported_account), binding
         )
-        s.import_opening_account_v2(
-            db, scope=scope, command=command, verifier=evidence.TrustedVerifier()
+        cash._prepare_window(db, scope, command)
+        cash._import_command(
+            db,
+            scope=scope,
+            command=command,
+            verifier=evidence.TrustedVerifier(),
+            version=2,
         )
         db.commit()
         with pytest.raises((BillingConflict, DBAPIError)):
@@ -3177,7 +3300,7 @@ def test_raw_tax_triple_remains_occupied_if_auxiliary_historical_hash_is_corrupt
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         live_account, execute, binding, _ = _source_case(
             db, scope, "withholding_tax_component"
         )
@@ -3186,12 +3309,17 @@ def test_raw_tax_triple_remains_occupied_if_auxiliary_historical_hash_is_corrupt
         command = _with_historical_binding(
             _command(db, scope, imported_account), binding
         )
-        s.import_opening_account_v2(
-            db, scope=scope, command=command, verifier=evidence.TrustedVerifier()
+        cash._prepare_window(db, scope, command)
+        cash._import_command(
+            db,
+            scope=scope,
+            command=command,
+            verifier=evidence.TrustedVerifier(),
+            version=2,
         )
         db.commit()
     table = _model(plane, "OpeningHistoricalDischargeClaim").__table__
-    with b._session(scratch[0], scope) as owner:
+    with cash._session(scratch, scratch[0], scope) as owner:
         row = (
             owner.execute(
                 select(table).where(
@@ -3254,7 +3382,7 @@ def test_credit_void_and_ordinary_invoice_correlations_do_not_claim_credit_issua
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account, _, invoice = b._seed_invoice(db, scope, suffix=str(uuid4()))
         fact_model = _model(plane, "InvoiceDocumentFact")
         original_fact = db.scalars(
@@ -3318,8 +3446,13 @@ def test_credit_void_and_ordinary_invoice_correlations_do_not_claim_credit_issua
         opening = _with_historical_binding(
             _command(db, scope, imported_account), historical_binding
         )
-        receipt = s.import_opening_account_v2(
-            db, scope=scope, command=opening, verifier=evidence.TrustedVerifier()
+        cash._prepare_window(db, scope, opening)
+        receipt = cash._import_command(
+            db,
+            scope=scope,
+            command=opening,
+            verifier=evidence.TrustedVerifier(),
+            version=2,
         )
         db.commit()
         occupied = _source_rows(db, plane, historical_binding)
@@ -3400,13 +3533,13 @@ def test_common_source_keeper_raw_admission_has_exact_backing_positive_control(
     scratch, plane, attack
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         other_account = cash._new_account(db, scope)
         _import(db, scope, account)
         db.commit()
     table = _model(plane, "ReceivableSourceClaim").__table__
-    with b._session(scratch[0], scope) as owner:
+    with cash._session(scratch, scratch[0], scope) as owner:
         assert owner.scalar(
             text(
                 "SELECT NOT condeferrable FROM pg_constraint "
@@ -3465,7 +3598,7 @@ def test_pending_opening_cannot_commit_without_its_actual_source_occupancy(
     scratch, plane
 ):
     scope, _ = noncash._scope_url(scratch, plane)
-    with b._session(scratch[0], scope) as owner:
+    with cash._session(scratch, scratch[0], scope) as owner:
         account = cash._new_account(owner, scope)
         table = _model(plane, "ReceivableSourceClaim").__table__
         _disable_fixture_append_before_insert(owner, table)
@@ -3497,9 +3630,10 @@ def test_v2_pristine_admission_observes_native_write_after_acquired_snapshot(
     scratch, plane, kind, native_commits, isolation
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         command = _command(db, scope, account)
+        cash._prepare_window(db, scope, command)
         write, native_model = cash._native_target_write(db, scope, account, kind)
         db.commit()
     snapshot_ready, native_finished = Barrier(2), Barrier(2)
@@ -3507,18 +3641,20 @@ def test_v2_pristine_admission_observes_native_write_after_acquired_snapshot(
 
     def import_complete_partition():
         try:
-            with b._session(url, scope) as db:
+            with cash._session(scratch, url, scope) as db:
                 cash._assert_target_isolation(db, isolation)
                 assert cash._native_target_count(db, native_model, account) == 0
                 assert _counts(db, plane, account)["PostingGroup"] == 0
                 snapshots.append(db.scalar(text("SELECT pg_current_snapshot()::text")))
                 snapshot_ready.wait(timeout=30)
                 native_finished.wait(timeout=30)
-                receipt = s.import_opening_account_v2(
+                cash._prepare_window(db, scope, command)
+                receipt = cash._import_command(
                     db,
                     scope=scope,
                     command=command,
                     verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
                 db.commit()
                 receipts.append(receipt)
@@ -3527,7 +3663,7 @@ def test_v2_pristine_admission_observes_native_write_after_acquired_snapshot(
 
     def write_unposted_native():
         try:
-            with b._session(url, scope) as db:
+            with cash._session(scratch, url, scope) as db:
                 snapshot_ready.wait(timeout=30)
                 native_ids.append(write(db))
                 if native_commits:
@@ -3551,7 +3687,7 @@ def test_v2_pristine_admission_observes_native_write_after_acquired_snapshot(
         assert not thread.is_alive()
     assert len(snapshots) == 1 and snapshots[0]
     assert len(native_ids) == 1 and writer_errors == []
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         # V2 recognizes documentary invoices, so count the exact native row
         # rather than confusing its two imported documents with native drafts.
         native_exists = db.scalar(
@@ -3584,11 +3720,13 @@ def test_v2_pristine_admission_observes_native_write_after_acquired_snapshot(
             position = cash._position(db, scope, account)
             assert position.collectible_receivable == position.available_credit == 0
             with pytest.raises(BillingRuleViolation) as fresh:
-                s.import_opening_account_v2(
+                cash._prepare_window(db, scope, command)
+                cash._import_command(
                     db,
                     scope=scope,
                     command=command,
                     verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
             assert fresh.value.code == "billing.opening_target_not_pristine"
         else:
@@ -3602,12 +3740,14 @@ def test_v2_pristine_admission_observes_native_write_after_acquired_snapshot(
                 "120"
             )
             assert cash._position(db, scope, account).available_credit == Decimal("60")
+            cash._prepare_window(db, scope, command)
             assert (
-                s.import_opening_account_v2(
+                cash._import_command(
                     db,
                     scope=scope,
                     command=command,
                     verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
                 == receipt
             )
@@ -3621,14 +3761,19 @@ def test_v2_complete_import_and_native_write_obey_same_outer_transaction_order(
     scratch, plane, kind, import_first
 ):
     scope, url = noncash._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with cash._session(scratch, url, scope) as db:
         account = cash._new_account(db, scope)
         command = _command(db, scope, account)
         write, native_model = cash._native_target_write(db, scope, account, kind)
         db.commit()
         if import_first:
-            receipt = s.import_opening_account_v2(
-                db, scope=scope, command=command, verifier=evidence.TrustedVerifier()
+            cash._prepare_window(db, scope, command)
+            receipt = cash._import_command(
+                db,
+                scope=scope,
+                command=command,
+                verifier=evidence.TrustedVerifier(),
+                version=2,
             )
             native_id = write(db)
             assert (
@@ -3654,11 +3799,13 @@ def test_v2_complete_import_and_native_write_obey_same_outer_transaction_order(
         else:
             native_id = write(db)
             with pytest.raises(BillingRuleViolation) as refusal:
-                s.import_opening_account_v2(
+                cash._prepare_window(db, scope, command)
+                cash._import_command(
                     db,
                     scope=scope,
                     command=command,
                     verifier=evidence.TrustedVerifier(),
+                    version=2,
                 )
             assert refusal.value.code == "billing.opening_target_not_pristine"
             assert (

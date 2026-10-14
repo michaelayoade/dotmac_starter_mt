@@ -787,3 +787,17 @@ def test_closed_union_validation_covers_both_python_union_representations():
     for value in (True, False, 1.0, "1", object()):
         with pytest.raises(OpeningEvidenceError):
             _validate_closed(value, int | None)
+
+
+def test_real_v2_preflight_is_consumed_by_rehearsal_report():
+    from dotmac_billing.opening_rehearsal import report_opening_rehearsal
+
+    from tests.unit.test_billing_opening_rehearsal import _run
+
+    run = _run(verifier=False)
+    preview = preview_opening_account_import_v2(run.commands[0])
+    report = report_opening_rehearsal(replace(run, previews=(preview,)))
+    assert preview.blockers
+    assert "verifier_unavailable" in {x.code for x in report.blockers}
+    assert not report.complete_exact_reconciliation
+    assert not report.activation_ready

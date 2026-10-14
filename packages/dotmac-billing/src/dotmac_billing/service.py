@@ -22,7 +22,7 @@ from dotmac_kernel.idempotency import (
 )
 from dotmac_kernel.messaging import enqueue_event, enqueue_platform_event
 from dotmac_kernel.money import Currency, Money
-from sqlalchemy import func, select
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -123,10 +123,13 @@ from dotmac_billing.opening_commands import (
     ReverseOpeningAccountImportV1,
 )
 from dotmac_billing.opening_contracts import (
+    OpeningManifestV1,
     OpeningPreviewRequestV1,
     OpeningVerificationUnavailable,
 )
 from dotmac_billing.opening_queries import (
+    _scoped,
+    _table,
     get_accounting_fact_v4,
     get_opening_cash_effect,
     get_opening_cash_lot,
@@ -153,12 +156,32 @@ from dotmac_billing.opening_receivable_validation import (
     _opening_replay_identity,
     opening_account_command_digest_v2,
     opening_account_import_blockers_v2,
+    opening_manifest_fingerprint_v2,
     opening_withholding_component_identity,
     verify_opening_account_import_v2,
 )
 from dotmac_billing.opening_validation import (
     opening_manifest_fingerprint,
     preview_opening_account_import,
+)
+from dotmac_billing.opening_window_contracts import (
+    OpeningWindowProvisionVerificationRequestV1,
+    OpeningWindowProvisionVerificationV1,
+    OpeningWindowProvisionVerifier,
+    OpeningWindowSealV1,
+    OpeningWindowSealVerificationRequestV1,
+    OpeningWindowSealVerificationV1,
+    OpeningWindowSealVerifier,
+    OpeningWindowV1,
+    ProvisionOpeningWindowV1,
+    SealOpeningWindowV1,
+    StoredOpeningWindowV1,
+    opening_admission_population_digest,
+)
+from dotmac_billing.opening_window_queries import (
+    get_opening_window,
+    get_opening_window_admissions,
+    get_opening_window_seal,
 )
 from dotmac_billing.queries import (
     get_non_cash_credit_effect,
@@ -5338,6 +5361,8 @@ def repair_document_artifact(
 
 
 __all__ = [
+    "provision_opening_window",
+    "seal_opening_window",
     "import_opening_account",
     "record_opening_cash_refund",
     "correct_opening_cash_refund",
@@ -5626,6 +5651,251 @@ def _opening_effect(
     )
 
 
+def provision_opening_window(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ProvisionOpeningWindowV1,
+    verifier: OpeningWindowProvisionVerifier | None = None,
+) -> OpeningWindowV1:
+    """Bind one explicit product-provisioned principal; SQL requires migrator.
+
+    This grants no role privileges and cannot bootstrap historical receipts.
+    The caller owns role provisioning, transaction completion and source proof.
+    """
+    if type(command) is not ProvisionOpeningWindowV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected provision command"
+        )
+    window = command.window
+    _require_scope_matches(routed=scope, declared=window.scope)
+    if window.manifest_version not in (1, 2) or window.principal_oid <= 0:
+        raise BillingRuleViolation("opening_window_binding", "invalid window binding")
+    manifest_digest = (
+        opening_manifest_fingerprint(window.manifest)
+        if type(window.manifest) is OpeningManifestV1
+        else opening_manifest_fingerprint_v2(window.manifest)
+    )
+    if (
+        window.manifest.scope != scope
+        or manifest_digest != window.manifest_fingerprint
+        or window.manifest_version
+        != (1 if type(window.manifest) is OpeningManifestV1 else 2)
+    ):
+        raise BillingRuleViolation(
+            "opening_window_manifest", "window requires exact complete manifest"
+        )
+    if verifier is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "trusted provision verifier required"
+        )
+    digest = fingerprint_of(
+        {"domain": "billing.opening.window.provision.v1", "command": _jsonable(command)}
+    )
+    try:
+        verified = verifier.verify_provision(
+            OpeningWindowProvisionVerificationRequestV1(command, digest)
+        )
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "provision qualification unavailable"
+        ) from exc
+    if (
+        type(verified) is not OpeningWindowProvisionVerificationV1
+        or verified.operation != "billing.opening.window.provision.v1"
+        or verified.scope != scope
+        or verified.window_id != window.window_id
+        or verified.epoch != window.epoch
+        or verified.manifest_fingerprint != manifest_digest
+        or verified.principal_name != window.principal_name
+        or verified.principal_oid != window.principal_oid
+        or verified.command_digest != digest
+        or verified.authority_ref != window.provision_authority_ref
+    ):
+        raise BillingRuleViolation(
+            "opening_authority_binding", "provision proof does not bind command"
+        )
+    evidence = _jsonable(StoredOpeningWindowV1(window, verified))
+    values = {
+        "id": window.window_id,
+        "epoch": window.epoch,
+        "manifest_version": window.manifest_version,
+        "manifest_fingerprint": window.manifest_fingerprint,
+        "principal_name": window.principal_name,
+        "principal_oid": window.principal_oid,
+        "provision_authority_ref": window.provision_authority_ref,
+        "evidence": evidence,
+        "evidence_digest": fingerprint_of(evidence),
+    }
+    if isinstance(scope, TenantScope):
+        values["tenant_id"] = scope.tenant_id
+    db.execute(insert(_table(scope, "opening_windows")).values(**values))
+    db.flush()
+    return window
+
+
+def _touch_opening_window(db: Session, *, scope: Scope) -> OpeningWindowV1:
+    table = _table(scope, "opening_windows")
+    result = db.execute(
+        _scoped(
+            update(table)
+            .values(generation=table.c.generation + 1)
+            .returning(table.c.id),
+            scope,
+            table,
+        )
+    ).scalar_one_or_none()
+    if result is None:
+        raise BillingRuleViolation(
+            "opening_window_missing", "opening window is required"
+        )
+    window = get_opening_window(db, scope=scope)
+    if window is None:
+        raise BillingRuleViolation(
+            "opening_window_missing", "opening window is required"
+        )
+    if get_opening_window_seal(db, scope=scope) is not None:
+        raise BillingRuleViolation("opening_window_sealed", "opening window is sealed")
+    return window
+
+
+def _admit_opening_window(
+    db: Session, *, scope: Scope, manifest_fingerprint: str, manifest_version: int
+) -> OpeningWindowV1:
+    window = _touch_opening_window(db, scope=scope)
+    if (window.manifest_fingerprint, window.manifest_version) != (
+        manifest_fingerprint,
+        manifest_version,
+    ):
+        raise BillingRuleViolation(
+            "opening_window_manifest", "opening window binds one complete manifest"
+        )
+    return window
+
+
+def seal_opening_window(
+    db: Session,
+    *,
+    scope: Scope,
+    command: SealOpeningWindowV1,
+    verifier: OpeningWindowSealVerifier | None = None,
+) -> OpeningWindowSealV1:
+    if type(command) is not SealOpeningWindowV1:
+        raise BillingRuleViolation("opening_command_invalid", "expected seal command")
+    _require_scope_matches(routed=scope, declared=command.scope)
+    if verifier is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "trusted seal verifier required"
+        )
+    trusted_verifier = verifier
+    digest = fingerprint_of(
+        {"domain": "billing.opening.window.seal.v1", "command": _jsonable(command)}
+    )
+    population_digest = opening_admission_population_digest(command.admissions)
+
+    def qualify() -> OpeningWindowSealVerificationV1:
+        try:
+            verified = trusted_verifier.verify_seal(
+                OpeningWindowSealVerificationRequestV1(
+                    command, digest, population_digest
+                )
+            )
+        except OpeningVerificationUnavailable as exc:
+            raise BillingRuleViolation(
+                "opening_verifier_unavailable", "seal qualification unavailable"
+            ) from exc
+        if (
+            type(verified) is not OpeningWindowSealVerificationV1
+            or verified.operation != "billing.opening.window.seal.v1"
+            or verified.scope != scope
+            or verified.window_id != command.window_id
+            or verified.epoch != command.epoch
+            or verified.manifest_fingerprint != command.manifest_fingerprint
+            or verified.command_digest != digest
+            or verified.population_digest != population_digest
+            or verified.population_count != len(command.admissions)
+            or verified.coupled_watermark != command.coupled_watermark
+            or verified.authority_ref != command.authority_ref
+        ):
+            raise BillingRuleViolation(
+                "opening_authority_binding", "seal proof does not bind command"
+            )
+        return verified
+
+    # Authenticate exact retries; this observation is not new-seal authority.
+    qualify()
+
+    def operation(session: Session) -> dict[str, object]:
+        window = _touch_opening_window(session, scope=scope)
+        if (window.window_id, window.epoch, window.manifest_fingerprint) != (
+            command.window_id,
+            command.epoch,
+            command.manifest_fingerprint,
+        ):
+            raise BillingRuleViolation(
+                "opening_window_binding", "seal window binding differs"
+            )
+        # Only fresh evidence observed under the physical custody lock seals.
+        verified = qualify()
+        actual = get_opening_window_admissions(session, scope=scope)
+        expected = {
+            item.partition.account_id
+            for item in (
+                *window.manifest.cash_lots,
+                *getattr(window.manifest, "receivables", ()),
+            )
+            if item.residual_minor > 0
+        }
+        if {item.billing_account_id for item in actual} != expected or len(
+            actual
+        ) != len(expected):
+            raise BillingRuleViolation(
+                "opening_window_population",
+                "frozen complete partition population differs",
+            )
+        if (
+            len(actual) != len(command.admissions)
+            or opening_admission_population_digest(actual) != population_digest
+        ):
+            raise BillingRuleViolation(
+                "opening_window_population", "complete local admissions differ"
+            )
+        seal = OpeningWindowSealV1(
+            command, verified, population_digest, len(actual), datetime.now(UTC)
+        )
+        evidence = _jsonable(seal)
+        values = {
+            "id": uuid4(),
+            "window_id": window.window_id,
+            "population_digest": population_digest,
+            "population_count": len(actual),
+            "coupled_watermark": command.coupled_watermark,
+            "command_digest": digest,
+            "evidence": evidence,
+            "evidence_digest": fingerprint_of(evidence),
+        }
+        if isinstance(scope, TenantScope):
+            values["tenant_id"] = scope.tenant_id
+        session.execute(insert(_table(scope, "opening_window_seals")).values(**values))
+        session.flush()
+        return {"window_id": str(window.window_id)}
+
+    _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.window.seal.v1",
+        key=command.command_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    result = get_opening_window_seal(db, scope=scope)
+    if result is None:
+        raise BillingRuleViolation(
+            "opening_evidence_integrity", "sealed window missing"
+        )
+    return result
+
+
 def _qualified_import(
     command: ImportOpeningAccountV1,
     verifier: OpeningImportVerifier | None,
@@ -5783,17 +6053,23 @@ def import_opening_account(
             command.partition.precision,
         )
     plane = _models(scope)
-    account = _one(
-        db,
-        scope=scope,
-        model=plane.account,
-        row_id=command.partition.account_id,
-        lock=True,
-    )
-    _require_account_money(account, amount)
     digest = opening_cash_command_digest(command)
 
     def operation(session: Session) -> dict[str, object]:
+        _admit_opening_window(
+            session,
+            scope=scope,
+            manifest_fingerprint=verified.manifest_fingerprint,
+            manifest_version=1,
+        )
+        account = _one(
+            session,
+            scope=scope,
+            model=plane.account,
+            row_id=command.partition.account_id,
+            lock=True,
+        )
+        _require_account_money(account, amount)
         _require_pristine_opening_target(session, scope=scope, command=command)
         for source in sources:
             existing = session.execute(
@@ -6956,17 +7232,23 @@ def import_opening_account_v2(
         ar_minor, command.partition.currency, command.partition.precision
     )
     plane = _models(scope)
-    account = _one(
-        db,
-        scope=scope,
-        model=plane.account,
-        row_id=command.partition.account_id,
-        lock=True,
-    )
-    _require_account_money(account, amount)
     digest = opening_account_command_digest_v2(command)
 
     def operation(session: Session) -> dict[str, object]:
+        _admit_opening_window(
+            session,
+            scope=scope,
+            manifest_fingerprint=verified.manifest_fingerprint,
+            manifest_version=2,
+        )
+        account = _one(
+            session,
+            scope=scope,
+            model=plane.account,
+            row_id=command.partition.account_id,
+            lock=True,
+        )
+        _require_account_money(account, amount)
         _require_pristine_opening_target(session, scope=scope, command=command)
         for source in sources:
             if (

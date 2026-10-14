@@ -38,6 +38,14 @@ KERNEL_VERSIONS = (
 )
 
 _INTERNAL_RELATIONS = (
+    ("opening_window_admissions", ("window_id",), "opening_windows", ("id",)),
+    (
+        "opening_window_admissions",
+        ("receipt_id", "billing_account_id"),
+        "opening_import_receipts",
+        ("id", "billing_account_id"),
+    ),
+    ("opening_window_seals", ("window_id",), "opening_windows", ("id",)),
     (
         "opening_receivable_bases",
         ("receipt_id", "billing_account_id"),
