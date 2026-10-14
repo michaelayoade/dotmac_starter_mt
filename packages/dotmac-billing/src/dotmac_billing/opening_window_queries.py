@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_billing.opening_contracts import OpeningManifestV1
 from dotmac_billing.opening_queries import _decode_row, _require, _scoped, _table
+from dotmac_billing.opening_receivable_contracts import OpeningManifestV2
 from dotmac_billing.opening_receivable_validation import opening_manifest_fingerprint_v2
 from dotmac_billing.opening_validation import opening_manifest_fingerprint
 from dotmac_billing.opening_window_contracts import (
@@ -29,9 +30,9 @@ def get_opening_window(db: Session, *, scope: Scope) -> OpeningWindowV1 | None:
     stored = _decode_row(row, StoredOpeningWindowV1)
     window, proof = stored.window, stored.verification
     digest = (
-        opening_manifest_fingerprint(window.manifest)
-        if type(window.manifest) is OpeningManifestV1
-        else opening_manifest_fingerprint_v2(window.manifest)
+        opening_manifest_fingerprint_v2(window.manifest)
+        if isinstance(window.manifest, OpeningManifestV2)
+        else opening_manifest_fingerprint(window.manifest)
     )
     _require(
         window.scope == scope == window.manifest.scope == proof.scope

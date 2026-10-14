@@ -485,7 +485,12 @@
           "dotmac_billing/migrations/versions/bi_0008_opening_receivables.py",
           "dotmac_billing/opening_receivable_contracts.py",
           "dotmac_billing/opening_receivable_validation.py",
-          "dotmac_billing/opening_receivable_queries.py"
+          "dotmac_billing/opening_receivable_queries.py",
+      "dotmac_billing/migrations/versions/bi_0009_opening_window.py",
+      "dotmac_billing/opening_window_contracts.py",
+      "dotmac_billing/opening_window_queries.py",
+      "dotmac_billing/opening_rehearsal_contracts.py",
+      "dotmac_billing/opening_rehearsal.py"
         ],
         "forbidden_prefixes": [
           "app/",

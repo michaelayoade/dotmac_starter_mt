@@ -10,7 +10,7 @@ from dotmac_billing.opening_window_contracts import (
     OpeningWindowV1,
     opening_admission_population_digest,
 )
-from dotmac_kernel.cache import PlatformScope
+from dotmac_kernel.cache import PlatformScope, TenantScope
 
 from tests.unit import test_billing_opening_manifest as evidence
 
@@ -29,7 +29,7 @@ def _admission():
 
 
 def test_population_digest_is_order_independent_full_field_and_scope_bound():
-    first = _admission()
+    first = replace(_admission(), scope=TenantScope(uuid4()))
     second = replace(first, receipt_id=uuid4(), request_identity="request:2")
     digest = opening_admission_population_digest((first, second))
     assert digest == opening_admission_population_digest((second, first))

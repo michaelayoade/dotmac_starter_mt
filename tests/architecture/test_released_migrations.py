@@ -7253,6 +7253,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "bi_0006_cash_source_claim.py",
             "bi_0007_opening_cash.py",
             "bi_0008_opening_receivables.py",
+            "bi_0009_opening_window.py",
         }
     ),
     "dotmac-collections": frozenset(),

@@ -236,7 +236,7 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
     if set(lane_keys) != set(controls):
         block("source_population_incomplete", "source_lanes")
     for lane in source.lanes:
-        control = controls.get((lane.account_id, lane.currency))
+        lane_control = controls.get((lane.account_id, lane.currency))
         if lane.authority != "authoritative" or lane.authority_cutover_id is None:
             block("source_authority_unavailable", str(lane.account_id))
         if lane.posting_group_count < 0:
@@ -244,17 +244,17 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         if not lane.collectible_receivable.is_finite():
             block("source_money_invalid", str(lane.account_id))
         elif (
-            control is not None
-            and control.eligible_residual.is_finite()
-            and lane.collectible_receivable != control.eligible_residual
+            lane_control is not None
+            and lane_control.eligible_residual.is_finite()
+            and lane.collectible_receivable != lane_control.eligible_residual
         ):
             block(
                 "unclassified_money_delta", f"{lane.account_id}:source_receivable_lane"
             )
         if (lane.account_id, lane.currency) not in controls:
             block("source_partition_unresolved", str(lane.account_id))
-        for field in fields(lane):
-            if field.name in {
+        for lane_field in fields(lane):
+            if lane_field.name in {
                 "account_id",
                 "currency",
                 "fingerprint",
@@ -264,11 +264,11 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
                 "collectible_receivable",
             }:
                 continue
-            amount = getattr(lane, field.name)
+            amount = getattr(lane, lane_field.name)
             if not amount.is_finite():
-                block("source_money_invalid", f"{lane.account_id}:{field.name}")
+                block("source_money_invalid", f"{lane.account_id}:{lane_field.name}")
             elif amount != 0:
-                block("unsupported_lane", f"{lane.account_id}:{field.name}")
+                block("unsupported_lane", f"{lane.account_id}:{lane_field.name}")
     mappings = {
         (x.source_account_id, x.partition.currency): x.partition for x in run.mappings
     }
@@ -306,15 +306,17 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
             if key[1] is None:
                 raise OpeningEvidenceError("unresolved currency")
             units = precision.get(key[1], -1)
-            for field, expected in (
+            for amount_field, expected in (
                 ("total", control.original_total),
                 ("canonical_discharge", control.canonical_discharge),
                 ("residual", control.residual),
             ):
                 if sum(
-                    _minor(getattr(x, field), key[1], units) for x in cohort
+                    _minor(getattr(x, amount_field), key[1], units) for x in cohort
                 ) != _minor(expected, key[1], units):
-                    block("source_control_population_mismatch", f"{key[0]}:{field}")
+                    block(
+                        "source_control_population_mismatch", f"{key[0]}:{amount_field}"
+                    )
             if sum(
                 _minor(x.residual, key[1], units) for x in eligible_cohort
             ) != _minor(control.eligible_residual, key[1], units):
@@ -357,16 +359,16 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         for x in run.discharge_mappings
     }
     for source_id, mapping in invoice_mappings.items():
-        invoice = invoices.get(source_id)
-        item = receivables.get(mapping.source_invoice_key)
-        if invoice is None or item is None:
+        mapped_invoice = invoices.get(source_id)
+        mapped_receivable = receivables.get(mapping.source_invoice_key)
+        if mapped_invoice is None or mapped_receivable is None:
             block("invoice_mapping_coverage_mismatch", str(source_id))
             continue
-        partition = mappings.get((invoice.account_id, invoice.currency))
+        partition = mappings.get((mapped_invoice.account_id, mapped_invoice.currency))
         if (
-            item.partition != partition
-            or item.source_identity != mapping.source_identity
-            or invoice.precision != item.partition.precision
+            mapped_receivable.partition != partition
+            or mapped_receivable.source_identity != mapping.source_identity
+            or mapped_invoice.precision != mapped_receivable.partition.precision
         ):
             block("invoice_partition_binding_mismatch", str(source_id))
         # The actual V2 observation has no frozen subtotal, tax, FX, party or
@@ -374,35 +376,40 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         # imported original. Keep this explicitly unavailable until Sub exports
         # the documentary evidence through its own read-only contract.
         block("original_documentary_evidence_unavailable", str(source_id))
-        if item.original is None:
+        if mapped_receivable.original is None:
             block(
                 "original_documentary_evidence_unavailable", mapping.source_invoice_key
             )
         else:
             try:
-                original_minor = minor_units_of(item.original.grand_total)
+                original_minor = minor_units_of(mapped_receivable.original.grand_total)
                 observed_minor = _minor(
-                    invoice.total, invoice.currency, item.partition.precision
+                    mapped_invoice.total,
+                    mapped_invoice.currency,
+                    mapped_receivable.partition.precision,
                 )
                 if original_minor != observed_minor:
                     block("source_original_total_mismatch", str(source_id))
                 if (
-                    item.original.document_number != invoice.invoice_number
-                    or item.original.issued_at != invoice.issued_at
+                    mapped_receivable.original.document_number
+                    != mapped_invoice.invoice_number
+                    or mapped_receivable.original.issued_at != mapped_invoice.issued_at
                 ):
                     block("source_original_document_binding_mismatch", str(source_id))
                 discharged_minor = _minor(
-                    invoice.canonical_discharge,
-                    invoice.currency,
-                    item.partition.precision,
+                    mapped_invoice.canonical_discharge,
+                    mapped_invoice.currency,
+                    mapped_receivable.partition.precision,
                 )
                 if (
-                    sum(x.amount_minor for x in item.historical_discharges)
+                    sum(x.amount_minor for x in mapped_receivable.historical_discharges)
                     != discharged_minor
                 ):
                     block("source_discharge_total_mismatch", str(source_id))
-                if item.residual_minor != _minor(
-                    invoice.residual, invoice.currency, item.partition.precision
+                if mapped_receivable.residual_minor != _minor(
+                    mapped_invoice.residual,
+                    mapped_invoice.currency,
+                    mapped_receivable.partition.precision,
                 ):
                     block("source_invoice_residual_mismatch", str(source_id))
             except (OpeningEvidenceError, MoneyError, DecimalException, ValueError):
@@ -415,31 +422,33 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         all_observed_ids = [
             value.id for value in settlements.values() if value.invoice_id == source_id
         ]
-        if len(set(invoice.settlement_ids)) != len(invoice.settlement_ids) or sorted(
-            invoice.settlement_ids
-        ) != sorted(all_observed_ids):
+        if len(set(mapped_invoice.settlement_ids)) != len(
+            mapped_invoice.settlement_ids
+        ) or sorted(mapped_invoice.settlement_ids) != sorted(all_observed_ids):
             block("source_population_incomplete", f"{source_id}:settlements")
-        history = {x.reference: x for x in item.historical_discharges}
+        history = {x.reference: x for x in mapped_receivable.historical_discharges}
         references = [
             discharge_mappings[key] for key in observed if key in discharge_mappings
         ]
         if len(references) != len(set(references)) or set(references) != set(history):
             block("historical_discharge_evidence_unavailable", str(source_id))
-        for key, settlement in observed.items():
-            used_settlements.add(key)
-            effect = history.get(discharge_mappings.get(key, ""))
+        for settlement_key, settlement in observed.items():
+            used_settlements.add(settlement_key)
+            effect = history.get(discharge_mappings.get(settlement_key, ""))
             if effect is None or settlement.kind not in {"payment", "credit_note"}:
                 block("historical_discharge_evidence_unavailable", str(settlement.id))
                 continue
             if effect.kind not in {"payment", "credit_note"}:
                 block("historical_discharge_evidence_unavailable", effect.reference)
-            if expected_source_ids.get(key) != settlement.source_id:
+            if expected_source_ids.get(settlement_key) != settlement.source_id:
                 block("source_discharge_binding_mismatch", str(settlement.id))
             if effect.kind != settlement.kind:
                 block("source_discharge_binding_mismatch", str(settlement.id))
             try:
                 if effect.amount_minor != _minor(
-                    settlement.amount, invoice.currency, item.partition.precision
+                    settlement.amount,
+                    mapped_invoice.currency,
+                    mapped_receivable.partition.precision,
                 ):
                     block("source_discharge_amount_mismatch", str(settlement.id))
             except (OpeningEvidenceError, MoneyError, DecimalException, ValueError):
@@ -458,14 +467,14 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
     ):
         ref = f"{key[0]}:{key[1]}"
         preview = previews.get(partition)
-        control = controls.get(key)
-        command = commands.get(partition)
-        if preview is None or control is None or command is None:
+        preview_control = controls.get(key)
+        preview_command = commands.get(partition)
+        if preview is None or preview_control is None or preview_command is None:
             continue
         if precision.get(partition.currency) != partition.precision:
             block("currency_precision_mismatch", ref)
         if (
-            preview.target != command.target
+            preview.target != preview_command.target
             or preview.manifest_fingerprint != manifest_digest
             or preview.operation != "billing.opening.import.v2"
             or preview.target.scope != manifest.scope
@@ -498,7 +507,9 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         source_minor = None
         try:
             source_minor = _minor(
-                control.eligible_residual, partition.currency, partition.precision
+                preview_control.eligible_residual,
+                partition.currency,
+                partition.precision,
             )
         except (OpeningEvidenceError, MoneyError, DecimalException, ValueError):
             block("currency_precision_mismatch", ref)

@@ -144,6 +144,7 @@ from dotmac_billing.opening_receivable_contracts import (
     OpeningImportReceiptV2,
     OpeningImportReversalVerificationRequestV2,
     OpeningImportReversalVerificationV2,
+    OpeningManifestV2,
     OpeningReceivableBasisV1,
     ReceivableExposureV2,
 )
@@ -5672,9 +5673,9 @@ def provision_opening_window(
     if window.manifest_version not in (1, 2) or window.principal_oid <= 0:
         raise BillingRuleViolation("opening_window_binding", "invalid window binding")
     manifest_digest = (
-        opening_manifest_fingerprint(window.manifest)
-        if type(window.manifest) is OpeningManifestV1
-        else opening_manifest_fingerprint_v2(window.manifest)
+        opening_manifest_fingerprint_v2(window.manifest)
+        if isinstance(window.manifest, OpeningManifestV2)
+        else opening_manifest_fingerprint(window.manifest)
     )
     if (
         window.manifest.scope != scope
