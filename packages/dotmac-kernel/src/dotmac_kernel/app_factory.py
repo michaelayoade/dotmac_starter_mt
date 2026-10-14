@@ -52,7 +52,11 @@ from dotmac_kernel.features import mount_features
 from dotmac_kernel.flags import FlagCatalogue, install_flags
 from dotmac_kernel.logging import setup_logging
 from dotmac_kernel.middleware.csrf import CSRFMiddleware
-from dotmac_kernel.middleware.observability import ObservabilityMiddleware
+from dotmac_kernel.middleware.observability import (
+    ObservabilityMiddleware,
+    RequestEvidenceObserverMiddleware,
+    _RequestEvidenceSnapshotMiddleware,
+)
 from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import (
     SecurityHeadersMiddleware,
@@ -77,6 +81,7 @@ from dotmac_kernel.platform_auth import (
     platform_auth_router,
 )
 from dotmac_kernel.platform_web import PLATFORM_WEB_SURFACE
+from dotmac_kernel.request_evidence import RequestEvidenceContextV1
 from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
     install_setting_domains,
@@ -766,14 +771,25 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         window_seconds=settings.rate_limit_window_seconds,
         max_keys=settings.rate_limit_max_keys,
     )
+    if spec.request_evidence is not None:
+        # Inside the tenant resolver's BaseHTTPMiddleware task boundary, so
+        # the snapshot observes actor binds in downstream async dependencies.
+        app.add_middleware(_RequestEvidenceSnapshotMiddleware)
     app.add_middleware(TenantResolverMiddleware)
     if settings.trusted_hosts:
         hosts = [h.strip() for h in settings.trusted_hosts.split(",") if h.strip()]
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
-    app.add_middleware(
-        ObservabilityMiddleware,
-        trust_inbound_request_id=settings.trust_inbound_request_id,
-    )
+    if spec.request_evidence is None:
+        app.add_middleware(
+            ObservabilityMiddleware,
+            trust_inbound_request_id=settings.trust_inbound_request_id,
+        )
+    else:
+        app.add_middleware(RequestEvidenceObserverMiddleware)
+        app.add_middleware(
+            RequestEvidenceContextV1,
+            trusted_proxies=spec.request_evidence.trusted_proxies,
+        )
     configured_csp = (
         settings.content_security_policy or spec.security_policy.content_security_policy
     )

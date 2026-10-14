@@ -45,7 +45,11 @@ from dotmac_kernel.api_documentation import (
     classify_environment,
     environment_api_documentation_policy,
 )
-from dotmac_kernel.assembly import ProductAssemblySpec, ProductSecurityPolicy
+from dotmac_kernel.assembly import (
+    ProductAssemblySpec,
+    ProductSecurityPolicy,
+    RequestEvidenceConfigurationV1,
+)
 from dotmac_kernel.audit import (
     ACTOR_TYPES,
     AuditEvent,
@@ -529,6 +533,7 @@ __all__ = [
     "verify_product_database_catalog",
     # assembly composition
     "ProductAssemblySpec",
+    "RequestEvidenceConfigurationV1",
     # API-documentation exposure: declared per assembly, never inherited
     "ApiDocumentationPolicy",
     "ApiDocumentationPolicyError",

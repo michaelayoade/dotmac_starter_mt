@@ -58,6 +58,7 @@
         "ModulePlaneSelection",
         "ProductAssemblySpec",
         "ProductSecurityPolicy",
+        "RequestEvidenceConfigurationV1",
         "StartupCheck",
         "StartupHook"
       ],
@@ -750,7 +751,8 @@
     "dotmac_kernel.middleware.observability": {
       "classification": "supported",
       "exports": [
-        "ObservabilityMiddleware"
+        "ObservabilityMiddleware",
+        "RequestEvidenceObserverMiddleware"
       ],
       "status": "declared"
     },
@@ -1809,6 +1811,7 @@
     "ProductManifestSnapshot",
     "ProductSecurityPolicy",
     "ProfileValidationReport",
+    "RequestEvidenceConfigurationV1",
     "ResolvedExternalIdentity",
     "Role",
     "RoleDefinition",

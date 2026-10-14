@@ -48,11 +48,18 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from dotmac_kernel.config import settings
 from dotmac_kernel.deps import get_platform_db
 from dotmac_kernel.exceptions import UnauthorizedError
 from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
+from dotmac_kernel.request_evidence import (
+    UNSET_EVIDENCE,
+    RequestActor,
+    bind_actor,
+    current_evidence,
+)
 from dotmac_kernel.security import (
     decode_access_token,
     encode_jwt,
@@ -142,7 +149,7 @@ def authenticate_platform_request(
     return admin
 
 
-def require_platform_admin(
+async def require_platform_admin(
     request: Request,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_platform_db),
@@ -153,9 +160,15 @@ def require_platform_admin(
     token = _bearer_token(authorization)
     if token is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    admin = authenticate_platform_request(request, db, token=token)
+    # Authenticate off the event loop as before, then bind on the ASGI task:
+    # writes inside a synchronous dependency's threadpool context do not flow
+    # back to domain consumers or request observation.
+    admin = await run_in_threadpool(
+        authenticate_platform_request, request, db, token=token
+    )
     if admin is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    _bind_platform_actor(admin)
     return admin
 
 
@@ -168,7 +181,7 @@ def _browser_session_policy(request: Request) -> BrowserSessionPolicy:
         )
 
 
-def require_platform_web_auth(
+async def require_platform_web_auth(
     request: Request,
     db: Session = Depends(get_platform_db),
 ) -> PlatformAdmin:
@@ -183,10 +196,24 @@ def require_platform_web_auth(
     )
     if not token:
         raise WebAuthRedirect(next_url=request.url.path, login_path=login_path)
-    admin = authenticate_platform_request(request, db, token=token)
+    # Authenticate off the event loop as before, then bind on the ASGI task:
+    # writes inside a synchronous dependency's threadpool context do not flow
+    # back to domain consumers or request observation.
+    admin = await run_in_threadpool(
+        authenticate_platform_request, request, db, token=token
+    )
     if admin is None:
         raise WebAuthRedirect(next_url=request.url.path, login_path=login_path)
+    _bind_platform_actor(admin)
     return admin
+
+
+def _bind_platform_actor(admin: PlatformAdmin) -> None:
+    if current_evidence() is not UNSET_EVIDENCE:
+        # Platform credentials carry no authorization-scope claim. A human
+        # platform admin is the audit vocabulary's user; membership is not a
+        # scope and this record grants nothing.
+        bind_actor(RequestActor(kind="user", id=str(admin.id), scopes=()))
 
 
 class PlatformCookieAuthenticationProvider:
