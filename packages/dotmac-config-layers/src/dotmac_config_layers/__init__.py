@@ -9,6 +9,8 @@ Provider plug-ins implement :class:`DomainPlugin`; this package names no provide
 
 from __future__ import annotations
 
+from typing import Final
+
 from .compose import (
     SCHEMA_VERSION,
     AppliedLayer,
@@ -103,6 +105,8 @@ from .widening import (
     widening,
 )
 
+__version__: Final[str] = "0.1.0a1"
+
 __all__ = [
     "AccessKind",
     "AppliedLayer",
@@ -156,6 +160,7 @@ __all__ = [
     "Tombstone",
     "Unknown",
     "WideningItem",
+    "__version__",
     "canonical_json",
     "compose",
     "evaluate_module",

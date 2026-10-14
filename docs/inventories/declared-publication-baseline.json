@@ -190,7 +190,7 @@
     "dotmac-config-layers": {
       "declared": "0.1.0a1",
       "reason": "FIRST SOURCE, NOT YET PUBLISHED. 0.1.0a1 is the generic layered-composition engine ported from Dotmac Sub draft PR 3625 under ADR-0074 and the ADR-0017 owner-directed exception; it has no tag and no registry artifact. Publication is a release-captain action by Michael's go, in a gap between billing releases and before dotmac-routeros-config; no Sub pin, adoption or product writer change is claimed here. Remove this row only through the authorized release-record transition for dotmac-config-layers-v0.1.0a1.",
-      "state": "declared-unpublished"
+      "state": "never-published"
     }
   }
 }

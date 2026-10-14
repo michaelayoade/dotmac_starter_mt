@@ -8,11 +8,11 @@
       "source": "dotmac_sub:app/services/composition/__init__.py",
       "source_blob": "e51444e6defb2b37602e729a7a93d1ee4f3ef9ae",
       "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/__init__.py",
-      "destination_blob": "7023908c2f36a248016654c20dd0d8654bf06c29",
-      "lines_added": 172,
+      "destination_blob": "44e9789fb1cfb91fe3c3a3728375ced81e451c62",
+      "lines_added": 177,
       "lines_removed": 2,
       "allowed_deltas": [
-        "rewritten: public API re-exports and __all__; docstring edited to name no Sub document"
+        "rewritten: public API re-exports, __version__ and __all__; docstring edited to name no Sub document"
       ]
     },
     {
