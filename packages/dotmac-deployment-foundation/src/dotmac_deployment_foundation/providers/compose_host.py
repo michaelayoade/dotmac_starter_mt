@@ -385,6 +385,10 @@ class ComposeHostEffects:
         worker_ping_timeout_seconds: int = 30,
         migration_heads_timeout_seconds: int = 60,
     ) -> None:
+        # Executable providers require owner-parsed input and retain no caller
+        # aliases. Rebind FIRST so every derived cache uses this private copy;
+        # manual/replaced values remain usable by pure planning/render APIs.
+        spec = ProductDeploymentSpec.validated_execution_snapshot(spec)
         self._spec = spec
         self._material_probe_transport = material_probe_transport
         self._material_probe_protected_roots = material_probe_protected_roots
@@ -1978,6 +1982,10 @@ class NginxInstaller:
         test_timeout_seconds: int = 30,
         reload_timeout_seconds: int = 30,
     ) -> None:
+        # Executable providers require owner-parsed input and retain no caller
+        # aliases. Rebind FIRST so every derived cache uses this private copy;
+        # manual/replaced values remain usable by pure planning/render APIs.
+        spec = ProductDeploymentSpec.validated_execution_snapshot(spec)
         self._spec = spec
         self._site_path = Path(site_path)
         self._nginx_bin = nginx_bin

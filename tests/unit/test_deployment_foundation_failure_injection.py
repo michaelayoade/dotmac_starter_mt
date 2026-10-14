@@ -1143,7 +1143,7 @@ def test_a_backup_returning_no_checksum_is_refused_at_the_backup_step() -> None:
     assert "checksum" in outcome.failure
 
 
-def test_rollback_actually_restores_the_previous_digest() -> None:
+def test_historical_rollback_refuses_without_an_approved_target_procedure() -> None:
     """`steps_for_rollback` returned steps and nothing ran them.
 
     `dotmac-deploy rollback` could therefore only PRINT a plan. Worse, the
@@ -1165,11 +1165,12 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
         evidence_verifier=AcceptingVerifier(),
         **valid_host_source_kwargs(),
     )
-    outcome = executor.rollback(plan, lock=held_lock(spec.product))
-    assert outcome.succeeded, outcome.failure
-    assert effects.switched_to == [OLD_DIGEST]
-    assert all(item.image_digest == OLD_DIGEST for item in effects.observe_roles())
-    assert effects.evidence_written
+    with pytest.raises(PreconditionFailed) as caught:
+        executor.rollback(plan, lock=held_lock(spec.product))
+    assert caught.value.code == "execution_plan.rollback_target_unbound"
+    assert effects.switched_to == []
+    assert not effects.evidence_written
+    assert not grant.v3_provider.consumed
 
 
 def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
@@ -1197,9 +1198,10 @@ def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
     )
     with pytest.raises(PreconditionFailed) as caught:
         executor.rollback(plan, lock=held_lock(spec.product))
-    assert "maintenance_required" in str(caught.value)
+    assert caught.value.code == "execution_plan.rollback_target_unbound"
     assert effects.switched_to == [], "nothing may be switched by a refused rollback"
-    assert effects.evidence_written, "the refusal is itself worth recording"
+    assert not effects.evidence_written
+    assert not grant.v3_provider.consumed
 
 
 # ── deployment annotations ──────────────────────────────────────────────────
@@ -1238,13 +1240,13 @@ def test_a_successful_run_annotates_start_then_success() -> None:
     assert start["strategy"] == "warm_candidate"
 
 
-def test_a_rollback_annotates_itself() -> None:
+def test_historical_rollback_refusal_does_not_annotate_or_write_evidence() -> None:
     spec = load()
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     clock = FakeClock()
     grant, execution_plan = _bound(spec, plan, "rollback", effects=effects)
-    Executor(
+    executor = Executor(
         spec,
         effects,
         grant,
@@ -1254,8 +1256,13 @@ def test_a_rollback_annotates_itself() -> None:
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
         **valid_host_source_kwargs(),
-    ).rollback(plan, lock=held_lock(spec.product))
-    assert "deployment.rollback" in [item["event"] for item in effects.annotations]
+    )
+    with pytest.raises(PreconditionFailed) as caught:
+        executor.rollback(plan, lock=held_lock(spec.product))
+    assert caught.value.code == "execution_plan.rollback_target_unbound"
+    assert effects.annotations == []
+    assert not effects.evidence_written
+    assert not grant.v3_provider.consumed
 
 
 def test_an_annotation_sink_failure_never_fails_the_deployment() -> None:

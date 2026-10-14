@@ -1219,3 +1219,119 @@ def test_manifest_digest_still_returns_empty_for_an_absent_manifest(
 ) -> None:
     """The pre-existing contract is unchanged: absent is a refusal, not a match."""
     assert make_effects(tmp_path).manifest_digest("manifest.json") == ""
+
+
+def test_real_provider_executes_frozen_commands_and_files_after_consume_alias_mutation(
+    tmp_path: Path,
+) -> None:
+    """Use the normal provider/runner/files, not a stand-in Effects object."""
+    from dotmac_deployment_foundation.engine.plan import (
+        DeploymentPlan,
+        Step,
+        StepKind,
+        Strategy,
+    )
+    from dotmac_deployment_foundation.engine.run import Executor
+    from dotmac_deployment_foundation.render.compose import render_compose
+
+    from tests.unit.deployment_lock_harness import held_lock
+    from tests.unit.foundation_v3_support import grant_for_plan
+    from tests.unit.host_source_stance import valid_host_source_kwargs
+    from tests.unit.test_deployment_foundation_execution_binding import _plan_and_digest
+
+    spec = load()
+    approved = spec.validated_execution_snapshot()
+    calls = []
+    events = []
+
+    def runner(argv, **kwargs):
+        calls.append((list(argv), dict(kwargs.get("env") or {})))
+        if "ps" in argv:
+            return CommandResult(0, "[]")
+        events.append("effect")
+        return CommandResult(0)
+
+    from dotmac_deployment_foundation.exposure import APPLY_COMMAND
+    from dotmac_deployment_foundation.providers.exposure_host import (
+        ComposeHostExposureEffects,
+    )
+
+    effects = ComposeHostEffects(spec, tmp_path, runner=runner)
+    installer = NginxInstaller(spec, tmp_path / "site.conf", runner=runner)
+    exposure = ComposeHostExposureEffects(spec, deploy_dir=tmp_path, runner=runner)
+    approved_nginx = installer.render()
+    work = DeploymentPlan(
+        product=spec.product,
+        image=spec.image,
+        image_digest=spec.image_digest,
+        source_revision=spec.source_revision,
+        manifest_digest=spec.manifest_digest,
+        strategy=Strategy.RECREATE,
+        steps=(
+            Step(
+                StepKind.MIGRATE, "approved migration", command=spec.migration.command
+            ),
+            Step(StepKind.SWITCH, "approved switch"),
+        ),
+        rollback_permitted=False,
+        rollback_reason="diagnostic",
+    )
+    frozen, _ = _plan_and_digest(spec, work, effects=effects)
+    grant = grant_for_plan(spec, frozen)
+    original = grant.v3_provider.consume_dispatch
+
+    def consume(*, request):
+        events.append("consume")
+        object.__setattr__(spec.roles[0], "command", ("unapproved-command",))
+        object.__setattr__(spec.roles[0].resources, "memory", "99g")
+        object.__setattr__(spec.roles[1], "replicas", 64)
+        object.__setattr__(spec.migration, "owner_material", "WRONG_OWNER")
+        object.__setattr__(spec, "product", "unapproved-product")
+        return original(request=request)
+
+    grant.v3_provider.consume_dispatch = consume
+    outcome = Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=frozen,
+        sleep=lambda _: None,
+        **valid_host_source_kwargs(),
+    ).run(work, lock=held_lock(approved.product))
+    assert outcome.succeeded, outcome.failure
+    assert events[0] == "consume"
+    migration_argv, environment = next(
+        (argv, env) for argv, env in calls if "upgrade" in argv
+    )
+    assert migration_argv[-len(approved.migration.command) :] == list(
+        approved.migration.command
+    )
+    assert "WRONG_OWNER" not in environment
+    assert (tmp_path / "docker-compose.yml").read_text() == render_compose(
+        approved, image=approved.image
+    )
+    assert "unapproved-command" not in (tmp_path / "docker-compose.yml").read_text()
+    assert outcome.plan.product == approved.product
+    assert outcome.execution_plan_digest == frozen.digest()
+    # The executable Nginx provider retained the same independently validated
+    # spec, so its actual install/write path cannot read the caller mutation.
+    installer.install()
+    assert (tmp_path / "site.conf").read_text() == approved_nginx
+    assert installer.render() == approved_nginx
+    exposure.apply_compose(APPLY_COMMAND, timeout_seconds=30)
+    exposure_argv = calls[-1][0]
+    assert exposure_argv[exposure_argv.index("--project-name") + 1] == approved.product
+    assert "unapproved-product" not in exposure_argv
+
+
+@pytest.mark.parametrize("provider", ["compose", "nginx"])
+def test_executable_provider_requires_parsed_spec_but_planning_still_accepts_data(
+    tmp_path: Path, provider: str
+) -> None:
+    spec = replace(load())
+    with pytest.raises(SpecError) as caught:
+        if provider == "compose":
+            ComposeHostEffects(spec, tmp_path)
+        else:
+            NginxInstaller(spec, tmp_path / "site.conf")
+    assert caught.value.code == "spec.execution_parse_input_missing"

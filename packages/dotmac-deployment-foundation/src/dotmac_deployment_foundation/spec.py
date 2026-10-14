@@ -42,10 +42,14 @@ version-gated dataclass field entirely.
 
 from __future__ import annotations
 
+import dataclasses
+import json
+import math
 import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
@@ -2661,6 +2665,57 @@ class ProductDeploymentSpec:
         default=SCHEMA_V1, repr=False, metadata={"canonical_root_only": True}
     )
 
+    # Private parser input, never descriptor identity or attestation. A manual
+    # constructor/dataclasses.replace remains data but cannot authorize effects.
+    _execution_parse_input: bytes | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    def validated_execution_snapshot(self) -> ProductDeploymentSpec:
+        """Reparse and exactly match the complete actual tree before mutation.
+
+        Never opens ``source``. Replacement/manual records without retained
+        parser input must be parsed again before execution; planning is unchanged.
+        The bytes are untrusted input, not a provenance token or wire document.
+        """
+        if (
+            type(self) is not ProductDeploymentSpec
+            or type(getattr(self, "source", None)) is not str
+        ):
+            raise SpecError(
+                "execution requires the exact owner spec and plain source label"
+            )
+        retained = getattr(self, "_execution_parse_input", None)
+        if retained is None:
+            raise SpecError(
+                "execution requires retained owner parser input; "
+                "parse the descriptor again",
+                code="spec.execution_parse_input_missing",
+            )
+        if type(retained) is not bytes:
+            raise SpecError(
+                "execution parser input must be immutable bytes",
+                code="spec.execution_parse_input_invalid",
+            )
+        try:
+            document = json.loads(
+                retained.decode("utf-8"),
+                object_pairs_hook=_execution_unique_object,
+                parse_constant=_execution_bad_number,
+                parse_float=_execution_finite_float,
+            )
+            _execution_plain_input(document)
+            if type(document) is not dict:
+                raise ValueError("parser input root must be an object")
+        except (ValueError, TypeError, RecursionError, OverflowError) as exc:
+            raise SpecError(
+                "retained execution parser input is malformed",
+                code="spec.execution_parse_input_invalid",
+            ) from exc
+        fresh = ProductDeploymentSpec.from_document(document, source=self.source)
+        _require_execution_semantics(self, fresh)
+        return fresh
+
     def __post_init__(self) -> None:
         if self.descriptor_schema not in SCHEMAS:
             raise UnknownSchemaError(
@@ -2993,6 +3048,14 @@ class ProductDeploymentSpec:
             descriptor_schema=str(declared),
         )
         _validate_cross_field(spec, source)
+        try:
+            _execution_plain_input(document)
+            retained = json.dumps(document, allow_nan=False).encode("utf-8")
+        except (ValueError, TypeError, RecursionError, OverflowError):
+            # Preserve planning acceptance for exotic Mapping inputs. Mutation
+            # gives a precise missing-input refusal rather than guessing a copy.
+            retained = None
+        object.__setattr__(spec, "_execution_parse_input", retained)
         return spec
 
     # ── derived, so two products cannot disagree ────────────────────────────
@@ -3326,3 +3389,93 @@ def _validate_exposure(spec: ProductDeploymentSpec, source: str) -> None:
         what="host socket",
         where=source,
     )
+
+
+# In-process parser retention only. None of these functions serialize authority.
+_EXECUTION_INPUT_MAX_DEPTH = 128
+
+
+def _execution_plain_input(value: Any, depth: int = 0) -> None:
+    if depth > _EXECUTION_INPUT_MAX_DEPTH:
+        raise ValueError("execution parser input exceeds structural depth")
+    if type(value) is dict:
+        for key, item in value.items():
+            if type(key) is not str:
+                raise TypeError("parser input keys must be plain strings")
+            _execution_plain_input(item, depth + 1)
+    elif type(value) is list:
+        for item in value:
+            _execution_plain_input(item, depth + 1)
+    elif type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("nonfinite parser input")
+    elif type(value) not in (str, int, bool, type(None)):
+        raise TypeError("parser input is not a plain JSON value")
+
+
+def _execution_unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate parser input key")
+        result[key] = value
+    return result
+
+
+def _execution_bad_number(value: str) -> Any:
+    raise ValueError("nonfinite parser input constant")
+
+
+def _execution_finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("nonfinite parser input number")
+    return number
+
+
+def _execution_semantic_fields(value: Any) -> tuple[dataclasses.Field[Any], ...]:
+    # Exactly these two ROOT exclusions. Nested source/private/compare=False
+    # fields remain semantic; future fields enter the comparison automatically.
+    return tuple(
+        item
+        for item in dataclasses.fields(value)
+        if not (
+            type(value) is ProductDeploymentSpec
+            and item.name in ("source", "_execution_parse_input")
+        )
+    )
+
+
+def _require_execution_semantics(actual: Any, parsed: Any, depth: int = 0) -> None:
+    def mismatch() -> None:
+        raise SpecError(
+            "actual spec does not exactly match retained owner parser input",
+            code="spec.execution_input_mismatch",
+        )
+
+    if depth > _EXECUTION_INPUT_MAX_DEPTH or type(actual) is not type(parsed):
+        mismatch()
+    if dataclasses.is_dataclass(parsed):
+        for item in _execution_semantic_fields(parsed):
+            try:
+                candidate = getattr(actual, item.name)
+            except AttributeError:
+                mismatch()
+            _require_execution_semantics(
+                candidate, getattr(parsed, item.name), depth + 1
+            )
+    elif type(parsed) is tuple:
+        if len(actual) != len(parsed):
+            mismatch()
+        for left, right in zip(actual, parsed, strict=True):
+            _require_execution_semantics(left, right, depth + 1)
+    elif isinstance(parsed, Enum):
+        if actual is not parsed:
+            mismatch()
+    elif type(parsed) in (str, int, bool, type(None)):
+        if actual != parsed:
+            mismatch()
+    else:
+        # A future owner leaf needs explicit classification, not arbitrary
+        # __eq__ or coercion supplied by an executable input.
+        mismatch()

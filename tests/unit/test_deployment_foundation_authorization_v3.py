@@ -521,11 +521,16 @@ def test_successful_consume_has_deterministic_recovery_ref_and_effect_boundary(
         sleep=lambda _: None,
         admission_provider=admission,
     )
-    outcome = (
-        executor.run(work, lock=held_lock(spec.product))
-        if operation == "deploy"
-        else executor.rollback(work, lock=held_lock(spec.product))
-    )
+    if operation == "rollback":
+        before = effects.snapshot()
+        with pytest.raises(PreconditionFailed) as caught:
+            executor.rollback(work, lock=held_lock(spec.product))
+        assert caught.value.code == "execution_plan.rollback_target_unbound"
+        assert provider.consumed is False
+        assert effects.snapshot() == before
+        assert events == []
+        return
+    outcome = executor.run(work, lock=held_lock(spec.product))
     expected = f"control-dispatch:{grant.receipt.dispatch_id}"
     assert provider.consumed is True
     assert provider.last_consumption_ref == expected
