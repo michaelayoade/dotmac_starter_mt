@@ -541,7 +541,7 @@ jobs:
           NATIVE_IMAGE: ${{ env.IMAGE_TAG }}
         run: |
           docker run --rm "$NATIVE_IMAGE" alembic --version
-          docker run --rm "$NATIVE_IMAGE" python -c 'import dotmac_positioning._native, dotmac_network_topology._native, dotmac_fiber_plant._native, dotmac_media_observations._native, dotmac_imports._native, dotmac_web_analytics._native, dotmac_forms._native, dotmac_surveys._native, dotmac_inventory._native'
+          docker run --rm "$NATIVE_IMAGE" python -c 'import dotmac_positioning._native, dotmac_network_topology._native, dotmac_fiber_plant._native, dotmac_media_observations._native, dotmac_imports._native, dotmac_web_analytics._native, dotmac_forms._native, dotmac_surveys._native, dotmac_inventory._native, dotmac_finance._native'
       - run: |
           docker run -d --name ${{ env.SMOKE_CONTAINER }} -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
             -e DATABASE_URL=postgresql+psycopg://x:x@localhost/x ${{ env.IMAGE_TAG }}

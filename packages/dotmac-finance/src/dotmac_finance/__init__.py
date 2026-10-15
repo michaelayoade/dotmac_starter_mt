@@ -34,7 +34,7 @@ from dotmac_finance.service import (
     revalue_asset_book,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.2.0a1"
 
 __all__ = [
     "AccountMapping",

@@ -1149,7 +1149,7 @@ url = "packages/dotmac-files"
 
 [[package]]
 name = "dotmac-finance"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant fixed-asset books, depreciation and immutable accounting consequences"
 optional = false
 python-versions = ">=3.11,<3.14"

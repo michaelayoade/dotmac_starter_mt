@@ -3,8 +3,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import (
+    ROUND_05UP,
+    ROUND_CEILING,
+    ROUND_DOWN,
+    ROUND_FLOOR,
+    ROUND_HALF_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    ROUND_UP,
+    Clamped,
+    ConversionSyntax,
+    Decimal,
+    DivisionByZero,
+    DivisionImpossible,
+    DivisionUndefined,
+    FloatOperation,
+    Inexact,
+    InvalidContext,
+    InvalidOperation,
+    Overflow,
+    Rounded,
+    Subnormal,
+    Underflow,
+    getcontext,
+)
 
+from dotmac_finance import _native
 from dotmac_finance.contracts import DepreciationMethod
 
 
@@ -41,30 +66,97 @@ class DepreciationResult:
     closing_remaining_life_months: int
 
 
-def _declining_charge(
-    *,
+_SIGNALS = (
+    InvalidOperation,
+    FloatOperation,
+    DivisionByZero,
+    Overflow,
+    Underflow,
+    Subnormal,
+    Inexact,
+    Rounded,
+    Clamped,
+)
+_ROUNDINGS = (
+    ROUND_CEILING,
+    ROUND_FLOOR,
+    ROUND_UP,
+    ROUND_DOWN,
+    ROUND_HALF_UP,
+    ROUND_HALF_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_05UP,
+)
+_INVALID_CONDITIONS = (
+    InvalidOperation,
+    ConversionSyntax,
+    DivisionImpossible,
+    DivisionUndefined,
+    InvalidContext,
+)
+
+
+def _native_charges(
     carrying: Decimal,
     residual: Decimal,
-    useful_life_months: int,
+    unimpaired: Decimal,
+    useful: int,
+    remaining: int,
     periods: int,
-    remaining_life_months: int,
-    multiplier: Decimal,
+    method: DepreciationMethod,
     minor_units: int,
-) -> Decimal:
-    current = carrying
-    for period in range(periods):
-        maximum = max(Decimal(0), current - residual)
-        if maximum == 0:
-            break
-        if period + 1 == remaining_life_months:
-            charge = maximum
-        else:
-            charge = min(
-                maximum,
-                _q(current * multiplier / Decimal(useful_life_months), minor_units),
-            )
-        current -= charge
-    return _q(carrying - current, minor_units)
+) -> tuple[Decimal, Decimal]:
+    context = getcontext()
+    traps = sum(
+        1 << index for index, signal in enumerate(_SIGNALS) if context.traps[signal]
+    )
+    results, status, failure, invalid_scale = _native.depreciation_charges(
+        [
+            str(carrying),
+            str(residual),
+            str(unimpaired),
+            str(Decimal(useful)),
+            str(Decimal(remaining)),
+        ],
+        str(Decimal(periods)),
+        method.value,
+        minor_units if 0 <= minor_units <= 6 else 7,
+        (
+            context.prec,
+            _ROUNDINGS.index(context.rounding),
+            context.Emin,
+            context.Emax,
+            context.clamp,
+        ),
+        traps,
+    )
+    for index, signal in enumerate(_SIGNALS):
+        if status & (1 << index):
+            context.flags[signal] = True
+    if status & (1 << 9):
+        raise MemoryError
+    if failure is not None:
+        failed_signals, conditions = failure
+        trapped = []
+        for index, signal in enumerate(_SIGNALS):
+            if failed_signals & traps & (1 << index):
+                if signal is InvalidOperation:
+                    trapped.extend(
+                        condition
+                        for bit, condition in enumerate(_INVALID_CONDITIONS)
+                        if conditions & (1 << bit)
+                    )
+                else:
+                    trapped.append(signal)
+        primary = next(
+            signal
+            for index, signal in enumerate(_SIGNALS)
+            if failed_signals & traps & (1 << index)
+        )
+        raise primary(trapped)
+    if invalid_scale:
+        raise FinanceRuleViolation("minor units must be between zero and six")
+    return Decimal(results[0]), Decimal(results[1])
 
 
 def calculate_depreciation(
@@ -94,41 +186,16 @@ def calculate_depreciation(
     if min(carrying, residual, unimpaired) < 0:
         raise FinanceRuleViolation("carrying and residual values cannot be negative")
 
-    if method is DepreciationMethod.STRAIGHT_LINE:
-        charge = _q(
-            max(Decimal(0), carrying - residual)
-            * Decimal(effective_periods)
-            / Decimal(remaining_life_months),
-            minor_units,
-        )
-        unimpaired_charge = _q(
-            max(Decimal(0), unimpaired - residual)
-            * Decimal(effective_periods)
-            / Decimal(remaining_life_months),
-            minor_units,
-        )
-    else:
-        multiplier = (
-            Decimal(2) if method is DepreciationMethod.DOUBLE_DECLINING else Decimal(1)
-        )
-        charge = _declining_charge(
-            carrying=carrying,
-            residual=residual,
-            useful_life_months=useful_life_months,
-            periods=effective_periods,
-            remaining_life_months=remaining_life_months,
-            multiplier=multiplier,
-            minor_units=minor_units,
-        )
-        unimpaired_charge = _declining_charge(
-            carrying=unimpaired,
-            residual=residual,
-            useful_life_months=useful_life_months,
-            periods=effective_periods,
-            remaining_life_months=remaining_life_months,
-            multiplier=multiplier,
-            minor_units=minor_units,
-        )
+    charge, unimpaired_charge = _native_charges(
+        carrying,
+        residual,
+        unimpaired,
+        useful_life_months,
+        remaining_life_months,
+        effective_periods,
+        method,
+        minor_units,
+    )
 
     charge = min(charge, max(Decimal(0), carrying - residual))
     unimpaired_charge = min(unimpaired_charge, max(Decimal(0), unimpaired - residual))

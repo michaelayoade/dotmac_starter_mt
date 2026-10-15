@@ -4,7 +4,7 @@
 
 The Rust implementation branch introduces private `_native` extensions owned by
 Imports, Web Analytics, Network Topology, Fiber Plant, Media Observations,
-Positioning, Forms and Surveys. Each extension ships inside its independently versioned
+Positioning, Forms, Surveys, Inventory and Finance. Each extension ships inside its independently versioned
 domain distribution; there is no new shared database or generic domain service.
 These are `0.2.0a1` source candidates pending hosted qualification and release,
 not published artifacts or product adoption claims.
@@ -18,7 +18,9 @@ not published artifacts or product adoption claims.
 | Linear functional-hierarchy cycle detection | `dotmac_media_observations._native` | Provider-neutral fact selection, active scopes, lifecycle projection and persistence |
 | Batched circle/polygon membership | `dotmac_positioning._native` | Explicit product-selected fence ids, shape validation, current-observation admission and locked entry/exit state |
 | Batched structural form answer validation | `dotmac_forms._native` | Established Decimal/date/URL/email parsers, ordered errors, submission admission, snapshots and effects |
-| Batched survey response validation | `dotmac_surveys._native` | Unicode normalization, labels, declaration/lifecycle policy, exact Decimal cohort arithmetic and response persistence |
+| Sequential exact-decimal ledger totals | `dotmac_inventory._native` | Decimal context selection and signal replay, tenant-selected ledger/reservations, stock refusal, unit division and persistence |
+| Batched survey validation and cohort arithmetic | `dotmac_surveys._native` | Unicode normalization, labels, declaration/lifecycle policy, accepted value conversion/comparison and ordered Decimal signal replay, response persistence |
+| Ordered asset depreciation trajectories | `dotmac_finance._native` | Input policy, final caps, Decimal signal replay, book selection, line/total write order, accounting consequences and posting |
 
 Native calls receive owned primitive snapshots and detach from the Python
 interpreter during computation. They open no sessions, hold no tenant cache,
@@ -44,8 +46,12 @@ release facilities retain all publication, registry read-back and trust authorit
 
 Source qualification and remaining implementation scope are recorded in
 [`inventories/rust-computation-sources.md`](inventories/rust-computation-sources.md).
-Financial batch calculations remain subsequent goal work; their runtime has
-not been ported by these eight candidates. The first six candidates completed
+Inventory now has a source implementation of sequential quantity/value/reservation
+reductions using statically bundled, checksum-pinned libmpdec 4.0.1. Finance depreciation and survey cohort arithmetic use the same private source
+crate, `native/decimal-core`, embedded byte-for-byte into each owning source
+archive. The generator rejects stale copies; no shared Python distribution or
+runtime module dependency is introduced. All three preserve sequential Decimal
+rounding, sticky flags and first trapped operation. The first six candidates completed
 hosted exact-wheel and extracted-source-archive qualification at PR #843 head
 `7f55d3adb99c25ec7e53ef7448902a66376544c3`; later source changes require fresh
 qualification and do not inherit that result.

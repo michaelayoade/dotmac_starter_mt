@@ -30,17 +30,17 @@ fn main() {
     assert_eq!(
         env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap(),
         "64",
-        "inventory Decimal batches require a 64-bit target"
+        "Decimal arithmetic require a 64-bit target"
     );
     let target = env::var("CARGO_CFG_TARGET_OS").unwrap();
     assert!(
         target == "linux" || target == "macos",
-        "unsupported inventory native target"
+        "unsupported Decimal native target"
     );
     assert_eq!(
         env::var("HOST").unwrap(),
         env::var("TARGET").unwrap(),
-        "build inventory wheels on their native architecture"
+        "build Decimal extensions on their native architecture"
     );
 
     let bytes = fs::read(ARCHIVE).expect("bundled mpdecimal source archive is required");
@@ -90,7 +90,7 @@ fn main() {
         .include(&library)
         .pic(true)
         .flag("-fvisibility=hidden")
-        .compile("dotmac_inventory_decimal_shim");
+        .compile("dotmac_decimal_core_shim");
     // Shim first, then its static dependencies. No pkg-config/system fallback,
     // shared libmpdec, C++ library, install target, or network fetch is used.
     println!("cargo:rustc-link-search=native={}", library.display());

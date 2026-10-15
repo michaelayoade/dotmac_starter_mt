@@ -116,3 +116,30 @@ def test_artifact_qualification_requires_each_wheel(tmp_path, monkeypatch, missi
     (directory / "example_owner-1-cp312-cp312-linux_x86_64.whl").touch()
     with pytest.raises(RuntimeError, match="expected one example_owner wheel"):
         module.verify_artifacts(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "symbol", ("mpd_qadd", "_mpd_add", "MPD_MINALLOC", "dm_decimal_add")
+)
+def test_decimal_symbol_families_must_remain_private(tmp_path, monkeypatch, symbol):
+    spec = importlib.util.spec_from_file_location(
+        "native_linkage_canary", ROOT / "scripts/native_qualify.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    wheel = tmp_path / "inventory.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("dotmac_inventory/_native.so", b"synthetic ELF")
+        archive.writestr("native/vendor/LICENSE.mpdecimal.txt", "upstream notice")
+        archive.writestr(
+            "inventory.dist-info/WHEEL",
+            "Root-Is-Purelib: false\nTag: cp312-cp312-linux_x86_64\n",
+        )
+    monkeypatch.setattr(
+        module.subprocess,
+        "check_output",
+        lambda argv, **kwargs: "" if argv[0] == "readelf" else f"0000 T {symbol}\n",
+    )
+    with pytest.raises(RuntimeError, match="private symbols"):
+        module.verify_wheel(wheel, "dotmac_inventory")

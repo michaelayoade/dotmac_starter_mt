@@ -15,13 +15,10 @@ include = [
   { path = "native/Cargo.lock", format = "sdist" },
   { path = "native/pyproject.toml", format = "sdist" },
   { path = "native/src/**/*", format = "sdist" },
-  { path = "native/build.rs", format = "sdist" },
-  { path = "native/decimal_shim.c", format = "sdist" },
-  { path = "native/decimal_shim.h", format = "sdist" },
-  { path = "native/vendor/*", format = "sdist" },
-  { path = "native/vendor/LICENSE.mpdecimal.txt", format = ["sdist", "wheel"] },
+  { path = "native/decimal-core/**/*", format = "sdist" },
+  { path = "native/decimal-core/vendor/LICENSE.mpdecimal.txt", format = ["sdist", "wheel"] },
 ]
-exclude = ["native/target", "src/**/*.so", "src/**/*.pyd", "src/**/*.dll", "src/**/*.dylib"]
+exclude = ["native/target", "native/**/target", "src/**/*.so", "src/**/*.pyd", "src/**/*.dll", "src/**/*.dylib"]
 
 [tool.poetry.build]
 script = "build.py"
@@ -29,6 +26,7 @@ generate-setup-file = false
 
 [tool.dotmac.native]
 python-package = "dotmac_inventory"
+decimal-core = true
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"

@@ -3,7 +3,32 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from decimal import Decimal
+from decimal import (
+    ROUND_05UP,
+    ROUND_CEILING,
+    ROUND_DOWN,
+    ROUND_FLOOR,
+    ROUND_HALF_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    ROUND_UP,
+    Clamped,
+    Context,
+    ConversionSyntax,
+    Decimal,
+    DivisionByZero,
+    DivisionImpossible,
+    DivisionUndefined,
+    FloatOperation,
+    Inexact,
+    InvalidContext,
+    InvalidOperation,
+    Overflow,
+    Rounded,
+    Subnormal,
+    Underflow,
+    getcontext,
+)
 
 from dotmac_surveys import _native
 from dotmac_surveys.contracts import (
@@ -114,6 +139,70 @@ def validate_answers(
     )
 
 
+# Shared decimal-core's wire order follows CPython signal/condition priority.
+_SIGNALS = (
+    InvalidOperation,
+    FloatOperation,
+    DivisionByZero,
+    Overflow,
+    Underflow,
+    Subnormal,
+    Inexact,
+    Rounded,
+    Clamped,
+)
+_INVALID_CONDITIONS = (
+    InvalidOperation,
+    ConversionSyntax,
+    DivisionImpossible,
+    DivisionUndefined,
+    InvalidContext,
+)
+_ROUNDINGS = (
+    ROUND_CEILING,
+    ROUND_FLOOR,
+    ROUND_UP,
+    ROUND_DOWN,
+    ROUND_HALF_UP,
+    ROUND_HALF_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_05UP,
+)
+
+
+def _replay_metric_status(
+    context: Context, traps: int, status: int, failure: _native.ArithmeticFailure
+) -> None:
+    for index, signal in enumerate(_SIGNALS):
+        if status & (1 << index):
+            context.flags[signal] = True
+    if status & (1 << 9):
+        raise MemoryError
+    if failure is None:
+        return
+    failed_signals, failed_conditions = failure
+    trapped = [
+        signal
+        for index, signal in enumerate(_SIGNALS)
+        if failed_signals & traps & (1 << index)
+    ]
+    if not trapped:
+        return
+    details = []
+    for signal in trapped:
+        if signal is InvalidOperation:
+            details.extend(
+                condition
+                for index, condition in enumerate(_INVALID_CONDITIONS)
+                if failed_conditions & (1 << index)
+            )
+            if not failed_conditions:
+                details.append(InvalidOperation)
+        else:
+            details.append(signal)
+    raise trapped[0](details)
+
+
 def calculate_metrics(
     *,
     ratings: Iterable[int | None],
@@ -124,23 +213,46 @@ def calculate_metrics(
     if len(rating_rows) != len(nps_rows):
         raise ValueError("rating and NPS projections must describe the same responses")
 
+    # Conversion errors and FloatOperation precede all arithmetic, as before.
     present_ratings = [Decimal(value) for value in rating_rows if value is not None]
-    average = (
-        (sum(present_ratings, Decimal(0)) / Decimal(len(present_ratings))).quantize(
-            Decimal("0.01")
-        )
-        if present_ratings
-        else None
+    context = getcontext()
+    traps = sum(
+        1 << index for index, signal in enumerate(_SIGNALS) if context.traps[signal]
     )
-    present_nps = [value for value in nps_rows if value is not None]
-    nps_score: Decimal | None = None
-    if present_nps:
-        promoters = sum(value >= 9 for value in present_nps)
-        detractors = sum(value <= 6 for value in present_nps)
-        nps_score = (
-            (Decimal(promoters - detractors) / Decimal(len(present_nps))) * Decimal(100)
-        ).quantize(Decimal("0.01"))
-    return SurveyMetrics(len(rating_rows), average, nps_score)
+
+    def predicates() -> Iterable[tuple[bool, bool]]:
+        # These are lazy type-boundary comparisons, not metric arithmetic.
+        # Consume all promoter comparisons before any detractor comparisons;
+        # arbitrary-sized ints and existing rich-comparison errors stay exact.
+        for value in nps_rows:
+            if value is not None:
+                yield True, value >= 9
+        for value in nps_rows:
+            if value is not None:
+                yield False, value <= 6
+
+    def replay_rating(status: int, failure: _native.ArithmeticFailure) -> None:
+        _replay_metric_status(context, traps, status, failure)
+
+    average, score, status, failure = _native.calculate_metrics(
+        ratings=[str(value) for value in present_ratings],
+        nps_predicates=predicates(),
+        context=(
+            context.prec,
+            _ROUNDINGS.index(context.rounding),
+            context.Emin,
+            context.Emax,
+            context.clamp,
+        ),
+        traps=traps,
+        replay_rating=replay_rating,
+    )
+    _replay_metric_status(context, traps, status, failure)
+    return SurveyMetrics(
+        len(rating_rows),
+        Decimal(average) if average is not None else None,
+        Decimal(score) if score is not None else None,
+    )
 
 
 __all__ = ["calculate_metrics", "transition_survey", "validate_answers"]

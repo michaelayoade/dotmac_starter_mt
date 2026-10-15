@@ -17,6 +17,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+DECIMAL_MODULES = {"dotmac_inventory", "dotmac_finance", "dotmac_surveys"}
 
 
 def run(*arguments: str, cwd: Path = ROOT) -> None:
@@ -52,12 +53,12 @@ def verify_wheel(wheel: Path, module: str) -> None:
             or "-none-any" in contents
         ):
             raise RuntimeError(f"wrong native tags: {wheel}: {contents}")
-        if module == "dotmac_inventory":
+        if module in DECIMAL_MODULES:
             if not any(
                 name.endswith("LICENSE.mpdecimal.txt") for name in archive.namelist()
             ):
                 raise RuntimeError(
-                    "inventory wheel must ship the upstream Decimal license"
+                    "Decimal wheel must ship the upstream Decimal license"
                 )
             with tempfile.TemporaryDirectory() as temporary:
                 library = Path(temporary) / "_native.so"
@@ -68,10 +69,11 @@ def verify_wheel(wheel: Path, module: str) -> None:
                 symbols = subprocess.check_output(
                     ["nm", "-D", "--defined-only", str(library)], text=True
                 )
-                if "libmpdec" in needed or re.search(r"\b(?:mpd_|dm_)\w*", symbols):
+                if "libmpdec" in needed or re.search(
+                    r"\b(?:_?mpd_|dm_|MPD_)\w*", symbols
+                ):
                     raise RuntimeError(
-                        "inventory Decimal must be statically linked "
-                        "with private symbols"
+                        "Decimal must be statically linked " "with private symbols"
                     )
 
 
@@ -90,19 +92,22 @@ def unpack_sdist(sdist: Path, destination: Path, module: str) -> Path:
             "native/pyproject.toml",
             "native/src/lib.rs",
         ]
-        if module == "dotmac_inventory":
+        if module in DECIMAL_MODULES:
             expected += [
-                "native/build.rs",
-                "native/decimal_shim.c",
-                "native/decimal_shim.h",
-                "native/vendor/UPSTREAM.toml",
-                "native/vendor/LICENSE.mpdecimal.txt",
+                "native/decimal-core/Cargo.toml",
+                "native/decimal-core/src/lib.rs",
+                "native/decimal-core/build.rs",
+                "native/decimal-core/decimal_shim.c",
+                "native/decimal-core/decimal_shim.h",
+                "native/decimal-core/vendor/UPSTREAM.toml",
+                "native/decimal-core/vendor/LICENSE.mpdecimal.txt",
             ]
             if not any(
-                "/native/vendor/" in name and name.endswith(".tar.gz") for name in names
+                "/native/decimal-core/vendor/" in name and name.endswith(".tar.gz")
+                for name in names
             ):
                 raise RuntimeError(
-                    "inventory source archive lacks vendored Decimal sources"
+                    "Decimal source archive lacks vendored Decimal sources"
                 )
         for suffix in expected:
             if not any(name.endswith("/" + suffix) for name in names):
@@ -279,8 +284,11 @@ def standalone(artifacts: Path) -> None:
                 cwd=tests,
             )
     hashes = []
-    for path in sorted(artifacts.rglob("*")):
-        if path.is_file() and path.name.endswith((".whl", ".tar.gz")):
+    retained = [*artifacts.glob("*.whl"), *artifacts.glob("*.tar.gz")]
+    retained += list((artifacts / "rebuilt").glob("*.whl"))
+    retained += list((artifacts / "runtime").glob("*.whl"))
+    for path in sorted(retained):
+        if path.is_file():
             hashes.append(
                 f"{hashlib.sha256(path.read_bytes()).hexdigest()}  "
                 f"{path.relative_to(artifacts)}\n"

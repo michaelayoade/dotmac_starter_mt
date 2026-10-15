@@ -219,3 +219,221 @@ def test_answer_iterator_failure_propagates_before_question_errors() -> None:
 
     with pytest.raises(RuntimeError, match="answer stream failed"):
         validate_answers((Question("q", QuestionType.RATING, "Required"),), answers())
+
+
+# The displaced implementation is retained only as the hosted differential oracle.
+def _reference_metrics(*, ratings, nps_values):
+    from decimal import Decimal
+
+    from dotmac_surveys.contracts import SurveyMetrics
+
+    rating_rows = tuple(ratings)
+    nps_rows = tuple(nps_values)
+    if len(rating_rows) != len(nps_rows):
+        raise ValueError("rating and NPS projections must describe the same responses")
+    present_ratings = [Decimal(value) for value in rating_rows if value is not None]
+    average = (
+        (sum(present_ratings, Decimal(0)) / Decimal(len(present_ratings))).quantize(
+            Decimal("0.01")
+        )
+        if present_ratings
+        else None
+    )
+    present_nps = [value for value in nps_rows if value is not None]
+    nps_score = None
+    if present_nps:
+        promoters = sum(value >= 9 for value in present_nps)
+        detractors = sum(value <= 6 for value in present_nps)
+        nps_score = (
+            (Decimal(promoters - detractors) / Decimal(len(present_nps))) * Decimal(100)
+        ).quantize(Decimal("0.01"))
+    return SurveyMetrics(len(rating_rows), average, nps_score)
+
+
+def _metric_outcome(function, ratings, nps_values, context):
+    from decimal import localcontext
+
+    with localcontext(context) as active:
+        try:
+            result = function(ratings=ratings, nps_values=nps_values)
+            outcome = (
+                "ok",
+                result.total_responses,
+                str(result.avg_rating) if result.avg_rating is not None else None,
+                str(result.nps_score) if result.nps_score is not None else None,
+            )
+        except Exception as error:
+            outcome = ("error", type(error), error.args)
+        return outcome, dict(active.flags)
+
+
+@pytest.mark.parametrize(
+    "rounding",
+    [
+        "ROUND_CEILING",
+        "ROUND_FLOOR",
+        "ROUND_UP",
+        "ROUND_DOWN",
+        "ROUND_HALF_UP",
+        "ROUND_HALF_DOWN",
+        "ROUND_HALF_EVEN",
+        "ROUND_05UP",
+    ],
+)
+@pytest.mark.parametrize("precision", [1, 2, 4, 28])
+@pytest.mark.parametrize("trapped", [False, True])
+def test_metric_context_rounding_flags_and_traps_match_reference(
+    rounding: str, precision: int, trapped: bool
+) -> None:
+    from decimal import Context, Inexact, InvalidOperation, Rounded
+
+    from dotmac_surveys import calculate_metrics
+
+    context = Context(prec=precision, rounding=rounding)
+    context.traps[InvalidOperation] = trapped
+    context.traps[Inexact] = trapped
+    context.traps[Rounded] = trapped
+    ratings = (5, 2, None, 4, 1, 3, 4)
+    nps = (10, 9, 7, None, 6, 0, 8)
+    assert _metric_outcome(calculate_metrics, ratings, nps, context) == _metric_outcome(
+        _reference_metrics, ratings, nps, context
+    )
+
+
+@pytest.mark.parametrize(
+    ("ratings", "nps"),
+    [
+        ((), ()),
+        ((None, None), (None, None)),
+        ((1, None, 5), (None, -100, 100)),
+        ((10**100, -(10**100), 1), (10**6000, -(10**6000), 7)),
+        (("sNaN", "NaN"), (None, None)),
+        (("Infinity", "-Infinity"), (10, 0)),
+        (("0.000000001", "0.000000002"), (10, 8)),
+        ((True, False), (True, False)),
+        ((1.25, "2.75"), (10.5, 6.5)),
+    ],
+)
+def test_metric_empty_sparse_extreme_and_accepted_conversion_parity(
+    ratings, nps
+) -> None:
+    from decimal import Context, Inexact, InvalidOperation
+
+    from dotmac_surveys import calculate_metrics
+
+    context = Context(prec=5, Emin=-4, Emax=4, clamp=1)
+    context.traps[InvalidOperation] = False
+    context.flags[Inexact] = True
+    assert _metric_outcome(calculate_metrics, ratings, nps, context) == _metric_outcome(
+        _reference_metrics, ratings, nps, context
+    )
+
+
+def test_metric_iterables_materialize_before_length_check_and_decimal_conversion() -> (
+    None
+):
+    from dotmac_surveys import calculate_metrics
+
+    seen: list[str] = []
+
+    def ratings():
+        seen.append("ratings")
+        yield "not a Decimal"
+
+    def nps():
+        seen.append("nps")
+        yield 10
+        yield 9
+
+    with pytest.raises(ValueError, match="same responses"):
+        calculate_metrics(ratings=ratings(), nps_values=nps())
+    assert seen == ["ratings", "nps"]
+
+
+def test_metric_decimal_conversions_all_finish_before_rating_arithmetic() -> None:
+    from decimal import InvalidOperation, localcontext
+
+    from dotmac_surveys import calculate_metrics
+
+    with localcontext() as context:
+        context.prec = 1
+        context.traps[InvalidOperation] = True
+        with pytest.raises(TypeError):
+            calculate_metrics(ratings=(10**100, object()), nps_values=(None, None))
+        assert not context.flags[InvalidOperation]
+
+
+def test_metric_rating_trap_precedes_nps_comparison_error() -> None:
+    from decimal import InvalidOperation, localcontext
+
+    from dotmac_surveys import calculate_metrics
+
+    with localcontext() as context:
+        context.prec = 1
+        context.traps[InvalidOperation] = True
+        with pytest.raises(InvalidOperation):
+            calculate_metrics(ratings=(5,), nps_values=(object(),))
+        assert context.flags[InvalidOperation]
+
+
+def test_metric_rating_flags_are_visible_before_nps_comparison_failure() -> None:
+    from decimal import Context, InvalidOperation
+
+    from dotmac_surveys import calculate_metrics
+
+    context = Context(prec=3)
+    context.traps[InvalidOperation] = False
+    ratings = (1, 2, 2)
+    nps = (10, object(), 0)
+    assert _metric_outcome(calculate_metrics, ratings, nps, context) == _metric_outcome(
+        _reference_metrics, ratings, nps, context
+    )
+
+
+def test_metric_native_batch_is_consumed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dotmac_surveys import calculate_metrics
+
+    native = _native.calculate_metrics
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return native(*args, **kwargs)
+
+    monkeypatch.setattr(lifecycle._native, "calculate_metrics", spy)
+    result = calculate_metrics(ratings=(5, 4, None), nps_values=(10, 0, None))
+    assert str(result.avg_rating) == "4.50"
+    assert str(result.nps_score) == "0.00"
+    assert calls == [1]
+
+
+@pytest.mark.parametrize("token", ["NaN", "sNaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize("trapped", [False, True])
+def test_metric_nps_decimal_comparison_signals_follow_rating_phase(
+    token: str, trapped: bool
+) -> None:
+    from decimal import Context, Decimal, InvalidOperation
+
+    from dotmac_surveys import calculate_metrics
+
+    context = Context(prec=6)
+    context.traps[InvalidOperation] = trapped
+    ratings = (1, 2, 2)
+    nps = (10, Decimal(token), 0)
+    assert _metric_outcome(calculate_metrics, ratings, nps, context) == _metric_outcome(
+        _reference_metrics, ratings, nps, context
+    )
+
+
+def test_metric_float_conversion_trap_precedes_arithmetic_and_nps_errors() -> None:
+    from decimal import FloatOperation, InvalidOperation, localcontext
+
+    from dotmac_surveys import calculate_metrics
+
+    with localcontext() as context:
+        context.prec = 1
+        context.traps[FloatOperation] = True
+        with pytest.raises(FloatOperation):
+            calculate_metrics(ratings=(10**100, 1.25), nps_values=(object(), None))
+        assert context.flags[FloatOperation]
+        assert not context.flags[InvalidOperation]

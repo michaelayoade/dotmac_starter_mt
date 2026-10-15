@@ -7,6 +7,39 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+DECIMAL_CORE = ROOT / "native/decimal-core"
+
+
+def decimal_core_files(directory: Path) -> dict[Path, bytes]:
+    """Complete source membership and bytes; compiler output is never a source."""
+    return {
+        path.relative_to(directory): path.read_bytes()
+        for path in directory.rglob("*")
+        if path.is_file() and "target" not in path.relative_to(directory).parts
+    }
+
+
+def sync_decimal_core(package: Path, *, check: bool) -> list[str]:
+    expected = decimal_core_files(DECIMAL_CORE)
+    if not expected:
+        raise SystemExit("canonical native/decimal-core source is missing")
+    destination = package / "native/decimal-core"
+    actual = decimal_core_files(destination)
+    drift = sorted(
+        name
+        for name in expected.keys() | actual.keys()
+        if expected.get(name) != actual.get(name)
+    )
+    if check:
+        return [str((destination / name).relative_to(ROOT)) for name in drift]
+    for name in actual.keys() - expected.keys():
+        (destination / name).unlink()
+    for name in drift:
+        if name in expected:
+            path = destination / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(expected[name])
+    return []
 
 
 def configured_packages() -> list[tuple[Path, str]]:
@@ -33,6 +66,9 @@ def main() -> None:
         if args.list:
             print(package.relative_to(ROOT))
             continue
+        data = tomllib.loads((package / "pyproject.toml").read_text())
+        if data["tool"]["dotmac"]["native"].get("decimal-core", False):
+            stale.extend(sync_decimal_core(package, check=args.check))
         expected = (
             template.replace("__DOTMAC_PACKAGE__", module)
             .replace("__DOTMAC_MATURIN__", pins["maturin"])
@@ -42,7 +78,6 @@ def main() -> None:
         if args.check:
             if not path.exists() or path.read_text() != expected:
                 stale.append(str(path.relative_to(ROOT)))
-            data = tomllib.loads((package / "pyproject.toml").read_text())
             required = [
                 f"poetry-core=={pins['poetry-core']}",
                 f"maturin=={pins['maturin']}",
@@ -55,6 +90,12 @@ def main() -> None:
             if mini["tool"]["maturin"]["module-name"] != f"{module}._native":
                 stale.append(str(package.relative_to(ROOT)) + ": native module")
             cargo = tomllib.loads((package / "native/Cargo.toml").read_text())
+            if data["tool"]["dotmac"]["native"].get("decimal-core", False):
+                core = cargo["dependencies"].get("dotmac-decimal-core", {})
+                if core != {"version": "=0.1.0", "path": "decimal-core"}:
+                    stale.append(
+                        str(package.relative_to(ROOT)) + ": decimal core dependency"
+                    )
             pyo3 = cargo["dependencies"]["pyo3"]
             if pyo3["version"] != "=" + pins["pyo3"] or any(
                 feature.startswith("abi3") for feature in pyo3.get("features", [])

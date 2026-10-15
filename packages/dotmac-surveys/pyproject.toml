@@ -15,8 +15,10 @@ include = [
     { path = "native/Cargo.lock", format = "sdist" },
     { path = "native/pyproject.toml", format = "sdist" },
     { path = "native/src/**/*", format = "sdist" },
+    { path = "native/decimal-core/**/*", format = "sdist" },
+    { path = "native/decimal-core/vendor/LICENSE.mpdecimal.txt", format = ["sdist", "wheel"] },
 ]
-exclude = ["native/target", "src/**/*.so", "src/**/*.pyd", "src/**/*.dll", "src/**/*.dylib"]
+exclude = ["native/**/target", "src/**/*.so", "src/**/*.pyd", "src/**/*.dll", "src/**/*.dylib"]
 
 [tool.poetry.build]
 script = "build.py"
@@ -24,6 +26,7 @@ generate-setup-file = false
 
 [tool.dotmac.native]
 python-package = "dotmac_surveys"
+decimal-core = true
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"

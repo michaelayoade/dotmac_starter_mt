@@ -16,6 +16,12 @@ never commit, roll back or perform network I/O. See
 [`ADR-0053`](../../docs/adr/0053-surveys-own-feedback-evidence-not-subject-consequences.md)
 and the [product-first inventory](../../docs/inventories/surveys-sources.md).
 
-## Native validation candidate
+## Native computation candidate
 
-The unreleased `0.2.0a1` candidate batches structural answer validation in a private Rust extension. Established Python Unicode/Decimal/date/URL/email parsing and every persistence/lifecycle decision retain their owners. Matching wheels require no compiler; source builds require the exact packaged Rust/build-tool pins and a C linker. Hosted qualification and publication remain separate.
+The unreleased `0.2.0a1` candidate batches answer validation and rating/NPS
+cohort arithmetic in a private Rust extension. Python retains Unicode and value
+conversion/comparison semantics, ordered Decimal signal replay, and persistence
+and lifecycle decisions. Source builds require Rust 1.90.0, a C compiler and
+make. The source archive embeds the canonical arithmetic crate, checksum-pinned
+libmpdec source and BSD license. Hosted qualification and publication remain
+separate.
