@@ -78,8 +78,8 @@ protected main. Qualification or a package pin alone is not product adoption.
 
 | Native successor | Existing use to assess | Product boundary |
 | --- | --- | --- |
-| Surveys | Sub's survey metric projections through public `calculate_metrics` | Prove score eligibility, empty populations, Decimal/rounding and output parity; keep product queries, rows and transactions. Full survey persistence cutover remains separate. |
-| Finance | ERP fixed-asset depreciation through public `calculate_depreciation` | Prove the supported three-method, period, rounding and final true-up contract. Unsupported product methods and accounting consequences retain their owners. |
+| Surveys | Sub's metric projections assessed; current rounding does not match public `calculate_metrics` | Preserve existing NPS results and SQL average aggregation. A separately agreed metric contract and parity proof precede a bounded substitution; full survey persistence cutover remains separate. |
+| Finance | ERP fixed-asset depreciation assessed; current period/rounding rules do not match public `calculate_depreciation` | Preserve ERP catch-up and original-cost rounding. A separately agreed calculation contract and batch boundary precede substitution; unsupported methods and accounting consequences retain their owners. |
 | Inventory | No compatible computation-only public caller established | Private native totals remain inside module projection services. Organization-to-Tenant mapping, stock replay, shadow and writer retirement precede full adoption. |
 | Forms | No compatible computation-only public caller established | Private native review remains inside the submission owner. Seven-table backfill, immutable versions, refusal/isolation parity and generic-writer retirement precede full adoption. |
 | Positioning | No compatible computation-only public caller established | Geometric membership does not replace product distance/transition semantics. Accuracy and purpose/expiry/revocation grant decisions precede Sub's full adoption. |
@@ -87,6 +87,22 @@ protected main. Qualification or a package pin alone is not product adoption.
 | Fiber Plant | No compatible computation-only public caller established | Strand/splice continuity does not replace product endpoint/segment ambiguity rules. CRM outside-plant consolidation and coordinated suite gates remain. |
 | Media Observations | Mkt hierarchy is qualifying source; no bounded public computation adoption established | Production-writer audit, hierarchy/metric shadow and reconciliation remain prerequisites to cutover. No attribution or transport ownership moves. |
 | Web Analytics | No matching first-party event consumer established | Financial KPIs and provider aggregates are outside the contract. Qualified release does not create a website/funnel product feature. |
+
+The completed source assessment inspected Sub
+`b0bc01a656fbaa6023ffe0f0e97189b4e92ca4c8`
+(`app/services/surveys.py::_refresh_survey_projections`) and ERP
+`d1c1c7975eead7cb716fc4d590dabe97b6eebcdd`
+(`app/services/fixed_assets/depreciation.py::calculate_run`). Sub converts a
+floating-point NPS result to Decimal before rounding: a net promoter count of 23
+among 160 rated responses yields 14.37, while Starter's exact calculation yields
+14.38. Its average is already a SQL aggregate. ERP's multi-period catch-up rounds
+once after applying the rate to opening carrying value; Starter's declining
+balance calculation compounds and rounds monthly. ERP's straight-line rounding
+uses original cost and total life rather than carrying value and remaining life.
+These are source-derived contract differences, not executed parity or performance
+measurements. No additional compatible bounded consumer was established; qualify
+and release the existing APIs without changing those product policies or moving
+SQL aggregates into Python merely to create a native caller.
 
 No remaining native successor is claimed published by this continuation. Exact
 publication evidence belongs in the existing release-verification records.
