@@ -1294,7 +1294,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-inventory"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Dotmac Inventory — tenant-local stock ledger, reservations, traceability, and valuation"
 optional = false
 python-versions = ">=3.11,<3.14"

@@ -7,21 +7,50 @@ use pyo3::types::PyBytes;
 // Python str.strip includes the four information separators in addition to
 // Unicode White_Space; Rust char::is_whitespace alone is not equivalent.
 const WHITESPACE: &[&[u8]] = &[
-    b"\t", b"\n", b"\x0b", b"\x0c", b"\r", b"\x1c", b"\x1d", b"\x1e", b"\x1f", b" ",
-    b"\xc2\x85", b"\xc2\xa0", b"\xe1\x9a\x80", b"\xe2\x80\x80", b"\xe2\x80\x81",
-    b"\xe2\x80\x82", b"\xe2\x80\x83", b"\xe2\x80\x84", b"\xe2\x80\x85",
-    b"\xe2\x80\x86", b"\xe2\x80\x87", b"\xe2\x80\x88", b"\xe2\x80\x89",
-    b"\xe2\x80\x8a", b"\xe2\x80\xa8", b"\xe2\x80\xa9", b"\xe2\x80\xaf",
-    b"\xe2\x81\x9f", b"\xe3\x80\x80",
+    b"\t",
+    b"\n",
+    b"\x0b",
+    b"\x0c",
+    b"\r",
+    b"\x1c",
+    b"\x1d",
+    b"\x1e",
+    b"\x1f",
+    b" ",
+    b"\xc2\x85",
+    b"\xc2\xa0",
+    b"\xe1\x9a\x80",
+    b"\xe2\x80\x80",
+    b"\xe2\x80\x81",
+    b"\xe2\x80\x82",
+    b"\xe2\x80\x83",
+    b"\xe2\x80\x84",
+    b"\xe2\x80\x85",
+    b"\xe2\x80\x86",
+    b"\xe2\x80\x87",
+    b"\xe2\x80\x88",
+    b"\xe2\x80\x89",
+    b"\xe2\x80\x8a",
+    b"\xe2\x80\xa8",
+    b"\xe2\x80\xa9",
+    b"\xe2\x80\xaf",
+    b"\xe2\x81\x9f",
+    b"\xe3\x80\x80",
 ];
 
 // Reversible UTF-8/surrogatepass wire: Python accepts lone surrogates in text
 // decoded by some codecs. Never silently constrain that contract to Rust UTF-8.
 fn trimmed(mut value: &[u8]) -> &[u8] {
-    while let Some(rest) = WHITESPACE.iter().find_map(|space| value.strip_prefix(*space)) {
+    while let Some(rest) = WHITESPACE
+        .iter()
+        .find_map(|space| value.strip_prefix(*space))
+    {
         value = rest;
     }
-    while let Some(rest) = WHITESPACE.iter().find_map(|space| value.strip_suffix(*space)) {
+    while let Some(rest) = WHITESPACE
+        .iter()
+        .find_map(|space| value.strip_suffix(*space))
+    {
         value = rest;
     }
     value
@@ -62,9 +91,14 @@ fn normalize_rows(
         Ok(output)
     });
     let rows = result.map_err(PyValueError::new_err)?;
-    Ok(rows.into_iter().map(|row| {
-        row.into_iter().map(|value| PyBytes::new(py, &value).unbind()).collect()
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|value| PyBytes::new(py, &value).unbind())
+                .collect()
+        })
+        .collect())
 }
 
 #[pymodule]

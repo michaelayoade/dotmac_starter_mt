@@ -51,7 +51,7 @@ ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_TOOLCHAIN=1.90.0 \
     PATH=/usr/local/cargo/bin:$PATH
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && apt-get install -y --no-install-recommends gcc libc6-dev make \
     && rm -rf /var/lib/apt/lists/*
 
 ARG APP_PORT=8000

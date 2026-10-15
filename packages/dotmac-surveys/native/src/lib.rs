@@ -27,12 +27,19 @@ fn canonical_number(value: &[u8], maximum: u8) -> Option<u8> {
 }
 
 fn validate(questions: Vec<Question>, answers: Vec<Answer>) -> Result {
-    let known: BTreeSet<&[u8]> = questions.iter().map(|question| question.0.as_slice()).collect();
-    let submitted: BTreeMap<&[u8], usize> = answers.iter().enumerate()
-        .map(|(index, answer)| (answer.0.as_slice(), index)).collect();
+    let known: BTreeSet<&[u8]> = questions
+        .iter()
+        .map(|question| question.0.as_slice())
+        .collect();
+    let submitted: BTreeMap<&[u8], usize> = answers
+        .iter()
+        .enumerate()
+        .map(|(index, answer)| (answer.0.as_slice(), index))
+        .collect();
     // UTF-8 with surrogatepass preserves codepoint lexicographic ordering,
     // including isolated surrogates, without requiring Rust Unicode strings.
-    let unknown: Vec<usize> = submitted.iter()
+    let unknown: Vec<usize> = submitted
+        .iter()
         .filter_map(|(key, &index)| (!known.contains(*key)).then_some(index))
         .collect();
     if !unknown.is_empty() {
