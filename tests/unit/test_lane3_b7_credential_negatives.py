@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 import pathlib
 import sys
 from typing import Any
@@ -51,6 +52,171 @@ def test_checked_in_matrix_is_valid(
     assert mod.validate(role, matrix, fixture) == []
     assert mod.main([str(ROOT)]) == 0
     assert not any(r["path"] == "UNKNOWN" for r in matrix["path_isolation"])
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "repository",
+        "repository_id",
+        "repository_owner_id",
+        "environment",
+        "ref",
+        "workflow_ref",
+        "event_name",
+    ],
+)
+def test_each_historical_claim_value_is_bound(
+    role: Any, matrix: dict[str, Any], fixture: dict[str, Any], claim: str
+) -> None:
+    fixture["bound_claims"][claim] += "-drift"
+    assert "fixture bound claim values differ from the source-derived mapping" in (
+        mod.validate(role, matrix, fixture)
+    )
+
+
+@pytest.mark.parametrize("change", ["missing", "extra", "numeric", "absent"])
+def test_historical_claim_mapping_must_be_complete_and_exact(
+    role: Any, matrix: dict[str, Any], fixture: dict[str, Any], change: str
+) -> None:
+    if change == "missing":
+        del fixture["bound_claims"]["ref"]
+    elif change == "extra":
+        fixture["bound_claims"]["sub"] = "extra"
+    elif change == "numeric":
+        fixture["bound_claims"]["repository_id"] = 1406738001
+    else:
+        del fixture["bound_claims"]
+    assert "fixture bound claim values differ from the source-derived mapping" in (
+        mod.validate(role, matrix, fixture)
+    )
+
+
+@pytest.mark.parametrize("change", ["id", "repository", "workflow", "environment"])
+def test_agreeing_sources_cannot_rewrite_applied_history(
+    tmp_path: pathlib.Path, change: str
+) -> None:
+    _copy_sources(tmp_path)
+    config_path = tmp_path / mod.CONFIG
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    doc_path = tmp_path / mod.DOC
+    doc = doc_path.read_text(encoding="utf-8")
+    if change == "id":
+        config["execution_repository_id"] += 1
+    else:
+        old = {
+            "repository": config["execution_repository"],
+            "workflow": config["workflow_path"],
+            "environment": config["environment"]["name"],
+        }[change]
+        new = old + "-drift"
+        if change == "repository":
+            config["execution_repository"] = new
+        elif change == "workflow":
+            config["workflow_path"] = new
+        else:
+            config["environment"]["name"] = new
+        doc = doc.replace(old, new)
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    doc_path.write_text(doc, encoding="utf-8")
+    problems = mod.validate(
+        mod.load_role_definition(tmp_path),
+        mod.load_matrix(tmp_path),
+        mod.load_fixture(tmp_path),
+    )
+    assert (
+        "fixture bound claim values differ from the source-derived mapping" in problems
+    )
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("token_ttl_seconds", 301),
+        ("token_max_ttl_seconds", 301),
+        ("token_explicit_max_ttl_seconds", 301),
+        ("token_ttl_seconds", True),
+        ("token_max_ttl_seconds", 300.0),
+        ("token_explicit_max_ttl_seconds", "300"),
+        ("token_policies", ["lane3-exposure-rehearsal", "default"]),
+        ("token_policies", []),
+        ("token_no_default_policy", 1),
+        ("bound_subject", "anything"),
+        ("user_claim", "run_id"),
+        ("claim_mappings", {}),
+        ("bound_claims_type", "glob"),
+        ("token_type", "service"),
+        ("token_bound_cidrs", []),
+    ],
+)
+@pytest.mark.parametrize("target", ["matrix", "fixture", "both"])
+def test_applied_fields_bind_exact_intended_shape(
+    role: Any,
+    matrix: dict[str, Any],
+    fixture: dict[str, Any],
+    key: str,
+    value: Any,
+    target: str,
+) -> None:
+    if target in ("matrix", "both"):
+        matrix["applied_role"][key] = value
+    if target in ("fixture", "both"):
+        fixture[key] = value
+    problems = mod.validate(role, matrix, fixture)
+    assert any(key in p for p in problems)
+
+
+@pytest.mark.parametrize(
+    "key,minimum",
+    [
+        ("worst_case_expiration_leeway_seconds", 150),
+        ("worst_case_clock_skew_leeway_seconds", 60),
+    ],
+)
+@pytest.mark.parametrize("value", [None, True, False, -1, 0, 59, "150", 150.0])
+def test_unread_leeway_fallback_is_strict_and_conservative(
+    role: Any,
+    matrix: dict[str, Any],
+    fixture: dict[str, Any],
+    key: str,
+    minimum: int,
+    value: Any,
+) -> None:
+    matrix["applied_role"][key] = value
+    assert any(
+        key in p and "worst-case leeway" in p
+        for p in (mod.validate(role, matrix, fixture))
+    )
+
+
+def test_larger_conservative_leeway_fallback_is_valid(
+    role: Any, matrix: dict[str, Any], fixture: dict[str, Any]
+) -> None:
+    matrix["applied_role"]["worst_case_expiration_leeway_seconds"] = 151
+    matrix["applied_role"]["worst_case_clock_skew_leeway_seconds"] = 61
+    assert mod.validate(role, matrix, fixture) == []
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("clock_skew_leeway", 0),
+        ("expiration_leeway", True),
+        ("not_before_leeway", -1.0),
+        ("read_back", True),
+        ("read_back", 0),
+    ],
+)
+def test_fixture_cannot_claim_unobserved_leeway_readback(
+    role: Any,
+    matrix: dict[str, Any],
+    fixture: dict[str, Any],
+    key: str,
+    value: Any,
+) -> None:
+    fixture["leeways"][key] = value
+    matrix["applied_role"]["leeways_read_back"] = fixture["leeways"]["read_back"]
+    assert any("fixture.leeways" in p for p in mod.validate(role, matrix, fixture))
 
 
 def test_role_definition_is_derived_from_source(role: Any) -> None:

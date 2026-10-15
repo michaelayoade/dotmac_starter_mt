@@ -18,18 +18,32 @@ Claims come from the "Workflow identity" paragraph of
 `docs/LANE3_EXECUTION_TOPOLOGY.md` (lines 230-238), the values in
 `.github/lane3-execution.json` (lines 4-9) and `scripts/lane3_openbao_topology.py`
 (`ROLE` line 24, `AUDIENCE` line 25, `KV_PATH` line 27, `MAX_TOKEN_TTL` line 29).
-The role was applied and read back on 2026-10-10. The value-safe record of that
-read-back is `docs/inventories/lane3-b7-applied-role-fixture.json` (claim names,
-types and flags only; no policy text, no secrets), and the validator diffs the
-matrix `applied_role` block and the source-derived claims against it. The
-fixture is a record, not a live check.
+The role was applied on 2026-10-10. The historical public values and intended
+shape are recorded in `docs/inventories/lane3-b7-applied-role-fixture.json`,
+including all seven exact claim values. The validator compares the complete
+source-derived claim mapping against that retained history and checks the
+matrix's TTLs, policy and fields with strict JSON types. Repository/doc
+agreement cannot silently rewrite the applied claim values.
 
-Read-back facts:
+Provenance: the retained private evidence
+`.cutover-private/b67-scripts/live-b7-public.log` records configuration at
+`2026-10-10T06:32:55.239816+00:00`, the public claim mapping, audience, token
+policy/type/TTL and no-default-policy flag. `b67-operation.py` lines 82-86
+also asserts both maximum TTLs equal 300 on role read-back; the public log
+prints only the base TTL. `b67-model.py` lines 45-48 records intended fields
+and disabled leeways. The fixture identifies those retained files by SHA-256
+as inspected on 2026-10-15; it is not regenerated from the current source
+configuration and makes no new live read-back claim. Omitted/default fields
+and disabled leeways were not independently established by the retained
+read-back assertions. Any future refresh needs separately approved evidence.
 
-- Bound claims (7, `bound_claims_type` string, exact match): `repository`,
+Historical read-back assertions and intended/default fields:
+
+- Bound claims (7; intended `bound_claims_type` string, exact match): `repository`,
   `repository_id`, `repository_owner_id`, `environment`, `ref`, `workflow_ref`,
   `event_name`. Audience (`bound_audiences`): `urn:dotmac:lane3:exposure-rehearsal`.
-- `bound_subject`: none. `user_claim`: `sub` (login fails if `sub` is absent; all
+- Intended/default (not asserted in retained read-back): `bound_subject`: none.
+  `user_claim`: `sub` (login fails if `sub` is absent; all
   Lane 3 runs share one entity alias). No `claim_mappings`.
 - `bound_issuer`: a mount-level setting on `auth/jwt` (the GitHub issuer), not a
   role field, and the mount is shared with the Gate-0 role
@@ -38,11 +52,15 @@ Read-back facts:
   not by a row. Any change to `auth/jwt/config` re-opens every row.
 - Token: batch (not renewable), ttl, max_ttl and explicit_max_ttl 300 seconds,
   `token_no_default_policy` true, sole policy `lane3-exposure-rehearsal`,
-  `token_bound_cidrs` unset (looser than the CIDR-bound A6 AppRoles; an
-  observation, not a row).
+  intended/default `token_bound_cidrs` unset (not asserted in retained read-back;
+  looser than the CIDR-bound A6 AppRoles).
 - Leeways (`clock_skew_leeway`, `expiration_leeway`, `not_before_leeway`):
-  intended -1 (disabled) in the model but NOT read back. Plan for the OpenBao
-  defaults as the worst case (expiration 150 s, clock skew 60 s).
+  intended -1 (disabled) in the model but NOT read back. Plan at least the documented
+  [OpenBao 2.5.x JWT API defaults](https://openbao.org/api-docs/2.5.x/auth/jwt/)
+  (expiration 150 s, clock skew 60 s), checked separately as strict integer
+  minima. These are planning fallbacks, not observed leeways or a bound on
+  arbitrary future configuration. The expiry row remains unproducible under
+  the current timeout; no deadline is widened here.
 - Policy: explicit deny on `gate0-ssh/*`, `secret/data/dotmac/platform-cp/*` and
   `secret/metadata/*`; everything else is implicitly denied (no default policy).
 
@@ -130,13 +148,18 @@ logs, policy text review, a positive login.
     "user_claim": "sub",
     "claim_mappings": null,
     "token_type": "batch",
+    "token_ttl_seconds": 300,
+    "token_max_ttl_seconds": 300,
+    "token_explicit_max_ttl_seconds": 300,
+    "token_policies": ["lane3-exposure-rehearsal"],
     "token_no_default_policy": true,
     "token_bound_cidrs": null,
     "bound_issuer_shared_with": [
       "rehearsal-issuer-protected"
     ],
     "leeways_read_back": false,
-    "worst_case_expiration_leeway_seconds": 150
+    "worst_case_expiration_leeway_seconds": 150,
+    "worst_case_clock_skew_leeway_seconds": 60
   },
   "evidence_definitions": {
     "no_token_issued": {

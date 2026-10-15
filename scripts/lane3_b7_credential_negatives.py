@@ -20,7 +20,8 @@ The role definition is derived from the "Workflow identity" paragraph of the
 topology document, ``.github/lane3-execution.json`` and the constants of
 ``scripts/lane3_openbao_topology.py``, and diffed against
 ``docs/inventories/lane3-b7-applied-role-fixture.json``. The fixture records
-the 2026-10-10 read-back; it is not a live check.
+the 2026-10-10 public read-back and intended/default fields separately; it is
+not a live check.
 """
 
 from __future__ import annotations
@@ -38,6 +39,33 @@ CONFIG = ".github/lane3-execution.json"
 READER = "scripts/lane3_openbao_topology.py"
 MATRIX = "docs/inventories/lane3-b7-credential-negative-matrix.md"
 FIXTURE = "docs/inventories/lane3-b7-applied-role-fixture.json"
+
+# Historical applied/intended shape; changes need a reviewed evidence refresh.
+# See the fixture's provenance for read-back assertions versus model intent.
+APPLIED_FIELDS = {
+    "bound_subject": None,
+    "bound_claims_type": "string",
+    "user_claim": "sub",
+    "claim_mappings": None,
+    "token_type": "batch",
+    "token_ttl_seconds": 300,
+    "token_max_ttl_seconds": 300,
+    "token_explicit_max_ttl_seconds": 300,
+    "token_policies": ["lane3-exposure-rehearsal"],
+    "token_no_default_policy": True,
+    "token_bound_cidrs": None,
+}
+INTENDED_LEEWAYS = {
+    "clock_skew_leeway": -1,
+    "expiration_leeway": -1,
+    "not_before_leeway": -1,
+    "read_back": False,
+}
+# OpenBao 2.5.x JWT API defaults; neither is an observed live role value.
+UNREAD_LEEWAY_MINIMUMS = {
+    "worst_case_expiration_leeway_seconds": 150,
+    "worst_case_clock_skew_leeway_seconds": 60,
+}
 
 BEGIN = "<!-- matrix:begin -->"
 END = "<!-- matrix:end -->"
@@ -492,31 +520,36 @@ def _validate_fixture(role: RoleDefinition, matrix: dict, fixture: dict) -> list
         problems.append("fixture role differs from the reader ROLE")
     if sorted(fixture.get("bound_claims_names", [])) != sorted(role.bound_claims):
         problems.append("fixture bound claim names differ from the source-derived set")
+    if not _exact_value(fixture.get("bound_claims"), role.bound_claims):
+        problems.append(
+            "fixture bound claim values differ from the source-derived mapping"
+        )
     if fixture.get("bound_audiences") != [role.audience]:
         problems.append("fixture bound_audiences differ from the source audience")
     applied = matrix.get("applied_role")
     if not isinstance(applied, dict):
         return [*problems, "applied_role block missing"]
-    for key in (
-        "bound_subject",
-        "bound_claims_type",
-        "user_claim",
-        "claim_mappings",
-        "token_type",
-        "token_no_default_policy",
-        "token_bound_cidrs",
-    ):
-        if key not in applied or applied[key] != fixture.get(key):
+    for key, expected in APPLIED_FIELDS.items():
+        if key not in fixture or not _exact_value(fixture[key], expected):
+            problems.append(f"fixture.{key} differs from the historical intended shape")
+        if key not in applied or not _exact_value(applied[key], fixture.get(key)):
             problems.append(f"applied_role.{key} differs from the fixture")
     leeways = fixture.get("leeways", {})
-    if applied.get("leeways_read_back") != leeways.get("read_back"):
+    if not _exact_value(leeways, INTENDED_LEEWAYS):
+        problems.append("fixture.leeways differs from the historical unread intent")
+    if not isinstance(leeways, dict):
+        leeways = {}
+    if not _exact_value(applied.get("leeways_read_back"), leeways.get("read_back")):
         problems.append("applied_role.leeways_read_back differs from the fixture")
-    if not leeways.get("read_back") and not isinstance(
-        applied.get("worst_case_expiration_leeway_seconds"), int
-    ):
-        problems.append(
-            "leeways are not read back: a worst-case leeway must be planned for"
-        )
+    # The historical evidence does not establish disabled leeways. A changed
+    # read_back flag cannot bypass these conservative planning requirements.
+    for key, minimum in UNREAD_LEEWAY_MINIMUMS.items():
+        value = applied.get(key)
+        if type(value) is not int or value < minimum:
+            problems.append(
+                f"applied_role.{key}: unread worst-case leeway must be an integer "
+                f">= {minimum} seconds"
+            )
     if applied.get("bound_issuer_shared_with") != (
         fixture.get("bound_issuer", {}).get("shared_with_roles")
     ):
@@ -524,6 +557,23 @@ def _validate_fixture(role: RoleDefinition, matrix: dict, fixture: dict) -> list
             "applied_role.bound_issuer_shared_with differs from the fixture"
         )
     return problems
+
+
+def _exact_value(actual: object, expected: object) -> bool:
+    """Compare JSON shapes without Python's bool/int or int/float equality."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        assert isinstance(actual, dict)
+        return actual.keys() == expected.keys() and all(
+            _exact_value(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        assert isinstance(actual, list)
+        return len(actual) == len(expected) and all(
+            _exact_value(a, e) for a, e in zip(actual, expected, strict=True)
+        )
+    return actual == expected
 
 
 def _validate_paths(matrix: dict, fixture: dict) -> list[str]:
