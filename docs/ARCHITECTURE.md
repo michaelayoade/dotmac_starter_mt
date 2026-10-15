@@ -45,6 +45,13 @@ artifact hashes. The runtime image preserves Python console entrypoints and
 compiled modules while excluding the Rust compiler/toolchain. The existing
 release facilities retain all publication, registry read-back and trust authority.
 
+The existing published-source drift ratchet enrolls native inputs present at
+either the release tag or current source revision. `NativePackageSource.v1`
+fingerprints Git modes, kinds and object identities for Python/native sources,
+the build hook and packaging configuration. Removing inputs cannot escape the
+check. These fingerprints use distinct fields and preserve historical Python
+tree identities; unrelated extraction and changelog documents stay outside it.
+
 Source qualification and implementation boundaries are recorded in
 [`inventories/rust-computation-sources.md`](inventories/rust-computation-sources.md).
 Inventory now has a source implementation of sequential quantity/value/reservation

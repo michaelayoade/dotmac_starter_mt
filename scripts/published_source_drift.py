@@ -5,7 +5,8 @@ A distribution declares a version. If a release tag exists for that exact
 version, a consumer installing it receives the bytes at that tag. This measures
 whether the `src/` tree on HEAD is still those bytes.
 
-Only `src/` is compared, deliberately. `CHANGELOG.md`, `EXTRACTION.toml` and the
+For legacy Python distributions only `src/` is compared, deliberately.
+`CHANGELOG.md`, `EXTRACTION.toml` and the
 `pyproject.toml` version line drift on most released packages as governance
 records are updated, and that is bookkeeping, not a lie to a consumer. What
 matters is the IMPORTABLE code: `dotmac-ui` 0.1.0a7 was published, verified and
@@ -13,6 +14,15 @@ tagged, and then `map_frame` merged with no version bump, so the wheel a
 consumer installed exposed only `EMPTY_STATE` while every gate stayed green.
 That is a `src/` divergence, and comparing whole package directories would bury
 it in 60-odd harmless metadata diffs.
+
+Native inputs present at either the publication tag or HEAD enroll a
+NativePackageSource.v1 identity over src/, native/, build.py and pyproject.toml
+Git object IDs, modes and kinds with explicit absence markers. This covers
+Rust, C, vendored inputs, dependency locks, build hooks and packaging selection
+without hashing unrelated governance documents. Removing native inputs cannot
+unenroll a tag.
+Unresolved revisions or missing required native paths refuse the comparison.
+Native fingerprints are separate fields; legacy tree IDs retain their meaning.
 
 Comparison is by git TREE OBJECT hash: one comparison covering every path, every
 byte, modes, additions and deletions, which no file walk can accidentally miss.
@@ -25,11 +35,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import subprocess
 import sys
 import tomllib
+from typing import TypedDict
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASELINE_PATH = REPO_ROOT / "tests/architecture/published_source_drift_baseline.json"
@@ -64,15 +76,120 @@ def released_distributions() -> list[tuple[str, str, str]]:
     return found
 
 
-def drifted() -> list[dict[str, str]]:
-    """Every released distribution whose `src/` differs from its tag."""
+NATIVE_SOURCE_SCHEMA = "NativePackageSource.v1"
+_NATIVE_COMPONENTS = ("src", "native", "build.py", "pyproject.toml")
+_ABSENT = "ABSENT"
 
+
+class _GitObject(TypedDict):
+    mode: str
+    kind: str
+    oid: str
+
+
+_SourceObjects = dict[str, _GitObject]
+
+
+def _source_objects(ref: str, package: str) -> _SourceObjects:
+    """Read labeled Git objects, distinguishing absence from unresolved refs."""
+    paths = [f"{package}/{component}" for component in _NATIVE_COMPONENTS]
+    result = subprocess.run(
+        ["git", "ls-tree", ref, "--", *paths],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise SystemExit(f"cannot resolve native source revision {ref!r}")
+    objects: _SourceObjects = {}
+    for line in result.stdout.splitlines():
+        metadata, path = line.split("\t", 1)
+        mode, kind, identity = metadata.split()
+        objects[path.removeprefix(f"{package}/")] = {
+            "mode": mode,
+            "kind": kind,
+            "oid": identity,
+        }
+    return objects
+
+
+def _native_enrolled(objects: _SourceObjects, ref: str, package: str) -> bool:
+    if "native" in objects or "build.py" in objects:
+        return True
+    if "pyproject.toml" not in objects:
+        return False
+    result = subprocess.run(
+        ["git", "cat-file", "blob", objects["pyproject.toml"]["oid"]],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise SystemExit(
+            f"cannot resolve native source configuration {package} at {ref}"
+        )
+    try:
+        metadata = tomllib.loads(result.stdout)
+    except tomllib.TOMLDecodeError as failure:
+        raise SystemExit(
+            f"cannot resolve native source configuration {package} at {ref}"
+        ) from failure
+    return "native" in metadata.get("tool", {}).get("dotmac", {})
+
+
+def native_fingerprint(ref: str, package: str) -> str:
+    return _native_fingerprint(_source_objects(ref, package), ref, package)
+
+
+def _native_fingerprint(objects: _SourceObjects, ref: str, package: str) -> str:
+    for required in ("src", "pyproject.toml"):
+        if required not in objects:
+            raise SystemExit(
+                f"required native source input {package}/{required} is missing at {ref}"
+            )
+    payload = {
+        "schema": NATIVE_SOURCE_SCHEMA,
+        "objects": [
+            [
+                label + "/" if label in {"src", "native"} else label,
+                objects.get(label, _ABSENT),
+            ]
+            for label in _NATIVE_COMPONENTS
+        ],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def drifted() -> list[dict[str, str]]:
+    """Compare Python source and, when enrolled at either ref, native inputs."""
     out: list[dict[str, str]] = []
     for name, version, src in released_distributions():
         tag = f"{name}-v{version}"
-        published = git("rev-parse", f"{tag}:{src}")
-        current = git("rev-parse", f"HEAD:{src}")
-        if not published or not current or published == current:
+        package = src.removesuffix("/src")
+        published_objects = _source_objects(tag, package)
+        current_objects = _source_objects("HEAD", package)
+        native = _native_enrolled(published_objects, tag, package) or _native_enrolled(
+            current_objects, "HEAD", package
+        )
+        published = (
+            published_objects["src"]["oid"] if "src" in published_objects else ""
+        )
+        current = current_objects["src"]["oid"] if "src" in current_objects else ""
+        extra = {}
+        if native:
+            published_fingerprint = _native_fingerprint(published_objects, tag, package)
+            current_fingerprint = _native_fingerprint(current_objects, "HEAD", package)
+            if published_fingerprint == current_fingerprint:
+                continue
+            extra = {
+                "native_source_schema": NATIVE_SOURCE_SCHEMA,
+                "published_native_fingerprint": published_fingerprint,
+                "head_native_fingerprint": current_fingerprint,
+            }
+        elif not published or not current or published == current:
             continue
         out.append(
             {
@@ -81,6 +198,7 @@ def drifted() -> list[dict[str, str]]:
                 "tag": tag,
                 "published_tree": published,
                 "head_tree": current,
+                **extra,
             }
         )
     return sorted(out, key=lambda row: row["distribution"])
