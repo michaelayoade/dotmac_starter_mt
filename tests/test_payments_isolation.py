@@ -7,6 +7,7 @@ import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -236,6 +237,96 @@ def _seed_pending(migrated, *, with_proof=False):
         intent_id = intent.id
         session.commit()
     return scope, intent_id, proof_id, now
+
+
+def test_intent_replay_binds_the_request_in_migrated_tenant_scope(migrated):
+    from dotmac_kernel.cache import PlatformScope
+    from dotmac_kernel.money import Currency
+
+    scope, _, _, now = _seed_pending(migrated)
+    command = OpenPaymentIntent(
+        payer_reference="customer:binding",
+        target_reference="invoice:binding",
+        purpose=PaymentPurpose.INVOICE_SETTLEMENT,
+        requested=Money.of("123.456789", Currency("XTS", 6)),
+        reference="binding-replay",
+        provider_type="paystack",
+        channel="web",
+        opened_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        first = open_payment_intent(session, scope=scope, command=command)
+        intent_id = first.id
+        session.commit()
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        replay = open_payment_intent(session, scope=scope, command=command)
+        assert replay.id == intent_id
+        for changed in (
+            replace(command, target_reference="invoice:other"),
+            replace(command, target_reference=None),
+            replace(command, purpose=PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT),
+            replace(command, provider_type="bank"),
+            replace(command, channel="transfer"),
+            replace(command, payer_reference="customer:other"),
+            replace(command, requested=Money.of("123.456788", Currency("XTS", 6))),
+            replace(command, requested=Money.of("123.456789", Currency("XXX", 6))),
+            replace(command, requested=Money.of("123.456", Currency("XTS", 3))),
+            replace(command, opened_at=now + timedelta(seconds=1)),
+            replace(command, expires_at=now + timedelta(hours=2)),
+            replace(command, expires_at=None),
+        ):
+            with pytest.raises(Conflict):
+                open_payment_intent(session, scope=scope, command=changed)
+        assert (
+            open_payment_intent(
+                session,
+                scope=scope,
+                command=replace(
+                    command, opened_at=None, provider_type=" PAYSTACK ", channel=" WEB "
+                ),
+            ).id
+            == intent_id
+        )
+        with pytest.raises(TypeError, match="requires TenantScope"):
+            open_payment_intent(session, scope=PlatformScope(), command=command)
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(PaymentIntent)
+                .where(PaymentIntent.reference == command.reference)
+            )
+            == 1
+        )
+        session.rollback()
+
+    foreign, _, _, _ = _seed_pending(migrated)
+    with _tenant_session(migrated[1], foreign.tenant_id) as session:
+        assert session.get(PaymentIntent, intent_id) is None
+        other = open_payment_intent(
+            session,
+            scope=foreign,
+            command=replace(command, target_reference="invoice:foreign"),
+        )
+        assert other.id != intent_id
+        session.commit()
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        assert (
+            open_payment_intent(session, scope=scope, command=command).id == intent_id
+        )
+        rollback_command = replace(command, reference="binding-rollback")
+        pending = open_payment_intent(session, scope=scope, command=rollback_command)
+        pending_id = pending.id
+        assert (
+            open_payment_intent(session, scope=scope, command=rollback_command).id
+            == pending_id
+        )
+        session.rollback()
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        assert session.get(PaymentIntent, pending_id) is None
+        assert (
+            open_payment_intent(session, scope=scope, command=command).id == intent_id
+        )
 
 
 def _race(app_url, scope, intent_id, operations, *, proof_id=None):
@@ -789,3 +880,145 @@ def test_empty_immutability_downgrade_and_reupgrade(migrated):
                 {"privilege": privilege},
             )
     engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "code,scale,value",
+    [
+        ("JPY", 0, "123"),
+        ("NGN", 2, "123.45"),
+        ("BHD", 3, "123.456"),
+        ("XTS", 6, "123.456789"),
+        ("NGN", 3, "123.456"),
+    ],
+)
+def test_intent_reference_lookup_is_fresh_scoped_and_rollback_owned(
+    migrated, code, scale, value
+):
+    from dotmac_kernel.money import Currency
+    from dotmac_payments import (
+        GetPaymentIntentV1,
+        PaymentIntentObservationV1,
+        get_payment_intent_v1,
+    )
+
+    scope, _, _, now = _seed_pending(migrated)
+    foreign, _, _, _ = _seed_pending(migrated)
+    money = Money.of(value, Currency(code, scale))
+    command = OpenPaymentIntent(
+        payer_reference="payer:lookup",
+        target_reference="invoice:lookup",
+        purpose=PaymentPurpose.INVOICE_SETTLEMENT,
+        requested=money,
+        reference="lookup-reference",
+        provider_type="paystack",
+        channel="web",
+        opened_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    query = GetPaymentIntentV1("  lookup-reference  ")
+    app_url = migrated[1]
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        intent = open_payment_intent(session, scope=scope, command=command)
+        intent_id = intent.id
+        session.commit()
+    with _tenant_session(app_url, foreign.tenant_id) as session:
+        assert get_payment_intent_v1(session, scope=foreign, query=query) is None
+        other = open_payment_intent(
+            session,
+            scope=foreign,
+            command=replace(
+                command,
+                payer_reference="payer:foreign",
+                target_reference="invoice:foreign",
+            ),
+        )
+        foreign_id = other.id
+        session.commit()
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        expected = PaymentIntentObservationV1(
+            scope=scope,
+            intent_id=intent_id,
+            reference=command.reference,
+            payer_reference=command.payer_reference,
+            target_reference=command.target_reference,
+            purpose=command.purpose,
+            requested=money,
+            confirmed=None,
+            provider_type="PAYSTACK",
+            channel="WEB",
+            status=PaymentIntentStatus.PENDING,
+            opened_at=now,
+            expires_at=command.expires_at,
+            settled_at=None,
+        )
+        assert get_payment_intent_v1(session, scope=scope, query=query) == expected
+        assert (
+            get_payment_intent_v1(
+                session, scope=scope, query=GetPaymentIntentV1("unknown")
+            )
+            is None
+        )
+        # Explicit SQL tenant scope must hold even against an RLS-visible row.
+        assert get_payment_intent_v1(session, scope=foreign, query=query) is None
+        stale = session.get(PaymentIntent, intent_id)
+        stale.reference = "dirty-reference"
+        stale.payer_reference = "dirty-payer"
+        stale.target_reference = None
+        stale.requested_amount = Money.of("9", money.currency).amount
+        stale.minor_units = None
+        stale.provider_type = "DIRTY"
+        stale.channel = "DIRTY"
+        stale.status = PaymentIntentStatus.CANCELLED
+        stale.opened_at = now + timedelta(days=1)
+        stale.expires_at = None
+        stale.settled_at = now + timedelta(days=2)
+        assert get_payment_intent_v1(session, scope=scope, query=query) == expected
+        assert stale in session.dirty
+        assert stale.reference == "dirty-reference"
+        session.rollback()
+    with _tenant_session(app_url, foreign.tenant_id) as session:
+        observation = get_payment_intent_v1(session, scope=foreign, query=query)
+        assert observation.intent_id == foreign_id
+        assert observation.payer_reference == "payer:foreign"
+        assert observation.target_reference == "invoice:foreign"
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        assert get_payment_intent_v1(session, scope=scope, query=query) == expected
+        settled_at = now + timedelta(minutes=10)
+        record_confirmation(
+            session,
+            scope=scope,
+            command=RecordConfirmation(
+                intent_id=intent_id,
+                source=ConfirmationSource.PROVIDER_CALLBACK,
+                external_reference="lookup-settlement",
+                confirmed=money,
+                observed_at=settled_at,
+            ),
+        )
+        session.commit()
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        assert get_payment_intent_v1(session, scope=scope, query=query) == replace(
+            expected,
+            status=PaymentIntentStatus.CONFIRMED,
+            confirmed=money,
+            settled_at=settled_at,
+        )
+        rollback_query = GetPaymentIntentV1("lookup-rollback")
+        pending = open_payment_intent(
+            session,
+            scope=scope,
+            command=replace(
+                command,
+                reference=rollback_query.reference,
+                target_reference=None,
+                expires_at=None,
+            ),
+        )
+        rolled_back = get_payment_intent_v1(session, scope=scope, query=rollback_query)
+        assert rolled_back.intent_id == pending.id
+        assert rolled_back.target_reference is None
+        assert rolled_back.expires_at is None
+        session.rollback()
+    with _tenant_session(app_url, scope.tenant_id) as session:
+        assert get_payment_intent_v1(session, scope=scope, query=rollback_query) is None

@@ -28,6 +28,31 @@ class UnresolvedMoneyPrecision(Conflict):
 
 
 @dataclass(frozen=True, slots=True)
+class GetPaymentIntentV1:
+    reference: str
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentIntentObservationV1:
+    """Persisted intent binding and lifecycle, not immutable cash evidence."""
+
+    scope: TenantScope
+    intent_id: UUID
+    reference: str
+    payer_reference: str
+    target_reference: str | None
+    purpose: PaymentPurpose
+    requested: Money
+    confirmed: Money | None
+    provider_type: str
+    channel: str
+    status: PaymentIntentStatus
+    opened_at: datetime
+    expires_at: datetime | None
+    settled_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class GetConfirmedCashV1:
     confirmation_id: UUID
 
@@ -147,6 +172,8 @@ __all__ = [
     "ConfirmationNotFound",
     "ConfirmedCashObservationV1",
     "GetConfirmedCashV1",
+    "GetPaymentIntentV1",
+    "PaymentIntentObservationV1",
     "UnresolvedMoneyPrecision",
     "ConfirmationSource",
     "OpenPaymentIntent",
