@@ -70,6 +70,7 @@ def campaign(tmp_path, monkeypatch):
     manifest_path, manifest_digest = held("manifest.json", manifest)
     proposal_path, proposal_digest = held("proposal.json", proposal)
     cfg = SimpleNamespace(
+        purpose="qualification",
         state_path=tmp_path / "state.json",
         runner_group_id=4,
         runner_org="synthetic-org",

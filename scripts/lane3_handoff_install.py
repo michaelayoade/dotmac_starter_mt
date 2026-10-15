@@ -72,7 +72,11 @@ RUNTIME_MODULES = (
     *CONTROLLER_MODULES,
     "lane3_handoff_coordinator.py",
     "lane3_campaign_bootstrap.py",
+    "lane3_execution.py",
     "lane3_handoff_install.py",
+)
+PRIOR_RUNTIME_MODULES = tuple(
+    name for name in RUNTIME_MODULES if name != "lane3_execution.py"
 )
 # The previously installed closure is recognized only as rollback/prior
 # evidence. Every new target and every new dispatcher still requires the
@@ -163,7 +167,7 @@ def validate_manifest(
     if not (
         allow_legacy_runtime
         and type(runtime) is dict
-        and set(runtime) == set(LEGACY_RUNTIME_MODULES)
+        and set(runtime) in (set(LEGACY_RUNTIME_MODULES), set(PRIOR_RUNTIME_MODULES))
     ):
         exact(runtime, set(RUNTIME_MODULES))
     for checksum in value["runtime"].values():
