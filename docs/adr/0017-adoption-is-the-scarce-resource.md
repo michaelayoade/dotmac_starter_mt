@@ -8,6 +8,24 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-10-14: owner-directed exception for the router configuration packages
+
+Michael explicitly directed, on 2026-10-14, that the router control plane's
+shared parts are built in Starter (ADR-0074). This lifts decision 2's
+moratorium for exactly three named units: `dotmac-config-layers` (the generic
+layered-composition engine), `dotmac-routeros-config` (the I/O-free RouterOS
+plug-in and `/export` parser) and `dotmac-network-config` (the stateful
+desired-state owner).
+
+It is an owner-directed exception like those for `dotmac-files`,
+`dotmac-imports`, `dotmac-approvals` and `dotmac-auth-oidc`. It is not evidence
+that a product is independently blocked: the only thing blocking Sub is its own
+feature freeze, which is context and not a demand-pull claim. It is not a
+general route for an unnamed network facility. Product-first treatment, dossier
+states, the adoption test and the release ordering are unchanged and are set
+out in ADR-0074; no adoption is claimed and every dossier stays
+`audit-complete` until a real Sub cutover retires a local implementation.
+
 ## Amendment, 2026-08-20: Paystack and Flutterwave connector construction is authorized
 
 Michael explicitly directed construction of the independently released
