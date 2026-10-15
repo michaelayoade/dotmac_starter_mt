@@ -1,5 +1,9 @@
 {
-  "scope": {"kind": "tenant", "tenant_id": "00000000-0000-0000-0000-000000000064"},
+  "schema": "billing.opening.rehearsal.assembly.v1",
+  "scope": {
+    "kind": "tenant",
+    "tenant_id": "00000000-0000-0000-0000-000000000064"
+  },
   "source_system": "sub",
   "recorded_cutoff": "2026-10-13T00:00:00+00:00",
   "source_authority_ref": "fixture:source-authority",
@@ -27,17 +31,17 @@
       "currency": "NGN",
       "precision": 2,
       "idempotency_key": "opening-rehearsal:fixture:ngn",
-      "target": {
-        "expected_position_fingerprint": "fixture-pristine-position",
-        "posting_watermark": "fixture-posting:0"
-      }
+      "expected_position_fingerprint": "fixture-pristine-position",
+      "posting_watermark": "fixture-posting:0"
     }
   ],
   "invoice_mappings": [
     {
       "source_invoice_id": "00000000-0000-0000-0000-000000000001",
-      "source_identity_kind": "invoice",
-      "source_identity_key": "invoice:fixture-1",
+      "source_identity": {
+        "kind": "invoice",
+        "key": "invoice:fixture-1"
+      },
       "source_invoice_key": "invoice:fixture-1"
     }
   ],

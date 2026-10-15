@@ -96,20 +96,29 @@ versioned `OpeningRehearsalAssemblyV1` (every field the adapter reads) and
 `OpeningRehearsalCensusV1` (the counted blocker census), and
 `dotmac_billing.opening_rehearsal` owns the only encodings:
 
+- `parse_opening_rehearsal_assembly` (strict) and `opening_rehearsal_assembly_wire`
+  are the two directions of one wire shape, both package-owned; the wire keys
+  equal the dataclass field names at every level and carry
+  `schema = "billing.opening.rehearsal.assembly.v1"`. Parsing is closed: an
+  unknown key at any level (an `approved_by`, an `amount_override`, a partition
+  `cash_lots`) is refused, every declared key is required
+  (`accepted_manual_holds` included, nothing defaults), UUIDs must be canonical
+  lowercase, and instants must be UTC (`Z` or `+00:00`; other offsets are
+  refused, not normalised, and `Z` and `+00:00` are one instant). Every JSON
+  read goes through `parse_opening_rehearsal_json`, which refuses duplicate
+  object keys and non-finite constants.
 - `opening_rehearsal_assembly_digest` is the single definition of an assembly's
-  identity for signing, the adapter and any later verifier: SHA-256 over the
-  sorted-key compact JSON of `opening_rehearsal_assembly_wire`
-  (`dotmac_kernel.fingerprints.fingerprint_of`). It is byte-identical to the
-  digest the adapter reported before, for any assembly spelled canonically (UTC
-  `+00:00` instants, `accepted_manual_holds` present, no undeclared keys); pinned
-  by the existing fixtures' digests and by an independently derived vector.
-  Deliberately different: undeclared extra keys no longer enter the identity, an
-  omitted `accepted_manual_holds` digests as `[]`, and a non-canonical instant
-  spelling digests as its normalised instant.
+  identity for signing, the adapter and any later verifier: the Kernel's
+  sorted-key compact JSON of `{"domain": "billing.opening.rehearsal.assembly.v1",
+  "value": <wire>}`, hashed with SHA-256, the same domain-separated pattern as the
+  binding and cash-command digests. **Identity change:** this supersedes the
+  first cut's undomained digest over the raw file; the digests differ and are
+  deliberately not backward compatible, because nothing production has been
+  signed. Vectors are pinned in the tests next to the literal canonical bytes.
 - `render_opening_rehearsal_census` renders the census (sorted keys, indent 2,
   finite, trailing newline) and `render_opening_rehearsal_refusal` renders the
-  two value-free CLI refusal lines. The adapter's stdout and `--out` output is
-  byte-identical to the previous cut for every shipped fixture.
+  two value-free CLI refusal lines. The census/refusal renderings are unchanged from the
+  first cut; only the `assembly_digest` value they carry changed (above).
 
 The adapter now holds no canonicalizing call. Digests identify content only;
 they are not approval, qualification or activation authority.

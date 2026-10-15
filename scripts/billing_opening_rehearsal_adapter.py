@@ -22,7 +22,6 @@ tests only, under ``tests/fixtures/opening_rehearsal/``.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -61,6 +60,8 @@ from dotmac_billing.opening_receivable_validation import (
 )
 from dotmac_billing.opening_rehearsal import (
     opening_rehearsal_assembly_digest,
+    parse_opening_rehearsal_assembly,
+    parse_opening_rehearsal_json,
     render_opening_rehearsal_census,
     render_opening_rehearsal_refusal,
     report_opening_rehearsal,
@@ -90,7 +91,7 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningRehearsalRunV1,
     OpeningSubObservationV2,
 )
-from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
+from dotmac_kernel.cache import Scope
 
 __all__ = [
     "AdapterInputError",
@@ -171,32 +172,126 @@ class V3Sidecar:
 
 @dataclass(frozen=True, slots=True)
 class AssemblyInputs:
-    """Adapter-local assembly declaration, loaded from ``--assembly`` JSON."""
+    """The package-owned declaration plus the views derived from it."""
 
-    scope: Scope
-    source_system: str
-    recorded_cutoff: datetime
-    source_authority_ref: str
-    account_mapping_version: str
-    cash_mapping_version: str
-    receivable_mapping_version: str
-    tax_mapping_version: str
-    source_resolver_version: str
-    collection_authority: str
-    collection_mapping_version: str
-    migration_authority_ref: str
-    binding: OpeningRehearsalBindingV1
-    partitions: tuple[OpeningRehearsalMappingV1, ...]
-    invoice_mappings: tuple[OpeningRehearsalInvoiceMappingV1, ...]
-    discharge_mappings: tuple[OpeningRehearsalDischargeMappingV1, ...]
-    targets: tuple[tuple[OpeningPartitionV1, OpeningTargetV1], ...]
-    occurred_at: datetime
-    starter_head_sha: str
-    sub_exit_code: int
-    assembly_digest: str
     declaration: OpeningRehearsalAssemblyV1
-    accepted_manual_holds: tuple[str, ...] = ()
-    idempotency_keys: tuple[tuple[OpeningPartitionV1, str], ...] = ()
+
+    @property
+    def scope(self) -> Scope:
+        return self.declaration.scope
+
+    @property
+    def source_system(self) -> str:
+        return self.declaration.source_system
+
+    @property
+    def recorded_cutoff(self) -> datetime:
+        return self.declaration.recorded_cutoff
+
+    @property
+    def source_authority_ref(self) -> str:
+        return self.declaration.source_authority_ref
+
+    @property
+    def account_mapping_version(self) -> str:
+        return self.declaration.account_mapping_version
+
+    @property
+    def cash_mapping_version(self) -> str:
+        return self.declaration.cash_mapping_version
+
+    @property
+    def receivable_mapping_version(self) -> str:
+        return self.declaration.receivable_mapping_version
+
+    @property
+    def tax_mapping_version(self) -> str:
+        return self.declaration.tax_mapping_version
+
+    @property
+    def source_resolver_version(self) -> str:
+        return self.declaration.source_resolver_version
+
+    @property
+    def collection_authority(self) -> str:
+        return self.declaration.collection_authority
+
+    @property
+    def collection_mapping_version(self) -> str:
+        return self.declaration.collection_mapping_version
+
+    @property
+    def migration_authority_ref(self) -> str:
+        return self.declaration.migration_authority_ref
+
+    @property
+    def binding(self) -> OpeningRehearsalBindingV1:
+        return self.declaration.binding
+
+    @property
+    def invoice_mappings(self) -> tuple[OpeningRehearsalInvoiceMappingV1, ...]:
+        return self.declaration.invoice_mappings
+
+    @property
+    def discharge_mappings(self) -> tuple[OpeningRehearsalDischargeMappingV1, ...]:
+        return self.declaration.discharge_mappings
+
+    @property
+    def occurred_at(self) -> datetime:
+        return self.declaration.occurred_at
+
+    @property
+    def starter_head_sha(self) -> str:
+        return self.declaration.starter_head_sha
+
+    @property
+    def sub_exit_code(self) -> int:
+        return self.declaration.sub_exit_code
+
+    @property
+    def accepted_manual_holds(self) -> tuple[str, ...]:
+        return self.declaration.accepted_manual_holds
+
+    @property
+    def assembly_digest(self) -> str:
+        return opening_rehearsal_assembly_digest(self.declaration)
+
+    @property
+    def partitions(self) -> tuple[OpeningRehearsalMappingV1, ...]:
+        return tuple(
+            OpeningRehearsalMappingV1(row.source_account_id, _partition(row))
+            for row in self.declaration.partitions
+        )
+
+    @property
+    def targets(self) -> tuple[tuple[OpeningPartitionV1, OpeningTargetV1], ...]:
+        return tuple(
+            (
+                _partition(row),
+                OpeningTargetV1(
+                    self.declaration.scope,
+                    row.account_id,
+                    row.currency,
+                    row.precision,
+                    row.expected_position_fingerprint,
+                    row.posting_watermark,
+                ),
+            )
+            for row in self.declaration.partitions
+        )
+
+    @property
+    def idempotency_keys(self) -> tuple[tuple[OpeningPartitionV1, str], ...]:
+        return tuple(
+            (_partition(row), row.idempotency_key)
+            for row in self.declaration.partitions
+        )
+
+
+def _partition(row: OpeningRehearsalAssemblyPartitionV1) -> OpeningPartitionV1:
+    return OpeningPartitionV1(
+        row.source_account_key, row.account_id, row.currency, row.precision
+    )
 
 
 def _malformed(code: str = "malformed_input") -> AdapterInputError:
@@ -500,159 +595,12 @@ def load_sub_observation(
     return observation, sidecar
 
 
-def _assembly_text(payload: Mapping[str, object], key: str) -> str:
-    return _text(_field(payload, key, "malformed_assembly"), "malformed_assembly")
-
-
 def load_assembly(payload: Mapping[str, object]) -> AssemblyInputs:
-    """Load the explicit assembly declaration; nothing is defaulted from Sub."""
-    root = _mapping(payload, "malformed_assembly")
-    code = "malformed_assembly"
-    scope_row = _mapping(_field(root, "scope", code), code)
-    scope_kind = _text(_field(scope_row, "kind", code), code)
-    scope: Scope
-    if scope_kind == "tenant":
-        scope = TenantScope(_uuid(_field(scope_row, "tenant_id", code), code))
-    elif scope_kind == "platform":
-        scope = PlatformScope()
-    else:
-        raise _malformed(code)
-    binding_row = _mapping(_field(root, "binding", code), code)
-    partitions: list[OpeningRehearsalMappingV1] = []
-    targets: list[tuple[OpeningPartitionV1, OpeningTargetV1]] = []
-    idempotency_keys: list[tuple[OpeningPartitionV1, str]] = []
-    declared: list[OpeningRehearsalAssemblyPartitionV1] = []
+    """Parse the explicit assembly declaration via the package; nothing defaults."""
     try:
-        for row in (
-            _mapping(item, code)
-            for item in _sequence(_field(root, "partitions", code), code)
-        ):
-            partition = OpeningPartitionV1(
-                _assembly_text(row, "source_account_key"),
-                _uuid(_field(row, "account_id", code), code),
-                _assembly_text(row, "currency"),
-                _integer(_field(row, "precision", code), code),
-            )
-            target_row = _mapping(_field(row, "target", code), code)
-            target = OpeningTargetV1(
-                scope,
-                partition.account_id,
-                partition.currency,
-                partition.precision,
-                _assembly_text(target_row, "expected_position_fingerprint"),
-                _assembly_text(target_row, "posting_watermark"),
-            )
-            partitions.append(
-                OpeningRehearsalMappingV1(
-                    _uuid(_field(row, "source_account_id", code), code), partition
-                )
-            )
-            targets.append((partition, target))
-            idempotency_key = _assembly_text(row, "idempotency_key")
-            idempotency_keys.append((partition, idempotency_key))
-            declared.append(
-                OpeningRehearsalAssemblyPartitionV1(
-                    _uuid(_field(row, "source_account_id", code), code),
-                    partition.source_account_key,
-                    partition.account_id,
-                    partition.currency,
-                    partition.precision,
-                    idempotency_key,
-                    target.expected_position_fingerprint,
-                    target.posting_watermark,
-                )
-            )
-        invoice_mappings = tuple(
-            OpeningRehearsalInvoiceMappingV1(
-                _uuid(_field(row, "source_invoice_id", code), code),
-                OpeningSourceIdentityV1(
-                    _assembly_text(row, "source_identity_kind"),
-                    _assembly_text(row, "source_identity_key"),
-                ),
-                _assembly_text(row, "source_invoice_key"),
-            )
-            for row in (
-                _mapping(item, code)
-                for item in _sequence(_field(root, "invoice_mappings", code), code)
-            )
-        )
-        discharge_mappings = tuple(
-            OpeningRehearsalDischargeMappingV1(
-                _assembly_text(row, "settlement_kind"),
-                _uuid(_field(row, "settlement_id", code), code),
-                _assembly_text(row, "historical_reference"),
-                _uuid(_field(row, "source_id", code), code),
-            )
-            for row in (
-                _mapping(item, code)
-                for item in _sequence(_field(root, "discharge_mappings", code), code)
-            )
-        )
-        binding = OpeningRehearsalBindingV1(
-            _uuid(_field(binding_row, "target_installation_id", code), code),
-            _assembly_text(binding_row, "artifact_identity"),
-            _assembly_text(binding_row, "policy_identity"),
-        )
+        return AssemblyInputs(parse_opening_rehearsal_assembly(payload))
     except OpeningEvidenceError:
-        raise _malformed(code) from None
-    try:
-        declaration = OpeningRehearsalAssemblyV1(
-            scope=scope,
-            source_system=_assembly_text(root, "source_system"),
-            recorded_cutoff=_instant(_field(root, "recorded_cutoff", code), code),
-            source_authority_ref=_assembly_text(root, "source_authority_ref"),
-            account_mapping_version=_assembly_text(root, "account_mapping_version"),
-            cash_mapping_version=_assembly_text(root, "cash_mapping_version"),
-            receivable_mapping_version=_assembly_text(
-                root, "receivable_mapping_version"
-            ),
-            tax_mapping_version=_assembly_text(root, "tax_mapping_version"),
-            source_resolver_version=_assembly_text(root, "source_resolver_version"),
-            collection_authority=_assembly_text(root, "collection_authority"),
-            collection_mapping_version=_assembly_text(
-                root, "collection_mapping_version"
-            ),
-            migration_authority_ref=_assembly_text(root, "migration_authority_ref"),
-            occurred_at=_instant(_field(root, "occurred_at", code), code),
-            starter_head_sha=_assembly_text(root, "starter_head_sha"),
-            sub_exit_code=_integer(_field(root, "sub_exit_code", code), code),
-            binding=binding,
-            partitions=tuple(declared),
-            invoice_mappings=invoice_mappings,
-            discharge_mappings=discharge_mappings,
-            accepted_manual_holds=tuple(
-                _text(item, code)
-                for item in _sequence(root.get("accepted_manual_holds", []), code)
-            ),
-        )
-    except OpeningEvidenceError:
-        raise _malformed(code) from None
-    return AssemblyInputs(
-        scope=scope,
-        source_system=declaration.source_system,
-        recorded_cutoff=declaration.recorded_cutoff,
-        source_authority_ref=declaration.source_authority_ref,
-        account_mapping_version=declaration.account_mapping_version,
-        cash_mapping_version=declaration.cash_mapping_version,
-        receivable_mapping_version=declaration.receivable_mapping_version,
-        tax_mapping_version=declaration.tax_mapping_version,
-        source_resolver_version=declaration.source_resolver_version,
-        collection_authority=declaration.collection_authority,
-        collection_mapping_version=declaration.collection_mapping_version,
-        migration_authority_ref=declaration.migration_authority_ref,
-        binding=binding,
-        partitions=tuple(partitions),
-        invoice_mappings=invoice_mappings,
-        discharge_mappings=discharge_mappings,
-        targets=tuple(targets),
-        occurred_at=declaration.occurred_at,
-        starter_head_sha=declaration.starter_head_sha,
-        sub_exit_code=declaration.sub_exit_code,
-        assembly_digest=opening_rehearsal_assembly_digest(declaration),
-        declaration=declaration,
-        accepted_manual_holds=declaration.accepted_manual_holds,
-        idempotency_keys=tuple(idempotency_keys),
-    )
+        raise _malformed("malformed_assembly") from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1169,18 +1117,14 @@ def rehearsal_census(
     )
 
 
-def _reject_constant(_value: str) -> object:
-    raise _malformed()
-
-
 def _read_json(path: Path) -> Mapping[str, object]:
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         raise _malformed() from None
     try:
-        value = json.loads(text, parse_constant=_reject_constant)
-    except (json.JSONDecodeError, AdapterInputError):
+        value = parse_opening_rehearsal_json(text)
+    except OpeningEvidenceError:
         raise _malformed() from None
     return _mapping(value)
 

@@ -580,16 +580,17 @@ def test_adapter_has_no_canonicalizing_call_of_its_own():
 
 
 def test_adapter_digest_is_the_package_digest_and_pinned():
+    # Domain-separated, versioned identity (supersedes the undomained digest).
     from dotmac_billing.opening_rehearsal import opening_rehearsal_assembly_digest
 
     for name, pinned in (
         (
             "assembly.json",
-            "712c675aff913691ebe4e3290bb00669aa204034b15554a12f3ff8623e2b7202",
+            "f5ae59d4cf966dceabb783a1e0935cef6ca3f87a6316a4fb5fed5d29d5d0e295",
         ),
         (
             "assembly_empty.json",
-            "6720eb418679ab068d9bea851afd05a888adb1e89552a6fcf73c0597d51c7eac",
+            "540312cff7d08deddebd66e09b86b517278fba776fe43ab3587125ddeb9f2a08",
         ),
     ):
         assert _assembly(name).assembly_digest == pinned
@@ -621,3 +622,94 @@ def test_assembly_wire_round_trips_through_the_loader_to_the_same_digest():
         )
         assert again.assembly_digest == loaded.assembly_digest
         assert again.declaration == loaded.declaration
+
+
+def _write(tmp_path, name, text):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _main(tmp_path, census_path, assembly_path):
+    return adapter.main(
+        [
+            "--census",
+            str(census_path),
+            "--assembly",
+            str(assembly_path),
+            "--out",
+            str(tmp_path / "out.json"),
+        ]
+    )
+
+
+def _refusal(capsys):
+    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda d: d.update(approved_by="someone"),
+        lambda d: d.update(amount_override="1"),
+        lambda d: d["partitions"][0].update(cash_lots=[]),
+        lambda d: d["binding"].update(approved=True),
+        lambda d: d["scope"].update(extra=1),
+        lambda d: d["invoice_mappings"][0].update(extra=1),
+        lambda d: d["invoice_mappings"][0]["source_identity"].update(extra=1),
+        lambda d: d.pop("accepted_manual_holds"),
+        lambda d: d.update(schema="billing.opening.rehearsal.assembly.v0"),
+        lambda d: d.update(recorded_cutoff="2026-10-13T01:00:00+01:00"),
+        lambda d: d.update(occurred_at="2026-10-13T00:00:00"),
+    ],
+)
+def test_strict_assembly_refuses_through_the_cli(tmp_path, capsys, mutate):
+    declared = _fixture("assembly.json")
+    mutate(declared)
+    with pytest.raises(adapter.AdapterInputError):
+        adapter.load_assembly(declared)
+    census = _write(tmp_path, "c.json", json.dumps(_fixture("census_empty_v2.json")))
+    assembly = _write(tmp_path, "a.json", json.dumps(declared))
+    assert _main(tmp_path, census, assembly) == 2
+    assert _refusal(capsys) == {"complete": False, "error": "malformed_assembly"}
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_utc_z_and_plus_zero_are_the_same_assembly(tmp_path):
+    declared = _fixture("assembly.json")
+    zulu = copy.deepcopy(declared)
+    zulu["recorded_cutoff"] = "2026-10-13T00:00:00Z"
+    zulu["occurred_at"] = "2026-10-13T00:00:00Z"
+    assert (
+        adapter.load_assembly(zulu).assembly_digest
+        == adapter.load_assembly(declared).assembly_digest
+    )
+
+
+def test_duplicate_json_keys_refuse_for_every_json_read(tmp_path, capsys):
+    good_census = json.dumps(_fixture("census_empty_v2.json"))
+    good_assembly = (FIXTURES / "assembly.json").read_text(encoding="utf-8")
+    duplicated_assembly = good_assembly.replace(
+        '"source_system": "sub"', '"source_system": "sub", "source_system": "sub"'
+    )
+    assert duplicated_assembly != good_assembly
+    assert (
+        _main(
+            tmp_path,
+            _write(tmp_path, "c.json", good_census),
+            _write(tmp_path, "a.json", duplicated_assembly),
+        )
+        == 2
+    )
+    assert _refusal(capsys)["error"] == "malformed_input"
+    duplicated_census = good_census.replace("{", '{"x": 1, "x": 2, ', 1)
+    assert (
+        _main(
+            tmp_path,
+            _write(tmp_path, "c2.json", duplicated_census),
+            _write(tmp_path, "a2.json", good_assembly),
+        )
+        == 2
+    )
+    assert _refusal(capsys)["error"] == "malformed_input"
+    assert not (tmp_path / "out.json").exists()

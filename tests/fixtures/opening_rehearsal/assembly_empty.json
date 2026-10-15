@@ -1,5 +1,9 @@
 {
-  "scope": {"kind": "tenant", "tenant_id": "00000000-0000-0000-0000-000000000064"},
+  "schema": "billing.opening.rehearsal.assembly.v1",
+  "scope": {
+    "kind": "tenant",
+    "tenant_id": "00000000-0000-0000-0000-000000000064"
+  },
   "source_system": "sub",
   "recorded_cutoff": "2026-10-13T00:00:00+00:00",
   "source_authority_ref": "fixture:source-authority",

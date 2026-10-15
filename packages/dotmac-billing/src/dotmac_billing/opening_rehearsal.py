@@ -9,25 +9,34 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import fields
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, DecimalException, localcontext
 from itertools import pairwise
 from typing import Literal
 from uuid import UUID
 
-from dotmac_kernel.cache import TenantScope
+from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.money import Currency, Money, MoneyError
 
 from dotmac_billing._opening_values import cash_decimal_context, minor_units_of
-from dotmac_billing.opening_contracts import OpeningBlockerV1, OpeningEvidenceError
+from dotmac_billing.opening_contracts import (
+    OpeningBlockerV1,
+    OpeningEvidenceError,
+    OpeningSourceIdentityV1,
+)
 from dotmac_billing.opening_receivable_validation import opening_manifest_fingerprint_v2
 from dotmac_billing.opening_rehearsal_contracts import (
+    OpeningRehearsalAssemblyPartitionV1,
     OpeningRehearsalAssemblyV1,
+    OpeningRehearsalBindingV1,
     OpeningRehearsalCensusBlockerV1,
     OpeningRehearsalCensusCountV1,
     OpeningRehearsalCensusV1,
     OpeningRehearsalComparisonV1,
     OpeningRehearsalDeltaV1,
+    OpeningRehearsalDischargeMappingV1,
+    OpeningRehearsalInvoiceMappingV1,
     OpeningRehearsalReportV1,
     OpeningRehearsalRunV1,
 )
@@ -38,6 +47,8 @@ __all__ = [
     "compare_opening_rehearsals",
     "opening_rehearsal_assembly_digest",
     "opening_rehearsal_assembly_wire",
+    "parse_opening_rehearsal_assembly",
+    "parse_opening_rehearsal_json",
     "opening_rehearsal_census_wire",
     "render_opening_rehearsal_census",
     "render_opening_rehearsal_refusal",
@@ -708,10 +719,22 @@ def compare_opening_rehearsals(
     )
 
 
+ASSEMBLY_SCHEMA = "billing.opening.rehearsal.assembly.v1"
+_ASSEMBLY_DOMAIN = "billing.opening.rehearsal.assembly.v1"
+
+
+def _utc_text(instant: datetime) -> str:
+    return instant.astimezone(UTC).isoformat()
+
+
 def opening_rehearsal_assembly_wire(
     assembly: OpeningRehearsalAssemblyV1,
 ) -> dict[str, object]:
-    """The one JSON shape of an assembly declaration (also the file shape)."""
+    """The one JSON shape of an assembly declaration (also the file shape).
+
+    Its keys are exactly the dataclass field names at every level, so a signed
+    file, the typed value and its identity cannot drift apart.
+    """
     if type(assembly) is not OpeningRehearsalAssemblyV1:
         raise OpeningEvidenceError("expected OpeningRehearsalAssemblyV1")
     scope = assembly.scope
@@ -721,9 +744,10 @@ def opening_rehearsal_assembly_wire(
         else {"kind": "platform"}
     )
     return {
+        "schema": assembly.schema,
         "scope": scope_wire,
         "source_system": assembly.source_system,
-        "recorded_cutoff": assembly.recorded_cutoff.isoformat(),
+        "recorded_cutoff": _utc_text(assembly.recorded_cutoff),
         "source_authority_ref": assembly.source_authority_ref,
         "account_mapping_version": assembly.account_mapping_version,
         "cash_mapping_version": assembly.cash_mapping_version,
@@ -733,7 +757,7 @@ def opening_rehearsal_assembly_wire(
         "collection_authority": assembly.collection_authority,
         "collection_mapping_version": assembly.collection_mapping_version,
         "migration_authority_ref": assembly.migration_authority_ref,
-        "occurred_at": assembly.occurred_at.isoformat(),
+        "occurred_at": _utc_text(assembly.occurred_at),
         "starter_head_sha": assembly.starter_head_sha,
         "sub_exit_code": assembly.sub_exit_code,
         "binding": {
@@ -749,18 +773,18 @@ def opening_rehearsal_assembly_wire(
                 "currency": row.currency,
                 "precision": row.precision,
                 "idempotency_key": row.idempotency_key,
-                "target": {
-                    "expected_position_fingerprint": row.expected_position_fingerprint,
-                    "posting_watermark": row.posting_watermark,
-                },
+                "expected_position_fingerprint": row.expected_position_fingerprint,
+                "posting_watermark": row.posting_watermark,
             }
             for row in assembly.partitions
         ],
         "invoice_mappings": [
             {
                 "source_invoice_id": str(row.source_invoice_id),
-                "source_identity_kind": row.source_identity.kind,
-                "source_identity_key": row.source_identity.key,
+                "source_identity": {
+                    "kind": row.source_identity.kind,
+                    "key": row.source_identity.key,
+                },
                 "source_invoice_key": row.source_invoice_key,
             }
             for row in assembly.invoice_mappings
@@ -781,12 +805,210 @@ def opening_rehearsal_assembly_wire(
 def opening_rehearsal_assembly_digest(assembly: OpeningRehearsalAssemblyV1) -> str:
     """The single identity of an assembly declaration.
 
-    SHA-256 over the sorted-key, compact JSON of its wire shape, which is the
-    Kernel's `fingerprint_of` encoding and the digest the adapter has always
-    reported for a canonically spelled assembly file. Order of mappings is
-    significant and preserved. Identifies content only.
+    Domain-separated (`billing.opening.rehearsal.assembly.v1`) like the binding
+    digest: SHA-256 over the Kernel's sorted-key compact JSON of
+    `{"domain", "value": <wire>}`. Order of mappings is significant and
+    preserved. It identifies content only: not approval, proof or authority.
     """
-    return fingerprint_of(opening_rehearsal_assembly_wire(assembly))
+    return _digest(_ASSEMBLY_DOMAIN, opening_rehearsal_assembly_wire(assembly))
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise OpeningEvidenceError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _reject_constant(_value: str) -> object:
+    raise OpeningEvidenceError("non-finite JSON constant")
+
+
+def parse_opening_rehearsal_json(text: str) -> object:
+    """Strict JSON reader for every rehearsal input: no duplicate keys, no NaN."""
+    try:
+        return json.loads(
+            text,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_constant,
+        )
+    except (ValueError, RecursionError):
+        raise OpeningEvidenceError("malformed JSON") from None
+
+
+def _exact(value: object, keys: frozenset[str]) -> Mapping[str, object]:
+    if not isinstance(value, Mapping) or not all(isinstance(k, str) for k in value):
+        raise OpeningEvidenceError("expected an object")
+    if set(value) != keys:
+        raise OpeningEvidenceError("unknown or missing assembly keys")
+    return value
+
+
+def _str(value: object) -> str:
+    if type(value) is not str:
+        raise OpeningEvidenceError("expected a string")
+    return value
+
+
+def _int(value: object) -> int:
+    if type(value) is not int:
+        raise OpeningEvidenceError("expected an integer")
+    return value
+
+
+def _list(value: object) -> list[object]:
+    if type(value) is not list:
+        raise OpeningEvidenceError("expected an array")
+    return value
+
+
+def _uuid(value: object) -> UUID:
+    text = _str(value)
+    try:
+        parsed = UUID(text)
+    except ValueError:
+        raise OpeningEvidenceError("expected a UUID") from None
+    if str(parsed) != text:
+        raise OpeningEvidenceError("UUIDs must be canonical lowercase")
+    return parsed
+
+
+def _utc_instant(value: object) -> datetime:
+    text = _str(value)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise OpeningEvidenceError("expected an ISO instant") from None
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        raise OpeningEvidenceError("assembly instants must be UTC")
+    return parsed.astimezone(UTC)
+
+
+_SCOPE_TENANT = frozenset({"kind", "tenant_id"})
+_SCOPE_PLATFORM = frozenset({"kind"})
+_ASSEMBLY_KEYS = frozenset(
+    {
+        "schema", "scope", "source_system", "recorded_cutoff",
+        "source_authority_ref", "account_mapping_version", "cash_mapping_version",
+        "receivable_mapping_version", "tax_mapping_version",
+        "source_resolver_version", "collection_authority",
+        "collection_mapping_version", "migration_authority_ref", "occurred_at",
+        "starter_head_sha", "sub_exit_code", "binding", "partitions",
+        "invoice_mappings", "discharge_mappings", "accepted_manual_holds",
+    }
+)  # fmt: skip
+_BINDING_KEYS = frozenset(
+    {"target_installation_id", "artifact_identity", "policy_identity"}
+)
+_PARTITION_KEYS = frozenset(
+    {
+        "source_account_id", "source_account_key", "account_id", "currency",
+        "precision", "idempotency_key", "expected_position_fingerprint",
+        "posting_watermark",
+    }
+)  # fmt: skip
+_INVOICE_KEYS = frozenset(
+    {"source_invoice_id", "source_identity", "source_invoice_key"}
+)
+_IDENTITY_KEYS = frozenset({"kind", "key"})
+_DISCHARGE_KEYS = frozenset(
+    {"settlement_kind", "settlement_id", "historical_reference", "source_id"}
+)
+
+
+def parse_opening_rehearsal_assembly(
+    payload: Mapping[str, object],
+) -> OpeningRehearsalAssemblyV1:
+    """Strictly parse a signed assembly declaration; the inverse of the wire.
+
+    Every object is closed: an unknown key at any level (an `approved_by`, an
+    `amount_override`, a partition `cash_lots`) refuses rather than being
+    ignored, and every declared key is required, `accepted_manual_holds`
+    included. Instants must be UTC. Nothing is defaulted. Duplicate JSON keys
+    are refused earlier, by `parse_opening_rehearsal_json`.
+    """
+    root = _exact(payload, _ASSEMBLY_KEYS)
+    if root["schema"] != ASSEMBLY_SCHEMA:
+        raise OpeningEvidenceError("unsupported assembly schema")
+    scope_row = root["scope"]
+    if not isinstance(scope_row, Mapping):
+        raise OpeningEvidenceError("expected an object")
+    scope: TenantScope | PlatformScope
+    if scope_row.get("kind") == "tenant":
+        scope = TenantScope(_uuid(_exact(scope_row, _SCOPE_TENANT)["tenant_id"]))
+    elif scope_row.get("kind") == "platform":
+        _exact(scope_row, _SCOPE_PLATFORM)
+        scope = PlatformScope()
+    else:
+        raise OpeningEvidenceError("unsupported scope kind")
+    binding = _exact(root["binding"], _BINDING_KEYS)
+    partitions = []
+    for item in _list(root["partitions"]):
+        row = _exact(item, _PARTITION_KEYS)
+        partitions.append(
+            OpeningRehearsalAssemblyPartitionV1(
+                _uuid(row["source_account_id"]),
+                _str(row["source_account_key"]),
+                _uuid(row["account_id"]),
+                _str(row["currency"]),
+                _int(row["precision"]),
+                _str(row["idempotency_key"]),
+                _str(row["expected_position_fingerprint"]),
+                _str(row["posting_watermark"]),
+            )
+        )
+    invoices = []
+    for item in _list(root["invoice_mappings"]):
+        row = _exact(item, _INVOICE_KEYS)
+        identity = _exact(row["source_identity"], _IDENTITY_KEYS)
+        invoices.append(
+            OpeningRehearsalInvoiceMappingV1(
+                _uuid(row["source_invoice_id"]),
+                OpeningSourceIdentityV1(_str(identity["kind"]), _str(identity["key"])),
+                _str(row["source_invoice_key"]),
+            )
+        )
+    discharges = []
+    for item in _list(root["discharge_mappings"]):
+        row = _exact(item, _DISCHARGE_KEYS)
+        discharges.append(
+            OpeningRehearsalDischargeMappingV1(
+                _str(row["settlement_kind"]),
+                _uuid(row["settlement_id"]),
+                _str(row["historical_reference"]),
+                _uuid(row["source_id"]),
+            )
+        )
+    return OpeningRehearsalAssemblyV1(
+        scope=scope,
+        source_system=_str(root["source_system"]),
+        recorded_cutoff=_utc_instant(root["recorded_cutoff"]),
+        source_authority_ref=_str(root["source_authority_ref"]),
+        account_mapping_version=_str(root["account_mapping_version"]),
+        cash_mapping_version=_str(root["cash_mapping_version"]),
+        receivable_mapping_version=_str(root["receivable_mapping_version"]),
+        tax_mapping_version=_str(root["tax_mapping_version"]),
+        source_resolver_version=_str(root["source_resolver_version"]),
+        collection_authority=_str(root["collection_authority"]),
+        collection_mapping_version=_str(root["collection_mapping_version"]),
+        migration_authority_ref=_str(root["migration_authority_ref"]),
+        occurred_at=_utc_instant(root["occurred_at"]),
+        starter_head_sha=_str(root["starter_head_sha"]),
+        sub_exit_code=_int(root["sub_exit_code"]),
+        binding=OpeningRehearsalBindingV1(
+            _uuid(binding["target_installation_id"]),
+            _str(binding["artifact_identity"]),
+            _str(binding["policy_identity"]),
+        ),
+        partitions=tuple(partitions),
+        invoice_mappings=tuple(invoices),
+        discharge_mappings=tuple(discharges),
+        accepted_manual_holds=tuple(
+            _str(item) for item in _list(root["accepted_manual_holds"])
+        ),
+    )
 
 
 def _blockers_wire(
@@ -799,7 +1021,12 @@ def _blockers_wire(
 
 
 def _counts_wire(rows: tuple[OpeningRehearsalCensusCountV1, ...]) -> dict[str, int]:
-    return {row.key: row.count for row in rows}
+    result: dict[str, int] = {}
+    for row in rows:
+        if row.key in result:
+            raise OpeningEvidenceError("duplicate census count key")
+        result[row.key] = row.count
+    return result
 
 
 def opening_rehearsal_census_wire(

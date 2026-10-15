@@ -8,7 +8,7 @@ source accounts to Starter partitions remains the assembly's explicit job.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -18,6 +18,7 @@ from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_billing._opening_values import OpeningCashValue
 from dotmac_billing.opening_contracts import (
     OpeningBlockerV1,
+    OpeningEvidenceError,
     OpeningPartitionV1,
     OpeningSourceIdentityV1,
 )
@@ -278,7 +279,18 @@ class OpeningRehearsalAssemblyV1(OpeningCashValue):
     partitions: tuple[OpeningRehearsalAssemblyPartitionV1, ...]
     invoice_mappings: tuple[OpeningRehearsalInvoiceMappingV1, ...]
     discharge_mappings: tuple[OpeningRehearsalDischargeMappingV1, ...]
-    accepted_manual_holds: tuple[str, ...] = ()
+    accepted_manual_holds: tuple[str, ...]
+    schema: Literal["billing.opening.rehearsal.assembly.v1"] = (
+        "billing.opening.rehearsal.assembly.v1"
+    )
+
+    def __post_init__(self) -> None:
+        OpeningCashValue.__post_init__(self)
+        # Instants are UTC in the signed declaration; other offsets are refused
+        # rather than normalised, so one instant has exactly one spelling.
+        for instant in (self.recorded_cutoff, self.occurred_at):
+            if instant.utcoffset() != timedelta(0):
+                raise OpeningEvidenceError("assembly instants must be UTC")
 
 
 @dataclass(frozen=True, slots=True)
