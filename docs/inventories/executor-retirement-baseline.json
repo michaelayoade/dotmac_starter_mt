@@ -140,8 +140,8 @@
           "not_an_executor": 5
         },
         "workflow": {
-          "non_production_executor": 7,
-          "not_an_executor": 17
+          "non_production_executor": 9,
+          "not_an_executor": 15
         }
       },
       "families_absent": [
@@ -163,7 +163,7 @@
         "workflow",
         "script"
       ],
-      "inventory_digest": "sha256:3fd9250749be530c0edee5dc811e09174ac7863dee11a39cb67de00e536954e7",
+      "inventory_digest": "sha256:6bca8e0a90c01b23378da38f0c87731d3c5fc9f040ecfd7cbbf22d0963ae9290",
       "measured_from": "working tree",
       "retired_total": 0,
       "revision": "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff",
@@ -185,7 +185,7 @@
   "schema_version": 1,
   "unadopted": [
     "dotmac_erp",
-    "dotmac_sub",
-    "dotmac_platform_control_plane"
+    "dotmac_platform_control_plane",
+    "dotmac_sub"
   ]
 }
