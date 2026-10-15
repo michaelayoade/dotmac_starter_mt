@@ -161,6 +161,8 @@ MANAGEMENT_FAILURE_CATEGORIES = frozenset(
 )
 COORDINATOR_FAILURE_CATEGORIES = frozenset(
     (
+        "admission.invalid",
+        "execution.unsupported",
         "approval.missing",
         "assignment.ambiguous",
         "binding.mismatch",
@@ -686,12 +688,7 @@ def coordinator_binding():
     if (
         config.get("schema") != "dotmac.lane3.handoff-coordinator.v2"
         or config.get("purpose") != authority["purpose"]
-        or hashlib.sha256(
-            json.dumps(
-                config, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-            ).encode()
-        ).hexdigest()
-        != authority["config_digest"]
+        or load_module("protocol").digest(config) != authority["config_digest"]
     ):
         raise CampaignRefused("coordinator-binding")
     for key in (
