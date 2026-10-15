@@ -187,11 +187,6 @@
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
     },
-    "dotmac-surveys": {
-      "declared": "0.2.0a1",
-      "reason": "INTENDED NATIVE IMPLEMENTATION CANDIDATE. User directed the Rust computation goal on 2026-10-15. Version 0.2.0a1 introduces a platform-specific private extension and cannot replace the earlier immutable pure-Python release. Hosted lock resolution, exact-wheel/source-archive parity and supported-interpreter qualification precede any publication request. No registry receipt, product adoption or writer switch is claimed. Remove this row only after the existing protected release facility publishes, installs, verifies and tags this exact candidate.",
-      "state": "declared-unpublished"
-    },
     "dotmac-tax": {
       "declared": "0.1.0a6",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adopter baseline. Candidate a6 includes a5 immutable rule supersession, sealed rule/band membership, bounded policy history and advisory preview; a6 adds caller-transaction exact catalog/rule authoring without internal savepoint completion, reusing Tax validation and replay comparators. The Sub owner must roll back and retry whole commands on unique insert contention. Sub policy UI requires a verified published successor and real owner/permission binding; no unpublished pin, financial writer or production authority is activated. Remove only through the exact authorized release record.",

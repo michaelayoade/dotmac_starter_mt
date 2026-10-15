@@ -7136,6 +7136,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-surveys ──
+    "dotmac-surveys-v0.2.0a1": (
+        "dotmac-surveys",
+        "194a657e98774568f3582a32a3b7b793fc568853",
+        {
+            "sv_0001_surveys.py": (
+                "8c86d1b7d756d81bf0aad746b8d222c434bdb2526ba353f3b3d231ce92fda7fe"
+            ),
+        },
+    ),
     "dotmac-surveys-v0.1.0a1": (
         "dotmac-surveys",
         "20d24703e70e4d361de2f406165df4b36cbee507",
