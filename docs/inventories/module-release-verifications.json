@@ -177,6 +177,28 @@
           "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-surveys",
+      "version": "0.2.0a1",
+      "tag": "dotmac-surveys-v0.2.0a1",
+      "tag_object": "2449d577a38578756d701e26979debaf2cdeef15",
+      "peeled_commit": "194a657e98774568f3582a32a3b7b793fc568853",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_surveys-0.2.0a1-cp312-cp312-manylinux_2_35_x86_64.whl": "2dcd85e8505e32b30381443d9a51536e4bc783177a9f192bddd34205350d205a"
+      },
+      "verification_run_id": "38787317841",
+      "source_run_id": "38787317841",
+      "release_authority_digest": "sha256:eba56abff71d545562a970b87939624cd97963baefc651853dae32f0eedd22d0",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+          "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
+        }
+      ]
     }
   ]
 }
