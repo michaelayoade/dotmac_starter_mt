@@ -33,7 +33,10 @@ first_cutover = "Sub remains payment-intent owner until history backfill, read-o
 shadow_and_drift = "Compare intent reference, payer, purpose, currency and requested amount, terminal status and settlement time, and every confirmation by source, provider type, external reference, confirmed amount and observation instant; invoice allocation and ledger posting themselves remain outside."
 local_copy_retirement = "After cutover, reduce Sub's topup-intent and payment-confirmation writers to zero while Billing keeps allocation and Integrator keeps provider transport."
 next_action = "Validate and release the declared 0.1.0a2 immutable-confirmation replay and intent/proof serialization prerequisite, then compose in Sub and implement the intent/confirmation backfill plus the zero-drift correlation shadow. Sub remains the writer until a separately authorized cutover."
-inventory_evidence = ["docs/inventories/customer-journey-owner-sources.md"]
+inventory_evidence = [
+  "docs/inventories/customer-journey-owner-sources.md",
+  "docs/inventories/payments-intent-replay-binding-extraction.md",
+]
 
 # Typed product claim. Sub is the qualifying source — these owners are extracted
 # FROM Sub's implementation, which is what `source_mode = "product-first"` and

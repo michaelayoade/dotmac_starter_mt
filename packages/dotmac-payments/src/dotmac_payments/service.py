@@ -135,9 +135,16 @@ def _same_currency(intent: PaymentIntent, money: Money, field: str) -> None:
 def open_payment_intent(
     db: Session, *, scope: TenantScope, command: OpenPaymentIntent
 ) -> PaymentIntent:
-    """Open an intent, idempotently on its own `reference`."""
+    """Open or replay one reference bound to the same normalized request.
+
+    Destination and expiry are exact optional bindings. Only an omitted
+    opening time retains its stored value without comparison on replay.
+    """
     tenant_id = _tenant(scope)
     reference = _required(command.reference, "reference")
+    payer_reference = _required(command.payer_reference, "payer reference")
+    provider_type = _required(command.provider_type, "provider type").upper()
+    channel = _required(command.channel, "channel").upper()
     requested = _positive(command.requested, "requested amount")
     existing = db.scalar(
         select(PaymentIntent).where(
@@ -151,15 +158,31 @@ def open_payment_intent(
             or existing.minor_units != requested.currency.minor_units
         ):
             raise Conflict("reference was reused for a different amount")
-        if existing.payer_reference != command.payer_reference.strip():
+        if existing.payer_reference != payer_reference:
             raise Conflict("reference was reused for a different payer")
+        if existing.target_reference != command.target_reference:
+            raise Conflict("reference was reused for a different target")
+        if existing.purpose != command.purpose:
+            raise Conflict("reference was reused for a different purpose")
+        if existing.provider_type != provider_type:
+            raise Conflict("reference was reused for a different provider")
+        if existing.channel != channel:
+            raise Conflict("reference was reused for a different channel")
+        if (existing.expires_at is None) != (command.expires_at is None) or (
+            existing.expires_at is not None
+            and command.expires_at is not None
+            and _utc_moment(existing.expires_at) != _utc_moment(command.expires_at)
+        ):
+            raise Conflict("reference was reused for a different expiry")
         # A replay keeps the STORED opening time. Omitting `opened_at` means
         # "now" only when there is nothing to replay — re-deriving it here
         # would let a retry silently move an authoritative business fact.
         # An explicitly different one is a conflict, not a correction: two
         # callers disagreeing about when the payer was asked to pay is the
         # same class of defect as disagreeing about the amount.
-        if command.opened_at is not None and command.opened_at != existing.opened_at:
+        if command.opened_at is not None and _utc_moment(
+            command.opened_at
+        ) != _utc_moment(existing.opened_at):
             raise Conflict("reference was reused for a different opening time")
         return existing
     opened_at = command.opened_at or datetime.now(UTC)
@@ -168,11 +191,11 @@ def open_payment_intent(
     row = PaymentIntent(
         tenant_id=tenant_id,
         reference=reference,
-        payer_reference=_required(command.payer_reference, "payer reference"),
+        payer_reference=payer_reference,
         target_reference=command.target_reference,
         purpose=command.purpose,
-        provider_type=_required(command.provider_type, "provider type").upper(),
-        channel=_required(command.channel, "channel").upper(),
+        provider_type=provider_type,
+        channel=channel,
         currency_code=requested.currency.code,
         minor_units=requested.currency.minor_units,
         requested_amount=requested.amount,

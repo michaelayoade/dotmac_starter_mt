@@ -7,6 +7,7 @@ import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -236,6 +237,96 @@ def _seed_pending(migrated, *, with_proof=False):
         intent_id = intent.id
         session.commit()
     return scope, intent_id, proof_id, now
+
+
+def test_intent_replay_binds_the_request_in_migrated_tenant_scope(migrated):
+    from dotmac_kernel.cache import PlatformScope
+    from dotmac_kernel.money import Currency
+
+    scope, _, _, now = _seed_pending(migrated)
+    command = OpenPaymentIntent(
+        payer_reference="customer:binding",
+        target_reference="invoice:binding",
+        purpose=PaymentPurpose.INVOICE_SETTLEMENT,
+        requested=Money.of("123.456789", Currency("XTS", 6)),
+        reference="binding-replay",
+        provider_type="paystack",
+        channel="web",
+        opened_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        first = open_payment_intent(session, scope=scope, command=command)
+        intent_id = first.id
+        session.commit()
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        replay = open_payment_intent(session, scope=scope, command=command)
+        assert replay.id == intent_id
+        for changed in (
+            replace(command, target_reference="invoice:other"),
+            replace(command, target_reference=None),
+            replace(command, purpose=PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT),
+            replace(command, provider_type="bank"),
+            replace(command, channel="transfer"),
+            replace(command, payer_reference="customer:other"),
+            replace(command, requested=Money.of("123.456788", Currency("XTS", 6))),
+            replace(command, requested=Money.of("123.456789", Currency("XXX", 6))),
+            replace(command, requested=Money.of("123.456", Currency("XTS", 3))),
+            replace(command, opened_at=now + timedelta(seconds=1)),
+            replace(command, expires_at=now + timedelta(hours=2)),
+            replace(command, expires_at=None),
+        ):
+            with pytest.raises(Conflict):
+                open_payment_intent(session, scope=scope, command=changed)
+        assert (
+            open_payment_intent(
+                session,
+                scope=scope,
+                command=replace(
+                    command, opened_at=None, provider_type=" PAYSTACK ", channel=" WEB "
+                ),
+            ).id
+            == intent_id
+        )
+        with pytest.raises(TypeError, match="requires TenantScope"):
+            open_payment_intent(session, scope=PlatformScope(), command=command)
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(PaymentIntent)
+                .where(PaymentIntent.reference == command.reference)
+            )
+            == 1
+        )
+        session.rollback()
+
+    foreign, _, _, _ = _seed_pending(migrated)
+    with _tenant_session(migrated[1], foreign.tenant_id) as session:
+        assert session.get(PaymentIntent, intent_id) is None
+        other = open_payment_intent(
+            session,
+            scope=foreign,
+            command=replace(command, target_reference="invoice:foreign"),
+        )
+        assert other.id != intent_id
+        session.commit()
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        assert (
+            open_payment_intent(session, scope=scope, command=command).id == intent_id
+        )
+        rollback_command = replace(command, reference="binding-rollback")
+        pending = open_payment_intent(session, scope=scope, command=rollback_command)
+        pending_id = pending.id
+        assert (
+            open_payment_intent(session, scope=scope, command=rollback_command).id
+            == pending_id
+        )
+        session.rollback()
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        assert session.get(PaymentIntent, pending_id) is None
+        assert (
+            open_payment_intent(session, scope=scope, command=command).id == intent_id
+        )
 
 
 def _race(app_url, scope, intent_id, operations, *, proof_id=None):
