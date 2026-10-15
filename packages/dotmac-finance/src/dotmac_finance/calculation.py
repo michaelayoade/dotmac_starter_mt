@@ -15,6 +15,7 @@ from decimal import (
     Clamped,
     ConversionSyntax,
     Decimal,
+    DecimalException,
     DivisionByZero,
     DivisionImpossible,
     DivisionUndefined,
@@ -137,7 +138,7 @@ def _native_charges(
         raise MemoryError
     if failure is not None:
         failed_signals, conditions = failure
-        trapped = []
+        trapped: list[type[DecimalException]] = []
         for index, signal in enumerate(_SIGNALS):
             if failed_signals & traps & (1 << index):
                 if signal is InvalidOperation:

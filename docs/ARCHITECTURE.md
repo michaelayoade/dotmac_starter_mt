@@ -4,10 +4,11 @@
 
 The Rust implementation branch introduces private `_native` extensions owned by
 Imports, Web Analytics, Network Topology, Fiber Plant, Media Observations,
-Positioning, Forms, Surveys, Inventory and Finance. Each extension ships inside its independently versioned
-domain distribution; there is no new shared database or generic domain service.
-These are `0.2.0a1` source candidates pending hosted qualification and release,
-not published artifacts or product adoption claims.
+Positioning, Forms, Surveys, Inventory and Finance. Each extension ships inside
+its independently versioned domain distribution; there is no new shared database
+or generic domain service. These are unpublished `0.2.0a1` source candidates.
+Hosted qualification gates the existing release controls and establishes no
+product adoption.
 
 | Computation | Native owner | Python authority retained |
 | --- | --- | --- |
@@ -44,14 +45,16 @@ artifact hashes. The runtime image preserves Python console entrypoints and
 compiled modules while excluding the Rust compiler/toolchain. The existing
 release facilities retain all publication, registry read-back and trust authority.
 
-Source qualification and remaining implementation scope are recorded in
+Source qualification and implementation boundaries are recorded in
 [`inventories/rust-computation-sources.md`](inventories/rust-computation-sources.md).
 Inventory now has a source implementation of sequential quantity/value/reservation
-reductions using statically bundled, checksum-pinned libmpdec 4.0.1. Finance depreciation and survey cohort arithmetic use the same private source
+reductions using statically bundled, checksum-pinned libmpdec 4.0.1. Finance
+depreciation and survey cohort arithmetic use the same private source
 crate, `native/decimal-core`, embedded byte-for-byte into each owning source
 archive. The generator rejects stale copies; no shared Python distribution or
 runtime module dependency is introduced. All three preserve sequential Decimal
-rounding, sticky flags and first trapped operation. The first six candidates completed
+rounding, sticky flags and first trapped operation. The first six candidates
+completed
 hosted exact-wheel and extracted-source-archive qualification at PR #843 head
 `7f55d3adb99c25ec7e53ef7448902a66376544c3`; later source changes require fresh
 qualification and do not inherit that result.

@@ -16,6 +16,7 @@ from decimal import (
     Context,
     ConversionSyntax,
     Decimal,
+    DecimalException,
     DivisionByZero,
     DivisionImpossible,
     DivisionUndefined,
@@ -188,7 +189,7 @@ def _replay_metric_status(
     ]
     if not trapped:
         return
-    details = []
+    details: list[type[DecimalException]] = []
     for signal in trapped:
         if signal is InvalidOperation:
             details.extend(
