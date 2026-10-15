@@ -128,6 +128,7 @@ inventory_evidence = [
   "docs/inventories/billing-multiline-extraction.md",
   "docs/inventories/billing-sub-cutover-readiness.md",
   "docs/inventories/billing-opening-window-extraction.md",
+  "docs/inventories/billing-opening-trusted-providers-extraction.md",
   "docs/inventories/billing-opening-rehearsal-report-extraction.md",
   "docs/adr/0020-billing-owns-operational-receivables.md",
   "docs/adr/0023-dual-plane-modules-declare-both-persistence-planes.md",

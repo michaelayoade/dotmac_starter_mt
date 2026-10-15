@@ -42,6 +42,7 @@ class OpeningSourceEvidenceV2(OpeningCashValue):
     receivable_lifecycle_proof_ref: str
     documentary_tax_mapping_proof_ref: str
     historical_discharge_mapping_proof_ref: str
+    source_attestation_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,7 @@ class OpeningImportGrantV2(OpeningCashValue):
     operation: Literal["billing.opening.import.v2"]
     command: ImportOpeningAccountV2
     migration_authority_proof_ref: str
+    source_attestation_digest: str
 
 
 class OpeningSourceEvidenceProviderV2(Protocol):
@@ -95,17 +97,6 @@ def qualify_opening_account_import_v2(
     ):
         return None
 
-    grant = grant_provider.verify_grant(request)
-    if type(grant) is not OpeningImportGrantV2:
-        return None
-    _validate_closed(grant, OpeningImportGrantV2)
-    if (
-        grant.operation != "billing.opening.import.v2"
-        or grant.command.scope != command.scope
-        or opening_account_command_digest_v2(grant.command) != command_digest
-    ):
-        return None
-
     source = source_provider.load_source(
         scope=command.scope, capture=command.manifest.capture
     )
@@ -118,6 +109,18 @@ def qualify_opening_account_import_v2(
         or opening_manifest_fingerprint_v2(source.manifest) != manifest_fingerprint
     ):
         return None
+    grant = grant_provider.verify_grant(request)
+    if type(grant) is not OpeningImportGrantV2:
+        return None
+    _validate_closed(grant, OpeningImportGrantV2)
+    if (
+        grant.source_attestation_digest != source.source_attestation_digest
+        or grant.operation != "billing.opening.import.v2"
+        or grant.command.scope != command.scope
+        or opening_account_command_digest_v2(grant.command) != command_digest
+    ):
+        return None
+
     if opening_account_import_blockers_v2(command):
         return None
 

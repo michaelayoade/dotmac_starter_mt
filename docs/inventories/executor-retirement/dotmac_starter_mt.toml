@@ -151,6 +151,24 @@ is destroyed with the job. Checked: it names no declared production target.
 """
 
 [[entrypoint]]
+name = "workflow:native-compute"
+family = "workflow"
+path = ".github/workflows/native-compute.yml"
+trigger = "workflow_call (from CI), workflow_dispatch (optional lock bootstrap)"
+credential = "GITHUB_TOKEN(contents:read); no user-provisioned repository secret"
+disposition = "non_production_executor"
+targets = ["github-hosted-runner"]
+premise = """
+Build and test CI on ephemeral GitHub-hosted runners. Generates reviewable Cargo
+lock/source artifacts, builds native domain wheels and source archives, rebuilds
+extracted archives, and tests installed artifacts on the supported interpreters.
+Runs retained-wheel installation in a compiler-free Docker container on the
+ephemeral GitHub runner. Checked: it names no declared production target. It
+receives no host, registry-publish or deployment credential and creates no
+deployment or publication authority.
+"""
+
+[[entrypoint]]
 name = "workflow:deployment-conformance"
 family = "workflow"
 path = ".github/workflows/deployment-conformance.yml"
@@ -396,8 +414,9 @@ family = "workflow"
 path = ".github/workflows/release-module.yml"
 trigger = "workflow_dispatch"
 credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
-disposition = "not_an_executor"
-premise = "publishes to the index only; commands no deployment verb"
+disposition = "non_production_executor"
+targets = ["github-hosted-runner"]
+premise = "publishes package bytes to the index and smoke-loads native wheels in an ephemeral Docker container on the GitHub runner; checked: names no declared production deployment target"
 
 [[entrypoint]]
 name = "workflow:verify-kernel-release"

@@ -38,6 +38,9 @@ description: >-
 runs:
   using: composite
   steps:
+    # Editable domain packages build their private extensions through the same
+    # pinned toolchain as retained wheels. Installation occurs on hosted CI.
+    - uses: ./.github/actions/setup-native
     - name: Select the lock for this interpreter
       id: lock
       shell: bash

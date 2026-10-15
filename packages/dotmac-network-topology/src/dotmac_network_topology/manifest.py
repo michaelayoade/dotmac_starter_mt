@@ -10,7 +10,7 @@ from dotmac_network_topology.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="network_topology",
-    version="0.1.0a1",
+    version="0.2.0a1",
     core=False,
     short_code="nettop",
     migration_prefix="nt",

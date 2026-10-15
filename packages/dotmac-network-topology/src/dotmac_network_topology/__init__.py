@@ -17,7 +17,7 @@ from dotmac_network_topology.service import (
     withdraw_link,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.2.0a1"
 from dotmac_network_topology.contracts import (
     DeclareLink,
     LinkKind,

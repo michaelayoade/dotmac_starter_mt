@@ -39,6 +39,7 @@ source_paths = [
   "dotmac_starter_mt:packages/dotmac-finance/src/dotmac_finance",
 ]
 preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_finance_native.py",
   "dotmac_erp:tests/unit/services/fixed_assets/test_asset_service.py",
   "dotmac_erp:tests/unit/services/fixed_assets/test_depreciation_service.py",
   "dotmac_erp:tests/unit/services/fixed_assets/test_disposal_service.py",
@@ -52,6 +53,7 @@ preserved_tests = [
 contract_consumers = []
 candidate_consumers = ["dotmac_erp", "dotmac-erp"]
 inventory_evidence = [
+  "docs/inventories/rust-computation-sources.md",
   "docs/inventories/finance-asset-accounting-sources.md",
   "docs/adr/0048-finance-owns-asset-books-and-accounting-consequences.md",
 ]

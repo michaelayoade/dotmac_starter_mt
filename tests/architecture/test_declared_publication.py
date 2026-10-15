@@ -280,17 +280,12 @@ def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> No
 
 
 def test_imports_release_lane_names_erp_without_claiming_adoption() -> None:
-    """Publication is now due, while product adoption remains unclaimed.
+    """The existing allowlist and ERP candidate survive the native successor.
 
-    The 2026-08-15 removal was correct when Imports had no ready adopter. ERP's
-    first-adopter slice now supplies the domain port, composed lineage, bounded
-    storage adapter, scheduling/repair surface, parity check and PostgreSQL
-    concurrency proof. Under the later named-adopter rule, that makes a2
-    release-eligible; it does not make ERP a proven contract consumer before
-    ERP can resolve the release and merge its exact lock pin.
-
-    This assertion survives publication: before the tag the outstanding ledger
-    row must authorize release; after the tag that row must disappear.
+    The native candidate remains deliberately unpublished pending qualification.
+    Neither the allowlist nor the repository's declaration proves publication
+    or product adoption. Before a verified tag the candidate needs its recorded
+    disposition; after publication that row must disappear.
     """
     sweep, survey = _survey()
     allowlist = json.loads(
@@ -300,7 +295,7 @@ def test_imports_release_lane_names_erp_without_claiming_adoption() -> None:
     package = PROJECT_ROOT / "packages" / "dotmac-imports"
     assert (package / "pyproject.toml").is_file()
     finding = survey["distributions"]["dotmac-imports"]
-    assert finding["declared"] == "0.1.0a2"
+    assert finding["declared"] == "0.2.0a1"
 
     dossier = tomllib.loads((package / "EXTRACTION.toml").read_text(encoding="utf-8"))
     assert dossier["status"] == "audit-complete"
@@ -312,8 +307,8 @@ def test_imports_release_lane_names_erp_without_claiming_adoption() -> None:
     assert published != recorded
     if recorded:
         reason = _ledger()["dotmac-imports"]["reason"]
-        assert "OUTSTANDING" in reason
-        assert "dotmac-imports-v0.1.0a2" in reason
+        assert "INTENDED NATIVE IMPLEMENTATION CANDIDATE" in reason
+        assert "0.2.0a1" in reason
 
 
 def test_imports_allowlist_history_and_reauthorization_are_both_explained() -> None:
@@ -643,7 +638,7 @@ def test_the_ledger_covers_every_package_and_nothing_else() -> None:
     """Discovery, not enumeration: the survey reads `packages/*/pyproject.toml`,
     so a new distribution is enrolled by existing rather than by being added to
     a list here — which would go stale exactly when it matters."""
-    sweep, survey = _survey()
+    _sweep_module, survey = _survey()
     packages = {
         path.parent.name
         for path in (PROJECT_ROOT / "packages").glob("*/pyproject.toml")

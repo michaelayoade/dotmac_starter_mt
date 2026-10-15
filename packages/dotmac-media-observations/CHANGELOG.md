@@ -1,5 +1,12 @@
 # Changelog — dotmac-media-observations
 
+## 0.2.0a1 — unreleased
+
+- Replace domain computation with a private batched Rust extension behind the existing Python API.
+- Ship a platform-specific CPython wheel and a complete locked native source archive.
+- Keep authorization, persistence, transactions and audit with their existing Python owners.
+
+
 ## 0.1.0a1 — 2026-08-20
 
 Published, registry-verified and tagged from exact protected-main revision

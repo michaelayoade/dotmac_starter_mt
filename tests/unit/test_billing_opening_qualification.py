@@ -51,6 +51,7 @@ def _evidence(manifest: OpeningManifestV2) -> OpeningSourceEvidenceV2:
         "provider:ar-lifecycle",
         "provider:documentary-tax",
         "provider:historical-discharge",
+        "cv1:" + "a" * 64,
     )
 
 
@@ -87,7 +88,10 @@ class HeldGrant:
 def _providers(command: ImportOpeningAccountV2) -> tuple[HeldSource, HeldGrant]:
     return HeldSource(_evidence(command.manifest)), HeldGrant(
         OpeningImportGrantV2(
-            "billing.opening.import.v2", command, "provider:fresh-migration-grant"
+            "billing.opening.import.v2",
+            command,
+            "provider:fresh-migration-grant",
+            "cv1:" + "a" * 64,
         )
     )
 
@@ -223,6 +227,7 @@ def test_cross_scope_authority_is_refused(authority: str) -> None:
             "billing.opening.import.v2",
             replace(command, scope=foreign_scope, manifest=foreign_manifest),
             "foreign:grant",
+            "cv1:" + "a" * 64,
         )
     else:
         source.evidence = _evidence(foreign_manifest)
@@ -442,7 +447,7 @@ def test_identical_retry_obtains_fresh_authority(revoked: str) -> None:
         )
         is None
     )
-    assert grant.calls == [request, request]
+    assert grant.calls == ([request] if revoked == "source" else [request, request])
     if revoked == "source":
         assert source.calls == [(command.scope, command.manifest.capture)] * 2
 
@@ -495,7 +500,7 @@ def test_request_and_provider_subclasses_are_not_closed_authority() -> None:
             grant_provider=grant,
         )
     source.evidence = SourceSubclass(
-        command.manifest, "source", "cash", "ar", "tax", "discharge"
+        command.manifest, "source", "cash", "ar", "tax", "discharge", "cv1:" + "a" * 64
     )
     assert (
         qualify_opening_account_import_v2(
@@ -504,7 +509,9 @@ def test_request_and_provider_subclasses_are_not_closed_authority() -> None:
         is None
     )
     source.evidence = _evidence(command.manifest)
-    grant.grant = GrantSubclass("billing.opening.import.v2", command, "grant")
+    grant.grant = GrantSubclass(
+        "billing.opening.import.v2", command, "grant", "cv1:" + "a" * 64
+    )
     assert (
         qualify_opening_account_import_v2(
             request, source_provider=source, grant_provider=grant
@@ -525,7 +532,10 @@ def test_identical_retry_uses_new_provider_proofs() -> None:
         _evidence(command.manifest), source_binding_proof_ref="provider:renewed-source"
     )
     grant.grant = OpeningImportGrantV2(
-        "billing.opening.import.v2", command, "provider:renewed-grant"
+        "billing.opening.import.v2",
+        command,
+        "provider:renewed-grant",
+        "cv1:" + "a" * 64,
     )
     second = qualify_opening_account_import_v2(
         request, source_provider=source, grant_provider=grant
@@ -541,7 +551,9 @@ def test_identical_retry_uses_new_provider_proofs() -> None:
 def test_envelopes_are_frozen_closed_values() -> None:
     command = ar._candidate()
     evidence = _evidence(command.manifest)
-    grant = OpeningImportGrantV2("billing.opening.import.v2", command, "provider:grant")
+    grant = OpeningImportGrantV2(
+        "billing.opening.import.v2", command, "provider:grant", "cv1:" + "a" * 64
+    )
     with pytest.raises(FrozenInstanceError):
         evidence.source_binding_proof_ref = "caller-proof"  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
@@ -550,3 +562,42 @@ def test_envelopes_are_frozen_closed_values() -> None:
         replace(evidence, cash_lifecycle_proof_ref=" ")
     with pytest.raises(OpeningEvidenceError):
         replace(grant, operation="billing.opening.import.reverse.v2")
+
+
+def test_source_attestation_digest_must_match_fresh_grant():
+    command = ar._candidate()
+    source, grant = _providers(command)
+    assert grant.grant is not None
+    grant.grant = replace(grant.grant, source_attestation_digest="cv1:" + "b" * 64)
+    assert (
+        qualify_opening_account_import_v2(
+            _request(command), source_provider=source, grant_provider=grant
+        )
+        is None
+    )
+
+
+def test_source_authentication_precedes_final_fresh_grant():
+    command = ar._candidate()
+    source, grant = _providers(command)
+    events = []
+
+    class OrderedSource(HeldSource):
+        def load_source(self, *, scope, capture):
+            events.append("source")
+            return super().load_source(scope=scope, capture=capture)
+
+    class OrderedGrant(HeldGrant):
+        def verify_grant(self, request):
+            events.append("grant")
+            return super().verify_grant(request)
+
+    assert (
+        qualify_opening_account_import_v2(
+            _request(command),
+            source_provider=OrderedSource(source.evidence),
+            grant_provider=OrderedGrant(grant.grant),
+        )
+        is not None
+    )
+    assert events == ["source", "grant"]

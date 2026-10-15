@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_media_observations._native import cycle_children
 from dotmac_media_observations.contracts import (
     ClaimStatus,
     CountValue,
@@ -1139,26 +1140,15 @@ def _cycle_children(
     candidates: dict[_HierarchyKey, tuple[HierarchyFact, ObservationEnvelope]],
     active: set[tuple[str, ...]],
 ) -> set[_HierarchyKey]:
-    cycle: set[_HierarchyKey] = set()
-    by_scope: dict[tuple[str, str, str], dict[str, str]] = {}
-    for key, (fact, _envelope) in candidates.items():
-        parent_key = (key[0], key[1], key[2], fact.parent_entity_ref)
-        if key in active and parent_key in active:
-            by_scope.setdefault(key[:3], {})[key[3]] = fact.parent_entity_ref
-    for scope, edges in by_scope.items():
-        for start in edges:
-            traversal: list[str] = []
-            positions: dict[str, int] = {}
-            current = start
-            while current in edges:
-                if current in positions:
-                    for child in traversal[positions[current] :]:
-                        cycle.add((*scope, child))
-                    break
-                positions[current] = len(traversal)
-                traversal.append(current)
-                current = edges[current]
-    return cycle
+    return set(
+        cycle_children(
+            [
+                (key, fact.parent_entity_ref)
+                for key, (fact, _envelope) in candidates.items()
+            ],
+            [cast(_EntityKey, key) for key in active],
+        )
+    )
 
 
 def _replace_projections(

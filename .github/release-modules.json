@@ -490,7 +490,10 @@
       "dotmac_billing/opening_window_contracts.py",
       "dotmac_billing/opening_window_queries.py",
       "dotmac_billing/opening_rehearsal_contracts.py",
-      "dotmac_billing/opening_rehearsal.py"
+      "dotmac_billing/opening_rehearsal.py",
+          "dotmac_billing/opening_qualification.py",
+          "dotmac_billing/opening_verification_contracts.py",
+          "dotmac_billing/opening_verification.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -502,7 +505,8 @@
           "alembic",
           "dotmac-kernel",
           "sqlalchemy",
-          "python"
+          "python",
+          "cryptography"
         ]
       }
     },

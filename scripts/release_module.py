@@ -59,11 +59,14 @@ import ast
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tomllib
 import zipfile
 from collections.abc import Iterable
+from email.parser import Parser
+from itertools import product
 from pathlib import Path
 from typing import Final
 
@@ -228,6 +231,85 @@ def _declared(entry: dict) -> dict:
     return manifest
 
 
+def _native_package(entry: dict) -> str | None:
+    """Enrollment belongs to the owning package, never a second module list."""
+    data = tomllib.loads(
+        (entry["package_path"] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    native = data.get("tool", {}).get("dotmac", {}).get("native")
+    if native is None:
+        return None
+    if (
+        not isinstance(native, dict)
+        or native.get("python-package") != entry["import_name"]
+        or not isinstance(native.get("decimal-core", False), bool)
+    ):
+        raise ReleaseRefused(
+            f"{entry['distribution']}: invalid native enrollment; python-package "
+            "must equal the reviewed import_name and decimal-core must be boolean"
+        )
+    return native["python-package"]
+
+
+def _inspect_native(entry: dict, wheel: Path) -> None:
+    module = _native_package(entry)
+    if module is None:
+        return
+    # This sibling is part of the release source closure. Its stdlib-only
+    # verifier owns Decimal's license, static-link and private-symbol policy.
+    from native_qualify import DECIMAL_MODULES, verify_wheel
+
+    data = tomllib.loads(
+        (entry["package_path"] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    if (
+        data["tool"]["dotmac"]["native"].get("decimal-core", False)
+        and module not in DECIMAL_MODULES
+    ):
+        raise ReleaseRefused(f"{module}: Decimal qualification is not enrolled")
+    try:
+        verify_wheel(wheel, module)
+        with zipfile.ZipFile(wheel) as archive:
+            extensions = [
+                name for name in archive.namelist() if name.endswith((".so", ".pyd"))
+            ]
+            if len(extensions) != 1:
+                raise ValueError("native wheel needs exactly one Python extension")
+            (metadata,) = (
+                name for name in archive.namelist() if name.endswith(".dist-info/WHEEL")
+            )
+            headers = Parser().parsestr(archive.read(metadata).decode("utf-8"))
+        if headers.get_all("Root-Is-Purelib") != ["false"]:
+            raise ValueError("native wheel must declare Root-Is-Purelib: false once")
+
+        def tags(raw: str) -> set[tuple[str, str, str]]:
+            interpreter, abi, platform = raw.split("-")
+            expanded = set(
+                product(interpreter.split("."), abi.split("."), platform.split("."))
+            )
+            if any(
+                not re.fullmatch(r"cp[0-9]+[a-z]*", py)
+                or not re.fullmatch(r"cp[0-9]+[a-z]*", binary)
+                or not target
+                or target == "any"
+                for py, binary, target in expanded
+            ):
+                raise ValueError("native wheel needs CPython ABI and platform tags")
+            return expanded
+
+        declared = headers.get_all("Tag", [])
+        if not declared:
+            raise ValueError("native wheel has no Tag header")
+        wheel_tags = tags("-".join(wheel.stem.rsplit("-", 3)[-3:]))
+        metadata_tags = set().union(*(tags(tag) for tag in declared))
+        if wheel_tags != metadata_tags:
+            raise ValueError("native wheel filename and WHEEL tags disagree")
+    except (RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as error:
+        raise ReleaseRefused(
+            f"{wheel.name}: native qualification failed: {error}"
+        ) from error
+
+
 def local_first_party_dependencies(entry: dict) -> list[Path]:
     """Return reviewed first-party dependencies that need local smoke wheels.
 
@@ -323,6 +405,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
         print(f"db_schema={entry['db_schema']}")
     print(f"version={manifest['version']}")
     print(f"tag={entry['tag_prefix']}{manifest['version']}")
+    print(f"native_package={_native_package(entry) or ''}")
 
 
 def migration_extent_problems(entry: dict) -> list[str]:
@@ -372,6 +455,7 @@ def cmd_inspect(args: argparse.Namespace) -> None:
             f"expected exactly one wheel in {args.dist}, found {len(wheels)}"
         )
     wheel = wheels[0]
+    _inspect_native(entry, wheel)
 
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
@@ -514,13 +598,39 @@ print("kernel", dotmac_kernel.__version__, "registered:",
 """
 
 
-def _verify_installed(python: Path, targets: list[tuple[str, str, str | None]]) -> None:
+_NATIVE_REGISTER = """
+import importlib, pathlib, site
+from importlib.machinery import ExtensionFileLoader, EXTENSION_SUFFIXES
+
+checkout = pathlib.Path({checkout!r}).resolve()
+installed_roots = [pathlib.Path(root).resolve() for root in site.getsitepackages()]
+for name in {names!r}:
+    native = importlib.import_module(name + "._native")
+    spec = native.__spec__
+    assert spec is not None and isinstance(spec.loader, ExtensionFileLoader), name
+    assert spec.name == name + "._native", (name, spec.name)
+    origin = pathlib.Path(spec.origin).resolve()
+    assert origin == pathlib.Path(native.__file__).resolve(), (name, origin)
+    assert any(str(origin).endswith(suffix) for suffix in EXTENSION_SUFFIXES), origin
+    assert any(origin.is_relative_to(root) for root in installed_roots), origin
+    assert not origin.is_relative_to(checkout), origin
+    assert origin.parent.name == name and origin.name.startswith("_native."), origin
+    print("native extension loaded:", name, origin)
+"""
+
+
+def _verify_installed(
+    python: Path,
+    targets: list[tuple[str, str, str | None]],
+    native_targets: list[str] | None = None,
+) -> None:
     # `-I`: isolated mode — no user site, no PYTHON* environment, and the
     # current directory never on sys.path, so nothing can resolve from a
     # checkout by accident.
-    subprocess.run(
-        [str(python), "-I", "-c", _REGISTER.format(names=targets)], check=True
+    script = _REGISTER.format(names=targets) + _NATIVE_REGISTER.format(
+        names=native_targets or [], checkout=str(REPO_ROOT)
     )
+    subprocess.run([str(python), "-I", "-c", script], check=True)
 
 
 #: Proves each first-party distribution in the smoke venv was installed from
@@ -659,6 +769,7 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
         _verify_installed(
             python,
             [(entry["import_name"], entry["manifest_attr"], entry["db_schema"])],
+            [native] if (native := _native_package(entry)) else [],
         )
 
     if args.emit_dependency_manifest:
@@ -700,6 +811,7 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
     import tempfile
 
     targets: list[tuple[str, str, str | None]] = []
+    native_targets: list[str] = []
     specs: list[str] = []
     if args.kernel:
         # The kernel is NOT an allowlisted module — it has its own release
@@ -715,6 +827,8 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
         targets.append(
             (entry["import_name"], entry["manifest_attr"], entry["db_schema"])
         )
+        if native := _native_package(entry):
+            native_targets.append(native)
         specs.append(pair)
 
     public_index = os.environ.get("PUBLIC_INDEX_URL", "https://pypi.org/simple")
@@ -733,7 +847,7 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
             ],
             check=True,
         )
-        _verify_installed(python, targets)
+        _verify_installed(python, targets, native_targets)
     print(f"registry verification OK for {', '.join(specs)}")
 
 
