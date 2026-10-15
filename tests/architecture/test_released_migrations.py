@@ -1636,6 +1636,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payments ──
+    "dotmac-payments-v0.1.0a2": (
+        "dotmac-payments",
+        "4fc0295da94ce62919966baaf1dd909f9af5dcbe",
+        {
+            "pm_0001_payment_intents.py": (
+                "d3f253970bfb6ef1e98289bff1dc2853bf4964a995d406a92529527d3bdb55db"
+            ),
+            "pm_0002_money_precision.py": (
+                "6c16863cc542178b5b1ac17a5d431c8fbbc4e270dcd6d190d7d6c39652848ae8"
+            ),
+            "pm_0003_confirmation_immutable.py": (
+                "fc15f0e306afee6fc9b02970b0a3c4b2e9bb45d1fac9aa23095c699ac7b4bc41"
+            ),
+        },
+    ),
     "dotmac-payments-v0.1.0a1": (
         "dotmac-payments",
         "04b9771320b865b66d1322660fc6d3590605c973",
@@ -7333,9 +7348,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "ao_0003_ack_attribution.py",
         }
     ),
-    "dotmac-payments": frozenset(
-        {"pm_0002_money_precision.py", "pm_0003_confirmation_immutable.py"}
-    ),
+    "dotmac-payments": frozenset(),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the
     # protected release tags it and its digest is recorded above.
