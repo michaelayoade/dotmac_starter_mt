@@ -1209,7 +1209,12 @@ def module_census_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     }
     paths["LEDGER"].write_text(
         json.dumps(
-            {"unpublished": {"dotmac-approvals": {"declared": "9.9.9"}}},
+            {
+                "unpublished": {
+                    "dotmac-approvals": {"declared": "9.9.9"},
+                    "dotmac-fixture-neighbour": {"declared": "1.0.0"},
+                }
+            },
             indent=2,
         )
         + "\n"
@@ -1305,7 +1310,9 @@ def test_module_publication_refreshes_census_and_preserves_legacy_drift(
     assert baseline["released_total"] == 63
     assert baseline["drifted_total"] == 1
     assert baseline["drifted"] == [legacy_drift]
-    assert json.loads(paths["LEDGER"].read_text())["unpublished"] == {}
+    assert json.loads(paths["LEDGER"].read_text())["unpublished"] == {
+        "dotmac-fixture-neighbour": {"declared": "1.0.0"}
+    }
     verified = json.loads(paths["MODULE_RELEASE_VERIFICATIONS"].read_text())["releases"]
     assert [row["tag"] for row in verified] == [arguments["tag"]]
     assert paths["KERNEL_AUTHORIZATION"].read_bytes() == authorization_before
