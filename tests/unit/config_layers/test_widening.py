@@ -176,4 +176,7 @@ def test_ordered_field_unset_is_compared_against_its_schema_default():
     assert found({}, {"level": "low"}) == ["/level"]  # default high -> low widens
     assert found({}, {"level": "high"}) == []  # unchanged from the default
     assert found({"level": "low"}, {"level": "high"}) == []  # narrowing
-    assert found({}, {"open": "low"}) == []  # no default: grants nothing before
+    # no default: an unset field grants nothing (most secure rank), so any
+    # less-secure value widens
+    assert found({}, {"open": "low"}) == ["/open"]
+    assert found({}, {"open": "high"}) == []
