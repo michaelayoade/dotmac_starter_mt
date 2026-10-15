@@ -1,4 +1,7 @@
 name: Native computation
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 on:
   workflow_call:
   workflow_dispatch:
@@ -20,7 +23,6 @@ jobs:
           python-version: '3.12'
       - uses: ./.github/actions/setup-native
       - name: Generate lockfiles for a subsequent reviewed commit
-        shell: bash
         run: |
           set -euo pipefail
           if [ -f native/decimal-core/Cargo.toml ]; then
@@ -67,7 +69,6 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/setup-poetry
       - name: Reject generated hook drift and missing committed locks
-        shell: bash
         run: |
           set -euo pipefail
           python scripts/sync_native_builds.py --check
@@ -78,7 +79,6 @@ jobs:
             cargo fmt --manifest-path "$package/native/Cargo.toml" -- --check
           done < <(python scripts/sync_native_builds.py --list)
       - name: Install assembly and build exact domain artifacts
-        shell: bash
         run: |
           set -euo pipefail
           python -m venv .venv
@@ -88,7 +88,6 @@ jobs:
             poetry build --directory "$package" --output "$GITHUB_WORKSPACE/native-artifacts"
           done < <(python scripts/sync_native_builds.py --list)
       - name: Verify native wheel and sdist payloads and rebuild source archives
-        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -117,13 +116,12 @@ jobs:
                   for expected in ['build.py', 'native/Cargo.toml', 'native/Cargo.lock', 'native/pyproject.toml', 'native/src/lib.rs']:
                       assert any(name.endswith('/' + expected) for name in names), expected
                   archive.extractall(target, filter='data')
-              source, = target.iterdir()
-              subprocess.run(['poetry', 'build', '--directory', str(source), '--format', 'wheel', '--output', str(artifacts / 'rebuilt')], check=True)
+              extracted_package, = target.iterdir()
+              subprocess.run(['poetry', 'build', '--directory', str(extracted_package), '--format', 'wheel', '--output', str(artifacts / 'rebuilt')], check=True)
           PY
       - name: Verify all artifacts and private Decimal linkage
         run: python scripts/native_qualify.py verify native-artifacts
       - name: Test exact wheel installations with module parity suites
-        shell: bash
         run: |
           set -euo pipefail
           # Installing a wheel over an editable path removes its .pth entry.
@@ -168,7 +166,6 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/setup-native
       - name: Check generated hooks and qualify standalone PEP 517 artifacts
-        shell: bash
         run: |
           set -euo pipefail
           python scripts/sync_native_builds.py --check

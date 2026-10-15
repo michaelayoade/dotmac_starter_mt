@@ -155,9 +155,7 @@ fn rating_average(ratings: Vec<CString>, spec: ContextSpec, traps: u32) -> Arith
         return memory_failure();
     };
     let mut status = Signals::default();
-    if !status.record(total.parse(c"0"), traps)
-        || !status.record(scale.parse(c"0.01"), traps)
-    {
+    if !status.record(total.parse(c"0"), traps) || !status.record(scale.parse(c"0.01"), traps) {
         return status.finish(None);
     }
     for text in &ratings {
@@ -181,7 +179,13 @@ fn rating_average(ratings: Vec<CString>, spec: ContextSpec, traps: u32) -> Arith
     status.finish(result)
 }
 
-fn nps_score(promoters: usize, detractors: usize, count: usize, spec: ContextSpec, traps: u32) -> ArithmeticResult {
+fn nps_score(
+    promoters: usize,
+    detractors: usize,
+    count: usize,
+    spec: ContextSpec,
+    traps: u32,
+) -> ArithmeticResult {
     if count == 0 {
         return (None, 0, None);
     }
@@ -232,7 +236,9 @@ fn calculate_metrics(
     if !valid_context(context) || traps & !0x1ff != 0 {
         return Err(PyValueError::new_err("invalid Decimal batch context"));
     }
-    let ratings: Vec<CString> = ratings.into_iter().map(CString::new)
+    let ratings: Vec<CString> = ratings
+        .into_iter()
+        .map(CString::new)
         .collect::<std::result::Result<_, _>>()
         .map_err(|_| PyValueError::new_err("Decimal text contains NUL"))?;
     let (average, raised, failure) = py.detach(move || rating_average(ratings, context, traps));
@@ -253,14 +259,12 @@ fn calculate_metrics(
     }
     // NPS rich comparisons may change the current Decimal context or traps.
     // Capture once after the complete predicate stream, not once per operation.
-    let (nps_context, nps_traps): (ContextSpec, u32) =
-        capture_nps_context.call0()?.extract()?;
+    let (nps_context, nps_traps): (ContextSpec, u32) = capture_nps_context.call0()?.extract()?;
     if !valid_context(nps_context) || nps_traps & !0x1ff != 0 {
         return Err(PyValueError::new_err("invalid Decimal NPS context"));
     }
-    let (score, raised, failure) = py.detach(move || {
-        nps_score(promoters, detractors, count, nps_context, nps_traps)
-    });
+    let (score, raised, failure) =
+        py.detach(move || nps_score(promoters, detractors, count, nps_context, nps_traps));
     Ok((average, score, raised, failure))
 }
 

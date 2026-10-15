@@ -477,3 +477,17 @@ reported UNADOPTED. The roster entry is the **current repository** that owes
 the inventory (`dotmac_platform_control_plane`); `vendor-cp-prod` is the
 historical host/credential evidence and belongs in that product's own
 inventory. `unadopted` is now three.
+
+## 2026-10-15 census amendment: native build CI
+
+The Starter census now records `workflow:native-compute`, invoked through
+`workflow_call` from CI or `workflow_dispatch` for optional lock bootstrap.
+Its only credential is `GITHUB_TOKEN` with `contents: read`; it takes no
+user-provisioned secret. Its `not_an_executor` disposition reflects native
+builds, source-archive rebuilds and installed-artifact tests on ephemeral
+GitHub-hosted runners, with no deployment verb or production target.
+
+The workflow count and canonical census digest are recorded in the baseline
+with the new row. This adds build qualification coverage and creates no new
+deployment or publication authority. Existing executor dispositions, Compose
+mutation paths and retirement totals are unchanged.

@@ -141,7 +141,7 @@
         },
         "workflow": {
           "non_production_executor": 7,
-          "not_an_executor": 16
+          "not_an_executor": 17
         }
       },
       "families_absent": [
@@ -163,7 +163,7 @@
         "workflow",
         "script"
       ],
-      "inventory_digest": "sha256:90fd5a5133dab07f55a4eab6938417f8ba18f74823eb2e3190586790afa6a29b",
+      "inventory_digest": "sha256:3fd9250749be530c0edee5dc811e09174ac7863dee11a39cb67de00e536954e7",
       "measured_from": "working tree",
       "retired_total": 0,
       "revision": "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff",
