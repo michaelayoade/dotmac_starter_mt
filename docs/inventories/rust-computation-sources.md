@@ -94,7 +94,7 @@ The completed source assessment inspected Sub
 `d1c1c7975eead7cb716fc4d590dabe97b6eebcdd`
 (`app/services/fixed_assets/depreciation.py::calculate_run`). Sub converts a
 floating-point NPS result to Decimal before rounding: a net promoter count of 23
-among 160 rated responses yields 14.37, while Starter's exact calculation yields
+among 160 NPS-scored responses yields 14.37, while Starter's exact calculation yields
 14.38. Its average is already a SQL aggregate. ERP's multi-period catch-up rounds
 once after applying the rate to opening carrying value; Starter's declining
 balance calculation compounds and rounds monthly. ERP's straight-line rounding
