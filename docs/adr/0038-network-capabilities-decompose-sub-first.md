@@ -317,8 +317,9 @@ a device composed from layered documents. Michael decided on 2026-10-14
    reconciliation) stays in `dotmac-network-control` and arrives with the suite
    cutover.
 
-Because `network-module-dispositions.toml` and its architecture canary are the
-mechanical record of the nine-module set, they are deliberately **not** changed:
-the tenth module is not part of that set. The ledger, the canary and this record
-are changed together in the review that adds `dotmac-network-config` source,
-should that review find the set needs to name it.
+`docs/inventories/network-module-dispositions.toml` records the tenth module in
+an `[[outside_suite_modules]]` entry, separate from the nine-module `modules`
+set, which is unchanged. The architecture canary pins it outside the cohort: it
+must not appear in the nine-module set or the contract ledger, must carry
+`adoption_cohort = "none"`, and moving it into the cohort is rejected. The
+ledger, the canary and this record change together.

@@ -78,8 +78,8 @@ The 2026-09-02 boundary ruling (Knowledge record
 in-process capabilities and that provider-specific connector plugins leave.
 `dotmac-routeros-config` is provider-specific but is not a connector. The
 ruling is clarified, narrowly, as: **no I/O, no credentials, no transport in
-Starter.** An I/O-free package that parses and models a provider's data formats
-may live in Starter. It must import no network, subprocess, socket or
+Starter.** On that basis `dotmac-routeros-config`, and only that package, may
+live in Starter. It must import no network, subprocess, socket or
 persistence module, hold or name no credential, and open no connection. A
 connector, session, SSH/REST/SNMP client or credential holder is still outside
 Starter. This clarification is specific to the named package; it is not a
