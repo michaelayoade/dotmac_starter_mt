@@ -23,7 +23,7 @@ composition_boundary = "Sub is the primary code source; CRM is conflict/retireme
 first_cutover = "dotmac_sub in the single network-suite-v1 cutover, blocked until CRM outside-plant authority is consolidated into Sub."
 shadow_and_drift = "Compare the complete Sub/CRM cohort, then backfill and compare structure, strand, splice, termination, continuity and accepted-change digests."
 local_copy_retirement = "CRM's outside-plant tables/writers and Sub's local plant owner are retired after sealed suite cutover and rollback window."
-next_action = "Build from audited Sub code, but do not adopt until CRM consolidation and complete Observer proof are green."
+next_action = "2026-10-15: qualify and release the 0.2.0a1 private-native successor through the existing protected module lane after exact-head hosted CI, wheel/source-archive parity and supported-interpreter checks. Preserve prior immutable release identities. Publication transfers no product data or writer authority. Adoption remains within ADR-0038's coordinated network-suite cutover and requires CRM outside-plant consolidation, Sub IPAM one-writer cutover, shadow proof and legacy-writer retirement."
 
 [[product_writers]]
 product = "dotmac_crm"
