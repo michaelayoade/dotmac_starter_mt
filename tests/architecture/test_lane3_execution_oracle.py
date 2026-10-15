@@ -12,8 +12,11 @@ records no admitted surface, so the oracle refuses before any network call.
 from __future__ import annotations
 
 import copy
+import json
 import pathlib
+import re
 import sys
+import tempfile
 from typing import Any
 
 import pytest
@@ -32,6 +35,16 @@ from lane3_execution import (  # noqa: E402
     select_runs,
 )
 from require_rehearsal import RehearsalMissing, decide  # noqa: E402
+
+from tests.unit.lane3_evidence_support import (  # noqa: E402
+    EVIDENCE_PATH,
+    REFERENCE,
+    REQUIREMENTS,
+    digest,
+    rows,
+    table,
+    write_evidence,
+)
 
 SHA = "a" * 40
 OTHER = "b" * 40
@@ -55,14 +68,23 @@ PROVISIONED: dict[str, Any] = {
     "runner_group": {"name": "lane3-exposure-protected", "id": GROUP_ID},
     "admitted_launcher_revisions": [LAUNCHER],
     "receipt_artifact": "lane3-rehearsal-receipt",
-    "admission_evidence": "docs/LANE3_EXECUTION_TOPOLOGY.md#7 run 1",
+    "admission_evidence": REFERENCE,
 }
 
 
-def _topology(**over: Any):  # type: ignore[no-untyped-def]
+@pytest.fixture()
+def evidence_root(tmp_path: pathlib.Path) -> pathlib.Path:
+    write_evidence(tmp_path)
+    return tmp_path
+
+
+def _topology(root: pathlib.Path | None = None, **over: Any):  # type: ignore[no-untyped-def]
     document = copy.deepcopy(PROVISIONED)
     document.update(over)
-    return parse_topology(document)
+    if root is None:
+        root = pathlib.Path(tempfile.mkdtemp(prefix="lane3-evidence-"))
+        write_evidence(root)
+    return parse_topology(document, repo_root=root)
 
 
 def _run(**over: Any) -> dict[str, Any]:
@@ -109,7 +131,9 @@ def test_a_fully_provisioned_topology_parses() -> None:
     ],
 )
 @pytest.mark.parametrize("value", [None, 0, -1, True, "1397614141"])
-def test_every_immutable_id_must_be_recorded(path: str, value: object) -> None:
+def test_every_immutable_id_must_be_recorded(
+    path: str, value: object, evidence_root: pathlib.Path
+) -> None:
     document = copy.deepcopy(PROVISIONED)
     node = document
     *parents, leaf = path.split(".")
@@ -117,7 +141,7 @@ def test_every_immutable_id_must_be_recorded(path: str, value: object) -> None:
         node = node[part]
     node[leaf] = value
     with pytest.raises(TopologyRefused, match=path):
-        parse_topology(document)
+        parse_topology(document, repo_root=evidence_root)
 
 
 @pytest.mark.parametrize("revisions", [[], ["C" * 40], ["c" * 39], [None], "c" * 40])
@@ -130,6 +154,167 @@ def test_no_launcher_is_admitted_without_a_full_commit(revisions: object) -> Non
 def test_no_surface_is_admitted_without_admission_evidence(evidence: object) -> None:
     with pytest.raises(TopologyRefused, match="admission_evidence"):
         _topology(admission_evidence=evidence)
+
+
+# ── admission_evidence is a reference to a complete § 7 table ─────────────
+
+
+def _refuses(root: pathlib.Path, match: str, reference: str = REFERENCE) -> None:
+    """The guard itself refused: a TopologyRefused naming the evidence defect."""
+    with pytest.raises(TopologyRefused, match=match) as caught:
+        _topology(root, admission_evidence=reference)
+    assert "admission_evidence" in str(caught.value)
+
+
+def test_a_complete_evidence_table_admits(evidence_root: pathlib.Path) -> None:
+    assert _topology(evidence_root).admission_evidence == REFERENCE
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "TBD",
+        "docs/LANE3_EXECUTION_TOPOLOGY.md#7 run 1",
+        "docs/LANE3_EXECUTION_TOPOLOGY.md#7-admission-evidence",
+        f"{EVIDENCE_PATH}",
+        f"{EVIDENCE_PATH}#",
+        f"{EVIDENCE_PATH}#Fixture Run 1",
+        f"../{EVIDENCE_PATH}#fixture-run-1",
+        "docs/other.md#fixture-run-1",
+    ],
+)
+def test_an_arbitrary_or_misdirected_reference_is_refused(
+    evidence_root: pathlib.Path, reference: str
+) -> None:
+    _refuses(evidence_root, "not a reference of the form", reference)
+
+
+def test_a_reference_to_a_missing_file_is_refused(tmp_path: pathlib.Path) -> None:
+    _refuses(tmp_path, "cannot be read")
+
+
+def test_a_missing_anchor_is_refused(evidence_root: pathlib.Path) -> None:
+    _refuses(evidence_root, "matches 0 headings", f"{EVIDENCE_PATH}#no-such-run")
+
+
+def test_a_duplicate_anchor_is_refused(tmp_path: pathlib.Path) -> None:
+    write_evidence(tmp_path, table(rows()) + table(rows()))
+    _refuses(tmp_path, "matches 2 headings")
+
+
+@pytest.mark.parametrize("missing", REQUIREMENTS)
+def test_a_missing_requirement_row_is_refused(
+    tmp_path: pathlib.Path, missing: str
+) -> None:
+    kept = {k: v for k, v in rows().items() if k != missing}
+    write_evidence(tmp_path, table(kept))
+    _refuses(tmp_path, f"no row for: {missing}")
+
+
+def test_an_unknown_or_repeated_requirement_row_is_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    extra = {**rows(), "Something else": ("run:9000100", digest("x"))}
+    write_evidence(tmp_path, table(extra))
+    _refuses(tmp_path, "not a § 7 requirement")
+    text = table(rows()) + f"| PR exclusion | `run:9000200` | `{digest('y')}` |\n"
+    write_evidence(tmp_path, text)
+    _refuses(tmp_path, "repeats")
+
+
+@pytest.mark.parametrize(
+    "coordinate",
+    [
+        "",
+        "TBD",
+        "run:0",
+        "run:123",
+        "run:111111",
+        "123456",
+        "run:<id>",
+        "audit:x",
+        "audit:aaaaaaaa",
+        "ci:9000001",
+        "run:9000001 extra",
+    ],
+)
+def test_a_placeholder_or_untyped_coordinate_is_refused(
+    tmp_path: pathlib.Path, coordinate: str
+) -> None:
+    broken = {**rows(), "Credential failure": (coordinate, digest("c"))}
+    write_evidence(tmp_path, table(broken))
+    _refuses(tmp_path, "Credential failure")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        "0" * 64,
+        "a" * 64,
+        digest("z")[:63],
+        digest("z") + "0",
+        digest("z").upper(),
+        "sha256:" + digest("z"),
+    ],
+)
+def test_a_bad_digest_is_refused(tmp_path: pathlib.Path, bad: str) -> None:
+    broken = {**rows(), "No-grant refusal": ("audit:openbao-audit-77", bad)}
+    write_evidence(tmp_path, table(broken))
+    _refuses(tmp_path, "No-grant refusal.*sha256")
+
+
+@pytest.mark.parametrize("word", ["pending", "TBD", "UNKNOWN", "N/A", "n/a"])
+def test_a_row_marked_pending_is_refused_even_with_valid_looking_cells(
+    tmp_path: pathlib.Path, word: str
+) -> None:
+    broken = {**rows(), "PR exclusion": (f"run:9000555 {word}", digest("p"))}
+    write_evidence(tmp_path, table(broken))
+    _refuses(tmp_path, "PR exclusion.*pending, unknown or a placeholder")
+
+
+def test_a_table_without_the_columns_is_refused(tmp_path: pathlib.Path) -> None:
+    write_evidence(tmp_path, "## Fixture run 1\n\nno table here\n")
+    _refuses(tmp_path, "no table with the columns")
+
+
+def test_load_topology_resolves_evidence_beside_the_topology_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    from tests.unit.lane3_evidence_support import write_topology
+
+    good = write_topology(tmp_path, PROVISIONED)
+    assert load_topology(pathlib.Path(good)).admission_evidence == REFERENCE
+    (tmp_path / EVIDENCE_PATH).write_text(table({}), encoding="utf-8")
+    with pytest.raises(TopologyRefused, match="admission_evidence.*no row for"):
+        load_topology(pathlib.Path(good))
+    stray = tmp_path / "elsewhere.json"
+    stray.write_text("{}", encoding="utf-8")
+    with pytest.raises(TopologyRefused, match="not under a .github directory"):
+        load_topology(stray)
+
+
+def test_the_shipped_evidence_file_admits_nothing() -> None:
+    """Every anchor in the checked-in file, including the template, is refused."""
+    text = (REPO / EVIDENCE_PATH).read_text(encoding="utf-8")
+    anchors = [
+        re.sub(r"[^a-z0-9 -]", "", line.lstrip("#").strip().lower()).replace(" ", "-")
+        for line in text.splitlines()
+        if line.startswith("#")
+    ]
+    assert anchors, "the shipped file has headings"
+    for anchor in anchors:
+        with pytest.raises(TopologyRefused):
+            parse_topology(
+                {**PROVISIONED, "admission_evidence": f"{EVIDENCE_PATH}#{anchor}"},
+                repo_root=REPO,
+            )
+    assert any("template" in a for a in anchors)
+
+
+def test_the_checked_in_topology_keeps_admission_evidence_null() -> None:
+    document = json.loads((REPO / ".github" / "lane3-execution.json").read_text())
+    assert document["admission_evidence"] is None
 
 
 # ── the dispatch grammar ───────────────────────────────────────────────────
