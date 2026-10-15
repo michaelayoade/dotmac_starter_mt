@@ -369,6 +369,16 @@ then does the protected positive dispatch run and get picked up.
 | Isolation and disclosure | A failed or cancelled canary run leaves no key, certificate or workspace state, and the next run sees none. A private-side scan of the public logs and artifacts, using the topology record's actual values, finds none. The scan runs outside the public repository, because a public scan would need the values. |
 | Oracle reachability | The amended oracle's reads (§ 6) succeed with the intended read credential and refuse with a wrong one. |
 
+`admission_evidence` in `.github/lane3-execution.json` must reference a filled
+table in `docs/inventories/lane3-admission-evidence.md#<anchor>` with one row
+per requirement above; `scripts/lane3_execution.py` refuses the topology
+otherwise (digest preimages, per-row coordinate kinds and staleness rules are
+in that file). The guard resolves the table in the same checkout as the
+topology file, so a caller must pass the topology at
+`<checkout>/.github/lane3-execution.json`; a temporary, `git show` or artifact
+copy is refused. The coordinator's credential handoff does not consult
+`admission_evidence`; that ordering is not enforced here.
+
 Scheduling probes use a disposable canary in the same group, on a separately
 named and authorized isolated VM. The canary is neither the existing control
 runner nor the shared testing server. Record repository IDs, read-backs, run
