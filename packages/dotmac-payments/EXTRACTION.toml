@@ -32,10 +32,11 @@ composition_boundary = "Adopters compose pm locally and correlate provider obser
 first_cutover = "Sub remains payment-intent owner until history backfill, read-only shadow and zero-drift correlation comparison complete and a separately authorized writer switch occurs."
 shadow_and_drift = "Compare intent reference, payer, purpose, currency and requested amount, terminal status and settlement time, and every confirmation by source, provider type, external reference, confirmed amount and observation instant; invoice allocation and ledger posting themselves remain outside."
 local_copy_retirement = "After cutover, reduce Sub's topup-intent and payment-confirmation writers to zero while Billing keeps allocation and Integrator keeps provider transport."
-next_action = "Validate and release the declared 0.1.0a2 immutable-confirmation replay and intent/proof serialization prerequisite, then compose in Sub and implement the intent/confirmation backfill plus the zero-drift correlation shadow. Sub remains the writer until a separately authorized cutover."
+next_action = "Validate and release the declared 0.1.0a2 immutable-confirmation replay, complete intent-request replay binding, intent/proof serialization and typed read-only reference lookup prerequisite, then compose the verified artifact in Sub and implement the intent/confirmation backfill plus the zero-drift correlation shadow. Provider verification, webhook and reconciliation callers resolve persisted intent bindings through the owner query and retain the original expiry; provider metadata cannot select the account or invoice. Sub remains the writer until a separately authorized cutover."
 inventory_evidence = [
   "docs/inventories/customer-journey-owner-sources.md",
   "docs/inventories/payments-intent-replay-binding-extraction.md",
+  "docs/inventories/payments-intent-lookup-extraction.md",
 ]
 
 # Typed product claim. Sub is the qualifying source — these owners are extracted

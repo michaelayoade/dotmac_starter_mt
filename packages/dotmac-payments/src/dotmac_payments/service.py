@@ -36,8 +36,11 @@ from dotmac_payments.contracts import (
     ConfirmedCashObservationV1,
     Conflict,
     GetConfirmedCashV1,
+    GetPaymentIntentV1,
     OpenPaymentIntent,
+    PaymentIntentObservationV1,
     PaymentIntentStatus,
+    PaymentPurpose,
     RecordConfirmation,
     ReviewTransferProof,
     SubmitTransferProof,
@@ -89,7 +92,10 @@ def _persisted_money(amount: Decimal, code: str, scale: int | None) -> Money:
     # Inspect before Money construction, whose public constructor quantizes.
     if not amount.is_finite() or not Decimal(0) < amount < Decimal("100000000000000"):
         raise Conflict("stored amount does not fit positive finite Numeric(20, 6)")
-    money = Money.of(amount, Currency(code, scale))
+    stored_currency = Currency(code, scale)
+    if stored_currency.code != code:
+        raise Conflict("stored currency code is not canonical")
+    money = Money.of(amount, stored_currency)
     if money.amount != amount:
         raise UnresolvedMoneyPrecision("stored amount conflicts with its precision")
     return money
@@ -413,6 +419,62 @@ def record_confirmation(
     return row
 
 
+def get_payment_intent_v1(
+    db: Session, *, scope: TenantScope, query: GetPaymentIntentV1
+) -> PaymentIntentObservationV1 | None:
+    """Observe the persisted reference binding without flushing caller changes.
+
+    Unknown and foreign references are indistinguishable. This read owns no
+    lifecycle transition, locks or transaction completion; the caller may roll
+    back its own flushed, uncommitted intent after observing it.
+    """
+    tenant_id = _tenant(scope)
+    reference = _required(query.reference, "reference")
+    table = PaymentIntent.__table__
+    with db.no_autoflush:
+        row = (
+            db.execute(
+                select(table).where(
+                    table.c.tenant_id == tenant_id, table.c.reference == reference
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+    if row is None:
+        return None
+    requested = _persisted_money(
+        row["requested_amount"], row["currency_code"], row["minor_units"]
+    )
+    confirmed = (
+        _persisted_money(
+            row["confirmed_amount"], row["currency_code"], row["minor_units"]
+        )
+        if row["confirmed_amount"] is not None
+        else None
+    )
+    return PaymentIntentObservationV1(
+        scope=scope,
+        intent_id=row["id"],
+        reference=row["reference"],
+        payer_reference=row["payer_reference"],
+        target_reference=row["target_reference"],
+        purpose=PaymentPurpose(row["purpose"]),
+        requested=requested,
+        confirmed=confirmed,
+        provider_type=row["provider_type"],
+        channel=row["channel"],
+        status=PaymentIntentStatus(row["status"]),
+        opened_at=_utc_moment(row["opened_at"]),
+        expires_at=_utc_moment(row["expires_at"])
+        if row["expires_at"] is not None
+        else None,
+        settled_at=_utc_moment(row["settled_at"])
+        if row["settled_at"] is not None
+        else None,
+    )
+
+
 def get_confirmed_cash_v1(
     db: Session, *, scope: TenantScope, query: GetConfirmedCashV1
 ) -> ConfirmedCashObservationV1:
@@ -452,6 +514,7 @@ def get_confirmed_cash_v1(
 
 __all__ = [
     "get_confirmed_cash_v1",
+    "get_payment_intent_v1",
     "cancel_payment_intent",
     "expire_payment_intent",
     "open_payment_intent",

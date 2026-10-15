@@ -806,3 +806,61 @@ def test_proof_acceptance_cannot_round_inconsistent_stored_precision(db):
         )
     assert proof.state is TransferProofState.SUBMITTED
     assert db.scalar(select(func.count()).select_from(models.PaymentConfirmation)) == 0
+
+
+def test_intent_lookup_public_observation_is_frozen_and_requires_tenant(db):
+    from dataclasses import FrozenInstanceError
+
+    from dotmac_kernel.cache import PlatformScope
+    from dotmac_payments import GetPaymentIntentV1, get_payment_intent_v1
+
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    observation = get_payment_intent_v1(
+        db, scope=scope, query=GetPaymentIntentV1(intent.reference)
+    )
+    assert observation.intent_id == intent.id
+    assert observation.scope == scope
+    with pytest.raises(FrozenInstanceError):
+        observation.reference = "changed"
+    with pytest.raises(ValueError, match="reference must not be empty"):
+        get_payment_intent_v1(db, scope=scope, query=GetPaymentIntentV1(" \t "))
+    with pytest.raises(TypeError, match="requires TenantScope"):
+        get_payment_intent_v1(
+            db, scope=PlatformScope(), query=GetPaymentIntentV1(intent.reference)
+        )
+
+
+@pytest.mark.parametrize(
+    "changes,error",
+    [
+        ({"minor_units": None}, "UnresolvedMoneyPrecision"),
+        (
+            {"requested_amount": Decimal("123.456"), "minor_units": 2},
+            "UnresolvedMoneyPrecision",
+        ),
+        ({"currency_code": "ngn"}, "Conflict"),
+    ],
+)
+def test_intent_lookup_refuses_corrupt_persisted_money(db, changes, error):
+    from dotmac_payments import (
+        GetPaymentIntentV1,
+        UnresolvedMoneyPrecision,
+        get_payment_intent_v1,
+    )
+
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    db.execute(
+        models.PaymentIntent.__table__.update()
+        .where(models.PaymentIntent.id == intent.id)
+        .values(**changes)
+    )
+    expected_error = {
+        "UnresolvedMoneyPrecision": UnresolvedMoneyPrecision,
+        "Conflict": Conflict,
+    }[error]
+    with pytest.raises(expected_error):
+        get_payment_intent_v1(
+            db, scope=scope, query=GetPaymentIntentV1(intent.reference)
+        )
