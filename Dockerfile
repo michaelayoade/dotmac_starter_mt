@@ -38,7 +38,21 @@ COPY packages/dotmac-kernel/src/dotmac_kernel/static ./packages/dotmac-kernel/sr
 COPY packages/dotmac-kernel/src/dotmac_kernel/templates ./packages/dotmac-kernel/src/dotmac_kernel/templates
 RUN npm run css:build
 
-FROM python:3.12-slim
+# Rust exists only in the dependency build stage. Keep its Debian release
+# aligned with Python so the resulting extension uses the final image's libc.
+FROM rust:1.90.0-slim-bookworm AS rust-toolchain
+
+FROM python:3.12-slim-bookworm AS dependency-builder
+
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    RUSTUP_TOOLCHAIN=1.90.0 \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG APP_PORT=8000
 
@@ -66,6 +80,18 @@ RUN python scripts/check_poetry_toolchain.py --bootstrap poetry-requirements.txt
 # dependency cache still keys on pyproject/lock.
 COPY packages ./packages
 RUN poetry install --only main --no-root --no-interaction
+
+# The final image receives installed dependencies and editable module sources,
+# never cargo, rustc, gcc or the build-stage OS packages.
+FROM python:3.12-slim-bookworm
+ARG APP_PORT=8000
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    APP_PORT=${APP_PORT}
+WORKDIR /srv/app
+COPY --from=dependency-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=dependency-builder /usr/local/bin /usr/local/bin
+COPY --from=dependency-builder /srv/app/packages ./packages
 
 COPY app ./app
 COPY alembic ./alembic

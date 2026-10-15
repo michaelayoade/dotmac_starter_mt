@@ -1,5 +1,12 @@
 # dotmac-imports changelog
 
+## 0.2.0a1 — unreleased
+
+- Replace domain computation with a private batched Rust extension behind the existing Python API.
+- Ship a platform-specific CPython wheel and a complete locked native source archive.
+- Keep authorization, persistence, transactions and audit with their existing Python owners.
+
+
 ## 0.1.0a2 — 2026-08-13
 
 Declares the database EFFECTS this lineage needs instead of naming a foreign

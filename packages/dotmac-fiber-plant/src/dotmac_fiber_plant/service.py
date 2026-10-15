@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -10,6 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_fiber_plant._native import continuity
 from dotmac_fiber_plant.contracts import (
     AcceptChange,
     ApproveChange,
@@ -504,45 +504,23 @@ def resolve_continuity(
     targets = {
         row.strand_id for row in terminations if row.endpoint_ref == query.to_ref
     }
-    graph: dict[UUID, list[tuple[UUID, UUID]]] = {}
-    for splice in splices:
-        graph.setdefault(splice.left_strand_id, []).append(
-            (splice.right_strand_id, splice.id)
-        )
-        graph.setdefault(splice.right_strand_id, []).append(
-            (splice.left_strand_id, splice.id)
-        )
-    queue: deque[tuple[UUID, tuple[UUID, ...], tuple[UUID, ...]]] = deque(
-        (strand, (strand,), ()) for strand in starts
+    strand_ids, splice_ids = continuity(
+        [
+            (str(row.left_strand_id), str(row.right_strand_id), str(row.id))
+            for row in splices
+        ],
+        [str(value) for value in starts],
+        [str(value) for value in targets],
     )
-    visited = set(starts)
-    while queue:
-        strand, strand_ids, splice_ids = queue.popleft()
-        if strand in targets:
-            return ContinuityPath(
-                tenant_id=tenant_id,
-                from_ref=query.from_ref,
-                to_ref=query.to_ref,
-                strand_ids=strand_ids,
-                splice_ids=splice_ids,
-                continuous=True,
-                reason_code=None,
-                as_of=query.as_of or datetime.now(UTC),
-            )
-        for next_strand, splice_id in graph.get(strand, []):
-            if next_strand not in visited:
-                visited.add(next_strand)
-                queue.append(
-                    (next_strand, (*strand_ids, next_strand), (*splice_ids, splice_id))
-                )
+    continuous = bool(strand_ids)
     return ContinuityPath(
         tenant_id=tenant_id,
         from_ref=query.from_ref,
         to_ref=query.to_ref,
-        strand_ids=(),
-        splice_ids=(),
-        continuous=False,
-        reason_code="no-continuous-path",
+        strand_ids=tuple(UUID(value) for value in strand_ids),
+        splice_ids=tuple(UUID(value) for value in splice_ids),
+        continuous=continuous,
+        reason_code=None if continuous else "no-continuous-path",
         as_of=query.as_of or datetime.now(UTC),
     )
 

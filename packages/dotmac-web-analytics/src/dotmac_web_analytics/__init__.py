@@ -77,7 +77,7 @@ from dotmac_web_analytics.service import (
     register_stream,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.2.0a1"
 
 __all__ = [
     "CORE_EVENT_DECLARATIONS",

@@ -1,5 +1,50 @@
 # Architecture
 
+## Native domain computation candidates (2026-10-15)
+
+The Rust implementation branch introduces private `_native` extensions owned by
+Imports, Web Analytics, Network Topology, Fiber Plant, Media Observations and
+Positioning. Each extension ships inside its existing independently versioned
+domain distribution; there is no new shared database or generic domain service.
+These are `0.2.0a1` source candidates pending hosted qualification and release,
+not published artifacts or product adoption claims.
+
+| Computation | Native owner | Python authority retained |
+| --- | --- | --- |
+| Bounded CSV row whitespace/shape normalization | `dotmac_imports._native` | Standard-library CSV grammar, encoding, headings, field declarations, source verification, durable partitions, row ledger and domain application |
+| Shared visitor ordering, sessions, dimension counts and funnels | `dotmac_web_analytics._native` | Event declarations, privacy admission, timezone buckets, fingerprints, generation records and persistence |
+| Batched exact-integer shortest paths | `dotmac_network_topology._native` | Tenant-selected active link snapshot, path policy, stored reachability and outbox |
+| Deterministic continuity BFS | `dotmac_fiber_plant._native` | Tenant-selected terminations/splices, endpoint selection and evidence |
+| Linear functional-hierarchy cycle detection | `dotmac_media_observations._native` | Provider-neutral fact selection, active scopes, lifecycle projection and persistence |
+| Batched circle/polygon membership | `dotmac_positioning._native` | Explicit product-selected fence ids, shape validation, current-observation admission and locked entry/exit state |
+
+Native calls receive owned primitive snapshots and detach from the Python
+interpreter during computation. They open no sessions, hold no tenant cache,
+read no credentials and emit no business effects. The Python runtime uses the
+native result directly; there is no silent Python algorithm fallback. Timezone
+and exact Decimal authority are not moved into an approximate native type.
+
+`scripts/native-build.toml` owns the compiler/binding/build-tool pins.
+`scripts/sync_native_builds.py` renders identical standalone Poetry hooks into
+each native package. An extracted source archive carries that hook and all
+locked Cargo inputs; it needs no checkout helper. Poetry retains distribution
+metadata authority and emits an accurately tagged platform/interpreter wheel.
+The intermediate Maturin wheel is a build input, never a separately published
+distribution. The hook accepts only the owning extension and refuses unrelated
+libraries or runtime dependencies.
+
+Hosted native qualification is a dependency of image construction. It verifies
+the generated inputs, builds and installs retained wheels, reconstructs wheels
+from extracted source archives, exercises the owning module suites, and records
+artifact hashes. The runtime image preserves Python console entrypoints and
+compiled modules while excluding the Rust compiler/toolchain. The existing
+release facilities retain all publication, registry read-back and trust authority.
+
+Source qualification and remaining implementation scope are recorded in
+[`inventories/rust-computation-sources.md`](inventories/rust-computation-sources.md).
+Financial batch calculations and survey/form bulk processing remain subsequent
+goal work; their runtime has not been ported by these six candidates.
+
 This expands the `CLAUDE.md` summary. See `docs/adr/0001-multi-tenant-architecture.md`
 for the founding tenancy design and `docs/adr/0002-starter-consolidation.md`
 for how this repo came to be the org's one starter. ADR-0003 defines the

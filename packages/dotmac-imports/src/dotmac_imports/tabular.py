@@ -14,6 +14,7 @@ import csv
 import io
 from collections.abc import Iterator, Mapping, Sequence
 
+from dotmac_imports import _native
 from dotmac_imports.contracts import (
     DEFAULT_MAX_ROWS,
     ColumnMapping,
@@ -29,6 +30,11 @@ from dotmac_imports.contracts import (
 # How many decoded rows a preview shows an operator. Enough to see that a
 # mapping is right, small enough that a preview never becomes an import.
 PREVIEW_ROWS: int = 5
+
+# Native transformations receive bounded partitions, not a second full-file
+# tree of raw rows. The public legacy decoder still returns its documented
+# bounded tuple; the large-import owner streams durable source partitions.
+_NATIVE_BATCH_ROWS: int = 200
 
 # Excel and Numbers write a UTF-8 BOM into exported CSV, which lands on the
 # first heading and silently makes it a column nothing matches. `utf-8-sig`
@@ -100,26 +106,36 @@ def decode_csv(
 
     rows: list[dict[str, str]] = []
     try:
-        for values in reader:
-            if len(values) > len(columns):
-                raise MalformedSource(
-                    f"row {reader.line_num} has {len(values)} cells for "
-                    f"{len(columns)} headings — extra cells cannot be "
-                    "silently discarded"
+        finished = False
+        while not finished:
+            batch: list[tuple[int, list[str]]] = []
+            parse_error: csv.Error | None = None
+            for _ in range(min(_NATIVE_BATCH_ROWS, max_rows - len(rows) + 1)):
+                try:
+                    values = next(reader)
+                except StopIteration:
+                    finished = True
+                    break
+                except csv.Error as exc:
+                    # Validate already decoded rows before reporting a later
+                    # parse refusal: the legacy contract reports the FIRST bad
+                    # row, even when a native batch reads ahead.
+                    parse_error = exc
+                    break
+                batch.append((reader.line_num, values))
+            try:
+                normalized = _native.normalize_rows(
+                    list(columns), batch, min(max_rows - len(rows), len(batch))
                 )
-            if not any(value.strip() for value in values):
-                continue
-            if len(rows) >= max_rows:
-                raise MalformedSource(
-                    f"source exceeds the {max_rows}-row ceiling for one run"
-                )
-            rows.append(
-                {
-                    column: (values[index].strip() if index < len(values) else "")
-                    for index, column in enumerate(columns)
-                    if column
-                }
-            )
+            except ValueError as exc:
+                if str(exc) == "row limit exceeded":
+                    raise MalformedSource(
+                        f"source exceeds the {max_rows}-row ceiling for one run"
+                    ) from None
+                raise MalformedSource(str(exc)) from None
+            rows.extend(dict(row) for row in normalized)
+            if parse_error is not None:
+                raise parse_error
     except csv.Error as exc:
         raise MalformedSource(f"cannot read source as CSV: {exc}") from exc
     return columns, tuple(rows)

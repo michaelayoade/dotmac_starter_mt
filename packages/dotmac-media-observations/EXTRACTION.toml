@@ -22,6 +22,7 @@ source_revisions = [
   "dotmac_starter_mt:c6ef6cd7b13105bd95c3faf354ffee9032077625",
 ]
 source_paths = [
+  "dotmac_starter_mt:packages/dotmac-media-observations/native",
   "dotmac_mkt:app/models/ad_campaign.py",
   "dotmac_mkt:app/models/channel_metric.py",
   "dotmac_mkt:app/services/ad_sync_service.py",
@@ -37,6 +38,7 @@ source_paths = [
   "dotmac_starter_mt:packages/dotmac-integration/src/dotmac_integration/capability_registry.py",
 ]
 preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_media_observations_native.py",
   "dotmac_mkt:tests/test_ad_sync_service.py",
   "dotmac_mkt:tests/test_analytics_daily_totals.py",
   "dotmac_mkt:tests/test_analytics_sync.py",
@@ -50,6 +52,7 @@ contract_consumers = []
 candidate_consumers = ["dotmac-erp", "dotmac_sub"]
 authority_boundary = "ADR-0034. The module owns only provider-neutral immutable aggregate external-media observations and rebuildable projections. Integrator and connector plugins own every provider transport concern. Sub owns immutable Lead origin and the customer lifecycle. CRM's Lead/ROI writers are negative evidence, not behavior to port. Provider conversion claims remain provider_reported and never become official acquisition, customer identity or authoritative revenue."
 inventory_evidence = [
+  "docs/inventories/rust-computation-sources.md",
   "docs/inventories/media-observations-sources.md",
   "docs/inventories/module-extraction-sources.md",
 ]

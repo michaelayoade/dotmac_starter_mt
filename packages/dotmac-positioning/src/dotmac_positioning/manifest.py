@@ -10,7 +10,7 @@ from dotmac_positioning.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="positioning",
-    version="0.1.0a1",
+    version="0.2.0a1",
     core=False,
     short_code="pos",
     migration_prefix="po",

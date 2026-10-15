@@ -1113,7 +1113,7 @@ url = "packages/dotmac-expenses"
 
 [[package]]
 name = "dotmac-fiber-plant"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant outside-plant structure, strand, splice, termination and continuity owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1221,7 +1221,7 @@ url = "packages/dotmac-fx-policy"
 
 [[package]]
 name = "dotmac-imports"
-version = "0.1.0a2"
+version = "0.2.0a1"
 description = "DotMac bulk-import run ledger, dry-run/apply promotion and column mapping"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1375,7 +1375,7 @@ url = "packages/dotmac-licensing"
 
 [[package]]
 name = "dotmac-media-observations"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Provider-neutral immutable external media observations and rebuildable projections"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1483,7 +1483,7 @@ url = "packages/dotmac-network-observability"
 
 [[package]]
 name = "dotmac-network-topology"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant declared/observed link, path, reachability and topology-projection owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1663,7 +1663,7 @@ url = "packages/dotmac-pon-access"
 
 [[package]]
 name = "dotmac-positioning"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2179,7 +2179,7 @@ url = "packages/dotmac-usage-rating"
 
 [[package]]
 name = "dotmac-web-analytics"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Privacy-first first-party website observations and deterministic analytical projections"
 optional = false
 python-versions = ">=3.11,<3.14"

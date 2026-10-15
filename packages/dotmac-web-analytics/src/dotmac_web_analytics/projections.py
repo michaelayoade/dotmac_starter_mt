@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections import defaultdict
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -13,6 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from dotmac_web_analytics import _native
 from dotmac_web_analytics.contracts import (
     AggregateMetricQuery,
     AggregateMetricRow,
@@ -166,81 +165,53 @@ def _included(
     )
 
 
-def _sessionize(
-    observations: tuple[EventObservation, ...], command: RebuildProjectionsCommand
+def _session_rows(
+    observations: tuple[EventObservation, ...],
+    groups: list[list[int]],
+    command: RebuildProjectionsCommand,
 ) -> tuple[list[SessionProjectionRow], list[SessionEventLink]]:
-    by_visitor: dict[str, list[EventObservation]] = defaultdict(list)
-    for observation in observations:
-        by_visitor[observation.visitor_digest].append(observation)
     sessions: list[SessionProjectionRow] = []
     links: list[SessionEventLink] = []
-    timeout = command.session_rule.inactivity_seconds
-    for visitor_digest in sorted(by_visitor):
-        ordered = sorted(
-            by_visitor[visitor_digest],
-            key=lambda row: (row.occurred_at, row.received_at, str(row.id)),
+    for indices in groups:
+        group = [observations[index] for index in indices]
+        visitor_digest = group[0].visitor_digest
+        key = _hash(
+            (
+                "web-session-v1",
+                str(command.property_id),
+                visitor_digest,
+                command.session_rule.code,
+                command.session_rule.version,
+                str(group[0].id),
+            )
         )
-        groups: list[list[EventObservation]] = []
-        for observation in ordered:
-            if not groups:
-                groups.append([observation])
-                continue
-            delta = (
-                observation.occurred_at - groups[-1][-1].occurred_at
-            ).total_seconds()
-            if delta <= timeout:
-                groups[-1].append(observation)
-            else:
-                groups.append([observation])
-        for group in groups:
-            key = _hash(
-                (
-                    "web-session-v1",
-                    str(command.property_id),
-                    visitor_digest,
-                    command.session_rule.code,
-                    command.session_rule.version,
-                    str(group[0].id),
-                )
+        sessions.append(
+            SessionProjectionRow(
+                tenant_id=command.tenant_id,
+                generation_id=UUID(int=0),
+                property_id=command.property_id,
+                session_key=key,
+                visitor_digest=visitor_digest,
+                rule_code=command.session_rule.code,
+                rule_version=command.session_rule.version,
+                started_at=group[0].occurred_at,
+                ended_at=group[-1].occurred_at,
+                event_count=len(group),
             )
-            sessions.append(
-                SessionProjectionRow(
-                    tenant_id=command.tenant_id,
-                    generation_id=UUID(int=0),
-                    property_id=command.property_id,
-                    session_key=key,
-                    visitor_digest=visitor_digest,
-                    rule_code=command.session_rule.code,
-                    rule_version=command.session_rule.version,
-                    started_at=group[0].occurred_at,
-                    ended_at=group[-1].occurred_at,
-                    event_count=len(group),
-                )
+        )
+        links.extend(
+            SessionEventLink(
+                tenant_id=command.tenant_id,
+                generation_id=UUID(int=0),
+                property_id=command.property_id,
+                observation_id=observation.id,
+                session_key=key,
             )
-            links.extend(
-                SessionEventLink(
-                    tenant_id=command.tenant_id,
-                    generation_id=UUID(int=0),
-                    property_id=command.property_id,
-                    observation_id=observation.id,
-                    session_key=key,
-                )
-                for observation in group
-            )
+            for observation in group
+        )
     sessions.sort(key=lambda row: (row.started_at, row.session_key))
     links.sort(key=lambda row: str(row.observation_id))
     return sessions, links
-
-
-def _bucket(value: datetime, timezone_name: str) -> datetime:
-    try:
-        zone = ZoneInfo(timezone_name)
-    except (ValueError, ZoneInfoNotFoundError) as exc:
-        from dotmac_web_analytics.contracts import InvalidContract
-
-        raise InvalidContract(f"unknown IANA timezone {timezone_name!r}") from exc
-    local_day = value.astimezone(zone).date()
-    return datetime.combine(local_day, time.min, tzinfo=zone).astimezone(UTC)
 
 
 def _dimensions(
@@ -258,85 +229,42 @@ def _dimensions(
     )
 
 
-@dataclass
-class _MetricCell:
-    events: int = 0
-    visitors: set[str] = field(default_factory=set)
-    sessions: set[str] = field(default_factory=set)
+def _microseconds(value: datetime) -> int:
+    delta = _as_utc(value) - datetime(1970, 1, 1, tzinfo=UTC)
+    return (delta.days * 86_400 + delta.seconds) * 1_000_000 + delta.microseconds
 
 
-def _aggregates(
-    observations: tuple[EventObservation, ...],
-    links: list[SessionEventLink],
-    command: RebuildProjectionsCommand,
-) -> list[AggregateMetric]:
-    session_by_event = {link.observation_id: link.session_key for link in links}
-    values: dict[tuple[datetime, MetricDimension, str], _MetricCell] = {}
+def _native_snapshot(
+    observations: tuple[EventObservation, ...], timezone_name: str
+) -> tuple[list[_native.Event], dict[int, datetime]]:
+    try:
+        zone = ZoneInfo(timezone_name)
+    except (ValueError, ZoneInfoNotFoundError) as exc:
+        from dotmac_web_analytics.contracts import InvalidContract
+
+        raise InvalidContract(f"unknown IANA timezone {timezone_name!r}") from exc
+    buckets: dict[int, datetime] = {}
+    events: list[_native.Event] = []
     for observation in observations:
-        bucket = _bucket(observation.occurred_at, command.timezone_name)
-        for dimension, dimension_key in _dimensions(observation):
-            cell = values.setdefault(
-                (bucket, dimension, dimension_key),
-                _MetricCell(),
-            )
-            cell.events += 1
-            cell.visitors.add(observation.visitor_digest)
-            cell.sessions.add(session_by_event[observation.id])
-    rows: list[AggregateMetric] = []
-    for (bucket, dimension, key), cell in sorted(
-        values.items(), key=lambda item: (item[0][0], item[0][1], item[0][2])
-    ):
-        rows.append(
-            AggregateMetric(
-                tenant_id=command.tenant_id,
-                generation_id=UUID(int=0),
-                property_id=command.property_id,
-                bucket_start=bucket,
-                dimension=str(dimension),
-                dimension_key=key,
-                event_count=cell.events,
-                visitor_count=len(cell.visitors),
-                session_count=len(cell.sessions),
+        occurred = _as_utc(observation.occurred_at)
+        local_day = occurred.astimezone(zone).date()
+        bucket = datetime.combine(local_day, time.min, tzinfo=zone).astimezone(UTC)
+        bucket_us = _microseconds(bucket)
+        buckets[bucket_us] = bucket
+        events.append(
+            (
+                observation.visitor_digest,
+                _microseconds(occurred),
+                _microseconds(observation.received_at),
+                str(observation.id),
+                observation.event_code,
+                observation.event_schema_version,
+                observation.pseudonym_key_version,
+                bucket_us,
+                [(str(dimension), key) for dimension, key in _dimensions(observation)],
             )
         )
-    return rows
-
-
-def _funnel_counts(
-    observations: tuple[EventObservation, ...], funnel: FunnelDefinition
-) -> tuple[int, tuple[int, ...]]:
-    by_visitor: dict[str, list[EventObservation]] = defaultdict(list)
-    for observation in observations:
-        by_visitor[observation.visitor_digest].append(observation)
-    completed = [0 for _ in funnel.steps]
-    entrants = 0
-    for rows in by_visitor.values():
-        ordered = sorted(
-            rows, key=lambda row: (row.occurred_at, row.received_at, str(row.id))
-        )
-        first_at: datetime | None = None
-        cursor = 0
-        for observation in ordered:
-            step = funnel.steps[cursor]
-            if (
-                observation.event_code != step.event_code
-                or observation.event_schema_version != step.event_schema_version
-            ):
-                continue
-            if cursor == 0:
-                first_at = observation.occurred_at
-                entrants += 1
-            elif (
-                first_at is None
-                or (observation.occurred_at - first_at).total_seconds()
-                > funnel.within_seconds
-            ):
-                break
-            completed[cursor] += 1
-            cursor += 1
-            if cursor == len(funnel.steps):
-                break
-    return entrants, tuple(completed)
+    return events, buckets
 
 
 def _projection_document(
@@ -438,25 +366,52 @@ def rebuild_projections(
     included = _included(observations, classifications)
     authoritative = _authoritative_digest(observations, classifications)
 
-    by_visitor: dict[str, list[EventObservation]] = defaultdict(list)
-    for observation in included:
-        by_visitor[observation.visitor_digest].append(observation)
+    events, buckets = _native_snapshot(included, command.timezone_name)
+    visitor_values, session_groups, metric_values, funnel_values = (
+        _native.project_batch(
+            events=events,
+            inactivity_seconds=command.session_rule.inactivity_seconds,
+            funnels=[
+                (
+                    funnel.within_seconds,
+                    [
+                        (step.event_code, step.event_schema_version)
+                        for step in funnel.steps
+                    ],
+                )
+                for funnel in funnels
+            ],
+        )
+    )
     visitors = [
         VisitorProjectionRow(
             tenant_id=command.tenant_id,
             generation_id=UUID(int=0),
             property_id=command.property_id,
             visitor_digest=digest,
-            pseudonym_key_version=max(row.pseudonym_key_version for row in rows),
-            first_seen_at=min(row.occurred_at for row in rows),
-            last_seen_at=max(row.occurred_at for row in rows),
+            pseudonym_key_version=key_version,
+            first_seen_at=included[first].occurred_at,
+            last_seen_at=included[last].occurred_at,
         )
-        for digest, rows in sorted(by_visitor.items())
+        for digest, key_version, first, last in visitor_values
     ]
-    sessions, links = _sessionize(included, command)
-    metrics = _aggregates(included, links, command)
+    sessions, links = _session_rows(included, session_groups, command)
+    metrics = [
+        AggregateMetric(
+            tenant_id=command.tenant_id,
+            generation_id=UUID(int=0),
+            property_id=command.property_id,
+            bucket_start=buckets[bucket],
+            dimension=dimension,
+            dimension_key=key,
+            event_count=event_count,
+            visitor_count=visitor_count,
+            session_count=session_count,
+        )
+        for bucket, dimension, key, event_count, visitor_count, session_count in metric_values
+    ]
     funnel_rows: list[FunnelResultRow] = []
-    for funnel in funnels:
+    for funnel, (entrants, completed) in zip(funnels, funnel_values, strict=True):
         for step in funnel.steps:
             registry.require(step.event_code, step.event_schema_version)
         existing = db.scalar(
@@ -488,7 +443,6 @@ def rebuild_projections(
             raise InvalidContract(
                 f"funnel {funnel.code!r} v{funnel.version} was redefined"
             )
-        entrants, completed = _funnel_counts(included, funnel)
         funnel_rows.append(
             FunnelResultRow(
                 tenant_id=command.tenant_id,
