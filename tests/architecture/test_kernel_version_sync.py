@@ -429,6 +429,11 @@ STATELESS_CAPABILITY_FLOORS: dict[str, str] = {
     # release. The latest capability floor is therefore a103, with no fake DB
     # namespace for this stateless module.
     "dotmac-document-rendering": "0.1.0a103",
+    # The engine consumes no kernel capability beyond registering a stateless
+    # ModuleManifest, which a88 already supports (the dotmac-document-rendering
+    # a1 floor). Sub pins a98, so adopting the engine never raises Sub's kernel
+    # pin. ADR-0074.
+    "dotmac-config-layers": "0.1.0a88",
 }
 
 

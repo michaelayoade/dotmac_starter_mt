@@ -757,6 +757,58 @@
         ]
       }
     },
+    "dotmac-config-layers": {
+      "$comment": [
+        "Generic layered-configuration composition engine (ADR-0074).",
+        "Stateless: db_schema null is an asserted release shape, exactly as for",
+        "dotmac-document-rendering. The engine imports only the standard library,",
+        "pydantic and itself; the manifest alone imports the kernel.",
+        "",
+        "kernel_floor a88 is the first kernel that registers a stateless manifest",
+        "(the dotmac-document-rendering a1 floor); the package consumes no later",
+        "kernel capability, and Sub pins a98, so adoption does not raise Sub's",
+        "kernel pin.",
+        "",
+        "Intended adopter: dotmac_sub. This row does not claim adoption, move",
+        "authority or retire a writer. Publication is a release-captain action",
+        "in a gap between billing releases, before dotmac-routeros-config."
+      ],
+      "package_dir": "packages/dotmac-config-layers",
+      "import_name": "dotmac_config_layers",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a88",
+      "db_schema": null,
+      "tag_prefix": "dotmac-config-layers-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_config_layers/__init__.py",
+          "dotmac_config_layers/compose.py",
+          "dotmac_config_layers/derive.py",
+          "dotmac_config_layers/document.py",
+          "dotmac_config_layers/drift.py",
+          "dotmac_config_layers/evaluate.py",
+          "dotmac_config_layers/exceptions.py",
+          "dotmac_config_layers/fields.py",
+          "dotmac_config_layers/layers.py",
+          "dotmac_config_layers/manifest.py",
+          "dotmac_config_layers/merge.py",
+          "dotmac_config_layers/plugin.py",
+          "dotmac_config_layers/py.typed",
+          "dotmac_config_layers/widening.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "pydantic",
+          "python"
+        ]
+      }
+    },
     "dotmac-content": {
       "$comment": [
         "Tenant editorial plans and immutable ContentSnapshotV1 values.",

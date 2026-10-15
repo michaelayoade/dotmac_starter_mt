@@ -776,6 +776,24 @@ type = "directory"
 url = "packages/dotmac-compliance-reporting"
 
 [[package]]
+name = "dotmac-config-layers"
+version = "0.1.0a1"
+description = "Generic layered configuration composition: weighted layers, deterministic merge, provenance, conflicts and dated exceptions"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+pydantic = ">=2.7.4,<3.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-config-layers"
+
+[[package]]
 name = "dotmac-connector-flutterwave"
 version = "0.1.0a3"
 description = "Flutterwave API v4 settlement ingress and reconciliation connector"
@@ -4427,4 +4445,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "3c247eb4835121dfb777357c8a37cc1506a69fdb2235292067f64617b490fb14"
+content-hash = "f3e5903d1f728ffee0f0b9753e89facafdb0832f7f3c3e471635d80dab26875c"
