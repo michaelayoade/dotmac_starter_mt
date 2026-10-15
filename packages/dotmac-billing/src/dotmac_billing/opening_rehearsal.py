@@ -6,12 +6,15 @@ verifier, cash qualification, import, seal or activation authority.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from dataclasses import fields
 from decimal import Decimal, DecimalException, localcontext
 from itertools import pairwise
 from typing import Literal
 from uuid import UUID
 
+from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.money import Currency, Money, MoneyError
 
@@ -19,6 +22,10 @@ from dotmac_billing._opening_values import cash_decimal_context, minor_units_of
 from dotmac_billing.opening_contracts import OpeningBlockerV1, OpeningEvidenceError
 from dotmac_billing.opening_receivable_validation import opening_manifest_fingerprint_v2
 from dotmac_billing.opening_rehearsal_contracts import (
+    OpeningRehearsalAssemblyV1,
+    OpeningRehearsalCensusBlockerV1,
+    OpeningRehearsalCensusCountV1,
+    OpeningRehearsalCensusV1,
     OpeningRehearsalComparisonV1,
     OpeningRehearsalDeltaV1,
     OpeningRehearsalReportV1,
@@ -26,7 +33,15 @@ from dotmac_billing.opening_rehearsal_contracts import (
 )
 from dotmac_billing.opening_validation import _payload
 
-__all__ = ["report_opening_rehearsal", "compare_opening_rehearsals"]
+__all__ = [
+    "report_opening_rehearsal",
+    "compare_opening_rehearsals",
+    "opening_rehearsal_assembly_digest",
+    "opening_rehearsal_assembly_wire",
+    "opening_rehearsal_census_wire",
+    "render_opening_rehearsal_census",
+    "render_opening_rehearsal_refusal",
+]
 
 _CASH_TABLES = frozenset(
     {
@@ -691,3 +706,186 @@ def compare_opening_rehearsals(
         blockers,
         digests,
     )
+
+
+def opening_rehearsal_assembly_wire(
+    assembly: OpeningRehearsalAssemblyV1,
+) -> dict[str, object]:
+    """The one JSON shape of an assembly declaration (also the file shape)."""
+    if type(assembly) is not OpeningRehearsalAssemblyV1:
+        raise OpeningEvidenceError("expected OpeningRehearsalAssemblyV1")
+    scope = assembly.scope
+    scope_wire: dict[str, object] = (
+        {"kind": "tenant", "tenant_id": str(scope.tenant_id)}
+        if isinstance(scope, TenantScope)
+        else {"kind": "platform"}
+    )
+    return {
+        "scope": scope_wire,
+        "source_system": assembly.source_system,
+        "recorded_cutoff": assembly.recorded_cutoff.isoformat(),
+        "source_authority_ref": assembly.source_authority_ref,
+        "account_mapping_version": assembly.account_mapping_version,
+        "cash_mapping_version": assembly.cash_mapping_version,
+        "receivable_mapping_version": assembly.receivable_mapping_version,
+        "tax_mapping_version": assembly.tax_mapping_version,
+        "source_resolver_version": assembly.source_resolver_version,
+        "collection_authority": assembly.collection_authority,
+        "collection_mapping_version": assembly.collection_mapping_version,
+        "migration_authority_ref": assembly.migration_authority_ref,
+        "occurred_at": assembly.occurred_at.isoformat(),
+        "starter_head_sha": assembly.starter_head_sha,
+        "sub_exit_code": assembly.sub_exit_code,
+        "binding": {
+            "target_installation_id": str(assembly.binding.target_installation_id),
+            "artifact_identity": assembly.binding.artifact_identity,
+            "policy_identity": assembly.binding.policy_identity,
+        },
+        "partitions": [
+            {
+                "source_account_id": str(row.source_account_id),
+                "source_account_key": row.source_account_key,
+                "account_id": str(row.account_id),
+                "currency": row.currency,
+                "precision": row.precision,
+                "idempotency_key": row.idempotency_key,
+                "target": {
+                    "expected_position_fingerprint": row.expected_position_fingerprint,
+                    "posting_watermark": row.posting_watermark,
+                },
+            }
+            for row in assembly.partitions
+        ],
+        "invoice_mappings": [
+            {
+                "source_invoice_id": str(row.source_invoice_id),
+                "source_identity_kind": row.source_identity.kind,
+                "source_identity_key": row.source_identity.key,
+                "source_invoice_key": row.source_invoice_key,
+            }
+            for row in assembly.invoice_mappings
+        ],
+        "discharge_mappings": [
+            {
+                "settlement_kind": row.settlement_kind,
+                "settlement_id": str(row.settlement_id),
+                "historical_reference": row.historical_reference,
+                "source_id": str(row.source_id),
+            }
+            for row in assembly.discharge_mappings
+        ],
+        "accepted_manual_holds": list(assembly.accepted_manual_holds),
+    }
+
+
+def opening_rehearsal_assembly_digest(assembly: OpeningRehearsalAssemblyV1) -> str:
+    """The single identity of an assembly declaration.
+
+    SHA-256 over the sorted-key, compact JSON of its wire shape, which is the
+    Kernel's `fingerprint_of` encoding and the digest the adapter has always
+    reported for a canonically spelled assembly file. Order of mappings is
+    significant and preserved. Identifies content only.
+    """
+    return fingerprint_of(opening_rehearsal_assembly_wire(assembly))
+
+
+def _blockers_wire(
+    rows: tuple[OpeningRehearsalCensusBlockerV1, ...],
+) -> list[dict[str, object]]:
+    return [
+        {"code": row.code, "count": row.count, "references": list(row.references)}
+        for row in rows
+    ]
+
+
+def _counts_wire(rows: tuple[OpeningRehearsalCensusCountV1, ...]) -> dict[str, int]:
+    return {row.key: row.count for row in rows}
+
+
+def opening_rehearsal_census_wire(
+    census: OpeningRehearsalCensusV1,
+) -> dict[str, object]:
+    if type(census) is not OpeningRehearsalCensusV1:
+        raise OpeningEvidenceError("expected OpeningRehearsalCensusV1")
+    provenance = census.provenance
+    unmapped = census.unmapped
+    sidecar = census.v3_documentary_sidecar
+    rollup = census.rollup
+    return {
+        "schema": census.schema,
+        "provenance": {
+            "sub_source_repository_sha": provenance.sub_source_repository_sha,
+            "starter_head_sha": provenance.starter_head_sha,
+            "population_version": provenance.population_version,
+            "content_fingerprint": provenance.content_fingerprint,
+            "snapshot_id": provenance.snapshot_id,
+            "schema_heads": list(provenance.schema_heads),
+            "captured_at": provenance.captured_at,
+            "sub_exit_code": provenance.sub_exit_code,
+            "assembly_digest": provenance.assembly_digest,
+            "binding_digest": provenance.binding_digest,
+            "report_content_digest": provenance.report_content_digest,
+            "manifest_fingerprint": provenance.manifest_fingerprint,
+        },
+        "partitions": [
+            {
+                "source_account_id": row.source_account_id,
+                "source_account_key": row.source_account_key,
+                "currency": row.currency,
+                "precision": row.precision,
+                "admissible": row.admissible,
+                "cash_residual_minor": row.cash_residual_minor,
+                "receivable_residual_minor": row.receivable_residual_minor,
+                "blockers": _blockers_wire(row.blockers),
+                "deltas": [
+                    {
+                        "lane": delta.lane,
+                        "source_minor": delta.source_minor,
+                        "preview_minor": delta.preview_minor,
+                        "unclassified_delta_minor": delta.unclassified_delta_minor,
+                    }
+                    for delta in row.deltas
+                ],
+            }
+            for row in census.partitions
+        ],
+        "report_blockers": _blockers_wire(census.report_blockers),
+        "adapter_blockers": _blockers_wire(census.adapter_blockers),
+        "unmapped": {
+            "accounts": list(unmapped.accounts),
+            "invoices": list(unmapped.invoices),
+            "settlements": list(unmapped.settlements),
+        },
+        "v3_documentary_sidecar": {
+            "unavailable_count": sidecar.unavailable_count,
+            "by_requirement": _counts_wire(sidecar.by_requirement),
+            "by_reason": _counts_wire(sidecar.by_reason),
+            "invoice_ids": list(sidecar.invoice_ids),
+        },
+        "dropped_source_fields": list(census.dropped_source_fields),
+        "rollup": {
+            "partitions_total": rollup.partitions_total,
+            "partitions_admissible": rollup.partitions_admissible,
+            "complete_exact_reconciliation": rollup.complete_exact_reconciliation,
+            "blocked_by_reason": _counts_wire(rollup.blocked_by_reason),
+            "accepted_manual_holds": list(rollup.accepted_manual_holds),
+            "unmapped_counts": {
+                "accounts": len(unmapped.accounts),
+                "invoices": len(unmapped.invoices),
+                "settlements": len(unmapped.settlements),
+            },
+        },
+    }
+
+
+def render_opening_rehearsal_census(census: OpeningRehearsalCensusV1) -> str:
+    """The one canonical rendering: sorted keys, indent 2, finite, newline-ended."""
+    wire: Mapping[str, object] = opening_rehearsal_census_wire(census)
+    return json.dumps(wire, sort_keys=True, indent=2, allow_nan=False) + "\n"
+
+
+def render_opening_rehearsal_refusal(code: str) -> str:
+    """The value-free one-line refusal; only a sanitised code is ever shown."""
+    if type(code) is not str or not code.strip():
+        raise OpeningEvidenceError("a refusal needs a non-empty code")
+    return json.dumps({"complete": False, "error": code}, sort_keys=True)

@@ -162,6 +162,9 @@ from dotmac_billing.opening_receivable_validation import (
 )
 from dotmac_billing.opening_rehearsal import (
     compare_opening_rehearsals,
+    opening_rehearsal_assembly_digest,
+    render_opening_rehearsal_census,
+    render_opening_rehearsal_refusal,
     report_opening_rehearsal,
 )
 from dotmac_billing.opening_rehearsal_contracts import (
@@ -171,7 +174,9 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningObservedPopulationV1,
     OpeningObservedPrecisionV1,
     OpeningObservedSettlementV1,
+    OpeningRehearsalAssemblyV1,
     OpeningRehearsalBindingV1,
+    OpeningRehearsalCensusV1,
     OpeningRehearsalComparisonV1,
     OpeningRehearsalDeltaV1,
     OpeningRehearsalDischargeMappingV1,
@@ -248,6 +253,11 @@ __all__ = [
     "OpeningRehearsalRunV1",
     "OpeningSubObservationV2",
     "compare_opening_rehearsals",
+    "opening_rehearsal_assembly_digest",
+    "render_opening_rehearsal_census",
+    "render_opening_rehearsal_refusal",
+    "OpeningRehearsalAssemblyV1",
+    "OpeningRehearsalCensusV1",
     "report_opening_rehearsal",
     "OpeningCollectionEvidenceV1",
     "OpeningOriginalDocumentV1",

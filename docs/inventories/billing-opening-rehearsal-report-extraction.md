@@ -84,3 +84,32 @@ for the record. Earlier supersession: if an `OpeningSubObservationV3` replaces
 the V2 projection, delete the v3-sidecar path in the same change. Deletion
 removes only `scripts/billing_opening_rehearsal_adapter.py` and its fixtures;
 the `opening_rehearsal*.py` report types remain package-owned.
+
+### Canonical encodings are package-owned — 2026-10-15
+
+The first adapter cut carried four canonicalizing `json.dumps(..., sort_keys=True)`
+calls of its own, which tripped the tooling canonicalizing-population ratchet
+(`SCRIPT_CANONICALIZING_MODULES`). Michael's 2026-10-15 decision (option A) was a
+typed contract owned by one module, not a ratchet entry; the baseline is
+unchanged. `dotmac_billing.opening_rehearsal_contracts` now owns the closed,
+versioned `OpeningRehearsalAssemblyV1` (every field the adapter reads) and
+`OpeningRehearsalCensusV1` (the counted blocker census), and
+`dotmac_billing.opening_rehearsal` owns the only encodings:
+
+- `opening_rehearsal_assembly_digest` is the single definition of an assembly's
+  identity for signing, the adapter and any later verifier: SHA-256 over the
+  sorted-key compact JSON of `opening_rehearsal_assembly_wire`
+  (`dotmac_kernel.fingerprints.fingerprint_of`). It is byte-identical to the
+  digest the adapter reported before, for any assembly spelled canonically (UTC
+  `+00:00` instants, `accepted_manual_holds` present, no undeclared keys); pinned
+  by the existing fixtures' digests and by an independently derived vector.
+  Deliberately different: undeclared extra keys no longer enter the identity, an
+  omitted `accepted_manual_holds` digests as `[]`, and a non-canonical instant
+  spelling digests as its normalised instant.
+- `render_opening_rehearsal_census` renders the census (sorted keys, indent 2,
+  finite, trailing newline) and `render_opening_rehearsal_refusal` renders the
+  two value-free CLI refusal lines. The adapter's stdout and `--out` output is
+  byte-identical to the previous cut for every shipped fixture.
+
+The adapter now holds no canonicalizing call. Digests identify content only;
+they are not approval, qualification or activation authority.

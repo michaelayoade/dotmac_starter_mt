@@ -11,7 +11,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from dotmac_billing.opening_rehearsal import report_opening_rehearsal
+from dotmac_billing.opening_rehearsal import (
+    render_opening_rehearsal_census,
+    report_opening_rehearsal,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures" / "opening_rehearsal"
@@ -40,8 +43,13 @@ def _assembly(name="assembly.json"):
     return adapter.load_assembly(_fixture(name))
 
 
-def _census(payload, assembly=None):
+def _typed_census(payload, assembly=None):
     return adapter.rehearsal_census(payload, assembly=assembly or _assembly())
+
+
+def _census(payload, assembly=None):
+    # The package-owned canonical rendering, read back as a plain mapping.
+    return json.loads(render_opening_rehearsal_census(_typed_census(payload, assembly)))
 
 
 def _run(payload, assembly=None):
@@ -452,9 +460,13 @@ def test_same_input_bytes_produce_byte_identical_artifact(tmp_path):
         )
         outputs.append(out_path.read_bytes())
     assert outputs[0] == outputs[1]
-    first = _census(copy.deepcopy(payload))
-    second = _census(copy.deepcopy(payload))
-    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+    first = _typed_census(copy.deepcopy(payload))
+    second = _typed_census(copy.deepcopy(payload))
+    assert first == second
+    assert render_opening_rehearsal_census(first) == render_opening_rehearsal_census(
+        second
+    )
+    assert render_opening_rehearsal_census(first).encode() == outputs[0]
 
 
 def test_adapter_module_purity_ast():
@@ -553,3 +565,59 @@ def test_v3_sidecar_counts_excluded_without_double_counting_eligible():
     assert (
         "documentary_observations.current_invoices" in artifact["dropped_source_fields"]
     )
+
+
+def test_adapter_has_no_canonicalizing_call_of_its_own():
+    """The canonical encodings are package-owned (no tooling ratchet entry)."""
+    tree = ast.parse(ADAPTER_PATH.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+            assert not (
+                name == "dumps" and any(kw.arg == "sort_keys" for kw in node.keywords)
+            )
+            assert name not in {"sha256", "fingerprint_of"}
+
+
+def test_adapter_digest_is_the_package_digest_and_pinned():
+    from dotmac_billing.opening_rehearsal import opening_rehearsal_assembly_digest
+
+    for name, pinned in (
+        (
+            "assembly.json",
+            "712c675aff913691ebe4e3290bb00669aa204034b15554a12f3ff8623e2b7202",
+        ),
+        (
+            "assembly_empty.json",
+            "6720eb418679ab068d9bea851afd05a888adb1e89552a6fcf73c0597d51c7eac",
+        ),
+    ):
+        assert _assembly(name).assembly_digest == pinned
+        assert (
+            _typed_census(
+                _fixture("census_empty_v2.json"), _assembly(name)
+            ).provenance.assembly_digest
+            == pinned
+        )
+    assert opening_rehearsal_assembly_digest  # the single definition exists
+
+
+def test_assembly_wire_round_trips_through_the_loader_to_the_same_digest():
+    from dotmac_billing.opening_rehearsal import (
+        opening_rehearsal_assembly_digest,
+        opening_rehearsal_assembly_wire,
+    )
+
+    for name in ("assembly.json", "assembly_empty.json"):
+        declared = _fixture(name)
+        loaded = adapter.load_assembly(declared)
+        # The typed declaration re-encodes to exactly the file that produced it.
+        assert opening_rehearsal_assembly_wire(loaded.declaration) == declared
+        assert opening_rehearsal_assembly_digest(loaded.declaration) == (
+            loaded.assembly_digest
+        )
+        again = adapter.load_assembly(
+            opening_rehearsal_assembly_wire(loaded.declaration)
+        )
+        assert again.assembly_digest == loaded.assembly_digest
+        assert again.declaration == loaded.declaration

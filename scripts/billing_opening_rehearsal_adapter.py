@@ -22,7 +22,6 @@ tests only, under ``tests/fixtures/opening_rehearsal/``.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from collections.abc import Mapping, Sequence
@@ -30,6 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Final
 from uuid import UUID
 
 from dotmac_billing.contracts import (
@@ -59,7 +59,12 @@ from dotmac_billing.opening_receivable_validation import (
     opening_manifest_fingerprint_v2,
     preview_opening_account_import_v2,
 )
-from dotmac_billing.opening_rehearsal import report_opening_rehearsal
+from dotmac_billing.opening_rehearsal import (
+    opening_rehearsal_assembly_digest,
+    render_opening_rehearsal_census,
+    render_opening_rehearsal_refusal,
+    report_opening_rehearsal,
+)
 from dotmac_billing.opening_rehearsal_contracts import (
     OpeningObservedControlV1,
     OpeningObservedInvoiceV1,
@@ -67,7 +72,18 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningObservedPopulationV1,
     OpeningObservedPrecisionV1,
     OpeningObservedSettlementV1,
+    OpeningRehearsalAssemblyPartitionV1,
+    OpeningRehearsalAssemblyV1,
     OpeningRehearsalBindingV1,
+    OpeningRehearsalCensusBlockerV1,
+    OpeningRehearsalCensusCountV1,
+    OpeningRehearsalCensusDeltaV1,
+    OpeningRehearsalCensusPartitionV1,
+    OpeningRehearsalCensusProvenanceV1,
+    OpeningRehearsalCensusRollupV1,
+    OpeningRehearsalCensusSidecarV1,
+    OpeningRehearsalCensusUnmappedV1,
+    OpeningRehearsalCensusV1,
     OpeningRehearsalDischargeMappingV1,
     OpeningRehearsalInvoiceMappingV1,
     OpeningRehearsalMappingV1,
@@ -87,7 +103,7 @@ __all__ = [
     "rehearsal_census",
 ]
 
-_ARTIFACT_SCHEMA = "sub-starter-opening-rehearsal-census/v1"
+_ARTIFACT_SCHEMA: Final = "sub-starter-opening-rehearsal-census/v1"
 _POPULATION_VERSIONS = frozenset(
     {"sub-billing-opening-census-v2", "sub-billing-opening-census-v3"}
 )
@@ -178,6 +194,7 @@ class AssemblyInputs:
     starter_head_sha: str
     sub_exit_code: int
     assembly_digest: str
+    declaration: OpeningRehearsalAssemblyV1
     accepted_manual_holds: tuple[str, ...] = ()
     idempotency_keys: tuple[tuple[OpeningPartitionV1, str], ...] = ()
 
@@ -504,6 +521,7 @@ def load_assembly(payload: Mapping[str, object]) -> AssemblyInputs:
     partitions: list[OpeningRehearsalMappingV1] = []
     targets: list[tuple[OpeningPartitionV1, OpeningTargetV1]] = []
     idempotency_keys: list[tuple[OpeningPartitionV1, str]] = []
+    declared: list[OpeningRehearsalAssemblyPartitionV1] = []
     try:
         for row in (
             _mapping(item, code)
@@ -530,7 +548,20 @@ def load_assembly(payload: Mapping[str, object]) -> AssemblyInputs:
                 )
             )
             targets.append((partition, target))
-            idempotency_keys.append((partition, _assembly_text(row, "idempotency_key")))
+            idempotency_key = _assembly_text(row, "idempotency_key")
+            idempotency_keys.append((partition, idempotency_key))
+            declared.append(
+                OpeningRehearsalAssemblyPartitionV1(
+                    _uuid(_field(row, "source_account_id", code), code),
+                    partition.source_account_key,
+                    partition.account_id,
+                    partition.currency,
+                    partition.precision,
+                    idempotency_key,
+                    target.expected_position_fingerprint,
+                    target.posting_watermark,
+                )
+            )
         invoice_mappings = tuple(
             OpeningRehearsalInvoiceMappingV1(
                 _uuid(_field(row, "source_invoice_id", code), code),
@@ -564,35 +595,62 @@ def load_assembly(payload: Mapping[str, object]) -> AssemblyInputs:
         )
     except OpeningEvidenceError:
         raise _malformed(code) from None
-    canonical = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
-    )
+    try:
+        declaration = OpeningRehearsalAssemblyV1(
+            scope=scope,
+            source_system=_assembly_text(root, "source_system"),
+            recorded_cutoff=_instant(_field(root, "recorded_cutoff", code), code),
+            source_authority_ref=_assembly_text(root, "source_authority_ref"),
+            account_mapping_version=_assembly_text(root, "account_mapping_version"),
+            cash_mapping_version=_assembly_text(root, "cash_mapping_version"),
+            receivable_mapping_version=_assembly_text(
+                root, "receivable_mapping_version"
+            ),
+            tax_mapping_version=_assembly_text(root, "tax_mapping_version"),
+            source_resolver_version=_assembly_text(root, "source_resolver_version"),
+            collection_authority=_assembly_text(root, "collection_authority"),
+            collection_mapping_version=_assembly_text(
+                root, "collection_mapping_version"
+            ),
+            migration_authority_ref=_assembly_text(root, "migration_authority_ref"),
+            occurred_at=_instant(_field(root, "occurred_at", code), code),
+            starter_head_sha=_assembly_text(root, "starter_head_sha"),
+            sub_exit_code=_integer(_field(root, "sub_exit_code", code), code),
+            binding=binding,
+            partitions=tuple(declared),
+            invoice_mappings=invoice_mappings,
+            discharge_mappings=discharge_mappings,
+            accepted_manual_holds=tuple(
+                _text(item, code)
+                for item in _sequence(root.get("accepted_manual_holds", []), code)
+            ),
+        )
+    except OpeningEvidenceError:
+        raise _malformed(code) from None
     return AssemblyInputs(
         scope=scope,
-        source_system=_assembly_text(root, "source_system"),
-        recorded_cutoff=_instant(_field(root, "recorded_cutoff", code), code),
-        source_authority_ref=_assembly_text(root, "source_authority_ref"),
-        account_mapping_version=_assembly_text(root, "account_mapping_version"),
-        cash_mapping_version=_assembly_text(root, "cash_mapping_version"),
-        receivable_mapping_version=_assembly_text(root, "receivable_mapping_version"),
-        tax_mapping_version=_assembly_text(root, "tax_mapping_version"),
-        source_resolver_version=_assembly_text(root, "source_resolver_version"),
-        collection_authority=_assembly_text(root, "collection_authority"),
-        collection_mapping_version=_assembly_text(root, "collection_mapping_version"),
-        migration_authority_ref=_assembly_text(root, "migration_authority_ref"),
+        source_system=declaration.source_system,
+        recorded_cutoff=declaration.recorded_cutoff,
+        source_authority_ref=declaration.source_authority_ref,
+        account_mapping_version=declaration.account_mapping_version,
+        cash_mapping_version=declaration.cash_mapping_version,
+        receivable_mapping_version=declaration.receivable_mapping_version,
+        tax_mapping_version=declaration.tax_mapping_version,
+        source_resolver_version=declaration.source_resolver_version,
+        collection_authority=declaration.collection_authority,
+        collection_mapping_version=declaration.collection_mapping_version,
+        migration_authority_ref=declaration.migration_authority_ref,
         binding=binding,
         partitions=tuple(partitions),
         invoice_mappings=invoice_mappings,
         discharge_mappings=discharge_mappings,
         targets=tuple(targets),
-        occurred_at=_instant(_field(root, "occurred_at", code), code),
-        starter_head_sha=_assembly_text(root, "starter_head_sha"),
-        sub_exit_code=_integer(_field(root, "sub_exit_code", code), code),
-        assembly_digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
-        accepted_manual_holds=tuple(
-            _text(item, code)
-            for item in _sequence(root.get("accepted_manual_holds", []), code)
-        ),
+        occurred_at=declaration.occurred_at,
+        starter_head_sha=declaration.starter_head_sha,
+        sub_exit_code=declaration.sub_exit_code,
+        assembly_digest=opening_rehearsal_assembly_digest(declaration),
+        declaration=declaration,
+        accepted_manual_holds=declaration.accepted_manual_holds,
         idempotency_keys=tuple(idempotency_keys),
     )
 
@@ -971,19 +1029,28 @@ def _dropped_source_fields(payload: Mapping[str, object]) -> tuple[str, ...]:
 
 def _grouped_blockers(
     rows: Sequence[tuple[str, Sequence[str]]],
-) -> list[dict[str, object]]:
+) -> tuple[OpeningRehearsalCensusBlockerV1, ...]:
     grouped: dict[str, set[str]] = {}
     for code, references in rows:
         grouped.setdefault(code, set()).update(references)
-    return [
-        {"code": code, "count": len(refs), "references": sorted(refs)}
+    return tuple(
+        OpeningRehearsalCensusBlockerV1(code, len(refs), tuple(sorted(refs)))
         for code, refs in sorted(grouped.items())
-    ]
+    )
+
+
+def _counts(
+    values: Mapping[str, int],
+) -> tuple[OpeningRehearsalCensusCountV1, ...]:
+    return tuple(
+        OpeningRehearsalCensusCountV1(key, count)
+        for key, count in sorted(values.items())
+    )
 
 
 def rehearsal_census(
     payload: Mapping[str, object], *, assembly: AssemblyInputs
-) -> dict[str, object]:
+) -> OpeningRehearsalCensusV1:
     """Run the full census over one Sub document and return the artifact."""
     obs, sidecar = load_sub_observation(payload)
     outcome = _assemble(obs, sidecar, assembly)
@@ -1001,7 +1068,7 @@ def rehearsal_census(
             global_blockers.append((code, (reference,)))
         else:
             scoped_blockers.setdefault(partition_key, []).append((code, (reference,)))
-    partitions: list[dict[str, object]] = []
+    partitions: list[OpeningRehearsalCensusPartitionV1] = []
     for partition in sorted(
         {mapping.partition for mapping in run.mappings},
         key=lambda row: row.source_account_key,
@@ -1016,28 +1083,26 @@ def rehearsal_census(
         rows.extend(scoped_blockers.get(partition.source_account_key, []))
         blockers = _grouped_blockers(rows)
         partitions.append(
-            {
-                "source_account_id": str(source_account_by_partition[partition]),
-                "source_account_key": partition.source_account_key,
-                "currency": partition.currency,
-                "precision": partition.precision,
-                "admissible": bool(preview and preview.admissible) and not blockers,
-                "cash_residual_minor": preview.cash_residual_minor if preview else 0,
-                "receivable_residual_minor": preview.receivable_residual_minor
-                if preview
-                else 0,
-                "blockers": blockers,
-                "deltas": [
-                    {
-                        "lane": delta.lane,
-                        "source_minor": delta.source_minor,
-                        "preview_minor": delta.preview_minor,
-                        "unclassified_delta_minor": delta.unclassified_delta_minor,
-                    }
+            OpeningRehearsalCensusPartitionV1(
+                str(source_account_by_partition[partition]),
+                partition.source_account_key,
+                partition.currency,
+                partition.precision,
+                bool(preview and preview.admissible) and not blockers,
+                preview.cash_residual_minor if preview else 0,
+                preview.receivable_residual_minor if preview else 0,
+                blockers,
+                tuple(
+                    OpeningRehearsalCensusDeltaV1(
+                        delta.lane,
+                        delta.source_minor,
+                        delta.preview_minor,
+                        delta.unclassified_delta_minor,
+                    )
                     for delta in report.deltas
                     if delta.partition == partition
-                ],
-            }
+                ),
+            )
         )
     by_requirement: dict[str, int] = {}
     by_reason: dict[str, int] = {}
@@ -1048,68 +1113,59 @@ def rehearsal_census(
             by_reason[reason] = by_reason.get(reason, 0) + 1
     blocked_by_reason: dict[str, int] = {}
     for entry in partitions:
-        for blocker in entry["blockers"]:  # type: ignore[union-attr]
-            code = str(blocker["code"])  # type: ignore[index]
-            blocked_by_reason[code] = blocked_by_reason.get(code, 0) + 1
-    return {
-        "schema": _ARTIFACT_SCHEMA,
-        "provenance": {
-            "sub_source_repository_sha": obs.source_repository_sha,
-            "starter_head_sha": assembly.starter_head_sha,
-            "population_version": obs.population_version,
-            "content_fingerprint": obs.content_fingerprint,
-            "snapshot_id": obs.snapshot_id,
-            "schema_heads": list(obs.schema_heads),
-            "captured_at": obs.captured_at.isoformat(),
-            "sub_exit_code": assembly.sub_exit_code,
-            "assembly_digest": assembly.assembly_digest,
-            "binding_digest": report.binding_digest,
-            "report_content_digest": report.content_digest,
-            "manifest_fingerprint": opening_manifest_fingerprint_v2(run.manifest),
-        },
-        "partitions": partitions,
-        "report_blockers": _grouped_blockers(
-            [(row.code, row.references) for row in report.blockers]
+        for blocker in entry.blockers:
+            blocked_by_reason[blocker.code] = blocked_by_reason.get(blocker.code, 0) + 1
+    report_blockers = _grouped_blockers(
+        [(row.code, row.references) for row in report.blockers]
+    )
+    unmapped = OpeningRehearsalCensusUnmappedV1(
+        outcome.unmapped["accounts"],
+        outcome.unmapped["invoices"],
+        outcome.unmapped["settlements"],
+    )
+    return OpeningRehearsalCensusV1(
+        schema=_ARTIFACT_SCHEMA,
+        provenance=OpeningRehearsalCensusProvenanceV1(
+            obs.source_repository_sha,
+            assembly.starter_head_sha,
+            obs.population_version,
+            obs.content_fingerprint,
+            obs.snapshot_id,
+            obs.schema_heads,
+            obs.captured_at.isoformat(),
+            assembly.sub_exit_code,
+            assembly.assembly_digest,
+            report.binding_digest,
+            report.content_digest,
+            opening_manifest_fingerprint_v2(run.manifest),
         ),
-        "adapter_blockers": _grouped_blockers(global_blockers),
-        "unmapped": {key: list(values) for key, values in outcome.unmapped.items()},
-        "v3_documentary_sidecar": {
-            "unavailable_count": len(sidecar.unavailable_original_evidence),
-            "by_requirement": by_requirement,
-            "by_reason": by_reason,
-            "invoice_ids": sorted(
-                str(record.invoice_id)
-                for record in sidecar.unavailable_original_evidence
+        partitions=tuple(partitions),
+        report_blockers=report_blockers,
+        adapter_blockers=_grouped_blockers(global_blockers),
+        unmapped=unmapped,
+        v3_documentary_sidecar=OpeningRehearsalCensusSidecarV1(
+            len(sidecar.unavailable_original_evidence),
+            _counts(by_requirement),
+            _counts(by_reason),
+            tuple(
+                sorted(
+                    str(record.invoice_id)
+                    for record in sidecar.unavailable_original_evidence
+                )
             ),
-        },
-        "dropped_source_fields": list(_dropped_source_fields(payload)),
-        "rollup": {
-            "partitions_total": len(partitions),
-            "partitions_admissible": sum(
-                1 for entry in partitions if entry["admissible"]
-            ),
-            "complete_exact_reconciliation": bool(
+        ),
+        dropped_source_fields=_dropped_source_fields(payload),
+        rollup=OpeningRehearsalCensusRollupV1(
+            len(partitions),
+            sum(1 for entry in partitions if entry.admissible),
+            bool(
                 report.complete_exact_reconciliation
                 and not outcome.adapter_blockers
                 and not any(outcome.unmapped.values())
             ),
-            "blocked_by_reason": blocked_by_reason,
-            "accepted_manual_holds": list(assembly.accepted_manual_holds),
-            "unmapped_counts": {
-                key: len(values) for key, values in outcome.unmapped.items()
-            },
-        },
-    }
-
-
-def _artifact_blocked(artifact: Mapping[str, object]) -> bool:
-    if artifact["report_blockers"] or artifact["adapter_blockers"]:
-        return True
-    if any(values for values in _mapping(artifact["unmapped"]).values()):
-        return True
-    return any(
-        _mapping(entry)["blockers"]  # type: ignore[arg-type]
-        for entry in _sequence(artifact["partitions"])
+            _counts(blocked_by_reason),
+            assembly.accepted_manual_holds,
+        ),
     )
 
 
@@ -1145,19 +1201,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         assembly = load_assembly(_read_json(Path(args.assembly)))
         artifact = rehearsal_census(census_payload, assembly=assembly)
     except AdapterInputError as exc:
-        print(json.dumps({"complete": False, "error": exc.code}, sort_keys=True))
+        print(render_opening_rehearsal_refusal(exc.code))
         return 2
     except OpeningEvidenceError:
-        print(
-            json.dumps({"complete": False, "error": "malformed_input"}, sort_keys=True)
-        )
+        print(render_opening_rehearsal_refusal("malformed_input"))
         return 2
-    rendered = json.dumps(artifact, sort_keys=True, indent=2, allow_nan=False) + "\n"
+    rendered = render_opening_rehearsal_census(artifact)
     if args.out:
         Path(args.out).write_text(rendered, encoding="utf-8")
     else:
         sys.stdout.write(rendered)
-    return 1 if _artifact_blocked(artifact) else 0
+    return 1 if artifact.blocked else 0
 
 
 if __name__ == "__main__":
