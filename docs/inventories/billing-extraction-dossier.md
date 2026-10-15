@@ -798,13 +798,19 @@ The concrete prospective consumer is Sub's `ModuleBillingAccountBinding` in
 `bae92fe01a24cdec9d2283dabe7a793efe25674a` (tree
 `946d668835b92b074323cbc7a101f926da1db762`). Its composite FK proves scope/id
 existence, but cannot prove currency, minor-unit precision or external product
-reference. Planned validation in `app/services/provider_payment_settlements.py`
-and `tests/integration/test_provider_invoice_module_cash_pg.py` must use the public
-`GetBillingAccountObservationV1` / `get_billing_account_observation` surface
-instead of foreign ORM imports. That foundation contains the binding model,
-source query and correlations, and explicitly identifies this public-account
-dependency; it does not yet import the new getter or prove account validation.
-This is prospective composition, not adoption; `contract_consumers` remains empty.
+reference. Its separately reviewed consumer source at Sub commit
+`60ff4a755636ce55a8f683806bdf3a6b1d8b1929` (tree
+`cf0929550d63284760e9092d2c8c79d2d466312e`) implements
+`get_module_invoice_billing_account` in
+`app/services/provider_payment_settlements.py`: resolve persisted checkout facts
+and the local mapping, call this genuine public query, then compare payer
+reference, currency and precision. Its focused PostgreSQL canaries call the real
+API; no foreign ORM read or local copy is introduced. The consumer branch is
+published as source only, without a pull request: type and positive PostgreSQL
+acceptance require this API to be published and exactly pinned first. The earlier
+foundation commit contains neither the getter import nor proven account
+validation. This is prospective composition, not adoption;
+`contract_consumers` remains empty.
 
 `BillingAccountObservationV1` contains current scope, account id, external
 reference and kernel `Currency`. Frozen describes the returned value only. The
