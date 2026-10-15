@@ -1117,16 +1117,16 @@ def rehearsal_census(
     )
 
 
-def _read_json(path: Path) -> Mapping[str, object]:
+def _read_json(path: Path, code: str = "malformed_input") -> Mapping[str, object]:
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        raise _malformed() from None
+        raise _malformed(code) from None
     try:
         value = parse_opening_rehearsal_json(text)
     except OpeningEvidenceError:
-        raise _malformed() from None
-    return _mapping(value)
+        raise _malformed(code) from None
+    return _mapping(value, code)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1142,7 +1142,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         census_payload = _read_json(Path(args.census))
-        assembly = load_assembly(_read_json(Path(args.assembly)))
+        assembly = load_assembly(_read_json(Path(args.assembly), "malformed_assembly"))
         artifact = rehearsal_census(census_payload, assembly=assembly)
     except AdapterInputError as exc:
         print(render_opening_rehearsal_refusal(exc.code))

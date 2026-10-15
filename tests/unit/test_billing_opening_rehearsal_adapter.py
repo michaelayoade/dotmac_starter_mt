@@ -701,7 +701,7 @@ def test_duplicate_json_keys_refuse_for_every_json_read(tmp_path, capsys):
         )
         == 2
     )
-    assert _refusal(capsys)["error"] == "malformed_input"
+    assert _refusal(capsys)["error"] == "malformed_assembly"
     duplicated_census = good_census.replace("{", '{"x": 1, "x": 2, ', 1)
     assert (
         _main(
