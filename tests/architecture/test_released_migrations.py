@@ -6834,6 +6834,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-finance ──
+    "dotmac-finance-v0.2.0a1": (
+        "dotmac-finance",
+        "e0c96d95aa03c1c4578715bccab2741cb6cb45ae",
+        {
+            "fn_0001_asset_accounting.py": (
+                "1f503d5056eabbcde45954152f250b631ee43b488d7f4d29056b69042f4c1c79"
+            ),
+        },
+    ),
     "dotmac-finance-v0.1.0a1": (
         "dotmac-finance",
         "20d24703e70e4d361de2f406165df4b36cbee507",
