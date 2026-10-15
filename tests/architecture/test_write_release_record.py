@@ -1195,6 +1195,173 @@ def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
     assert released.read_text(encoding="utf-8") == released_before
 
 
+@pytest.fixture
+def module_census_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A governed publication with a synthetic tag oracle and real renderer."""
+    writer = _writer()
+    source_drift = writer._local_script("published_source_drift")
+    paths = {
+        "LEDGER": tmp_path / "declared-publication-baseline.json",
+        "RELEASED_TAGS_MODULE": tmp_path / "test_released_migrations.py",
+        "SOURCE_DRIFT_BASELINE": tmp_path / "published_source_drift_baseline.json",
+        "KERNEL_AUTHORIZATION": tmp_path / "kernel-release-authorization.json",
+        "MODULE_RELEASE_VERIFICATIONS": tmp_path / "module-release-verifications.json",
+    }
+    paths["LEDGER"].write_text(
+        json.dumps(
+            {"unpublished": {"dotmac-approvals": {"declared": "9.9.9"}}},
+            indent=2,
+        )
+        + "\n"
+    )
+    paths["RELEASED_TAGS_MODULE"].write_text(writer.RELEASED_TAGS_MODULE.read_text())
+    paths["KERNEL_AUTHORIZATION"].write_text(writer.KERNEL_AUTHORIZATION.read_text())
+    paths["MODULE_RELEASE_VERIFICATIONS"].write_text(
+        _empty_module_release_verification_text(writer)
+    )
+    drift = {
+        "distribution": "dotmac-fixture-legacy",
+        "version": "0.1.0a1",
+        "tag_tree": "a" * 40,
+        "head_tree": "b" * 40,
+    }
+    legacy_drift = {
+        **drift,
+        "disposition": "accepted-debt",
+        "reason": "fixture debt retires at its next release",
+    }
+    paths["SOURCE_DRIFT_BASELINE"].write_text(
+        json.dumps(
+            {"released_total": 62, "drifted_total": 1, "drifted": [legacy_drift]},
+            indent=2,
+        )
+        + "\n"
+    )
+    for name, path in paths.items():
+        monkeypatch.setattr(writer, name, path)
+    monkeypatch.setattr(writer, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(writer, "tag_commit", lambda _tag: "2" * 40)
+    monkeypatch.setattr(writer, "annotated_tag_object", lambda _tag: "1" * 40)
+    wheel = "dotmac_approvals-9.9.9-py3-none-any.whl"
+    message = writer.render_module_release_tag_evidence(
+        distribution="dotmac-approvals",
+        version="9.9.9",
+        wheel_filename=wheel,
+        wheel_sha256="3" * 64,
+        verification_run_id="123456789",
+        source_run_id="123456789",
+        release_authority_digest=_AUTHORITY_DIGEST_FIXTURE,
+        smoke_dependency_wheels=_SMOKE_WHEELS_FIXTURE,
+    )
+    monkeypatch.setattr(writer, "annotated_tag_message", lambda _tag: message)
+    monkeypatch.setattr(
+        writer, "module_wheel_digest", lambda *_a, **_k: (wheel, "3" * 64)
+    )
+    monkeypatch.setattr(
+        writer, "resolve_lineage_inputs", lambda **_arguments: (None, None, {})
+    )
+
+    def released_distributions():
+        # The recorder must scope the canonical renderer to its own repository
+        # and baseline, rather than carrying the imported module's defaults.
+        assert source_drift.REPO_ROOT == tmp_path
+        assert source_drift.BASELINE_PATH == paths["SOURCE_DRIFT_BASELINE"]
+        return [(f"dotmac-fixture-{n}", "1.0.0", "fixture/src") for n in range(63)]
+
+    monkeypatch.setattr(source_drift, "released_distributions", released_distributions)
+    monkeypatch.setattr(source_drift, "drifted", lambda: [dict(drift)])
+
+    def local_script(name):
+        assert (
+            name == "published_source_drift"
+        ), "module publication consumed kernel auth"
+        return source_drift
+
+    monkeypatch.setattr(writer, "_local_script", local_script)
+    arguments = {
+        "distribution": "dotmac-approvals",
+        "version": "9.9.9",
+        "tag": "dotmac-approvals-v9.9.9",
+        "package_dir": None,
+        "import_name": None,
+        "no_lineage": True,
+        "artifact_dir": str(tmp_path / "artifact"),
+        "expected_run_id": "123456789",
+        "expected_commit": "2" * 40,
+    }
+    return writer, source_drift, paths, arguments, legacy_drift
+
+
+def test_module_publication_refreshes_census_and_preserves_legacy_drift(
+    module_census_record,
+) -> None:
+    """Sensitivity: the kernel-only recorder leaves the old total of 62."""
+    writer, _source_drift, paths, arguments, legacy_drift = module_census_record
+    authorization_before = paths["KERNEL_AUTHORIZATION"].read_bytes()
+
+    changed = writer.write_record(**arguments)
+
+    baseline = json.loads(paths["SOURCE_DRIFT_BASELINE"].read_text())
+    assert baseline["released_total"] == 63
+    assert baseline["drifted_total"] == 1
+    assert baseline["drifted"] == [legacy_drift]
+    assert json.loads(paths["LEDGER"].read_text())["unpublished"] == {}
+    verified = json.loads(paths["MODULE_RELEASE_VERIFICATIONS"].read_text())["releases"]
+    assert [row["tag"] for row in verified] == [arguments["tag"]]
+    assert paths["KERNEL_AUTHORIZATION"].read_bytes() == authorization_before
+    assert any("63 released, 1 drifted" in entry for entry in changed)
+
+
+def test_module_publication_rerun_changes_no_record_bytes(module_census_record) -> None:
+    writer, _source_drift, paths, arguments, _legacy_drift = module_census_record
+    writer.write_record(**arguments)
+    before = {name: path.read_bytes() for name, path in paths.items()}
+
+    assert writer.write_record(**arguments) == []
+    assert {name: path.read_bytes() for name, path in paths.items()} == before
+
+
+def test_module_census_detector_rejects_a_temporary_stale_render(
+    monkeypatch: pytest.MonkeyPatch, module_census_record
+) -> None:
+    """Prove the publication assertion fires when the old census is retained."""
+    writer, _source_drift, paths, _arguments, _legacy_drift = module_census_record
+    stale = paths["SOURCE_DRIFT_BASELINE"].read_text()
+    monkeypatch.setattr(writer, "_render_source_drift_baseline", lambda: stale)
+
+    with pytest.raises(AssertionError):
+        test_module_publication_refreshes_census_and_preserves_legacy_drift(
+            module_census_record
+        )
+
+
+def test_module_census_render_failure_writes_no_partial_record(
+    monkeypatch: pytest.MonkeyPatch, module_census_record
+) -> None:
+    writer, source_drift, paths, arguments, _legacy_drift = module_census_record
+    before = {name: path.read_bytes() for name, path in paths.items()}
+
+    def refuse_render():
+        raise RuntimeError("synthetic source census unavailable")
+
+    monkeypatch.setattr(source_drift, "render_baseline", refuse_render)
+    with pytest.raises(RuntimeError, match="synthetic source census unavailable"):
+        writer.write_record(**arguments)
+
+    assert {name: path.read_bytes() for name, path in paths.items()} == before
+
+
+def test_release_authority_enrolls_the_canonical_source_census_renderer() -> None:
+    authority = _writer()._local_script("release_authority")
+
+    def read(relative_path):
+        path = PROJECT_ROOT / relative_path
+        return path.read_text() if path.is_file() else None
+
+    files, _external = authority.derive_surface(read)
+    assert "scripts/published_source_drift.py" in files
+
+
 def test_kernel_record_consumes_authorization_and_refreshes_source_census(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
