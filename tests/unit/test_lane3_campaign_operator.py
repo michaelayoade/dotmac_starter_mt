@@ -495,7 +495,9 @@ def test_actual_coordinator_cli_measures_source_before_fixed_prepare_command(
 
     monkeypatch.setattr(module, "measured", measure)
     monkeypatch.setattr(
-        module, "_run_owned", lambda args, deadline: calls.append((args, deadline))
+        module,
+        "_run_owned",
+        lambda args, deadline, **kwargs: calls.append((args, deadline)),
     )
     if drift:
         with pytest.raises(module.CampaignRefused):
@@ -537,7 +539,9 @@ def test_actual_launch_cli_inherits_the_original_parent_deadline(monkeypatch):
     monkeypatch.setattr(module, "measured", lambda *args: b"synthetic")
     monkeypatch.setattr(module, "coordinator_binding", lambda: {})
     monkeypatch.setattr(
-        module, "_run_owned", lambda args, deadline: calls.append((args, deadline))
+        module,
+        "_run_owned",
+        lambda args, deadline, **kwargs: calls.append((args, deadline)),
     )
     module.coordinator_cli("launch", 160.125, 12)
     assert calls[0][0][-4:] == [
@@ -810,3 +814,166 @@ def test_b8_prepared_custody_precedes_public_prepare_and_is_consumed_once(
     with pytest.raises(module.CampaignRefused):
         exchange.exchange(process)
     assert events.count("prepare") == 1
+
+
+@pytest.mark.parametrize(
+    "phase", ["retain", "gate_prepare", "prepare", "gate_bootstrap", "launch"]
+)
+def test_failure_phase_is_preserved_and_cleanup_does_not_replace_it(
+    monkeypatch, tmp_path, phase
+):
+    module, management, _, _ = management_fixture(monkeypatch, tmp_path)
+    original_call, original_coordinator = management._call, module.coordinator_cli
+
+    def call(op, age, deadline):
+        if op == phase:
+            raise module.CampaignRefused("management-unproved")
+        return original_call(op, age, deadline)
+
+    def coordinator(op, deadline, run_id=None):
+        if op == phase:
+            raise module.CampaignRefused("code-pin")
+        return original_coordinator(op, deadline, run_id)
+
+    def cleanup():
+        raise RuntimeError("PRIVATE-CANARY")
+
+    monkeypatch.setattr(management, "_call", call)
+    monkeypatch.setattr(module, "coordinator_cli", coordinator)
+    monkeypatch.setattr(management, "failure_finalize", cleanup)
+    with pytest.raises(module.CampaignRefused) as error:
+        management.retained_launch()
+    value = module.failure_diagnostic(error.value)
+    assert value["phase"] == phase
+    assert value["cleanup"] == "unproven"
+    assert value["category"] == (
+        "code-pin" if phase in ("prepare", "launch") else "management-unproved"
+    )
+    assert "PRIVATE" not in repr(error.value) + json.dumps(value)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"status":"REFUSED","category":"binding.mismatch"}',
+        b'{"status":"REFUSED","category":"PRIVATE-CANARY"}',
+        b'{"status":"REFUSED","category":"internal","secret":"PRIVATE-CANARY"}',
+        b'{"status":"REFUSED","category":"internal","category":"binding.mismatch"}',
+        b'{"status":"REFUSED","category":NaN}',
+        b"PRIVATE-CANARY",
+        b'{"status":"REFUSED"',
+    ],
+)
+def test_only_measured_coordinator_child_can_preserve_exact_safe_nonzero_refusal(raw):
+    module = operator()
+    code = "import sys;sys.stdout.buffer.write(" + repr(raw) + ");sys.exit(1)"
+    args = [sys.executable, "-I", "-B", "-c", code]
+    categories = importlib.import_module("lane3_handoff_protocol").CATEGORIES
+    for allow in (None, categories):
+        with pytest.raises(module.CampaignRefused) as error:
+            module._run_owned(args, time.monotonic() + 10, refusal_categories=allow)
+        diagnostic = module.failure_diagnostic(error.value)
+        expected = (
+            "binding.mismatch"
+            if allow is not None
+            and raw == b'{"status":"REFUSED","category":"binding.mismatch"}'
+            else "subprocess-unproved"
+        )
+        assert diagnostic["category"] == expected
+        assert "PRIVATE" not in repr(error.value) + json.dumps(diagnostic)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"category": "PRIVATE-CANARY"},
+        {"phase": "PRIVATE-CANARY"},
+        {"stage": "PRIVATE-CANARY"},
+        {"extra": "PRIVATE-CANARY"},
+        {"cleanup": float("nan")},
+    ],
+)
+def test_bridge_diagnostic_is_exact_bounded_and_never_advances_phase(
+    monkeypatch, change
+):
+    module = operator()
+    management = module.ManagementStdio(None)
+    diagnostic = {
+        "phase": "retain",
+        "stage": "old-stop-readback",
+        "category": "systemd-unproven",
+        "cleanup": "completed",
+    }
+    diagnostic.update(change)
+    management.pipe = SimpleNamespace(
+        send=lambda *args: None,
+        receive=lambda *args: {"status": "REFUSED", "diagnostic": diagnostic},
+    )
+    monkeypatch.setattr(module, "key_age", lambda age: None)
+    with pytest.raises(module.CampaignRefused) as error:
+        management._call("retain", 30, time.monotonic() + 10)
+    assert management.phase == "initial"
+    assert "PRIVATE" not in repr(error.value) + json.dumps(
+        module.failure_diagnostic(error.value)
+    )
+    assert module.failure_diagnostic(error.value)["category"] == "management-unproved"
+
+
+def test_bridge_valid_refusal_survives_without_accepting_a_pass(monkeypatch):
+    module = operator()
+    management = module.ManagementStdio(None)
+    diagnostic = {
+        "phase": "retain",
+        "stage": "old-stop-readback",
+        "category": "systemd-unproven",
+        "cleanup": "completed",
+    }
+    management.pipe = SimpleNamespace(
+        send=lambda *args: None,
+        receive=lambda *args: {"status": "REFUSED", "diagnostic": diagnostic},
+    )
+    monkeypatch.setattr(module, "key_age", lambda age: None)
+    with pytest.raises(module.CampaignRefused) as error:
+        management._call("retain", 30, time.monotonic() + 10)
+    assert module.failure_diagnostic(error.value) == diagnostic
+    assert management.phase == "initial"
+
+
+def test_coordinator_diagnostic_wire_vocabulary_matches_protocol_owner():
+    assert (
+        operator().COORDINATOR_FAILURE_CATEGORIES
+        == importlib.import_module("lane3_handoff_protocol").CATEGORIES
+    )
+
+
+def test_owner_adapter_revalidates_mutated_metadata_and_ignores_duck_types():
+    module = operator()
+    error = module.CampaignRefused("code-pin")
+    error.diagnostic["category"] = "PRIVATE-CANARY"
+    for candidate in (
+        error,
+        SimpleNamespace(diagnostic={"category": "PRIVATE-CANARY"}),
+    ):
+        assert module.failure_diagnostic(candidate)["category"] == "unproven"
+        assert "PRIVATE" not in json.dumps(module.failure_diagnostic(candidate))
+
+
+def test_successful_finalization_cannot_erase_unproven_transition_cleanup(
+    monkeypatch, tmp_path
+):
+    module, management, _, _ = management_fixture(monkeypatch, tmp_path)
+    original = {
+        "phase": "retain",
+        "stage": "arm",
+        "category": "systemd-unproven",
+        "cleanup": "unproven",
+    }
+
+    def refuse(*args):
+        raise module.CampaignRefused("management-unproved", diagnostic=original)
+
+    monkeypatch.setattr(management, "_call", refuse)
+    monkeypatch.setattr(management, "failure_finalize", lambda: None)
+    with pytest.raises(module.CampaignRefused) as error:
+        management.retained_launch()
+    assert module.failure_diagnostic(error.value) == original

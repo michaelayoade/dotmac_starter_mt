@@ -78,8 +78,62 @@ def deployment_inputs():
     return copy.deepcopy(DEPLOYMENT)
 
 
+BRIDGE_FAILURE_CATEGORIES = frozenset(
+    (
+        "binding",
+        "bridge-lock",
+        "code-pin",
+        "duplicate-key",
+        "finish-already-attempted",
+        "input-deadline",
+        "input-schema",
+        "installation-pin",
+        "invocation",
+        "line-too-long",
+        "module-role",
+        "object-required",
+        "order",
+        "original-clock",
+        "original-expired",
+        "original-timer",
+        "original-timer-drift",
+        "protected-file",
+        "protected-parent",
+        "protocol",
+        "receipt-missing",
+        "truncated-line",
+    )
+)
+
+
 class BridgeRefused(RuntimeError):
-    pass
+    def __init__(self, category):
+        category = (
+            category
+            if type(category) is str and category in BRIDGE_FAILURE_CATEGORIES
+            else "unexpected"
+        )
+        super().__init__(category)
+        self.category = category
+
+
+def failure_diagnostic(error, bridge, phase, cleanup):
+    """Recognize the measured helper's class identity, never duck-typed labels."""
+    if bridge is not None and type(error) is bridge.mgmt_module.Refused:
+        diagnostic = bridge.mgmt_module.failure_diagnostic(error, phase)
+    else:
+        diagnostic = {
+            "phase": phase,
+            "stage": "bridge",
+            "category": error.category
+            if type(error) is BridgeRefused
+            and error.category in BRIDGE_FAILURE_CATEGORIES
+            else "unexpected",
+            "cleanup": "not_attempted",
+        }
+    if cleanup in ("completed", "unproven") and diagnostic["cleanup"] != "unproven":
+        diagnostic["cleanup"] = cleanup
+    return diagnostic
 
 
 def strict_object(pairs):
@@ -336,13 +390,14 @@ class Bridge:
 
     def on_exit(self):
         if self.receipt is None or self.finish_attempted:
-            return
+            return "not_attempted"
         try:
             self.finish()
-        except BaseException:  # noqa: S110 - preserve timer ownership
+            return "completed"
+        except BaseException:
             # Active/unknown local lease or stale bindings do not authorize
             # premature removal. Preserve original/retained timer ownership.
-            pass
+            return "unproven"
 
 
 def line(deadline_ns):
@@ -369,6 +424,9 @@ def line(deadline_ns):
 def main():
     os.umask(0o077)
     sys.dont_write_bytecode = True
+    bridge = None
+    phase = "unproven"
+    cleanup = "not_attempted"
     try:
         if os.geteuid() != 0 or not sys.flags.isolated or sys.argv[1:]:
             raise BridgeRefused("invocation")
@@ -393,15 +451,30 @@ def main():
                     doc = decode(raw)
                     if set(doc) != {"op"} or type(doc["op"]) is not str:
                         raise BridgeRefused("protocol")
+                    phase = (
+                        doc["op"]
+                        if doc["op"]
+                        in {"retain", "gate_prepare", "gate_bootstrap", "finish"}
+                        else "unproven"
+                    )
                     result = bridge.operate(doc["op"])
                     print(json.dumps(result, separators=(",", ":")), flush=True)
             finally:
                 if bridge is not None:
-                    bridge.on_exit()
+                    cleanup = bridge.on_exit()
         return 0
-    except BaseException:
+    except BaseException as exc:
         try:
-            print('{"status":"REFUSED","category":"bridge-stopped"}', flush=True)
+            print(
+                json.dumps(
+                    {
+                        "status": "REFUSED",
+                        "diagnostic": failure_diagnostic(exc, bridge, phase, cleanup),
+                    },
+                    separators=(",", ":"),
+                ),
+                flush=True,
+            )
         except BaseException:  # noqa: S110 - private diagnostics suppressed
             pass
         return 1

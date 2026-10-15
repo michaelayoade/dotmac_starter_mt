@@ -271,6 +271,45 @@ def test_management_failures_never_return_checkpoint_or_retry(owned_child, defec
     assert processes[0].stdin.closed and processes[0].stdout.closed
 
 
+@pytest.mark.parametrize("phase", ["decide", "finish"])
+def test_management_preserves_later_operation_phase_and_prior_cleanup(
+    owned_child, phase
+):
+    module = invoker()
+    canonical = importlib.import_module("lane3_campaign_operator")
+    owned_child("import sys\nsys.stdin.buffer.read()\n")
+    operator, events, _ = management_operator()
+    operator.CampaignRefused = canonical.CampaignRefused
+    operator.failure_diagnostic = canonical.failure_diagnostic
+
+    def refuse(*args):
+        raise canonical.CampaignRefused(
+            "code-pin",
+            diagnostic={
+                "phase": "unproven",
+                "stage": "operator",
+                "category": "code-pin",
+                "cleanup": "unproven",
+            },
+        )
+
+    if phase == "decide":
+        operator.coordinator_cli = refuse
+    else:
+        operator.ManagementStdio.finish = refuse
+    with pytest.raises(canonical.CampaignRefused) as error:
+        module.management_checkpoint(operator)
+    diagnostic = canonical.failure_diagnostic(error.value)
+    assert diagnostic == {
+        "phase": phase,
+        "stage": "operator",
+        "category": "code-pin",
+        "cleanup": "unproven",
+    }
+    assert events.count("retain") == 1
+    assert events[-1] == "close"
+
+
 @pytest.mark.parametrize(
     "code,accepted",
     [
