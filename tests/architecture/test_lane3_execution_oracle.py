@@ -319,12 +319,22 @@ def test_a_hidden_table_is_refused(tmp_path: pathlib.Path) -> None:
     write_evidence(
         tmp_path, body.replace("| Requirement", "<!--\n| Requirement", 1) + "-->\n"
     )
-    _refuses(tmp_path, "comment or code fence")
+    _refuses(tmp_path, "HTML comment marker")
     for fence in ("```", "~~~"):
         write_evidence(
             tmp_path, body.replace("| Requirement", f"{fence}\n| Requirement", 1)
         )
         _refuses(tmp_path, "comment or code fence")
+
+
+def test_a_comment_spanning_the_heading_and_table_is_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    body = table(rows())
+    write_evidence(tmp_path, "<!--\n" + body + "-->\n")
+    _refuses(tmp_path, "HTML comment marker")
+    write_evidence(tmp_path, body + "\nstray -->\n")
+    _refuses(tmp_path, "HTML comment marker")
 
 
 @pytest.mark.parametrize(

@@ -198,12 +198,18 @@ def require_admission_evidence(reference: Any, *, repo_root: pathlib.Path) -> st
                 raise OSError(f"{part} is a symbolic link")
         if not path.is_file():
             raise OSError("not a regular file")
-        lines = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
     except (OSError, ValueError) as exc:
         raise TopologyRefused(
             f"admission_evidence names {EVIDENCE_FILE}, which cannot be read at "
             f"this revision: {exc}"
         ) from exc
+    if "<!--" in text or "-->" in text:
+        raise TopologyRefused(
+            f"admission_evidence {EVIDENCE_FILE} contains an HTML comment marker; "
+            "a comment can hide a heading or a table from the rendered page"
+        )
     starts = [
         i
         for i, line in enumerate(lines)
