@@ -148,3 +148,32 @@ def test_plain_object_children_and_unchanged_documents():
     }
     assert paths(doc, doc) == []
     assert paths({}, {}) == []
+
+
+def test_ordered_field_unset_is_compared_against_its_schema_default():
+    """H1 for `ordered`: an unset field holds its default, not 'nothing granted'."""
+    specs = SpecIndex(
+        {
+            "/level": FieldSpec(
+                Kind.scalar,
+                access=AccessKind.ordered,
+                ranking=("high", "mid", "low"),
+                tie=Tie.restrictive,
+                default="high",
+            ),
+            "/open": FieldSpec(
+                Kind.scalar,
+                access=AccessKind.ordered,
+                ranking=("high", "mid", "low"),
+                tie=Tie.restrictive,
+            ),
+        }
+    )
+
+    def found(before, after):
+        return [item.path for item in params_widening(specs, before, after)]
+
+    assert found({}, {"level": "low"}) == ["/level"]  # default high -> low widens
+    assert found({}, {"level": "high"}) == []  # unchanged from the default
+    assert found({"level": "low"}, {"level": "high"}) == []  # narrowing
+    assert found({}, {"open": "low"}) == []  # no default: grants nothing before

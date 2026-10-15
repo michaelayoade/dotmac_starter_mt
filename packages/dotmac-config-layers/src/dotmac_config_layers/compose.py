@@ -20,6 +20,7 @@ from .document import (
 )
 from .drift import Suppression
 from .exceptions import (
+    LAPSE_REPORT_DAYS,
     ExceptionKind,
     ExceptionSpec,
     ExceptionState,
@@ -151,7 +152,7 @@ class Effective:
     inert: tuple[str, ...]
     lapsed: tuple[LapsedException, ...]
     annotations: tuple[tuple[str, str, str], ...]
-    router_hash: str
+    subject_hash: str
     exceptions: tuple[ExceptionStatus, ...] = ()
 
     def conflicts(self) -> list[Conflict]:
@@ -452,6 +453,8 @@ def compose(
     revisions: Iterable[LayerRevision],
     exceptions: Iterable[ExceptionSpec],
     today: date,
+    *,
+    lapse_report_days: int = LAPSE_REPORT_DAYS,
 ) -> Effective:
     """Pure: the same inputs give the same effective state in any input order."""
     top_rank = max(t.rank for t in plugin.tiers)
@@ -537,7 +540,9 @@ def compose(
     for exc in ordered_exceptions:
         if not exception_applies(exc, subject.key, subject.dims):
             continue
-        state = exception_state(exc, today, widening=False)  # time / revoked only
+        state = exception_state(
+            exc, today, widening=False, lapse_report_days=lapse_report_days
+        )  # time / revoked only
         if state is ExceptionState.lapsed:
             lapsed.append(
                 LapsedException(exc.id, exc.module_key, exc.until, exc.reason, state)
@@ -574,7 +579,9 @@ def compose(
             trial = copy.deepcopy(exc_merger)
             _apply_exception(trial, exc, origin)
             widened = _exception_widens(plugin, exc.module_key, exc_merger, trial)
-        state = exception_state(exc, today, widening=widened)
+        state = exception_state(
+            exc, today, widening=widened, lapse_report_days=lapse_report_days
+        )
         statuses.append(
             ExceptionStatus(
                 exc.id, exc.module_key, exc.kind.value, state, widened, exc.approved
@@ -732,7 +739,7 @@ def compose(
         inert=tuple(sorted(set(inert))),
         lapsed=tuple(lapsed),
         annotations=tuple(annotations),
-        router_hash=hash_of({k: r.effective_hash for k, r in sorted(results.items())}),
+        subject_hash=hash_of({k: r.effective_hash for k, r in sorted(results.items())}),
         exceptions=tuple(statuses),
     )
 

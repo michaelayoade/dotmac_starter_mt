@@ -42,13 +42,25 @@ ALLOWED_THIRD_PARTY = frozenset({"pydantic"})
 # `urllib.parse` is string quoting only; nothing in urllib may open a connection.
 FORBIDDEN_URLLIB = frozenset({"urllib.request", "urllib.error", "urllib.robotparser"})
 FORBIDDEN_CALLS = frozenset(
-    {"now", "today", "utcnow", "getenv", "environ", "open", "urlopen", "uuid4"}
+    {
+        "now",
+        "today",
+        "utcnow",
+        "getenv",
+        "environ",
+        "open",
+        "urlopen",
+        "uuid4",
+        # dynamic imports would bypass the import-root allow-list
+        "__import__",
+        "import_module",
+    }
 )
 PROVIDER_WORDS = ("routeros", "mikrotik", "snmp", "ntp ")
 
 
 def _modules() -> list[Path]:
-    return sorted(SOURCE_ROOT.glob("*.py"))
+    return sorted(SOURCE_ROOT.rglob("*.py"))
 
 
 def _import_findings(source: str, *, label: str, kernel_allowed: bool) -> list[str]:
@@ -156,6 +168,15 @@ def test_engine_has_no_clock_environment_filesystem_or_network_call() -> None:
         "from datetime import date\nvalue = date.today()\n", label="planted_clock.py"
     ), "sensitivity: the clock detector no longer bites"
     assert _call_findings("import os\nos.getenv('X')\n", label="planted_env.py")
+    # dynamic imports cannot hide a forbidden root from the allow-list
+    assert _call_findings("__import__('socket')\n", label="planted_dunder.py")
+    assert _call_findings(
+        "import importlib\nimportlib.import_module('socket')\n",
+        label="planted_importlib.py",
+    )
+    assert _import_findings(
+        "import importlib\n", label="planted_importlib.py", kernel_allowed=False
+    )
 
 
 def test_engine_source_names_no_provider() -> None:

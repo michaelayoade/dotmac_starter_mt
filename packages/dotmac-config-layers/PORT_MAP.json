@@ -19,11 +19,13 @@
       "source": "dotmac_sub:app/services/composition/compose.py",
       "source_blob": "fd2c755eba5ed48ae862cf91304053553ec79e79",
       "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/compose.py",
-      "destination_blob": "be4ea0ddcee86e11e713d1c64e8d83f6bb636e67",
-      "lines_added": 17,
-      "lines_removed": 17,
+      "destination_blob": "5eccee09cd79c3b62a87c5182e7e18f0d55b046f",
+      "lines_added": 28,
+      "lines_removed": 21,
       "allowed_deltas": [
-        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates",
+        "rename Effective.router_hash to subject_hash (reviewed delta: no router vocabulary in the generic engine)",
+        "keyword-only lapse_report_days=LAPSE_REPORT_DAYS on compose(); default keeps behaviour"
       ]
     },
     {
@@ -67,18 +69,20 @@
       "lines_added": 0,
       "lines_removed": 0,
       "allowed_deltas": [
-        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+        "none (byte-identical)"
       ]
     },
     {
       "source": "dotmac_sub:app/services/composition/exceptions.py",
       "source_blob": "39a187b4d58ca717f52f2d5f4c6f84cc03dd1e6e",
       "destination": "packages/dotmac-config-layers/src/dotmac_config_layers/exceptions.py",
-      "destination_blob": "4b16155280c8e3fce545bca9058054edd4a18ce4",
-      "lines_added": 1,
-      "lines_removed": 1,
+      "destination_blob": "8a92e2550bb30dbd700fdbf07d680342d9483006",
+      "lines_added": 9,
+      "lines_removed": 5,
       "allowed_deltas": [
-        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates"
+        "lint-only: ruff 0.6.9 autofix (RUF005 tuple unpacking, UP038 union isinstance, I001 import order) and noqa/nosec markers required by the Starter gates",
+        "keyword-only lapse_report_days=LAPSE_REPORT_DAYS on exception_state(); default keeps behaviour",
+        "Sub-specific comment about router_health removed"
       ]
     },
     {
@@ -165,25 +169,28 @@
       "source": "dotmac_sub:tests/services/composition/test_spec_vectors.py",
       "source_blob": "376080345b46a9a1b28aa7bd6511b12ce1d8b3b5",
       "destination": "tests/unit/config_layers/test_spec_vectors.py",
-      "destination_blob": "0e34d0d365f1a55cc67be1b55ea506d879fc6b63",
-      "lines_added": 12,
-      "lines_removed": 57,
+      "destination_blob": "c310e3cdc03e567c62bd3898acb31f868dfa42b2",
+      "lines_added": 80,
+      "lines_removed": 60,
       "allowed_deltas": [
         "import rewrite: app.services.composition to dotmac_config_layers",
         "lint-only: ruff 0.6.9 autofix and format",
-        "removed test_input_widening_key_is_ignored_by_the_parser and test_t14_snmp_write_access_default_override_needs_approval: they import Sub router_control and move to the dotmac-routeros-config slice"
+        "removed test_input_widening_key_is_ignored_by_the_parser and test_t14_snmp_write_access_default_override_needs_approval: they import Sub router_control and move to the dotmac-routeros-config slice",
+        "router_hash renamed to subject_hash",
+        "added tests: module-root H1 override, ExceptionSpec has no widening field, lapse_report_days parameter"
       ]
     },
     {
       "source": "dotmac_sub:tests/services/composition/test_widening.py",
       "source_blob": "6c5ff06c538668ea47a25ef06d6e303a5e290caf",
       "destination": "tests/unit/config_layers/test_widening.py",
-      "destination_blob": "4b2c9e4e62bcd24257ccdb49dd3e426bfcb7b744",
-      "lines_added": 2,
+      "destination_blob": "28c6027652a913ce2ddefc81b010372e64e41f78",
+      "lines_added": 31,
       "lines_removed": 2,
       "allowed_deltas": [
         "import rewrite: app.services.composition to dotmac_config_layers",
-        "lint-only: ruff 0.6.9 autofix and format"
+        "lint-only: ruff 0.6.9 autofix and format",
+        "added test: H1 for ordered fields"
       ]
     }
   ]

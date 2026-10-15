@@ -265,7 +265,7 @@ def test_t14_exception_activity_and_lapse_window():
     plain = {"widening": False}
     assert exception_state(exc, date(2026, 11, 13), **plain) is ExceptionState.active
     assert exception_state(exc, date(2026, 11, 14), **plain) is ExceptionState.lapsed
-    # reported through until + 7 days (router_health posture EXPIRED_NOTE_DAYS)
+    # reported through until + 7 days (LAPSE_REPORT_DAYS)
     assert exception_state(exc, date(2026, 11, 20), **plain) is ExceptionState.lapsed
     assert exception_state(exc, date(2026, 11, 21), **plain) is ExceptionState.expired
     g = rev("global", "g", block("m", btest={"enabled": False}))
@@ -424,13 +424,13 @@ def test_t17_permutation_invariance_of_hash_provenance_and_conflicts():
         exceptions = list(exc)
         rng.shuffle(exceptions)
         eff = run(layers, exceptions=exceptions)
-        assert eff.router_hash == reference.router_hash
+        assert eff.subject_hash == reference.subject_hash
         for key, result in reference.modules.items():
             other = eff.modules[key]
             assert other.effective_hash == result.effective_hash
             assert other.provenance == result.provenance
             assert other.conflicts == result.conflicts
-        assert run(layers).router_hash == baseline.router_hash
+        assert run(layers).subject_hash == baseline.subject_hash
 
 
 @pytest.mark.parametrize("module", ["m"])
@@ -835,3 +835,68 @@ def test_m8_union_add_remove_of_one_element_conflicts_in_both_orders():
         rem = rev("group", n2, block("m", routes={"$remove": ["Z"]}), weight=100)
         eff = run([g, add, rem]).modules["m"]
         assert not eff.conflicts and eff.params["routes"] == ["Q"]
+
+
+def test_t14_module_root_override_of_a_defaulted_field_needs_approval():
+    """H1: an override patched at the module root widens a defaulted field."""
+    g = rev("global", "g", block("m", x=1))
+    exc = override(
+        "X-10", "m", "", {"btest": {"enabled": True}}, until=date(2026, 11, 13)
+    )
+    eff = run([g], exceptions=[exc], today=date(2026, 10, 20))
+    (status,) = eff.exceptions
+    assert (status.state.value, status.widening) == ("pending_approval", True)
+    assert values(eff).get("btest", {}).get("enabled") is not True
+    eff = run([g], exceptions=[replace(exc, approved=True)], today=date(2026, 10, 20))
+    assert values(eff)["btest"]["enabled"] is True
+
+
+def test_exception_spec_has_no_widening_field_so_an_input_key_cannot_set_it():
+    from dataclasses import fields
+
+    assert "widening" not in {f.name for f in fields(ExceptionSpec)}
+    with pytest.raises(TypeError):
+        ExceptionSpec(  # type: ignore[call-arg]
+            id="X-11",
+            module_key="m",
+            kind=ExceptionKind.override,
+            reason="field engineers need this for testing",
+            created_on=date(2026, 10, 14),
+            widening=False,
+        )
+
+
+def test_lapse_report_window_is_a_keyword_only_parameter():
+    exc = override("X-12", "m", "/btest", {"enabled": False}, until=date(2026, 11, 13))
+    kw = {"widening": False}
+    # the default keeps the 7-day window
+    assert exception_state(exc, date(2026, 11, 20), **kw) is ExceptionState.lapsed
+    assert exception_state(exc, date(2026, 11, 21), **kw) is ExceptionState.expired
+    # a caller-supplied window moves the boundary
+    assert (
+        exception_state(exc, date(2026, 11, 21), lapse_report_days=14, **kw)
+        is ExceptionState.lapsed
+    )
+    assert (
+        exception_state(exc, date(2026, 11, 20), lapse_report_days=3, **kw)
+        is ExceptionState.expired
+    )
+    g = rev("global", "g", block("m", btest={"enabled": False}))
+    wide = run([g], exceptions=[exc], today=date(2026, 11, 25))
+    assert [s.state for s in wide.exceptions] == [ExceptionState.expired]
+    from dotmac_config_layers.compose import compose as engine_compose
+
+    from .demo_plugin import PLUGIN, subject
+
+    kept = engine_compose(
+        PLUGIN,
+        subject(profiles=("access", "aggregation"), tags=("canary",)),
+        [g],
+        [exc],
+        date(2026, 11, 25),
+        lapse_report_days=30,
+    )
+    assert [item.id for item in kept.lapsed] == ["X-12"]
+    assert not kept.exceptions
+    with pytest.raises(TypeError):
+        engine_compose(PLUGIN, subject(), [g], [exc], date(2026, 11, 25), 30)  # type: ignore[misc]

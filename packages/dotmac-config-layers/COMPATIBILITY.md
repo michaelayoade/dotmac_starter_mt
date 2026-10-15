@@ -21,8 +21,15 @@ incompatible block is invalid for that module only.
 
 ## Notes
 
-- `Effective` carries a `router_hash` field name inherited from the source
-  engine. It is a hash over the per-module effective hashes and carries no
-  router meaning. A neutral rename is a breaking change and must happen before
-  the first release or not at all; it is recorded as an open question in the
-  Starter pull request.
+- `Effective.router_hash` of the source engine is renamed `subject_hash` before
+  the first release: it is a hash over the per-module effective hashes and has no
+  router meaning. This is a reviewed delta from the Sub draft (see
+  `PORT_MAP.json`); a Sub consumer reads `subject_hash`.
+- `compose()` and `exception_state()` take a keyword-only `lapse_report_days`
+  defaulting to `LAPSE_REPORT_DAYS` (7), so a consumer may align the lapse
+  reporting window with its own posture rules. The default keeps the source
+  behaviour.
+- Kernel floor `a88` is the floor of the sibling stateless module
+  `dotmac-document-rendering` 0.1.0a1 and the first kernel the manifest-only
+  probe in `scripts/module_floor_check.sh` is run against here. The package uses
+  only `ModuleManifest(code, version, core=False)`.

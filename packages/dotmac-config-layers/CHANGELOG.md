@@ -11,4 +11,6 @@
   an explicit public `__all__`.
 - Kernel floor `>=0.1.0a88`, the first kernel that registers a stateless
   manifest; no capability beyond the manifest is consumed.
+- Reviewed deltas from the Sub draft: `Effective.router_hash` is `subject_hash`;
+  `compose()` and `exception_state()` accept keyword-only `lapse_report_days`.
 - Source only: not released, not published, not adopted.
