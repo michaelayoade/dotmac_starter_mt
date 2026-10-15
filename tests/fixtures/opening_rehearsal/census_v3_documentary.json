@@ -1,0 +1,187 @@
+{
+  "capture": {
+    "declared_source": {
+      "source_repository_sha": "0123456789abcdef0123456789abcdef01234567",
+      "installation_id": "00000000-0000-0000-0000-000000000032",
+      "economic_cutoff": "2026-10-13T00:00:00+00:00",
+      "currency_precisions": [["NGN", 2]],
+      "population_version": "sub-billing-opening-census-v3"
+    },
+    "schema_heads": ["fixture-schema:1"],
+    "snapshot_id": "fixture-snapshot:v3-documentary",
+    "captured_at": "2026-10-13T00:00:00+00:00",
+    "isolation": "repeatable read",
+    "population_complete": true,
+    "mutable_history_reconstructed": false
+  },
+  "subscriber_ids": ["00000000-0000-0000-0000-00000000000a"],
+  "invoices": [
+    {
+      "invoice_id": "00000000-0000-0000-0000-000000000001",
+      "account_id": "00000000-0000-0000-0000-00000000000a",
+      "currency": "NGN",
+      "precision": 2,
+      "invoice_number": "FIXTURE-INV-1",
+      "status": "issued",
+      "active": true,
+      "proforma": false,
+      "issued_at": "2026-10-01T00:00:00+00:00",
+      "due_at": "2026-10-15T00:00:00+00:00",
+      "due_basis": "issued_at",
+      "due_basis_ref": "fixture:due-basis",
+      "due_policy_version": "fixture:due-policy:1",
+      "total": "100.00",
+      "stored_residual": "100.00",
+      "payments_applied": "0.00",
+      "credits_applied": "0.00",
+      "opening_funding_applied": "0.00",
+      "canonical_discharge": "0.00",
+      "residual": "100.00",
+      "created_at": "2026-10-01T00:00:00+00:00",
+      "updated_at": "2026-10-01T00:00:00+00:00",
+      "collections_due_basis_verified": false,
+      "line_ids": ["00000000-0000-0000-0000-000000005001"],
+      "settlement_ids": []
+    },
+    {
+      "invoice_id": "00000000-0000-0000-0000-000000000002",
+      "account_id": "00000000-0000-0000-0000-00000000000a",
+      "currency": "NGN",
+      "precision": 2,
+      "invoice_number": "FIXTURE-INV-2",
+      "status": "paid",
+      "active": true,
+      "proforma": false,
+      "issued_at": "2026-09-01T00:00:00+00:00",
+      "due_at": "2026-09-15T00:00:00+00:00",
+      "due_basis": "issued_at",
+      "due_basis_ref": "fixture:due-basis",
+      "due_policy_version": "fixture:due-policy:1",
+      "total": "50.00",
+      "stored_residual": "0.00",
+      "payments_applied": "50.00",
+      "credits_applied": "0.00",
+      "opening_funding_applied": "0.00",
+      "canonical_discharge": "50.00",
+      "residual": "0.00",
+      "created_at": "2026-09-01T00:00:00+00:00",
+      "updated_at": "2026-09-01T00:00:00+00:00",
+      "collections_due_basis_verified": false,
+      "line_ids": [],
+      "settlement_ids": []
+    }
+  ],
+  "lines": [],
+  "settlements": [],
+  "financial_sources": [],
+  "lanes": [
+    {
+      "account_id": "00000000-0000-0000-0000-00000000000a",
+      "currency": "NGN",
+      "authority": "authoritative",
+      "authority_cutover_id": "00000000-0000-0000-0000-0000000001f4",
+      "fingerprint": "fixture:lane-fingerprint",
+      "posting_group_count": 0,
+      "collectible_receivable": "100.00",
+      "unapplied_customer_credit": "0.00",
+      "prepaid_funding_reserved": "0.00",
+      "prepaid_funding_consumed": "0.00",
+      "written_off_total": "0.00",
+      "refunded_total": "0.00",
+      "adjustment_total": "0.00"
+    }
+  ],
+  "effects": [],
+  "eligible_invoice_ids": ["00000000-0000-0000-0000-000000000001"],
+  "exclusions": [
+    {
+      "source_id": "00000000-0000-0000-0000-000000000002",
+      "reason": "fully_closed"
+    }
+  ],
+  "blocking_exceptions": [],
+  "controls": [
+    {
+      "account_id": "00000000-0000-0000-0000-00000000000a",
+      "currency": "NGN",
+      "invoice_count": 2,
+      "eligible_count": 1,
+      "excluded_count": 1,
+      "exception_count": 0,
+      "original_total": "150.00",
+      "canonical_discharge": "50.00",
+      "residual": "100.00",
+      "eligible_residual": "100.00",
+      "source_count": 0
+    }
+  ],
+  "content_fingerprint": "fixture-content:v3-documentary",
+  "cash_evidence": {
+    "payments": [],
+    "payment_settlements": [],
+    "provider_events": [],
+    "inbox_receipts": [],
+    "refunds": [],
+    "reversals": [],
+    "proofs": [],
+    "proof_corrections": [],
+    "topups": [],
+    "source_counts": [
+      {"table": "payments", "count": 0},
+      {"table": "payment_settlements", "count": 0},
+      {"table": "payment_provider_events", "count": 0},
+      {"table": "integration_inbox", "count": 0},
+      {"table": "payment_refunds", "count": 0},
+      {"table": "payment_reversals", "count": 0},
+      {"table": "payment_proofs", "count": 0},
+      {"table": "payment_proof_corrections", "count": 0},
+      {"table": "topup_intents", "count": 0}
+    ],
+    "blocking_exceptions": [],
+    "qualified_payment_ids": []
+  },
+  "documentary_observations": {
+    "current_invoices": [
+      {
+        "invoice_id": "00000000-0000-0000-0000-000000000001",
+        "subtotal": "77777.77",
+        "discount_amount": "0.00",
+        "tax_total": "8888.88",
+        "total": "100.00",
+        "billing_period_start": "2026-10-01T00:00:00+00:00",
+        "billing_period_end": "2026-10-31T00:00:00+00:00"
+      }
+    ],
+    "current_lines": [
+      {
+        "line_id": "00000000-0000-0000-0000-000000005001",
+        "invoice_id": "00000000-0000-0000-0000-000000000001",
+        "description": "fixture current line",
+        "tax_rate_id": null,
+        "tax_rate_snapshot_version": null,
+        "tax_rate_code_snapshot": null,
+        "tax_rate_percent_snapshot": "66.66",
+        "tax_rate_is_active_snapshot": null,
+        "tax_application": "exclusive"
+      }
+    ],
+    "unavailable_original_evidence": [
+      {
+        "invoice_id": "00000000-0000-0000-0000-000000000001",
+        "requirements": [
+          "documentary_reference",
+          "documentary_digest",
+          "seller",
+          "customer",
+          "tax_snapshots"
+        ],
+        "reasons": ["no_authenticated_frozen_document"]
+      },
+      {
+        "invoice_id": "00000000-0000-0000-0000-000000000002",
+        "requirements": ["documentary_reference", "documentary_digest", "seller"],
+        "reasons": ["no_authenticated_frozen_document"]
+      }
+    ]
+  }
+}

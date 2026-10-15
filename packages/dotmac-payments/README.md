@@ -46,6 +46,19 @@ and rollback, so an observation is not a durable transaction receipt. Assembly
 must resolve intent/payer to account through its own structural binding; provider
 metadata never supplies Billing identity or turns claimed deductions into cash.
 
+`get_payment_intent_v1(db, scope=TenantScope(...),
+query=GetPaymentIntentV1(reference))` reads the stored intent by its stripped
+natural reference. It returns frozen `PaymentIntentObservationV1` with scope,
+intent ID, reference, payer/target references, purpose, requested Money, optional
+stored confirmed Money, provider/channel, status and opening/expiry/settlement
+instants. Unknown and cross-tenant references return `None`; platform scope and
+empty references are refused. Persisted scalar reads ignore dirty ORM values,
+suppress autoflush and leave commit/rollback to the caller. Stored precision is
+never inferred and noncanonical currency codes are refused. The optional
+confirmed amount describes intent state; immutable cash evidence still comes
+from `get_confirmed_cash_v1`. Neither observation authorizes settlement or
+resolves a Billing account. See the [lookup inventory](../../docs/inventories/payments-intent-lookup-extraction.md).
+
 Additive `pm_0002_money_precision` leaves existing rows with NULL precision. It
 has no scale default or inferred backfill: neither a currency registry nor the
 Numeric decimal exponent proves the original command scale. Legacy proof
