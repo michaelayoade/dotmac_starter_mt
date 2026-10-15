@@ -97,4 +97,10 @@ every book, schedule, valuation balance and consequence; shadow equivalent
 operations at declared currency precision; seal the authority switch under
 source-book locks; and retire the legacy decision writers with a bidirectional
 ratchet. Backoffice is the second independent candidate consumer. Until ERP's
-cutover is complete, the package is audit-complete, uncomposed and unpublished.
+cutover is complete, the package is audit-complete and uncomposed. 2026-10-15:
+qualify and release the 0.2.0a1 private-native successor through the existing
+protected module lane after exact-head hosted CI, wheel/source-archive parity
+and supported-interpreter checks. Preserve prior immutable release identities.
+Publication moves no ERP books or consequence authority: ERP remains the writer
+until backfill, zero-drift shadow, a sealed authority switch and rollback window
+are complete.
