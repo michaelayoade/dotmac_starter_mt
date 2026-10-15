@@ -11,13 +11,23 @@ struct Step {
     link: String,
 }
 
-fn resolve(graph: &HashMap<String, Vec<(String, String, BigInt)>>, source: String, destination: String) -> Path {
+fn resolve(
+    graph: &HashMap<String, Vec<(String, String, BigInt)>>,
+    source: String,
+    destination: String,
+) -> Path {
     let zero = BigInt::from(0);
-    let mut steps = vec![Step { node: source.clone(), parent: None, link: String::new() }];
+    let mut steps = vec![Step {
+        node: source.clone(),
+        parent: None,
+        link: String::new(),
+    }];
     let mut queue = BinaryHeap::from([Reverse((zero.clone(), source.clone(), 0usize))]);
     let mut best = HashMap::from([(source, zero.clone())]);
     while let Some(Reverse((cost, node, index))) = queue.pop() {
-        if best.get(&node) != Some(&cost) { continue; }
+        if best.get(&node) != Some(&cost) {
+            continue;
+        }
         if node == destination {
             let mut hops = Vec::new();
             let mut links = Vec::new();
@@ -26,11 +36,15 @@ fn resolve(graph: &HashMap<String, Vec<(String, String, BigInt)>>, source: Strin
                 let step = &steps[current];
                 hops.push(step.node.clone());
                 match step.parent {
-                    Some(parent) => { links.push(step.link.clone()); current = parent; }
+                    Some(parent) => {
+                        links.push(step.link.clone());
+                        current = parent;
+                    }
                     None => break,
                 }
             }
-            hops.reverse(); links.reverse();
+            hops.reverse();
+            links.reverse();
             return (hops, links, cost);
         }
         if let Some(edges) = graph.get(&node) {
@@ -39,7 +53,11 @@ fn resolve(graph: &HashMap<String, Vec<(String, String, BigInt)>>, source: Strin
                 if best.get(next).map_or(true, |old| next_cost < *old) {
                     best.insert(next.clone(), next_cost.clone());
                     let next_index = steps.len();
-                    steps.push(Step { node: next.clone(), parent: Some(index), link: link.clone() });
+                    steps.push(Step {
+                        node: next.clone(),
+                        parent: Some(index),
+                        link: link.clone(),
+                    });
                     // Strict improvements mean two live equal-cost entries cannot share a
                     // node. Python's later hops/UUID heap tie fields never decide a pop.
                     queue.push(Reverse((next_cost, next.clone(), next_index)));
@@ -55,10 +73,18 @@ fn resolve_paths(py: Python<'_>, links: Vec<Link>, queries: Vec<(String, String)
     py.detach(move || {
         let mut graph: HashMap<String, Vec<(String, String, BigInt)>> = HashMap::new();
         for (left, right, id, bidirectional, cost) in links {
-            graph.entry(left.clone()).or_default().push((right.clone(), id.clone(), cost.clone()));
-            if bidirectional { graph.entry(right).or_default().push((left, id, cost)); }
+            graph
+                .entry(left.clone())
+                .or_default()
+                .push((right.clone(), id.clone(), cost.clone()));
+            if bidirectional {
+                graph.entry(right).or_default().push((left, id, cost));
+            }
         }
-        queries.into_iter().map(|(source, target)| resolve(&graph, source, target)).collect()
+        queries
+            .into_iter()
+            .map(|(source, target)| resolve(&graph, source, target))
+            .collect()
     })
 }
 

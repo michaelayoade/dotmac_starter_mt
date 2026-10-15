@@ -5,7 +5,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-type Event = (String, i64, i64, String, String, i64, i64, i64, Vec<(String, String)>);
+type Event = (
+    String,
+    i64,
+    i64,
+    String,
+    String,
+    i64,
+    i64,
+    i64,
+    Vec<(String, String)>,
+);
 type Funnel = (i64, Vec<(String, i64)>);
 type Visitor = (String, i64, usize, usize);
 type Metric = (i64, String, String, usize, usize, usize);
@@ -54,42 +64,57 @@ fn project(events: Vec<Event>, timeout_us: i64, funnels: Vec<Funnel>) -> Project
     let mut cells: BTreeMap<(i64, String, String), Cell> = BTreeMap::new();
     for (index, event) in events.iter().enumerate() {
         for (dimension, key) in &event.8 {
-            let cell = cells.entry((event.7, dimension.clone(), key.clone())).or_default();
+            let cell = cells
+                .entry((event.7, dimension.clone(), key.clone()))
+                .or_default();
             cell.events += 1;
             cell.visitors.insert(event.0.clone());
             cell.sessions.insert(session_by_event[index]);
         }
     }
-    let metrics = cells.into_iter().map(|((bucket, dimension, key), cell)| {
-        (bucket, dimension, key, cell.events, cell.visitors.len(), cell.sessions.len())
-    }).collect();
-    let counts = funnels.into_iter().map(|(within_seconds, steps)| {
-        let mut entrants = 0;
-        let mut completed = vec![0; steps.len()];
-        for ordered in by_visitor.values() {
-            let mut cursor = 0;
-            let mut first_at = 0;
-            for &index in ordered {
-                let event = &events[index];
-                let step = &steps[cursor];
-                if event.4 != step.0 || event.5 != step.1 {
-                    continue;
-                }
-                if cursor == 0 {
-                    first_at = event.1;
-                    entrants += 1;
-                } else if event.1 - first_at > within_seconds * 1_000_000 {
-                    break;
-                }
-                completed[cursor] += 1;
-                cursor += 1;
-                if cursor == steps.len() {
-                    break;
+    let metrics = cells
+        .into_iter()
+        .map(|((bucket, dimension, key), cell)| {
+            (
+                bucket,
+                dimension,
+                key,
+                cell.events,
+                cell.visitors.len(),
+                cell.sessions.len(),
+            )
+        })
+        .collect();
+    let counts = funnels
+        .into_iter()
+        .map(|(within_seconds, steps)| {
+            let mut entrants = 0;
+            let mut completed = vec![0; steps.len()];
+            for ordered in by_visitor.values() {
+                let mut cursor = 0;
+                let mut first_at = 0;
+                for &index in ordered {
+                    let event = &events[index];
+                    let step = &steps[cursor];
+                    if event.4 != step.0 || event.5 != step.1 {
+                        continue;
+                    }
+                    if cursor == 0 {
+                        first_at = event.1;
+                        entrants += 1;
+                    } else if event.1 - first_at > within_seconds * 1_000_000 {
+                        break;
+                    }
+                    completed[cursor] += 1;
+                    cursor += 1;
+                    if cursor == steps.len() {
+                        break;
+                    }
                 }
             }
-        }
-        (entrants, completed)
-    }).collect();
+            (entrants, completed)
+        })
+        .collect();
     (visitors, sessions, metrics, counts)
 }
 
@@ -104,16 +129,22 @@ fn project_batch(
     if inactivity_seconds < 0 || inactivity_seconds > 86_400 {
         return Err(PyValueError::new_err("invalid inactivity seconds"));
     }
-    if funnels.iter().any(|(seconds, steps)| {
-        *seconds < 0 || *seconds > 2_592_000 || steps.is_empty()
-    }) {
+    if funnels
+        .iter()
+        .any(|(seconds, steps)| *seconds < 0 || *seconds > 2_592_000 || steps.is_empty())
+    {
         return Err(PyValueError::new_err("invalid funnel window or steps"));
     }
     // Driver timestamps are exact Python datetime microseconds, inside i64 bounds.
     // Validate private callers too, keeping time subtraction panic-free.
     const MAX_INSTANT: i64 = 400_000_000_000_000_000;
-    if events.iter().any(|event| !(-MAX_INSTANT..=MAX_INSTANT).contains(&event.1)) {
-        return Err(PyValueError::new_err("event instant is outside datetime bounds"));
+    if events
+        .iter()
+        .any(|event| !(-MAX_INSTANT..=MAX_INSTANT).contains(&event.1))
+    {
+        return Err(PyValueError::new_err(
+            "event instant is outside datetime bounds",
+        ));
     }
     Ok(py.detach(move || project(events, inactivity_seconds * 1_000_000, funnels)))
 }

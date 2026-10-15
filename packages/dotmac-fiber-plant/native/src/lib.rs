@@ -2,16 +2,27 @@ use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[pyfunction]
-fn continuity(py: Python<'_>, edges: Vec<(String, String, String)>, starts: Vec<String>, targets: Vec<String>) -> (Vec<String>, Vec<String>) {
+fn continuity(
+    py: Python<'_>,
+    edges: Vec<(String, String, String)>,
+    starts: Vec<String>,
+    targets: Vec<String>,
+) -> (Vec<String>, Vec<String>) {
     py.detach(move || {
         let mut graph: HashMap<String, Vec<(String, String)>> = HashMap::new();
         for (left, right, id) in edges {
-            graph.entry(left.clone()).or_default().push((right.clone(), id.clone()));
+            graph
+                .entry(left.clone())
+                .or_default()
+                .push((right.clone(), id.clone()));
             graph.entry(right).or_default().push((left, id));
         }
         let targets: HashSet<_> = targets.into_iter().collect();
         let mut visited: HashSet<_> = starts.iter().cloned().collect();
-        let mut steps: Vec<(String, Option<usize>, String)> = starts.into_iter().map(|node| (node, None, String::new())).collect();
+        let mut steps: Vec<(String, Option<usize>, String)> = starts
+            .into_iter()
+            .map(|node| (node, None, String::new()))
+            .collect();
         let mut queue: VecDeque<_> = (0..steps.len()).collect();
         while let Some(index) = queue.pop_front() {
             let node = steps[index].0.clone();
@@ -23,11 +34,15 @@ fn continuity(py: Python<'_>, edges: Vec<(String, String, String)>, starts: Vec<
                     let (node, parent, link) = &steps[current];
                     strands.push(node.clone());
                     match parent {
-                        Some(parent) => { splices.push(link.clone()); current = *parent; }
+                        Some(parent) => {
+                            splices.push(link.clone());
+                            current = *parent;
+                        }
                         None => break,
                     }
                 }
-                strands.reverse(); splices.reverse();
+                strands.reverse();
+                splices.reverse();
                 return (strands, splices);
             }
             if let Some(edges) = graph.get(&node) {
