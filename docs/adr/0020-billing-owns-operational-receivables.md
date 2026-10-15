@@ -459,3 +459,35 @@ The first code slice must include sensitivity-proven checks that:
 - a recurring charge occurrence cannot acquire receivable/settlement state,
   while a billing obligation cannot decide cadence, coverage or proration; and
 - every stateful module uses its allocated schema and independent lineage.
+
+## Amendment, 2026-10-15: Sub billing cutover sequencing
+
+Michael's 2026-10-13 M1/M6/M8 rulings set the order for the Sub billing
+programme. For that programme only, the recommendation above to adopt Billing
+in Vendor CP or a greenfield consumer first is waived: Sub is cutover 1 on its
+tenant plane, and may prepare its Billing adoption incrementally. Vendor CP
+remains a later platform-plane candidate and has no synthetic tenant. This
+does not change the build-once owner boundary or release requirements: Sub
+consumes an exact released package pin through the assembly, with Billing
+retaining operational receivables and each module retaining its domain write
+authority and independent migration lineage. The assembly owns the single
+caller transaction; services only mutate and flush. Package publication alone
+is not adoption.
+
+M6 keeps prepaid activity pay-then-record: no financial document precedes
+funding; advance drafts become notices; the obligation is created at funding
+with its final service period; and wallet value remains available credit from
+which renewal draws. M8 limits migration to open items and separately evidenced
+opening lanes; closed history remains a provenance-labelled, read-only Sub
+archive.
+
+Caller migration proceeds incrementally behind released contracts, shadow
+comparison, rehearsal, and retirement proof. The operational ledger authority
+changes once globally after the complete migration and one-writer readiness
+gates pass. There are no account-cohort authority flips and no dual writing.
+ERP's new receiving side is outside the Sub switch's critical path. The existing
+feed must consume committed Billing facts or safely queue them under the agreed
+contract, while ERP retains
+GL and statutory accounting authority. This amendment records sequencing only;
+it does not claim an adopter is live, a rehearsal is complete, or authorize a
+writer change or authority switch.

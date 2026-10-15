@@ -1,0 +1,53 @@
+{
+  "capture": {
+    "declared_source": {
+      "source_repository_sha": "0123456789abcdef0123456789abcdef01234567",
+      "installation_id": "00000000-0000-0000-0000-000000000032",
+      "economic_cutoff": "2026-10-13T00:00:00+00:00",
+      "currency_precisions": [["NGN", 2]],
+      "population_version": "sub-billing-opening-census-v2"
+    },
+    "schema_heads": ["fixture-schema:1"],
+    "snapshot_id": "fixture-snapshot:empty-v2",
+    "captured_at": "2026-10-13T00:00:00+00:00",
+    "isolation": "repeatable read",
+    "population_complete": true,
+    "mutable_history_reconstructed": false
+  },
+  "subscriber_ids": [],
+  "invoices": [],
+  "lines": [],
+  "settlements": [],
+  "financial_sources": [],
+  "lanes": [],
+  "effects": [],
+  "eligible_invoice_ids": [],
+  "exclusions": [],
+  "blocking_exceptions": [],
+  "controls": [],
+  "content_fingerprint": "fixture-content:empty-v2",
+  "cash_evidence": {
+    "payments": [],
+    "payment_settlements": [],
+    "provider_events": [],
+    "inbox_receipts": [],
+    "refunds": [],
+    "reversals": [],
+    "proofs": [],
+    "proof_corrections": [],
+    "topups": [],
+    "source_counts": [
+      {"table": "payments", "count": 0},
+      {"table": "payment_settlements", "count": 0},
+      {"table": "payment_provider_events", "count": 0},
+      {"table": "integration_inbox", "count": 0},
+      {"table": "payment_refunds", "count": 0},
+      {"table": "payment_reversals", "count": 0},
+      {"table": "payment_proofs", "count": 0},
+      {"table": "payment_proof_corrections", "count": 0},
+      {"table": "topup_intents", "count": 0}
+    ],
+    "blocking_exceptions": [],
+    "qualified_payment_ids": []
+  }
+}
