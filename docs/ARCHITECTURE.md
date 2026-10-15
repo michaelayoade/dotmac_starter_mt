@@ -45,6 +45,19 @@ artifact hashes. The runtime image preserves Python console entrypoints and
 compiled modules while excluding the Rust compiler/toolchain. The existing
 release facilities retain all publication, registry read-back and trust authority.
 
+The initial binary release target is CPython 3.12 on Linux x86_64, qualified by
+loading the retained wheels in `python:3.12-slim-bookworm` without a Rust
+compiler. The release lane repeats that target-image smoke before publication;
+manifest registration alone cannot prove that the native extension loads.
+Python 3.11 and 3.13 have hosted source-build/parity qualification, but the
+single-wheel publication contract does not claim prebuilt binaries for them.
+Source installations require the compiler and build tools pinned above.
+ERP's existing durable customer CSV preparation is the first downstream slice:
+it already delegates preview parsing and mapping inference to `dotmac-imports`.
+Adoption requires a verified registry release, an exact product pin/lock, and a
+product workflow canary exercising the installed extension. This is not an
+apply-worker acceleration claim or a production deployment claim.
+
 The existing published-source drift ratchet enrolls native inputs present at
 either the release tag or current source revision. `NativePackageSource.v1`
 fingerprints Git modes, kinds and object identities for Python/native sources,
@@ -60,11 +73,11 @@ depreciation and survey cohort arithmetic use the same private source
 crate, `native/decimal-core`, embedded byte-for-byte into each owning source
 archive. The generator rejects stale copies; no shared Python distribution or
 runtime module dependency is introduced. All three preserve sequential Decimal
-rounding, sticky flags and first trapped operation. The first six candidates
-completed
-hosted exact-wheel and extracted-source-archive qualification at PR #843 head
-`7f55d3adb99c25ec7e53ef7448902a66376544c3`; later source changes require fresh
-qualification and do not inherit that result.
+rounding, sticky flags and first trapped operation. All ten candidates passed
+hosted exact-wheel, extracted-source-archive and full repository CI at PR #843
+head `2184ad1969012de3022470d152dc2e7891198d40`, run `38709519486`.
+Release-readiness changes require fresh qualification and do not inherit that
+result.
 
 This expands the `CLAUDE.md` summary. See `docs/adr/0001-multi-tenant-architecture.md`
 for the founding tenancy design and `docs/adr/0002-starter-consolidation.md`
@@ -3870,6 +3883,7 @@ runtime or Gate 0 acceptance. Its owners and consumers are:
 |---|---|---|
 | `lane3_broker_origin.py`, `lane3_handoff_protocol.py` | Starter: exact-origin grammar and bounded, value-free protocol | Controller, coordinator and job client |
 | `lane3_handoff_coordinator.py`, `lane3_handoff_resolver.py` | Starter: authoritative GitHub qualification, immutable source installation, exact DNS capture and durable JIT cleanup | Independently approved host ceremony |
+| `lane3_handoff_coordinator.py::parse_config`, `authority_binding`, `assemble_v2_config`; `lane3_execution.py::require_admission_evidence` | Starter: explicit reviewed proof source capability, v2 qualification/config digest and same-commit admission DATA validation; candidate execution remains unsupported | Existing controller independent approval and measured runtime bundle; explicit private factory adapter |
 | `lane3_campaign_bootstrap.py` | Starter: measure the closed private bootstrap union/observation-age profile, require complete positive-TTL observations and identical chains from both configured TCP resolvers, retain all record/acquisition provenance, and freeze the deduplicated union with 60-second earliest-capture age | Root preview/freeze and the actual coordinator launch path under the original campaign deadline; broker TTL/grant policy remains separately owned |
 | `lane3_handoff_controller.py` | Starter: root lease journal, task identity, UID-scoped firewall, launch budget, exact-owned rollback and fresh read-only WireGuard checks | Coordinator and authenticated consumed-lease client over the private socket |
 | `lane3_handoff_install.py` | Starter: immutable installation bundle, protected independent configuration, locked management dispatch, durable install rollback, explicit uninstall and boot-readiness barrier | Host administrator and the fixed coordinator management channel |

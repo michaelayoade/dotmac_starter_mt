@@ -45,6 +45,55 @@ from typing import Any, Final
 
 SCHEMA: Final = "Lane3ExecutionTopology.v1"
 
+#: The repository this module is checked out in. ``admission_evidence`` names a
+#: file inside it, so the evidence is read at the same revision as the topology.
+REPO_ROOT: Final = pathlib.Path(__file__).resolve().parents[1]
+
+#: The ONE file ``admission_evidence`` may point into, and the anchor grammar.
+#: ``docs/LANE3_EXECUTION_TOPOLOGY.md`` stays design prose; the filled evidence
+#: lives in its own checked-in table so a reviewer can read what was proven.
+EVIDENCE_FILE: Final = "docs/inventories/lane3-admission-evidence.md"
+EVIDENCE_REFERENCE: Final = re.compile(
+    re.escape(EVIDENCE_FILE) + r"#(?P<anchor>[a-z0-9][a-z0-9-]*)"
+)
+
+#: The eight admission requirements of ``docs/LANE3_EXECUTION_TOPOLOGY.md`` § 7,
+#: exactly as that table's first column names them.
+ADMISSION_REQUIREMENTS: Final = (
+    "Public controls",
+    "Authorized scheduling",
+    "PR exclusion",
+    "Ref and workflow failure",
+    "Credential failure",
+    "No-grant refusal",
+    "Isolation and disclosure",
+    "Oracle reachability",
+)
+EVIDENCE_HEADER: Final = ("Requirement", "Evidence coordinate", "Evidence sha256")
+
+_JOB_COORDINATE: Final = re.compile(r"(?:run|job):[1-9][0-9]{5,19}")
+_TYPED_COORDINATE: Final = re.compile(
+    r"(?:audit|readback|scan):[A-Za-z0-9][A-Za-z0-9._/-]{7,}"
+)
+#: Coordinate kinds each row may use. § 7 asks for audit-side observation for the
+#: credential rows ("a log line saying so is not enough"), a private-side scan
+#: for isolation, scheduling runs for dispatch, and a read-back for controls.
+#: Rows not listed accept any typed kind.
+ALLOWED_KINDS: Final = {
+    "No-grant refusal": frozenset({"audit"}),
+    "Credential failure": frozenset({"audit"}),
+    "Isolation and disclosure": frozenset({"scan"}),
+    "Authorized scheduling": frozenset({"run", "job"}),
+    "Public controls": frozenset({"readback"}),
+}
+_SEPARATOR_CELL: Final = re.compile(r":?-{3,}:?")
+_DIGEST: Final = re.compile(r"[0-9a-f]{64}")
+_PLACEHOLDER: Final = re.compile(
+    r"\b(?:pending|tbd|todo|unknown|unfilled|placeholder|example|changeme|xxx+)\b"
+    r"|\bn/?a\b|[<>]",
+    re.IGNORECASE,
+)
+
 #: ``lane3 starter=<40 lowercase hex> candidate=<version>``. The version grammar
 #: is PEP 440's public form restricted to what this facility allocates
 #: (``0.4.0a2``): digits, dots and one pre-release segment.
@@ -107,8 +156,157 @@ def _text(document: dict[str, Any], path: str) -> str:
     return node
 
 
-def parse_topology(document: Any) -> Lane3ExecutionTopology:
-    """Parse the checked-in topology, refusing anything not fully admitted."""
+def _slug(heading: str) -> str:
+    return re.sub(r"[^a-z0-9 -]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def _cells(line: str) -> list[str]:
+    return [
+        cell.strip().strip("`").strip() for cell in line.strip().strip("|").split("|")
+    ]
+
+
+def require_admission_evidence(reference: Any, *, repo_root: pathlib.Path) -> str:
+    """Refuse unless ``reference`` resolves to a complete § 7 evidence table.
+
+    ``reference`` is ``docs/inventories/lane3-admission-evidence.md#<anchor>``.
+    The anchor names a heading in that checked-in file; the pipe
+    lines under it, up to the next heading, form the table. It must hold exactly
+    one row per § 7 requirement, each carrying a typed
+    coordinate (``run:``/``job:`` plus a numeric ID, or ``audit:``/
+    ``readback:``/``scan:`` plus a token) and a sha256 digest. A string alone,
+    or a table with a pending, unknown or placeholder row, admits nothing. No
+    network: this proves the evidence is recorded and well formed, and leaves
+    its truth to the reviewer of the change that fills it.
+    """
+    match = (
+        EVIDENCE_REFERENCE.fullmatch(reference) if isinstance(reference, str) else None
+    )
+    if match is None:
+        raise TopologyRefused(
+            f"admission_evidence {reference!r} is not a reference of the form "
+            f"{EVIDENCE_FILE}#<anchor>. A bare string, or a pointer anywhere "
+            "else, is a claim and not evidence (docs/LANE3_EXECUTION_TOPOLOGY.md § 7)"
+        )
+    anchor = match.group("anchor")
+    path = repo_root / EVIDENCE_FILE
+    try:
+        walked = repo_root
+        for part in pathlib.PurePosixPath(EVIDENCE_FILE).parts:
+            walked = walked / part
+            if walked.is_symlink():
+                raise OSError(f"{part} is a symbolic link")
+        if not path.is_file():
+            raise OSError("not a regular file")
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+    except (OSError, ValueError) as exc:
+        raise TopologyRefused(
+            f"admission_evidence names {EVIDENCE_FILE}, which cannot be read at "
+            f"this revision: {exc}"
+        ) from exc
+    if "<!--" in text or "-->" in text:
+        raise TopologyRefused(
+            f"admission_evidence {EVIDENCE_FILE} contains an HTML comment marker; "
+            "a comment can hide a heading or a table from the rendered page"
+        )
+    starts = [
+        i
+        for i, line in enumerate(lines)
+        if re.match(r"#{1,6} ", line) and _slug(line.lstrip("#")) == anchor
+    ]
+    if len(starts) != 1:
+        raise TopologyRefused(
+            f"admission_evidence anchor #{anchor} matches {len(starts)} headings "
+            f"in {EVIDENCE_FILE}; it must match exactly one"
+        )
+    section: list[str] = []
+    for line in lines[starts[0] + 1 :]:
+        if re.match(r"#{1,6} ", line):
+            break
+        if "<!--" in line or line.lstrip().startswith(("```", "~~~")):
+            raise TopologyRefused(
+                f"admission_evidence #{anchor} contains a comment or code fence; "
+                "the table a reviewer sees rendered must be the table parsed"
+            )
+        if line.lstrip().startswith("|"):
+            section.append(line)
+    if len(section) < 2 or tuple(_cells(section[0])) != EVIDENCE_HEADER:
+        raise TopologyRefused(
+            f"admission_evidence #{anchor} has no table with the columns "
+            f"{' | '.join(EVIDENCE_HEADER)}"
+        )
+    separator = _cells(section[1])
+    if len(separator) != len(EVIDENCE_HEADER) or not all(
+        _SEPARATOR_CELL.fullmatch(cell) for cell in separator
+    ):
+        raise TopologyRefused(
+            f"admission_evidence #{anchor} table has no separator row"
+        )
+    seen: dict[str, tuple[str, str]] = {}
+    for line in section[2:]:
+        cells = _cells(line)
+        if len(cells) != len(EVIDENCE_HEADER):
+            raise TopologyRefused(f"admission_evidence #{anchor} has a malformed row")
+        name, coordinate, digest = cells
+        if name not in ADMISSION_REQUIREMENTS:
+            raise TopologyRefused(
+                f"admission_evidence #{anchor} has a row for {name!r}, which is "
+                "not a § 7 requirement"
+            )
+        if name in seen:
+            raise TopologyRefused(f"admission_evidence #{anchor} repeats {name!r}")
+        seen[name] = (coordinate, digest)
+    missing = [name for name in ADMISSION_REQUIREMENTS if name not in seen]
+    if missing:
+        raise TopologyRefused(
+            f"admission_evidence #{anchor} has no row for: {', '.join(missing)}"
+        )
+    for name, (coordinate, digest) in seen.items():
+        if _PLACEHOLDER.search(coordinate) or _PLACEHOLDER.search(digest):
+            raise TopologyRefused(
+                f"admission_evidence #{anchor} row {name!r} is pending, unknown "
+                "or a placeholder"
+            )
+        typed = _JOB_COORDINATE.fullmatch(coordinate) or _TYPED_COORDINATE.fullmatch(
+            coordinate
+        )
+        if not typed or len(set(coordinate.split(":", 1)[1])) < 2:
+            raise TopologyRefused(
+                f"admission_evidence #{anchor} row {name!r} has no typed evidence "
+                f"coordinate (run:<id>, job:<id>, audit:/readback:/scan:<token>): "
+                f"{coordinate!r}"
+            )
+        allowed = ALLOWED_KINDS.get(name)
+        kind = coordinate.split(":", 1)[0]
+        if allowed is not None and kind not in allowed:
+            raise TopologyRefused(
+                f"admission_evidence #{anchor} row {name!r} must use a "
+                f"{'/'.join(sorted(allowed))}: coordinate, not {kind}:"
+            )
+        if not _DIGEST.fullmatch(digest) or len(set(digest)) < 2:
+            raise TopologyRefused(
+                f"admission_evidence #{anchor} row {name!r} has no sha256 evidence "
+                "digest (64 lowercase hex, not a repeated character)"
+            )
+    for index, label in ((0, "coordinate"), (1, "digest")):
+        values = [pair[index] for pair in seen.values()]
+        if len(set(values)) != len(values):
+            raise TopologyRefused(
+                f"admission_evidence #{anchor} reuses one {label} across rows; each "
+                "requirement needs its own evidence"
+            )
+    return reference
+
+
+def parse_topology(
+    document: Any, *, repo_root: pathlib.Path = REPO_ROOT
+) -> Lane3ExecutionTopology:
+    """Parse the checked-in topology, refusing anything not fully admitted.
+
+    ``repo_root`` is where ``admission_evidence`` is resolved: the checkout the
+    topology was read from, so topology and evidence are the same revision.
+    """
     if not isinstance(document, dict) or document.get("schema") != SCHEMA:
         raise TopologyRefused(f"expected a {SCHEMA} document")
     revisions = document.get("admitted_launcher_revisions")
@@ -132,6 +330,7 @@ def parse_topology(document: Any) -> Lane3ExecutionTopology:
             "and positive admission proofs is a configuration, not an admitted "
             "execution surface (docs/LANE3_EXECUTION_TOPOLOGY.md § 7)"
         )
+    require_admission_evidence(evidence, repo_root=repo_root)
     return Lane3ExecutionTopology(
         starter_repository=_text(document, "starter_repository"),
         execution_repository=_text(document, "execution_repository"),
@@ -150,11 +349,20 @@ def parse_topology(document: Any) -> Lane3ExecutionTopology:
 
 
 def load_topology(path: pathlib.Path) -> Lane3ExecutionTopology:
+    """Read ``<repo>/.github/lane3-execution.json`` and its evidence from ``<repo>``."""
+    path = path.absolute()
+    if path.is_symlink():
+        raise TopologyRefused(f"{path} is a symbolic link; refusing to follow it")
+    if path.parent.name != ".github":
+        raise TopologyRefused(
+            f"{path} is not directly under a .github directory, so the checkout "
+            "holding its admission evidence cannot be identified"
+        )
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise TopologyRefused(f"cannot read {path}: {exc}") from exc
-    return parse_topology(document)
+    return parse_topology(document, repo_root=path.parent.parent)
 
 
 def parse_run_name(title: Any) -> tuple[str, str] | None:

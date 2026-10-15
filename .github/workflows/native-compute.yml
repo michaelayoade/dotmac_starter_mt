@@ -138,10 +138,17 @@ jobs:
           PY
             poetry run pytest -q tests/unit/test_positioning.py tests/unit/test_positioning_native.py tests/unit/test_network_suite_services.py tests/unit/test_network_topology_native.py tests/unit/test_fiber_plant_native.py tests/unit/test_media_observations.py tests/unit/test_media_observations_native.py tests/unit/test_imports.py tests/unit/test_imports_native.py tests/unit/test_web_analytics_engine.py tests/unit/test_web_analytics_native.py tests/unit/test_forms.py tests/unit/test_forms_native.py tests/unit/test_surveys_service.py tests/unit/test_surveys_lifecycle.py tests/unit/test_surveys_native.py tests/unit/test_inventory_native.py tests/unit/test_inventory_service.py tests/unit/test_inventory_valuation.py tests/unit/test_finance_calculations.py tests/unit/test_finance_service.py tests/unit/test_finance_native.py
           done
+      - name: Load retained wheels in the supported Debian runtime
+        run: |
+          poetry build --directory packages/dotmac-kernel --format wheel --output "$GITHUB_WORKSPACE/native-artifacts/runtime"
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/source:ro" --workdir /source \
+            python:3.12-slim-bookworm \
+            python scripts/native_qualify.py runtime-smoke native-artifacts
       - name: Record exact artifact identities
         run: |
           cd native-artifacts
-          sha256sum ./*.whl ./*.tar.gz rebuilt/*.whl > SHA256SUMS
+          sha256sum ./*.whl ./*.tar.gz rebuilt/*.whl runtime/*.whl > SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-artifacts-cp${{ matrix.python }}
@@ -149,6 +156,7 @@ jobs:
             native-artifacts/*.whl
             native-artifacts/*.tar.gz
             native-artifacts/rebuilt/*.whl
+            native-artifacts/runtime/*.whl
             native-artifacts/SHA256SUMS
           if-no-files-found: error
 

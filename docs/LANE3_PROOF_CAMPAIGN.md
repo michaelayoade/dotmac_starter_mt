@@ -253,3 +253,38 @@ accepted head/base before any live invocation. Static checks and prior operator
 tests do not qualify this new supervision code. The module deliberately leaves
 the already reviewed activation/staging/readbacks and the separate human proof
 decision with the root orchestrator; source presence is not deployment readiness.
+
+### Coordinator purpose and migration boundary (2026-10-15)
+
+The proposed v2 source bundle classifies this campaign as `qualification` only
+through reviewed immutable configuration and its exact source-capability record
+(`docs/inventories/lane3-source-capabilities.md`). Its permitted operations are
+GitHub OIDC, bounded OpenBao KV read, proof recording and cleanup, followed by
+terminal execution refusal. The classification includes the entire reviewed
+supplier/import closure and exact workflow blob, not merely a workflow name or
+final step label. The existing per-run Environment approval, independent expiring
+controller approval, routing, first-attempt, lease and deadline checks still apply.
+The controller rereads that exact protected approval before grant mutations,
+before installing additional rules and immediately before publishing a grant;
+expiry, removal or substitution refuses and enters owned cleanup.
+A source/config/capability change invalidates the persisted qualification and its
+approval. No candidate download/install/executor, ExecutionGrant production or
+acceptance, or passing Lane 3 rehearsal receipt is classified by this record.
+
+The controller consumes nested v2 purpose/config/capability bindings only on its
+management qualification. Its independently staged approval digest covers them.
+The runner-client broker-grant wire schema retains its existing meaning. A
+bounded grant while admission is null can qualify transport mechanics; it cannot
+serve as the no-ExecutionGrant execution negative, which needs independent
+OpenBao audit evidence on the actual execution path.
+
+Do not reuse a v1 campaign deployment for new authority. Retire its existing lease
+with explicit coordinator cleanup/status recovery using the original journal and
+controller, then render explicit v2 inputs with `assemble_v2_config`. The approval
+factory compares `authority_binding(cfg)` with the canonical readback qualification
+before hashing the approval. The installed runtime closure now additionally owes
+`lane3_execution.py`; all runtime/operator/config/approval pins must be refreshed
+atomically after source review. No private or installed pin is refreshed by this
+source change. Hosted synthetic/system suites remain bounded mechanical evidence;
+the exact deployed launcher classification and live proof window require their
+separate acceptance and human gates.

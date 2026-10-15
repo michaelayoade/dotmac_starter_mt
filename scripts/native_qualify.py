@@ -296,14 +296,46 @@ def standalone(artifacts: Path) -> None:
     (artifacts / "SHA256SUMS").write_text("".join(hashes))
 
 
+def runtime_smoke(artifacts: Path) -> None:
+    """Install retained wheels in the target image without a source compiler."""
+    native_wheels = sorted(artifacts.glob("*.whl"))
+    runtime_wheels = sorted((artifacts / "runtime").glob("*.whl"))
+    if not native_wheels or not runtime_wheels:
+        raise RuntimeError("runtime smoke requires retained native and kernel wheels")
+    run(
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--only-binary=:all:",
+        "--no-cache-dir",
+        *map(str, [*runtime_wheels, *native_wheels]),
+    )
+    run(
+        sys.executable,
+        "-I",
+        "-c",
+        "import importlib, importlib.machinery, pathlib, sys; "
+        "extensions=[importlib.import_module(name+'._native') "
+        "for name in sys.argv[1:]]; "
+        "assert all(isinstance(ext.__loader__, "
+        "importlib.machinery.ExtensionFileLoader) and "
+        "'site-packages' in pathlib.Path(ext.__file__).parts "
+        "for ext in extensions), [ext.__file__ for ext in extensions]",
+        *[module for _, module in packages()],
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["standalone", "verify"])
+    parser.add_argument("command", choices=["standalone", "verify", "runtime-smoke"])
     parser.add_argument("artifacts", type=Path)
     args = parser.parse_args()
     artifacts = args.artifacts.resolve()
     if args.command == "standalone":
         standalone(artifacts)
+    elif args.command == "runtime-smoke":
+        runtime_smoke(artifacts)
     else:
         verify_artifacts(artifacts)
 
