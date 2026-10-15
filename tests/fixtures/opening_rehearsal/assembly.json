@@ -1,0 +1,46 @@
+{
+  "scope": {"kind": "tenant", "tenant_id": "00000000-0000-0000-0000-000000000064"},
+  "source_system": "sub",
+  "recorded_cutoff": "2026-10-13T00:00:00+00:00",
+  "source_authority_ref": "fixture:source-authority",
+  "account_mapping_version": "fixture:account-mapping:1",
+  "cash_mapping_version": "fixture:cash-mapping:1",
+  "receivable_mapping_version": "fixture:receivable-mapping:1",
+  "tax_mapping_version": "fixture:tax-mapping:1",
+  "source_resolver_version": "fixture:source-resolver:1",
+  "collection_authority": "fixture:collection-authority",
+  "collection_mapping_version": "fixture:collection-mapping:1",
+  "migration_authority_ref": "fixture:migration-authority",
+  "occurred_at": "2026-10-13T00:00:00+00:00",
+  "starter_head_sha": "7a133895d611d9043eff10dc1b8271bdda493ff2",
+  "sub_exit_code": 1,
+  "binding": {
+    "target_installation_id": "00000000-0000-0000-0000-0000000000c8",
+    "artifact_identity": "fixture:assembly-artifact",
+    "policy_identity": "fixture:assembly-policy"
+  },
+  "partitions": [
+    {
+      "source_account_id": "00000000-0000-0000-0000-00000000000a",
+      "source_account_key": "source-account:fixture-10",
+      "account_id": "00000000-0000-0000-0000-0000000003e9",
+      "currency": "NGN",
+      "precision": 2,
+      "idempotency_key": "opening-rehearsal:fixture:ngn",
+      "target": {
+        "expected_position_fingerprint": "fixture-pristine-position",
+        "posting_watermark": "fixture-posting:0"
+      }
+    }
+  ],
+  "invoice_mappings": [
+    {
+      "source_invoice_id": "00000000-0000-0000-0000-000000000001",
+      "source_identity_kind": "invoice",
+      "source_identity_key": "invoice:fixture-1",
+      "source_invoice_key": "invoice:fixture-1"
+    }
+  ],
+  "discharge_mappings": [],
+  "accepted_manual_holds": []
+}

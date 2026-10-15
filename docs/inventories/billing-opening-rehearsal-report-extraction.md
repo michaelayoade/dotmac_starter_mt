@@ -59,3 +59,28 @@ The named Sub host remains authorized for read-only capture, but current SSH
 sandbox access is blocked. Historical exception counts are dated baselines.
 No import, mutation, credentials, publication or activation is authorized by
 this report, and local static checks do not establish runtime acceptance.
+
+## Opening-rehearsal adapter (disposable assembly tooling) — 2026-10-14
+
+`scripts/billing_opening_rehearsal_adapter.py` is the unpublished read-only
+Sub -> Starter translator for the rehearsal census: it mechanically projects
+Sub's serialized `sub-billing-opening-census-v2`/`-v3` export onto
+`OpeningSubObservationV2`, assembles a candidate manifest from an explicit
+assembly file only (`cash_lots=()`, `original=None` always), and counts the
+pure preflight/report blockers per partition. It opens no database session,
+calls no writer, constructs no verifier, qualifies no cash and computes no
+tax. Its unit tests live in
+`tests/unit/test_billing_opening_rehearsal_adapter.py` with hand-authored
+fixtures (including a fixture assembly, for tests only) under
+`tests/fixtures/opening_rehearsal/`. The production assembly file remains a
+separate Michael-owned signed artifact; the adapter refuses to run without
+one.
+
+Deletion trigger: delete the adapter and its fixtures when (a) a verified
+`OpeningWindowSealV1` is stored for the target scope — after which new opening
+admission fails closed and rehearsal has no consumer — and (b) three
+successive complete runs have been compared via `compare_opening_rehearsals`
+for the record. Earlier supersession: if an `OpeningSubObservationV3` replaces
+the V2 projection, delete the v3-sidecar path in the same change. Deletion
+removes only `scripts/billing_opening_rehearsal_adapter.py` and its fixtures;
+the `opening_rehearsal*.py` report types remain package-owned.
