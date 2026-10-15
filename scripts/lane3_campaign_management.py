@@ -31,8 +31,106 @@ MARKER = "/root/dotmac-l3mgmt/owned"
 ACTIVATION = "dotmac-l3mgmt-activate.service"
 
 
+FAILURE_CATEGORIES = frozenset(
+    (
+        "activation-stop-unproven",
+        "already-attempted",
+        "arm-unowned",
+        "binding-invalid",
+        "binding-mismatch",
+        "cleanup-unproven",
+        "deadline-invalid",
+        "file-unproven",
+        "gate-unproven",
+        "helper-unproven",
+        "lease-active",
+        "lock-busy",
+        "lock-unproven",
+        "marker-unproven",
+        "old-stop-unproven",
+        "preflight-unproven",
+        "receipt-stale",
+        "receipt-unproven",
+        "root-required",
+        "state-unproven",
+        "systemd-unproven",
+        "timer-collision",
+        "timer-remover-active",
+        "timer-unproven",
+        "transition-unproven",
+        "unexpected",
+        "unit-unowned",
+        "usage-refused",
+    )
+)
+FAILURE_STAGES = frozenset(
+    {
+        "unproven",
+        "preflight",
+        "arm",
+        "first-bindings",
+        "first-retained-check",
+        "old-stop",
+        "old-stop-readback",
+        "second-bindings",
+        "second-retained-check",
+    }
+)
+FAILURE_PHASES = frozenset(
+    {"unproven", "retain", "gate_prepare", "gate_bootstrap", "finish"}
+)
+CLEANUP_OUTCOMES = frozenset({"not_attempted", "completed", "unproven"})
+
+
 class Refused(RuntimeError):
-    """A fixed public reason, with no command output or secret material."""
+    """Fixed public reason; metadata contains only reviewed finite labels."""
+
+    def __init__(
+        self, category, *, stage="unproven", cause=None, cleanup="not_attempted"
+    ):
+        category = (
+            category
+            if type(category) is str and category in FAILURE_CATEGORIES
+            else "unexpected"
+        )
+        super().__init__(category)
+        self.category = category
+        self.stage = (
+            stage if type(stage) is str and stage in FAILURE_STAGES else "unproven"
+        )
+        self.cleanup = (
+            cleanup
+            if type(cleanup) is str and cleanup in CLEANUP_OUTCOMES
+            else "unproven"
+        )
+        self.failure_category = (
+            cause.category
+            if type(cause) is Refused
+            else "unexpected"
+            if cause is not None
+            else category
+        )
+
+
+def failure_diagnostic(error, phase):
+    """Copy bounded metadata from this canonical exception owner only."""
+    valid = type(error) is Refused
+    return {
+        "phase": phase
+        if type(phase) is str and phase in FAILURE_PHASES
+        else "unproven",
+        "stage": error.stage
+        if valid and type(error.stage) is str and error.stage in FAILURE_STAGES
+        else "unproven",
+        "category": error.failure_category
+        if valid
+        and type(error.failure_category) is str
+        and error.failure_category in FAILURE_CATEGORIES
+        else "unexpected",
+        "cleanup": error.cleanup
+        if valid and type(error.cleanup) is str and error.cleanup in CLEANUP_OUTCOMES
+        else "not_attempted",
+    }
 
 
 @dataclass(frozen=True)
@@ -169,22 +267,34 @@ class Management:
             raise
         except Exception:
             raise Refused("preflight-unproven") from None
+        stage = "arm"
         try:
             self.backend.arm(
                 self.binding.new_unit, self.binding.owner, self.binding.expiry_ns
             )
+            stage = "first-bindings"
             self._bindings()
+            stage = "first-retained-check"
             self._timer(self.binding.new_unit, self.binding.owner, 600, retained=True)
+            stage = "old-stop"
             self.backend.stop(self.binding.old_unit)
+            stage = "old-stop-readback"
             if self.backend.timer(self.binding.old_unit) is not None:
                 raise Refused("old-stop-unproven")
+            stage = "second-bindings"
             self._bindings()
+            stage = "second-retained-check"
             self._timer(self.binding.new_unit, self.binding.owner, 600, retained=True)
-        except Exception:
+        except Exception as exc:
             # Never disarm either possible backstop after an unknown result. The
             # old timer is untouched until a new timer has independent readback.
-            self._cleanup()
-            raise Refused("transition-unproven") from None
+            cleaned = self._cleanup()
+            raise Refused(
+                "transition-unproven",
+                stage=stage,
+                cause=exc,
+                cleanup="completed" if cleaned else "unproven",
+            ) from None
         receipt = Receipt(
             self.binding.run_id,
             self.binding.boot_id,

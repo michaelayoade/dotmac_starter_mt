@@ -285,3 +285,80 @@ def test_helper_drift_prevents_timer_creation():
     with pytest.raises(cm.Refused, match="binding-mismatch"):
         m.retain()
     assert b.effects == []
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        "arm",
+        "first-retained-check",
+        "old-stop",
+        "old-stop-readback",
+        "second-bindings",
+        "second-retained-check",
+    ],
+)
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_transition_diagnostic_keeps_actual_stage_and_separate_cleanup(
+    monkeypatch, point, cleanup_fails
+):
+    b, m = prepared()
+    calls = {"bindings": 0, "new": 0, "old": 0}
+    original_bindings, original_timer = m._bindings, b.timer
+
+    def bindings():
+        calls["bindings"] += 1
+        if point == "second-bindings" and calls["bindings"] == 3:
+            raise cm.Refused("binding-mismatch")
+        original_bindings()
+
+    def timer(unit):
+        key = "old" if unit == m.binding.old_unit else "new"
+        calls[key] += 1
+        target = {
+            "first-retained-check": ("new", 2),
+            "second-retained-check": ("new", 3),
+            "old-stop-readback": ("old", 2),
+        }.get(point)
+        if target == (key, calls[key]):
+            raise cm.Refused("systemd-unproven")
+        return original_timer(unit)
+
+    def remove():
+        b.effects.append("remove")
+        if cleanup_fails:
+            raise RuntimeError("PRIVATE-CANARY")
+
+    monkeypatch.setattr(m, "_bindings", bindings)
+    monkeypatch.setattr(b, "timer", timer)
+    monkeypatch.setattr(b, "remove", remove)
+    if point == "arm":
+        b.fail = "arm"
+    if point == "old-stop":
+        monkeypatch.setattr(
+            b,
+            "stop",
+            lambda unit: (_ for _ in ()).throw(cm.Refused("systemd-unproven")),
+        )
+    with pytest.raises(cm.Refused, match="transition-unproven") as error:
+        m.retain()
+    diagnostic = cm.failure_diagnostic(error.value, "retain")
+    assert diagnostic["phase"] == "retain"
+    assert diagnostic["stage"] == point
+    assert diagnostic["cleanup"] == ("unproven" if cleanup_fails else "completed")
+    assert diagnostic["category"] == (
+        "unexpected"
+        if point == "arm"
+        else "binding-mismatch"
+        if point == "second-bindings"
+        else "systemd-unproven"
+    )
+    assert "PRIVATE" not in repr(error.value)
+    assert "PRIVATE" not in str(diagnostic)
+    assert b.effects[-1] == "remove"
+
+
+def test_management_unknown_exception_category_is_not_public():
+    error = cm.Refused("PRIVATE-CANARY")
+    assert "PRIVATE" not in repr(error)
+    assert cm.failure_diagnostic(error, "retain")["category"] == "unexpected"
