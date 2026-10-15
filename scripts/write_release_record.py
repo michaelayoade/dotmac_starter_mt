@@ -4,7 +4,7 @@
 ## Why this exists
 
 A release workflow writes the TAG. It does not write the RECORD, and the
-repository has three ledgers that a module publication affects when the tag
+repository has four ledgers that a module publication affects when the tag
 lands:
 
 1. ``docs/inventories/declared-publication-baseline.json`` — the ``unpublished``
@@ -19,6 +19,9 @@ lands:
    object, peeled source commit and SHA-256 of the exact build-once wheel carried
    into registry verification. Consumers can pin this checked-in producer
    record instead of trusting a copied digest.
+4. ``tests/architecture/published_source_drift_baseline.json`` — the census of
+   published source trees. A newly tagged declared version changes this census;
+   regenerate it with the canonical renderer, preserving surviving dispositions.
 
 Miss a required record and the tag-backed architecture gates fail, so ``main``
 is red from the instant of the tag
@@ -114,7 +117,13 @@ class ReleaseRecordError(RuntimeError):
 
 
 def _local_script(name: str):
-    path = REPO_ROOT / "scripts" / f"{name}.py"
+    # Keep this dynamically loaded dependency visible to ReleaseAuthority.v1's
+    # literal-path closure, so its renderer bytes are authorized with the writer.
+    path = REPO_ROOT / (
+        "scripts/published_source_drift.py"
+        if name == "published_source_drift"
+        else f"scripts/{name}.py"
+    )
     spec = importlib.util.spec_from_file_location(f"_release_record_{name}", path)
     if spec is None or spec.loader is None:
         raise ReleaseRecordError(f"cannot load the local {name} script")
@@ -123,6 +132,15 @@ def _local_script(name: str):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _render_source_drift_baseline() -> str:
+    source_drift = _local_script("published_source_drift")
+    # Imported defaults describe the helper's checkout, which need not be the
+    # recorder's repository or baseline (notably in synthetic fixtures).
+    source_drift.REPO_ROOT = REPO_ROOT
+    source_drift.BASELINE_PATH = SOURCE_DRIFT_BASELINE
+    return source_drift.render_baseline()
 
 
 def _git(*args: str) -> str:
@@ -1625,14 +1643,13 @@ def write_record(
     if distribution == "dotmac-kernel":
         require_kernel_evidence(version=version, tag=tag, commit=commit)
         authorization = _local_script("kernel_release_authorization")
-        source_drift = _local_script("published_source_drift")
         active = authorization.load_authorization()
         if active is None:
             if row is not None:
                 raise ReleaseRecordError(
                     "kernel authorization is consumed but publication ledger remains"
                 )
-            rendered_baseline = source_drift.render_baseline()
+            rendered_baseline = _render_source_drift_baseline()
             if rendered_baseline != baseline_text:
                 raise ReleaseRecordError(
                     "kernel authorization is consumed but source census differs"
@@ -1647,7 +1664,7 @@ def write_record(
                     f"kernel release authorization cannot be consumed: {failure}"
                 ) from failure
             json.loads(new_authorization)
-            new_baseline = source_drift.render_baseline()
+            new_baseline = _render_source_drift_baseline()
             rendered = json.loads(new_baseline)
             if (
                 rendered["released_total"]
@@ -1710,6 +1727,16 @@ def write_record(
         if added:
             changed.append(
                 f"recorded the verified {wheel_filename} SHA-256 and annotated tag"
+            )
+
+    if distribution != "dotmac-kernel":
+        new_baseline = _render_source_drift_baseline()
+        rendered = json.loads(new_baseline)
+        if new_baseline != baseline_text:
+            changed.append(
+                "recomputed the published-source census from the tagged tree "
+                f"({rendered['released_total']} released, "
+                f"{rendered['drifted_total']} drifted)"
             )
 
     # Validate every premise before any file changes. A refused first
