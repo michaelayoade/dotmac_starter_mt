@@ -30,6 +30,12 @@ incompatible block is invalid for that module only.
   reporting window with its own posture rules. The default keeps the source
   behaviour.
 - Kernel floor `a88` is the floor of the sibling stateless module
-  `dotmac-document-rendering` 0.1.0a1 and the first kernel the manifest-only
-  probe in `scripts/module_floor_check.sh` is run against here. The package uses
-  only `ModuleManifest(code, version, core=False)`.
+  `dotmac-document-rendering` 0.1.0a1, chosen for consistency and because it is
+  well below Sub's `a98` pin. It is NOT proven minimal: `scripts/module_floor_check.sh`
+  was tried on 2026-10-15 and refused the entry, because the previous published
+  kernel (`a86`) also loads the manifest (`ModuleManifest(code, version,
+  core=False)`, whose fields exist in far older kernels). The package is
+  therefore not listed in that script, since a floor that is not necessary
+  cannot pass it. A lower floor may be adopted later, with the probe, by a
+  change that lowers the declared floor, the allowlist row and the floor map
+  together. Any floor at or below `a98` keeps Sub's kernel pin unchanged.
