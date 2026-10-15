@@ -21,4 +21,5 @@ def calculate_metrics(
     context: ContextSpec,
     traps: int,
     replay_rating: Callable[[int, ArithmeticFailure], None],
+    capture_nps_context: Callable[[], tuple[ContextSpec, int]],
 ) -> tuple[str | None, str | None, int, ArithmeticFailure]: ...

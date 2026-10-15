@@ -21,7 +21,10 @@ fn arithmetic_and_copy_use_explicit_context() {
     assert_eq!(value.text().as_deref(), Some("10"));
     let mut copy = Decimal::new().unwrap();
     assert_eq!(copy.copy_from(&value).signals, 0);
-    assert_eq!(copy.compare(&operand), (Some(Ordering::Greater), Default::default()));
+    assert_eq!(
+        copy.compare(&operand),
+        (Some(Ordering::Greater), Default::default())
+    );
     assert_eq!(copy.scaleb(&decimal(c"-1"), &context).signals, 0);
     assert_eq!(copy.text().as_deref(), Some("1.0"));
 }
@@ -31,10 +34,16 @@ fn quantize_override_does_not_change_ambient_rounding() {
     let context = Context::new((28, 6, -999999, 999999, 0)).unwrap();
     let scale = decimal(c"0.01");
     let mut value = decimal(c"1.225");
-    assert_eq!(value.quantize(&scale, &context, Some(4)).signals, INEXACT | ROUNDED);
+    assert_eq!(
+        value.quantize(&scale, &context, Some(4)).signals,
+        INEXACT | ROUNDED
+    );
     assert_eq!(value.text().as_deref(), Some("1.23"));
     value.parse(c"1.225");
-    assert_eq!(value.quantize(&scale, &context, None).signals, INEXACT | ROUNDED);
+    assert_eq!(
+        value.quantize(&scale, &context, None).signals,
+        INEXACT | ROUNDED
+    );
     assert_eq!(value.text().as_deref(), Some("1.22"));
 }
 

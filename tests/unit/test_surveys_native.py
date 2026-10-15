@@ -251,9 +251,9 @@ def _reference_metrics(*, ratings, nps_values):
 
 
 def _metric_outcome(function, ratings, nps_values, context):
-    from decimal import localcontext
+    from decimal import getcontext, localcontext
 
-    with localcontext(context) as active:
+    with localcontext(context):
         try:
             result = function(ratings=ratings, nps_values=nps_values)
             outcome = (
@@ -264,7 +264,7 @@ def _metric_outcome(function, ratings, nps_values, context):
             )
         except Exception as error:
             outcome = ("error", type(error), error.args)
-        return outcome, dict(active.flags)
+        return outcome, dict(getcontext().flags)
 
 
 @pytest.mark.parametrize(
@@ -437,3 +437,29 @@ def test_metric_float_conversion_trap_precedes_arithmetic_and_nps_errors() -> No
             calculate_metrics(ratings=(10**100, 1.25), nps_values=(object(), None))
         assert context.flags[FloatOperation]
         assert not context.flags[InvalidOperation]
+
+
+@pytest.mark.parametrize("mutation", ["precision", "trap", "replace_context"])
+def test_metric_nps_uses_ambient_context_after_rich_comparisons(mutation: str) -> None:
+    from decimal import Context, Inexact, getcontext, setcontext
+
+    from dotmac_surveys import calculate_metrics
+
+    class ContextChangingInt(int):
+        def __ge__(self, other):
+            if mutation == "precision":
+                getcontext().prec = 1
+            elif mutation == "trap":
+                getcontext().traps[Inexact] = True
+            else:
+                replacement = getcontext().copy()
+                replacement.prec = 1
+                setcontext(replacement)
+            return super().__ge__(other)
+
+    context = Context(prec=28)
+    ratings = (None, None, None)
+    nps = (ContextChangingInt(10), 9, 7)
+    assert _metric_outcome(calculate_metrics, ratings, nps, context) == _metric_outcome(
+        _reference_metrics, ratings, nps, context
+    )

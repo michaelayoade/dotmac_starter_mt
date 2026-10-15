@@ -234,6 +234,25 @@ def calculate_metrics(
     def replay_rating(status: int, failure: _native.ArithmeticFailure) -> None:
         _replay_metric_status(context, traps, status, failure)
 
+    def capture_nps_context() -> tuple[_native.ContextSpec, int]:
+        nonlocal context, traps
+        # Rich comparisons may mutate or replace the active context. NPS
+        # arithmetic and its final signal replay must observe that new context.
+        context = getcontext()
+        traps = sum(
+            1 << index for index, signal in enumerate(_SIGNALS) if context.traps[signal]
+        )
+        return (
+            (
+                context.prec,
+                _ROUNDINGS.index(context.rounding),
+                context.Emin,
+                context.Emax,
+                context.clamp,
+            ),
+            traps,
+        )
+
     average, score, status, failure = _native.calculate_metrics(
         ratings=[str(value) for value in present_ratings],
         nps_predicates=predicates(),
@@ -246,6 +265,7 @@ def calculate_metrics(
         ),
         traps=traps,
         replay_rating=replay_rating,
+        capture_nps_context=capture_nps_context,
     )
     _replay_metric_status(context, traps, status, failure)
     return SurveyMetrics(

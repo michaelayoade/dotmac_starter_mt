@@ -143,3 +143,31 @@ def test_decimal_symbol_families_must_remain_private(tmp_path, monkeypatch, symb
     )
     with pytest.raises(RuntimeError, match="private symbols"):
         module.verify_wheel(wheel, "dotmac_inventory")
+
+
+def test_decimal_source_mirror_checks_bytes_and_extra_files(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "native_source_mirror_canary", ROOT / "scripts/sync_native_builds.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    canonical = tmp_path / "native/decimal-core"
+    canonical.mkdir(parents=True)
+    (canonical / "Cargo.toml").write_text("canonical source\n")
+    (canonical / "archive.tar.gz").write_bytes(b"exact pinned source bytes")
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(module, "DECIMAL_CORE", canonical)
+    package = tmp_path / "packages/example"
+    assert module.sync_decimal_core(package, check=False) == []
+    assert module.sync_decimal_core(package, check=True) == []
+    embedded = package / "native/decimal-core"
+    (embedded / "archive.tar.gz").write_bytes(b"changed source bytes")
+    (embedded / "stale.rs").write_text("obsolete source")
+    assert set(module.sync_decimal_core(package, check=True)) == {
+        "packages/example/native/decimal-core/archive.tar.gz",
+        "packages/example/native/decimal-core/stale.rs",
+    }
+    module.sync_decimal_core(package, check=False)
+    assert not (embedded / "stale.rs").exists()
+    assert (embedded / "archive.tar.gz").read_bytes() == b"exact pinned source bytes"

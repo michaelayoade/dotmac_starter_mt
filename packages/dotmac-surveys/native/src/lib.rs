@@ -219,7 +219,7 @@ fn nps_score(promoters: usize, detractors: usize, count: usize, spec: ContextSpe
 }
 
 #[pyfunction]
-#[pyo3(signature = (*, ratings, nps_predicates, context, traps, replay_rating))]
+#[pyo3(signature = (*, ratings, nps_predicates, context, traps, replay_rating, capture_nps_context))]
 fn calculate_metrics(
     py: Python<'_>,
     ratings: Vec<String>,
@@ -227,6 +227,7 @@ fn calculate_metrics(
     context: ContextSpec,
     traps: u32,
     replay_rating: &Bound<'_, PyAny>,
+    capture_nps_context: &Bound<'_, PyAny>,
 ) -> PyResult<(Option<String>, Option<String>, u32, ArithmeticFailure)> {
     if !valid_context(context) || traps & !0x1ff != 0 {
         return Err(PyValueError::new_err("invalid Decimal batch context"));
@@ -250,7 +251,16 @@ fn calculate_metrics(
             detractors += usize::from(included);
         }
     }
-    let (score, raised, failure) = py.detach(move || nps_score(promoters, detractors, count, context, traps));
+    // NPS rich comparisons may change the current Decimal context or traps.
+    // Capture once after the complete predicate stream, not once per operation.
+    let (nps_context, nps_traps): (ContextSpec, u32) =
+        capture_nps_context.call0()?.extract()?;
+    if !valid_context(nps_context) || nps_traps & !0x1ff != 0 {
+        return Err(PyValueError::new_err("invalid Decimal NPS context"));
+    }
+    let (score, raised, failure) = py.detach(move || {
+        nps_score(promoters, detractors, count, nps_context, nps_traps)
+    });
     Ok((average, score, raised, failure))
 }
 

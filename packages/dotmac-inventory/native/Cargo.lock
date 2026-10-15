@@ -57,12 +57,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "dotmac-inventory-native"
+name = "dotmac-decimal-core"
 version = "0.1.0"
 dependencies = [
  "cc",
- "pyo3",
  "sha2",
+]
+
+[[package]]
+name = "dotmac-inventory-native"
+version = "0.1.0"
+dependencies = [
+ "dotmac-decimal-core",
+ "pyo3",
 ]
 
 [[package]]

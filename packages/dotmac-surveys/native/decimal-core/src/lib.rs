@@ -30,7 +30,10 @@ pub struct Status {
 }
 impl Status {
     fn from_wire(wire: u64) -> Self {
-        Self { signals: wire as u32, conditions: (wire >> 32) as u32 }
+        Self {
+            signals: wire as u32,
+            conditions: (wire >> 32) as u32,
+        }
     }
 }
 
@@ -43,27 +46,57 @@ pub fn valid_context(spec: ContextSpec) -> bool {
 }
 
 extern "C" {
-    fn dm_context_new(precision: i64, rounding: i32, emin: i64, emax: i64, clamp: i32)
-        -> *mut c_void;
+    fn dm_context_new(
+        precision: i64,
+        rounding: i32,
+        emin: i64,
+        emax: i64,
+        clamp: i32,
+    ) -> *mut c_void;
     fn dm_context_clone(context: *const c_void) -> *mut c_void;
     fn dm_context_free(context: *mut c_void);
     fn dm_decimal_new() -> *mut c_void;
     fn dm_decimal_free(decimal: *mut c_void);
     fn dm_decimal_parse(decimal: *mut c_void, text: *const c_char) -> u64;
     fn dm_decimal_copy(result: *mut c_void, value: *const c_void) -> u64;
-    fn dm_decimal_add(result: *mut c_void, left: *const c_void, right: *const c_void,
-                      context: *const c_void) -> u64;
-    fn dm_decimal_sub(result: *mut c_void, left: *const c_void, right: *const c_void,
-                      context: *const c_void) -> u64;
-    fn dm_decimal_mul(result: *mut c_void, left: *const c_void, right: *const c_void,
-                      context: *const c_void) -> u64;
-    fn dm_decimal_div(result: *mut c_void, left: *const c_void, right: *const c_void,
-                      context: *const c_void) -> u64;
-    fn dm_decimal_scaleb(result: *mut c_void, left: *const c_void, right: *const c_void,
-                         context: *const c_void) -> u64;
+    fn dm_decimal_add(
+        result: *mut c_void,
+        left: *const c_void,
+        right: *const c_void,
+        context: *const c_void,
+    ) -> u64;
+    fn dm_decimal_sub(
+        result: *mut c_void,
+        left: *const c_void,
+        right: *const c_void,
+        context: *const c_void,
+    ) -> u64;
+    fn dm_decimal_mul(
+        result: *mut c_void,
+        left: *const c_void,
+        right: *const c_void,
+        context: *const c_void,
+    ) -> u64;
+    fn dm_decimal_div(
+        result: *mut c_void,
+        left: *const c_void,
+        right: *const c_void,
+        context: *const c_void,
+    ) -> u64;
+    fn dm_decimal_scaleb(
+        result: *mut c_void,
+        left: *const c_void,
+        right: *const c_void,
+        context: *const c_void,
+    ) -> u64;
     fn dm_decimal_compare(left: *const c_void, right: *const c_void, order: *mut i32) -> u64;
-    fn dm_decimal_quantize(result: *mut c_void, value: *const c_void, scale: *const c_void,
-                           context: *const c_void, rounding: i32) -> u64;
+    fn dm_decimal_quantize(
+        result: *mut c_void,
+        value: *const c_void,
+        scale: *const c_void,
+        context: *const c_void,
+        rounding: i32,
+    ) -> u64;
     fn dm_decimal_string(decimal: *const c_void) -> *mut c_char;
     fn dm_string_free(text: *mut c_char);
 }
@@ -73,11 +106,14 @@ impl Context {
     /// Returns None for invalid fields or allocation failure. Validate first to
     /// distinguish invalid input from allocation failure at a language boundary.
     pub fn new(spec: ContextSpec) -> Option<Self> {
-        if !valid_context(spec) { return None; }
+        if !valid_context(spec) {
+            return None;
+        }
         // SAFETY: validated fields; C owns allocation and initializes every field.
         NonNull::new(unsafe {
             dm_context_new(spec.0, spec.1.into(), spec.2, spec.3, spec.4.into())
-        }).map(Self)
+        })
+        .map(Self)
     }
 
     pub fn try_clone(&self) -> Option<Self> {
@@ -101,7 +137,12 @@ macro_rules! binary_method {
             // SAFETY: mpdec permits result/left aliasing; all handles are live
             // and exclusively owned. The function cannot retain these pointers.
             Status::from_wire(unsafe {
-                $ffi(self.0.as_ptr(), self.0.as_ptr(), value.0.as_ptr(), context.0.as_ptr())
+                $ffi(
+                    self.0.as_ptr(),
+                    self.0.as_ptr(),
+                    value.0.as_ptr(),
+                    context.0.as_ptr(),
+                )
             })
         }
     };
@@ -113,7 +154,9 @@ impl Decimal {
         let mut result = Self(NonNull::new(unsafe { dm_decimal_new() })?);
         // mpd_qnew allocates a coefficient buffer but does not initialize a
         // numerical value. Establish a valid zero before exposing a safe handle.
-        if result.parse(c"0").signals & MEMORY != 0 { return None; }
+        if result.parse(c"0").signals & MEMORY != 0 {
+            return None;
+        }
         Some(result)
     }
 
@@ -157,15 +200,22 @@ impl Decimal {
         // SAFETY: mpdec permits result/value aliasing. The C shim copies context
         // and validates override before applying it; caller context is unchanged.
         Status::from_wire(unsafe {
-            dm_decimal_quantize(self.0.as_ptr(), self.0.as_ptr(), scale.0.as_ptr(),
-                                 context.0.as_ptr(), rounding.map(i32::from).unwrap_or(-1))
+            dm_decimal_quantize(
+                self.0.as_ptr(),
+                self.0.as_ptr(),
+                scale.0.as_ptr(),
+                context.0.as_ptr(),
+                rounding.map(i32::from).unwrap_or(-1),
+            )
         })
     }
 
     pub fn text(&self) -> Option<String> {
         // SAFETY: context-independent serialization returns ASCII or NULL.
         let pointer = NonNull::new(unsafe { dm_decimal_string(self.0.as_ptr()) })?;
-        let result = unsafe { CStr::from_ptr(pointer.as_ptr()) }.to_string_lossy().into_owned();
+        let result = unsafe { CStr::from_ptr(pointer.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
         // SAFETY: matching deallocator frees the returned string exactly once.
         unsafe { dm_string_free(pointer.as_ptr()) };
         Some(result)
