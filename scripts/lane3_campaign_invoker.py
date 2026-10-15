@@ -186,8 +186,10 @@ def management_checkpoint(operator):
     deadline = time.monotonic() + 420
     with owned_ssh("bridge") as process:
         management = operator.ManagementStdio(process)
+        attempted_phase = "retain"
         try:
             management.retained_launch()  # one canonical absolute 60s call
+            attempted_phase = "decide"
             decision = operator.coordinator_cli("decide", deadline)
             if (
                 type(decision) is not dict
@@ -196,6 +198,7 @@ def management_checkpoint(operator):
             ):
                 raise InvokerRefused("broker-decision-refused")
             run = _terminal_run(operator, deadline)
+            attempted_phase = "finish"
             closed = management.finish()
             return {
                 "run": run,
@@ -203,15 +206,26 @@ def management_checkpoint(operator):
                 "closure": closed,
                 "proof_acceptance": "ROOT_REVIEW_REQUIRED",
             }
-        except BaseException:
+        except BaseException as exc:
+            cleanup = "not_attempted"
             if (
                 management.phase in ("retained", "prepared", "bootstrapped")
                 and not management.finish_attempted
             ):
                 try:
                     management.failure_finalize()
+                    cleanup = "completed"
                 except BaseException:
                     management.failure = "UNPROVEN"
+                    cleanup = "unproven"
+            # Only the measured operator's canonical class can carry data.
+            if type(exc) is getattr(operator, "CampaignRefused", None):
+                diagnostic = operator.failure_diagnostic(exc)
+                if diagnostic["phase"] == "unproven":
+                    diagnostic["phase"] = attempted_phase
+                if cleanup != "not_attempted" and diagnostic["cleanup"] != "unproven":
+                    diagnostic["cleanup"] = cleanup
+                exc.diagnostic = diagnostic
             raise
         finally:
             management.close()

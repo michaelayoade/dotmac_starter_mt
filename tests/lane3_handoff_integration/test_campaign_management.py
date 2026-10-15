@@ -310,3 +310,52 @@ def test_real_autonomous_bound_callback_removes_only_original_run(management):
             stderr=subprocess.DEVNULL,
             timeout=5,
         )
+
+
+@pytest.mark.parametrize("point", ["old-stop-readback", "second-retained-check"])
+def test_real_stopped_original_then_refusal_keeps_actual_stage(
+    management, monkeypatch, point
+):
+    host, manager = management
+    timer = host.timer
+    original_stopped = False
+    retained_reads = 0
+    stop = host.stop
+
+    def observed_stop(unit):
+        nonlocal original_stopped
+        stop(unit)
+        if unit == manager.binding.old_unit:
+            original_stopped = True
+
+    def failing_read(unit):
+        nonlocal retained_reads
+        if unit == manager.binding.new_unit:
+            retained_reads += 1
+        if original_stopped and (
+            (point == "old-stop-readback" and unit == manager.binding.old_unit)
+            or (
+                point == "second-retained-check"
+                and unit == manager.binding.new_unit
+                and retained_reads == 3
+            )
+        ):
+            # First confirm the actual collected original is absent, including
+            # the real service PID/cgroup parser, before injecting a refusal.
+            assert timer(manager.binding.old_unit) is None
+            raise cm.Refused("systemd-unproven")
+        return timer(unit)
+
+    monkeypatch.setattr(host, "stop", observed_stop)
+    monkeypatch.setattr(host, "timer", failing_read)
+    with pytest.raises(cm.Refused, match="transition-unproven") as error:
+        manager.retain()
+    assert cm.failure_diagnostic(error.value, "retain") == {
+        "phase": "retain",
+        "stage": point,
+        "category": "systemd-unproven",
+        "cleanup": "completed",
+    }
+    assert host.marker_binding() is None
+    assert timer(manager.binding.old_unit) is None
+    assert timer(manager.binding.new_unit) is not None
