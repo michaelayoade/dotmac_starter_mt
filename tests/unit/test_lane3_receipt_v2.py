@@ -61,7 +61,8 @@ DOCUMENT: dict[str, Any] = {
     "receipt_artifact": "lane3-rehearsal-receipt",
     "admission_evidence": REFERENCE,
 }
-_FIXTURE_ROOT = pathlib.Path(tempfile.mkdtemp(prefix="lane3-evidence-"))
+_FIXTURE_TMP = tempfile.TemporaryDirectory(prefix="lane3-evidence-")  # removed at exit
+_FIXTURE_ROOT = pathlib.Path(_FIXTURE_TMP.name)
 write_evidence(_FIXTURE_ROOT)
 TOPOLOGY = lane3_execution.parse_topology(DOCUMENT, repo_root=_FIXTURE_ROOT)
 

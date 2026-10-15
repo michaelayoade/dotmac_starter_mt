@@ -14,7 +14,6 @@ from __future__ import annotations
 import copy
 import json
 import pathlib
-import re
 import sys
 import tempfile
 from typing import Any
@@ -28,6 +27,7 @@ from lane3_execution import (  # noqa: E402
     GRAMMAR_GUARD_PROVEN,
     ExecutionRunRefused,
     TopologyRefused,
+    _slug,
     load_topology,
     parse_run_name,
     parse_topology,
@@ -78,13 +78,15 @@ def evidence_root(tmp_path: pathlib.Path) -> pathlib.Path:
     return tmp_path
 
 
+_TMP = tempfile.TemporaryDirectory(prefix="lane3-evidence-")  # removed at exit
+_SHARED_ROOT = pathlib.Path(_TMP.name)
+write_evidence(_SHARED_ROOT)
+
+
 def _topology(root: pathlib.Path | None = None, **over: Any):  # type: ignore[no-untyped-def]
     document = copy.deepcopy(PROVISIONED)
     document.update(over)
-    if root is None:
-        root = pathlib.Path(tempfile.mkdtemp(prefix="lane3-evidence-"))
-        write_evidence(root)
-    return parse_topology(document, repo_root=root)
+    return parse_topology(document, repo_root=root or _SHARED_ROOT)
 
 
 def _run(**over: Any) -> dict[str, Any]:
@@ -115,8 +117,8 @@ def test_the_checked_in_topology_is_not_an_admitted_surface() -> None:
         load_topology(REPO / ".github" / "lane3-execution.json")
 
 
-def test_a_fully_provisioned_topology_parses() -> None:
-    topology = _topology()
+def test_a_fully_provisioned_topology_parses(evidence_root: pathlib.Path) -> None:
+    topology = _topology(evidence_root)
     assert topology.execution_repository_id == REPO_ID
     assert topology.admitted_launcher_revisions == frozenset({LAUNCHER})
 
@@ -273,6 +275,87 @@ def test_a_row_marked_pending_is_refused_even_with_valid_looking_cells(
     _refuses(tmp_path, "PR exclusion.*pending, unknown or a placeholder")
 
 
+def test_the_same_digest_or_coordinate_on_two_rows_is_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    same_digest = {
+        **rows(),
+        "PR exclusion": (rows()["PR exclusion"][0], digest("Public controls")),
+    }
+    write_evidence(tmp_path, table(same_digest))
+    _refuses(tmp_path, "reuses one digest")
+    same_coordinate = {
+        **rows(),
+        "Oracle reachability": (rows()["PR exclusion"][0], digest("o")),
+    }
+    write_evidence(tmp_path, table(same_coordinate))
+    _refuses(tmp_path, "reuses one coordinate")
+
+
+@pytest.mark.parametrize(
+    ("row", "wrong"),
+    [
+        ("No-grant refusal", "run:9000999"),
+        ("No-grant refusal", "scan:fixture-record-9"),
+        ("Credential failure", "run:9000999"),
+        ("Credential failure", "readback:fixture-record-9"),
+        ("Isolation and disclosure", "audit:fixture-record-9"),
+        ("Isolation and disclosure", "run:9000999"),
+        ("Authorized scheduling", "audit:fixture-record-9"),
+        ("Authorized scheduling", "readback:fixture-record-9"),
+        ("Public controls", "run:9000999"),
+        ("Public controls", "audit:fixture-record-9"),
+    ],
+)
+def test_a_coordinate_kind_the_row_does_not_allow_is_refused(
+    tmp_path: pathlib.Path, row: str, wrong: str
+) -> None:
+    write_evidence(tmp_path, table({**rows(), row: (wrong, digest("w"))}))
+    _refuses(tmp_path, f"row {row!r} must use a")
+
+
+def test_a_hidden_table_is_refused(tmp_path: pathlib.Path) -> None:
+    body = table(rows())
+    write_evidence(
+        tmp_path, body.replace("| Requirement", "<!--\n| Requirement", 1) + "-->\n"
+    )
+    _refuses(tmp_path, "comment or code fence")
+    for fence in ("```", "~~~"):
+        write_evidence(
+            tmp_path, body.replace("| Requirement", f"{fence}\n| Requirement", 1)
+        )
+        _refuses(tmp_path, "comment or code fence")
+
+
+@pytest.mark.parametrize(
+    "separator", ["| | | |", "|-|", "| -- | -- | -- |", "| --- | --- |"]
+)
+def test_a_weak_separator_row_is_refused(
+    tmp_path: pathlib.Path, separator: str
+) -> None:
+    write_evidence(tmp_path, table(rows()).replace("| --- | --- | --- |", separator))
+    _refuses(tmp_path, "no separator row")
+
+
+def test_a_symlinked_evidence_path_or_topology_is_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    real = tmp_path / "real"
+    write_evidence(real)
+    linked = tmp_path / "linked"
+    (linked / "docs").mkdir(parents=True)
+    (linked / "docs" / "inventories").symlink_to(real / "docs" / "inventories")
+    _refuses(linked, "symbolic link")
+    from tests.unit.lane3_evidence_support import write_topology
+
+    good = pathlib.Path(write_topology(real, PROVISIONED))
+    other = tmp_path / "other" / ".github"
+    other.mkdir(parents=True)
+    (other / "lane3-execution.json").symlink_to(good)
+    with pytest.raises(TopologyRefused, match="symbolic link"):
+        load_topology(other / "lane3-execution.json")
+
+
 def test_a_table_without_the_columns_is_refused(tmp_path: pathlib.Path) -> None:
     write_evidence(tmp_path, "## Fixture run 1\n\nno table here\n")
     _refuses(tmp_path, "no table with the columns")
@@ -290,26 +373,23 @@ def test_load_topology_resolves_evidence_beside_the_topology_file(
         load_topology(pathlib.Path(good))
     stray = tmp_path / "elsewhere.json"
     stray.write_text("{}", encoding="utf-8")
-    with pytest.raises(TopologyRefused, match="not under a .github directory"):
+    with pytest.raises(TopologyRefused, match="not directly under a .github"):
         load_topology(stray)
 
 
 def test_the_shipped_evidence_file_admits_nothing() -> None:
-    """Every anchor in the checked-in file, including the template, is refused."""
+    """Every anchor in the shipped file, template included, is refused by the guard."""
     text = (REPO / EVIDENCE_PATH).read_text(encoding="utf-8")
     anchors = [
-        re.sub(r"[^a-z0-9 -]", "", line.lstrip("#").strip().lower()).replace(" ", "-")
-        for line in text.splitlines()
-        if line.startswith("#")
+        _slug(line.lstrip("#")) for line in text.splitlines() if line.startswith("#")
     ]
-    assert anchors, "the shipped file has headings"
+    assert any("template" in a for a in anchors)
     for anchor in anchors:
-        with pytest.raises(TopologyRefused):
+        with pytest.raises(TopologyRefused, match="admission_evidence #"):
             parse_topology(
                 {**PROVISIONED, "admission_evidence": f"{EVIDENCE_PATH}#{anchor}"},
                 repo_root=REPO,
             )
-    assert any("template" in a for a in anchors)
 
 
 def test_the_checked_in_topology_keeps_admission_evidence_null() -> None:

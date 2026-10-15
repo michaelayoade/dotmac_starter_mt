@@ -30,10 +30,28 @@ def digest(label: str) -> str:
     return hashlib.sha256(label.encode()).hexdigest()
 
 
+KINDS = {
+    "Public controls": "readback",
+    "Authorized scheduling": "run",
+    "PR exclusion": "run",
+    "Ref and workflow failure": "job",
+    "Credential failure": "audit",
+    "No-grant refusal": "audit",
+    "Isolation and disclosure": "scan",
+    "Oracle reachability": "run",
+}
+
+
+def coordinate(name: str, index: int) -> str:
+    kind = KINDS[name]
+    if kind in ("run", "job"):
+        return f"{kind}:{9000001 + index}"
+    return f"{kind}:fixture-record-{index}"
+
+
 def rows() -> dict[str, tuple[str, str]]:
     return {
-        name: (f"run:{9000001 + i}", digest(name))
-        for i, name in enumerate(REQUIREMENTS)
+        name: (coordinate(name, i), digest(name)) for i, name in enumerate(REQUIREMENTS)
     }
 
 
