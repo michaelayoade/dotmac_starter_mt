@@ -356,6 +356,7 @@ def test_metric_decimal_conversions_all_finish_before_rating_arithmetic() -> Non
     from dotmac_surveys import calculate_metrics
 
     with localcontext() as context:
+        context.clear_flags()
         context.prec = 1
         context.traps[InvalidOperation] = True
         with pytest.raises(TypeError):
@@ -431,6 +432,7 @@ def test_metric_float_conversion_trap_precedes_arithmetic_and_nps_errors() -> No
     from dotmac_surveys import calculate_metrics
 
     with localcontext() as context:
+        context.clear_flags()
         context.prec = 1
         context.traps[FloatOperation] = True
         with pytest.raises(FloatOperation):
