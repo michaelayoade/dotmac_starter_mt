@@ -108,6 +108,10 @@ BOOTSTRAP_LOCKS: tuple[str, ...] = (
     ".github/bootstrap/poetry-requirements-py312.txt",
 )
 
+#: Native builds execute the compiler selected by this configuration. It is
+#: data outside the executable-token scan, but still release control.
+NATIVE_TOOLCHAIN_INPUTS: tuple[str, ...] = ("scripts/native-build.toml",)
+
 ROOT_WORKFLOWS: tuple[str, ...] = (
     ".github/workflows/release-module.yml",
     ".github/workflows/recover-module-release.yml",
@@ -238,7 +242,7 @@ def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
     dependencies)`` — the latter holds non-local Python import names and
     ``action:<owner/repo@sha>`` coordinates for every third-party action.
     """
-    files: set[str] = {POLICY_PATH, *BOOTSTRAP_LOCKS}
+    files: set[str] = {POLICY_PATH, *BOOTSTRAP_LOCKS, *NATIVE_TOOLCHAIN_INPUTS}
     external: set[str] = set()
     # This module is walked like any root, so its own imports are covered.
     queue: list[str] = [*ROOT_WORKFLOWS, *VERIFICATION_ROOTS, AUTHORITY_MODULE_PATH]
@@ -252,8 +256,8 @@ def derive_surface(read: Reader) -> tuple[list[str], list[str]]:
     # Ensure the always-included files actually exist too.
     _require(POLICY_PATH, read)
     _require(AUTHORITY_MODULE_PATH, read)
-    for lock in BOOTSTRAP_LOCKS:
-        _require(lock, read)
+    for toolchain_input in (*BOOTSTRAP_LOCKS, *NATIVE_TOOLCHAIN_INPUTS):
+        _require(toolchain_input, read)
 
     def enqueue(path: str) -> None:
         if path not in queued:

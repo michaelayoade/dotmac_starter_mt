@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0a1 — Unreleased
+
+- Rebuild quantity, value and reservation totals with a private Rust batch and
+  statically bundled libmpdec 4.0.1. Preserve sequential Decimal rounding,
+  context flags, traps and Python service authority.
+- Source archives include pinned Rust/C inputs and the upstream BSD license.
+
 ## 0.1.0a1 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and

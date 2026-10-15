@@ -11,11 +11,14 @@ source_revisions = [
   "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
   "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
 ]
-source_paths = ["dotmac_sub:app/models/forwarding_topology.py", "dotmac_sub:app/models/network_monitoring.py", "dotmac_sub:app/services/topology/", "dotmac_sub:app/services/network/forwarding_topology.py", "dotmac_starter_mt:packages/dotmac-network-topology/src/dotmac_network_topology"]
-preserved_tests = ["dotmac_sub:tests/test_forwarding_topology.py", "dotmac_sub:tests/test_network_topology_services.py", "dotmac_sub:tests/services/topology/test_customer_path.py", "dotmac_sub:tests/architecture/test_forwarding_topology_boundary.py", "dotmac_starter_mt:tests/architecture/test_network_module_suite.py", "dotmac_starter_mt:tests/test_network_suite_isolation.py"]
+source_paths = [
+  "dotmac_starter_mt:packages/dotmac-network-topology/native","dotmac_sub:app/models/forwarding_topology.py", "dotmac_sub:app/models/network_monitoring.py", "dotmac_sub:app/services/topology/", "dotmac_sub:app/services/network/forwarding_topology.py", "dotmac_starter_mt:packages/dotmac-network-topology/src/dotmac_network_topology"]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_network_topology_native.py","dotmac_sub:tests/test_forwarding_topology.py", "dotmac_sub:tests/test_network_topology_services.py", "dotmac_sub:tests/services/topology/test_customer_path.py", "dotmac_sub:tests/architecture/test_forwarding_topology_boundary.py", "dotmac_starter_mt:tests/architecture/test_network_module_suite.py", "dotmac_starter_mt:tests/test_network_suite_isolation.py"]
 contract_consumers = []
 candidate_consumers = ["dotmac_sub"]
-inventory_evidence = ["docs/inventories/network-module-sources.md", "docs/inventories/network-module-dispositions.toml", "docs/inventories/network-module-contracts.toml", "docs/adr/0038-network-capabilities-decompose-sub-first.md"]
+inventory_evidence = [
+  "docs/inventories/rust-computation-sources.md","docs/inventories/network-module-sources.md", "docs/inventories/network-module-dispositions.toml", "docs/inventories/network-module-contracts.toml", "docs/adr/0038-network-capabilities-decompose-sub-first.md"]
 composition_boundary = "Typed opaque inputs cross owners; paths are local rebuildable projections. No sibling imports, product models, cross-module FKs or provider I/O."
 first_cutover = "dotmac_sub in the single network-suite-v1 cutover."
 shadow_and_drift = "Backfill declarations/observations and compare resolved paths, reachability and coverage-gap digests against Sub."

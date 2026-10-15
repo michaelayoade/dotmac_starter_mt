@@ -1,5 +1,84 @@
 # Architecture
 
+## Native domain computation candidates (2026-10-15)
+
+The Rust implementation branch introduces private `_native` extensions owned by
+Imports, Web Analytics, Network Topology, Fiber Plant, Media Observations,
+Positioning, Forms, Surveys, Inventory and Finance. Each extension ships inside
+its independently versioned domain distribution; there is no new shared database
+or generic domain service. These are unpublished `0.2.0a1` source candidates.
+Hosted qualification gates the existing release controls and establishes no
+product adoption.
+
+| Computation | Native owner | Python authority retained |
+| --- | --- | --- |
+| Bounded CSV row normalization and fused field projection | `dotmac_imports._native` | Standard-library CSV grammar, encoding, headings, field declarations, source verification, durable partitions, row ledger and domain application |
+| Shared visitor ordering, sessions, dimension counts and funnels | `dotmac_web_analytics._native` | Event declarations, privacy admission, timezone buckets, fingerprints, generation records and persistence |
+| Batched exact-integer shortest paths | `dotmac_network_topology._native` | Tenant-selected active link snapshot, path policy, stored reachability and outbox |
+| Deterministic continuity BFS | `dotmac_fiber_plant._native` | Tenant-selected terminations/splices, endpoint selection and evidence |
+| Linear functional-hierarchy cycle detection | `dotmac_media_observations._native` | Provider-neutral fact selection, active scopes, lifecycle projection and persistence |
+| Batched circle/polygon membership | `dotmac_positioning._native` | Explicit product-selected fence ids, shape validation, current-observation admission and locked entry/exit state |
+| Batched structural form answer validation | `dotmac_forms._native` | Established Decimal/date/URL/email parsers, ordered errors, submission admission, snapshots and effects |
+| Sequential exact-decimal ledger totals | `dotmac_inventory._native` | Decimal context selection and signal replay, tenant-selected ledger/reservations, stock refusal, unit division and persistence |
+| Batched survey validation and cohort arithmetic | `dotmac_surveys._native` | Unicode normalization, labels, declaration/lifecycle policy, accepted value conversion/comparison and ordered Decimal signal replay, response persistence |
+| Ordered asset depreciation trajectories | `dotmac_finance._native` | Input policy, final caps, Decimal signal replay, book selection, line/total write order, accounting consequences and posting |
+
+Native calls receive owned primitive snapshots and detach from the Python
+interpreter during computation. They open no sessions, hold no tenant cache,
+read no credentials and emit no business effects. The Python runtime uses the
+native result directly; there is no silent Python algorithm fallback. Timezone
+and exact Decimal authority are not moved into an approximate native type.
+
+`scripts/native-build.toml` owns the compiler/binding/build-tool pins.
+`scripts/sync_native_builds.py` renders identical standalone Poetry hooks into
+each native package. An extracted source archive carries that hook and all
+locked Cargo inputs; it needs no checkout helper. Poetry retains distribution
+metadata authority and emits an accurately tagged platform/interpreter wheel.
+The intermediate Maturin wheel is a build input, never a separately published
+distribution. The hook accepts only the owning extension and refuses unrelated
+libraries or runtime dependencies.
+
+Hosted native qualification is a dependency of image construction. It verifies
+the generated inputs, builds and installs retained wheels, reconstructs wheels
+from extracted source archives, exercises the owning module suites, and records
+artifact hashes. The runtime image preserves Python console entrypoints and
+compiled modules while excluding the Rust compiler/toolchain. The existing
+release facilities retain all publication, registry read-back and trust authority.
+
+The initial binary release target is CPython 3.12 on Linux x86_64, qualified by
+loading the retained wheels in `python:3.12-slim-bookworm` without a Rust
+compiler. The release lane repeats that target-image smoke before publication;
+manifest registration alone cannot prove that the native extension loads.
+Python 3.11 and 3.13 have hosted source-build/parity qualification, but the
+single-wheel publication contract does not claim prebuilt binaries for them.
+Source installations require the compiler and build tools pinned above.
+ERP's existing durable customer CSV preparation is the first downstream slice:
+it already delegates preview parsing and mapping inference to `dotmac-imports`.
+Adoption requires a verified registry release, an exact product pin/lock, and a
+product workflow canary exercising the installed extension. This is not an
+apply-worker acceleration claim or a production deployment claim.
+
+The existing published-source drift ratchet enrolls native inputs present at
+either the release tag or current source revision. `NativePackageSource.v1`
+fingerprints Git modes, kinds and object identities for Python/native sources,
+the build hook and packaging configuration. Removing inputs cannot escape the
+check. These fingerprints use distinct fields and preserve historical Python
+tree identities; unrelated extraction and changelog documents stay outside it.
+
+Source qualification and implementation boundaries are recorded in
+[`inventories/rust-computation-sources.md`](inventories/rust-computation-sources.md).
+Inventory now has a source implementation of sequential quantity/value/reservation
+reductions using statically bundled, checksum-pinned libmpdec 4.0.1. Finance
+depreciation and survey cohort arithmetic use the same private source
+crate, `native/decimal-core`, embedded byte-for-byte into each owning source
+archive. The generator rejects stale copies; no shared Python distribution or
+runtime module dependency is introduced. All three preserve sequential Decimal
+rounding, sticky flags and first trapped operation. All ten candidates passed
+hosted exact-wheel, extracted-source-archive and full repository CI at PR #843
+head `2184ad1969012de3022470d152dc2e7891198d40`, run `38709519486`.
+Release-readiness changes require fresh qualification and do not inherit that
+result.
+
 This expands the `CLAUDE.md` summary. See `docs/adr/0001-multi-tenant-architecture.md`
 for the founding tenancy design and `docs/adr/0002-starter-consolidation.md`
 for how this repo came to be the org's one starter. ADR-0003 defines the

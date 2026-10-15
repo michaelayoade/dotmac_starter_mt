@@ -68,7 +68,7 @@ from dotmac_media_observations.service import (
     report_metric_drift,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.2.0a1"
 
 __all__ = [
     "CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION",

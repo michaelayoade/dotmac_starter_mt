@@ -280,12 +280,16 @@ def test_an_allowlisted_module_without_a_local_segment_still_resolves() -> None:
 
 
 def test_imports_is_release_allowlisted_for_the_erp_first_adopter() -> None:
-    result = _resolve("dotmac-imports", version="0.1.0a2")
+    declared = tomllib.loads(
+        (PROJECT_ROOT / "packages/dotmac-imports/pyproject.toml").read_text()
+    )["tool"]["poetry"]["version"]
+    result = _resolve("dotmac-imports", version=declared)
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
     assert emitted["kernel_floor"] == "0.1.0a56"
     assert emitted["db_schema"] == "mod_imports"
-    assert emitted["tag"] == "dotmac-imports-v0.1.0a2"
+    assert emitted["version"] == declared
+    assert emitted["tag"] == f"dotmac-imports-v{declared}"
 
 
 def test_inbox_operations_is_release_allowlisted_for_the_sub_cutover() -> None:

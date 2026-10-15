@@ -23,7 +23,7 @@ MIGRATION = SOURCE / "migrations/versions/fn_0001_asset_accounting.py"
 
 def test_manifest_allocates_one_tenant_only_finance_lineage() -> None:
     assert module.code == "finance"
-    assert module.version == "0.1.0a1"
+    assert module.version == "0.2.0a1"
     assert module.short_code == "finance"
     assert module.migration_prefix == "fn"
     assert module.migration_branch == "finance"

@@ -3,9 +3,94 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import (
+    ROUND_05UP,
+    ROUND_CEILING,
+    ROUND_DOWN,
+    ROUND_FLOOR,
+    ROUND_HALF_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    ROUND_UP,
+    Clamped,
+    Decimal,
+    DivisionByZero,
+    FloatOperation,
+    Inexact,
+    InvalidOperation,
+    Overflow,
+    Rounded,
+    Subnormal,
+    Underflow,
+    getcontext,
+)
+
+from dotmac_inventory import _native
 
 _SCALE = Decimal("0.000001")
+
+# Wire order is CPython _decimal's signal priority, independent of mpdec's bits.
+_SIGNALS = (
+    InvalidOperation,
+    FloatOperation,
+    DivisionByZero,
+    Overflow,
+    Underflow,
+    Subnormal,
+    Inexact,
+    Rounded,
+    Clamped,
+)
+_ROUNDINGS = (
+    ROUND_CEILING,
+    ROUND_FLOOR,
+    ROUND_UP,
+    ROUND_DOWN,
+    ROUND_HALF_UP,
+    ROUND_HALF_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_05UP,
+)
+
+
+def _sum_quantized_columns(
+    columns: tuple[tuple[Decimal, ...], ...],
+) -> tuple[Decimal, ...]:
+    """Sequential Decimal addition and final six-place quantization in Rust.
+
+    Capture immutable strings and the ambient context before detaching. Replay
+    only newly raised signals, including the failed operation's flags, before
+    raising the same trapped exception as CPython. Existing flags never retrap.
+    """
+    context = getcontext()
+    traps = sum(
+        1 << index for index, signal in enumerate(_SIGNALS) if context.traps[signal]
+    )
+    results, status, failure = _native.sum_quantized_columns(
+        [[str(value) for value in column] for column in columns],
+        (
+            context.prec,
+            _ROUNDINGS.index(context.rounding),
+            context.Emin,
+            context.Emax,
+            context.clamp,
+        ),
+        traps,
+    )
+    for index, signal in enumerate(_SIGNALS):
+        if status & (1 << index):
+            context.flags[signal] = True
+    if status & (1 << 9):
+        raise MemoryError
+    if failure is not None:
+        failed_status, _column, _row = failure
+        trapped = [
+            signal
+            for index, signal in enumerate(_SIGNALS)
+            if failed_status & traps & (1 << index)
+        ]
+        raise trapped[0](trapped)
+    return tuple(Decimal(value) for value in results)
 
 
 def quantize(value: Decimal) -> Decimal:

@@ -10,7 +10,7 @@ from dotmac_web_analytics.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="web_analytics",
-    version="0.1.0a1",
+    version="0.2.0a1",
     core=False,
     short_code="webanalytics",
     migration_prefix="wa",

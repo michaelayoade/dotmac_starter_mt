@@ -43,7 +43,7 @@ from dotmac_imports.contracts import (
     SourceMismatch,
 )
 from dotmac_imports.models import ImportRun, ImportRunRow
-from dotmac_imports.tabular import decode, mapped_rows
+from dotmac_imports.tabular import _decode_mapped
 
 # Ported from Sub's `_CHUNK_COMMIT`. One call processes at most this many rows;
 # the caller then commits the domain effects and their ledger outcomes together.
@@ -395,14 +395,10 @@ def _rows_from_verified_bytes(
         delimiter=run.source_delimiter,
         encoding=run.source_encoding,
     )
-    columns, raw_rows = decode(data, source=source)
     mapping = ColumnMapping(
         tuple((str(pair[0]), str(pair[1])) for pair in (run.column_mapping or []))
     )
-    # `columns` is decoded deliberately even though mapping uses the raw row
-    # keys; it keeps malformed/duplicate headings on the verified path.
-    del columns
-    return tuple(mapped_rows(raw_rows, mapping, fields))
+    return _decode_mapped(data, source=source, mapping=mapping, fields=fields)
 
 
 def _apply_one(
