@@ -119,8 +119,11 @@ class BridgeRefused(RuntimeError):
 
 def failure_diagnostic(error, bridge, phase, cleanup):
     """Recognize the measured helper's class identity, never duck-typed labels."""
-    if bridge is not None and type(error) is bridge.mgmt_module.Refused:
-        diagnostic = bridge.mgmt_module.failure_diagnostic(error, phase)
+    # A partially constructed bridge may not have loaded its helper yet;
+    # diagnostic construction must never raise and lose the refusal frame.
+    mgmt_module = getattr(bridge, "mgmt_module", None) if bridge is not None else None
+    if mgmt_module is not None and type(error) is mgmt_module.Refused:
+        diagnostic = mgmt_module.failure_diagnostic(error, phase)
     else:
         diagnostic = {
             "phase": phase,
