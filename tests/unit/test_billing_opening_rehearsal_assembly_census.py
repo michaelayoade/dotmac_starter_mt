@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import fields, replace
 from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID
@@ -388,6 +389,129 @@ def test_closed_contract_rejects_malformed_values() -> None:
                 if f.name not in ("accepted_manual_holds", "schema")
             }
         )  # type: ignore[call-arg]
+
+
+# ── lookup-key uniqueness ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {},
+        {"account_id": _uuid(1002)},
+        {"source_account_key": "source-account:other"},
+        {"precision": 3},
+        {"idempotency_key": "other-import-key"},
+        {"expected_position_fingerprint": "other-target-position"},
+        {"posting_watermark": "posting:other"},
+    ],
+    ids=[
+        "identical",
+        "account",
+        "source-key",
+        "precision",
+        "retry-key",
+        "position",
+        "watermark",
+    ],
+)
+def test_duplicate_partition_lookup_key_refuses_at_closed_construction(change) -> None:
+    base = _assembly()
+    first = base.partitions[0]
+    duplicate = replace(first, **change)
+    # A changed destination/target never disambiguates the source lookup key.
+    assert (duplicate.source_account_id, duplicate.currency) == (
+        first.source_account_id,
+        first.currency,
+    )
+    with pytest.raises(OpeningEvidenceError, match="duplicate assembly partition"):
+        replace(base, partitions=(first, duplicate))
+    with pytest.raises(OpeningEvidenceError, match="duplicate assembly partition"):
+        replace(base, partitions=(duplicate, first))
+
+
+@pytest.mark.parametrize("changed_target", [False, True], ids=["identical", "target"])
+def test_duplicate_partition_lookup_key_refuses_during_json_decode(
+    changed_target,
+) -> None:
+    wire = _wire()
+    duplicate = deepcopy(wire["partitions"][0])
+    if changed_target:
+        duplicate["account_id"] = str(_uuid(1002))
+        duplicate["posting_watermark"] = "posting:other"
+    wire["partitions"].append(duplicate)
+    with pytest.raises(OpeningEvidenceError, match="duplicate assembly partition"):
+        parse_opening_rehearsal_assembly(wire)
+    decoded = parse_opening_rehearsal_json(json.dumps(wire))
+    with pytest.raises(OpeningEvidenceError, match="duplicate assembly partition"):
+        parse_opening_rehearsal_assembly(decoded)
+
+
+@pytest.mark.parametrize("changed_target", ["identical", "identity", "invoice-key"])
+def test_duplicate_invoice_lookup_key_refuses_at_closed_construction(
+    changed_target,
+) -> None:
+    base = _assembly()
+    first = base.invoice_mappings[0]
+    duplicate = first
+    if changed_target == "identity":
+        duplicate = replace(
+            first, source_identity=OpeningSourceIdentityV1("invoice", "invoice:other")
+        )
+    elif changed_target == "invoice-key":
+        duplicate = replace(first, source_invoice_key="invoice:other")
+    assert duplicate.source_invoice_id == first.source_invoice_id
+    with pytest.raises(OpeningEvidenceError, match="duplicate assembly invoice"):
+        replace(base, invoice_mappings=(first, duplicate))
+    with pytest.raises(OpeningEvidenceError, match="duplicate assembly invoice"):
+        replace(base, invoice_mappings=(duplicate, first))
+
+
+@pytest.mark.parametrize("changed_target", [False, True], ids=["identical", "target"])
+def test_duplicate_invoice_lookup_key_refuses_during_json_decode(
+    changed_target,
+) -> None:
+    wire = _wire()
+    duplicate = deepcopy(wire["invoice_mappings"][0])
+    if changed_target:
+        duplicate["source_identity"]["key"] = "invoice:other"
+        duplicate["source_invoice_key"] = "invoice:other"
+    wire["invoice_mappings"].append(duplicate)
+    with pytest.raises(OpeningEvidenceError, match="duplicate assembly invoice"):
+        parse_opening_rehearsal_assembly(wire)
+    decoded = parse_opening_rehearsal_json(json.dumps(wire))
+    with pytest.raises(OpeningEvidenceError, match="duplicate assembly invoice"):
+        parse_opening_rehearsal_assembly(decoded)
+
+
+@pytest.mark.parametrize("scope", [TenantScope(_uuid(100)), PlatformScope()])
+def test_distinct_source_lookup_keys_preserve_multicurrency_and_account_mappings(
+    scope,
+) -> None:
+    base = _assembly()
+    first = base.partitions[0]
+    other_currency = replace(first, currency="USD", idempotency_key="import:usd")
+    other_account = replace(
+        first,
+        source_account_id=_uuid(11),
+        source_account_key="source-account:11",
+        account_id=_uuid(1002),
+        idempotency_key="import:other-account",
+    )
+    other_invoice = OpeningRehearsalInvoiceMappingV1(
+        _uuid(2), OpeningSourceIdentityV1("invoice", "invoice:2"), "invoice:2"
+    )
+    assembly = replace(
+        base,
+        scope=scope,
+        partitions=(first, other_currency, other_account),
+        invoice_mappings=(*base.invoice_mappings, other_invoice),
+    )
+    decoded = parse_opening_rehearsal_json(
+        json.dumps(opening_rehearsal_assembly_wire(assembly))
+    )
+    assert parse_opening_rehearsal_assembly(decoded) == assembly
+    assert len(assembly.partitions) == 3 and len(assembly.invoice_mappings) == 2
 
 
 # ── census ──────────────────────────────────────────────────────────────────

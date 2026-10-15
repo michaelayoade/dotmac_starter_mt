@@ -1,0 +1,193 @@
+name: Native computation
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      bootstrap_locks:
+        description: Generate missing Cargo locks for review (never a qualification run)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  bootstrap-locks:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.bootstrap_locks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: ./.github/actions/setup-native
+      - name: Generate lockfiles for a subsequent reviewed commit
+        run: |
+          set -euo pipefail
+          if [ -f native/decimal-core/Cargo.toml ]; then
+            cargo generate-lockfile --manifest-path native/decimal-core/Cargo.toml
+            echo "LOCKFILE_BASE64 native/decimal-core/Cargo.lock"
+            base64 -w 0 native/decimal-core/Cargo.lock
+            echo
+            cargo fmt --manifest-path native/decimal-core/Cargo.toml
+            while read -r source; do
+              echo "SOURCE_BASE64 $source"
+              base64 -w 0 "$source"
+              echo
+            done < <(find native/decimal-core -path '*/vendor' -prune -o -name '*.rs' -print | sort)
+            python scripts/sync_native_builds.py
+          fi
+          while read -r package; do
+            cargo generate-lockfile --manifest-path "$package/native/Cargo.toml"
+            echo "LOCKFILE_BASE64 $package/native/Cargo.lock"
+            base64 -w 0 "$package/native/Cargo.lock"
+            echo
+            cargo fmt --manifest-path "$package/native/Cargo.toml"
+            while read -r source; do
+              echo "SOURCE_BASE64 $source"
+              base64 -w 0 "$source"
+              echo
+            done < <(find "$package/native" \( -path '*/target' -o -path '*/vendor' \) -prune -o -name '*.rs' -print | sort)
+          done < <(find packages -path '*/native/Cargo.toml' -print | sed 's@/native/Cargo.toml$@@' | sort)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-cargo-locks
+          path: packages/*/native/Cargo.lock
+          if-no-files-found: error
+  native-artifacts:
+    if: github.event_name != 'workflow_dispatch' || !inputs.bootstrap_locks
+    # Build tags must fit Debian Bookworm's GLIBC; Ubuntu 24 tags require 2.39.
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: ./.github/actions/setup-poetry
+      - name: Reject generated hook drift and missing committed locks
+        run: |
+          set -euo pipefail
+          python scripts/sync_native_builds.py --check
+          cargo fmt --manifest-path native/decimal-core/Cargo.toml -- --check
+          cargo test --manifest-path native/decimal-core/Cargo.toml --locked
+          while read -r package; do
+            git ls-files --error-unmatch "$package/native/Cargo.lock"
+            cargo fmt --manifest-path "$package/native/Cargo.toml" -- --check
+          done < <(python scripts/sync_native_builds.py --list)
+      - name: Install assembly and build exact domain artifacts
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          poetry install --no-interaction
+          mkdir -p native-artifacts
+          while read -r package; do
+            poetry build --directory "$package" --output "$GITHUB_WORKSPACE/native-artifacts"
+          done < <(python scripts/sync_native_builds.py --list)
+      - name: Verify native wheel and sdist payloads and rebuild source archives
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib, tarfile, tomllib, zipfile, subprocess
+          artifacts = pathlib.Path('native-artifacts').resolve()
+          for manifest in sorted(pathlib.Path('packages').glob('*/pyproject.toml')):
+              data = tomllib.loads(manifest.read_text())
+              native = data.get('tool', {}).get('dotmac', {}).get('native')
+              if not native:
+                  continue
+              module = native['python-package']
+              prefix = data['tool']['poetry']['name'].replace('-', '_') + '-'
+              wheel, = artifacts.glob(prefix + '*.whl')
+              with zipfile.ZipFile(wheel) as archive:
+                  native_files = [name for name in archive.namelist() if name.endswith(('.so', '.pyd', '.dll', '.dylib'))]
+                  assert len(native_files) == 1 and native_files[0].startswith(module + '/_native.'), native_files
+                  wheel_metadata, = [name for name in archive.namelist() if name.endswith('.dist-info/WHEEL')]
+                  metadata = archive.read(wheel_metadata).decode()
+                  assert 'Root-Is-Purelib: false' in metadata and '-none-any' not in metadata and '-abi3-' not in metadata, metadata
+              sdist, = artifacts.glob(prefix + '*.tar.gz')
+              target = artifacts / 'extracted' / module
+              target.mkdir(parents=True)
+              with tarfile.open(sdist) as archive:
+                  names = archive.getnames()
+                  assert not any(name.endswith(('.so', '.pyd', '.dll', '.dylib')) or '/target/' in name for name in names), names
+                  for expected in ['build.py', 'native/Cargo.toml', 'native/Cargo.lock', 'native/pyproject.toml', 'native/src/lib.rs']:
+                      assert any(name.endswith('/' + expected) for name in names), expected
+                  archive.extractall(target, filter='data')
+              extracted_package, = target.iterdir()
+              subprocess.run(['poetry', 'build', '--directory', str(extracted_package), '--format', 'wheel', '--output', str(artifacts / 'rebuilt')], check=True)
+          PY
+      - name: Verify all artifacts and private Decimal linkage
+        run: python scripts/native_qualify.py verify native-artifacts
+      - name: Test exact wheel installations with module parity suites
+        run: |
+          set -euo pipefail
+          # Installing a wheel over an editable path removes its .pth entry.
+          # Run outside the checkout package src roots; pytest imports installed bytes.
+          for distribution in native-artifacts native-artifacts/rebuilt; do
+            poetry run python -m pip install --force-reinstall --no-deps "$distribution"/*.whl
+            poetry run python - <<'PY'
+          import importlib, pathlib, tomllib
+          for manifest in pathlib.Path('packages').glob('*/pyproject.toml'):
+              native = tomllib.loads(manifest.read_text()).get('tool', {}).get('dotmac', {}).get('native')
+              if native:
+                  extension = importlib.import_module(native['python-package'] + '._native')
+                  assert 'site-packages' in str(extension.__file__), extension.__file__
+          PY
+            poetry run pytest -q tests/unit/test_positioning.py tests/unit/test_positioning_native.py tests/unit/test_network_suite_services.py tests/unit/test_network_topology_native.py tests/unit/test_fiber_plant_native.py tests/unit/test_media_observations.py tests/unit/test_media_observations_native.py tests/unit/test_imports.py tests/unit/test_imports_native.py tests/unit/test_web_analytics_engine.py tests/unit/test_web_analytics_native.py tests/unit/test_forms.py tests/unit/test_forms_native.py tests/unit/test_surveys_service.py tests/unit/test_surveys_lifecycle.py tests/unit/test_surveys_native.py tests/unit/test_inventory_native.py tests/unit/test_inventory_service.py tests/unit/test_inventory_valuation.py tests/unit/test_finance_calculations.py tests/unit/test_finance_service.py tests/unit/test_finance_native.py
+          done
+      - name: Load retained wheels in the supported Debian runtime
+        run: |
+          python -m pip wheel --no-deps --wheel-dir "$GITHUB_WORKSPACE/native-artifacts/runtime" ./packages/dotmac-kernel
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/source:ro" --workdir /source \
+            python:3.12-slim-bookworm \
+            python scripts/native_qualify.py runtime-smoke native-artifacts
+      - name: Record exact artifact identities
+        run: |
+          cd native-artifacts
+          sha256sum ./*.whl ./*.tar.gz rebuilt/*.whl runtime/*.whl > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-artifacts-cp${{ matrix.python }}
+          path: |
+            native-artifacts/*.whl
+            native-artifacts/*.tar.gz
+            native-artifacts/rebuilt/*.whl
+            native-artifacts/runtime/*.whl
+            native-artifacts/SHA256SUMS
+          if-no-files-found: error
+
+  native-supported-interpreters:
+    if: github.event_name != 'workflow_dispatch' || !inputs.bootstrap_locks
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: ./.github/actions/setup-native
+      - name: Check generated hooks and qualify standalone PEP 517 artifacts
+        run: |
+          set -euo pipefail
+          python scripts/sync_native_builds.py --check
+          python -m venv "$RUNNER_TEMP/native-qualify"
+          "$RUNNER_TEMP/native-qualify/bin/python" scripts/native_qualify.py standalone native-standalone-artifacts
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-standalone-cp${{ matrix.python }}
+          path: |
+            native-standalone-artifacts/*.whl
+            native-standalone-artifacts/*.tar.gz
+            native-standalone-artifacts/rebuilt/*.whl
+            native-standalone-artifacts/runtime/*.whl
+            native-standalone-artifacts/runtime-constraints.txt
+            native-standalone-artifacts/SHA256SUMS
+          if-no-files-found: error

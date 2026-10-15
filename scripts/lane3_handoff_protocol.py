@@ -73,6 +73,8 @@ CATEGORIES: Final = frozenset(
         "origin.flags",
         "binding.mismatch",
         "approval.missing",
+        "admission.invalid",
+        "execution.unsupported",
         "assignment.ambiguous",
         "snapshot.refused",
         "deadline.insufficient",
@@ -534,6 +536,25 @@ _GRANT_KEYS: Final = {
     "manifest_digest",
     "controller_digest",
 }
+
+
+def validate_authority(value: Any) -> dict[str, Any]:
+    """Management-only proof purpose; never expands the runner grant schema."""
+    doc = _exact(
+        value,
+        {"schema", "purpose", "config_digest", "capability_digest", "evidence_digest"},
+    )
+    if (
+        doc["schema"] != "dotmac.lane3.qualification-purpose.v2"
+        or doc["purpose"] != "qualification"
+    ):
+        # Actual admitted candidate execution has no installed owner yet.
+        raise ProtocolRefused("schema.invalid")
+    for key in ("config_digest", "capability_digest"):
+        hex64(doc[key])
+    if doc["evidence_digest"] is not None:
+        raise ProtocolRefused("schema.invalid")
+    return doc
 
 
 def validate_binding(value: Any) -> dict[str, Any]:

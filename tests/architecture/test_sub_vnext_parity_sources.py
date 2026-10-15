@@ -86,12 +86,18 @@ def test_retained_capabilities_have_audit_complete_dossiers() -> None:
         assert dossier["source_mode"] == expected_mode
         assert dossier["contract_consumers"] == []
         assert dossier["candidate_consumers"]
-        assert dossier["inventory_evidence"] == [
+        qualified_evidence = [
             "docs/inventories/sub-vnext-parity-sources.md",
             "docs/inventories/sub-vnext-parity-dispositions.toml",
             "docs/adr/0040-sub-vnext-parity-capabilities-have-"
             "narrow-independent-owners.md",
         ]
+        expected_evidence = (
+            ["docs/inventories/rust-computation-sources.md", *qualified_evidence]
+            if distribution == "dotmac-forms"
+            else qualified_evidence
+        )
+        assert dossier["inventory_evidence"] == expected_evidence
 
 
 def test_fleet_control_reuses_deployment_control() -> None:

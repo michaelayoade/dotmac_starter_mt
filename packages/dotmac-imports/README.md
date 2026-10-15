@@ -152,3 +152,7 @@ provable, rather than as an untested optional extra.
 Database extraction, PostgreSQL COPY and automatic partition-worker scaling are
 also not in this release. The durable lane is ready for a real ERP pilot; those
 optimisations require their own source evidence and measured cutover.
+
+## Native computation candidate
+
+The unreleased `0.2.0a1` candidate includes a private Rust `_native` extension behind the existing public Python API. Authorization, tenant isolation, transactions and persistence retain their current owners. Installing a matching wheel needs no compiler. Building from source requires the exact Rust and build-tool pins in the packaged `build.py`, plus a C linker; the source archive includes locked Cargo inputs. No Python computation fallback is installed. Hosted qualification and publication remain separate from this source change.

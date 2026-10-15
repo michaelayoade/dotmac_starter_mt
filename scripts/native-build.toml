@@ -1,0 +1,5 @@
+# Canonical toolchain pins; package-local hooks/metadata are generated from here.
+rust = "1.90.0"
+maturin = "1.14.1"
+poetry-core = "2.2.1"
+pyo3 = "0.29.0"

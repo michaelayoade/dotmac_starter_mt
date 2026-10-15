@@ -24,6 +24,7 @@ source_revisions = [
   "dotmac_starter_mt:4b285cb3b0da82b9a2a3d5f39f4aca7da19105ff",
 ]
 source_paths = [
+  "dotmac_starter_mt:packages/dotmac-web-analytics/native",
   "dotmac_starter_mt:docs/inventories/web-analytics-sources.md",
   "dotmac_mkt:app/adapters/google_analytics.py",
   "dotmac_mkt:app/tasks/analytics_sync.py",
@@ -37,12 +38,14 @@ source_paths = [
   "dotmac_starter_mt:packages/dotmac-integration/src/dotmac_integration/ingress.py",
 ]
 preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_web_analytics_native.py",
   "dotmac_starter_mt:tests/unit/test_web_analytics_contracts.py",
   "dotmac_starter_mt:tests/unit/test_web_analytics_engine.py",
   "dotmac_starter_mt:tests/architecture/test_web_analytics_module.py",
   "dotmac_starter_mt:tests/test_web_analytics_isolation.py",
 ]
 inventory_evidence = [
+  "docs/inventories/rust-computation-sources.md",
   "docs/inventories/web-analytics-sources.md",
   "docs/adr/0055-web-analytics-owns-first-party-observations.md",
 ]

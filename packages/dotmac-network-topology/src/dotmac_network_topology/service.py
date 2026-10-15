@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from heapq import heappop, heappush
 from uuid import UUID
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_network_topology._native import resolve_paths
 from dotmac_network_topology.contracts import (
     CoverageGap,
     CoverageQuery,
@@ -211,40 +211,22 @@ def withdraw_link(
     return _link_snapshot(row)
 
 
-def _resolve_path(
-    source: str, destination: str, links: tuple[Link, ...]
-) -> tuple[tuple[str, ...], tuple[UUID, ...], int]:
-    graph: dict[str, list[tuple[str, UUID, int]]] = {}
-    for link in links:
-        graph.setdefault(link.left_ref, []).append((link.right_ref, link.id, link.cost))
-        if link.direction == "bidirectional":
-            graph.setdefault(link.right_ref, []).append(
-                (link.left_ref, link.id, link.cost)
+def _resolve_paths(
+    queries: list[tuple[str, str]], links: tuple[Link, ...]
+) -> list[tuple[list[str], list[str], int]]:
+    return resolve_paths(
+        [
+            (
+                link.left_ref,
+                link.right_ref,
+                str(link.id),
+                link.direction == "bidirectional",
+                link.cost,
             )
-    queue: list[tuple[int, str, tuple[str, ...], tuple[UUID, ...]]] = [
-        (0, source, (source,), ())
-    ]
-    best_cost = {source: 0}
-    while queue:
-        cost, node, hops, link_ids = heappop(queue)
-        if cost != best_cost.get(node):
-            continue
-        if node == destination:
-            return hops, link_ids, cost
-        for next_node, link_id, edge_cost in graph.get(node, []):
-            next_cost = cost + edge_cost
-            if next_cost < best_cost.get(next_node, next_cost + 1):
-                best_cost[next_node] = next_cost
-                heappush(
-                    queue,
-                    (
-                        next_cost,
-                        next_node,
-                        (*hops, next_node),
-                        (*link_ids, link_id),
-                    ),
-                )
-    return (), (), 0
+            for link in links
+        ],
+        queries,
+    )
 
 
 def resolve_forwarding(
@@ -266,9 +248,9 @@ def resolve_forwarding(
     )
     if len(links) != len(selected_ids):
         raise TopologyNotFound("one or more path links were not found")
-    hops, link_ids, cost = _resolve_path(
-        command.source_ref, command.destination_ref, links
-    )
+    hops, link_ids, cost = _resolve_paths(
+        [(command.source_ref, command.destination_ref)], links
+    )[0]
     now = datetime.now(UTC)
     row = db.scalar(
         select(PathProjection)
@@ -333,10 +315,10 @@ def rebuild_topology(
     changed = False
     expected_gaps: dict[str, str] = {}
     now = datetime.now(UTC)
-    for path in paths:
-        hops, link_ids, total_cost = _resolve_path(
-            path.source_ref, path.destination_ref, links
-        )
+    results = _resolve_paths(
+        [(path.source_ref, path.destination_ref) for path in paths], links
+    )
+    for path, (hops, link_ids, total_cost) in zip(paths, results, strict=True):
         reachable = bool(hops)
         next_link_ids = [str(value) for value in link_ids]
         if (

@@ -33,6 +33,7 @@ RUNTIME_ROLES = frozenset(
         "lane3_openbao_topology.py",
         "lane3_broker_origin.py",
         "lane3_handoff_coordinator.py",
+        "lane3_execution.py",
         "lane3_topology.py",
         "lane3_handoff_protocol.py",
         "lane3_handoff_controller.py",
@@ -160,6 +161,8 @@ MANAGEMENT_FAILURE_CATEGORIES = frozenset(
 )
 COORDINATOR_FAILURE_CATEGORIES = frozenset(
     (
+        "admission.invalid",
+        "execution.unsupported",
         "approval.missing",
         "assignment.ambiguous",
         "binding.mismatch",
@@ -355,6 +358,7 @@ def configure(deployment):
         raise ValueError("deployment-qualification")
     qualification = candidate["qualification"]
     if set(qualification) != {
+        "authority",
         "repository_id",
         "run_id",
         "run_attempt",
@@ -366,6 +370,27 @@ def configure(deployment):
         "admission_digest",
         "supplier_digest",
     }:
+        raise ValueError("deployment-qualification")
+    authority = qualification["authority"]
+    if (
+        type(authority) is not dict
+        or set(authority)
+        != {
+            "schema",
+            "purpose",
+            "config_digest",
+            "capability_digest",
+            "evidence_digest",
+        }
+        or authority["schema"] != "dotmac.lane3.qualification-purpose.v2"
+        or authority["purpose"] != "qualification"
+        or authority["evidence_digest"] is not None
+        or any(
+            type(authority[key]) is not str
+            or re.fullmatch("[0-9a-f]{64}", authority[key]) is None
+            for key in ("config_digest", "capability_digest")
+        )
+    ):
         raise ValueError("deployment-qualification")
     for key in ("repository_id", "run_id", "run_attempt", "environment_id"):
         if type(qualification[key]) is not int or qualification[key] <= 0:
@@ -659,6 +684,13 @@ def coordinator_binding():
         != {"ssh_alias": binding["ssh_destination"], "controller_path": dispatcher}
     ):
         raise CampaignRefused("coordinator-binding")
+    authority = binding["qualification"]["authority"]
+    if (
+        config.get("schema") != "dotmac.lane3.handoff-coordinator.v2"
+        or config.get("purpose") != authority["purpose"]
+        or load_module("protocol").digest(config) != authority["config_digest"]
+    ):
+        raise CampaignRefused("coordinator-binding")
     for key in (
         "repository_id",
         "workflow_sha",
@@ -781,7 +813,7 @@ def durable_owned_state():
             "bootstrap_proposal_sha256",
             "bootstrap_provenance_digest",
         }
-        or state["schema"] != "dotmac.lane3.handoff-coordinator-state.v1"
+        or state["schema"] != "dotmac.lane3.handoff-coordinator-state.v2"
         or state["qualification"] != binding["qualification"]
     ):
         raise CampaignRefused("state-ownership-unproved")

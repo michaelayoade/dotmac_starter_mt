@@ -351,9 +351,11 @@ privileged code runs, and the receipt already binds the revision.
 `head_sha` remains the protected-main oracle" is amended in the same PR that
 changes the oracle (D-S2), not before. Rules describe enforced behaviour.
 
-## 7. Admission evidence before a privileged runner or credential
+## 7. Admission evidence before admitted candidate execution
 
-This mirrors CP § 11. A positive dispatch alone is never sufficient. On the
+This mirrors CP § 11. A positive dispatch alone is never sufficient.
+Separately approved refusal-only qualification produces this evidence under its
+exact bounded source capability; it does not admit candidate execution. On the
 single ephemeral runner the order is fixed: the runner is shown idle, the
 negative cases are queued and stay unassigned for the stated bound, and only
 then does the protected positive dispatch run and get picked up.
@@ -365,9 +367,22 @@ then does the protected positive dispatch run and get picked up.
 | PR exclusion | Same-repository and fork `pull_request` **and** `pull_request_target` probes, including probes that name the group or labels, never schedule on the group. |
 | Ref and workflow failure | A non-`main` dispatch, a different workflow, a different ref and a reusable call never schedule and never obtain a token. A missing reviewer blocks the job. |
 | Credential failure | Each wrong bound claim (name, immutable IDs, environment, ref, workflow, event, audience, expiry) is denied by the live role. The token cannot read Gate-0 or CP signer paths. |
-| No-grant refusal | A dispatch without a verified grant makes no OpenBao request, which is observed on the OpenBao audit side. A log line saying so is not enough. |
+| No-grant refusal | The candidate execution path without a verified Foundation ExecutionGrant makes no OpenBao request, observed on the OpenBao audit side. A qualification OIDC/KV probe or broker GRANTED result cannot satisfy this row. A log line saying so is not enough. |
 | Isolation and disclosure | A failed or cancelled canary run leaves no key, certificate or workspace state, and the next run sees none. A private-side scan of the public logs and artifacts, using the topology record's actual values, finds none. The scan runs outside the public repository, because a public scan would need the values. |
 | Oracle reachability | The amended oracle's reads (§ 6) succeed with the intended read credential and refuse with a wrong one. |
+
+`admission_evidence` in `.github/lane3-execution.json` must reference a filled
+table in `docs/inventories/lane3-admission-evidence.md#<anchor>` with one row
+per requirement above; `scripts/lane3_execution.py` refuses the topology
+otherwise (digest preimages, per-row coordinate kinds and staleness rules are
+in that file). The guard resolves the table in the same checkout as the
+topology file, so a caller must pass the topology at
+`<checkout>/.github/lane3-execution.json`; a temporary, `git show` or artifact
+copy is refused by `load_topology`. The proposed coordinator v2 integration
+uses the same evidence validator directly over its independently verified
+same-commit data snapshot; the deployed coordinator remains unenforced until
+the separately reviewed installation and proof complete. Candidate execution
+is explicitly unsupported by that proof-only coordinator bundle.
 
 Scheduling probes use a disposable canary in the same group, on a separately
 named and authorized isolated VM. The canary is neither the existing control
@@ -734,3 +749,59 @@ K1 qualification, runtime upgrade, OIDC read, B8 proof or Gate-0 acceptance is
 claimed by this source change. Runtime bundle/configuration pins and upgrade
 recovery must be reviewed before installation; final authority remains the
 assigned-run check and the completed-run oracle.
+
+### 2026-10-15: purpose-scoped coordinator source integration
+
+Michael adopted the distinction between separately approved refusal-only
+qualification and admitted candidate execution. Section 7's admission prerequisite
+applies to **candidate execution**. Qualification is bounded evidence production
+under its own exact source classification and human approval; it leaves
+`admission_evidence` null. A proof OIDC/KV request is not the no-grant execution
+negative: that row requires an independent OpenBao audit observation of the actual
+execution path refusing without a verified Foundation ExecutionGrant. Broker
+`GRANTED` is transport permission and never that ExecutionGrant.
+
+The proposed coordinator v2 bundle implements this distinction at the existing
+`readback_binding` owner, used before prepare, JIT issuance and broker transport.
+The source configuration explicitly selects `qualification` or
+`admitted_execution`; no workflow input or missing-value default selects it.
+Qualification requires the exact reviewed source-capability record described in
+`docs/inventories/lane3-source-capabilities.md`. Its complete configuration and
+capability digests travel inside the management qualification and independently
+approved qualification digest. The runner's existing transport-grant binding
+schema is unchanged. Source, import closure, workflow blob or finite-operation
+changes require a new reviewed classification and approval; copying the purpose
+string is insufficient.
+
+Two independently pinned owners are intentional: the measured installed runtime
+bundle contains `lane3_execution.py` and its standard-library-only validator;
+the topology and fixed evidence DATA file are fetched at the same immutable
+`cfg.admission.commit`, with independent content hashes. A bounded private fresh
+tree contains those exact topology bytes and the fixed regular evidence file.
+The coordinator calls `require_admission_evidence(reference, repo_root=...)` from
+the installed runtime. It never fetches or imports network Python. Supplier and
+workflow pins remain separate reviewed coordinates, all bound by the complete
+configuration/capability tuple.
+
+Even a complete evidence table yields `execution.unsupported` before privileged
+prepare/JIT/grant: this bundle has only the refusal-only proof launcher and has no
+candidate executor or ExecutionGrant verification owner. This is a checked
+prerequisite followed by an explicit unsupported path, not a positive execution
+proof. Future execution integration must use the actual signed-authorization
+owner at the executor boundary; matching dispatch text or broker grant cannot
+satisfy it.
+
+New authority requires CONFIG v2 and STATE v2. Legacy v1 records receive no
+inferred purpose and cannot prepare, launch or decide. Explicit coordinator
+`cleanup`/`status` recovery accepts structurally valid v1 configuration/state,
+preserves the original qualification and launch-intent digests and never consults
+admission data. Changed/invalid v2 purpose or evidence cannot block this recovery.
+Retire the owned lease through its original controller before assembling fresh
+v2 inputs; do not rewrite old journal/approval digests into v2. The pure
+`assemble_v2_config` adapter requires explicit purpose, reviewed capability and
+evidence-hash inputs and validates the result without performing effects.
+
+This is a proposed atomic source bundle. Hosted CI, independent review, merged
+source, installation measurement, the single deployment/packet pin refresh and
+live audit acceptance are still required. Source/static checks do not close the
+coordinator debt, admit a candidate, or activate Window 8.

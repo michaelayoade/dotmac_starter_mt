@@ -10,6 +10,7 @@ import base64
 import copy
 import dataclasses
 import hashlib
+import json
 import pathlib
 import sys
 from types import SimpleNamespace
@@ -49,13 +50,37 @@ ADMISSION_DIGEST = hashlib.sha256(ADMISSION).hexdigest()
 SUPPLIER_DIGEST = hp.digest(
     {"lane3_github_oidc.py": hashlib.sha256(MODULE).hexdigest()}
 )
-ADMISSION_PATH = f"repos/{STARTER}/contents/docs/admission.json?ref={STARTER_SHA}"
+ADMISSION_PATH = (
+    f"repos/{STARTER}/contents/.github/lane3-execution.json?ref={STARTER_SHA}"
+)
 DISPATCHER = "/opt/dotmac-lane3-handoff/" + "a" * 64 + "/lane3_handoff_install.py"
 
 
 def config_doc(controller_path: str = DISPATCHER) -> dict[str, Any]:
     return {
         "schema": co.CONFIG_SCHEMA,
+        "purpose": "qualification",
+        "evidence_sha256": None,
+        "source_capability": {
+            "schema": "dotmac.lane3.source-capability.v1",
+            "purpose": "qualification",
+            "repository": REPO,
+            "workflow_path": WF,
+            "workflow_sha": SHA,
+            "workflow_blob": BLOB,
+            "starter_repository": STARTER,
+            "starter_commit": STARTER_SHA,
+            "supplier_modules": {
+                "scripts/lane3_github_oidc.py": hashlib.sha256(MODULE).hexdigest()
+            },
+            "operations": [
+                "github-oidc",
+                "bounded-openbao-kv-read",
+                "proof-record",
+                "cleanup",
+            ],
+            "terminal": "execution-refused",
+        },
         "repository": REPO,
         "repository_id": 9,
         "workflow_path": WF,
@@ -74,7 +99,7 @@ def config_doc(controller_path: str = DISPATCHER) -> dict[str, Any]:
         },
         "admission": {
             "repository": STARTER,
-            "path": "docs/admission.json",
+            "path": ".github/lane3-execution.json",
             "commit": STARTER_SHA,
             "sha256": ADMISSION_DIGEST,
         },
@@ -202,6 +227,8 @@ def world() -> dict[str, Any]:
             ],
         },
         f"repos/{STARTER}/contents/scripts/lane3_github_oidc.py?ref={STARTER_SHA}": {
+            "type": "file",
+            "path": "scripts/lane3_github_oidc.py",
             "encoding": "base64",
             "content": base64.b64encode(MODULE).decode(),
         },
@@ -1415,3 +1442,424 @@ def legacy_binding_tests_use_a_separate_admitted_dns_capture(monkeypatch):
 
     monkeypatch.setattr(co, "fresh_bootstrap", fresh)
     monkeypatch.setattr(co, "retain_bootstrap_provenance", lambda *args: None)
+
+
+@pytest.mark.parametrize("purpose", [None, "", "skip_admission", "Qualification"])
+def test_unknown_purpose_never_creates_authority(purpose: Any) -> None:
+    doc = config_doc()
+    doc["purpose"] = purpose
+    with pytest.raises(co.CoordinatorRefused):
+        co.parse_config(doc)
+
+
+def test_legacy_config_is_recovery_only() -> None:
+    doc = config_doc()
+    doc["schema"] = co.LEGACY_CONFIG_SCHEMA
+    for key in ("purpose", "source_capability", "evidence_sha256"):
+        doc.pop(key)
+    with pytest.raises(co.CoordinatorRefused):
+        co.parse_config(doc)
+    cfg = co.parse_config(doc, recovery=True)
+    with pytest.raises(co.CoordinatorRefused):
+        co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+
+
+def test_capability_manifest_binds_sources_and_finite_operations() -> None:
+    assert co.parse_config(config_doc()).purpose == "qualification"
+    for key, value in (
+        ("workflow_blob", "f" * 40),
+        ("operations", ["candidate-install"]),
+        ("terminal", "success"),
+    ):
+        doc = config_doc()
+        doc["source_capability"][key] = value
+        with pytest.raises(co.CoordinatorRefused):
+            co.parse_config(doc)
+
+
+def test_phase_recheck_rejects_changed_capability() -> None:
+    cfg = config()
+    good = co.prelaunch_binding(api_of(prelaunch_world()), cfg, RUN)
+    changed = dataclasses.replace(cfg, config_digest="f" * 64)
+    with pytest.raises(co.CoordinatorRefused, match="binding.mismatch"):
+        co.readback_binding(
+            api_of(world()),
+            changed,
+            run_id=RUN,
+            runner_id=RUNNER,
+            report=report(),
+            expected_qualification=good,
+        )
+
+
+def execution_world() -> tuple[co.Config, dict[str, Any], str]:
+    from tests.unit.lane3_evidence_support import REFERENCE, rows, table
+
+    raw_evidence = table(rows()).encode()
+    doc = config_doc()
+    doc.update(
+        purpose="admitted_execution",
+        source_capability=None,
+        evidence_sha256=hashlib.sha256(raw_evidence).hexdigest(),
+    )
+    admitted = json.loads(ADMISSION)
+    admitted["admission_evidence"] = REFERENCE
+    raw_topology = hp.canonical_json(admitted)
+    doc["admission"]["sha256"] = hashlib.sha256(raw_topology).hexdigest()
+    data = prelaunch_world()
+    data[ADMISSION_PATH] = {
+        "encoding": "base64",
+        "content": base64.b64encode(raw_topology).decode(),
+    }
+    path = f"repos/{STARTER}/contents/{co.le.EVIDENCE_FILE}?ref={STARTER_SHA}"
+    data[path] = {
+        "type": "file",
+        "path": co.le.EVIDENCE_FILE,
+        "encoding": "base64",
+        "content": base64.b64encode(raw_evidence).decode(),
+    }
+    tree_sha = "e" * 40
+    data[f"repos/{STARTER}/git/commits/{STARTER_SHA}"] = {
+        "sha": STARTER_SHA,
+        "tree": {"sha": tree_sha},
+    }
+    entries = []
+    for file_path, raw in (
+        (".github/lane3-execution.json", raw_topology),
+        (co.le.EVIDENCE_FILE, raw_evidence),
+    ):
+        git_blob = hashlib.sha1(
+            b"blob " + str(len(raw)).encode() + b"\0" + raw, usedforsecurity=False
+        ).hexdigest()
+        entries.append(
+            {
+                "path": file_path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": git_blob,
+                "size": len(raw),
+            }
+        )
+    data[f"repos/{STARTER}/git/trees/{tree_sha}?recursive=1"] = {
+        "sha": tree_sha,
+        "truncated": False,
+        "tree": entries,
+    }
+    return co.parse_config(doc), data, path
+
+
+def test_complete_real_table_is_checked_but_execution_has_no_owner(
+    tmp_path: pathlib.Path, monkeypatch: Any
+) -> None:
+    cfg, data, path = execution_world()
+    cfg = dataclasses.replace(cfg, state_path=tmp_path / "state")
+    checked: list[pathlib.Path] = []
+    validator = co.le.require_admission_evidence
+
+    def guard(reference: Any, *, repo_root: pathlib.Path) -> str:
+        assert (
+            repo_root / ".github/lane3-execution.json"
+        ).read_bytes() == base64.b64decode(data[ADMISSION_PATH]["content"])
+        assert not (repo_root / co.le.EVIDENCE_FILE).is_symlink()
+        checked.append(repo_root)
+        return validator(reference, repo_root=repo_root)
+
+    monkeypatch.setattr(co.le, "require_admission_evidence", guard)
+    effects: list[Any] = []
+    with pytest.raises(co.CoordinatorRefused, match="execution.unsupported"):
+        co.op_prepare(cfg, lambda *args: effects.append(args), api_of(data), RUN)
+    assert checked and not checked[0].exists()
+    assert effects == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    ["tampered", "symlink", "other-path", "cross-commit", "missing"],
+)
+def test_same_commit_evidence_data_refuses_planted_changes(defect: str) -> None:
+    cfg, data, path = execution_world()
+    if defect == "tampered":
+        data[path]["content"] = base64.b64encode(b"tampered").decode()
+    elif defect == "symlink":
+        data[path]["type"] = "symlink"
+    elif defect == "other-path":
+        data[path]["path"] = "elsewhere.md"
+    elif defect == "cross-commit":
+        cfg = dataclasses.replace(cfg, admission={**cfg.admission, "commit": "f" * 40})
+    elif defect == "missing":
+        data.pop(path)
+    with pytest.raises(co.CoordinatorRefused):
+        co.prelaunch_binding(api_of(data), cfg, RUN)
+
+
+@pytest.mark.parametrize("schema", [co.STATE_SCHEMA, co.LEGACY_STATE_SCHEMA])
+def test_owned_cleanup_survives_invalid_purpose_and_evidence(
+    tmp_path: pathlib.Path, schema: str
+) -> None:
+    doc = config_doc()
+    doc.update(purpose="unclassified", source_capability=None, evidence_sha256="broken")
+    cfg = dataclasses.replace(
+        co.parse_config(doc, recovery=True), state_path=tmp_path / "state"
+    )
+    original = {
+        "schema": schema,
+        "lease_id": LEASE,
+        "qualification": {"original": "retained"},
+    }
+    co.save_state(cfg.state_path, original)
+    calls: list[str] = []
+
+    def channel(op: str, req: Any) -> Any:
+        calls.append(op)
+        assert req["lease_id"] == LEASE
+        return closed_reply()
+
+    def no_api(*args: Any) -> Any:
+        pytest.fail("cleanup consulted admission or GitHub")
+
+    co.op_cleanup(cfg, channel, no_api)
+    assert calls == ["cleanup"]
+    assert not cfg.state_path.exists()
+
+
+def test_factory_requires_explicit_reviewed_v2_inputs_and_preserves_input() -> None:
+    doc = config_doc()
+    legacy = copy.deepcopy(doc)
+    legacy["schema"] = co.LEGACY_CONFIG_SCHEMA
+    for key in ("purpose", "source_capability", "evidence_sha256"):
+        legacy.pop(key)
+    before = copy.deepcopy(legacy)
+    rendered = co.assemble_v2_config(
+        legacy,
+        purpose="qualification",
+        source_capability=doc["source_capability"],
+        evidence_sha256=None,
+    )
+    assert rendered == doc
+    assert legacy == before
+    with pytest.raises(co.CoordinatorRefused):
+        co.assemble_v2_config(
+            legacy,
+            purpose="qualification",
+            source_capability=None,
+            evidence_sha256=None,
+        )
+    assert co.authority_binding(co.parse_config(rendered))[
+        "config_digest"
+    ] == hp.digest(rendered)
+
+
+@pytest.mark.parametrize(
+    "defect", ["git-symlink", "truncated", "wrong-blob", "missing-mode"]
+)
+def test_contents_api_cannot_hide_git_tree_symlink_or_changed_blob(defect: str) -> None:
+    cfg, data, _ = execution_world()
+    tree = data[f"repos/{STARTER}/git/trees/{'e' * 40}?recursive=1"]
+    row = tree["tree"][1]
+    if defect == "git-symlink":
+        row["mode"] = "120000"
+    elif defect == "truncated":
+        tree["truncated"] = True
+    elif defect == "wrong-blob":
+        row["sha"] = "f" * 40
+    else:
+        row.pop("mode")
+    with pytest.raises(co.CoordinatorRefused, match="admission.invalid"):
+        co.prelaunch_binding(api_of(data), cfg, RUN)
+
+
+def replace_execution_data(
+    cfg: co.Config,
+    data: dict[str, Any],
+    path: str,
+    *,
+    reference: Any,
+    evidence: bytes | None = None,
+) -> co.Config:
+    topology = json.loads(base64.b64decode(data[ADMISSION_PATH]["content"]))
+    topology["admission_evidence"] = reference
+    raw = hp.canonical_json(topology)
+    data[ADMISSION_PATH]["content"] = base64.b64encode(raw).decode()
+    if evidence is not None:
+        data[path]["content"] = base64.b64encode(evidence).decode()
+    evidence = base64.b64decode(data[path]["content"])
+    tree = data[f"repos/{STARTER}/git/trees/{'e' * 40}?recursive=1"]["tree"]
+    for row, contents in zip(tree, (raw, evidence), strict=True):
+        row["sha"] = hashlib.sha1(
+            b"blob " + str(len(contents)).encode() + b"\0" + contents,
+            usedforsecurity=False,
+        ).hexdigest()
+        row["size"] = len(contents)
+    return dataclasses.replace(
+        cfg,
+        admission={**cfg.admission, "sha256": hashlib.sha256(raw).hexdigest()},
+        evidence_sha256=hashlib.sha256(evidence).hexdigest(),
+    )
+
+
+@pytest.mark.parametrize(
+    "defect", ["null", "bare", "absent-anchor", "incomplete-table"]
+)
+def test_canonical_admission_guard_is_reached_for_reference_and_table_failures(
+    tmp_path: pathlib.Path, monkeypatch: Any, defect: str
+) -> None:
+    from tests.unit.lane3_evidence_support import REFERENCE, rows, table
+
+    cfg, data, path = execution_world()
+    reference = {
+        "null": None,
+        "bare": "invented",
+        "absent-anchor": co.le.EVIDENCE_FILE + "#absent",
+        "incomplete-table": REFERENCE,
+    }[defect]
+    evidence = (
+        table(
+            {key: value for key, value in rows().items() if key != "No-grant refusal"}
+        ).encode()
+        if defect == "incomplete-table"
+        else None
+    )
+    cfg = replace_execution_data(
+        cfg, data, path, reference=reference, evidence=evidence
+    )
+    cfg = dataclasses.replace(cfg, state_path=tmp_path / "state")
+    called = []
+    validator = co.le.require_admission_evidence
+
+    def guard(value: Any, *, repo_root: pathlib.Path) -> str:
+        called.append(value)
+        return validator(value, repo_root=repo_root)
+
+    monkeypatch.setattr(co.le, "require_admission_evidence", guard)
+    effects = []
+    with pytest.raises(co.CoordinatorRefused, match="admission.invalid"):
+        co.op_prepare(cfg, lambda *args: effects.append(args), api_of(data), RUN)
+    assert called == [reference]
+    assert effects == [] and not cfg.state_path.exists()
+
+
+@pytest.mark.parametrize("phase", ["prepare", "launch", "decide"])
+def test_complete_execution_evidence_is_unsupported_before_each_effect_boundary(
+    tmp_path: pathlib.Path, monkeypatch: Any, phase: str
+) -> None:
+    cfg, data, _ = execution_world()
+    cfg = dataclasses.replace(cfg, state_path=tmp_path / "state")
+    validator = co.le.require_admission_evidence
+    checked = []
+
+    def guard(reference: Any, *, repo_root: pathlib.Path) -> str:
+        checked.append(reference)
+        return validator(reference, repo_root=repo_root)
+
+    monkeypatch.setattr(co.le, "require_admission_evidence", guard)
+    effects = []
+    if phase == "prepare":
+        with pytest.raises(co.CoordinatorRefused, match="execution.unsupported"):
+            co.op_prepare(cfg, lambda *args: effects.append(args), api_of(data), RUN)
+    elif phase == "launch":
+        co.save_state(
+            cfg.state_path,
+            {
+                "schema": co.STATE_SCHEMA,
+                "lease_id": LEASE,
+                "qualification": {"authority": co.authority_binding(cfg)},
+            },
+        )
+        with pytest.raises(co.CoordinatorRefused, match="execution.unsupported"):
+            co.op_launch(
+                cfg,
+                lambda *args: effects.append(args),
+                api_of(data),
+                RUN,
+                deadline_ns=co.time.monotonic_ns() + 60_000_000_000,
+            )
+    else:
+        assigned = world()
+        assigned.update(
+            {
+                key: value
+                for key, value in data.items()
+                if key == ADMISSION_PATH or "/git/" in key or co.le.EVIDENCE_FILE in key
+            }
+        )
+        channel = Channel(report())
+        result = co.decide(
+            cfg=cfg,
+            api=api_of(assigned),
+            channel=channel,
+            lease=LEASE,
+            run_id=RUN,
+            runner_id=RUNNER,
+            qualification={"authority": co.authority_binding(cfg)},
+            policy_doc=POLICY,
+            bootstrap_manifest=BOOTSTRAP,
+        )
+        assert result.status == "REFUSED" and result.category == "execution.unsupported"
+        assert channel.ops() == ["status", "refuse"]
+    assert checked and effects == []
+
+
+def test_true_v1_config_status_and_launch_intent_cleanup_preserve_original_digest(
+    tmp_path: pathlib.Path,
+) -> None:
+    legacy = config_doc()
+    legacy["schema"] = co.LEGACY_CONFIG_SCHEMA
+    for key in ("purpose", "source_capability", "evidence_sha256"):
+        legacy.pop(key)
+    legacy["state_path"] = str(tmp_path / "state")
+    with pytest.raises(co.CoordinatorRefused, match="config.invalid"):
+        co.parse_config(legacy)
+    cfg = co.parse_config(legacy, recovery=True)
+    original = co.prelaunch_binding(api_of(prelaunch_world()), config(), RUN)
+    original.pop("authority")
+    digest = hp.digest(original)
+    name = f"lane3-handoff-{LEASE}"
+    state = {
+        "schema": co.LEGACY_STATE_SCHEMA,
+        "lease_id": LEASE,
+        "qualification": original,
+        "run_id": RUN,
+        "launch_intent": {
+            "name": name,
+            "runner_group_id": GROUP,
+            "run_id": RUN,
+            "qualification_digest": digest,
+        },
+    }
+    co.save_state(cfg.state_path, state)
+    calls = []
+    deleted = []
+
+    def channel(op: str, req: Any) -> Any:
+        calls.append(op)
+        assert req["lease_id"] == LEASE
+        assert co.read_json(cfg.state_path)["qualification"] == original
+        assert (
+            co.read_json(cfg.state_path)["launch_intent"]["qualification_digest"]
+            == digest
+        )
+        return (
+            {"lease_id": LEASE, "state": "BOOTSTRAP"}
+            if op == "status"
+            else closed_reply()
+        )
+
+    def api(path: str, method: str = "GET") -> Any:
+        assert "/actions/runners" in path or "/actions/runner-groups/" in path
+        if method == "DELETE":
+            assert path.endswith(f"/runners/{RUNNER}")
+            retained = co.read_json(cfg.state_path)
+            assert retained["qualification"] == original
+            assert retained["launch_intent"]["qualification_digest"] == digest
+            deleted.append(RUNNER)
+            return None
+        rows = [] if deleted else [{"id": RUNNER, "name": name}]
+        return {"total_count": len(rows), "runners": rows}
+
+    assert co.op_status(cfg, channel, api)["state"] == "BOOTSTRAP"
+    assert co.read_json(cfg.state_path) == state
+    with pytest.raises(co.CoordinatorRefused, match="config.invalid"):
+        co.prelaunch_binding(api, cfg, RUN)
+    co.op_cleanup(cfg, channel, api)
+    assert calls == ["status", "cleanup"] and deleted == [RUNNER]
+    assert not cfg.state_path.exists()

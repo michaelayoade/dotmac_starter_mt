@@ -61,6 +61,13 @@ def test_protected_configuration_is_one_shot_and_defensively_copied(monkeypatch)
         "runtime_pins": dict.fromkeys(module.RUNTIME_ROLES, "b" * 64),
         "github_run_id": 12,
         "qualification": {
+            "authority": {
+                "schema": "dotmac.lane3.qualification-purpose.v2",
+                "purpose": "qualification",
+                "config_digest": "a" * 64,
+                "capability_digest": "b" * 64,
+                "evidence_digest": None,
+            },
             "repository_id": 1,
             "run_id": 12,
             "run_attempt": 1,
@@ -576,6 +583,13 @@ def real_owned_journal(monkeypatch):
             "workflow_sha": "a" * 40,
             "workflow_blob": "b" * 40,
             "starter_commit": "c" * 40,
+            "authority": {
+                "schema": "dotmac.lane3.qualification-purpose.v2",
+                "purpose": "qualification",
+                "config_digest": "a" * 64,
+                "capability_digest": "b" * 64,
+                "evidence_digest": None,
+            },
             "approval_digest": "d" * 64,
             "admission_digest": "e" * 64,
             "supplier_digest": "f" * 64,
@@ -583,6 +597,8 @@ def real_owned_journal(monkeypatch):
         state_path = directory / "state.json"
         config_path = directory / "coordinator.json"
         config = {
+            "schema": "dotmac.lane3.handoff-coordinator.v2",
+            "purpose": "qualification",
             "state_path": str(state_path),
             "runner_org": "synthetic-org",
             "runner_group_id": 4,
@@ -605,6 +621,7 @@ def real_owned_journal(monkeypatch):
             "bootstrap_manifest_sha256": "b" * 64,
             "bootstrap_proposal_sha256": "c" * 64,
         }
+        qualification["authority"]["config_digest"] = protocol.digest(config)
         config_raw = protocol.canonical_json(config)
         config_path.write_bytes(config_raw)
         config_path.chmod(0o600)
@@ -625,7 +642,7 @@ def real_owned_journal(monkeypatch):
         }
         monkeypatch.setattr(module, "deployment_inputs", lambda: binding)
         prepared = {
-            "schema": "dotmac.lane3.handoff-coordinator-state.v1",
+            "schema": "dotmac.lane3.handoff-coordinator-state.v2",
             "lease_id": "d" * 32,
             "qualification": qualification,
             "bootstrap_manifest_digest": "b" * 64,
@@ -697,9 +714,19 @@ def test_closure_routes_must_match_pinned_coordinator_configuration(
         "runner_org": "synthetic-org",
         "runner_group_id": 4,
         "ssh_destination": "synthetic-host",
-        "qualification": {},
+        "qualification": {
+            "authority": {
+                "schema": "dotmac.lane3.qualification-purpose.v2",
+                "purpose": "qualification",
+                "config_digest": "a" * 64,
+                "capability_digest": "b" * 64,
+                "evidence_digest": None,
+            },
+        },
     }
     config = {
+        "schema": "dotmac.lane3.handoff-coordinator.v2",
+        "purpose": "qualification",
         "state_path": str(binding["state_path"]),
         "runner_org": "synthetic-org",
         "runner_group_id": 4,
@@ -710,6 +737,11 @@ def test_closure_routes_must_match_pinned_coordinator_configuration(
             + "/lane3_handoff_install.py",
         },
     }
+    binding["qualification"]["authority"]["config_digest"] = hashlib.sha256(
+        json.dumps(
+            config, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+    ).hexdigest()
     if defect == "foreign-target":
         config["management"]["ssh_alias"] = "unapproved-host"
     elif defect == "foreign-group":
@@ -720,6 +752,11 @@ def test_closure_routes_must_match_pinned_coordinator_configuration(
         config["state_path"] = "/other/state"
     monkeypatch.setattr(module, "deployment_inputs", lambda: binding)
     monkeypatch.setattr(module, "measured", lambda *args: json.dumps(config).encode())
+    monkeypatch.setattr(
+        module,
+        "load_module",
+        lambda role: importlib.import_module("lane3_handoff_protocol"),
+    )
     if defect:
         with pytest.raises(module.CampaignRefused, match="coordinator-binding"):
             module.coordinator_binding()
@@ -977,3 +1014,31 @@ def test_successful_finalization_cannot_erase_unproven_transition_cleanup(
     with pytest.raises(module.CampaignRefused) as error:
         management.retained_launch()
     assert module.failure_diagnostic(error.value) == original
+
+
+def test_coordinator_configuration_digest_uses_measured_protocol_owner(
+    real_owned_journal, monkeypatch
+):
+    module, _, _, _, _ = real_owned_journal
+    loader = module.load_module
+    calls = []
+
+    def measured_owner(role):
+        owner = loader(role)
+        digest = owner.digest
+
+        def observed(value):
+            calls.append((role, value))
+            return digest(value)
+
+        owner.digest = observed
+        return owner
+
+    monkeypatch.setattr(module, "load_module", measured_owner)
+    config = module.coordinator_binding()
+    assert calls == [("protocol", config)]
+    binding = module.deployment_inputs()
+    path = binding["runtime"] / "lane3_handoff_protocol.py"
+    path.write_bytes(path.read_bytes() + b"\n# changed reviewed protocol bytes\n")
+    with pytest.raises(module.CampaignRefused, match="code-pin"):
+        module.coordinator_binding()

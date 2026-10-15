@@ -32,3 +32,8 @@ the package but does not install its lineage. ERP is the first candidate cutover
 See [`EXTRACTION.toml`](EXTRACTION.toml), the
 [source inventory](../../docs/inventories/finance-asset-accounting-sources.md),
 and [ADR-0048](../../docs/adr/0048-finance-owns-asset-books-and-accounting-consequences.md).
+
+The unreleased 0.2.0a1 candidate includes a private Rust depreciation engine.
+Source builds require Rust 1.90.0, a C compiler and make. The owning source
+archive carries its arithmetic core, pinned libmpdec source and BSD license.
+Hosted exact-wheel, source-rebuild and Decimal parity checks gate qualification.

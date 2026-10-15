@@ -10,7 +10,7 @@ from dotmac_inventory.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="inventory",
-    version="0.1.0a1",
+    version="0.2.0a1",
     core=False,
     short_code="inventory",
     migration_prefix="iv",

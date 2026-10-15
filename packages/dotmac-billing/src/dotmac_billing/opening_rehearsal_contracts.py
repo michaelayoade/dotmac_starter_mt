@@ -291,6 +291,17 @@ class OpeningRehearsalAssemblyV1(OpeningCashValue):
         for instant in (self.recorded_cutoff, self.occurred_at):
             if instant.utcoffset() != timedelta(0):
                 raise OpeningEvidenceError("assembly instants must be UTC")
+        # The adapter indexes source accounts by currency and invoices by UUID.
+        # Reject ambiguous declarations before a dict can choose either row,
+        # including byte-identical duplicates; this boundary never repairs data.
+        partition_keys = {
+            (row.source_account_id, row.currency) for row in self.partitions
+        }
+        if len(partition_keys) != len(self.partitions):
+            raise OpeningEvidenceError("duplicate assembly partition lookup key")
+        invoice_keys = {row.source_invoice_id for row in self.invoice_mappings}
+        if len(invoice_keys) != len(self.invoice_mappings):
+            raise OpeningEvidenceError("duplicate assembly invoice lookup key")
 
 
 @dataclass(frozen=True, slots=True)

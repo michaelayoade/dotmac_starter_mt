@@ -55,6 +55,7 @@ def _base_files(ra) -> dict[str, str]:
         ra.AUTHORITY_MODULE_PATH: "# authority module source\n",
         **{path: "# checker source\n" for path in ra.VERIFICATION_ROOTS},
         **{lock: "poetry==2.0.0 --hash=sha256:00\n" for lock in ra.BOOTSTRAP_LOCKS},
+        **{pin: 'rust = "1.90.0"\n' for pin in ra.NATIVE_TOOLCHAIN_INPUTS},
     }
 
 
@@ -615,3 +616,33 @@ def test_the_worktree_reader_preserves_carriage_returns(ra, tmp_path: Path) -> N
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "b.py").write_bytes(b"import os\r\n")
     assert ra.worktree_reader(tmp_path)("scripts/b.py") == "import os\r\n"
+
+
+def test_native_compiler_pins_are_required_release_control(ra):
+    files = _base_files(ra)
+    derived, external = ra.derive_surface(_dict_reader(files))
+    pin = ra.NATIVE_TOOLCHAIN_INPUTS[0]
+    assert pin in derived
+    original = ra.authority_digest(derived, external, _dict_reader(files))
+    files[pin] = 'rust = "1.91.0"\n'
+    assert ra.authority_digest(derived, external, _dict_reader(files)) != original
+    del files[pin]
+    with pytest.raises(ra.ReleaseAuthorityError, match="native-build.toml"):
+        ra.derive_surface(_dict_reader(files))
+
+
+def test_poetry_native_composite_action_chain_is_in_the_release_surface(ra):
+    files = _base_files(ra)
+    files[ra.ROOT_WORKFLOWS[0]] = (
+        "jobs:\n  build:\n    steps:\n" "      - uses: ./.github/actions/setup-poetry\n"
+    )
+    files[".github/actions/setup-poetry/action.yml"] = (
+        "runs:\n  using: composite\n  steps:\n"
+        "    - uses: ./.github/actions/setup-native\n"
+    )
+    files[".github/actions/setup-native/action.yml"] = (
+        "runs:\n  using: composite\n  steps:\n"
+        "    - run: rustup show active-toolchain\n"
+    )
+    derived, _ = ra.derive_surface(_dict_reader(files))
+    assert ".github/actions/setup-native/action.yml" in derived
