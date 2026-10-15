@@ -1646,6 +1646,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-imports ──
+    "dotmac-imports-v0.2.0a1": (
+        "dotmac-imports",
+        "008ccaeaebda6855ba34b8e70740e3859954a37b",
+        {
+            "im_0001_import_runs.py": (
+                "c6d6caa3765bf133da66f1c6fe9decb179a3a2a7638ec404e3bcae7dc4f5109a"
+            ),
+        },
+    ),
     "dotmac-imports-v0.1.0a2": (
         "dotmac-imports",
         "5876ffd0bce17172fa2dc6ac6d09b48d877fadf8",
