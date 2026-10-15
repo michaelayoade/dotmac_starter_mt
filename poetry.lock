@@ -676,6 +676,7 @@ files = []
 develop = true
 
 [package.dependencies]
+cryptography = ">=42"
 alembic = ">=1.13"
 dotmac-kernel = ">=0.1.0a105"
 sqlalchemy = "^2.0"
