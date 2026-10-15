@@ -241,7 +241,11 @@ def test_wire_keys_exactly_equal_the_dataclass_fields_at_every_level() -> None:
 
 def test_partition_order_is_significant() -> None:
     base = _assembly()
-    second = replace(base.partitions[0], source_account_key="source-account:b")
+    second = replace(
+        base.partitions[0],
+        source_account_id=_uuid(11),
+        source_account_key="source-account:b",
+    )
     one = replace(base, partitions=(base.partitions[0], second))
     two = replace(base, partitions=(second, base.partitions[0]))
     assert _digest_of(one) != _digest_of(two)
