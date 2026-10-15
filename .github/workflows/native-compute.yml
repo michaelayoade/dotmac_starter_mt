@@ -57,7 +57,8 @@ jobs:
           if-no-files-found: error
   native-artifacts:
     if: github.event_name != 'workflow_dispatch' || !inputs.bootstrap_locks
-    runs-on: ubuntu-latest
+    # Build tags must fit Debian Bookworm's GLIBC; Ubuntu 24 tags require 2.39.
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:

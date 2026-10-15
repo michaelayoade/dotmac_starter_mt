@@ -161,7 +161,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Matches native qualification: GLIBC 2.35 wheels load on Debian 12 (2.36).
+    runs-on: ubuntu-22.04
     outputs:
       package_dir: ${{ steps.resolve.outputs.package_dir }}
       tag: ${{ steps.resolve.outputs.tag }}
