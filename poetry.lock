@@ -1167,7 +1167,7 @@ url = "packages/dotmac-finance"
 
 [[package]]
 name = "dotmac-forms"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant form definitions, immutable versions and validated submission evidence"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2054,7 +2054,7 @@ url = "packages/dotmac-support-access"
 
 [[package]]
 name = "dotmac-surveys"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Dotmac Surveys — tenant-scoped feedback definitions, invitations, responses, and aggregate evidence"
 optional = false
 python-versions = ">=3.11,<3.14"

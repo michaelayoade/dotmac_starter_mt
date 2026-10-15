@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from decimal import Decimal
 
+from dotmac_surveys import _native
 from dotmac_surveys.contracts import (
     Answer,
     InvalidAnswer,
@@ -50,55 +51,67 @@ def transition_survey(
 def validate_answers(
     questions: Sequence[Question], answers: Iterable[Answer]
 ) -> ValidatedResponse:
-    submitted: dict[str, str] = {}
-    for answer in answers:
-        if answer.key in submitted:
-            raise InvalidAnswer(f'question "{answer.key}" was answered more than once')
-        submitted[answer.key] = answer.value
+    # Keep Python Unicode semantics, including lone surrogates, at the byte
+    # bridge. Native code owns every validation decision and returns indices.
+    question_rows = list(questions)
+    primitive_questions: list[_native.Question] = [
+        (
+            question.key.encode("utf-8", "surrogatepass"),
+            1
+            if question.type is QuestionType.RATING
+            else 2
+            if question.type is QuestionType.NPS
+            else 3
+            if question.type is QuestionType.MULTIPLE_CHOICE
+            else 0,
+            question.required,
+            [option.encode("utf-8", "surrogatepass") for option in question.options],
+        )
+        for question in question_rows
+    ]
+    submitted: list[tuple[str, str]] = []
 
-    known = {question.key for question in questions}
-    unknown = sorted(set(submitted) - known)
-    if unknown:
-        raise InvalidAnswer(f"response contains unknown question(s): {unknown}")
-
-    normalized: dict[str, str] = {}
-    rating: int | None = None
-    nps_value: int | None = None
-    for question in questions:
-        value = submitted.get(question.key, "").strip()
-        if not value:
-            if question.required:
-                raise InvalidAnswer(f'an answer is required for "{question.label}"')
-            continue
-        if question.type is QuestionType.RATING:
-            try:
-                numeric = int(value)
-            except ValueError as exc:
-                raise InvalidAnswer(
-                    "rating must be an integer from 1 through 5"
-                ) from exc
-            if str(numeric) != value or not 1 <= numeric <= 5:
-                raise InvalidAnswer("rating must be an integer from 1 through 5")
-            rating = numeric
-        elif question.type is QuestionType.NPS:
-            try:
-                numeric = int(value)
-            except ValueError as exc:
-                raise InvalidAnswer("NPS must be an integer from 0 through 10") from exc
-            if str(numeric) != value or not 0 <= numeric <= 10:
-                raise InvalidAnswer("NPS must be an integer from 0 through 10")
-            nps_value = numeric
-        elif question.type is QuestionType.MULTIPLE_CHOICE:
-            if value not in question.options:
-                raise InvalidAnswer(
-                    f'choose a configured option for "{question.label}"'
-                )
-        elif len(value) > 10_000:
-            raise InvalidAnswer(
-                f'answer for "{question.label}" cannot exceed 10000 characters'
+    def primitive_answers() -> Iterable[_native.Answer]:
+        for answer in answers:
+            value = answer.value.strip()
+            submitted.append((answer.key, value))
+            yield (
+                answer.key.encode("utf-8", "surrogatepass"),
+                value.encode("utf-8", "surrogatepass"),
+                len(value),
             )
-        normalized[question.key] = value
-    return ValidatedResponse(normalized, rating, nps_value)
+
+    normalized, rating, nps_value, error = _native.validate_batch(
+        questions=primitive_questions, answers=primitive_answers()
+    )
+    if error is not None:
+        code, indices = error
+        if code == "duplicate":
+            key = submitted[indices[0]][0]
+            raise InvalidAnswer(f'question "{key}" was answered more than once')
+        if code == "unknown":
+            unknown = [submitted[index][0] for index in indices]
+            raise InvalidAnswer(f"response contains unknown question(s): {unknown}")
+        label = question_rows[indices[0]].label
+        if code == "required":
+            raise InvalidAnswer(f'an answer is required for "{label}"')
+        if code == "rating":
+            raise InvalidAnswer("rating must be an integer from 1 through 5")
+        if code == "nps":
+            raise InvalidAnswer("NPS must be an integer from 0 through 10")
+        if code == "choice":
+            raise InvalidAnswer(f'choose a configured option for "{label}"')
+        if code == "length":
+            raise InvalidAnswer(f'answer for "{label}" cannot exceed 10000 characters')
+        raise RuntimeError(f"unsupported native answer validation result {code!r}")
+    return ValidatedResponse(
+        {
+            question_rows[question_index].key: submitted[answer_index][1]
+            for question_index, answer_index in normalized
+        },
+        rating,
+        nps_value,
+    )
 
 
 def calculate_metrics(

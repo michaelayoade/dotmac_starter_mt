@@ -408,7 +408,14 @@ def rebuild_projections(
             visitor_count=visitor_count,
             session_count=session_count,
         )
-        for bucket, dimension, key, event_count, visitor_count, session_count in metric_values
+        for (
+            bucket,
+            dimension,
+            key,
+            event_count,
+            visitor_count,
+            session_count,
+        ) in metric_values
     ]
     funnel_rows: list[FunnelResultRow] = []
     for funnel, (entrants, completed) in zip(funnels, funnel_values, strict=True):

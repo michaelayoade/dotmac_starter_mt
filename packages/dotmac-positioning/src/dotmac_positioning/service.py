@@ -1272,10 +1272,11 @@ def _native_shape(row: Geofence) -> _native.Shape:
         # malformed stored geometry is refused before any state mutation.
         if not row.polygon_points:
             raise IndexError("list index out of range")
-        return (
-            None,
-            [(latitude, longitude) for latitude, longitude in row.polygon_points],
-        )
+        points = []
+        for point in row.polygon_points:
+            latitude, longitude = point
+            points.append((latitude, longitude))
+        return None, points
     raise GeofenceConflict(f"geofence {row.id} has an unsupported shape")
 
 

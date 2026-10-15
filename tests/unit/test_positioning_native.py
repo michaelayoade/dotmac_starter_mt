@@ -17,14 +17,15 @@ from dotmac_positioning import (
     ObservationPolicy,
     PolygonFence,
     SourceAssignmentInput,
+    _native,
     assign_source,
     create_geofence,
     create_tracked_unit,
     evaluate_geofences,
     grant_collection,
     record_observations,
+    service,
 )
-from dotmac_positioning import _native, service
 from dotmac_positioning.models import (
     TENANT_MODELS,
     Geofence,

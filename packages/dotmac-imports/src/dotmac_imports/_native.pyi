@@ -1,3 +1,6 @@
 def normalize_rows(
-    columns: list[str], records: list[tuple[int, list[str]]], remaining: int
-) -> list[list[tuple[str, str]]]: ...
+    column_count: int,
+    records: list[tuple[int, list[bytes]]],
+    remaining: int,
+    projection: list[int],
+) -> list[list[bytes]]: ...

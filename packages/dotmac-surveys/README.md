@@ -15,3 +15,7 @@ The first package version is tenant-only and owns three tables in
 never commit, roll back or perform network I/O. See
 [`ADR-0053`](../../docs/adr/0053-surveys-own-feedback-evidence-not-subject-consequences.md)
 and the [product-first inventory](../../docs/inventories/surveys-sources.md).
+
+## Native validation candidate
+
+The unreleased `0.2.0a1` candidate batches structural answer validation in a private Rust extension. Established Python Unicode/Decimal/date/URL/email parsing and every persistence/lifecycle decision retain their owners. Matching wheels require no compiler; source builds require the exact packaged Rust/build-tool pins and a C linker. Hosted qualification and publication remain separate.

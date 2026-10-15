@@ -3,20 +3,22 @@
 ## Native domain computation candidates (2026-10-15)
 
 The Rust implementation branch introduces private `_native` extensions owned by
-Imports, Web Analytics, Network Topology, Fiber Plant, Media Observations and
-Positioning. Each extension ships inside its existing independently versioned
+Imports, Web Analytics, Network Topology, Fiber Plant, Media Observations,
+Positioning, Forms and Surveys. Each extension ships inside its independently versioned
 domain distribution; there is no new shared database or generic domain service.
 These are `0.2.0a1` source candidates pending hosted qualification and release,
 not published artifacts or product adoption claims.
 
 | Computation | Native owner | Python authority retained |
 | --- | --- | --- |
-| Bounded CSV row whitespace/shape normalization | `dotmac_imports._native` | Standard-library CSV grammar, encoding, headings, field declarations, source verification, durable partitions, row ledger and domain application |
+| Bounded CSV row normalization and fused field projection | `dotmac_imports._native` | Standard-library CSV grammar, encoding, headings, field declarations, source verification, durable partitions, row ledger and domain application |
 | Shared visitor ordering, sessions, dimension counts and funnels | `dotmac_web_analytics._native` | Event declarations, privacy admission, timezone buckets, fingerprints, generation records and persistence |
 | Batched exact-integer shortest paths | `dotmac_network_topology._native` | Tenant-selected active link snapshot, path policy, stored reachability and outbox |
 | Deterministic continuity BFS | `dotmac_fiber_plant._native` | Tenant-selected terminations/splices, endpoint selection and evidence |
 | Linear functional-hierarchy cycle detection | `dotmac_media_observations._native` | Provider-neutral fact selection, active scopes, lifecycle projection and persistence |
 | Batched circle/polygon membership | `dotmac_positioning._native` | Explicit product-selected fence ids, shape validation, current-observation admission and locked entry/exit state |
+| Batched structural form answer validation | `dotmac_forms._native` | Established Decimal/date/URL/email parsers, ordered errors, submission admission, snapshots and effects |
+| Batched survey response validation | `dotmac_surveys._native` | Unicode normalization, labels, declaration/lifecycle policy, exact Decimal cohort arithmetic and response persistence |
 
 Native calls receive owned primitive snapshots and detach from the Python
 interpreter during computation. They open no sessions, hold no tenant cache,
@@ -42,8 +44,11 @@ release facilities retain all publication, registry read-back and trust authorit
 
 Source qualification and remaining implementation scope are recorded in
 [`inventories/rust-computation-sources.md`](inventories/rust-computation-sources.md).
-Financial batch calculations and survey/form bulk processing remain subsequent
-goal work; their runtime has not been ported by these six candidates.
+Financial batch calculations remain subsequent goal work; their runtime has
+not been ported by these eight candidates. The first six candidates completed
+hosted exact-wheel and extracted-source-archive qualification at PR #843 head
+`7f55d3adb99c25ec7e53ef7448902a66376544c3`; later source changes require fresh
+qualification and do not inherit that result.
 
 This expands the `CLAUDE.md` summary. See `docs/adr/0001-multi-tenant-architecture.md`
 for the founding tenancy design and `docs/adr/0002-starter-consolidation.md`

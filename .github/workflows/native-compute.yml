@@ -10,6 +10,35 @@ on:
 permissions:
   contents: read
 jobs:
+  vendor-decimal-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Retain checksum-verified upstream Decimal source for review
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, pathlib, subprocess, tomllib
+          vendor = pathlib.Path('packages/dotmac-inventory/native/vendor')
+          record = tomllib.loads((vendor / 'UPSTREAM.toml').read_text())
+          archive = vendor / record['archive']
+          if not archive.exists():
+              subprocess.run(['curl', '--fail', '--location', '--proto', '=https', '--tlsv1.2', '--retry', '2', '--output', str(archive), record['url']], check=True)
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != record['sha256']:
+              raise SystemExit('upstream Decimal source checksum mismatch')
+          print('VENDOR_BASE64 ' + str(archive), flush=True)
+          import base64
+          print(base64.b64encode(archive.read_bytes()).decode('ascii'), flush=True)
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: decimal-upstream-source
+          path: packages/dotmac-inventory/native/vendor/*
+          if-no-files-found: error
   bootstrap-locks:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.bootstrap_locks)
     runs-on: ubuntu-latest
@@ -123,7 +152,7 @@ jobs:
                   extension = importlib.import_module(native['python-package'] + '._native')
                   assert 'site-packages' in str(extension.__file__), extension.__file__
           PY
-            poetry run pytest -q tests/unit/test_positioning.py tests/unit/test_positioning_native.py tests/unit/test_network_suite_services.py tests/unit/test_network_topology_native.py tests/unit/test_fiber_plant_native.py tests/unit/test_media_observations.py tests/unit/test_media_observations_native.py tests/unit/test_imports.py tests/unit/test_imports_native.py tests/unit/test_web_analytics_engine.py tests/unit/test_web_analytics_native.py
+            poetry run pytest -q tests/unit/test_positioning.py tests/unit/test_positioning_native.py tests/unit/test_network_suite_services.py tests/unit/test_network_topology_native.py tests/unit/test_fiber_plant_native.py tests/unit/test_media_observations.py tests/unit/test_media_observations_native.py tests/unit/test_imports.py tests/unit/test_imports_native.py tests/unit/test_web_analytics_engine.py tests/unit/test_web_analytics_native.py tests/unit/test_forms.py tests/unit/test_forms_native.py tests/unit/test_surveys_service.py tests/unit/test_surveys_lifecycle.py tests/unit/test_surveys_native.py
           done
       - name: Record exact artifact identities
         run: find native-artifacts -name '*.whl' -o -name '*.tar.gz' | sort | xargs sha256sum > native-artifacts/SHA256SUMS

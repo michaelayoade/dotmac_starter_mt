@@ -1,5 +1,11 @@
 # Changelog — dotmac-surveys
 
+## 0.2.0a1 — unreleased
+
+- Batch structural answer validation in a private native extension, preserving error ordering, Unicode and public Python contracts.
+- Include pinned standalone native build inputs in the source archive.
+
+
 ## 0.1.0a1 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and
