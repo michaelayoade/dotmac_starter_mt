@@ -15,8 +15,13 @@ type ContextSpec = (i64, u8, i64, i64, u8);
 type BatchResult = (Vec<String>, u32, Option<(u32, usize, usize)>);
 
 extern "C" {
-    fn dm_context_new(precision: i64, rounding: i32, emin: i64, emax: i64, clamp: i32)
-        -> *mut c_void;
+    fn dm_context_new(
+        precision: i64,
+        rounding: i32,
+        emin: i64,
+        emax: i64,
+        clamp: i32,
+    ) -> *mut c_void;
     fn dm_context_free(context: *mut c_void);
     fn dm_decimal_new() -> *mut c_void;
     fn dm_decimal_free(decimal: *mut c_void);

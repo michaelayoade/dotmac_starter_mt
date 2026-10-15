@@ -115,8 +115,13 @@ def unpack_sdist(sdist: Path, destination: Path, module: str) -> Path:
 def verify_artifacts(artifacts: Path) -> None:
     for package, module in packages():
         prefix = package.name.replace("-", "_") + "-"
-        for wheel in artifacts.rglob(prefix + "*.whl"):
-            verify_wheel(wheel, module)
+        for directory in (artifacts, artifacts / "rebuilt"):
+            wheels = list(directory.glob(prefix + "*.whl"))
+            if len(wheels) != 1:
+                raise RuntimeError(
+                    f"expected one {module} wheel in {directory}: {wheels}"
+                )
+            verify_wheel(wheels[0], module)
         (sdist,) = artifacts.glob(prefix + "*.tar.gz")
         with tempfile.TemporaryDirectory() as temporary:
             unpack_sdist(sdist, Path(temporary), module)

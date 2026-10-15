@@ -97,3 +97,22 @@ def test_wrong_compiler_is_refused(tmp_path, monkeypatch) -> None:
     )
     with pytest.raises(RuntimeError, match="rustc 1.90.0"):
         hook.build_native()
+
+
+@pytest.mark.parametrize("missing", ("original", "rebuilt"))
+def test_artifact_qualification_requires_each_wheel(tmp_path, monkeypatch, missing):
+    spec = importlib.util.spec_from_file_location(
+        "native_qualification_canary", ROOT / "scripts/native_qualify.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        module, "packages", lambda: [(Path("example-owner"), "example_owner")]
+    )
+    monkeypatch.setattr(module, "verify_wheel", lambda *args: None)
+    (tmp_path / "rebuilt").mkdir()
+    directory = tmp_path / "rebuilt" if missing == "original" else tmp_path
+    (directory / "example_owner-1-cp312-cp312-linux_x86_64.whl").touch()
+    with pytest.raises(RuntimeError, match="expected one example_owner wheel"):
+        module.verify_artifacts(tmp_path)
