@@ -140,7 +140,7 @@ jobs:
           done
       - name: Load retained wheels in the supported Debian runtime
         run: |
-          poetry build --directory packages/dotmac-kernel --format wheel --output "$GITHUB_WORKSPACE/native-artifacts/runtime"
+          python -m pip wheel --no-deps --wheel-dir "$GITHUB_WORKSPACE/native-artifacts/runtime" ./packages/dotmac-kernel
           docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/source:ro" --workdir /source \
             python:3.12-slim-bookworm \
