@@ -199,6 +199,28 @@
           "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-finance",
+      "version": "0.2.0a1",
+      "tag": "dotmac-finance-v0.2.0a1",
+      "tag_object": "640a59fbd0a0f6d363a99c1f7cc4847f84a3236f",
+      "peeled_commit": "e0c96d95aa03c1c4578715bccab2741cb6cb45ae",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_finance-0.2.0a1-cp312-cp312-manylinux_2_35_x86_64.whl": "6e4f0829414e1daa5b5effb18e2a54545431bdfcae33a79dc99007572b8ee4f5"
+      },
+      "verification_run_id": "38799482342",
+      "source_run_id": "38799482342",
+      "release_authority_digest": "sha256:eba56abff71d545562a970b87939624cd97963baefc651853dae32f0eedd22d0",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+          "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
+        }
+      ]
     }
   ]
 }
