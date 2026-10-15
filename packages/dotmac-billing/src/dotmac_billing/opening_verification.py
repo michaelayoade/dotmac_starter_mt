@@ -234,13 +234,13 @@ def required_opening_evidence_v1(
             add("confirmation", lot.confirmation.reference, identity)
         for consumption in lot.consumptions:
             add("consumption", consumption.reference, identity)
-            for reference in (
+            for consumption_reference in (
                 consumption.ledger_ref,
                 consumption.target_ref,
                 consumption.reverses_ref,
             ):
-                if reference is not None:
-                    add("consumption", reference, identity)
+                if consumption_reference is not None:
+                    add("consumption", consumption_reference, identity)
     for item in value.manifest.receivables:
         identity = item.source_identity
         add("receivable", item.source_invoice_key, identity)
@@ -263,9 +263,12 @@ def required_opening_evidence_v1(
                 add("discharge", discharge.reverses_ref, identity)
             for replay in discharge.replay_bindings:
                 add("discharge", replay.source_ref, identity)
-                for reference in (replay.determination_ref, replay.component_ref):
-                    if reference is not None:
-                        add("tax", reference, identity)
+                for replay_reference in (
+                    replay.determination_ref,
+                    replay.component_ref,
+                ):
+                    if replay_reference is not None:
+                        add("tax", replay_reference, identity)
     return tuple(requirements)
 
 
