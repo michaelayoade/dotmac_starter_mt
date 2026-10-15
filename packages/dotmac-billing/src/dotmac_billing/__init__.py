@@ -283,7 +283,6 @@ __all__ = [
     "opening_source_attestation_digest_v1",
     "opening_source_attestation_signing_input_v1",
     "required_opening_evidence_v1",
-
     "OpeningWindowAdmissionV1",
     "OpeningWindowProvisionVerificationRequestV1",
     "OpeningWindowProvisionVerificationV1",
