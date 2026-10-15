@@ -1,0 +1,44 @@
+{
+  "schema": "Lane3B7AppliedRoleFixture.v1",
+  "note": "Value-safe description of the B7 role as applied and read back on 2026-10-10. Claim names, types and flags only. No secrets, no policy text, no identifiers beyond those already public in .github/lane3-execution.json.",
+  "role": "lane3-exposure-rehearsal",
+  "auth_mount": "jwt",
+  "bound_claims_names": [
+    "environment",
+    "event_name",
+    "ref",
+    "repository",
+    "repository_id",
+    "repository_owner_id",
+    "workflow_ref"
+  ],
+  "bound_claims_type": "string",
+  "bound_audiences": ["urn:dotmac:lane3:exposure-rehearsal"],
+  "bound_subject": null,
+  "user_claim": "sub",
+  "claim_mappings": null,
+  "bound_issuer": {
+    "scope": "mount-level (auth/jwt/config), not a role field",
+    "shared_with_roles": ["rehearsal-issuer-protected"],
+    "read_back": true
+  },
+  "token_type": "batch",
+  "token_ttl_seconds": 300,
+  "token_max_ttl_seconds": 300,
+  "token_explicit_max_ttl_seconds": 300,
+  "token_no_default_policy": true,
+  "token_bound_cidrs": null,
+  "token_policies": ["lane3-exposure-rehearsal"],
+  "leeways": {
+    "clock_skew_leeway": -1,
+    "expiration_leeway": -1,
+    "not_before_leeway": -1,
+    "read_back": false
+  },
+  "policy_denies": [
+    "gate0-ssh/*",
+    "secret/data/dotmac/platform-cp/*",
+    "secret/metadata/*"
+  ],
+  "implicit_deny_elsewhere": true
+}
