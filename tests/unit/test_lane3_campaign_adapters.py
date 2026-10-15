@@ -264,7 +264,17 @@ def test_actual_bridge_main_protocol_and_eof_cleanup(
         assert calls.count("finish") == 1
         assert output[0]["op"] == "retain"
     else:
-        assert output == [{"status": "REFUSED", "category": "bridge-stopped"}]
+        assert output == [
+            {
+                "status": "REFUSED",
+                "diagnostic": {
+                    "phase": "unproven",
+                    "stage": "bridge",
+                    "category": "duplicate-key",
+                    "cleanup": "not_attempted",
+                },
+            }
+        ]
 
 
 def test_prepared_custody_repr_serialization_and_one_shot(monkeypatch):
@@ -782,3 +792,36 @@ def test_remote_inputs_exact_schema_and_canonical_binding(monkeypatch, defect):
     else:
         with pytest.raises((remote.RemoteRefused, transport.Refused, TypeError)):
             remote.inputs(client, transport)
+
+
+@pytest.mark.parametrize("phase", ["retain", "gate_prepare", "gate_bootstrap"])
+def test_bridge_uses_measured_management_exception_identity_and_safe_labels(
+    monkeypatch, phase
+):
+    bridge_module = adapter("bridge")
+    management_module = adapter("management")
+    bridge = SimpleNamespace(mgmt_module=management_module)
+    error = management_module.Refused("timer-unproven", stage="first-retained-check")
+    diagnostic = bridge_module.failure_diagnostic(error, bridge, phase, "unproven")
+    assert diagnostic == {
+        "phase": phase,
+        "stage": "first-retained-check",
+        "category": "timer-unproven",
+        "cleanup": "unproven",
+    }
+
+    class Imposter(RuntimeError):
+        category = "timer-unproven"
+        failure_category = "PRIVATE-CANARY"
+
+    assert (
+        bridge_module.failure_diagnostic(
+            Imposter("PRIVATE-CANARY"), bridge, phase, "not_attempted"
+        )["category"]
+        == "unexpected"
+    )
+    earlier = management_module.Refused("timer-unproven", cleanup="unproven")
+    assert (
+        bridge_module.failure_diagnostic(earlier, bridge, phase, "completed")["cleanup"]
+        == "unproven"
+    )
