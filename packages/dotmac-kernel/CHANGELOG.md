@@ -6,6 +6,14 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased
+
+- Reserve `learning` / `mod_learning` / `lr` / branch `learning` for the
+  Academy-sourced reusable learning domain before its module source is added.
+  This reservation installs no module, moves no data and transfers no writer
+  authority. The source returns to `0.1.0a105+dev`; the published a105 release
+  remains unchanged, and a future numeric release needs its own authorization.
+
 ## 0.1.0a105 — Release inventory
 
 This section inventories the source proposed for the next numeric alpha after
