@@ -6833,6 +6833,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-fiber-plant ──
+    "dotmac-fiber-plant-v0.2.0a1": (
+        "dotmac-fiber-plant",
+        "4f3d9e4b6d26114d9a5d949fbe0b0626a1400f77",
+        {
+            "fp_0001_fiber_plant.py": (
+                "7749f27a97b01c438613639dbc35cc971cab427821920619b6d434ea8b6a821b"
+            ),
+        },
+    ),
     "dotmac-fiber-plant-v0.1.0a1": (
         "dotmac-fiber-plant",
         "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
