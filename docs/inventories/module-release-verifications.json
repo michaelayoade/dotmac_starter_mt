@@ -221,6 +221,28 @@
           "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-inventory",
+      "version": "0.2.0a1",
+      "tag": "dotmac-inventory-v0.2.0a1",
+      "tag_object": "4624e6e03157b9fe85c93b0c0fa81488eb853c8b",
+      "peeled_commit": "49f35ca6008ef36c3db69f3230782d8f83146ac9",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_inventory-0.2.0a1-cp312-cp312-manylinux_2_35_x86_64.whl": "ceb1682697ab2dfa2f1937a68468fbc628432b9223fe6e46c234cc8c38687f11"
+      },
+      "verification_run_id": "38830568194",
+      "source_run_id": "38830568194",
+      "release_authority_digest": "sha256:eba56abff71d545562a970b87939624cd97963baefc651853dae32f0eedd22d0",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+          "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
+        }
+      ]
     }
   ]
 }
