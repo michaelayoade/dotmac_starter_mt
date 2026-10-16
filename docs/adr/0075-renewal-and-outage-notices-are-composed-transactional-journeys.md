@@ -1,6 +1,6 @@
 # ADR-0075: Renewal and outage notices are composed transactional journeys
 
-- Status: Proposed
+- Status: Accepted (Michael, 2026-10-16)
 - Date: 2026-10-16
 - Decider: Michael
 - Related: ADR-0014 (at-most-once has one owner), ADR-0016 (payment coverage
