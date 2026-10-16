@@ -259,7 +259,7 @@ def test_a_pure_verifier_that_only_observes_needs_no_lock(tmp_path: Path) -> Non
     )
 
     spec = load()
-    effects = _FakeEffects(before=_observation(), after=_observation())
+    effects = _FakeEffects(spec=spec, before=_observation(), after=_observation())
     for _ in range(3):
         verify_exposure(spec, effects.observe())
     assert effects.calls == ["observe", "observe", "observe"]

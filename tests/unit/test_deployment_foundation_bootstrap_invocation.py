@@ -162,7 +162,8 @@ def test_every_effects_implementation_conforms_to_the_WIDENED_protocol() -> None
 def test_the_shared_double_satisfies_the_runtime_protocol(double: str) -> None:
     from tests.unit.test_deployment_foundation_failure_injection import FakeEffects
 
-    assert isinstance(FakeEffects(), Effects)
+    spec, _, _ = _fixture()
+    assert isinstance(FakeEffects(spec=spec), Effects)
 
 
 # ── the step is NOT in plan.steps, so V1 digests do not move ────────────────
@@ -366,6 +367,7 @@ def _plant_checkout(root: Path) -> None:
     subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell
         ["git", "init", "-q", str(root)],  # noqa: S607 # nosec B607
         check=True,
+        timeout=30,
     )
 
 
@@ -391,6 +393,7 @@ def test_the_sweep_does_not_reach_into_a_SIBLING_CHECKOUT(tmp_path: Path) -> Non
     subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell
         ["git", "-C", str(outer), "add", "tracked.py"],  # noqa: S607 # nosec B607
         check=True,
+        timeout=30,
     )
     (outer / "untracked.py").write_text("class AlsoConforming:\n    pass\n")
     (outer / "sibling_lane" / "other_lane.py").write_text(

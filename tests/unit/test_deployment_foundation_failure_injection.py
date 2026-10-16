@@ -274,7 +274,8 @@ class FakeEffects:
     names.
     """
 
-    def __init__(self, **overrides: object) -> None:
+    def __init__(self, *, spec: ProductDeploymentSpec, **overrides: object) -> None:
+        self._execution_spec = spec.validated_execution_snapshot()
         self.present = True
         self.labels: dict[str, str] = {"org.opencontainers.image.revision": REVISION}
         self.evidence: object = signed_evidence()
@@ -313,6 +314,20 @@ class FakeEffects:
         self._ready_calls = 0
         for key, value in overrides.items():
             setattr(self, key, value)
+
+    @property
+    def execution_descriptor(self) -> bytes:
+        return self._execution_spec.to_canonical_document().canonical_bytes()
+
+    def preflight_backup(self, dataset_code: str) -> None:
+        dataset = next(
+            (d for d in self._execution_spec.backup_datasets if d.code == dataset_code),
+            None,
+        )
+        if dataset is None or dataset.external_executor is not None:
+            raise PreconditionFailed(
+                "fake provider supports declared local datasets only"
+            )
 
     # ── gates ──
     def image_present(self, reference: str) -> bool:
@@ -497,7 +512,7 @@ def test_a_correct_deployment_succeeds_end_to_end() -> None:
     meaning anything.
     """
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     _, outcome = run(spec, effects)
     assert outcome.succeeded, outcome.failure
     assert outcome.failed_step is None
@@ -510,7 +525,7 @@ def test_a_correct_deployment_succeeds_end_to_end() -> None:
 
 def test_a_missing_image_digest_refuses_before_anything_is_mutated() -> None:
     spec = load()
-    _, outcome = run(spec, FakeEffects(present=False))
+    _, outcome = run(spec, FakeEffects(spec=spec, present=False))
     assert not outcome.succeeded
     assert (
         outcome.failed_step is not None and outcome.failed_step.value == "verify_image"
@@ -521,7 +536,8 @@ def test_a_missing_image_digest_refuses_before_anything_is_mutated() -> None:
 def test_an_image_built_from_the_wrong_revision_is_refused() -> None:
     spec = load()
     _, outcome = run(
-        spec, FakeEffects(labels={"org.opencontainers.image.revision": "f" * 40})
+        spec,
+        FakeEffects(spec=spec, labels={"org.opencontainers.image.revision": "f" * 40}),
     )
     assert (
         outcome.failed_step is not None
@@ -537,7 +553,7 @@ def test_an_image_with_no_revision_label_is_refused() -> None:
     commit, so every later integrity claim about this deployment is unfounded.
     """
     spec = load()
-    _, outcome = run(spec, FakeEffects(labels={}))
+    _, outcome = run(spec, FakeEffects(spec=spec, labels={}))
     assert (
         outcome.failed_step is not None
         and outcome.failed_step.value == "verify_revision"
@@ -546,7 +562,7 @@ def test_an_image_with_no_revision_label_is_refused() -> None:
 
 def test_a_revision_with_no_release_evidence_is_refused() -> None:
     spec = load()
-    _, outcome = run(spec, FakeEffects(evidence=None))
+    _, outcome = run(spec, FakeEffects(spec=spec, evidence=None))
     assert (
         outcome.failed_step is not None
         and outcome.failed_step.value == "verify_release_evidence"
@@ -568,7 +584,8 @@ def test_a_loose_mapping_from_an_effects_implementation_is_refused() -> None:
     _, outcome = run(
         spec,
         FakeEffects(
-            evidence={"document": {"schema": "x"}, "signature": "s", "key_id": "k"}
+            spec=spec,
+            evidence={"document": {"schema": "x"}, "signature": "s", "key_id": "k"},
         ),
     )
     assert (
@@ -581,7 +598,7 @@ def test_a_loose_mapping_from_an_effects_implementation_is_refused() -> None:
 
 def test_a_dirty_checkout_is_refused() -> None:
     spec = load()
-    _, outcome = run(spec, FakeEffects(dirty=True))
+    _, outcome = run(spec, FakeEffects(spec=spec, dirty=True))
     assert (
         outcome.failed_step is not None
         and outcome.failed_step.value == "refuse_dirty_state"
@@ -595,7 +612,9 @@ def test_an_untracked_compose_override_is_refused() -> None:
     reverts it — which is how the service went down the previous two times.
     """
     spec = load()
-    _, outcome = run(spec, FakeEffects(overrides_found=["docker-compose.override.yml"]))
+    _, outcome = run(
+        spec, FakeEffects(spec=spec, overrides_found=["docker-compose.override.yml"])
+    )
     assert (
         outcome.failed_step is not None
         and outcome.failed_step.value == "refuse_dirty_state"
@@ -605,7 +624,7 @@ def test_an_untracked_compose_override_is_refused() -> None:
 
 def test_a_source_bind_mount_into_a_container_is_refused() -> None:
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     effects.roles["app"] = RoleObservation(
         "app", True, GOOD_DIGEST, 0, source_mounted=True
     )
@@ -619,7 +638,9 @@ def test_a_source_bind_mount_into_a_container_is_refused() -> None:
 
 def test_missing_migration_credentials_are_refused_before_ddl() -> None:
     spec = load()
-    _, outcome = run(spec, FakeEffects(materials=["DATABASE_URL", "REDIS_URL"]))
+    _, outcome = run(
+        spec, FakeEffects(spec=spec, materials=["DATABASE_URL", "REDIS_URL"])
+    )
     assert (
         outcome.failed_step is not None
         and outcome.failed_step.value == "verify_materials"
@@ -661,7 +682,7 @@ def test_a_failing_product_preflight_hook_refuses_before_mutation() -> None:
     )
     spec = ProductDeploymentSpec.loads(text, source="<test>")
     effects = FakeEffects(
-        command_results={"check-licence": CommandResult(3, stderr="expired")}
+        spec=spec, command_results={"check-licence": CommandResult(3, stderr="expired")}
     )
     _, outcome = run(spec, effects)
     assert (
@@ -676,7 +697,7 @@ def test_a_failing_product_preflight_hook_refuses_before_mutation() -> None:
 
 def test_a_failed_backup_stops_the_deployment_before_any_ddl() -> None:
     spec = load()
-    plan, outcome = run(spec, FakeEffects(backup_ok=False))
+    plan, outcome = run(spec, FakeEffects(spec=spec, backup_ok=False))
     assert outcome.failed_step is not None and outcome.failed_step.value == "backup"
     ran = [record.kind.value for record in outcome.records]
     assert "migrate" not in ran, "DDL must never run after a failed backup"
@@ -690,7 +711,7 @@ def test_a_corrupt_backup_fails_verification_and_stops_the_deployment() -> None:
     implementation's size check accepts.
     """
     spec = load()
-    _, outcome = run(spec, FakeEffects(backup_verifies=False))
+    _, outcome = run(spec, FakeEffects(spec=spec, backup_verifies=False))
     assert (
         outcome.failed_step is not None and outcome.failed_step.value == "verify_backup"
     )
@@ -701,7 +722,8 @@ def test_a_corrupt_backup_fails_verification_and_stops_the_deployment() -> None:
 def test_a_failing_migration_role_preflight_stops_before_the_migration() -> None:
     spec = load()
     effects = FakeEffects(
-        command_results={"python": CommandResult(1, stderr="app_admin cannot CREATE")}
+        spec=spec,
+        command_results={"python": CommandResult(1, stderr="app_admin cannot CREATE")},
     )
     _, outcome = run(spec, effects)
     assert (
@@ -718,7 +740,8 @@ def test_a_migration_failure_that_is_not_lock_contention_is_not_retried() -> Non
     """
     spec = load()
     effects = FakeEffects(
-        command_results={"alembic": CommandResult(1, stderr="relation already exists")}
+        spec=spec,
+        command_results={"alembic": CommandResult(1, stderr="relation already exists")},
     )
     _, outcome = run(spec, effects)
     assert outcome.failed_step is not None and outcome.failed_step.value == "migrate"
@@ -737,6 +760,7 @@ def test_sql_that_sets_lock_timeout_does_not_make_a_permission_error_retryable()
     """
     spec = load()
     effects = FakeEffects(
+        spec=spec,
         command_results={
             "alembic": CommandResult(
                 1,
@@ -745,7 +769,7 @@ def test_sql_that_sets_lock_timeout_does_not_make_a_permission_error_retryable()
                     "LINE 1: SET lock_timeout = '5s'; CREATE TABLE example"
                 ),
             )
-        }
+        },
     )
     _, outcome = run(spec, effects)
     assert outcome.failed_step is not None and outcome.failed_step.value == "migrate"
@@ -755,11 +779,12 @@ def test_sql_that_sets_lock_timeout_does_not_make_a_permission_error_retryable()
 def test_migration_lock_contention_is_retried_and_then_gives_up() -> None:
     spec = load()
     effects = FakeEffects(
+        spec=spec,
         command_results={
             "alembic": CommandResult(
                 1, stderr="canceling statement due to lock timeout"
             )
-        }
+        },
     )
     _, outcome = run(spec, effects)
     assert outcome.failed_step is not None and outcome.failed_step.value == "migrate"
@@ -775,7 +800,7 @@ def test_a_missing_migration_head_is_caught_even_though_the_command_exited_zero(
     declared ones can.
     """
     spec = load()
-    _, outcome = run(spec, FakeEffects(heads=["a003"]))
+    _, outcome = run(spec, FakeEffects(spec=spec, heads=["a003"]))
     assert (
         outcome.failed_step is not None and outcome.failed_step.value == "verify_heads"
     )
@@ -787,7 +812,7 @@ def test_a_missing_migration_head_is_caught_even_though_the_command_exited_zero(
 
 def test_a_candidate_that_never_becomes_ready_is_not_handed_traffic() -> None:
     spec = load()
-    effects = FakeEffects(candidate_never_ready=True)
+    effects = FakeEffects(spec=spec, candidate_never_ready=True)
     _, outcome = run(spec, effects)
     assert (
         outcome.failed_step is not None
@@ -801,7 +826,7 @@ def test_a_candidate_that_never_becomes_ready_is_not_handed_traffic() -> None:
 
 def test_a_candidate_started_on_the_wrong_digest_is_refused() -> None:
     spec = load()
-    _, outcome = run(spec, FakeEffects(candidate_digest=OLD_DIGEST))
+    _, outcome = run(spec, FakeEffects(spec=spec, candidate_digest=OLD_DIGEST))
     assert (
         outcome.failed_step is not None
         and outcome.failed_step.value == "start_candidate"
@@ -815,7 +840,7 @@ def test_a_role_left_on_a_previous_digest_after_the_switch_is_caught() -> None:
     firing failing tasks for hours with every container-level check green.
     """
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     original_switch = effects.switch
 
     def switch_leaving_beat_behind(*, timeout_seconds: int, image: str) -> None:
@@ -832,7 +857,7 @@ def test_a_role_left_on_a_previous_digest_after_the_switch_is_caught() -> None:
 
 def test_a_restarting_role_is_a_failed_deployment_not_a_healthy_one() -> None:
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     original_switch = effects.switch
 
     def switch_with_crashloop(*, timeout_seconds: int, image: str) -> None:
@@ -852,7 +877,7 @@ def test_an_unhealthy_worker_fails_the_deployment_even_though_its_container_is_u
 ):
     """A running worker draining nothing looks healthy at the container level."""
     spec = load()
-    _, outcome = run(spec, FakeEffects(worker_ok=False))
+    _, outcome = run(spec, FakeEffects(spec=spec, worker_ok=False))
     assert (
         outcome.failed_step is not None and outcome.failed_step.value == "verify_roles"
     )
@@ -861,7 +886,7 @@ def test_an_unhealthy_worker_fails_the_deployment_even_though_its_container_is_u
 
 def test_a_stale_scheduler_fails_the_deployment() -> None:
     spec = load()
-    _, outcome = run(spec, FakeEffects(tick_age=9_999))
+    _, outcome = run(spec, FakeEffects(spec=spec, tick_age=9_999))
     assert (
         outcome.failed_step is not None and outcome.failed_step.value == "verify_roles"
     )
@@ -876,7 +901,7 @@ def test_a_scheduler_that_has_never_ticked_is_distinguished_from_a_late_one() ->
     place.
     """
     spec = load()
-    _, outcome = run(spec, FakeEffects(tick_age=None))
+    _, outcome = run(spec, FakeEffects(spec=spec, tick_age=None))
     assert (
         outcome.failed_step is not None and outcome.failed_step.value == "verify_roles"
     )
@@ -987,7 +1012,7 @@ def test_a_product_declaring_no_backup_dataset_says_so_in_the_plan() -> None:
 def test_evidence_is_written_before_success_is_declared() -> None:
     """Evidence written only on success is absent exactly when it is wanted."""
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     _, outcome = run(spec, effects)
     assert effects.evidence_written
     recorded = effects.evidence_written[-1]
@@ -999,7 +1024,7 @@ def test_evidence_is_written_before_success_is_declared() -> None:
 def test_image_retention_failure_does_not_fail_a_verified_deployment() -> None:
     """The one deliberate fail-open, and it is recorded rather than silent."""
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
 
     def failing_prune(*, retain: int) -> None:
         raise StepFailed("prune_images", "permission denied on /var/lib/docker")
@@ -1040,7 +1065,8 @@ def test_a_migration_that_fails_partway_reports_the_world_as_MUTATED() -> None:
     """
     spec = load()
     effects = FakeEffects(
-        command_results={"alembic": CommandResult(1, stderr="relation already exists")}
+        spec=spec,
+        command_results={"alembic": CommandResult(1, stderr="relation already exists")},
     )
     _, outcome = run(spec, effects)
     assert outcome.failed_step is not None
@@ -1055,7 +1081,7 @@ def test_a_gate_failure_still_reports_the_world_as_UNTOUCHED() -> None:
     pass while the flag told an operator nothing.
     """
     spec = load()
-    _, outcome = run(spec, FakeEffects(present=False))
+    _, outcome = run(spec, FakeEffects(spec=spec, present=False))
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_image"
     assert not outcome.mutated
@@ -1069,7 +1095,8 @@ def test_evidence_is_written_even_when_the_run_dies_at_the_migration() -> None:
     """
     spec = load()
     effects = FakeEffects(
-        command_results={"alembic": CommandResult(1, stderr="relation already exists")}
+        spec=spec,
+        command_results={"alembic": CommandResult(1, stderr="relation already exists")},
     )
     _, outcome = run(spec, effects)
     assert not outcome.succeeded
@@ -1087,7 +1114,8 @@ def test_an_evidence_write_failure_does_not_mask_the_real_failure() -> None:
     would lose the only thing the operator needed."""
     spec = load()
     effects = FakeEffects(
-        command_results={"alembic": CommandResult(1, stderr="relation already exists")}
+        spec=spec,
+        command_results={"alembic": CommandResult(1, stderr="relation already exists")},
     )
 
     def exploding_write(evidence: Mapping[str, object]) -> str:
@@ -1108,7 +1136,7 @@ def test_the_verifier_receives_the_real_checksum_and_size() -> None:
     an empty one on every call.
     """
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     seen: list[BackupResult] = []
 
     def capture(result: BackupResult) -> bool:
@@ -1132,7 +1160,7 @@ def test_a_backup_returning_no_checksum_is_refused_at_the_backup_step() -> None:
     verification would mean the migration gate had already been cleared.
     """
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
 
     def checksum_free(dataset_code: str, *, timeout_seconds: int) -> BackupResult:
         return BackupResult(dataset_code, "/backups/x.sql.gz", 1024, "", "sha256")
@@ -1143,7 +1171,7 @@ def test_a_backup_returning_no_checksum_is_refused_at_the_backup_step() -> None:
     assert "checksum" in outcome.failure
 
 
-def test_rollback_actually_restores_the_previous_digest() -> None:
+def test_historical_rollback_refuses_without_an_approved_target_procedure() -> None:
     """`steps_for_rollback` returned steps and nothing ran them.
 
     `dotmac-deploy rollback` could therefore only PRINT a plan. Worse, the
@@ -1151,7 +1179,7 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
     rollback would have restored the image that had just failed.
     """
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     grant, execution_plan = _bound(spec, plan, "rollback", effects=effects)
     executor = Executor(
@@ -1165,11 +1193,12 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
         evidence_verifier=AcceptingVerifier(),
         **valid_host_source_kwargs(),
     )
-    outcome = executor.rollback(plan, lock=held_lock(spec.product))
-    assert outcome.succeeded, outcome.failure
-    assert effects.switched_to == [OLD_DIGEST]
-    assert all(item.image_digest == OLD_DIGEST for item in effects.observe_roles())
-    assert effects.evidence_written
+    with pytest.raises(PreconditionFailed) as caught:
+        executor.rollback(plan, lock=held_lock(spec.product))
+    assert caught.value.code == "execution_plan.rollback_target_unbound"
+    assert effects.switched_to == []
+    assert not effects.evidence_written
+    assert not grant.v3_provider.consumed
 
 
 def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
@@ -1184,7 +1213,7 @@ def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
         ),
         source="<test>",
     )
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     grant, execution_plan = _bound(spec, plan, "rollback", effects=effects)
     executor = Executor(
@@ -1197,9 +1226,10 @@ def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
     )
     with pytest.raises(PreconditionFailed) as caught:
         executor.rollback(plan, lock=held_lock(spec.product))
-    assert "maintenance_required" in str(caught.value)
+    assert caught.value.code == "execution_plan.rollback_target_unbound"
     assert effects.switched_to == [], "nothing may be switched by a refused rollback"
-    assert effects.evidence_written, "the refusal is itself worth recording"
+    assert not effects.evidence_written
+    assert not grant.v3_provider.consumed
 
 
 # ── deployment annotations ──────────────────────────────────────────────────
@@ -1214,7 +1244,8 @@ def test_a_start_annotation_is_sent_BEFORE_the_work() -> None:
     """
     spec = load()
     effects = FakeEffects(
-        command_results={"alembic": CommandResult(1, stderr="relation already exists")}
+        spec=spec,
+        command_results={"alembic": CommandResult(1, stderr="relation already exists")},
     )
     _, outcome = run(spec, effects)
     assert not outcome.succeeded
@@ -1225,7 +1256,7 @@ def test_a_start_annotation_is_sent_BEFORE_the_work() -> None:
 
 def test_a_successful_run_annotates_start_then_success() -> None:
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     _, outcome = run(spec, effects)
     assert outcome.succeeded
     assert [item["event"] for item in effects.annotations] == [
@@ -1238,13 +1269,13 @@ def test_a_successful_run_annotates_start_then_success() -> None:
     assert start["strategy"] == "warm_candidate"
 
 
-def test_a_rollback_annotates_itself() -> None:
+def test_historical_rollback_refusal_does_not_annotate_or_write_evidence() -> None:
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     clock = FakeClock()
     grant, execution_plan = _bound(spec, plan, "rollback", effects=effects)
-    Executor(
+    executor = Executor(
         spec,
         effects,
         grant,
@@ -1254,8 +1285,13 @@ def test_a_rollback_annotates_itself() -> None:
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
         **valid_host_source_kwargs(),
-    ).rollback(plan, lock=held_lock(spec.product))
-    assert "deployment.rollback" in [item["event"] for item in effects.annotations]
+    )
+    with pytest.raises(PreconditionFailed) as caught:
+        executor.rollback(plan, lock=held_lock(spec.product))
+    assert caught.value.code == "execution_plan.rollback_target_unbound"
+    assert effects.annotations == []
+    assert not effects.evidence_written
+    assert not grant.v3_provider.consumed
 
 
 def test_an_annotation_sink_failure_never_fails_the_deployment() -> None:
@@ -1264,7 +1300,7 @@ def test_an_annotation_sink_failure_never_fails_the_deployment() -> None:
     deployment refused because a dashboard was unreachable is a worse outcome
     than a deployment nobody annotated."""
     spec = load()
-    effects = FakeEffects()
+    effects = FakeEffects(spec=spec)
 
     def exploding(annotation: Mapping[str, str]) -> None:
         raise OSError("sink unreachable")
@@ -1287,7 +1323,7 @@ def test_a_manifest_that_hashes_to_something_else_is_refused_BEFORE_any_mutation
     this.
     """
     spec = load()
-    _, outcome = run(spec, FakeEffects(manifest="sha256:" + "9" * 64))
+    _, outcome = run(spec, FakeEffects(spec=spec, manifest="sha256:" + "9" * 64))
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_manifest"
     assert not outcome.mutated
@@ -1300,7 +1336,7 @@ def test_an_unreadable_manifest_is_a_refusal_and_not_a_match() -> None:
     when the thing it inspects has disappeared.
     """
     spec = load()
-    _, outcome = run(spec, FakeEffects(manifest=""))
+    _, outcome = run(spec, FakeEffects(spec=spec, manifest=""))
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_manifest"
     assert "could not be read" in outcome.failure

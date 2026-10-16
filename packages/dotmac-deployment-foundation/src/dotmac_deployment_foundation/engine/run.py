@@ -36,12 +36,22 @@ becomes a recorded note rather than an undocumented `|| true`.
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import json
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, Protocol, runtime_checkable
+from typing import (
+    Any,
+    Final,
+    Protocol,
+    get_args,
+    get_origin,
+    get_type_hints,
+    runtime_checkable,
+)
 
 from ..authorization import ExecutionGrant
 from ..authorization_v3 import (
@@ -57,7 +67,7 @@ from ..deployment_evidence import (
     StepEvidenceV1,
     StepStanding,
 )
-from ..errors import DeploymentError, PreconditionFailed, StepFailed
+from ..errors import DeploymentError, PreconditionFailed, SpecError, StepFailed
 from ..evidence import (
     SignatureVerifier,
     SignedEvidenceEnvelope,
@@ -66,9 +76,11 @@ from ..evidence import (
 )
 from ..execution_plan import (
     HostPrestateV1,
+    render_execution_plan,
 )
 from ..execution_plan_v2 import (
     ExposureReconciliationV1,
+    FoundationExecutionPlanV2,
     PostgresPrincipalCredentialBootstrapV1,
 )
 from ..execution_plan_v3 import (
@@ -85,6 +97,7 @@ from ..exposure import (
 )
 from ..external_recovery import (
     EXTERNAL_BACKUP_PATH_PREFIX,
+    ExternalRecoveryReceiptV1,
     accept_external_recovery_receipt,
     backup_record_from_receipt,
     require_restore_proof,
@@ -104,10 +117,12 @@ from ..spec import SCHEMA_V4, MaterialProbe, ProductDeploymentSpec
 from ..telemetry import Annotation
 from .lock import DeploymentLockHeld
 from .plan import (
+    _PHASE_OF,
     DeploymentPlan,
+    Phase,
     Step,
     StepKind,
-    steps_for_rollback,
+    Strategy,
 )
 from .plan import (
     _ingress_roles as _plan_ingress_roles,
@@ -169,6 +184,23 @@ class Effects(Protocol):
     policy lives in one readable place instead of being distributed across
     fourteen implementations that might each interpret a failure differently.
     """
+
+    @property
+    def execution_descriptor(self) -> bytes:
+        """Canonical bytes derived from the private validated spec being executed.
+
+        Providers must snapshot before deriving product/path/ownership caches,
+        retain no caller aliases, and never accept a digest or rebind at run time.
+        """
+        ...
+
+    def preflight_backup(self, dataset_code: str) -> None:
+        """Pure preparation of this exact local dataset; raise if unsupported.
+
+        No material resolution, host access, command, file or other effect.
+        Capture must use the same preparation path.
+        """
+        ...
 
     # ── gates ──
     def image_present(self, reference: str) -> bool: ...
@@ -760,6 +792,7 @@ class Executor:
         # position — right after the lock, ahead of the grant — is the ruling
         # rather than a preference.
         self._verify_host_source()
+        self._snapshot_spec()
         # Re-checked here, not merely at construction: the grant names a
         # descriptor, and this asserts the plan in hand is that descriptor's.
         # A grant built early and used late is exactly where "nothing changed
@@ -767,6 +800,7 @@ class Executor:
         self._grant.require(
             operation="deploy", descriptor_digest=self._descriptor_digest()
         )
+        plan = self._snapshot_and_require_deploy_operands(plan)
         outcome = DeploymentOutcome(
             plan=plan,
             notes=list(plan.notes),
@@ -835,7 +869,217 @@ class Executor:
             self._persist_evidence(outcome)
         return outcome
 
-    def _require_execution_plan(self, operation: str) -> tuple[str, str]:
+    def _snapshot_spec(self) -> None:
+        try:
+            self._spec = ProductDeploymentSpec.validated_execution_snapshot(self._spec)
+        except SpecError as exc:
+            raise PreconditionFailed(str(exc), code=exc.code) from exc
+
+    def _snapshot_authority(self) -> None:
+        # Keep the existing precise absent-plan refusal in _require_execution_plan.
+        if self._execution_plan is not None:
+            try:
+                self._execution_plan = _snapshot_execution_record(self._execution_plan)
+            except SpecError as exc:
+                raise PreconditionFailed(str(exc), code=exc.code) from exc
+            self._bootstraps = self._execution_plan.principal_bootstraps
+            self._exposure = self._execution_plan.exposure_reconciliations
+
+    def _snapshot_and_require_deploy_operands(
+        self, work: DeploymentPlan
+    ) -> DeploymentPlan:
+        try:
+            spec = self._spec
+            actual = _snapshot_execution_record(work)
+            self._snapshot_authority()
+            frozen = self._execution_plan
+            if frozen is None:
+                # No provider consumption; preserve the existing absent diagnosis.
+                self._require_execution_plan("deploy")
+                raise PreconditionFailed("execution plan absent")  # unreachable
+            for name, approved_name in (
+                ("product", "product"),
+                ("image", "image_reference"),
+                ("image_digest", "image_digest"),
+                ("source_revision", "source_revision"),
+                ("manifest_digest", "manifest_digest"),
+            ):
+                value = getattr(actual, name)
+                if value != getattr(spec, name) or value != getattr(
+                    frozen, approved_name
+                ):
+                    raise PreconditionFailed(
+                        f"executable {name} disagrees with spec/frozen plan"
+                    )
+            descriptor = spec.to_canonical_document().sha256_digest()
+            self._grant.require(operation="deploy", descriptor_digest=descriptor)
+            if descriptor != frozen.descriptor_digest:
+                raise PreconditionFailed(
+                    "actual descriptor disagrees with frozen execution plan"
+                )
+            self._require_provider_descriptor(self._effects, spec, descriptor)
+            if self._exposure:
+                self._require_provider_descriptor(
+                    self._exposure_effects, spec, descriptor
+                )
+            projected = render_execution_plan(
+                spec,
+                actual,
+                target=frozen.target,
+                operation="deploy",
+                descriptor_digest=descriptor,
+                prestate=frozen.host_prestate,
+                application_profile_digest=frozen.application_profile_digest,
+            )
+            for item in dataclasses.fields(projected):
+                if getattr(projected, item.name) != getattr(frozen.base, item.name):
+                    raise PreconditionFailed(
+                        f"executable projection disagrees at {item.name}"
+                    )
+            self._preflight_executable_capabilities(actual, spec)
+        except SpecError as exc:
+            raise PreconditionFailed(str(exc), code=exc.code) from exc
+        self._spec = spec
+        return actual
+
+    @staticmethod
+    def _require_provider_descriptor(
+        provider: object, spec: ProductDeploymentSpec, descriptor: str
+    ) -> None:
+        actual = getattr(provider, "execution_descriptor", None)
+        if type(actual) is not bytes:
+            raise PreconditionFailed(
+                "selected provider lacks immutable execution_descriptor bytes"
+            )
+        identity = "sha256:" + hashlib.sha256(actual).hexdigest()
+        if (
+            actual != spec.to_canonical_document().canonical_bytes()
+            or identity != descriptor
+        ):
+            raise PreconditionFailed(
+                "selected provider executes a different descriptor "
+                "than spec/frozen plan"
+            )
+
+    def _preflight_executable_capabilities(
+        self, work: DeploymentPlan, spec: ProductDeploymentSpec
+    ) -> None:
+        captured: set[str] = set()
+        datasets = {dataset.code: dataset for dataset in spec.backup_datasets}
+        for step in work.steps:
+            phase = _PHASE_OF.get(step.kind)
+            if (
+                step.kind not in _STEP_EFFECT_METHODS
+                or type(phase) is not Phase
+                or not callable(getattr(self, f"_do_{step.kind.value}", None))
+            ):
+                raise PreconditionFailed(
+                    "execution step has no supported handler/phase"
+                )
+            for method in _STEP_EFFECT_METHODS[step.kind]:
+                if not callable(getattr(self._effects, method, None)):
+                    raise PreconditionFailed(
+                        f"selected execution capability {method} is absent"
+                    )
+            if step.kind in (
+                StepKind.BACKUP,
+                StepKind.VERIFY_BACKUP,
+                StepKind.VERIFY_EXTERNAL_RECOVERY_RECEIPT,
+            ):
+                dataset = datasets.get(step.target)
+                if dataset is None:
+                    raise PreconditionFailed("selected recovery dataset is undeclared")
+                if step.kind is StepKind.VERIFY_EXTERNAL_RECOVERY_RECEIPT:
+                    if dataset.external_executor is None:
+                        raise PreconditionFailed("selected recovery dataset is local")
+                    # Verify handed-over receipt, trust and cadence inputs before
+                    # dispatch consumption; retain the dynamic step-time check.
+                    self._external_recovery_detail(step)
+                else:
+                    if dataset.external_executor is not None:
+                        raise PreconditionFailed(
+                            "external recovery cannot use local capture"
+                        )
+                    if step.kind is StepKind.BACKUP:
+                        prepare = getattr(self._effects, "preflight_backup", None)
+                        if not callable(prepare):
+                            raise PreconditionFailed(
+                                "backup preparation capability is absent"
+                            )
+                        try:
+                            prepare(step.target)
+                        except DeploymentError as exc:
+                            raise PreconditionFailed(
+                                str(exc), code=getattr(exc, "code", "")
+                            ) from exc
+                        captured.add(step.target)
+                    elif step.target not in captured:
+                        raise PreconditionFailed(
+                            "backup verification precedes local capture"
+                        )
+            if step.kind in (StepKind.START_CANDIDATE, StepKind.GATE_CANDIDATE):
+                spec.role(step.target)
+            elif step.kind is StepKind.VERIFY_ROLES and step.target:
+                spec.role(step.target)
+            if (
+                step.kind is StepKind.GATE_CANDIDATE
+                and spec.role(step.target).ready is None
+            ):
+                raise PreconditionFailed(
+                    "selected candidate gate has no readiness probe"
+                )
+            if step.kind is StepKind.VERIFY_ROLES:
+                roles = (spec.role(step.target),) if step.target else spec.roles
+                ingress_roles = set(_plan_ingress_roles(spec))
+                for role in roles:
+                    if role.replicas == 0:
+                        continue
+                    methods = []
+                    if role.ready is not None and role.code in ingress_roles:
+                        methods.append("role_ready")
+                    if role.worker is not None:
+                        methods.append("worker_responds")
+                    if role.scheduler_tick_max_age_seconds is not None:
+                        methods.append("scheduler_last_tick_age_seconds")
+                    if any(
+                        not callable(getattr(self._effects, name, None))
+                        for name in methods
+                    ):
+                        raise PreconditionFailed(
+                            "selected role-verification capability is absent"
+                        )
+            if step.kind is StepKind.SUPPORT_JOB:
+                topology = spec.compose_topology
+                if topology is None or not any(
+                    j.code == step.target and j.run_during_deploy for j in topology.jobs
+                ):
+                    raise PreconditionFailed(
+                        "selected support job is not deploy-authorized"
+                    )
+        if self._bootstraps and not callable(
+            getattr(self._effects, "bootstrap_principal_credential", None)
+        ):
+            raise PreconditionFailed("principal bootstrap capability is absent")
+        if self._exposure:
+            for name in ("observe", "replace_rules", "restore_chains"):
+                if not callable(getattr(self._exposure_effects, name, None)):
+                    raise PreconditionFailed(
+                        "exposure reconciliation capability is absent"
+                    )
+        if (
+            spec.descriptor_schema == SCHEMA_V4
+            and any(
+                s.kind
+                in (StepKind.VERIFY_MATERIALS, StepKind.VERIFY_POST_MIGRATION_MATERIALS)
+                for s in work.steps
+            )
+            and not isinstance(self._effects, CandidateMaterialProbeEffects)
+        ):
+            raise PreconditionFailed("candidate material probe capability is absent")
+
+    def _require_execution_plan(
+        self, operation: str, *, consume: bool = True
+    ) -> tuple[str, str]:
         """Step 4: recompute the plan digest and consume the Control dispatch.
 
         Nothing here reconstructs Control's document and nothing normalizes it.
@@ -871,6 +1115,15 @@ class Executor:
                 "having it authorized, and running the unfrozen one is the gap "
                 "this contract closes"
             )
+        if self._execution_plan.target != self._grant.target:
+            raise PreconditionFailed("execution plan target disagrees with grant")
+        if self._execution_plan.descriptor_digest != self._descriptor_digest():
+            raise PreconditionFailed(
+                "frozen execution plan descriptor disagrees with actual spec"
+            )
+        self._grant.require(
+            operation=operation, descriptor_digest=self._descriptor_digest()
+        )
         # THE HOST IS RE-OBSERVED, not remembered. The plan's prestate is what
         # the host looked like when the plan was rendered and authorized; this
         # is what it looks like NOW, at the moment before mutation. Between the
@@ -951,6 +1204,8 @@ class Executor:
         digest = require_execution_plan_v3_digest(
             self._execution_plan, authorized=authorized
         )
+        if not consume:
+            return digest, ""
         # The startup-fixed CP provider owns current-standing validation and
         # atomic dispatch consumption in its external transaction. It refuses
         # before COMMIT or returns normally after it. Every Foundation check
@@ -1311,63 +1566,32 @@ class Executor:
     def rollback(
         self, plan: DeploymentPlan, *, lock: DeploymentLockHeld
     ) -> DeploymentOutcome:
-        """Execute the rollback, or refuse it.
+        """Refuse historical rollback whose target/procedure was never frozen.
 
-        `steps_for_rollback` returns the steps and nothing ran them, so
-        `dotmac-deploy rollback` could only ever PRINT a plan. Here the steps
-        actually execute, and `_rolling_back` makes `switch` target the previous
-        digest rather than the deploying one — which the shared handler would
-        otherwise have done, restoring the image that had just failed.
-
-        ``lock`` is required here for the same reason it is required by
-        :meth:`run`, and the rollback half is if anything the sharper one: a
-        rollback races the deployment it is undoing, and the two must not
-        interleave. Boundary 3 names failure and rollback handling explicitly
-        because that is the half a "wrap the happy path" reading omits.
+        Pure rollback planning and historical authorization inspection remain
+        available. This mutating entry point validates the existing read-only
+        authority joins, then refuses before consumption or any host write.
         """
         self._lock_path = lock.require_held(product=self._spec.product)
         # Same gate, same position, same reason as `run`: rollback mutates a
         # host exactly like a deploy does, and the ruling names it explicitly
         # so this is not left to a "wrap the happy path" reading.
         self._verify_host_source()
+        self._snapshot_spec()
         self._grant.require(
             operation="rollback", descriptor_digest=self._descriptor_digest()
         )
-        steps = steps_for_rollback(plan)
-        outcome = DeploymentOutcome(
-            plan=plan,
-            notes=list(plan.notes),
-            descriptor_digest=self._descriptor_digest(),
-            control_plan_digest=str(self._grant.receipt.control_plan_digest),
-            execution_sequence=int(self._grant.execution_sequence),
-            attempt_no=int(self._grant.attempt_no),
-            operation="rollback",
+        # Historical V1/V2/V3 freeze deploy steps, not the procedure derived
+        # from previous_image/rollback_permitted. Validate the existing authority
+        # joins read-only, then refuse before Control consumption or host writes.
+        self._snapshot_authority()
+        self._require_execution_plan("rollback", consume=False)
+        raise PreconditionFailed(
+            "this historical execution document does not freeze the actual "
+            "rollback procedure and target; render and separately approve a "
+            "supported target-bound rollback plan",
+            code="execution_plan.rollback_target_unbound",
         )
-        if not steps:
-            outcome.failure = plan.rollback_reason
-            outcome.notes.append(f"ROLLBACK REFUSED — {plan.rollback_reason}")
-            self._persist_evidence(outcome)
-            raise PreconditionFailed(f"rollback refused: {plan.rollback_reason}")
-        digest, consumption_ref = self._require_execution_plan("rollback")
-        outcome.execution_plan_digest = digest
-        outcome.control_consumption_ref = consumption_ref
-        self._rolling_back = True
-        # `plan.rollback_reason` is descriptor-derived prose, not an exception
-        # — but it is still free text crossing the same seam, and the type now
-        # refuses it. The event name already says a rollback started.
-        self._annotate("deployment.rollback", plan)
-        try:
-            self._run_steps(steps, plan, outcome)
-            outcome.succeeded = True
-            outcome.standing = RunStanding.SUCCEEDED
-        except DeploymentError:
-            pass
-        finally:
-            self._rolling_back = False
-            outcome.notes.extend(self._notes_sink)
-            self._notes_sink.clear()
-            self._persist_evidence(outcome)
-        return outcome
 
     # ── dispatch ────────────────────────────────────────────────────────────
 
@@ -1652,6 +1876,21 @@ class Executor:
         computes the `restore_proof_max_age_days` window correctly -- had zero
         callers, so the window was inert. This is the caller.
         """
+        receipt, detail = self._external_recovery_detail(step)
+        outcome.notes.append(
+            f"recovery receipt {receipt.sha256_digest()} for {step.target}: {detail}"
+        )
+        return (
+            f"{receipt.executor.kind}:{receipt.executor.identifier}"
+            f"@{receipt.executor.version} proved {list(receipt.verifications)} "
+            f"on snapshot {receipt.snapshot_checksum_algorithm}="
+            f"{receipt.snapshot_checksum}; {detail}"
+        )
+
+    def _external_recovery_detail(
+        self, step: Step
+    ) -> tuple[ExternalRecoveryReceiptV1, str]:
+        """Validate exact supplied recovery inputs without observing the host."""
         dataset = next(
             (item for item in self._spec.backup_datasets if item.code == step.target),
             None,
@@ -1694,15 +1933,7 @@ class Executor:
             records,
             now_epoch=self._now_epoch or receipt.proved_at_epoch,
         )
-        outcome.notes.append(
-            f"recovery receipt {receipt.sha256_digest()} for {step.target}: {detail}"
-        )
-        return (
-            f"{receipt.executor.kind}:{receipt.executor.identifier}"
-            f"@{receipt.executor.version} proved {list(receipt.verifications)} "
-            f"on snapshot {receipt.snapshot_checksum_algorithm}="
-            f"{receipt.snapshot_checksum}; {detail}"
-        )
+        return receipt, detail
 
     def _do_product_preflight(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
@@ -2158,3 +2389,113 @@ def _digest_of(reference: str) -> str:
     compared the two forms directly would fail on a correct restoration.
     """
     return reference.rsplit("@", 1)[1] if "@" in reference else reference
+
+
+# Closed executable model field inventory. An owner field addition must be
+# reviewed here before it can reach effects; no arbitrary dataclass is copied.
+_EXECUTION_RECORD_FIELDS = {
+    DeploymentPlan: (
+        "product image image_digest source_revision manifest_digest "
+        "strategy steps rollback_permitted rollback_reason previous_image "
+        "notes"
+    ),
+    Step: "kind description command timeout_seconds retries target",
+    HostPrestateV1: "roles",
+    FoundationExecutionPlanV2: (
+        "product target operation foundation_version image_reference "
+        "image_digest source_revision manifest_digest descriptor_digest "
+        "strategy environment_inventory host_prestate "
+        "application_profile_digest steps principal_bootstraps "
+        "exposure_reconciliations"
+    ),
+    FoundationExecutionPlanV3: (
+        "base candidate_wheel_digest target_id controller_ssh_fingerprint "
+        "host_id host_incarnation host_enrolment_ref"
+    ),
+    PostgresPrincipalCredentialBootstrapV1: (
+        "service principal secret_path secret_field expected_version " "transition"
+    ),
+    ExposureReconciliationV1: "family chain",
+}
+
+
+def _snapshot_execution_record(value: Any) -> Any:
+    owner = type(value)
+    fields = _EXECUTION_RECORD_FIELDS.get(owner)
+    if fields is None or tuple(f.name for f in dataclasses.fields(owner)) != tuple(
+        fields.split()
+    ):
+        raise PreconditionFailed(
+            "execution record has unsupported owner type or fields"
+        )
+    hints = get_type_hints(owner)
+    try:
+        values = {
+            name: _snapshot_execution_value(getattr(value, name), hints[name])
+            for name in fields.split()
+        }
+        if owner is Step and (values["timeout_seconds"] <= 0 or values["retries"] <= 0):
+            raise PreconditionFailed("execution step bounds must be positive integers")
+        return owner(**values)
+    except (AttributeError, TypeError, ValueError, RecursionError) as exc:
+        raise PreconditionFailed("execution record is structurally malformed") from exc
+
+
+def _snapshot_execution_value(value: Any, shape: Any) -> Any:
+    if shape in (str, int, bool, StepKind, Strategy):
+        if type(value) is not shape:
+            raise PreconditionFailed(
+                "execution operand has an invalid primitive/enum shape"
+            )
+        return value
+    if shape in _EXECUTION_RECORD_FIELDS:
+        if type(value) is not shape:
+            raise PreconditionFailed("execution operand has a foreign owner record")
+        return _snapshot_execution_record(value)
+    if get_origin(shape) is tuple:
+        if type(value) is not tuple:
+            raise PreconditionFailed("execution operand must be an immutable tuple")
+        args = get_args(shape)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return tuple(_snapshot_execution_value(item, args[0]) for item in value)
+        if len(value) != len(args):
+            raise PreconditionFailed("execution tuple has an invalid arity")
+        return tuple(
+            _snapshot_execution_value(item, kind)
+            for item, kind in zip(value, args, strict=True)
+        )
+    raise PreconditionFailed("execution operand field has no classified shape")
+
+
+_STEP_EFFECT_METHODS = {
+    StepKind.ACQUIRE_LOCK: (),
+    StepKind.VERIFY_IMAGE: ("image_present",),
+    StepKind.VERIFY_REVISION: ("image_labels",),
+    StepKind.VERIFY_MANIFEST: ("manifest_digest",),
+    StepKind.VERIFY_RELEASE_EVIDENCE: ("release_evidence",),
+    StepKind.REFUSE_DIRTY_STATE: (
+        "working_tree_dirty",
+        "untracked_compose_overrides",
+        "observe_roles",
+    ),
+    StepKind.VERIFY_MATERIALS: ("resolved_materials",),
+    StepKind.VERIFY_EXTERNAL_RECOVERY_RECEIPT: (),
+    StepKind.PRODUCT_PREFLIGHT: ("run_command",),
+    StepKind.BACKUP: ("backup",),
+    StepKind.VERIFY_BACKUP: ("verify_backup",),
+    StepKind.SUPPORT_JOB: ("run_support_job",),
+    StepKind.MIGRATION_PREFLIGHT: ("run_migration_command",),
+    StepKind.STOP_FOR_MAINTENANCE: ("stop_roles",),
+    StepKind.MIGRATE: ("run_migration_command",),
+    StepKind.VERIFY_HEADS: ("migration_heads",),
+    StepKind.VERIFY_POST_MIGRATION_MATERIALS: ("probe_candidate_materials",),
+    StepKind.START_CANDIDATE: ("start_candidate",),
+    StepKind.GATE_CANDIDATE: ("candidate_ready",),
+    StepKind.SWITCH: ("switch",),
+    StepKind.VERIFY_ROLES: ("observe_roles",),
+    StepKind.STABILISE: ("observe_roles",),
+    StepKind.PRODUCT_POSTFLIGHT: ("run_command",),
+    StepKind.RECORD_EVIDENCE: ("write_evidence", "read_evidence"),
+    StepKind.PRUNE_IMAGES: ("prune_images",),
+    StepKind.RELEASE_LOCK: (),
+}
