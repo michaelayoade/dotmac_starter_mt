@@ -7,8 +7,8 @@ typed rehearsal boundary (``OpeningSubObservationV2`` plus a candidate
 ``OpeningManifestV2``), runs the pure preflights and emits a counted blocker
 census. It opens no database session on either side, calls no writer and
 constructs no verifier. It never qualifies cash, never fabricates an original
-document and computes no tax. The CLI always leaves originals unavailable;
-the Python assembly API can preserve independently supplied typed originals.
+document and computes no tax. An optional aligned evidence sidecar preserves
+explicit typed originals and historical discharges without qualifying them.
 ``cash_lots=()`` always.
 VAT belongs only to sales and is owned by dotmac-tax contracts, while source
 payments remain payments. Fields that cannot be sourced mechanically become
@@ -24,6 +24,7 @@ tests only, under ``tests/fixtures/opening_rehearsal/``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -52,6 +53,7 @@ from dotmac_billing.opening_contracts import (
 from dotmac_billing.opening_receivable_contracts import (
     ImportOpeningAccountV2,
     OpeningCollectionEvidenceV1,
+    OpeningHistoricalDischargeV1,
     OpeningManifestV2,
     OpeningOriginalDocumentV1,
     OpeningReceivableItemV1,
@@ -65,6 +67,7 @@ from dotmac_billing.opening_rehearsal import (
     opening_rehearsal_assembly_digest,
     parse_opening_rehearsal_assembly,
     parse_opening_rehearsal_json,
+    parse_opening_rehearsal_original_evidence,
     render_opening_rehearsal_census,
     render_opening_rehearsal_refusal,
     report_opening_rehearsal,
@@ -91,6 +94,7 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningRehearsalDischargeMappingV1,
     OpeningRehearsalInvoiceMappingV1,
     OpeningRehearsalMappingV1,
+    OpeningRehearsalOriginalEvidenceV1,
     OpeningRehearsalRunV1,
     OpeningSubObservationV2,
 )
@@ -102,6 +106,7 @@ __all__ = [
     "V3Sidecar",
     "assemble_rehearsal_run",
     "load_assembly",
+    "load_original_evidence",
     "load_sub_observation",
     "main",
     "rehearsal_census",
@@ -640,6 +645,9 @@ def _assemble(
     sidecar: V3Sidecar,
     assembly: AssemblyInputs,
     original_documents: tuple[tuple[UUID, OpeningOriginalDocumentV1], ...] = (),
+    historical_discharges: tuple[
+        tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
+    ] = (),
 ) -> _AssemblyOutcome:
     precisions = {row.currency: row.precision for row in obs.currency_precisions}
     partition_by_source = {
@@ -678,6 +686,7 @@ def _assemble(
         if (
             invoice_id in originals
             or invoice is None
+            or sum(row.invoice_id == invoice_id for row in obs.invoices) != 1
             or invoice_id not in eligible_ids
             or invoice_id not in invoice_mappings
             or invoice_id in exclusion_reasons
@@ -692,6 +701,67 @@ def _assemble(
         ):
             raise _malformed("original_document_mapping_invalid")
         originals[invoice_id] = original
+    # Only explicit observed settlement mappings may carry historical effects.
+    # Parent namespaces/live identities remain supplied evidence, for the
+    # independent verifier to qualify; no source namespace is invented here.
+    histories: dict[UUID, tuple[OpeningHistoricalDischargeV1, ...]] = {}
+    used_references: set[str] = set()
+    if type(historical_discharges) is not tuple:
+        raise _malformed("historical_discharge_mapping_invalid")
+    for entry in historical_discharges:
+        if type(entry) is not tuple or len(entry) != 2:
+            raise _malformed("historical_discharge_mapping_invalid")
+        invoice_id, effects = entry
+        invoice = invoices.get(invoice_id) if type(invoice_id) is UUID else None
+        if (
+            invoice is None
+            or invoice_id in histories
+            or invoice_id not in originals
+            or type(effects) is not tuple
+        ):
+            raise _malformed("historical_discharge_mapping_invalid")
+        for effect in effects:
+            if type(effect) is not OpeningHistoricalDischargeV1:
+                raise _malformed("historical_discharge_mapping_invalid")
+            mappings = [
+                row
+                for row in assembly.discharge_mappings
+                if row.historical_reference == effect.reference
+            ]
+            if len(mappings) != 1 or effect.reference in used_references:
+                raise _malformed("historical_discharge_mapping_invalid")
+            mapping = mappings[0]
+            if (
+                sum(
+                    (row.settlement_kind, row.settlement_id)
+                    == (mapping.settlement_kind, mapping.settlement_id)
+                    for row in assembly.discharge_mappings
+                )
+                != 1
+            ):
+                raise _malformed("historical_discharge_mapping_invalid")
+            observed = [
+                row
+                for row in obs.settlements
+                if (row.kind, row.id)
+                == (mapping.settlement_kind, mapping.settlement_id)
+            ]
+            if len(observed) != 1:
+                raise _malformed("historical_discharge_mapping_invalid")
+            settlement = observed[0]
+            if (
+                not settlement.active
+                or settlement.invoice_id != invoice_id
+                or settlement.id not in invoice.settlement_ids
+                or settlement.source_id != mapping.source_id
+                or effect.kind != settlement.kind
+                or effect.kind not in {"payment", "credit_note"}
+                or effect.amount_minor
+                != _minor_units(settlement.amount, precisions.get(invoice.currency))
+            ):
+                raise _malformed("historical_discharge_mapping_invalid")
+            used_references.add(effect.reference)
+        histories[invoice_id] = effects
     adapter_blockers: list[tuple[str, str, str | None]] = []
     unmapped_accounts: set[str] = set()
     unmapped_invoices: set[str] = set()
@@ -772,7 +842,7 @@ def _assemble(
                     partition,
                     mapping.source_invoice_key,
                     originals.get(invoice.invoice_id),
-                    (),
+                    histories.get(invoice.invoice_id, ()),
                     residual_minor,
                     _collection_evidence(assembly, pointer),
                     assembly.receivable_mapping_version,
@@ -959,18 +1029,24 @@ def assemble_rehearsal_run(
     assembly: AssemblyInputs,
     sidecar: V3Sidecar | None = None,
     original_documents: tuple[tuple[UUID, OpeningOriginalDocumentV1], ...] = (),
+    historical_discharges: tuple[
+        tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
+    ] = (),
 ) -> OpeningRehearsalRunV1:
     """Build a candidate run, preserving only explicitly supplied typed originals.
 
     This mapping is not qualification. The caller must independently qualify
     the exact command through the existing importer verifier. The source CLI
-    supplies no originals, and cash/discharge synthesis remains unsupported.
+    supplies no originals unless explicitly given an aligned sidecar. Cash and
+    discharge synthesis remain unsupported.
 
     The optional sidecar carries the exclusion/blocking identities the closed
     V2 projection cannot hold; without it those invoices safely degrade to
     blocking (unclassified) dispositions and remain counted blockers.
     """
-    return _assemble(obs, sidecar or V3Sidecar(), assembly, original_documents).run
+    return _assemble(
+        obs, sidecar or V3Sidecar(), assembly, original_documents, historical_discharges
+    ).run
 
 
 def _dropped_source_fields(payload: Mapping[str, object]) -> tuple[str, ...]:
@@ -1046,6 +1122,9 @@ def rehearsal_census(
     *,
     assembly: AssemblyInputs,
     original_documents: tuple[tuple[UUID, OpeningOriginalDocumentV1], ...] = (),
+    historical_discharges: tuple[
+        tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
+    ] = (),
 ) -> OpeningRehearsalCensusV1:
     """Run the census, preserving independently supplied typed originals.
 
@@ -1054,7 +1133,9 @@ def rehearsal_census(
     V3 historical-unavailable observations remain visible in the artifact.
     """
     obs, sidecar = load_sub_observation(payload)
-    outcome = _assemble(obs, sidecar, assembly, original_documents)
+    outcome = _assemble(
+        obs, sidecar, assembly, original_documents, historical_discharges
+    )
     run = outcome.run
     report = report_opening_rehearsal(run)
     raw_by_partition = dict(outcome.raw_blockers)
@@ -1170,6 +1251,30 @@ def rehearsal_census(
     )
 
 
+def load_original_evidence(
+    payload: object, *, census_bytes: bytes, assembly: AssemblyInputs
+) -> OpeningRehearsalOriginalEvidenceV1:
+    """Require exact raw census and canonical assembly alignment, not authority."""
+    try:
+        evidence = parse_opening_rehearsal_original_evidence(payload)
+    except OpeningEvidenceError:
+        raise _malformed("malformed_original_evidence") from None
+    if (
+        evidence.census_sha256 != hashlib.sha256(census_bytes).hexdigest()
+        or evidence.assembly_digest != assembly.assembly_digest
+    ):
+        raise _malformed("malformed_original_evidence")
+    return evidence
+
+
+def _read_census(path: Path) -> tuple[bytes, Mapping[str, object]]:
+    try:
+        raw = path.read_bytes()
+        return raw, _mapping(parse_opening_rehearsal_json(raw.decode("utf-8")))
+    except (OSError, UnicodeDecodeError, OpeningEvidenceError):
+        raise _malformed() from None
+
+
 def _read_json(path: Path, code: str = "malformed_input") -> Mapping[str, object]:
     try:
         text = path.read_text(encoding="utf-8")
@@ -1191,12 +1296,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="Assembly declaration JSON; the adapter refuses to run without it",
     )
+    parser.add_argument(
+        "--original-evidence",
+        help="Optional V1 original evidence aligned to census bytes and assembly",
+    )
     parser.add_argument("--out", help="Write the artifact here instead of stdout")
     args = parser.parse_args(argv)
     try:
-        census_payload = _read_json(Path(args.census))
+        census_bytes, census_payload = _read_census(Path(args.census))
         assembly = load_assembly(_read_json(Path(args.assembly), "malformed_assembly"))
-        artifact = rehearsal_census(census_payload, assembly=assembly)
+        originals = ()
+        histories = ()
+        if args.original_evidence:
+            evidence = load_original_evidence(
+                _read_json(Path(args.original_evidence), "malformed_original_evidence"),
+                census_bytes=census_bytes,
+                assembly=assembly,
+            )
+            originals = tuple(
+                (row.source_invoice_id, row.original) for row in evidence.invoices
+            )
+            histories = tuple(
+                (row.source_invoice_id, row.historical_discharges)
+                for row in evidence.invoices
+            )
+        artifact = rehearsal_census(
+            census_payload,
+            assembly=assembly,
+            original_documents=originals,
+            historical_discharges=histories,
+        )
     except AdapterInputError as exc:
         print(render_opening_rehearsal_refusal(exc.code))
         return 2
