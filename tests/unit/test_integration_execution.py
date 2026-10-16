@@ -554,3 +554,39 @@ def test_integration_scopes_are_namespaced() -> None:
     for bad in ("", "delivery.inbound", "Delivery Inbound"):
         with pytest.raises(ValueError):
             scope_for(bad)
+
+
+def test_trusted_no_config_context_is_recorded_without_inventing_a_revision(
+    db: Session,
+    installation: ConnectorInstallation,
+    binding: CapabilityBinding,
+) -> None:
+    from dataclasses import FrozenInstanceError
+
+    from dotmac_integration.execution import (
+        ReceiptVerificationOrigin,
+        receipt_verification_origin,
+    )
+
+    origin = ReceiptVerificationOrigin(
+        installation_id=installation.id,
+        capability_binding_id=binding.id,
+        connector_key=installation.connector_key,
+        manifest_digest=installation.manifest_digest,
+        config_revision_id=None,
+        verification_mode="ingress",
+    )
+    receipt, created = receive_verified(
+        db,
+        installation_id=installation.id,
+        capability_binding_id=binding.id,
+        provider_event_id="no-config",
+        event_type="received",
+        payload={},
+        verification_origin=origin,
+    )
+    assert created
+    assert receipt_verification_origin(receipt) == origin
+    assert receipt.verification_config_revision_id is None
+    with pytest.raises(FrozenInstanceError):
+        origin.config_revision_id = uuid.uuid4()

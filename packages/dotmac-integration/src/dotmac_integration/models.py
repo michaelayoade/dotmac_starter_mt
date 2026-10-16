@@ -517,6 +517,25 @@ class InboxReceipt(Base):
             "'reconciliation_required', 'dead_letter')",
             name="ck_inbox_receipts_state",
         ),
+        CheckConstraint(
+            "(verification_connector_key IS NULL "
+            "AND verification_manifest_digest IS NULL "
+            "AND verification_config_revision_id IS NULL "
+            "AND verification_mode IS NULL) OR "
+            "(verification_connector_key IS NOT NULL "
+            "AND length(trim(verification_connector_key)) > 0 "
+            "AND verification_connector_key = trim(verification_connector_key) "
+            "AND verification_manifest_digest IS NOT NULL "
+            "AND length(verification_manifest_digest) = 64 "
+            "AND verification_mode IS NOT NULL "
+            "AND verification_mode IN ('ingress', 'poll'))",
+            name="ck_inbox_receipts_verification_origin",
+        ),
+        CheckConstraint(
+            "verification_manifest_digest IS NULL "
+            "OR verification_manifest_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_inbox_receipts_origin_digest",
+        ).ddl_if(dialect="postgresql"),
         Index("ix_inbox_receipts_state_received", "state", "received_at"),
         # The claim predicate's index. A sweeper scanning for due, unleased
         # receipts is the hottest read on this table once delivery is running.
@@ -548,6 +567,18 @@ class InboxReceipt(Base):
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
     headers_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
+    #: Original engine context, never copied from payload or today's binding.
+    #: Null tuple is legacy/unknown, not an invitation to backfill.
+    verification_connector_key: Mapped[str | None] = mapped_column(
+        String(120), nullable=True
+    )
+    verification_manifest_digest: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    verification_config_revision_id: Mapped[UUID | None] = mapped_column(
+        Uuid(), nullable=True
+    )
+    verification_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     state: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default="verified"

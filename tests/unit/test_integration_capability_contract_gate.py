@@ -687,6 +687,16 @@ class _Address:
         self.installation_id = binding.installation_id
         self.binding_id = binding.id
         self.capability_id = FAKE_CAPABILITY
+        from dotmac_integration.execution import ReceiptVerificationOrigin
+
+        self.verification_origin = ReceiptVerificationOrigin(
+            installation_id=self.installation_id,
+            capability_binding_id=self.binding_id,
+            connector_key="conformance_fake",
+            manifest_digest="d" * 64,
+            config_revision_id=None,
+            verification_mode="ingress",
+        )
 
 
 def _events(payload: dict[str, object]) -> tuple[InboundEvent, ...]:

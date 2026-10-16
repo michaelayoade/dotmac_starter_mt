@@ -44,8 +44,9 @@ the risk is not a double call but a silently skipped window.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 from dotmac_integration.models import (
@@ -67,6 +68,9 @@ __all__ = [
     "ExecutionError",
     "LostClaim",
     "ProviderEventIdentityCollision",
+    "ReceiptVerificationOrigin",
+    "ReceiptVerificationOriginConflict",
+    "receipt_verification_origin",
     "advance_checkpoint",
     "claim_delivery",
     "claim_receipt",
@@ -88,6 +92,85 @@ class ProviderEventIdentityCollision(ExecutionError):
     Not a duplicate. A provider reusing an event id for different content is a
     provider defect, and deduping it would discard the second payload silently.
     """
+
+
+class ReceiptVerificationOriginConflict(ExecutionError):
+    """An event identity was retried with different or unknown original context."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptVerificationOrigin:
+    """Original engine verification context; never merchant or cash proof.
+
+    No payload, configuration, secret reference or material belongs here.
+    A null config revision faithfully records a prepared no-config context.
+    """
+
+    installation_id: UUID
+    capability_binding_id: UUID
+    connector_key: str
+    manifest_digest: str
+    config_revision_id: UUID | None
+    verification_mode: Literal["ingress", "poll"]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.installation_id, UUID) or not isinstance(
+            self.capability_binding_id, UUID
+        ):
+            raise ValueError("receipt origin requires installation and binding UUIDs")
+        if self.config_revision_id is not None and not isinstance(
+            self.config_revision_id, UUID
+        ):
+            raise ValueError("receipt origin config revision must be a UUID or null")
+        if (
+            not isinstance(self.connector_key, str)
+            or not self.connector_key.strip()
+            or self.connector_key != self.connector_key.strip()
+            or len(self.connector_key) > 120
+        ):
+            raise ValueError("receipt origin connector key is invalid")
+        if (
+            not isinstance(self.manifest_digest, str)
+            or len(self.manifest_digest) != 64
+            or any(char not in "0123456789abcdef" for char in self.manifest_digest)
+        ):
+            raise ValueError("receipt origin manifest digest must be lowercase SHA-256")
+        if self.verification_mode not in ("ingress", "poll"):
+            raise ValueError("receipt origin mode must be ingress or poll")
+
+
+def receipt_verification_origin(
+    receipt: InboxReceipt,
+) -> ReceiptVerificationOrigin | None:
+    """Internal typed read of recorded context; legacy unknown stays unknown.
+
+    Reads only the receipt. Current bindings/configuration can never supply
+    missing historical evidence, even after an installation rotates.
+    """
+    if receipt.verification_connector_key is None:
+        if any(
+            value is not None
+            for value in (
+                receipt.verification_manifest_digest,
+                receipt.verification_config_revision_id,
+                receipt.verification_mode,
+            )
+        ):
+            raise ExecutionError("receipt verification origin is incomplete")
+        return None
+    if (
+        receipt.verification_manifest_digest is None
+        or receipt.verification_mode not in ("ingress", "poll")
+    ):
+        raise ExecutionError("receipt verification origin is incomplete")
+    return ReceiptVerificationOrigin(
+        installation_id=receipt.installation_id,
+        capability_binding_id=receipt.capability_binding_id,
+        connector_key=receipt.verification_connector_key,
+        manifest_digest=receipt.verification_manifest_digest,
+        config_revision_id=receipt.verification_config_revision_id,
+        verification_mode=cast(Literal["ingress", "poll"], receipt.verification_mode),
+    )
 
 
 class DeliveryIdempotencyConflict(ExecutionError):
@@ -146,15 +229,26 @@ def receive_verified(
     event_type: str,
     payload: Any,
     headers: dict[str, object] | None = None,
+    verification_origin: ReceiptVerificationOrigin | None = None,
 ) -> tuple[InboxReceipt, bool]:
     """Record a verified inbound event. Returns `(receipt, is_new)`.
 
     "Verified" is the caller's assertion that authenticity was already checked —
     this function records, it does not authenticate. Signature verification
     belongs to the connector that knows the provider's scheme.
+
+    The engine supplies ``verification_origin`` from its detached prepared
+    context. Omission preserves the old trusted-receiver API as explicitly
+    unrecorded provenance; it never resolves today's configuration. A replay
+    requires the same original context, including unknown versus recorded.
     """
     from sqlalchemy import select
 
+    if verification_origin is not None and (
+        verification_origin.installation_id != installation_id
+        or verification_origin.capability_binding_id != capability_binding_id
+    ):
+        raise ReceiptVerificationOriginConflict("receipt origin address differs")
     event_id = provider_event_id.strip()
     if not event_id:
         raise ExecutionError("provider_event_id is required to deduplicate")
@@ -177,6 +271,13 @@ def receive_verified(
                 "different payload. This is a provider identity collision, not "
                 "a redelivery — refusing to discard the new content"
             )
+        if (
+            existing.installation_id != installation_id
+            or receipt_verification_origin(existing) != verification_origin
+        ):
+            raise ReceiptVerificationOriginConflict(
+                "provider event has a different original verification context"
+            )
         return existing, False
 
     receipt = InboxReceipt(
@@ -187,6 +288,18 @@ def receive_verified(
         payload_digest=digest,
         payload_json=payload if isinstance(payload, dict) else {"value": payload},
         headers_json=headers,
+        verification_connector_key=(
+            verification_origin.connector_key if verification_origin else None
+        ),
+        verification_manifest_digest=(
+            verification_origin.manifest_digest if verification_origin else None
+        ),
+        verification_config_revision_id=(
+            verification_origin.config_revision_id if verification_origin else None
+        ),
+        verification_mode=(
+            verification_origin.verification_mode if verification_origin else None
+        ),
         state="verified",
     )
     db.add(receipt)
