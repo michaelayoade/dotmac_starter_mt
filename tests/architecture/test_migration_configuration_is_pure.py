@@ -37,6 +37,9 @@ def test_import_guard_notices_a_planted_settings_dependency() -> None:
 
 
 _PROBE = """
+import importlib.util
+import sys
+
 import sqlalchemy
 import sqlalchemy.orm
 
@@ -47,14 +50,32 @@ sqlalchemy.create_engine = forbidden
 sqlalchemy.engine.create_engine = forbidden
 sqlalchemy.orm.sessionmaker = forbidden
 sqlalchemy.orm.Session.__init__ = forbidden
+
+# Load the exact seam without executing the parent package's public exports.
+# The parent imports assembly -> session_runtime for the inert runtime class;
+# that is separate from this module's stricter import-dependency contract.
+spec = importlib.util.spec_from_file_location(
+    "migration_configuration_purity_probe", sys.argv[1]
+)
+assert spec is not None and spec.loader is not None
+configuration = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(configuration)
+assert "dotmac_kernel.db" not in sys.modules
+assert "dotmac_kernel.session_runtime" not in sys.modules
+assert configuration.select_migration_database_url(
+    migration_database_url="held-url"
+) == "held-url"
+
+# Also prove the real supported import succeeds under the construction traps,
+# including the parent initializer. Importing an inert class is permitted;
+# constructing an engine/session remains forbidden throughout both layers.
 from dotmac_kernel.migrations.configuration import (
     select_migration_database_url,
     set_alembic_database_url,
 )
-import sys
 assert "dotmac_kernel.db" not in sys.modules
-assert "dotmac_kernel.session_runtime" not in sys.modules
 assert select_migration_database_url(migration_database_url="held-url") == "held-url"
+print("migration configuration import passed")
 """
 
 
@@ -65,7 +86,7 @@ def _probe(source: str) -> subprocess.CompletedProcess[str]:
         if key not in {"DATABASE_URL", "MIGRATION_DATABASE_URL"}
     }
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-c", source],
+        [sys.executable, "-c", source, str(MODULE)],
         capture_output=True,
         text=True,
         env=env,
@@ -77,6 +98,7 @@ def _probe(source: str) -> subprocess.CompletedProcess[str]:
 def test_configuration_import_constructs_no_engine_or_session() -> None:
     result = _probe(_PROBE)
     assert result.returncode == 0, result.stderr
+    assert result.stdout == "migration configuration import passed\n"
 
 
 @pytest.mark.parametrize(
@@ -85,4 +107,5 @@ def test_configuration_import_constructs_no_engine_or_session() -> None:
 def test_runtime_probe_notices_planted_runtime_construction(violation: str) -> None:
     result = _probe(_PROBE + f"\n{violation}\n")
     assert result.returncode != 0
+    assert result.stdout == "migration configuration import passed\n"
     assert "constructed a database runtime" in result.stderr
