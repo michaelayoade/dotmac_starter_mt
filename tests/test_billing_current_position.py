@@ -79,6 +79,7 @@ def test_position_requires_readwrite_readcommitted(scratch, plane, mode):
         if mode == "READ ONLY":
             db.execute(text("SET TRANSACTION READ ONLY"))
         else:
+            db.rollback()
             db.connection(execution_options={"isolation_level": mode})
         with pytest.raises(BillingRuleViolation):
             get_current_receivable_position(

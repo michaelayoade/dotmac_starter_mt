@@ -1076,7 +1076,7 @@ def test_unearmarked_backing_removal_requires_zero_consumption_and_retains_histo
         change = ReversePostingGroupCommand(backing_id, b.NOW, str(uuid4()))
         with pytest.raises(BillingRuleViolation) as refused:
             service.reverse_posting_group(db, scope=scope, command=change)
-        assert refused.value.code == "settlement_backing_consumed"
+        assert refused.value.code == "billing.settlement_backing_consumed"
         service.deallocate_settlement(
             db,
             scope=scope,

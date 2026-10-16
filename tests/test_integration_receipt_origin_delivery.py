@@ -43,6 +43,26 @@ from tests.unit.test_integration_ingress import (  # noqa: F401
 
 @pytest.mark.parametrize("wire_version", ["v1", "v2"])
 @pytest.mark.parametrize("recorded_origin", [True, False])
+def _reenable(db, installation, registry) -> None:
+    """Re-run activation after a config rotation demotes the installation.
+
+    put_config_revision invalidates activation by design; a rotated endpoint
+    is eligible again only after the live enable path re-validates it.
+    """
+    from dotmac_integration import enable, set_binding_enabled
+    from dotmac_integration.models import CapabilityBinding
+
+    enable(db, installation, registry=registry)
+    for binding in db.execute(
+        select(CapabilityBinding).where(
+            CapabilityBinding.installation_id == installation.id
+        )
+    ).scalars():
+        set_binding_enabled(
+            db, installation, binding, registry=registry, enabled=True
+        )
+
+
 def test_real_claim_retains_recorded_origin_across_configuration_rotation(
     migrated_scratch: tuple[str, str],  # noqa: F811
     wire_version: str,
@@ -140,6 +160,7 @@ def test_real_claim_retains_recorded_origin_across_configuration_rotation(
             config={"variant": "rotated"},
             secret_refs={"signing": "bao://kv/signing"},
         )
+        _reenable(db, installation, registry)
         rotated = prepare_ingress(db, endpoint=address(key), registry=registry)
         assert rotated.config_revision_id != prepared.config_revision_id
         assert resolve_receipt_origin_evidence(db, receipt_id=receipt_id) == original

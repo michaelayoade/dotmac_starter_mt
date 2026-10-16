@@ -41,6 +41,26 @@ def _event(identity: str) -> tuple[InboundEvent, ...]:
     )
 
 
+def _reenable(db, installation, registry) -> None:
+    """Re-run activation after a config rotation demotes the installation.
+
+    put_config_revision invalidates activation by design; a rotated endpoint
+    is eligible again only after the live enable path re-validates it.
+    """
+    from dotmac_integration import enable, set_binding_enabled
+    from dotmac_integration.models import CapabilityBinding
+
+    enable(db, installation, registry=registry)
+    for binding in db.execute(
+        select(CapabilityBinding).where(
+            CapabilityBinding.installation_id == installation.id
+        )
+    ).scalars():
+        set_binding_enabled(
+            db, installation, binding, registry=registry, enabled=True
+        )
+
+
 def test_first_context_survives_retry_rotation_and_atomic_conflict(
     migrated_scratch: tuple[str, str],  # noqa: F811
 ) -> None:
@@ -67,6 +87,7 @@ def test_first_context_survives_retry_rotation_and_atomic_conflict(
             config={"variant": "rotated"},
             secret_refs={"signing": "bao://kv/signing"},
         )
+        _reenable(db, installation, registry)
         rotated = prepare_ingress(db, endpoint=address(key), registry=registry)
         assert rotated.config_revision_id != prepared.config_revision_id
     fresh_identity = uuid.uuid4().hex
@@ -374,6 +395,7 @@ def test_two_actual_contexts_race_and_the_first_winner_retains_its_origin(
             config={"variant": "rotated"},
             secret_refs={"signing": "bao://kv/signing"},
         )
+        _reenable(db, installation, registry)
         rotated = prepare_ingress(db, endpoint=address(key), registry=registry)
     rendezvous = threading.Barrier(2)
 
@@ -669,6 +691,7 @@ def test_mutable_prepared_inputs_cannot_retain_original_digest(
             config={"nested": {"values": [1]}},
             secret_refs={"signing": "bao://kv/signing"},
         )
+        _reenable(db, installation, registry)
         if mode == "poll":
             registration = ensure_polling_checkpoint(
                 db,

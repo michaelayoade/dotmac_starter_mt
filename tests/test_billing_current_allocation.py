@@ -284,6 +284,7 @@ def test_current_observation_refuses_stale_snapshot_isolation(
 ):
     url, scope, request, _ = _setup(scratch, plane)
     with billing._session(url, scope) as db:
+        db.rollback()
         db.connection(execution_options={"isolation_level": isolation})
         with pytest.raises(BillingRuleViolation, match="READ COMMITTED"):
             get_current_settlement_allocation(db, scope=scope, request=request)

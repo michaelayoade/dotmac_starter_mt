@@ -223,6 +223,7 @@ def test_current_draw_refuses_stale_or_readonly_transactions(scratch, plane, mod
         if mode == "READ ONLY":
             db.execute(text("SET TRANSACTION READ ONLY"))
         else:
+            db.rollback()
             db.connection(execution_options={"isolation_level": mode})
         with pytest.raises(BillingRuleViolation, match="read-write READ COMMITTED"):
             get_current_cash_credit_draw(db, scope=scope, request=request)
