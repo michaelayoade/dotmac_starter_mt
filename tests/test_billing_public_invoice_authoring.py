@@ -42,9 +42,8 @@ from tests import test_billing_isolation as billing
 def scratch():
     # Extend the existing real migrated Billing scratch database with Numbering
     # through its public lineage, never metadata.create_all or handwritten DDL.
-    from alembic.config import Config
-
     from alembic import command
+    from alembic.config import Config
 
     planes = (ModulePlane.TENANT, ModulePlane.PLATFORM)
     with billing._scratch_database(planes) as urls:
