@@ -384,7 +384,7 @@ def resolve_receipt_origin_evidence(
         raise DeliveryError("original receipt is not retained")
     # The existing owner reads these attributes only; a scalar Row supplies the
     # same shape without consulting or refreshing a caller's dirty ORM entity.
-    origin = receipt_verification_origin(receipt)  # type: ignore[arg-type]
+    origin = receipt_verification_origin(receipt)
     if origin is None:
         return None
     return ReceiptOriginEvidence(
@@ -694,7 +694,7 @@ def _wire_schema_version(destination: TrustedDestination) -> str:
     version = getattr(descriptor, "wire_schema_version", None)
     if version is None:
         return PRODUCT_OBSERVATION_SCHEMA_VERSION
-    if version not in (
+    if not isinstance(version, str) or version not in (
         PRODUCT_OBSERVATION_SCHEMA_VERSION,
         PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION,
         "dotmac.io/integrator-observation-envelope/v1",

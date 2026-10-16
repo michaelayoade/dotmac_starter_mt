@@ -7,13 +7,14 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from decimal import Decimal, localcontext
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, NoReturn, ParamSpec, TypeVar, cast
 from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import Scope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.money import Money
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from dotmac_billing import models
@@ -28,6 +29,7 @@ from dotmac_billing.commands import (
 from dotmac_billing.contracts import AcceptSettlementV1, SettlementFundingLane
 from dotmac_billing.earmark_authority import (
     CorrectSettlementEarmarkV1,
+    EarmarkChange,
     EarmarkCorrectionVerificationRequestV1,
     EarmarkCorrectionVerificationV1,
     EarmarkCorrectionVerifier,
@@ -45,6 +47,7 @@ from dotmac_billing.earmark_contracts import (
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
 from dotmac_billing.opening_cash_contracts import OpeningCashEffectV1
 from dotmac_billing.opening_commands import ReverseCashCreditDrawV1
+from dotmac_billing.opening_queries import get_opening_cash_lot_position
 
 _VERIFIED = object()
 _P = ParamSpec("_P")
@@ -60,7 +63,7 @@ def _exact_capacity(function: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapped
 
 
-def _fail(code: str, message: str) -> None:
+def _fail(code: str, message: str) -> NoReturn:
     raise BillingRuleViolation(code, message)
 
 
@@ -178,7 +181,10 @@ def _touch_account(db: Session, scope: Scope, account_id: UUID) -> None:
     )
     if isinstance(scope, TenantScope):
         statement = statement.where(model.tenant_id == scope.tenant_id)
-    if db.execute(statement).rowcount != 1:
+    result = db.execute(statement)
+    if not isinstance(result, CursorResult):
+        _fail("earmark_corrupt", "account serialization did not return a DML result")
+    if result.rowcount != 1:
         _fail("not_found", "billing account was not found")
 
 
@@ -398,7 +404,7 @@ def get_funding_availability(
             plane.opening_lot.billing_account_id == account.id,
         )
         for lot_row in sorted(lots, key=lambda item: str(item["id"])):
-            position = service.get_opening_cash_lot_position(
+            position = get_opening_cash_lot_position(
                 db, scope=scope, lot_id=lot_row["id"]
             )
             if (
@@ -464,7 +470,9 @@ class _EarmarkPermit:
     verification: EarmarkCorrectionVerificationV1
 
 
-def _check_permit(permit: _EarmarkPermit | None, scope: Scope, command: object) -> None:
+def _check_permit(
+    permit: _EarmarkPermit | None, scope: Scope, command: EarmarkChange
+) -> None:
     if permit is not None and (
         type(permit) is not _EarmarkPermit
         or permit.token is not _VERIFIED
@@ -875,13 +883,13 @@ def guard_post_group(
                 db, scope=scope, model=plane.group, row_id=current.reverses_group_id
             )
         if current.group_kind == "settlement_accepted":
-            candidates = _rows(
+            settlement_candidates = _rows(
                 db,
                 scope,
                 plane.settlement,
                 plane.settlement.billing_account_id == account_id,
             )
-            for settlement_row in candidates:
+            for settlement_row in settlement_candidates:
                 if current.source_ref != f"settlement:{settlement_row['id']}":
                     continue
                 settlement = service._one(
@@ -1031,14 +1039,16 @@ def correct_settlement_earmark(
         _fail(
             "earmark_account_mismatch", "correction claims must belong to one account"
         )
-    operation = "billing.earmark.correct." + type(command.change).__name__ + ".v1"
-    digest = fingerprint_of({"domain": operation, "command": asdict(command)})
-    request = EarmarkCorrectionVerificationRequestV1(operation, command, digest, facts)
+    operation_scope = "billing.earmark.correct." + type(command.change).__name__ + ".v1"
+    digest = fingerprint_of({"domain": operation_scope, "command": asdict(command)})
+    request = EarmarkCorrectionVerificationRequestV1(
+        operation_scope, command, digest, facts
+    )
     verdict = verifier.verify_correction(request)
     fingerprints = tuple((item.earmark_id, item.evidence_fingerprint) for item in facts)
     if (
         type(verdict) is not EarmarkCorrectionVerificationV1
-        or verdict.operation != operation
+        or verdict.operation != operation_scope
         or verdict.command_digest != digest
         or verdict.claim_fingerprints != fingerprints
         or type(verdict.authorization_proof_ref) is not str
@@ -1055,7 +1065,7 @@ def correct_settlement_earmark(
         scope,
         fingerprint_of(asdict(command.change)),
         digest,
-        operation,
+        operation_scope,
         fingerprints,
         verdict,
     )
@@ -1064,18 +1074,30 @@ def correct_settlement_earmark(
     if isinstance(change, ReleaseEarmarkV1 | ReverseEarmarkReleaseV1):
         service._require_scope_matches(routed=scope, declared=change.scope)
         return _release_change(db, scope=scope, command=change, permit=permit)
-    owners = {
-        DeallocationCommand: service.deallocate_settlement,
-        ReallocationCommand: service.reallocate_settlement,
-        RefundCommand: service.refund_settlement,
-        ReversePostingGroupCommand: service.reverse_posting_group,
-        ReverseCashCreditDrawV1: service.reverse_cash_credit_draw,
-    }
 
     def operation(session: Session) -> dict[str, object]:
-        group = owners[type(change)](
-            session, scope=scope, command=change, _earmark_permit=permit
-        )
+        if isinstance(change, DeallocationCommand):
+            group = service.deallocate_settlement(
+                session, scope=scope, command=change, _earmark_permit=permit
+            )
+        elif isinstance(change, ReallocationCommand):
+            group = service.reallocate_settlement(
+                session, scope=scope, command=change, _earmark_permit=permit
+            )
+        elif isinstance(change, RefundCommand):
+            group = service.refund_settlement(
+                session, scope=scope, command=change, _earmark_permit=permit
+            )
+        elif isinstance(change, ReversePostingGroupCommand):
+            group = service.reverse_posting_group(
+                session, scope=scope, command=change, _earmark_permit=permit
+            )
+        elif isinstance(change, ReverseCashCreditDrawV1):
+            group = service.reverse_cash_credit_draw(
+                session, scope=scope, command=change, _earmark_permit=permit
+            )
+        else:
+            _fail("earmark_input_invalid", "unsupported correction command")
         return {"posting_group_id": str(group.id)}
 
     key = (
@@ -1091,12 +1113,15 @@ def correct_settlement_earmark(
         fingerprint=digest,
         operation=operation,
     )
-    return service._one(
+    group = service._one(
         db,
         scope=scope,
         model=service._models(scope).group,
         row_id=UUID(str(outcome.result["posting_group_id"])),
     )
+    if not isinstance(group, models.PostingGroup | models.PlatformPostingGroup):
+        _fail("earmark_corrupt", "correction result is not a posting group")
+    return group
 
 
 @_exact_capacity

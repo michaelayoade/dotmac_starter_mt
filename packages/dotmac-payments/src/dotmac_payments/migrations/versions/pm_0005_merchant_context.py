@@ -6,6 +6,9 @@ Revises: pm_0004_purchase_funding
 
 from __future__ import annotations
 
+from datetime import datetime
+from uuid import UUID
+
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
@@ -21,7 +24,9 @@ _SCHEMA = "mod_payments"
 _TABLES = ("merchant_contexts", "merchant_context_ends")
 
 
-def _review_columns() -> tuple[sa.Column, ...]:
+def _review_columns() -> (
+    tuple[sa.Column[UUID] | sa.Column[str] | sa.Column[datetime], ...]
+):
     return (
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),

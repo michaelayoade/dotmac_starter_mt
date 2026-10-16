@@ -9,6 +9,7 @@ transaction. Callers must admit again before every new financial effect.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from uuid import UUID, uuid4
@@ -45,7 +46,7 @@ from dotmac_payments.service import (
 )
 
 
-def _digest(domain: str, values: list[object]) -> str:
+def _digest(domain: str, values: Sequence[object]) -> str:
     frames = [str(item).encode("utf-8") for item in [domain, *values]]
     return hashlib.sha256(
         b"".join(str(len(item)).encode("ascii") + b":" + item for item in frames)
@@ -341,13 +342,14 @@ def qualify_provider_cash(
         db, scope, ProviderCashQualification.command_id == request.command_id
     )
     if existing:
-        row = existing[0]
+        original = existing[0]
         if (
-            row.original != value
-            or (row.source_namespace, row.source_key, row.source_version) != identity
+            original.original != value
+            or (original.source_namespace, original.source_key, original.source_version)
+            != identity
         ):
             raise Conflict("qualification command replay differs from original cash")
-        return row
+        return original
     _admit_context(db, scope, value)
     if _rows(
         db,

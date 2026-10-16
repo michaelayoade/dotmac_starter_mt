@@ -4635,7 +4635,7 @@ def apply_available_credit(
                 )
                 if quantity == 0:
                     continue
-                amount = money_from_minor(
+                opening_amount = money_from_minor(
                     quantity, account.currency, account.minor_units
                 )
                 effect = _opening_effect(
@@ -4644,7 +4644,7 @@ def apply_available_credit(
                     group_id=group_id,
                     sequence=len(opening) + 1,
                     kind="application",
-                    amount=amount,
+                    amount=opening_amount,
                     source_ref=command.source_ref,
                     request_digest=digest,
                     occurred_at=command.occurred_at,
@@ -4657,7 +4657,7 @@ def apply_available_credit(
                         len(source_order) + 1, None, effect.effect_id
                     )
                 )
-                remaining -= amount.amount
+                remaining -= opening_amount.amount
                 if remaining == 0:
                     break
         if remaining != 0:

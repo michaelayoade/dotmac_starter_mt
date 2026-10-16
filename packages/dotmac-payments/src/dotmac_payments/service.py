@@ -24,7 +24,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -33,6 +32,7 @@ from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.messaging.outbox import enqueue_event
 from dotmac_kernel.money import Currency, Money
 from sqlalchemy import select, text
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -755,7 +755,7 @@ def _merchant_stored_instant(value: object) -> datetime:
     return _utc_moment(value)
 
 
-def _merchant_snapshot(values: Mapping[str, object]) -> MerchantContextV1:
+def _merchant_snapshot(values: RowMapping) -> MerchantContextV1:
     until = values["effective_until"]
     return MerchantContextV1(
         scope=TenantScope(_merchant_uuid(values["tenant_id"])),

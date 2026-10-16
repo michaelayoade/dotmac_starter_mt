@@ -38,6 +38,55 @@ KERNEL_VERSIONS = (
 )
 
 _INTERNAL_RELATIONS = (
+    ("settlement_earmarks", ("billing_account_id",), "billing_accounts", ("id",)),
+    (
+        "settlement_earmarks",
+        ("settlement_id", "billing_account_id"),
+        "confirmed_settlements",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "settlement_earmark_targets",
+        ("billing_account_id",),
+        "billing_accounts",
+        ("id",),
+    ),
+    (
+        "settlement_earmark_targets",
+        ("earmark_id", "billing_account_id"),
+        "settlement_earmarks",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "settlement_earmark_effects",
+        ("billing_account_id",),
+        "billing_accounts",
+        ("id",),
+    ),
+    (
+        "settlement_earmark_effects",
+        ("earmark_id", "billing_account_id"),
+        "settlement_earmarks",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "settlement_earmark_effects",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "settlement_earmark_effects",
+        ("allocation_id", "billing_account_id"),
+        "allocation_effects",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "settlement_earmark_effects",
+        ("original_effect_id", "billing_account_id"),
+        "settlement_earmark_effects",
+        ("id", "billing_account_id"),
+    ),
     ("opening_window_admissions", ("window_id",), "opening_windows", ("id",)),
     (
         "opening_window_admissions",

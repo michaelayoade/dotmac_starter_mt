@@ -622,8 +622,8 @@ and the next gate.
 
 ### [`dotmac-payments`](../packages/dotmac-payments/README.md)
 
-- **Owner:** Payment intent and its confirmation correlation
-- **Contract:** Own the payment intent lifecycle, submitted transfer proof and its review, and the append-only correlation between an intent and an external settlement fact. Payer, purchase/obligation or receivable target and document identifiers are opaque. NOT receivables, settlement allocation, invoice or credit application, bank accounts, general-ledger posting, refunds, provider credentials or provider transport.
+- **Owner:** Payment intent, reviewed merchant context, provider cash qualification and external confirmation correlation
+- **Contract:** Own the payment intent lifecycle, submitted transfer proof and its review, immutable reviewed merchant-context authority, mandatory-authority qualification of original provider cash facts and the append-only correlation between an intent and an external settlement fact. Preserve physical economic identity separately from provenance and require fresh transaction-scoped admission for new financial use. Payer, purchase/obligation or receivable target, document and original transport/configuration identifiers are opaque. Merchant context alone does not qualify cash; an installed authenticated original-evidence authority remains required. NOT receivables, settlement allocation, invoice or credit application, bank accounts, general-ledger posting, refunds, provider credentials or provider transport.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-payments/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_sub`.

@@ -1572,6 +1572,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # FIRST release rather than after an in-place edit forced the issue, which
     # is the only cheap moment to do it: one migration, one digest, no history
     # to reconstruct and no divergence to grandfather.
+    "dotmac-forms-v0.2.0a1": (
+        "dotmac-forms",
+        "95271a1e369e4b19eaae2d475f5d745356f5fdf8",
+        {
+            "fm_0001_forms.py": (
+                "0778d4f950acf049851c6876dcd5d34bb6ef23f37a4dcc35c6af38af3e6b8267"
+            ),
+        },
+    ),
     "dotmac-forms-v0.1.0a1": (
         "dotmac-forms",
         "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",

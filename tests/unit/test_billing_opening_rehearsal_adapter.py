@@ -567,16 +567,65 @@ def test_v3_sidecar_counts_excluded_without_double_counting_eligible():
     )
 
 
-def test_adapter_has_no_canonicalizing_call_of_its_own():
-    """The canonical encodings are package-owned (no tooling ratchet entry)."""
-    tree = ast.parse(ADAPTER_PATH.read_text(encoding="utf-8"))
+def _assert_no_adapter_canonicalization(source):
+    tree = ast.parse(source)
+    parents = {
+        child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
             assert not (
                 name == "dumps" and any(kw.arg == "sort_keys" for kw in node.keywords)
             )
-            assert name not in {"sha256", "fingerprint_of"}
+            assert name != "fingerprint_of"
+            if name == "sha256":
+                # Raw transport binding is not a canonical financial encoding.
+                # Permit only the unchanged census bytes at the evidence boundary.
+                owner = parents.get(node)
+                while owner is not None and not isinstance(
+                    owner, ast.FunctionDef | ast.AsyncFunctionDef
+                ):
+                    owner = parents.get(owner)
+                assert isinstance(owner, ast.FunctionDef)
+                assert owner.name == "load_original_evidence"
+                assert isinstance(node.func, ast.Attribute)
+                assert isinstance(node.func.value, ast.Name)
+                assert node.func.value.id == "hashlib"
+                assert len(node.args) == 1 and not node.keywords
+                assert isinstance(node.args[0], ast.Name)
+                assert node.args[0].id == "census_bytes"
+
+
+def test_adapter_has_no_canonicalizing_call_of_its_own():
+    """Canonical encodings stay package-owned; raw census alignment is local."""
+    _assert_no_adapter_canonicalization(ADAPTER_PATH.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "hashlib.sha256(census_bytes.strip())",
+        "hashlib.sha256(json.dumps(payload).encode())",
+        "fingerprint_of(payload)",
+        "json.dumps(payload, sort_keys=True)",
+    ],
+)
+def test_adapter_canonicalization_guard_rejects_reencoded_or_normalized_input(
+    expression,
+):
+    with pytest.raises(AssertionError):
+        _assert_no_adapter_canonicalization(
+            f"def load_original_evidence(payload, *, census_bytes, assembly):\n"
+            f"    return {expression}\n"
+        )
+
+
+def test_adapter_canonicalization_guard_rejects_raw_hash_outside_evidence_boundary():
+    with pytest.raises(AssertionError):
+        _assert_no_adapter_canonicalization(
+            "def unrelated(census_bytes):\n    return hashlib.sha256(census_bytes)\n"
+        )
 
 
 def test_adapter_digest_is_the_package_digest_and_pinned():
@@ -965,8 +1014,16 @@ def test_cli_original_evidence_reaches_manifest_without_qualification(
     assert seen[0].manifest.receivables[0].original == _explicit_original(payload)
     assert seen[0].manifest.cash_lots == ()
     artifact = json.loads(out.read_text())
-    assert "original_documentary_evidence_unavailable" in _all_codes(artifact)
-    assert "run_blocked" in _all_codes(artifact)
+    # Mapping originals supplies values, not authenticated qualification. The
+    # single-run census reports the missing authority; run_blocked belongs to
+    # the separate three-run comparison contract.
+    assert _all_codes(artifact) == {
+        "original_documentary_evidence_unavailable",
+        "verifier_unavailable",
+    }
+    assert artifact["adapter_blockers"] == []
+    assert artifact["rollup"]["complete_exact_reconciliation"] is False
+    assert all(not partition["admissible"] for partition in artifact["partitions"])
 
 
 @pytest.mark.parametrize(

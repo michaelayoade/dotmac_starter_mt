@@ -655,17 +655,19 @@ def get_current_settlement_allocation(
 
         def net(parent: Any) -> Decimal:
             envelope(parent)
+            amount: object = parent["amount_delta"]
             if (
-                parent["id"] in visited
+                not isinstance(amount, Decimal)
+                or not amount.is_finite()
+                or amount == 0
+                or parent["id"] in visited
                 or len(visited) >= 128
                 or parent["settlement_id"] != request.settlement_id
                 or parent["document_id"] != request.document_id
-                or not parent["amount_delta"].is_finite()
-                or parent["amount_delta"] == 0
             ):
                 refused("allocation inverse lineage is malformed")
             visited.add(parent["id"])
-            total = parent["amount_delta"]
+            total = amount
             children = rows("allocation_effects", offsets_allocation_id=parent["id"])
             reversals = rows(
                 "posting_groups", reverses_group_id=parent["posting_group_id"]

@@ -164,7 +164,7 @@ def _prepared_config_digest(
     if revision.installation_id != installation_id:
         raise ExecutionError("prepared configuration belongs to another installation")
     try:
-        validate_config_revision(config, secret_refs)
+        validate_config_revision(config, dict(secret_refs))
     except ValueError:
         raise ExecutionError("prepared configuration references are invalid") from None
     actual = payload_digest(
@@ -368,7 +368,7 @@ def receive_verified(
                 "different payload. This is a provider identity collision, not "
                 "a redelivery — refusing to discard the new content"
             )
-        stored_origin = receipt_verification_origin(stored)  # type: ignore[arg-type]
+        stored_origin = receipt_verification_origin(stored)
         if (
             stored.installation_id != installation_id
             or stored_origin != verification_origin
