@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
-from dotmac_integration.execution import advance_checkpoint
+from dotmac_integration.execution import ReceiptVerificationOrigin, advance_checkpoint
 from dotmac_integration.ingress import record_batch
 from dotmac_integration.models import (
     CapabilityBinding,
@@ -151,6 +151,18 @@ class PreparedPoll:
     config: dict[str, object]
     secret_refs: dict[str, str]
     config_revision_id: UUID | None
+    manifest_digest: str = ""
+
+    @property
+    def verification_origin(self) -> ReceiptVerificationOrigin:
+        return ReceiptVerificationOrigin(
+            installation_id=self.installation_id,
+            capability_binding_id=self.binding_id,
+            connector_key=self.connector_key,
+            manifest_digest=self.manifest_digest,
+            config_revision_id=self.config_revision_id,
+            verification_mode="poll",
+        )
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -407,6 +419,7 @@ def prepare_poll(
         config=dict((revision.config_json if revision else {}) or {}),
         secret_refs=dict((revision.secret_refs if revision else {}) or {}),
         config_revision_id=revision.id if revision else None,
+        manifest_digest=installation.manifest_digest,
     )
 
 

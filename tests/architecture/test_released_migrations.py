@@ -7342,7 +7342,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ap_0003` records approved-decision withdrawals; still editable until
     # `dotmac-approvals` 0.1.0a7 is tagged.
     "dotmac-approvals": frozenset(),
-    "dotmac-integration": frozenset(),
+    "dotmac-integration": frozenset({"ig_0016_receipt_origin.py"}),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),

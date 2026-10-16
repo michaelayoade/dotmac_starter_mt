@@ -1325,6 +1325,7 @@ def test_two_sessions_racing_one_provider_event_produce_one_typed_refusal(
         binding_id=binding_id,
         connector_key="fake",
         capability_id="conformance.echo.v1",
+        manifest_digest="d" * 64,
     )
     events = (
         InboundEvent(
@@ -1466,6 +1467,7 @@ def test_a_collision_mid_batch_leaves_no_partial_row_in_postgres(
         binding_id=binding_id,
         connector_key="fake",
         capability_id="conformance.echo.v1",
+        manifest_digest="d" * 64,
     )
     events = tuple(
         InboundEvent(provider_event_id=i, event_type="e", payload={"i": i})

@@ -2,16 +2,17 @@
 
 ## Release state — read this before pinning
 
-**Seventeen versions have been released. Pin `0.1.0a17`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a17`; a17 was published, installed back
-from the private index, registered and tagged from exact revision
+**Eighteen versions have been released. Pin `0.1.0a18`.** The a18 publication
+is recorded by release verification records 116–135, including its exact tag
+and receipt. a17 was published, installed back from the private index,
+registered and tagged from exact revision
 `2cab76b442e6cc6c8ed81a409d943ba250351c3d` by release run `33043793199`, whose
 build, publish and verify jobs all succeeded. a16's is `32929018760`, from exact
-revision `dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e`. a17's released migration
-digests are recorded in `tests/architecture/test_released_migrations.py`'s
+revision `dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e`. Released migration
+digests remain recorded in `tests/architecture/test_released_migrations.py`'s
 `RELEASED_TAGS`.
 
-`0.1.0a17` is the latest published version. `0.1.0a16` adds domain-owned
+`0.1.0a18` is the latest published version. `0.1.0a16` adds domain-owned
 payload contracts and durably stores a validated normalized result in
 `ig_0013`, and adds durable polling attempt/failure/backoff evidence with a
 bounded keyset selection in `ig_0014`.
@@ -85,6 +86,23 @@ receipt delivery, retention, the type gate) and each wrote its own section
 before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
+
+## 2026-10-16 correction — a18 released; a19 proposed
+
+The dated a18 entry below records the source state when it was prepared. The
+subsequent a18 release is verified by module-release-verifications 116–135;
+its exact released migration digests remain frozen. The current source proposes
+`0.1.0a19` for receipt-origin metadata that preserves legacy unknown origin.
+It performs no backfill, changes no existing wire contract, and makes no
+cash-qualification claim. a19 remains unpublished and must not be exact-pinned.
+
+## 0.1.0a19 — unreleased
+
+- Preserves receipt origin as unknown for legacy records; it does not backfill
+  historical rows.
+- Adds no change to an existing wire contract and makes no cash-qualification
+  claim.
+- The a18 released migration files and digests remain unchanged.
 
 ## 0.1.0a18 — unreleased
 

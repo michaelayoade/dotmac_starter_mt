@@ -12,8 +12,8 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a17`; `0.1.0a18` is declared and
-unreleased.** Releases a2–a4 implement SPI 1.1;
+**Released: `0.1.0a1` through `0.1.0a18`; `0.1.0a19` is proposed and
+unpublished.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
 which is the authority on what has and has not shipped. a8 adds indexed,
@@ -39,11 +39,13 @@ capability payload contract (or dated schema grace) and independently names the
 wire the assembly must render. The module persists and revalidates both without
 authoring either contract.
 
-**Declared, unpublished `0.1.0a18`:** its source adds additive SPI 1.5's
-provider-neutral plan/apply/observe/cancel contract and SPI 1.6's bounded,
-provider-neutral synchronous REQUEST contract. It adds no
-persistence, migration or assembly wiring. `0.1.0a17` remains the latest
-release; no consumer may exact-pin a18 until the protected release tags it.
+**Released `0.1.0a18`:** it adds SPI 1.5's provider-neutral
+plan/apply/observe/cancel contract and SPI 1.6's bounded synchronous REQUEST
+contract. Its exact release and receipt are recorded in
+module-release-verifications 116–135. The proposed, unpublished `0.1.0a19`
+adds receipt-origin metadata that preserves legacy unknown origin without
+backfill, changes no existing wire contract, and makes no cash-qualification
+claim. Do not exact-pin a19.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to
