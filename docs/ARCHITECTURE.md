@@ -3997,6 +3997,27 @@ does not release receipt identity.
 
 ### Billing historical receivables opening (unpublished a8 candidate)
 
+The same unpublished candidate now includes `bi_0011_settlement_earmarks`.
+Billing owns immutable whole-receipt claims, exact rated-source targets and
+append-only held-capacity effects. Sub retains a restrictive product-to-claim
+FK; it does not own the monetary hold. Public `earmark_settlement`,
+`get_confirmed_settlement` and `get_funding_availability` supply typed boundaries.
+The receipt query observes stored facts and backing; it does not authenticate
+external evidence. Account funding availability includes remaining opening cash
+lots and confirmed receipts, distinguishes held from unrestricted cash, and
+excludes non-cash grants and withholding.
+
+Ordinary money commands discover claims themselves. Exact matching invoice
+targets can consume held funds; corrections require fresh operation-bound
+verification and append linked inverses/releases. The named qualified earmark
+refund consumes held capacity first, then unrestricted capacity; it never edits
+the original claim. Generic allocation/inverse posting also enforces per-source
+and per-invoice room, including unearmarked and mixed/opening sources. Receipt
+backing cannot be removed while consumption remains. A real account row-version
+update serializes these decisions under stale snapshots. Hosted PostgreSQL
+acceptance, publication, product qualification and authority activation remain
+pending; independent source review and static checks do not prove those gates.
+
 `dotmac_billing.service.import_opening_account_v2` owns one atomic pristine
 account/currency import of authenticated historical invoice residuals and
 supported cash. `reverse_opening_account_import_v2` appends a full inverse

@@ -68,6 +68,29 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV1,
     WithholdingTaxLineV1,
 )
+from dotmac_billing.earmark_authority import (
+    CorrectSettlementEarmarkV1,
+    EarmarkCorrectionVerificationRequestV1,
+    EarmarkCorrectionVerificationV1,
+    EarmarkCorrectionVerifier,
+    ReleaseEarmarkV1,
+    ReverseEarmarkReleaseV1,
+)
+from dotmac_billing.earmark_contracts import (
+    ConfirmedSettlementObservationV1,
+    EarmarkSettlementV1,
+    FundingAvailabilityV1,
+    GetConfirmedSettlementV1,
+    GetFundingAvailabilityV1,
+    SettlementEarmarkTargetV1,
+    SettlementEarmarkV1,
+)
+from dotmac_billing.earmarks import (
+    correct_settlement_earmark,
+    earmark_settlement,
+    get_confirmed_settlement,
+    get_funding_availability,
+)
 from dotmac_billing.errors import BillingConflict, BillingError, BillingRuleViolation
 from dotmac_billing.linking import (
     drop_billing_account_link,
@@ -235,6 +258,23 @@ from dotmac_billing.service import issue_rated_invoice
 __version__ = "0.1.0a8"
 
 __all__ = [
+    "ConfirmedSettlementObservationV1",
+    "GetConfirmedSettlementV1",
+    "get_confirmed_settlement",
+    "CorrectSettlementEarmarkV1",
+    "EarmarkCorrectionVerificationRequestV1",
+    "EarmarkCorrectionVerificationV1",
+    "EarmarkCorrectionVerifier",
+    "ReleaseEarmarkV1",
+    "ReverseEarmarkReleaseV1",
+    "EarmarkSettlementV1",
+    "FundingAvailabilityV1",
+    "GetFundingAvailabilityV1",
+    "SettlementEarmarkTargetV1",
+    "SettlementEarmarkV1",
+    "correct_settlement_earmark",
+    "earmark_settlement",
+    "get_funding_availability",
     "IssueRatedInvoiceV1",
     "IssuedRatedInvoiceV1",
     "ObligationSourceRegistry",

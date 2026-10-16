@@ -247,3 +247,8 @@ reason = "Inclusive-tax ordinary-credit fixture contradicts confirmed subtotal=t
 path = "dotmac_starter_mt:packages/dotmac-billing/src/dotmac_billing/service.py:accept_settlement"
 disposition = "port-delta"
 reason = "At accepted 05c6d256, preserve trust/scope/account and historical key/fingerprint/scalar replay; append exact scoped immutable source claim inside existing Kernel idempotent operation. No new confirmation authority or opening funding."
+
+[[source_dispositions]]
+path = "dotmac_sub:app/services/billing/payments.py:4804,5436;app/services/billing/account_credit.py:449;app/services/billing/_common.py:245,285;tests/test_prepaid_period_purchase_safety.py:144"
+disposition = "port-delta"
+reason = "Whole-receipt purchase reservation, matching-purchase allocation and held-versus-spendable credit algorithms qualify a Billing-core economic earmark. Preserve optional-consequence rollback/retry, exact Money and immutable linked corrections; exclude mutable legacy balances and product-specific module-table triggers. Sub694 remains a product source link. See the 2026-10-16 purchase-funding earmark inventory in billing-extraction-dossier.md; implementation, hosted acceptance, publication and activation remain separate."

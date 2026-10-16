@@ -208,6 +208,42 @@ def test_inverse_backing_and_unlinked_reallocation_fail_closed(scratch, plane, f
                         group_model.group_kind == "settlement_accepted",
                     )
                 ).scalar_one()
+                # A receipt cannot lose its backing while its money still
+                # covers an invoice. Restore the cash first through a linked
+                # deallocation, then retain the backing inverse as history.
+                with pytest.raises(
+                    BillingRuleViolation, match="undo receipt consumption"
+                ):
+                    service.reverse_posting_group(
+                        db,
+                        scope=scope,
+                        command=ReversePostingGroupCommand(
+                            target, billing.NOW, str(uuid4())
+                        ),
+                    )
+                assert (
+                    get_current_settlement_allocation(
+                        db, scope=scope, request=request
+                    ).state
+                    == "current"
+                )
+                allocation_model = (
+                    models.AllocationEffect
+                    if plane == "tenant"
+                    else models.PlatformAllocationEffect
+                )
+                original = db.execute(
+                    select(allocation_model.id).where(
+                        allocation_model.posting_group_id == request.posting_group_id
+                    )
+                ).scalar_one()
+                service.deallocate_settlement(
+                    db,
+                    scope=scope,
+                    command=DeallocationCommand(
+                        original, request.amount, billing.NOW, str(uuid4())
+                    ),
+                )
             service.reverse_posting_group(
                 db,
                 scope=scope,

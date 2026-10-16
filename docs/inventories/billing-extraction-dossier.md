@@ -930,3 +930,61 @@ backend lock waits in both directions (observation waits for committed correctio
 correction waits for the product-decision transaction). Local validation is
 static only; runtime acceptance, package
 publication, exact consumer pinning and installation activation remain separate.
+
+### 2026-10-16 — purchase funding earmarks (implementation inventory)
+
+The concrete consumer is Sub's accepted-quote prepaid purchase. Cash and its
+selected source survive optional invoice/allocation/entitlement rollback; retry
+must use that same source. The qualifying algorithms and guards are in Sub
+`PaymentAllocations._available_amount` (`billing/payments.py:5436`), purchase
+allocation affinity (`:4804`), `_source_payments` (`billing/account_credit.py:449`)
+and reserved versus spendable credit (`billing/_common.py:245,285`).
+`tests/test_prepaid_period_purchase_safety.py:144` exercises cash/reservation
+retention, zero unrelated spending and recovery using the original receipt.
+These observations were inspected in the cached Sub source and are not runtime
+or production acceptance.
+
+The prospective Sub694 selected-settlement FK is a product link, not a Billing
+capacity restriction. Existing Billing explicit allocation, refund and reversal
+commands can consume or invalidate that source without consulting the link.
+The actual consumer uses PREPAID_FUNDING; today's pooled available-credit draw
+filters AVAILABLE_CREDIT and does not consume that prepaid source. Billing's
+prepaid-funding position nevertheless has no held/unrestricted distinction.
+
+Under ADR 0020's funding-position, allocation and correction ownership, extract
+a whole-settlement economic earmark into the existing Billing core. Preserve
+Sub's product selection and optional-consequence transaction semantics. Do not
+copy legacy mutable balance fields, attach Sub financial-policy triggers to
+module-owned tables, add a reservation module, or import Sub into Billing.
+
+The source contract binds the exact original unused settlement/account/Money,
+declared producer identity and immutable rated-obligation source targets with
+exact amounts. Targets may be empty for an exceptional capture held for review.
+Claims and capacity attribution are append-only; corrections use linked facts
+and fresh operation-qualified authority. Every existing monetary mutation owner
+must discover the claim, including allocation, deallocation, reallocation,
+refund and reversal ancestry. Unrestricted capacity is actual unspent capacity
+minus still-held capacity; spending already released capacity must not subtract
+from held capacity again. Historical position facts retain their original
+meaning; a typed availability query supplies held/unrestricted values and a
+watermark covering both monetary and earmark facts.
+
+Required hosted proofs include both migrated planes, exact target/replay and
+wrong-target refusal, ordinary correction refusal and authorized immutable
+inverses, source/correction races, account rollback, and Sub's original cash plus
+earmark surviving optional issuance failure. Published migrations remain frozen.
+This inventory precedes implementation; no installed contract, package release,
+positive correction verifier or production activation is claimed.
+
+The source review also found a generic inverse gap in the existing clean core:
+`_reverse_group` negated allocation effects without a per-invoice room check.
+After deallocation and another receipt funding that invoice, reversing the
+deallocation could overcover it while a second open invoice kept aggregate
+account receivables nonnegative. Aggregate position validation is insufficient.
+The source change therefore guards source and document capacity for all affected
+postings, including unearmarked sources and opening/mixed inverses. Removing
+receipt backing requires zero remaining consumption. Deallocation follows linked
+inverse descendants so legitimate restored funding can be corrected again.
+The current-allocation test now refuses backing removal while its allocation
+remains, then proves the linked deallocation and backing inverse sequence.
+Authored regressions and independent source review are not hosted acceptance.
