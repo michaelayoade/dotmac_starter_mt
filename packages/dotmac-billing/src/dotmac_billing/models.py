@@ -370,6 +370,13 @@ class DocumentLine(Base, _TenantRow, _DocumentLineColumns):
         UniqueConstraint("tenant_id", "id", name="uq_document_lines_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
+            "id",
+            "document_id",
+            "billing_account_id",
+            name="uq_document_lines_source_key",
+        ),
+        UniqueConstraint(
+            "tenant_id",
             "document_id",
             "line_number",
             name="uq_document_lines_tenant_line",
@@ -412,6 +419,12 @@ class PlatformDocumentLine(Base, _DocumentLineColumns):
             "document_id", "line_number", name="uq_platform_document_lines_line"
         ),
         UniqueConstraint("obligation_id", name="uq_platform_document_lines_obligation"),
+        UniqueConstraint(
+            "id",
+            "document_id",
+            "billing_account_id",
+            name="uq_platform_document_lines_source_key",
+        ),
         schema_table_args(SCHEMA),
     )
 
