@@ -16,19 +16,12 @@
 
 ## Release state — read this before pinning
 
-**Seventeen versions have been released. Pin `0.1.0a17`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a17`; a17 was published, installed back
-from the private index, registered and tagged from exact revision
-`2cab76b442e6cc6c8ed81a409d943ba250351c3d` by release run `33043793199`, whose
-build, publish and verify jobs all succeeded. a16's is `32929018760`, from exact
-revision `dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e`. a17's released migration
-digests are recorded in `tests/architecture/test_released_migrations.py`'s
-`RELEASED_TAGS`.
-
-`0.1.0a17` is the latest published version. `0.1.0a16` adds domain-owned
-payload contracts and durably stores a validated normalized result in
-`ig_0013`, and adds durable polling attempt/failure/backoff evidence with a
-bounded keyset selection in `ig_0014`.
+**Published adopter baseline: `0.1.0a18`.** Its tag peels to
+`a7dc7a41d11c37a1b93d8e307e80731ce3275f11`, verified by run
+`37612462253`. The current `0.1.0a18+dev` source adds held-key product-query
+authentication and is unpublished. A fresh numeric allocation, protected
+publication, installed-byte verification and release record are required before
+an adopter can consume that addition.
 
 `0.1.0a17` is RELEASED — tagged `dotmac-integration-v0.1.0a17` on 2026-08-27,
 peeling to `2cab76b442e6cc6c8ed81a409d943ba250351c3d`. It adds authenticated
@@ -100,11 +93,10 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a18 — unreleased
+## 0.1.0a18 — RELEASED
 
-a17 is published (tag `dotmac-integration-v0.1.0a17`); a18 was allocated
-ahead of source so the durable provisioning-runtime work could not share a
-version number with a17's published contract. That work has now landed:
+Verified publication run `37612462253` binds this release to
+`a7dc7a41d11c37a1b93d8e307e80731ce3275f11`. Its additions include:
 
 - Adds **SPI 1.5**: a fourth closed `ConnectorMode`, `PROVISION`, with one
   `ProvisioningHandler` implementing `plan` / `apply` / `observe` / `cancel`.

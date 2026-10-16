@@ -142,6 +142,11 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-integration": {
+      "declared": "0.1.0a18+dev",
+      "reason": "UNPUBLISHED DEVELOPMENT LINE after verified a18. Shared held-key product authentication is extracted from Integrator without changing the connector SPI or Kernel floor. NOT to be repaired by editing the version to an older published identity. Allocate a fresh numeric successor only for reviewed publication; build, install-back verification, tag and accepted release record remain required before any consumer repin.",
+      "state": "declared-unpublished"
+    },
     "dotmac-kernel": {
       "declared": "0.1.0a105+dev",
       "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
