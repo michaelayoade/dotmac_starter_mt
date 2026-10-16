@@ -521,6 +521,7 @@ def test_claim_and_spend_race_never_accepts_both(scratch, plane, isolation):
     def run(claiming):
         try:
             with b._session(url, scope) as db:
+                db.rollback()
                 db.connection(execution_options={"isolation_level": isolation})
                 db.execute(
                     select(_model(plane, "BillingAccount").id).where(

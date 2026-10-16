@@ -1101,7 +1101,7 @@ def test_pm5_refuses_stamped_missing_outbox_catalog_before_ddl(
         with engine.begin() as connection:
             # Revision identity still claims the provider, but its platform
             # half is absent. No forged table/GRANT or manual metadata fallback.
-            connection.execute(text("DROP TABLE public.platform_outbox_events"))
+            connection.execute(text("DROP TABLE public.platform_outbox_events CASCADE"))
         with pytest.raises(PrerequisiteNotSatisfiedError):
             command.upgrade(cfg, "pm_0005_merchant_context")
         with engine.connect() as connection:

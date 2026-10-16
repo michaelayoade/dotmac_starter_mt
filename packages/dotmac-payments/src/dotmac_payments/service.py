@@ -793,11 +793,12 @@ def _merchant_snapshot(values: RowMapping) -> MerchantContextV1:
 
 
 def _merchant_context_rows(
-    db: Session, *conditions: ColumnElement[bool], lock: bool = False
+    db: Session, *conditions: ColumnElement[bool]
 ) -> tuple[MerchantContextV1, ...]:
+    # Context rows are append-only and every mutation already holds the
+    # merchant_review_lock slot lock, so a row lock adds no serialization;
+    # FOR UPDATE would also demand UPDATE privilege the runtime never holds.
     statement = select(MerchantContext.__table__).where(*conditions)
-    if lock:
-        statement = statement.with_for_update()
     with db.no_autoflush:
         return tuple(
             _merchant_snapshot(values) for values in db.execute(statement).mappings()
@@ -994,7 +995,6 @@ def accept_merchant_context(
             db,
             MerchantContext.tenant_id == tenant_id,
             MerchantContext.id == command.supersedes_context_id,
-            lock=True,
         )
         predecessor = predecessors[0] if predecessors else None
         if (
