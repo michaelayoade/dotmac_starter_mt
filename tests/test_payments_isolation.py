@@ -1097,8 +1097,16 @@ def test_purchase_funding_fresh_and_populated_pm3_upgrade(migrated):
         session.commit()
     # Heads now extend past pm_0004; descend through the still-empty
     # successor tables so the pm3-to-pm4 round trip below starts at pm_0004.
-    alembic_command.downgrade(_payments_config(), "pm_0004_purchase_funding")
     admin = create_engine(migrated[0])
+    with admin.connect() as connection:
+        past_pm4 = (
+            connection.scalar(
+                text("SELECT to_regclass('mod_payments.merchant_contexts')")
+            )
+            is not None
+        )
+    if past_pm4:
+        alembic_command.downgrade(_payments_config(), "pm_0004_purchase_funding")
     with admin.begin() as connection:
         before = _purchase_migration_snapshot(connection)
     alembic_command.upgrade(_payments_config(), "pm_0004_purchase_funding")
