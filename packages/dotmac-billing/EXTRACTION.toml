@@ -1,4 +1,6 @@
 schema_version = 1
+line_source_key_evidence_revisions = ["dotmac_sub:99313fb2cc0e179d13742d26a75e3a58c6720c6b"]
+line_source_key_source_note = "PORT-DELTA provider prerequisite for Sub prepaid-period purchases and entitlements: bi_0010_line_source_key adds ordinary exact scope/line/document/account unique FK targets on selected Billing planes. Existing line/document/account FKs, issued-line guards and ACLs remain unchanged. Sub's post-693 nullable bridge is planned, preserving legacy FKs without historical backfill or closed-invoice migration. Probe DDL is hosted PostgreSQL provider evidence only, not a deployed consumer schema, qualified cash or payment-status proof. See docs/inventories/billing-extraction-dossier.md."
 package = "dotmac-billing"
 classification = "optional-module"
 status = "audit-complete"

@@ -869,3 +869,40 @@ invoice. Assemblies retain source revision/deduplication ownership and must use
 the existing correction owner for documented obligations. Hosted canaries now
 compose the actual Numbering lineage and public allocator to verify number
 receipt/counter rollback, caller root rollback and concurrent public retries.
+
+## Exact line source provider key — 2026-10-16 candidate
+
+The qualifying consumer reference remains Sub
+`99313fb2cc0e179d13742d26a75e3a58c6720c6b`:
+`app/services/prepaid_period_purchases.py` stages a financial invoice and line
+for each funded final period; `app/models/prepaid_funding.py` and
+`app/models/billing.py` retain legacy purchase and entitlement invoice-line FKs.
+The public rated-invoice receipt returns stable stored identities. This separate
+provider schema prerequisite lets a future product FK prove that those identities
+belong to the exact Billing document and account. The existing tenant `(tenant_id,
+id)` line key alone cannot prove the product account's affinity.
+
+PORT-DELTA `bi_0010_line_source_key`, following `bi_0009_opening_window`, adds
+`uq_document_lines_source_key` over `(tenant_id, id, document_id,
+billing_account_id)` and `uq_platform_document_lines_source_key` over `(id,
+document_id, billing_account_id)`. These are ordinary nonpartial unique
+constraints, installed only on `selected_module_planes('billing')`. Existing
+keys, line/document/account FKs, FORCE RLS, issued-line immutability and runtime
+ACLs remain their existing owners. No released migration is edited. Downgrade
+uses PostgreSQL RESTRICT: a bound consumer FK refuses removal; no cascade or
+financial-history deletion is introduced.
+
+Sub's nullable module-line bridge is planned after its revision 693, preserving
+legacy FKs, with no historical backfill; closed invoice history stays in the
+read-only archive. This change adds no product field, authoring API, ledger or
+caller activation. It is not consumer adoption, qualified cash or payment-status
+proof. Billing `0.1.0a8` and this source delta remain unpublished.
+
+`tests/test_billing_line_source_key.py` authors real PostgreSQL canaries against
+the actual fresh migration chain and populated bi_0009 predecessor upgrade,
+with tenant-only, platform-only and both-plane selections. Disposable cross-schema
+probe FKs exercise exact tuple acceptance and wrong document/account/scope
+refusal; catalog and runtime probes retain financial guards and ACLs, and bound
+consumer FKs refuse downgrade. Probe DDL is not a deployed Sub schema. Runtime
+execution is reserved for Git-hosted CI; local AST/Ruff/diff checks are static
+evidence only.
