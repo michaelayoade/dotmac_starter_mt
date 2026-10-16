@@ -708,19 +708,26 @@ def test_mutable_prepared_inputs_cannot_retain_original_digest(
     elif mutation == "secret-ref":
         prepared.secret_refs["signing"] = "bao://kv/changed"
     elif mutation == "handler":
-        handler = (
-            plugin.poll_handler_for(prepared.capability_id)
-            if mode == "poll"
-            else plugin.ingress_handler_for(prepared.capability_id)
-        )
+        # FakePlugin mints a fresh handler class per handler_for call, so
+        # patching one handler's type cannot intercept the engine's own
+        # handler. Wrap the factory instead and mutate through the exact
+        # handler object the engine invokes.
         hook = "poll" if mode == "poll" else "verify"
-        original = getattr(type(handler), hook)
+        factory_name = "poll_handler_for" if mode == "poll" else "ingress_handler_for"
+        original_factory = getattr(type(plugin), factory_name)
 
-        def mutate_handler(self, *args, **kwargs):
-            kwargs["config"]["nested"]["values"].append(2)
-            return original(self, *args, **kwargs)
+        def mutating_factory(self, capability_id):
+            handler = original_factory(self, capability_id)
+            original_hook = getattr(handler, hook)
 
-        monkeypatch.setattr(type(handler), hook, mutate_handler)
+            def mutate_handler(*args, **kwargs):
+                kwargs["config"]["nested"]["values"].append(2)
+                return original_hook(*args, **kwargs)
+
+            object.__setattr__(handler, hook, mutate_handler)
+            return handler
+
+        monkeypatch.setattr(type(plugin), factory_name, mutating_factory)
 
     def resolver(refs):
         if mutation == "resolver":

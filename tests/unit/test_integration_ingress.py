@@ -117,9 +117,20 @@ MODULE_MODELS = (
 
 
 @pytest.fixture(autouse=True)
-def _installed_integration_audit_actions() -> None:
-    """The standalone module tests compose its declaration registry."""
+def _installed_integration_audit_actions():
+    """The standalone module tests compose its declaration registry.
+
+    The registry is process-global and this fixture is imported by the
+    hosted receipt-origin canaries, which share a process with app-level
+    tests. Restore whatever registry was active before so the standalone
+    composition cannot truncate the app's declarations for later tests.
+    """
+    from dotmac_kernel import audit_actions as _audit_actions
+
+    previous = _audit_actions._active_registry
     install_audit_actions(AuditActionRegistry.from_manifests([module]))
+    yield
+    _audit_actions._active_registry = previous
 
 
 # ── A connector that RECEIVES ───────────────────────────────────────────────

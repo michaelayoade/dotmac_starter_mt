@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+# Closed Payments-owned schema/table identifiers only.
+# ruff: noqa: S608
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
@@ -191,6 +193,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError(
-        "Provider cash qualification history is forward-only; use a reviewed forward migration"
-    )
+    # Retained qualification facts are forward-only; an empty installation
+    # has no history to preserve and may still retreat.
+    op.execute(f"ALTER TABLE {_SCHEMA}.{_TABLE} NO FORCE ROW LEVEL SECURITY")
+    op.execute(f"""
+        DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM {_SCHEMA}.{_TABLE})
+          THEN RAISE EXCEPTION 'cannot downgrade retained provider cash qualifications' USING ERRCODE = '23514'; END IF;
+        END $$;
+        """)
+    op.execute(f"ALTER TABLE {_SCHEMA}.{_TABLE} FORCE ROW LEVEL SECURITY")
+    op.drop_table(_TABLE, schema=_SCHEMA)
+    op.execute(f"DROP FUNCTION {_SCHEMA}.check_provider_cash_insert()")
+    op.execute(f"DROP FUNCTION {_SCHEMA}.provider_cash_source_lock(uuid, text, text)")
+    op.execute(f"DROP FUNCTION {_SCHEMA}.provider_cash_digest(text, text[])")

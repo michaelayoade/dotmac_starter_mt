@@ -6,6 +6,8 @@ Revises: pm_0004_purchase_funding
 
 from __future__ import annotations
 
+# Closed Payments-owned schema/table identifiers only.
+# ruff: noqa: S608
 from datetime import datetime
 from uuid import UUID
 
@@ -276,6 +278,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError(
-        "Merchant review history integrity is forward-only; use a reviewed forward migration"
+    # Retained review history is forward-only; an empty installation has no
+    # history to preserve and may still retreat.
+    for table in _TABLES:
+        op.execute(f"ALTER TABLE mod_payments.{table} NO FORCE ROW LEVEL SECURITY")
+        op.execute(f"""
+            DO $$ BEGIN
+              IF EXISTS (SELECT 1 FROM mod_payments.{table})
+              THEN RAISE EXCEPTION 'cannot downgrade retained merchant review history' USING ERRCODE = '23514'; END IF;
+            END $$;
+            """)
+        op.execute(f"ALTER TABLE mod_payments.{table} FORCE ROW LEVEL SECURITY")
+    for table in reversed(_TABLES):
+        op.drop_table(table, schema="mod_payments")
+    op.execute("DROP FUNCTION mod_payments.check_merchant_context_replacement()")
+    op.execute("DROP FUNCTION mod_payments.check_merchant_context_end_insert()")
+    op.execute("DROP FUNCTION mod_payments.check_merchant_context_insert()")
+    op.execute("DROP FUNCTION mod_payments.refuse_merchant_review_mutation()")
+    op.execute(
+        "DROP FUNCTION mod_payments.merchant_review_lock(uuid, uuid, text, text)"
     )

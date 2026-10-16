@@ -1158,9 +1158,9 @@ def test_distinct_commands_and_transport_slots_do_not_share_fence(
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(first), pool.submit(second)]
         try:
-            assert independent_committed.wait(10), (
-                "independent slot was globally serialized"
-            )
+            assert independent_committed.wait(
+                10
+            ), "independent slot was globally serialized"
         finally:
             release.set()
         for future in futures:
