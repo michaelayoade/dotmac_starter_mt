@@ -507,8 +507,16 @@ def test_fresh_and_pm4_upgrade_rls_acl_and_downgrade(migrated: tuple[str, str]) 
                 )
                 == 7
             )
-        with pytest.raises(RuntimeError, match="forward-only"):
-            command.downgrade(_payments_config(), "pm_0004_purchase_funding")
+        # Empty merchant history may retreat; retained history refuses in
+        # the populated forward-only proofs.
+        command.downgrade(_payments_config(), "pm_0004_purchase_funding")
+        with engine.connect() as connection:
+            assert (
+                connection.scalar(
+                    text("SELECT to_regclass('mod_payments.merchant_contexts')")
+                )
+                is None
+            )
     finally:
         engine.dispose()
 

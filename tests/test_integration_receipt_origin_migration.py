@@ -91,31 +91,37 @@ def _assert_downgrade_protects_origin(admin_url: str) -> None:
     )
 
     registry = registry_for(IngressFake())
+    # The registry is process-global; restore the composed app's registry so
+    # later app-level canaries in this session keep their declarations.
+    from dotmac_kernel import audit_actions as _audit_actions
+
+    previous_registry = _audit_actions._active_registry
     install_audit_actions(AuditActionRegistry.from_manifests([module]))
-    # Explicit capability registry fixture is requested below by autouse import;
-    # keep setup against the actual owners, not a copied receipt INSERT.
     engine = create_engine(admin_url)
-    with Session(engine) as db, db.begin():
-        _, _, key = build(db, registry)
-        prepared = prepare_ingress(db, endpoint=address(key), registry=registry)
-        ((receipt_id, _),) = record_batch(
-            db,
-            prepared,
-            (
-                InboundEvent(
-                    provider_event_id=uuid.uuid4().hex,
-                    event_type="received",
-                    payload={},
+    try:
+        with Session(engine) as db, db.begin():
+            _, _, key = build(db, registry)
+            prepared = prepare_ingress(db, endpoint=address(key), registry=registry)
+            ((receipt_id, _),) = record_batch(
+                db,
+                prepared,
+                (
+                    InboundEvent(
+                        provider_event_id=uuid.uuid4().hex,
+                        event_type="received",
+                        payload={},
+                    ),
                 ),
-            ),
-        )
-    with pytest.raises(
-        DBAPIError, match="cannot erase recorded receipt verification origin"
-    ):
-        command.downgrade(_config(admin_url), "ig_0015_descriptor_contract")
-    with Session(engine) as db:
-        assert (
-            receipt_verification_origin(db.get(InboxReceipt, receipt_id))
-            == prepared.verification_origin
-        )
-    engine.dispose()
+            )
+        with pytest.raises(
+            DBAPIError, match="cannot erase recorded receipt verification origin"
+        ):
+            command.downgrade(_config(admin_url), "ig_0015_descriptor_contract")
+        with Session(engine) as db:
+            assert (
+                receipt_verification_origin(db.get(InboxReceipt, receipt_id))
+                == prepared.verification_origin
+            )
+    finally:
+        _audit_actions._active_registry = previous_registry
+        engine.dispose()

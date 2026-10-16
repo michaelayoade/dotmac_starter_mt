@@ -892,9 +892,50 @@ def guard_post_group(
             for settlement_row in settlement_candidates:
                 if current.source_ref != f"settlement:{settlement_row['id']}":
                     continue
-                # Unclaimed backing reversal is governed by ordinary
-                # capacity validation; only claimed backing needs the
-                # consumed-receipt refusal below.
+                settlement = service._one(
+                    db, scope=scope, model=plane.settlement, row_id=settlement_row["id"]
+                )
+                if (
+                    service._settlement_used(
+                        db, scope=scope, settlement_id=settlement.id
+                    )
+                    != 0
+                ):
+                    # Consumption is pooled: other active backing on the
+                    # account may cover this receipt's use, but removing
+                    # backing must never leave total consumption uncovered.
+                    total_used = sum(
+                        (
+                            service._settlement_used(
+                                db, scope=scope, settlement_id=row["id"]
+                            )
+                            for row in settlement_candidates
+                        ),
+                        Decimal(0),
+                    )
+                    other_backing = sum(
+                        (
+                            Decimal(row["amount"])
+                            for row in settlement_candidates
+                            if row["id"] != settlement.id
+                            and service._settlement_has_active_backing(
+                                db,
+                                scope=scope,
+                                settlement=service._one(
+                                    db,
+                                    scope=scope,
+                                    model=plane.settlement,
+                                    row_id=row["id"],
+                                ),
+                            )
+                        ),
+                        Decimal(0),
+                    )
+                    if total_used > other_backing:
+                        _fail(
+                            "settlement_backing_consumed",
+                            "undo receipt consumption before removing backing",
+                        )
                 claim = _claim(db, scope, settlement_id=settlement_row["id"])
                 if claim is None:
                     continue

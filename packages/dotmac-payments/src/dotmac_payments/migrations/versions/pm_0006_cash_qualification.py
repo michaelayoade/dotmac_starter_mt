@@ -196,13 +196,17 @@ def downgrade() -> None:
     # Retained qualification facts are forward-only; an empty installation
     # has no history to preserve and may still retreat.
     op.execute(f"ALTER TABLE {_SCHEMA}.{_TABLE} NO FORCE ROW LEVEL SECURITY")
-    op.execute(f"""
-        DO $$ BEGIN
-          IF EXISTS (SELECT 1 FROM {_SCHEMA}.{_TABLE})
-          THEN RAISE EXCEPTION 'cannot downgrade retained provider cash qualifications' USING ERRCODE = '23514'; END IF;
-        END $$;
-        """)
+    retained = (
+        op.get_bind()
+        .execute(sa.text(f"SELECT count(*) FROM {_SCHEMA}.{_TABLE}"))
+        .scalar_one()
+    )
     op.execute(f"ALTER TABLE {_SCHEMA}.{_TABLE} FORCE ROW LEVEL SECURITY")
+    if retained:
+        raise RuntimeError(
+            "Provider cash qualification history is forward-only; "
+            "use a reviewed forward migration"
+        )
     op.drop_table(_TABLE, schema=_SCHEMA)
     op.execute(f"DROP FUNCTION {_SCHEMA}.check_provider_cash_insert()")
     op.execute(f"DROP FUNCTION {_SCHEMA}.provider_cash_source_lock(uuid, text, text)")

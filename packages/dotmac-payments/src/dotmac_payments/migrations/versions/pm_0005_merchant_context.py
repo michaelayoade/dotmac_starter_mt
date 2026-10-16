@@ -282,13 +282,17 @@ def downgrade() -> None:
     # history to preserve and may still retreat.
     for table in _TABLES:
         op.execute(f"ALTER TABLE mod_payments.{table} NO FORCE ROW LEVEL SECURITY")
-        op.execute(f"""
-            DO $$ BEGIN
-              IF EXISTS (SELECT 1 FROM mod_payments.{table})
-              THEN RAISE EXCEPTION 'cannot downgrade retained merchant review history' USING ERRCODE = '23514'; END IF;
-            END $$;
-            """)
+        retained = (
+            op.get_bind()
+            .execute(sa.text(f"SELECT count(*) FROM mod_payments.{table}"))
+            .scalar_one()
+        )
         op.execute(f"ALTER TABLE mod_payments.{table} FORCE ROW LEVEL SECURITY")
+        if retained:
+            raise RuntimeError(
+                "Merchant review history integrity is forward-only; "
+                "use a reviewed forward migration"
+            )
     for table in reversed(_TABLES):
         op.drop_table(table, schema="mod_payments")
     op.execute("DROP FUNCTION mod_payments.check_merchant_context_replacement()")
