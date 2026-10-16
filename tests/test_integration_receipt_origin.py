@@ -56,9 +56,7 @@ def _reenable(db, installation, registry) -> None:
             CapabilityBinding.installation_id == installation.id
         )
     ).scalars():
-        set_binding_enabled(
-            db, installation, binding, registry=registry, enabled=True
-        )
+        set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
 
 
 def test_first_context_survives_retry_rotation_and_atomic_conflict(

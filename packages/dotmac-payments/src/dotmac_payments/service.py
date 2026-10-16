@@ -538,17 +538,17 @@ def get_confirmed_cash_v1(
 
 __all__ = [
     "accept_merchant_context",
-    "revoke_merchant_context",
-    "resolve_current_merchant_context",
-    "get_original_merchant_context",
-    "merchant_review_request_fingerprint",
-    "get_confirmed_cash_v1",
-    "get_payment_intent_v1",
     "cancel_payment_intent",
     "expire_payment_intent",
+    "get_confirmed_cash_v1",
+    "get_original_merchant_context",
+    "get_payment_intent_v1",
+    "merchant_review_request_fingerprint",
     "open_payment_intent",
     "record_confirmation",
+    "resolve_current_merchant_context",
     "review_transfer_proof",
+    "revoke_merchant_context",
     "submit_transfer_proof",
 ]
 

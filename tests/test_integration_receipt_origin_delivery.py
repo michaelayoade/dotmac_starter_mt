@@ -25,7 +25,7 @@ from dotmac_integration.receipt_delivery import (
     product_observation_document,
     resolve_receipt_origin_evidence,
 )
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tests.test_integration_isolation import (  # noqa: F401
@@ -58,9 +58,7 @@ def _reenable(db, installation, registry) -> None:
             CapabilityBinding.installation_id == installation.id
         )
     ).scalars():
-        set_binding_enabled(
-            db, installation, binding, registry=registry, enabled=True
-        )
+        set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
 
 
 def test_real_claim_retains_recorded_origin_across_configuration_rotation(

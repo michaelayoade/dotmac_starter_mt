@@ -174,7 +174,7 @@ def _correct(db, scope, claim, change, verifier=None):
 
 
 def test_tenant_claim_isolation_and_role_boundary(scratch):
-    scope, url, offered, _, _ = _seed(scratch, "tenant")
+    _scope, url, offered, _, _ = _seed(scratch, "tenant")
     other = TenantScope(b._create_tenants(scratch[0], 1)[0])
     with b._session(url, other) as db:
         assert db.execute(select(models.SettlementEarmark.id)).first() is None

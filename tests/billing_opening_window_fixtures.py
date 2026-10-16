@@ -6,7 +6,6 @@ No source evidence, database identity or runtime role is inferred by production.
 from __future__ import annotations
 
 # Identifiers are fixed Billing table names and fixture-generated safe role names.
-# ruff: noqa: S608
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
