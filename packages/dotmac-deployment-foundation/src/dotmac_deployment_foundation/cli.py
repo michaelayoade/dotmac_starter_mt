@@ -545,6 +545,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     bindings = _load_bindings(args)
     effects = _build_effects(spec, args, bindings=bindings)
+    # Refuse a factory's independent descriptor before even its first host
+    # observation. Executor repeats the join against frozen authority at run.
+    Executor._require_provider_descriptor(
+        effects, spec, spec.to_canonical_document().sha256_digest()
+    )
     # THE MIDDLE TERM, RENDERED AND HANDED OVER. Nothing here chooses the
     # authorized digest -- that rides on the grant, which took it from the
     # attested receipt. This renders the plan the digest is recomputed FROM, so
@@ -1200,6 +1205,9 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     # let a single decision make a change and then erase it.
     bindings = _load_bindings(args)
     effects = _build_effects(spec, args, bindings=bindings)
+    Executor._require_provider_descriptor(
+        effects, spec, spec.to_canonical_document().sha256_digest()
+    )
     # A SEPARATE plan too, and for the same reason: one descriptor yields a
     # different plan per operation, so a deploy's frozen digest must not
     # recompute equal to a rollback's.

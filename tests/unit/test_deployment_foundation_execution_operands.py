@@ -31,7 +31,7 @@ from tests.unit.test_deployment_foundation_failure_injection import (
 def prepared():
     spec = load()
     work = build_plan(spec)
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     frozen, _ = _plan_and_digest(spec, work, effects=effects)
     grant = grant_for_plan(spec, frozen)
     executor = Executor(

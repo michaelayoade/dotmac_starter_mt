@@ -141,6 +141,11 @@ class ComposeHostExposureEffects:
         return result
 
     @property
+    def execution_descriptor(self) -> bytes:
+        """Canonical identity of the private spec governing firewall ownership."""
+        return self._spec.to_canonical_document().canonical_bytes()
+
+    @property
     def comment(self) -> str:
         return ownership_comment(self._spec.product)
 

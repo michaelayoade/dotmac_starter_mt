@@ -37,6 +37,7 @@ becomes a recorded note rather than an undocumented `|| true`.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -96,6 +97,7 @@ from ..exposure import (
 )
 from ..external_recovery import (
     EXTERNAL_BACKUP_PATH_PREFIX,
+    ExternalRecoveryReceiptV1,
     accept_external_recovery_receipt,
     backup_record_from_receipt,
     require_restore_proof,
@@ -182,6 +184,23 @@ class Effects(Protocol):
     policy lives in one readable place instead of being distributed across
     fourteen implementations that might each interpret a failure differently.
     """
+
+    @property
+    def execution_descriptor(self) -> bytes:
+        """Canonical bytes derived from the private validated spec being executed.
+
+        Providers must snapshot before deriving product/path/ownership caches,
+        retain no caller aliases, and never accept a digest or rebind at run time.
+        """
+        ...
+
+    def preflight_backup(self, dataset_code: str) -> None:
+        """Pure preparation of this exact local dataset; raise if unsupported.
+
+        No material resolution, host access, command, file or other effect.
+        Capture must use the same preparation path.
+        """
+        ...
 
     # ── gates ──
     def image_present(self, reference: str) -> bool: ...
@@ -898,6 +917,11 @@ class Executor:
                 raise PreconditionFailed(
                     "actual descriptor disagrees with frozen execution plan"
                 )
+            self._require_provider_descriptor(self._effects, spec, descriptor)
+            if self._exposure:
+                self._require_provider_descriptor(
+                    self._exposure_effects, spec, descriptor
+                )
             projected = render_execution_plan(
                 spec,
                 actual,
@@ -918,9 +942,30 @@ class Executor:
         self._spec = spec
         return actual
 
+    @staticmethod
+    def _require_provider_descriptor(
+        provider: object, spec: ProductDeploymentSpec, descriptor: str
+    ) -> None:
+        actual = getattr(provider, "execution_descriptor", None)
+        if type(actual) is not bytes:
+            raise PreconditionFailed(
+                "selected provider lacks immutable execution_descriptor bytes"
+            )
+        identity = "sha256:" + hashlib.sha256(actual).hexdigest()
+        if (
+            actual != spec.to_canonical_document().canonical_bytes()
+            or identity != descriptor
+        ):
+            raise PreconditionFailed(
+                "selected provider executes a different descriptor "
+                "than spec/frozen plan"
+            )
+
     def _preflight_executable_capabilities(
         self, work: DeploymentPlan, spec: ProductDeploymentSpec
     ) -> None:
+        captured: set[str] = set()
+        datasets = {dataset.code: dataset for dataset in spec.backup_datasets}
         for step in work.steps:
             phase = _PHASE_OF.get(step.kind)
             if (
@@ -936,6 +981,42 @@ class Executor:
                     raise PreconditionFailed(
                         f"selected execution capability {method} is absent"
                     )
+            if step.kind in (
+                StepKind.BACKUP,
+                StepKind.VERIFY_BACKUP,
+                StepKind.VERIFY_EXTERNAL_RECOVERY_RECEIPT,
+            ):
+                dataset = datasets.get(step.target)
+                if dataset is None:
+                    raise PreconditionFailed("selected recovery dataset is undeclared")
+                if step.kind is StepKind.VERIFY_EXTERNAL_RECOVERY_RECEIPT:
+                    if dataset.external_executor is None:
+                        raise PreconditionFailed("selected recovery dataset is local")
+                    # Verify handed-over receipt, trust and cadence inputs before
+                    # dispatch consumption; retain the dynamic step-time check.
+                    self._external_recovery_detail(step)
+                else:
+                    if dataset.external_executor is not None:
+                        raise PreconditionFailed(
+                            "external recovery cannot use local capture"
+                        )
+                    if step.kind is StepKind.BACKUP:
+                        prepare = getattr(self._effects, "preflight_backup", None)
+                        if not callable(prepare):
+                            raise PreconditionFailed(
+                                "backup preparation capability is absent"
+                            )
+                        try:
+                            prepare(step.target)
+                        except DeploymentError as exc:
+                            raise PreconditionFailed(
+                                str(exc), code=getattr(exc, "code", "")
+                            ) from exc
+                        captured.add(step.target)
+                    elif step.target not in captured:
+                        raise PreconditionFailed(
+                            "backup verification precedes local capture"
+                        )
             if step.kind in (StepKind.START_CANDIDATE, StepKind.GATE_CANDIDATE):
                 spec.role(step.target)
             elif step.kind is StepKind.VERIFY_ROLES and step.target:
@@ -1795,6 +1876,21 @@ class Executor:
         computes the `restore_proof_max_age_days` window correctly -- had zero
         callers, so the window was inert. This is the caller.
         """
+        receipt, detail = self._external_recovery_detail(step)
+        outcome.notes.append(
+            f"recovery receipt {receipt.sha256_digest()} for {step.target}: {detail}"
+        )
+        return (
+            f"{receipt.executor.kind}:{receipt.executor.identifier}"
+            f"@{receipt.executor.version} proved {list(receipt.verifications)} "
+            f"on snapshot {receipt.snapshot_checksum_algorithm}="
+            f"{receipt.snapshot_checksum}; {detail}"
+        )
+
+    def _external_recovery_detail(
+        self, step: Step
+    ) -> tuple[ExternalRecoveryReceiptV1, str]:
+        """Validate exact supplied recovery inputs without observing the host."""
         dataset = next(
             (item for item in self._spec.backup_datasets if item.code == step.target),
             None,
@@ -1837,15 +1933,7 @@ class Executor:
             records,
             now_epoch=self._now_epoch or receipt.proved_at_epoch,
         )
-        outcome.notes.append(
-            f"recovery receipt {receipt.sha256_digest()} for {step.target}: {detail}"
-        )
-        return (
-            f"{receipt.executor.kind}:{receipt.executor.identifier}"
-            f"@{receipt.executor.version} proved {list(receipt.verifications)} "
-            f"on snapshot {receipt.snapshot_checksum_algorithm}="
-            f"{receipt.snapshot_checksum}; {detail}"
-        )
+        return receipt, detail
 
     def _do_product_preflight(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome

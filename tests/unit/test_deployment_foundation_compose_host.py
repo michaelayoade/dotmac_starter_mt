@@ -232,11 +232,17 @@ def test_every_effects_protocol_method_is_implemented_by_compose_host_effects() 
     """
     protocol_methods = sorted(name for name in dir(Effects) if not name.startswith("_"))
     assert protocol_methods, "sanity: Effects must actually declare methods"
-    missing = [
-        name
-        for name in protocol_methods
-        if not callable(getattr(ComposeHostEffects, name, None))
-    ]
+    missing = []
+    for name in protocol_methods:
+        implementation = getattr(ComposeHostEffects, name, None)
+        if isinstance(getattr(Effects, name, None), property):
+            if (
+                not isinstance(implementation, property)
+                or implementation.fset is not None
+            ):
+                missing.append(name)
+        elif not callable(implementation):
+            missing.append(name)
     assert missing == [], f"ComposeHostEffects is missing: {missing}"
 
 
@@ -469,16 +475,18 @@ def test_source_mounted_is_false_for_a_mount_outside_the_app_root_the_negative_c
 def _init_git_repo(deploy_dir: Path) -> None:
     # A real, throwaway `git` repo — trusted, fixed argv, no shell. See the
     # module docstring for why this is driven for real rather than faked.
-    subprocess.run(["git", "init", "-q"], cwd=deploy_dir, check=True)  # noqa: S603, S607
+    subprocess.run(["git", "init", "-q"], cwd=deploy_dir, check=True, timeout=30)  # noqa: S603, S607
     subprocess.run(  # noqa: S603
         ["git", "config", "user.email", "test@example.com"],  # noqa: S607
         cwd=deploy_dir,
         check=True,
+        timeout=30,
     )
     subprocess.run(  # noqa: S603
         ["git", "config", "user.name", "Test"],  # noqa: S607
         cwd=deploy_dir,
         check=True,
+        timeout=30,
     )
 
 

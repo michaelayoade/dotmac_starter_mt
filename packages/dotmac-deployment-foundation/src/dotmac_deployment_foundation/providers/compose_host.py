@@ -977,7 +977,30 @@ class ComposeHostEffects:
         env = self._materials_env(materials)
         return self._run(list(command), timeout_seconds=timeout_seconds, env=env)
 
+    @property
+    def execution_descriptor(self) -> bytes:
+        """Identity of the same private snapshot used for every host operation."""
+        return self._spec.to_canonical_document().canonical_bytes()
+
     # ── backup / verify: the second, streaming seam ─────────────────────────
+
+    def _prepare_backup(self, code: str) -> tuple[BackupDataset, list[str]]:
+        """Pure local-capture preparation, shared by admission and capture."""
+        dataset = self._backup_dataset(code)
+        if dataset.kind != "postgres" or dataset.external_executor is not None:
+            raise PreconditionFailed(
+                "Compose capture supports local postgres datasets only"
+            )
+        if dataset.encryption != "none" or dataset.offsite:
+            raise PreconditionFailed(
+                "Compose gzip capture cannot satisfy encryption or offsite requirements"
+            )
+        if dataset.checksum not in BackupDataset.CHECKSUMS:
+            raise PreconditionFailed("unsupported backup checksum algorithm")
+        return dataset, self._backup_command(dataset)
+
+    def preflight_backup(self, dataset_code: str) -> None:
+        self._prepare_backup(dataset_code)
 
     def _backup_dataset(self, code: str) -> BackupDataset:
         for dataset in self._spec.backup_datasets:
@@ -1020,21 +1043,13 @@ class ComposeHostEffects:
         exact bytes landing on disk, at write time, not re-derived by
         opening the file again afterward.
         """
-        dataset = self._backup_dataset(dataset_code)
-        if dataset.kind != "postgres":
-            raise StepFailed(
-                "backup",
-                f"dataset {dataset_code!r} is {dataset.kind!r}; this provider backs "
-                "up postgres datasets only — an object_store or volume dataset "
-                "needs its own provider-side implementation",
-            )
+        dataset, argv = self._prepare_backup(dataset_code)
         self._backup_dir.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime(self._clock()))
         out_path = (
             self._backup_dir / f"{self._spec.product}_{dataset_code}_{stamp}.sql.gz"
         )
         tmp_path = out_path.with_name(out_path.name + ".part")
-        argv = self._backup_command(dataset)
         env = self._materials_env((dataset.material,))
         deadline = self._clock() + timeout_seconds
         proc = self._popen_factory(argv, env)

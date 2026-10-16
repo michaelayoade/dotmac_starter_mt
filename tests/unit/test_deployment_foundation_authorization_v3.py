@@ -194,7 +194,7 @@ def test_expired_v2_pair_refuses_issue(tmp_path: Path) -> None:
 
 def test_recheck_refuses_host_reenrolment_before_effects() -> None:
     spec = load()
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     work = build_plan(spec)
     plan, _ = _plan_and_digest(spec, work, effects=effects)
     grant = grant_for_plan(spec, plan)
@@ -219,7 +219,7 @@ def test_recheck_refuses_host_reenrolment_before_effects() -> None:
 
 def test_recheck_refuses_stale_pair_before_effects() -> None:
     spec = load()
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     work = build_plan(spec)
     plan, _ = _plan_and_digest(spec, work, effects=effects)
     grant = grant_for_plan(spec, plan)
@@ -242,7 +242,7 @@ def test_recheck_refuses_stale_pair_before_effects() -> None:
 @pytest.mark.parametrize("operation", ["deploy", "rollback"])
 def test_f2_host_b_cannot_execute_v3_target_a(operation: str) -> None:
     spec = load()
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     work = build_plan(
         spec,
         previous_image=(
@@ -287,7 +287,7 @@ def test_f2_incarnation_and_root_must_match_v3_before_effects(
     field: str, wrong: str, binding: str
 ) -> None:
     spec = load()
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     work = build_plan(spec)
     plan, _ = _plan_and_digest(spec, work, effects=effects)
     grant = grant_for_plan(spec, plan)
@@ -323,7 +323,7 @@ def test_v3_refuses_incomplete_or_changed_f2_trace_before_effects(
     mutation: str,
 ) -> None:
     spec = load()
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     work = build_plan(spec)
     plan, _ = _plan_and_digest(spec, work, effects=effects)
     grant = grant_for_plan(spec, plan)
@@ -430,7 +430,7 @@ def test_unconsumed_or_changed_control_authority_has_zero_effects(
     operation: str, failure: str
 ) -> None:
     spec = load()
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     work = build_plan(
         spec,
         previous_image=(
@@ -488,7 +488,7 @@ def test_successful_consume_has_deterministic_recovery_ref_and_effect_boundary(
     operation: str,
 ) -> None:
     spec = load()
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     work = build_plan(
         spec,
         previous_image=(
@@ -547,7 +547,7 @@ def test_a_bare_hex_execution_plan_digest_authorizes_like_the_prefixed_one() -> 
     same digest, so a genuine bare-hex authorization must reach consumption,
     not be refused at the last pre-consumption comparison."""
     spec = load()
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     work = build_plan(spec)
     plan, _ = _plan_and_digest(spec, work, effects=effects)
     bare = plan.digest().removeprefix("sha256:")
