@@ -7218,6 +7218,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-web-analytics ──
+    "dotmac-web-analytics-v0.2.0a1": (
+        "dotmac-web-analytics",
+        "8118be50a17caa733dda5fa6298f778e69f944dd",
+        {
+            "wa_0001_web_analytics.py": (
+                "febb356d3e8a280049226803286ea4076150e39af3ad6a65e09d611ec9fe4b71"
+            ),
+        },
+    ),
     "dotmac-web-analytics-v0.1.0a1": (
         "dotmac-web-analytics",
         "8b8e3d26f4b344cf1ed7444e9a2e3836c7115f30",

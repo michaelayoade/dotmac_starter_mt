@@ -187,11 +187,6 @@
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed rule/obligation backfill and amount shadow; it does not compose the module, move usage-rating authority, or retire Sub's writer. Invoices, tax, payments and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
-    "dotmac-web-analytics": {
-      "declared": "0.2.0a1",
-      "reason": "INTENDED NATIVE IMPLEMENTATION CANDIDATE. User directed the Rust computation goal on 2026-10-15. Version 0.2.0a1 introduces a platform-specific private extension and cannot replace the earlier immutable pure-Python release. Hosted lock resolution, exact-wheel/source-archive parity and supported-interpreter qualification precede any publication request. No registry receipt, product adoption or writer switch is claimed. Remove this row only after the existing protected release facility publishes, installs, verifies and tags this exact candidate.",
-      "state": "declared-unpublished"
-    },
     "dotmac-workforce": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named first intended consumer; ERP and CRM are later consumers under the dossier. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move workforce authority, or retire any Sub/ERP/CRM writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
