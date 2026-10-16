@@ -353,6 +353,28 @@
           "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-web-analytics",
+      "version": "0.2.0a1",
+      "tag": "dotmac-web-analytics-v0.2.0a1",
+      "tag_object": "74b646d117ab20126d78aed4c5871ccb1d23c27a",
+      "peeled_commit": "8118be50a17caa733dda5fa6298f778e69f944dd",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_web_analytics-0.2.0a1-cp312-cp312-manylinux_2_35_x86_64.whl": "a07241fbfd6ea22a70a053b8a5aea0c2f2d6044b157feba1eafafa76cb31684b"
+      },
+      "verification_run_id": "38906940095",
+      "source_run_id": "38906940095",
+      "release_authority_digest": "sha256:eba56abff71d545562a970b87939624cd97963baefc651853dae32f0eedd22d0",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+          "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
+        }
+      ]
     }
   ]
 }
