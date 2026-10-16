@@ -1,7 +1,7 @@
 """Frozen Billing V1 commands and published facts.
 
-Allocation and coverage deliberately do not live here. They are internal
-derivations of immutable Billing effects, not cross-application contracts.
+Allocation effects remain Billing-owned derivations. A narrowly scoped current
+observation proves one exact settlement allocation within the caller transaction.
 """
 
 from __future__ import annotations
@@ -402,6 +402,61 @@ class BillingAccountObservationV1:
     account_id: UUID
     external_account_ref: str
     currency: Currency
+
+
+@dataclass(frozen=True, slots=True)
+class GetCurrentSettlementAllocationV1:
+    """Observe one exact allocation, including current inverse effects."""
+
+    scope: Scope
+    billing_account_id: UUID
+    posting_group_id: UUID
+    settlement_id: UUID
+    document_id: UUID
+    amount: Money
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or (
+                isinstance(self.scope, TenantScope)
+                and not isinstance(self.scope.tenant_id, UUID)
+            )
+            or any(
+                not isinstance(value, UUID)
+                for value in (
+                    self.billing_account_id,
+                    self.posting_group_id,
+                    self.settlement_id,
+                    self.document_id,
+                )
+            )
+            or not isinstance(self.amount, Money)
+            or not self.amount.amount.is_finite()
+            or self.amount.amount <= 0
+        ):
+            raise BillingRuleViolation(
+                "allocation_observation_request_invalid",
+                "allocation observation requires UUID identities and positive Money",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentSettlementAllocationV1:
+    """Current transaction observation; re-observe before each product decision.
+
+    The account lock remains held by the caller transaction. This value is not
+    a historical fact or reusable admission token. Unlinked reductions refuse.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    posting_group_id: UUID
+    settlement_id: UUID
+    document_id: UUID
+    original_amount: Money
+    remaining_amount: Money
+    state: Literal["current", "reduced", "removed", "inactive_backing"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1170,6 +1225,8 @@ __all__ = [
     "ObligationSourceRegistry",
     "BillingAccountObservationV1",
     "GetBillingAccountObservationV1",
+    "GetCurrentSettlementAllocationV1",
+    "CurrentSettlementAllocationV1",
     "ACCOUNTING_FACT_V3_CONTRACT",
     "RECEIVABLE_POSITION_V2_CONTRACT",
     "NonCashCreditEffectKind",

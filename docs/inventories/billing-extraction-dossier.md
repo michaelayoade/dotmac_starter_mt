@@ -906,3 +906,27 @@ refusal; catalog and runtime probes retain financial guards and ACLs, and bound
 consumer FKs refuse downgrade. Probe DDL is not a deployed Sub schema. Runtime
 execution is reserved for Git-hosted CI; local AST/Ruff/diff checks are static
 evidence only.
+
+
+### 2026-10-16 — exact current settlement allocation observation (source only)
+
+The direct Sub `fund_prepaid_module_period_entitlement` consumer replays
+`allocate_settlement` before granting or replaying a product entitlement. The
+historical posting-group result survives later deallocation, refund or reversal,
+so Billing now exposes `GetCurrentSettlementAllocationV1`, frozen
+`CurrentSettlementAllocationV1`, and `get_current_settlement_allocation`. The
+existing public queries/contracts/facade own this narrow observation; allocation
+replay and schema remain unchanged. The request binds scope, account, exact
+allocation posting group, settlement, invoice and Money. The query reads scalars
+under the account lock, requires READ COMMITTED, validates live invoice and
+confirmed backing, and sums exact linked inverse descendants. Unlinked
+reallocation has no original-allocation identity and therefore refuses.
+
+`tests/test_billing_current_allocation.py` authors both-plane hosted migrated-PG
+canaries for scope/identity refusal, initial/replay, frozen values, partial/full
+deallocation, inverse-of-inverse, refund, reversal, unlinked reallocation and
+rollback, dirty identity-map avoidance, stale-isolation refusal and bounded real
+backend lock waits in both directions (observation waits for committed correction;
+correction waits for the product-decision transaction). Local validation is
+static only; runtime acceptance, package
+publication, exact consumer pinning and installation activation remain separate.

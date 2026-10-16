@@ -3,22 +3,25 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal, DecimalException
-from typing import Any, cast
+from decimal import Decimal, DecimalException, localcontext
+from typing import Any, Literal, NoReturn, cast
 from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
-from dotmac_kernel.money import Currency, MoneyError
+from dotmac_kernel.money import Currency, Money, MoneyError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_billing import models
 from dotmac_billing._document_facts import _decode, decode_invoice_document_fact
+from dotmac_billing._opening_values import cash_decimal_context
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
     BillingAccountObservationV1,
+    CurrentSettlementAllocationV1,
     GetBillingAccountObservationV1,
+    GetCurrentSettlementAllocationV1,
     GetInvoiceDocumentFactV1,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
@@ -169,6 +172,7 @@ def get_invoice_document_fact(
 
 __all__ = [
     "get_billing_account_observation",
+    "get_current_settlement_allocation",
     "get_receivable_position_v2",
     "get_non_cash_credit_grant",
     "get_non_cash_credit_effect",
@@ -492,3 +496,289 @@ def get_receivable_position_v2(
         raise BillingRuleViolation(
             "non_cash_credit_position_corrupt", "stored V2 position is invalid"
         ) from exc
+
+
+def get_current_settlement_allocation(
+    db: Session, *, scope: Scope, request: GetCurrentSettlementAllocationV1
+) -> CurrentSettlementAllocationV1:
+    """Observe exact current allocation under the Billing account lock.
+
+    READ COMMITTED is required: a lock does not refresh an older repeatable-read
+    snapshot. Uses persisted scalars, never dirty/cached ORM entities; no flush,
+    commit or rollback. The caller retains the lock until transaction end.
+    """
+    if not isinstance(request, GetCurrentSettlementAllocationV1):
+        raise BillingRuleViolation(
+            "allocation_observation_request_invalid", "unsupported allocation request"
+        )
+    GetCurrentSettlementAllocationV1(
+        request.scope,
+        request.billing_account_id,
+        request.posting_group_id,
+        request.settlement_id,
+        request.document_id,
+        request.amount,
+    )
+    if not isinstance(scope, TenantScope | PlatformScope) or request.scope != scope:
+        raise BillingRuleViolation(
+            "scope_mismatch", "allocation observation scope disagrees"
+        )
+    # These are Billing-owned scalar helpers and do not import the command
+    # service (which itself consumes this query module).
+    from dotmac_billing._receivable_backing import resolve_receivable_backing
+    from dotmac_billing.opening_queries import _scoped, _table
+
+    def refused(message: str) -> NoReturn:
+        raise BillingRuleViolation("allocation_observation_unavailable", message)
+
+    def rows(name: str, **filters: object) -> list[Any]:
+        table = _table(scope, name)
+        statement = select(table)
+        for key, value in filters.items():
+            statement = statement.where(table.c[key] == value)
+        return list(db.execute(_scoped(statement, scope, table)).mappings())
+
+    def one(name: str, row_id: UUID) -> Any:
+        found = rows(name, id=row_id)
+        if len(found) != 1:
+            refused("exact allocation identity was not found")
+        return found[0]
+
+    currency = request.amount.currency
+
+    def envelope(row: Any) -> None:
+        if (
+            row["billing_account_id"] != request.billing_account_id
+            or row["currency"] != currency.code
+            or row["minor_units"] != currency.minor_units
+        ):
+            refused("allocation account or currency identity disagrees")
+
+    with db.no_autoflush, localcontext(cash_decimal_context()):
+        if db.connection().get_isolation_level() != "READ COMMITTED":
+            refused("current allocation observation requires READ COMMITTED")
+        account = _table(scope, "billing_accounts")
+        found = (
+            db.execute(
+                _scoped(
+                    select(account)
+                    .where(account.c.id == request.billing_account_id)
+                    .with_for_update(),
+                    scope,
+                    account,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            found is None
+            or found["currency"] != currency.code
+            or found["minor_units"] != currency.minor_units
+        ):
+            refused("allocation account was not found with exact currency")
+        group = one("posting_groups", request.posting_group_id)
+        settlement = one("confirmed_settlements", request.settlement_id)
+        document = one("documents", request.document_id)
+        for row in (group, settlement, document):
+            envelope(row)
+        if (
+            group["group_kind"] != "allocation"
+            or group["reverses_group_id"] is not None
+        ):
+            refused("exact posting group is not an original allocation")
+        if (
+            document["document_kind"] != "invoice"
+            or document["issued_at"] is None
+            or rows(
+                "document_events", document_id=request.document_id, event_kind="voided"
+            )
+            or not resolve_receivable_backing(
+                db, scope=scope, document_id=request.document_id
+            ).active
+        ):
+            refused("current invoice backing is unavailable")
+        roots = rows("allocation_effects", posting_group_id=group["id"])
+        if len(roots) != 1:
+            refused("exact allocation posting group is ambiguous")
+        root = roots[0]
+        envelope(root)
+        if (
+            root["settlement_id"] != request.settlement_id
+            or root["document_id"] != request.document_id
+            or root["effect_kind"] != "allocation"
+            or root["offsets_allocation_id"] is not None
+            or root["amount_delta"] != request.amount.amount
+        ):
+            refused("exact original allocation identity or amount disagrees")
+        funding_lane = settlement["funding_lane"]
+        if funding_lane not in ("available_credit", "prepaid_funding"):
+            refused("settlement funding lane is invalid")
+
+        def effects(posting: Any, expected: dict[str, Decimal]) -> None:
+            envelope(posting)
+            actual = rows("posting_effects", posting_group_id=posting["id"])
+            if len(actual) != len(expected):
+                refused("posting effects are ambiguous")
+            seen: set[str] = set()
+            for effect in actual:
+                envelope(effect)
+                lane = effect["lane"]
+                if (
+                    lane in seen
+                    or lane not in expected
+                    or effect["amount_delta"] != expected[lane]
+                ):
+                    refused("posting effect amount or lane disagrees")
+                seen.add(lane)
+
+        effects(
+            group,
+            {"receivable": -root["amount_delta"], funding_lane: -root["amount_delta"]},
+        )
+        # Reallocation has no original-allocation pointer. Even if pair totals
+        # happen to match, they cannot prove this particular root remains funded.
+        if rows(
+            "allocation_effects",
+            settlement_id=request.settlement_id,
+            document_id=request.document_id,
+            effect_kind="reallocation",
+        ):
+            refused("unlinked reallocation cannot prove exact allocation remaining")
+        visited: set[UUID] = set()
+
+        def net(parent: Any) -> Decimal:
+            envelope(parent)
+            if (
+                parent["id"] in visited
+                or len(visited) >= 128
+                or parent["settlement_id"] != request.settlement_id
+                or parent["document_id"] != request.document_id
+                or not parent["amount_delta"].is_finite()
+                or parent["amount_delta"] == 0
+            ):
+                refused("allocation inverse lineage is malformed")
+            visited.add(parent["id"])
+            total = parent["amount_delta"]
+            children = rows("allocation_effects", offsets_allocation_id=parent["id"])
+            reversals = rows(
+                "posting_groups", reverses_group_id=parent["posting_group_id"]
+            )
+            if len(reversals) > 1 or {row["id"] for row in reversals} != {
+                row["posting_group_id"]
+                for row in children
+                if row["effect_kind"] == "reversal"
+            }:
+                refused("allocation reversal group lacks its exact inverse edge")
+            for child in children:
+                child_group = one("posting_groups", child["posting_group_id"])
+                envelope(child_group)
+                if child["effect_kind"] == "deallocation":
+                    if (
+                        parent["id"] != root["id"]
+                        or child_group["group_kind"] != "deallocation"
+                        or child_group["reverses_group_id"] is not None
+                        or child["amount_delta"] >= 0
+                    ):
+                        refused("deallocation lineage is malformed")
+                elif child["effect_kind"] == "reversal":
+                    if (
+                        child_group["group_kind"] != "reversal"
+                        or child_group["reverses_group_id"]
+                        != parent["posting_group_id"]
+                        or child["amount_delta"] != -parent["amount_delta"]
+                    ):
+                        refused("allocation reversal lineage disagrees")
+                    if (
+                        len(
+                            rows(
+                                "posting_groups",
+                                reverses_group_id=parent["posting_group_id"],
+                            )
+                        )
+                        != 1
+                    ):
+                        refused("allocation reversal lineage branches")
+                else:
+                    refused("allocation inverse kind is unsupported")
+                if (
+                    len(rows("allocation_effects", posting_group_id=child_group["id"]))
+                    != 1
+                ):
+                    refused("allocation inverse posting group is ambiguous")
+                effects(
+                    child_group,
+                    {
+                        "receivable": -child["amount_delta"],
+                        funding_lane: -child["amount_delta"],
+                    },
+                )
+                total += net(child)
+            if (
+                parent["amount_delta"] > 0 and not 0 <= total <= parent["amount_delta"]
+            ) or (
+                parent["amount_delta"] < 0 and not parent["amount_delta"] <= total <= 0
+            ):
+                refused("allocation inverse net exceeds its original amount")
+            return total
+
+        remaining = net(root)
+        acceptances = rows(
+            "posting_groups",
+            source_ref=f"settlement:{request.settlement_id}",
+            group_kind="settlement_accepted",
+        )
+        if len(acceptances) != 1 or acceptances[0]["reverses_group_id"] is not None:
+            refused("settlement acceptance backing is ambiguous")
+        current = acceptances[0]
+        expected = settlement["amount"]
+        if (
+            not expected.is_finite()
+            or expected <= 0
+            or not settlement["confirmation_evidence"]
+        ):
+            refused("confirmed settlement backing is invalid")
+        active = True
+        lineage: set[UUID] = set()
+        while True:
+            if current["id"] in lineage:
+                refused("settlement reversal lineage cycles")
+            lineage.add(current["id"])
+            effects(current, {funding_lane: expected})
+            if rows("allocation_effects", posting_group_id=current["id"]):
+                refused("settlement backing contains unexpected allocation effects")
+            children = rows("posting_groups", reverses_group_id=current["id"])
+            if not children:
+                break
+            if len(children) != 1 or children[0]["group_kind"] != "reversal":
+                refused("settlement reversal lineage is ambiguous")
+            current = children[0]
+            expected = -expected
+            active = not active
+        used = Decimal("0")
+        for movement in rows("allocation_effects", settlement_id=request.settlement_id):
+            envelope(movement)
+            if not movement["amount_delta"].is_finite():
+                refused("settlement usage is malformed")
+            used += movement["amount_delta"]
+        if not 0 <= used <= settlement["amount"]:
+            refused("settlement usage exceeds confirmed backing")
+        state: Literal["current", "reduced", "removed", "inactive_backing"] = (
+            "inactive_backing"
+            if not active
+            else "removed"
+            if remaining == 0
+            else "current"
+            if remaining == root["amount_delta"]
+            else "reduced"
+        )
+        return CurrentSettlementAllocationV1(
+            scope,
+            request.billing_account_id,
+            request.posting_group_id,
+            request.settlement_id,
+            request.document_id,
+            request.amount,
+            Money.of(remaining, currency),
+            state,
+        )
