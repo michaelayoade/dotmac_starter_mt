@@ -138,3 +138,57 @@ def test_observation_rejects_unbounded_labels_and_future_domain_time(
                 {},
             ),
         )
+
+
+def test_shared_key_freezes_retries_and_changed_payload_conflicts(db: Session) -> None:
+    from dataclasses import replace
+
+    from dotmac_platform_health import health_observation_key
+
+    register_component(db, code="api", display_name="API", freshness_seconds=60)
+    at = datetime(2026, 10, 16, 10, tzinfo=UTC)
+    labels = {"region": "west"}
+    key = health_observation_key("source:one", "api", "heartbeat:42")
+    command = HealthObservationInput(
+        "source:one", key, "api", HealthState.HEALTHY, at, at, "ok", labels
+    )
+    first = record_observation(db, command)
+    labels["region"] = "east"
+    assert record_observation(db, command).replayed
+    for changed in (
+        replace(command, state=HealthState.UNHEALTHY),
+        replace(command, summary="down"),
+        replace(command, labels={"region": "east"}),
+        replace(command, received_at=at + timedelta(seconds=1)),
+    ):
+        assert changed.observation_key == key
+        with pytest.raises(HealthConflict, match="different content"):
+            record_observation(db, changed)
+    assert db.scalars(select(HealthObservation)).all() == [first.observation]
+
+
+def test_service_fingerprint_preserves_existing_offset_and_json_bytes() -> None:
+    import hashlib
+    from datetime import timezone
+
+    from dotmac_platform_health.service import _fingerprint
+
+    at = datetime(2026, 10, 16, 10, tzinfo=timezone(timedelta(hours=1)))
+    command = HealthObservationInput(
+        "source:one",
+        "key",
+        "api",
+        HealthState.HEALTHY,
+        at,
+        at + timedelta(seconds=1),
+        "caf\u00e9",
+        {"z": "last", "a": "first"},
+    )
+    # Pin the pre-existing service encoding, including escaped Unicode and offsets.
+    old_bytes = (
+        b'{"component_code":"api","labels":{"a":"first","z":"last"},'
+        b'"observed_at":"2026-10-16T10:00:00+01:00",'
+        b'"received_at":"2026-10-16T10:00:01+01:00",'
+        b'"state":"healthy","summary":"caf\\u00e9"}'
+    )
+    assert _fingerprint(command) == hashlib.sha256(old_bytes).hexdigest()

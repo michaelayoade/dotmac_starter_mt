@@ -18,6 +18,7 @@ from dotmac_platform_health.contracts import (
     HealthObservationInput,
     HealthState,
     HealthSummary,
+    validate_health_observation,
 )
 from dotmac_platform_health.evidence import (
     HealthEvidenceError,
@@ -97,14 +98,7 @@ def register_component(
 def record_observation(
     db: Session, command: HealthObservationInput
 ) -> ObservationReceipt:
-    _aware(command.observed_at, "observed_at")
-    _aware(command.received_at, "received_at")
-    if command.observed_at > command.received_at:
-        raise ValueError("observed_at cannot be later than received_at")
-    if len(command.labels) > 20 or any(
-        len(k) > 80 or len(v) > 160 for k, v in command.labels.items()
-    ):
-        raise ValueError("labels must be bounded to 20 short key/value pairs")
+    validate_health_observation(command)
     component = db.scalar(
         select(HealthComponent).where(
             HealthComponent.code == command.component_code,
