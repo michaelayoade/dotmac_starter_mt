@@ -80,13 +80,44 @@ modules (ADR-0024).
 
 No module imports a sibling to make a journey work. Sub hosts no journey logic.
 
+The first host is the tenant assembly that adopts `dotmac-billing` for Sub at
+the billing cutover. Sub itself hosts no composer.
+
+### 2a. Channels are an ordered list chosen from installed channels
+
+- Each journey category resolves its channels through the kernel
+  `channel_policy` setting. Example:
+  `{"categories": {"service_renewal": ["whatsapp", "sms", "email"]}}`.
+- **Only installed channels can be chosen.** The UI offers only channels whose
+  delivery provider the assembly has registered. The setting's write-time
+  validator refuses any channel that is not installed. This needs one kernel
+  change: the validator is given the installed set.
+- **Order is fallback priority, not fan-out.** A notice is sent on the first
+  channel in the list that is all of the following:
+  - installed;
+  - allowed by consent for the category;
+  - backed by an address for this subscriber;
+  - usable for this message. For example, WhatsApp outside a session is usable
+    only with an approved template for the category.
+- A channel that is not usable is skipped, and the skip reason is recorded as
+  evidence. If no channel is usable, the outcome is recorded as *not delivered*.
+  It is never treated as success.
+- Fan-out to every listed channel is a later, explicit per-category option.
+  It is not the default.
+- The suggested default is `whatsapp → sms → email` for both journeys. Tenants
+  change it in the UI.
+
 ### 3. Journey 1: renewal and expiry reminders
 
 **Scheduling**
 - For each subscription period that ends, the composer arms one timer per
   reminder step.
 - The steps are tenant parameters entered at ship time; the default is
-  T-3 days, T-1 day and T0.
+  T-3 days, T-1 day and T0. A default T+1 step follows the period end.
+- The T+1 notice says "service paused" only if `dotmac-network-access`
+  observes that service has actually stopped. Otherwise the state is UNKNOWN
+  (ADR-0032), and the notice uses neutral wording such as "your plan has
+  expired".
 - Each step has a natural identity: (subscription, period, step).
 - When a renewal, payment, plan change, suspension or cancellation supersedes
   the period, a new timer generation replaces the old one. Stale steps are
@@ -179,9 +210,14 @@ Each has a natural identity of (incident, subscriber, phase).
 tenant. If the window is cancelled, the pending notices are superseded through
 the timer generation.
 
-**Quiet hours.** Unplanned-incident notices may send during quiet hours only
-when the incident severity is at or above a tenant threshold. Everything else
-waits for the window to open.
+**Quiet hours.**
+- Unplanned-incident notices may send during quiet hours only when the incident
+  affects a whole site or OLT, or its severity is at or above a tenant threshold.
+- Everything else waits for the window to open.
+- If an incident starts and is restored entirely within quiet hours, there is no
+  overnight start or restore notice. Instead, subscribers get one summary notice
+  when the window opens, and only if the incident lasted longer than the
+  flap-damping duration.
 
 **Notification evidence.** Network-assurance's own records show who was told,
 what they were told and when. Support can then answer "were we told?" without
@@ -235,12 +271,25 @@ facts. They hold no new authority.
   would have to import or mirror its siblings' state, contrary to ADR-0024.
   Reconsider it once three or more journeys share real mechanics.
 
-## Open questions for the Decider
+## Sequencing
 
-1. Which tenant assembly hosts the composers first? Is it the Sub thin-client
-   assembly with Starter modules installed, or a Starter product assembly?
-2. Which channels ship first: email, SMS, WhatsApp template messages? WhatsApp
-   outside a session needs pre-approved templates.
-3. Default reminder offsets (T-3/T-1/T0), and should a T+1 "service paused"
-   notice be part of journey 1?
-4. What severity threshold lets an incident notice send during quiet hours?
+Both journeys depend on modules that no product has adopted yet. This ADR does
+not move them ahead of Gate 0 or the billing cutover.
+
+1. Ship renewal reminders without a pay link.
+2. Add the pay link (§4) once the Starter billing and payments path is live for
+   the tenant.
+3. Ship outage notices after `dotmac-network-assurance` and
+   `dotmac-network-topology` have an adopter.
+
+## Decisions folded in (2026-10-16)
+
+These were open questions in the first draft. They are now answered:
+
+- **Host.** The assembly that adopts `dotmac-billing` for Sub (§2).
+- **Channels.** A selectable ordered list, limited to installed channels, used
+  first-reachable (§2a).
+- **T+1 notice.** Included, with wording that depends on what the network
+  actually observes (§3).
+- **Quiet hours.** Site/OLT-level or threshold severity only; overnight
+  incidents fold into a single morning summary (§5).
