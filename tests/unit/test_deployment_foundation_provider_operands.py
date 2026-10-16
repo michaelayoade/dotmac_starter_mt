@@ -193,10 +193,20 @@ def test_matching_real_provider_captures_verifies_and_records_under_its_own_iden
 def test_matching_real_exposure_binding_crosses_admission_and_keeps_dynamic_failure(
     tmp_path,
 ):
-    spec = parsed()
+    document = tomllib.loads(DESCRIPTOR)
+    document["roles"][1]["ports"] = [
+        {
+            "container": 9001,
+            "host": 9001,
+            "protocol": "tcp",
+            "exposure": "loopback",
+            "address_family": "ipv4",
+        }
+    ]
+    spec = ProductDeploymentSpec.from_document(document)
     commands = Commands()
     effects = concrete(spec, tmp_path, commands)
-    caller_exposure = parsed()
+    caller_exposure = ProductDeploymentSpec.from_document(document)
     exposure = ComposeHostExposureEffects(
         caller_exposure, deploy_dir=tmp_path, runner=commands
     )
@@ -211,6 +221,8 @@ def test_matching_real_exposure_binding_crosses_admission_and_keeps_dynamic_fail
     outcome = executor.run(work, lock=held_lock(spec.product))
     assert grant.v3_provider.consumed
     assert not outcome.succeeded  # Empty host observations cannot prove exposure.
+    assert outcome.failed_step == StepKind.APPLY_EXPOSURE
+    assert "nothing is listening on ipv4 port 9001" in outcome.failure
     assert commands.calls
     assert exposure.execution_descriptor == effects.execution_descriptor
     assert exposure.comment.endswith(spec.product)
