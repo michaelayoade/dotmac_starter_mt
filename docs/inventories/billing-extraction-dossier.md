@@ -778,3 +778,131 @@ questions do not gate Sub-first preparation. No new approval is created here.
    which the event is SUPPRESSED and reconciliation still converges. Adding it
    to the Vendor CP entry gates is the integration owner's call, since the
    cutover plan is not this dossier's to edit.
+
+
+## Current account observation extension — 2026-10-15
+
+This bounded PORT-DELTA extends the existing clean Billing account owner; it
+creates no module, lineage, migration or second identity owner. The implementation
+source is `dotmac_billing.service.create_billing_account` and
+`dotmac_billing.queries.get_invoice_document_fact` at accepted Starter source
+`49f35ca6008ef36c3db69f3230782d8f83146ac9`: preserve scoped tenant/platform routing,
+read persisted table mappings inside `no_autoflush`, and return a frozen typed copy.
+The existing product inventory and clean-core source variance remain applicable.
+Sub's subscriber reads identify legacy product subscribers, and ERP's AR/customer
+reads identify its product accounts; neither is a public read of the clean Billing
+account tables. Their identity/repair machinery is not imported.
+
+The concrete prospective consumer is Sub's `ModuleBillingAccountBinding` in
+`app/models/billing.py`, present in the invoice-cash foundation at Sub source
+`bae92fe01a24cdec9d2283dabe7a793efe25674a` (tree
+`946d668835b92b074323cbc7a101f926da1db762`). Its composite FK proves scope/id
+existence, but cannot prove currency, minor-unit precision or external product
+reference. Its separately reviewed consumer source at Sub commit
+`60ff4a755636ce55a8f683806bdf3a6b1d8b1929` (tree
+`cf0929550d63284760e9092d2c8c79d2d466312e`) implements
+`get_module_invoice_billing_account` in
+`app/services/provider_payment_settlements.py`: resolve persisted checkout facts
+and the local mapping, call this genuine public query, then compare payer
+reference, currency and precision. Its focused PostgreSQL canaries call the real
+API; no foreign ORM read or local copy is introduced. The consumer branch is
+published as source only, without a pull request: type and positive PostgreSQL
+acceptance require this API to be published and exactly pinned first. The earlier
+foundation commit contains neither the getter import nor proven account
+validation. This is prospective composition, not adoption;
+`contract_consumers` remains empty.
+
+`BillingAccountObservationV1` contains current scope, account id, external
+reference and kernel `Currency`. Frozen describes the returned value only. The
+external reference is mutable and the account can disappear; each query observes
+its own statement's persisted state and callers must re-observe as needed. It is
+not a historical fact, balance, authorization, lock proof or cached admission token.
+The query neither flushes/commits nor reads dirty ORM attributes. Existing real
+Alembic-migrated PostgreSQL canaries are reused for RLS, cross-plane same-id
+isolation, missing/invalid input, dirty identity maps, relink/delete freshness and
+corrupt stored identity. Hosted execution remains pending. Billing `0.1.0a8` stays
+an unpublished candidate; this change neither bumps a version nor grants
+publication or production authority.
+
+## Public rated invoice authoring — 2026-10-15 candidate
+
+This bounded API delta composes Billing's existing `accept_rated_obligation`,
+`create_draft_document` and `issue_document` owners. `IssueRatedInvoiceV1` carries
+one already-rated obligation and the existing frozen document snapshots;
+`IssuedRatedInvoiceV1` returns persisted scope/account/obligation/invoice/line
+identities, line number and the original issued fact version. Quantity is exactly
+one. Numbering and the manifest-backed obligation-source registry are injected by
+the assembly; the command cannot declare trusted source kinds. Kernel's existing
+idempotency operation/savepoint contains all three stages, including number
+allocation, postings and facts; services never commit or roll back the root.
+This adds neither a ledger nor tax/rating/numbering authority.
+
+The real intended consumer is Sub `app/services/prepaid_period_purchases.py`,
+`settle_prepaid_period_purchase` / `settle_verified_prepaid_period_purchase`,
+which issues one invoice and one line per funded final service period (source
+inspection at prospective Sub bridge head
+`99313fb2cc0e179d13742d26a75e3a58c6720c6b`, in
+`dotmac_sub-billing-module-invoice-cash`). Its existing staged invoice/line and
+issuance logic is the financial reference, including quantity one, frozen price
+and tax evidence, confirmed funding, and per-period identity. This API reuses
+clean Billing's accepted implementation rather than adding a second algorithm.
+No Qualification prototype or API #845 dependency is introduced.
+
+Consumer composition is deferred: Sub still needs its module-line/product-FK
+bridge; frozen price and Tax-owner evidence mapping; owner conflict-savepoint
+and root transaction composition; and verified cash-source binding. No consumer,
+adoption, activation, legacy retirement, release, or production authority transfer
+is claimed. The historical published Billing baseline remains `0.1.0a1`;
+`0.1.0a8` and this source delta remain unpublished candidates. Hosted PostgreSQL
+canaries cover isolation, exact replay and changed replay, original persisted
+identities, one issuance effect, and failure atomicity; local static checks are
+not runtime evidence. No new schema target or migration is required by this API.
+
+The public authoring path validates persisted applied-tax evidence with the
+existing `_require_obligation_taxes` rule inside its outer operation, before
+creating the draft. Missing evidence for nonzero tax, mismatched currency or
+minor-unit precision, and a tax sum that differs from the rated obligation are
+refused atomically. Legacy single-line authoring behavior is unchanged.
+Source fact version remains part of Billing's established obligation natural
+identity: changing it creates a new identity, not a correction of an issued
+invoice. Assemblies retain source revision/deduplication ownership and must use
+the existing correction owner for documented obligations. Hosted canaries now
+compose the actual Numbering lineage and public allocator to verify number
+receipt/counter rollback, caller root rollback and concurrent public retries.
+
+## Exact line source provider key — 2026-10-16 candidate
+
+The qualifying consumer reference remains Sub
+`99313fb2cc0e179d13742d26a75e3a58c6720c6b`:
+`app/services/prepaid_period_purchases.py` stages a financial invoice and line
+for each funded final period; `app/models/prepaid_funding.py` and
+`app/models/billing.py` retain legacy purchase and entitlement invoice-line FKs.
+The public rated-invoice receipt returns stable stored identities. This separate
+provider schema prerequisite lets a future product FK prove that those identities
+belong to the exact Billing document and account. The existing tenant `(tenant_id,
+id)` line key alone cannot prove the product account's affinity.
+
+PORT-DELTA `bi_0010_line_source_key`, following `bi_0009_opening_window`, adds
+`uq_document_lines_source_key` over `(tenant_id, id, document_id,
+billing_account_id)` and `uq_platform_document_lines_source_key` over `(id,
+document_id, billing_account_id)`. These are ordinary nonpartial unique
+constraints, installed only on `selected_module_planes('billing')`. Existing
+keys, line/document/account FKs, FORCE RLS, issued-line immutability and runtime
+ACLs remain their existing owners. No released migration is edited. Downgrade
+uses PostgreSQL RESTRICT: a bound consumer FK refuses removal; no cascade or
+financial-history deletion is introduced.
+
+Sub's nullable module-line bridge is planned after its revision 693, preserving
+legacy FKs, with no historical backfill; closed invoice history stays in the
+read-only archive. This change adds no product field, authoring API, ledger or
+caller activation. It is not consumer adoption, qualified cash or payment-status
+proof. Billing `0.1.0a8` and this source delta remain unpublished.
+
+`tests/test_billing_line_source_key.py` authors real PostgreSQL canaries against
+the actual fresh migration chain and populated bi_0009 predecessor upgrade,
+with tenant-only, platform-only and both-plane selections. Disposable cross-schema
+probe FKs exercise exact tuple acceptance and wrong document/account/scope
+refusal; catalog and runtime probes retain financial guards and ACLs, and bound
+consumer FKs refuse downgrade. Probe DDL is not a deployed Sub schema. Runtime
+execution is reserved for Git-hosted CI; local AST/Ruff/diff checks are static
+evidence only.

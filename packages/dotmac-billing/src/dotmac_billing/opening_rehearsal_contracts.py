@@ -24,8 +24,10 @@ from dotmac_billing.opening_contracts import (
 )
 from dotmac_billing.opening_receivable_contracts import (
     ImportOpeningAccountV2,
+    OpeningHistoricalDischargeV1,
     OpeningImportPreviewV2,
     OpeningManifestV2,
+    OpeningOriginalDocumentV1,
 )
 
 __all__ = [
@@ -46,6 +48,8 @@ __all__ = [
     "OpeningRehearsalComparisonV1",
     "OpeningRehearsalAssemblyPartitionV1",
     "OpeningRehearsalAssemblyV1",
+    "OpeningRehearsalOriginalEvidenceV1",
+    "OpeningRehearsalInvoiceEvidenceV1",
     "OpeningRehearsalCensusBlockerV1",
     "OpeningRehearsalCensusDeltaV1",
     "OpeningRehearsalCensusPartitionV1",
@@ -302,6 +306,34 @@ class OpeningRehearsalAssemblyV1(OpeningCashValue):
         invoice_keys = {row.source_invoice_id for row in self.invoice_mappings}
         if len(invoice_keys) != len(self.invoice_mappings):
             raise OpeningEvidenceError("duplicate assembly invoice lookup key")
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningRehearsalInvoiceEvidenceV1(OpeningCashValue):
+    """Explicit original and historical effects for one source invoice."""
+
+    source_invoice_id: UUID
+    original: OpeningOriginalDocumentV1
+    historical_discharges: tuple[OpeningHistoricalDischargeV1, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningRehearsalOriginalEvidenceV1(OpeningCashValue):
+    """Content aligned to exact source bytes and an assembly, not qualification."""
+
+    schema: Literal["billing.opening.rehearsal.original-evidence.v1"]
+    census_sha256: str
+    assembly_digest: str
+    invoices: tuple[OpeningRehearsalInvoiceEvidenceV1, ...]
+
+    def __post_init__(self) -> None:
+        OpeningCashValue.__post_init__(self)
+        for digest in (self.census_sha256, self.assembly_digest):
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise OpeningEvidenceError("invalid original evidence alignment digest")
+        ids = [row.source_invoice_id for row in self.invoices]
+        if len(ids) != len(set(ids)):
+            raise OpeningEvidenceError("duplicate original evidence invoice")
 
 
 @dataclass(frozen=True, slots=True)
