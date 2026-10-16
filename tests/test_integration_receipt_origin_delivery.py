@@ -41,8 +41,6 @@ from tests.unit.test_integration_ingress import (  # noqa: F401
 )
 
 
-@pytest.mark.parametrize("wire_version", ["v1", "v2"])
-@pytest.mark.parametrize("recorded_origin", [True, False])
 def _reenable(db, installation, registry) -> None:
     """Re-run activation after a config rotation demotes the installation.
 
@@ -61,6 +59,8 @@ def _reenable(db, installation, registry) -> None:
         set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
 
 
+@pytest.mark.parametrize("wire_version", ["v1", "v2"])
+@pytest.mark.parametrize("recorded_origin", [True, False])
 def test_real_claim_retains_recorded_origin_across_configuration_rotation(
     migrated_scratch: tuple[str, str],  # noqa: F811
     wire_version: str,
