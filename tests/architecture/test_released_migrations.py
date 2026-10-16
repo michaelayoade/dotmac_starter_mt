@@ -7375,7 +7375,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "ao_0003_ack_attribution.py",
         }
     ),
-    "dotmac-payments": frozenset({"pm_0004_purchase_funding.py"}),
+    "dotmac-payments": frozenset(
+        {"pm_0004_purchase_funding.py", "pm_0005_merchant_context.py"}
+    ),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the
     # protected release tags it and its digest is recorded above.

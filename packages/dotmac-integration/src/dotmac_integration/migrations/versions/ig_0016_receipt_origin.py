@@ -46,19 +46,30 @@ def upgrade() -> None:
         sa.Column("verification_mode", sa.String(16), nullable=True),
         schema=_SCHEMA,
     )
+    op.add_column(
+        _TABLE,
+        sa.Column("verification_config_digest", sa.String(64), nullable=True),
+        schema=_SCHEMA,
+    )
     op.create_check_constraint(
         "ck_inbox_receipts_verification_origin",
         _TABLE,
         "(verification_connector_key IS NULL "
         "AND verification_manifest_digest IS NULL "
-        "AND verification_config_revision_id IS NULL AND verification_mode IS NULL) OR "
+        "AND verification_config_revision_id IS NULL "
+        "AND verification_config_digest IS NULL AND verification_mode IS NULL) OR "
         "(verification_connector_key IS NOT NULL "
         "AND length(trim(verification_connector_key)) > 0 "
         "AND verification_connector_key = trim(verification_connector_key) "
         "AND verification_manifest_digest IS NOT NULL "
         "AND length(verification_manifest_digest) = 64 "
         "AND verification_mode IS NOT NULL "
-        "AND verification_mode IN ('ingress', 'poll'))",
+        "AND verification_mode IN ('ingress', 'poll') "
+        "AND ((verification_config_revision_id IS NULL "
+        "AND verification_config_digest IS NULL) OR "
+        "(verification_config_revision_id IS NOT NULL "
+        "AND verification_config_digest IS NOT NULL "
+        "AND length(verification_config_digest) = 64)))",
         schema=_SCHEMA,
     )
     op.create_check_constraint(
@@ -68,6 +79,13 @@ def upgrade() -> None:
         "OR verification_manifest_digest ~ '^[0-9a-f]{64}$'",
         schema=_SCHEMA,
     )
+    op.create_check_constraint(
+        "ck_inbox_receipts_origin_config_digest",
+        _TABLE,
+        "verification_config_digest IS NULL "
+        "OR verification_config_digest ~ '^[0-9a-f]{64}$'",
+        schema=_SCHEMA,
+    )
     op.execute("""
         CREATE FUNCTION mod_intg.guard_receipt_verification_origin()
         RETURNS trigger LANGUAGE plpgsql AS $$
@@ -75,11 +93,13 @@ def upgrade() -> None:
             IF TG_OP = 'UPDATE' THEN
                 IF ROW(OLD.id, OLD.installation_id, OLD.capability_binding_id,
                        OLD.verification_connector_key, OLD.verification_manifest_digest,
-                       OLD.verification_config_revision_id, OLD.verification_mode)
+                       OLD.verification_config_revision_id, OLD.verification_config_digest,
+                       OLD.verification_mode)
                    IS DISTINCT FROM
                    ROW(NEW.id, NEW.installation_id, NEW.capability_binding_id,
                        NEW.verification_connector_key, NEW.verification_manifest_digest,
-                       NEW.verification_config_revision_id, NEW.verification_mode) THEN
+                       NEW.verification_config_revision_id, NEW.verification_config_digest,
+                       NEW.verification_mode) THEN
                     RAISE EXCEPTION 'receipt verification origin is immutable';
                 END IF;
             ELSIF NEW.verification_connector_key IS NOT NULL THEN
@@ -133,11 +153,15 @@ def downgrade() -> None:
     )
     op.execute("DROP FUNCTION mod_intg.guard_receipt_verification_origin();")
     op.drop_constraint(
+        "ck_inbox_receipts_origin_config_digest", _TABLE, type_="check", schema=_SCHEMA
+    )
+    op.drop_constraint(
         "ck_inbox_receipts_origin_digest", _TABLE, type_="check", schema=_SCHEMA
     )
     op.drop_constraint(
         "ck_inbox_receipts_verification_origin", _TABLE, type_="check", schema=_SCHEMA
     )
+    op.drop_column(_TABLE, "verification_config_digest", schema=_SCHEMA)
     op.drop_column(_TABLE, "verification_mode", schema=_SCHEMA)
     op.drop_column(_TABLE, "verification_config_revision_id", schema=_SCHEMA)
     op.drop_column(_TABLE, "verification_manifest_digest", schema=_SCHEMA)

@@ -88,6 +88,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
@@ -96,11 +97,17 @@ from uuid import UUID
 
 from dotmac_integration.capability_registry import CapabilityRegistry
 from dotmac_integration.destination_binding import resolve_destination
-from dotmac_integration.execution import LostClaim, payload_digest
+from dotmac_integration.execution import (
+    LostClaim,
+    ReceiptVerificationOrigin,
+    payload_digest,
+    receipt_verification_origin,
+)
 from dotmac_integration.models import (
     SCHEMA,
     CapabilityBinding,
     ConnectorInstallation,
+    InboxReceipt,
 )
 from dotmac_integration.retry import Outcome, OutcomeStatus, next_state
 
@@ -114,6 +121,9 @@ __all__ = [
     "settle_statement",
     "ProductAcceptance",
     "PRODUCT_OBSERVATION_SCHEMA_VERSION",
+    "PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION",
+    "ReceiptOriginEvidence",
+    "resolve_receipt_origin_evidence",
     "ProductObservationSource",
     "ProductPortClient",
     "ProductOutcome",
@@ -308,6 +318,83 @@ def resolve_product_observation_source(
 
 
 @dataclass(frozen=True, slots=True)
+class ReceiptOriginEvidence:
+    """Original retained receipt context, opaque to product business policy.
+
+    This is not provider authenticity, merchant identity or financial acceptance.
+    Unknown historical context has no value of this type and is never backfilled.
+    """
+
+    receipt_id: UUID
+    payload_digest: str
+    verification_origin: ReceiptVerificationOrigin
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.receipt_id, UUID):
+            raise DeliveryError("original receipt identity must be a UUID")
+        if (
+            not isinstance(self.payload_digest, str)
+            or len(self.payload_digest) != 64
+            or any(char not in "0123456789abcdef" for char in self.payload_digest)
+        ):
+            raise DeliveryError("original receipt digest must be lowercase SHA-256")
+        if not isinstance(self.verification_origin, ReceiptVerificationOrigin):
+            raise DeliveryError(
+                "original receipt requires recorded verification context"
+            )
+        try:
+            # Revalidate even frozen inputs: callers can bypass dataclass
+            # construction or mutate with object.__setattr__ before projection.
+            ReceiptVerificationOrigin.__post_init__(self.verification_origin)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise DeliveryError(
+                "original receipt verification context is invalid"
+            ) from exc
+
+
+def resolve_receipt_origin_evidence(
+    session: Any, *, receipt_id: UUID
+) -> ReceiptOriginEvidence | None:
+    """Read the retained original receipt only; current config is never evidence.
+
+    Public read boundary for an authenticated assembly's query/shadow transport.
+    Missing receipts refuse; retained pre-origin history explicitly returns None.
+    The caller supplies authorization and its own transaction boundary.
+    """
+    from sqlalchemy import select
+
+    # Entity reads may return an altered ORM identity-map value before the
+    # immutable database guard has rejected its flush. Read persisted scalars,
+    # without autoflush, so the public evidence boundary cannot attest that value.
+    with session.no_autoflush:
+        receipt = session.execute(
+            select(
+                InboxReceipt.id,
+                InboxReceipt.installation_id,
+                InboxReceipt.capability_binding_id,
+                InboxReceipt.payload_digest,
+                InboxReceipt.verification_connector_key,
+                InboxReceipt.verification_manifest_digest,
+                InboxReceipt.verification_config_revision_id,
+                InboxReceipt.verification_config_digest,
+                InboxReceipt.verification_mode,
+            ).where(InboxReceipt.id == receipt_id)
+        ).one_or_none()
+    if receipt is None:
+        raise DeliveryError("original receipt is not retained")
+    # The existing owner reads these attributes only; a scalar Row supplies the
+    # same shape without consulting or refreshing a caller's dirty ORM entity.
+    origin = receipt_verification_origin(receipt)  # type: ignore[arg-type]
+    if origin is None:
+        return None
+    return ReceiptOriginEvidence(
+        receipt_id=receipt.id,
+        payload_digest=receipt.payload_digest,
+        verification_origin=origin,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class ReceiptClaim:
     """One worker's exclusive, TIME-BOUNDED right to deliver one receipt.
 
@@ -328,6 +415,7 @@ class ReceiptClaim:
     #: The fingerprint recorded by an EARLIER attempt, when there was one.
     #: `None` on a first attempt. Compared, never overwritten.
     stored_fingerprint: str | None = None
+    origin_evidence: ReceiptOriginEvidence | None = None
 
     def __post_init__(self) -> None:
         if self.attempt < 1:
@@ -358,6 +446,7 @@ class ProductRequest:
     provider_event_id: str
     event_type: str
     observation: Mapping[str, object]
+    origin_evidence: ReceiptOriginEvidence | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observation", _frozen(self.observation))
@@ -570,8 +659,7 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
         event_type=claim.event_type,
         observation=claim.observation,
     )
-    require_stable_fingerprint(claim.stored_fingerprint, fingerprint)
-    return ProductRequest(
+    request = ProductRequest(
         destination=claim.destination,
         source=claim.source,
         contract_version=claim.destination.contract_version,
@@ -584,23 +672,92 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
         provider_event_id=claim.provider_event_id,
         event_type=claim.event_type,
         observation=claim.observation,
+        origin_evidence=claim.origin_evidence,
     )
+    if (
+        _wire_schema_version(claim.destination)
+        == PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION
+    ):
+        fingerprint = payload_digest(product_observation_document(request))
+        request = dataclass_replace(request, request_fingerprint=fingerprint)
+    require_stable_fingerprint(claim.stored_fingerprint, fingerprint)
+    return request
 
 
 PRODUCT_OBSERVATION_SCHEMA_VERSION = "dotmac.io/product-observation/v1"
+PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION = "dotmac.io/product-observation/v2"
+
+
+def _wire_schema_version(destination: TrustedDestination) -> str:
+    # Legacy structural destinations and pre-v3 descriptors retain v1 exactly.
+    descriptor = getattr(destination, "product_port", None)
+    version = getattr(descriptor, "wire_schema_version", None)
+    if version is None:
+        return PRODUCT_OBSERVATION_SCHEMA_VERSION
+    if version not in (
+        PRODUCT_OBSERVATION_SCHEMA_VERSION,
+        PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION,
+        "dotmac.io/integrator-observation-envelope/v1",
+    ):
+        raise DeliveryError("unsupported product observation wire schema")
+    return version
+
+
+def _origin_document(request: ProductRequest) -> dict[str, object]:
+    evidence = request.origin_evidence
+    if evidence is None:
+        raise DeliveryError(
+            "v2 requires retained original receipt context; history is unknown"
+        )
+    if not isinstance(evidence, ReceiptOriginEvidence):
+        raise DeliveryError("v2 requires typed original receipt context")
+    try:
+        ReceiptOriginEvidence.__post_init__(evidence)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise DeliveryError("original receipt context is invalid") from exc
+    origin = evidence.verification_origin
+    if (
+        evidence.receipt_id != request.receipt_id
+        or origin.installation_id != request.source.installation_id
+        or origin.connector_key != request.source.connector_key
+        or origin.capability_binding_id != request.destination.capability_binding_id
+        or evidence.payload_digest != payload_digest(_json_value(request.observation))
+    ):
+        raise DeliveryError("original receipt context disagrees with the delivery")
+    return {
+        "receipt_id": str(evidence.receipt_id),
+        "payload_digest": evidence.payload_digest,
+        "installation_id": str(origin.installation_id),
+        "capability_binding_id": str(origin.capability_binding_id),
+        "connector_key": origin.connector_key,
+        "manifest_digest": origin.manifest_digest,
+        "original_config_digest": origin.config_digest,
+        "config_revision_id": (
+            None
+            if origin.config_revision_id is None
+            else str(origin.config_revision_id)
+        ),
+        "verification_mode": origin.verification_mode,
+    }
 
 
 def product_observation_document(request: ProductRequest) -> dict[str, object]:
-    """Project one generic ProductObservation v1 wire document.
+    """Project the explicitly negotiated ProductObservation wire document.
 
     Addressing comes only from the immutable product descriptor resolved during
     the claim. Source provenance comes only from the module's installation and
-    binding rows. The connector-normalized observation is carried as product
+    binding rows for v1, and only retained original receipt context for v2.
+    Unknown v2 history refuses. The connector-normalized observation is product
     input, never interpreted here.
     """
 
-    return {
-        "schema_version": PRODUCT_OBSERVATION_SCHEMA_VERSION,
+    version = _wire_schema_version(request.destination)
+    if version == "dotmac.io/integrator-observation-envelope/v1":
+        # This builder historically emitted v1; the assembly owns the distinct
+        # messaging envelope adapter and still selects it explicitly.
+        version = PRODUCT_OBSERVATION_SCHEMA_VERSION
+    document: dict[str, object] = {
+        "schema_version": version,
         "capability_id": request.destination.capability_id,
         "contract_version": request.contract_version,
         "source": {
@@ -615,6 +772,9 @@ def product_observation_document(request: ProductRequest) -> dict[str, object]:
         },
         "observation": _json_value(request.observation),
     }
+    if version == PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION:
+        document["receipt_origin"] = _origin_document(request)
+    return document
 
 
 # ── The two seams ───────────────────────────────────────────────────────────
@@ -828,6 +988,19 @@ class ReceiptClaims:
             source = resolve_product_observation_source(
                 session, capability_binding_id=row.capability_binding_id
             )
+            origin_evidence = resolve_receipt_origin_evidence(
+                session, receipt_id=receipt_id
+            )
+            if (
+                origin_evidence is not None
+                and _wire_schema_version(destination)
+                == PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION
+            ):
+                original = origin_evidence.verification_origin
+                source = ProductObservationSource(
+                    installation_id=original.installation_id,
+                    connector_key=original.connector_key,
+                )
             session.execute(
                 text(
                     f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 # nosec B608 -- every interpolated fragment is a module-owned literal (schema name, state names, an int lease); all VALUES are bound
@@ -858,6 +1031,7 @@ class ReceiptClaims:
             # the identity it definitely has.
             correlation_id=row.correlation_id or str(receipt_id),
             stored_fingerprint=row.delivery_fingerprint,
+            origin_evidence=origin_evidence,
         )
 
     def settle(self, claim: ReceiptClaim, outcome: ProductOutcome) -> bool:

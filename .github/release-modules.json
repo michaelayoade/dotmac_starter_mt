@@ -1810,6 +1810,7 @@
           "dotmac_integration/manifest.py",
           "dotmac_integration/spi.py",
           "dotmac_integration/query_contract.py",
+          "dotmac_integration/receipt_delivery.py",
           "dotmac_integration/ingress.py",
           "dotmac_integration/polling.py",
           "dotmac_integration/discovery.py",
@@ -1831,7 +1832,8 @@
           "dotmac_integration/migrations/versions/ig_0012_delivery_evidence.py",
           "dotmac_integration/migrations/versions/ig_0013_delivery_result.py",
           "dotmac_integration/migrations/versions/ig_0014_polling_evidence.py",
-          "dotmac_integration/migrations/versions/ig_0015_descriptor_contract.py"
+          "dotmac_integration/migrations/versions/ig_0015_descriptor_contract.py",
+          "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -2380,6 +2382,7 @@
           "dotmac_payments/migrations/versions/pm_0002_money_precision.py",
           "dotmac_payments/migrations/versions/pm_0003_confirmation_immutable.py",
           "dotmac_payments/migrations/versions/pm_0004_purchase_funding.py",
+          "dotmac_payments/migrations/versions/pm_0005_merchant_context.py",
           "dotmac_payments/models.py",
           "dotmac_payments/service.py"
         ],

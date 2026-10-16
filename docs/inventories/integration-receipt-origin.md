@@ -7,15 +7,19 @@ at product delivery cannot recover those historical facts after rotation.
 
 `dotmac_integration.execution.ReceiptVerificationOrigin` records the original
 installation UUID, capability-binding UUID, connector key, manifest SHA-256,
-configuration-revision UUID (or the prepared no-config state), and engine mode
+configuration-revision UUID and captured configuration SHA-256 (or the prepared
+no-config state), and engine mode
 (`ingress` or `poll`). It contains no configuration, secret reference, request
 material, provider account or credential-generation claim. The first two UUIDs
-are the receipt's existing identity columns; four additive columns hold the
+are the receipt's existing identity columns; five additive columns hold the
 remaining values. The internal `receipt_verification_origin` accessor reads
 only the receipt and returns `None` for unknown history.
 
-`PreparedIngress` and `PreparedPoll` supply this frozen value from their own
-phase-one context. Poll preparation now carries the installation manifest pin
+`PreparedIngress` and `PreparedPoll` supply this value from their own detached
+phase-one context. The digest covers the existing configuration, secret-reference
+and schema-version inputs, never materialized secrets. It is captured before
+external I/O; it is not reconstructed from a mutable configuration row at delivery.
+Poll preparation now carries the installation manifest pin
 as ingress already did. `record_batch` supplies it to the existing
 `receive_verified` owner. A retry with identical context remains idempotent.
 Changed context, including an unknown historical context versus a new recorded
@@ -40,10 +44,16 @@ retention is unchanged; deletion and DDL authority remain the pre-existing
 trust boundary. This does not promise perpetual receipt history.
 
 This records original verification context only. Neither a manifest nor a
-configuration revision proves merchant identity, a credential generation,
+configuration revision or its digest proves merchant identity, a credential generation,
 authentic archival provider evidence, or cash qualification. There is no
 historical backfill and no change to published capability messages,
-ProductObservation v1, delivery semantics, settlement or cash writers. An
+ProductObservation v1, settlement or cash writers. An explicit descriptor
+wire-version selection enables the proposed ProductObservation v2 document
+builder with original receipt context and a fingerprint of the full v2 document.
+The public origin query reads persisted receipt scalars without autoflushing
+caller changes. Existing v1 and messaging documents retain their fingerprints.
+The actual Integrator publisher and Sub destination parser/descriptor have not
+adopted v2, and a19 remains unpublished. An
 assembly still needs independently accepted finite namespace mappings and
 provider proof before using any receipt as financial evidence.
 

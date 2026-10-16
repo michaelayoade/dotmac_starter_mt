@@ -15,6 +15,7 @@ from dotmac_payments.manifest import module
 
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/pm_0001_payment_intents.py"
+MERCHANT_MIGRATION = ROOT / "migrations/versions/pm_0005_merchant_context.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -30,6 +31,8 @@ def test_manifest_and_tenant_plane_are_exact() -> None:
         "payment_intents",
         "payment_transfer_proofs",
         "payment_confirmations",
+        "merchant_contexts",
+        "merchant_context_ends",
     )
     assert module.platform_tables == ()
     for name in module.tables:
@@ -124,13 +127,33 @@ def test_service_is_flush_only_and_sibling_independent() -> None:
 
 def test_root_migration_is_a_forced_rls_lineage_and_passes_the_gate() -> None:
     source = MIGRATION.read_text(encoding="utf-8")
-    for table in module.tables:
-        assert f'op.create_table(\n        "{table}"' in source
+    merchant_source = MERCHANT_MIGRATION.read_text(encoding="utf-8")
+    creation_sources = {
+        "payment_intents": source,
+        "payment_transfer_proofs": source,
+        "payment_confirmations": source,
+        "merchant_contexts": merchant_source,
+        "merchant_context_ends": merchant_source,
+    }
+    assert set(creation_sources) == set(module.tables)
+    for table, creation_source in creation_sources.items():
+        assert f'op.create_table(\n        "{table}"' in creation_source
     assert "for table in _TENANT_TABLES:" in source
-    assert "ALTER TABLE mod_payments.{table} ENABLE ROW LEVEL SECURITY" in source
-    assert "ALTER TABLE mod_payments.{table} FORCE ROW LEVEL SECURITY" in source
-    assert "CREATE POLICY {table}_tenant_isolation ON mod_payments.{table}" in source
-    assert "mod_payments.{table} TO app_user" in source
+    assert "for table in _TABLES:" in merchant_source
+    for migration_source in (source, merchant_source):
+        assert (
+            "ALTER TABLE mod_payments.{table} ENABLE ROW LEVEL SECURITY"
+            in migration_source
+        )
+        assert (
+            "ALTER TABLE mod_payments.{table} FORCE ROW LEVEL SECURITY"
+            in migration_source
+        )
+        assert (
+            "CREATE POLICY {table}_tenant_isolation ON mod_payments.{table}"
+            in migration_source
+        )
+        assert "mod_payments.{table} TO app_user" in migration_source
 
     from dotmac_kernel.migrations.gate import run_gate
 

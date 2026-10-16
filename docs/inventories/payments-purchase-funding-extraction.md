@@ -65,3 +65,45 @@ remain unchanged. Metadata proposes successor `0.1.0a3` as unpublished source;
 this does not allocate, approve, build, tag, publish or adopt that identity.
 Release-catalog allocation/authorization remains the release owner's decision.
 Sub remains the live writer until separately authorized adoption and cutover.
+
+## Merchant context and cash identity gap (2026-10-16)
+
+The purchase caller audit identified a second prerequisite in the same existing
+Payments owner. Local confirmation IDs cannot identify the economic provider
+transaction for both opening import and live acceptance. The following source
+inventory precedes implementation; none of these new contracts is published or
+adopted by Sub.
+
+| Existing source | Retain or extract | Leave outside this module |
+| --- | --- | --- |
+| Sub `provider_payment_settlements.ModuleInvoiceCashSource` | Exact frozen intent, payer, provider, transaction and Money comparisons; generalize the target boundary to purchases | Product account/invoice/purchase eligibility and local model FKs |
+| Sub `payment_gateway_finance.bind_integrator_installation` | Explicit reviewed configuration authority and exact provenance binding | Local installation/configuration FKs, authenticated Finance permission checks and UI |
+| Sub `payment_provider_events._normalize` | Normalized original transaction facts and exact replay conflicts | Provider wire decoding and transport authentication |
+| Sub `integrations.payment_capture` | Original connector/configuration provenance and separately observed capture facts | Caller-asserted merchant namespace as qualification; current configuration as original proof |
+| Starter Payments intent/confirmation owners | Frozen intent correlation and immutable accepted external facts | Confirmation UUID or a constant version as economic cash identity |
+
+The genuinely new portable rule is independently reviewed merchant-context
+authority. An immutable accepted context binds provider/environment and physical
+merchant identity to opaque original transport/configuration references and
+review evidence. Sub supplies server-authenticated review authority; the shared
+command validates its exact tenant, operation, request fingerprint and reviewer
+binding. A request flag or reviewer string cannot authorize acceptance. This is
+human-reviewed configuration authority, not automatic proof that an artifact or
+provider response is authentic.
+
+Append-only termination/supersession closes new admissions without rewriting
+original review facts. A historical context query returns evidence only and
+cannot itself authorize new cash. New mutations require READ WRITE READ
+COMMITTED and serialized scoped admission; historical reads retain their
+original facts. No new permission grant, provider credential or transport
+implementation belongs in these shared records.
+
+Sub remains the thin product adapter. Payments must ultimately own the shared
+merchant-qualified namespace/transaction/economic-version codec and successful
+cash qualification against the original frozen intent. Those qualification
+contracts are a following source slice, not supplied by the context records
+alone. Integration supplies actual retained authenticated transport provenance
+through its versioned delivery boundary, never a foreign platform-table query.
+Paystack capture time must come from explicit `paid_at`; unsupported Flutterwave
+merchant/capture semantics remain unresolved. No current, received, retrieved or
+creation timestamp substitutes for missing capture evidence.

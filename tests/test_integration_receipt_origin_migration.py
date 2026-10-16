@@ -60,12 +60,16 @@ def test_real_predecessor_legacy_row_stays_unknown_and_can_roundtrip(
         legacy_id = _receipt(conn, request)
     command.upgrade(config, "heads")
     with Session(engine) as db:
-        assert receipt_verification_origin(db.get(InboxReceipt, legacy_id)) is None
+        legacy = db.get(InboxReceipt, legacy_id)
+        assert legacy.verification_config_digest is None
+        assert receipt_verification_origin(legacy) is None
     # Unknown historical rows do not prevent a lossless downgrade/upgrade.
     command.downgrade(config, "ig_0015_descriptor_contract")
     command.upgrade(config, "heads")
     with Session(engine) as db:
-        assert receipt_verification_origin(db.get(InboxReceipt, legacy_id)) is None
+        legacy = db.get(InboxReceipt, legacy_id)
+        assert legacy.verification_config_digest is None
+        assert receipt_verification_origin(legacy) is None
     engine.dispose()
     _assert_downgrade_protects_origin(admin_url)
 

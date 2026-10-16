@@ -521,6 +521,7 @@ class InboxReceipt(Base):
             "(verification_connector_key IS NULL "
             "AND verification_manifest_digest IS NULL "
             "AND verification_config_revision_id IS NULL "
+            "AND verification_config_digest IS NULL "
             "AND verification_mode IS NULL) OR "
             "(verification_connector_key IS NOT NULL "
             "AND length(trim(verification_connector_key)) > 0 "
@@ -528,13 +529,23 @@ class InboxReceipt(Base):
             "AND verification_manifest_digest IS NOT NULL "
             "AND length(verification_manifest_digest) = 64 "
             "AND verification_mode IS NOT NULL "
-            "AND verification_mode IN ('ingress', 'poll'))",
+            "AND verification_mode IN ('ingress', 'poll') "
+            "AND ((verification_config_revision_id IS NULL "
+            "AND verification_config_digest IS NULL) OR "
+            "(verification_config_revision_id IS NOT NULL "
+            "AND verification_config_digest IS NOT NULL "
+            "AND length(verification_config_digest) = 64)))",
             name="ck_inbox_receipts_verification_origin",
         ),
         CheckConstraint(
             "verification_manifest_digest IS NULL "
             "OR verification_manifest_digest ~ '^[0-9a-f]{64}$'",
             name="ck_inbox_receipts_origin_digest",
+        ).ddl_if(dialect="postgresql"),
+        CheckConstraint(
+            "verification_config_digest IS NULL "
+            "OR verification_config_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_inbox_receipts_origin_config_digest",
         ).ddl_if(dialect="postgresql"),
         Index("ix_inbox_receipts_state_received", "state", "received_at"),
         # The claim predicate's index. A sweeper scanning for due, unleased
@@ -577,6 +588,9 @@ class InboxReceipt(Base):
     )
     verification_config_revision_id: Mapped[UUID | None] = mapped_column(
         Uuid(), nullable=True
+    )
+    verification_config_digest: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
     )
     verification_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
 

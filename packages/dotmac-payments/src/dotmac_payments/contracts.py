@@ -5,10 +5,12 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.money import Money
+from sqlalchemy.orm import Session
 
 
 class PaymentError(Exception):
@@ -174,6 +176,18 @@ class RecordConfirmation:
 
 
 __all__ = [
+    "MerchantReviewOperation",
+    "MerchantTransportContextV1",
+    "MerchantConfigurationV1",
+    "MerchantReviewEvidenceV1",
+    "AcceptMerchantContextV1",
+    "RevokeMerchantContextV1",
+    "AuthorizedMerchantReviewV1",
+    "MerchantReviewAuthority",
+    "MerchantContextV1",
+    "MerchantContextEndV1",
+    "ResolveMerchantContextV1",
+    "GetOriginalMerchantContextV1",
     "Conflict",
     "ConfirmationNotFound",
     "ConfirmedCashObservationV1",
@@ -191,3 +205,130 @@ __all__ = [
     "SubmitTransferProof",
     "TransferProofState",
 ]
+
+
+class MerchantReviewOperation(enum.StrEnum):
+    ACCEPT = "ACCEPT"
+    REVOKE = "REVOKE"
+
+
+@dataclass(frozen=True, slots=True)
+class MerchantTransportContextV1:
+    """Opaque original integration provenance; never physical merchant proof."""
+
+    provider_type: str
+    environment: str
+    installation_reference: str
+    capability_reference: str
+    config_revision_reference: str
+    config_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class MerchantConfigurationV1:
+    transport: MerchantTransportContextV1
+    physical_merchant_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class MerchantReviewEvidenceV1:
+    artifact_reference: str
+    sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptMerchantContextV1:
+    command_id: UUID
+    configuration: MerchantConfigurationV1
+    evidence: MerchantReviewEvidenceV1
+    effective_from: datetime
+    effective_until: datetime | None = None
+    supersedes_context_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RevokeMerchantContextV1:
+    command_id: UUID
+    context_id: UUID
+    evidence: MerchantReviewEvidenceV1
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizedMerchantReviewV1:
+    """Authority-produced attestation of human configuration review ONLY.
+
+    Never deserialize this from a request. The installed product authority must
+    freshly authenticate and authorize the human reviewer for this exact tenant,
+    operation and full request fingerprint. This is not artifact-byte checking
+    or independent provider verification, and confers no cash/ledger authority.
+    """
+
+    scope: TenantScope
+    command_id: UUID
+    operation: MerchantReviewOperation
+    request_fingerprint: str
+    reviewer_reference: str
+    reviewed_at: datetime
+
+
+class MerchantReviewAuthority(Protocol):
+    def authorize(
+        self,
+        db: Session,
+        *,
+        scope: TenantScope,
+        command: AcceptMerchantContextV1 | RevokeMerchantContextV1,
+        request_fingerprint: str,
+    ) -> AuthorizedMerchantReviewV1:
+        """Revalidate the exact human review; raise on denial/indeterminate.
+
+        An implementation belongs to the product's authenticated server owner,
+        never to provider payloads. It reads current authority in the caller
+        transaction without mutating or completing it. There is deliberately
+        no default authority.
+        """
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class MerchantContextV1:
+    scope: TenantScope
+    context_id: UUID
+    command_id: UUID
+    request_fingerprint: str
+    configuration: MerchantConfigurationV1
+    evidence: MerchantReviewEvidenceV1
+    reviewer_reference: str
+    reviewed_at: datetime
+    effective_from: datetime
+    effective_until: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class MerchantContextEndV1:
+    scope: TenantScope
+    end_id: UUID
+    command_id: UUID
+    context_id: UUID
+    operation: MerchantReviewOperation
+    request_fingerprint: str
+    replacement_context_id: UUID | None
+    evidence: MerchantReviewEvidenceV1
+    reviewer_reference: str
+    reviewed_at: datetime
+    effective_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ResolveMerchantContextV1:
+    transport: MerchantTransportContextV1
+    captured_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class GetOriginalMerchantContextV1:
+    """Evidence-only query for an already bound fact; no admission authority."""
+
+    context_id: UUID
+    transport: MerchantTransportContextV1
+    captured_at: datetime

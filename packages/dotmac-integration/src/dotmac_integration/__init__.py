@@ -407,6 +407,7 @@ from dotmac_integration.query_contract import (
     prepare_query,
 )
 from dotmac_integration.receipt_delivery import (
+    PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION,
     PRODUCT_OBSERVATION_SCHEMA_VERSION,
     DeliveryError,
     DeliveryReport,
@@ -422,6 +423,7 @@ from dotmac_integration.receipt_delivery import (
     ReceiptClaim,
     ReceiptClaims,
     ReceiptClaimStore,
+    ReceiptOriginEvidence,
     TransportFailure,
     TrustedDestination,
     TrustedScope,
@@ -432,6 +434,7 @@ from dotmac_integration.receipt_delivery import (
     request_fingerprint_for,
     require_stable_fingerprint,
     resolve_product_observation_source,
+    resolve_receipt_origin_evidence,
 )
 from dotmac_integration.retention import (
     REDACTION_MARKER,
@@ -673,6 +676,9 @@ __all__ = [
     "FingerprintConflict",
     "ProductAcceptance",
     "PRODUCT_OBSERVATION_SCHEMA_VERSION",
+    "PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION",
+    "ReceiptOriginEvidence",
+    "resolve_receipt_origin_evidence",
     "ProductObservationSource",
     "ProductPortClient",
     "ProductOutcome",

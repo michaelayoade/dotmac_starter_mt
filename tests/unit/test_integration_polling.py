@@ -93,7 +93,13 @@ def _seed(
             installation_id=installation.id,
             revision=1,
             schema_version="1",
-            config_digest="c" * 64,
+            config_digest=payload_digest(
+                {
+                    "config": {"variant": "primary"},
+                    "secret_refs": {"token": "bao://integrator/poll/token"},
+                    "schema_version": "1",
+                }
+            ),
             config_json={"variant": "primary"},
             secret_refs={"token": "bao://integrator/poll/token"},
         )

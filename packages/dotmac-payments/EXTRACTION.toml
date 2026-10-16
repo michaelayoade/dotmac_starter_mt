@@ -3,8 +3,8 @@ package = "dotmac-payments"
 classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
-owner = "Payment intent and its confirmation correlation"
-contract = "Own the payment intent lifecycle, submitted transfer proof and its review, and the append-only correlation between an intent and an external settlement fact. Payer, purchase/obligation or receivable target and document identifiers are opaque. NOT receivables, settlement allocation, invoice or credit application, bank accounts, general-ledger posting, refunds, provider credentials or provider transport."
+owner = "Payment intent, reviewed merchant context and external confirmation correlation"
+contract = "Own the payment intent lifecycle, submitted transfer proof and its review, immutable reviewed merchant-context authority, and the append-only correlation between an intent and an external settlement fact. Payer, purchase/obligation or receivable target, document and original transport/configuration identifiers are opaque. Merchant context alone does not qualify cash. NOT receivables, settlement allocation, invoice or credit application, bank accounts, general-ledger posting, refunds, provider credentials or provider transport."
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_revisions = [
   "dotmac_sub:9493ee4eef737f18b4813899a2d8f0537ed6d5c7",

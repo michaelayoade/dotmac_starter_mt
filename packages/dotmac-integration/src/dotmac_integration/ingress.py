@@ -138,6 +138,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -150,6 +151,8 @@ from dotmac_integration.execution import (
     ProviderEventIdentityCollision,
     ReceiptVerificationOrigin,
     ReceiptVerificationOriginConflict,
+    _prepared_config_digest,
+    _require_prepared_config_snapshot,
     receive_verified,
 )
 from dotmac_integration.models import (
@@ -791,15 +794,19 @@ class PreparedIngress:
     secret_refs: dict[str, str] = field(default_factory=dict)
     config_revision_id: UUID | None = None
     manifest_digest: str = ""
+    config_digest: str | None = None
+    config_schema_version: str | None = None
 
     @property
     def verification_origin(self) -> ReceiptVerificationOrigin:
+        _require_prepared_config_snapshot(self)
         return ReceiptVerificationOrigin(
             installation_id=self.installation_id,
             capability_binding_id=self.binding_id,
             connector_key=self.connector_key,
             manifest_digest=self.manifest_digest,
             config_revision_id=self.config_revision_id,
+            config_digest=self.config_digest,
             verification_mode="ingress",
         )
 
@@ -925,6 +932,25 @@ def prepare_ingress(
         if installation.current_config_revision_id
         else None
     )
+    if installation.current_config_revision_id is not None and revision is None:
+        raise EndpointNotUsable()
+    # Detach the exact handler inputs before hashing: nested dictionaries must
+    # not retain aliases to an ORM configuration changed after preparation.
+    config = deepcopy(dict((revision.config_json if revision else {}) or {}))
+    secret_refs = deepcopy(dict((revision.secret_refs if revision else {}) or {}))
+    try:
+        config_digest = (
+            _prepared_config_digest(
+                revision,
+                installation_id=installation.id,
+                config=config,
+                secret_refs=secret_refs,
+            )
+            if revision is not None
+            else None
+        )
+    except ExecutionError:
+        raise EndpointNotUsable() from None
     return PreparedIngress(
         installation_id=installation.id,
         binding_id=binding.id,
@@ -932,9 +958,11 @@ def prepare_ingress(
         capability_id=binding.capability_id,
         operation=operation,
         # `dict(...)` copies, so nothing lazy-loads once the session is gone.
-        config=dict((revision.config_json if revision else {}) or {}),
-        secret_refs=dict((revision.secret_refs if revision else {}) or {}),
+        config=config,
+        secret_refs=secret_refs,
         config_revision_id=revision.id if revision else None,
+        config_digest=config_digest,
+        config_schema_version=revision.schema_version if revision else None,
         manifest_digest=installation.manifest_digest,
     )
 
@@ -1040,6 +1068,7 @@ def verify_and_normalize(
     :raises ConnectorContract: `normalize` returned something other than
         `(tuple[InboundEvent, ...], Acknowledgement | None)`.
     """
+    _require_prepared_config_snapshot(prepared)
     handler = _handler(prepared, registry)
     # ONE call, ONE local. `prepared` carries references and never values, and
     # nothing on the return path has a field a value could travel in.
@@ -1054,6 +1083,7 @@ def verify_and_normalize(
     # `except Exception` untouched, and must, because swallowing a cancellation
     # is worse than the leak. So the binding is cleared on every exit instead.
     try:
+        _require_prepared_config_snapshot(prepared)
         try:
             returned_verification = handler.verify(
                 request, config=prepared.config, secrets=secrets
@@ -1063,6 +1093,7 @@ def verify_and_normalize(
             # provider-controlled bytes, and `__cause__` would carry it into any
             # traceback the edge logs.
             raise ConnectorRaised(type(exc).__name__) from None
+        _require_prepared_config_snapshot(prepared)
         if isinstance(returned_verification, bool):
             verification = VerificationResult(accepted=returned_verification)
         elif isinstance(returned_verification, VerificationResult):
@@ -1079,6 +1110,9 @@ def verify_and_normalize(
         if not verification.accepted:
             raise SignatureRejected()
 
+        # The injected observer may close over prepared inputs. Recheck at the
+        # final hook boundary so normalization never sees altered capture bytes.
+        _require_prepared_config_snapshot(prepared)
         try:
             returned = handler.normalize(request, config=prepared.config)
         except Exception as exc:
@@ -1086,6 +1120,7 @@ def verify_and_normalize(
     finally:
         secrets = {}
 
+    _require_prepared_config_snapshot(prepared)
     return _events_and_acknowledgement(returned)
 
 

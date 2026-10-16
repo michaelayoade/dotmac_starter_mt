@@ -1,6 +1,7 @@
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
+    OUTBOX_RELAY_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
 
@@ -15,7 +16,15 @@ module = ModuleManifest(
     migration_branch="payments",
     tables=TENANT_TABLES,
     platform_tables=(),
-    requires=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
+    outbox_event_types=(
+        "payments.merchant_context.accepted.v1",
+        "payments.merchant_context.ended.v1",
+    ),
+    requires=(
+        TENANT_SCOPE_CATALOG_V1.name,
+        MODULE_DATABASE_ROLES_V1.name,
+        OUTBOX_RELAY_V1.name,
+    ),
 )
 
 __all__ = ["module"]

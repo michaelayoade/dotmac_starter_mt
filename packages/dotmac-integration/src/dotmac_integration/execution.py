@@ -56,6 +56,7 @@ from dotmac_integration.models import (
 )
 from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
 from dotmac_integration.retry import Outcome, next_state, retry_delay_seconds
+from dotmac_integration.secret_refs import validate_config_revision
 from dotmac_integration.spi import canonical_digest
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -112,6 +113,7 @@ class ReceiptVerificationOrigin:
     manifest_digest: str
     config_revision_id: UUID | None
     verification_mode: Literal["ingress", "poll"]
+    config_digest: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.installation_id, UUID) or not isinstance(
@@ -122,6 +124,14 @@ class ReceiptVerificationOrigin:
             self.config_revision_id, UUID
         ):
             raise ValueError("receipt origin config revision must be a UUID or null")
+        if (self.config_revision_id is None) != (self.config_digest is None):
+            raise ValueError("receipt origin config revision and digest must be paired")
+        if self.config_digest is not None and (
+            not isinstance(self.config_digest, str)
+            or len(self.config_digest) != 64
+            or any(char not in "0123456789abcdef" for char in self.config_digest)
+        ):
+            raise ValueError("receipt origin config digest must be lowercase SHA-256")
         if (
             not isinstance(self.connector_key, str)
             or not self.connector_key.strip()
@@ -139,6 +149,73 @@ class ReceiptVerificationOrigin:
             raise ValueError("receipt origin mode must be ingress or poll")
 
 
+def _prepared_config_digest(
+    revision: Any,
+    *,
+    installation_id: UUID,
+    config: dict[str, object],
+    secret_refs: dict[str, str],
+) -> str:
+    """Validate the exact revision whose detached values will reach the handler.
+
+    The returned stored digest must describe these actual values, not a later
+    current-config lookup. References are hashed; secret material is never read.
+    """
+    if revision.installation_id != installation_id:
+        raise ExecutionError("prepared configuration belongs to another installation")
+    try:
+        validate_config_revision(config, secret_refs)
+    except ValueError:
+        raise ExecutionError("prepared configuration references are invalid") from None
+    actual = payload_digest(
+        {
+            "config": config,
+            "secret_refs": secret_refs,
+            "schema_version": revision.schema_version,
+        }
+    )
+    if revision.config_digest != actual:
+        raise ExecutionError("prepared configuration digest disagrees with its values")
+    return actual
+
+
+def _require_prepared_config_snapshot(prepared: Any) -> None:
+    """Refuse mutable handler inputs that no longer match captured reference bytes."""
+    if prepared.config_digest is None:
+        if (
+            prepared.config_revision_id is not None
+            and prepared.config_schema_version is None
+        ):
+            # Published positional constructors had no digest/schema. They may
+            # still invoke, but ReceiptVerificationOrigin refuses their UUID-only
+            # context if anyone tries to record it as original provenance.
+            return
+        if (
+            prepared.config
+            or prepared.secret_refs
+            or prepared.config_schema_version is not None
+        ):
+            raise ValueError("prepared no-config context changed")
+        return
+    if not isinstance(prepared.config_revision_id, UUID) or not isinstance(
+        prepared.config_schema_version, str
+    ):
+        raise ValueError("prepared configuration identity or schema is unavailable")
+    try:
+        validate_config_revision(prepared.config, prepared.secret_refs)
+    except ValueError:
+        raise ValueError("prepared configuration references are invalid") from None
+    actual = payload_digest(
+        {
+            "config": prepared.config,
+            "secret_refs": prepared.secret_refs,
+            "schema_version": prepared.config_schema_version,
+        }
+    )
+    if actual != prepared.config_digest:
+        raise ValueError("prepared configuration inputs changed after capture")
+
+
 def receipt_verification_origin(
     receipt: InboxReceipt,
 ) -> ReceiptVerificationOrigin | None:
@@ -153,6 +230,7 @@ def receipt_verification_origin(
             for value in (
                 receipt.verification_manifest_digest,
                 receipt.verification_config_revision_id,
+                receipt.verification_config_digest,
                 receipt.verification_mode,
             )
         ):
@@ -169,6 +247,7 @@ def receipt_verification_origin(
         connector_key=receipt.verification_connector_key,
         manifest_digest=receipt.verification_manifest_digest,
         config_revision_id=receipt.verification_config_revision_id,
+        config_digest=receipt.verification_config_digest,
         verification_mode=cast(Literal["ingress", "poll"], receipt.verification_mode),
     )
 
@@ -244,6 +323,15 @@ def receive_verified(
     """
     from sqlalchemy import select
 
+    if verification_origin is not None:
+        if not isinstance(verification_origin, ReceiptVerificationOrigin):
+            raise ReceiptVerificationOriginConflict("receipt origin is invalid")
+        try:
+            ReceiptVerificationOrigin.__post_init__(verification_origin)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ReceiptVerificationOriginConflict(
+                "receipt origin is invalid"
+            ) from exc
     if verification_origin is not None and (
         verification_origin.installation_id != installation_id
         or verification_origin.capability_binding_id != capability_binding_id
@@ -254,26 +342,41 @@ def receive_verified(
         raise ExecutionError("provider_event_id is required to deduplicate")
     digest = payload_digest(payload)
 
-    existing = db.execute(
-        select(InboxReceipt).where(
-            # BINDING-scoped, as in the source: the binding is what determines
-            # which capability handles the event, so two bindings observing one
-            # upstream event are two receipts with two consequences.
-            InboxReceipt.capability_binding_id == capability_binding_id,
-            InboxReceipt.provider_event_id == event_id,
-        )
-    ).scalar_one_or_none()
+    with db.no_autoflush:
+        stored = db.execute(
+            select(
+                InboxReceipt.id,
+                InboxReceipt.installation_id,
+                InboxReceipt.capability_binding_id,
+                InboxReceipt.payload_digest,
+                InboxReceipt.verification_connector_key,
+                InboxReceipt.verification_manifest_digest,
+                InboxReceipt.verification_config_revision_id,
+                InboxReceipt.verification_config_digest,
+                InboxReceipt.verification_mode,
+            ).where(
+                InboxReceipt.capability_binding_id == capability_binding_id,
+                InboxReceipt.provider_event_id == event_id,
+            )
+        ).one_or_none()
+        existing = db.get(InboxReceipt, stored.id) if stored is not None else None
 
     if existing is not None:
-        if existing.payload_digest != digest:
+        if stored.payload_digest != digest:
             raise ProviderEventIdentityCollision(
                 f"provider event {event_id!r} was already received with a "
                 "different payload. This is a provider identity collision, not "
                 "a redelivery — refusing to discard the new content"
             )
+        stored_origin = receipt_verification_origin(stored)  # type: ignore[arg-type]
         if (
-            existing.installation_id != installation_id
-            or receipt_verification_origin(existing) != verification_origin
+            stored.installation_id != installation_id
+            or stored_origin != verification_origin
+            or existing.id != stored.id
+            or existing.installation_id != stored.installation_id
+            or existing.capability_binding_id != stored.capability_binding_id
+            or existing.payload_digest != stored.payload_digest
+            or receipt_verification_origin(existing) != stored_origin
         ):
             raise ReceiptVerificationOriginConflict(
                 "provider event has a different original verification context"
@@ -296,6 +399,9 @@ def receive_verified(
         ),
         verification_config_revision_id=(
             verification_origin.config_revision_id if verification_origin else None
+        ),
+        verification_config_digest=(
+            verification_origin.config_digest if verification_origin else None
         ),
         verification_mode=(
             verification_origin.verification_mode if verification_origin else None
