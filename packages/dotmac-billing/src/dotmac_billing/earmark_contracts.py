@@ -167,7 +167,7 @@ class FundingAvailabilityV1:
     posted: Money
     held: Money
     unrestricted: Money
-    watermark: str
+    availability_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)

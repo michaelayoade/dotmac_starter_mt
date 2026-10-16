@@ -359,7 +359,7 @@ def get_funding_availability(
     if request.settlement_id is not None and not settlements:
         _fail("not_found", "settlement was not found in the requested account")
     posted = held = Decimal(0)
-    watermark: list[object] = []
+    fingerprint_material: list[object] = []
     for row in sorted(settlements, key=lambda item: str(item["id"])):
         settlement = service._one(
             db, scope=scope, model=plane.settlement, row_id=row["id"]
@@ -378,7 +378,7 @@ def get_funding_availability(
             )
         posted += room
         held += reserved
-        watermark.append(
+        fingerprint_material.append(
             (
                 str(settlement.id),
                 active,
@@ -417,7 +417,7 @@ def get_funding_availability(
                 )
             if not position.unwound:
                 posted += position.remaining.amount
-            watermark.append(
+            fingerprint_material.append(
                 (
                     "opening_cash",
                     str(lot_row["id"]),
@@ -432,7 +432,7 @@ def get_funding_availability(
             plane.opening_effect,
             plane.opening_effect.billing_account_id == account.id,
         )
-        watermark.append(
+        fingerprint_material.append(
             tuple(
                 sorted(
                     (str(row["id"]), row["evidence_digest"]) for row in opening_effects
@@ -441,7 +441,7 @@ def get_funding_availability(
         )
     # Cover all monetary groups (including linked inverses) as well as claims.
     groups = _rows(db, scope, plane.group, plane.group.billing_account_id == account.id)
-    watermark.append(
+    fingerprint_material.append(
         tuple(sorted((str(row["id"]), row["source_version"]) for row in groups))
     )
 
@@ -455,7 +455,7 @@ def get_funding_availability(
         money(posted),
         money(held),
         money(posted - held),
-        fingerprint_of(watermark),
+        fingerprint_of(fingerprint_material),
     )
 
 

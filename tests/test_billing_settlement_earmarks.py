@@ -251,12 +251,12 @@ def test_original_receipt_claim_replay_scope_money_and_two_period_targets(
         _allocate(db, scope, offered, first)
         middle = _availability(db, scope, offered)
         assert middle.held == middle.posted == b._money("120")
-        assert middle.watermark != initial.watermark
+        assert middle.availability_fingerprint != initial.availability_fingerprint
         second = _invoice(db, scope, offered.billing_account_id, sources[1])
         _allocate(db, scope, offered, second)
         final = _availability(db, scope, offered)
         assert final.held == final.posted == final.unrestricted == b._money("0")
-        assert final.watermark != middle.watermark
+        assert final.availability_fingerprint != middle.availability_fingerprint
 
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
@@ -420,7 +420,7 @@ def test_release_spending_does_not_doublecount_held_and_inverse_refuses_spent_ro
         after = _availability(db, scope, offered)
         assert before.held == after.held == b._money("120")
         assert after.posted == b._money("120") and after.unrestricted == b._money("0")
-        assert after.watermark != before.watermark
+        assert after.availability_fingerprint != before.availability_fingerprint
         with pytest.raises(BillingRuleViolation, match="capacity"):
             _correct(
                 db,
@@ -642,7 +642,7 @@ def test_account_cash_availability_opening_lot_and_released_mixed_draw_inverse(p
             after = get_funding_availability(db, scope=scope, request=request)
             assert after.posted == after.held == b._money("180")
             assert after.unrestricted == b._money("0")
-            assert after.watermark != before.watermark
+            assert after.availability_fingerprint != before.availability_fingerprint
             assert service.get_opening_cash_lot_position(
                 db, scope=scope, lot_id=receipt.lot_ids[0]
             ).remaining == b._money("0")

@@ -967,7 +967,7 @@ refund and reversal ancestry. Unrestricted capacity is actual unspent capacity
 minus still-held capacity; spending already released capacity must not subtract
 from held capacity again. Historical position facts retain their original
 meaning; a typed availability query supplies held/unrestricted values and a
-watermark covering both monetary and earmark facts.
+availability fingerprint covering both monetary and earmark facts.
 
 Required hosted proofs include both migrated planes, exact target/replay and
 wrong-target refusal, ordinary correction refusal and authorized immutable
