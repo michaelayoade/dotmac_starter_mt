@@ -132,11 +132,6 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Released a1 remains unchanged. Candidate a2 adds separate Billing-shaped V2 rendering with honest recorded provenance, shared Kernel a103 canonical encoding and strict in-memory PDF validation. Hosted acceptance, authorized publication and install-back verification precede product qualification; no Sub pin, official-artifact authority or financial writer activation changes here.",
       "state": "declared-unpublished"
     },
-    "dotmac-fiber-plant": {
-      "declared": "0.2.0a1",
-      "reason": "INTENDED NATIVE IMPLEMENTATION CANDIDATE. User directed the Rust computation goal on 2026-10-15. Version 0.2.0a1 introduces a platform-specific private extension and cannot replace the earlier immutable pure-Python release. Hosted lock resolution, exact-wheel/source-archive parity and supported-interpreter qualification precede any publication request. No registry receipt, product adoption or writer switch is claimed. Remove this row only after the existing protected release facility publishes, installs, verifies and tags this exact candidate.",
-      "state": "declared-unpublished"
-    },
     "dotmac-inbox": {
       "declared": "0.1.0a2+dev",
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a2 IS published and tagged (dotmac-inbox-v0.1.0a2). This Inbox capability slice adds explicit snooze-until-reply, late transport-observation correlation, opaque product-supplied thread/message identities and the unreleased ib_0002 migration, so continuing to declare bare 0.1.0a2 would make one released version name two contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only by separately ALLOCATING the next public version at release time; never remove the marker merely to quiet a gate.",
