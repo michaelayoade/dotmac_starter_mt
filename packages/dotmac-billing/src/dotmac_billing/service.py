@@ -71,8 +71,11 @@ from dotmac_billing.contracts import (
     FinancialState,
     InvoiceDocumentFactV1,
     InvoiceLineFactV1,
+    IssuedRatedInvoiceV1,
+    IssueRatedInvoiceV1,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
+    ObligationSourceRegistry,
     PartyDocumentSnapshotV1,
     PartyTaxIdentitySnapshotV1,
     PaymentInstructionsSnapshotV1,
@@ -543,6 +546,20 @@ def create_billing_account(
     return cast(_AccountRow, row)
 
 
+def _rated_obligation_natural_key(command: AcceptRatedObligationV1) -> str:
+    natural_payload = {
+        "contract_line_ref": command.contract_line_ref,
+        "contract_version": command.contract_version,
+        "charge_component": command.charge_component,
+        "source_fact_id": command.source_fact_id,
+        "source_fact_version": command.source_fact_version,
+        "period_start": command.service_period.starts_at,
+        "period_end": command.service_period.ends_at,
+        "currency": command.total_amount.currency.code,
+    }
+    return fingerprint_of(natural_payload)
+
+
 def accept_rated_obligation(
     db: Session,
     *,
@@ -576,17 +593,7 @@ def accept_rated_obligation(
         lock=True,
     )
     _require_account_money(account, command.total_amount)
-    natural_payload = {
-        "contract_line_ref": command.contract_line_ref,
-        "contract_version": command.contract_version,
-        "charge_component": command.charge_component,
-        "source_fact_id": command.source_fact_id,
-        "source_fact_version": command.source_fact_version,
-        "period_start": command.service_period.starts_at,
-        "period_end": command.service_period.ends_at,
-        "currency": command.total_amount.currency.code,
-    }
-    natural_key = fingerprint_of(natural_payload)
+    natural_key = _rated_obligation_natural_key(command)
     offered = fingerprint_of(asdict(command))
 
     def operation(session: Session) -> dict[str, object]:
@@ -840,6 +847,135 @@ def create_draft_document(
             model=plane.document,
             row_id=UUID(str(outcome.result["document_id"])),
         ),
+    )
+
+
+def issue_rated_invoice(
+    db: Session,
+    *,
+    scope: Scope,
+    command: IssueRatedInvoiceV1,
+    obligation_sources: ObligationSourceRegistry,
+    numbering: NumberingProvider,
+) -> IssuedRatedInvoiceV1:
+    """Atomically compose existing Billing owners; leave the root to the caller.
+
+    Kernel's existing idempotency savepoint contains acceptance, drafting,
+    numbering, issuance, postings and facts. The account lock serializes retries
+    before consulting that ledger; changed inputs retain its conflict semantics.
+    The numbering adapter must allocate transactionally in the supplied session.
+    """
+    if not isinstance(command, IssueRatedInvoiceV1) or not isinstance(
+        command.obligation, AcceptRatedObligationV1
+    ):
+        raise BillingRuleViolation("invalid_command", "expected IssueRatedInvoiceV1")
+    if not isinstance(scope, TenantScope | PlatformScope):
+        raise BillingRuleViolation(
+            "invalid_scope", "an explicit Billing scope is required"
+        )
+    obligation_command = command.obligation
+    _require_scope_matches(routed=scope, declared=obligation_command.scope)
+    obligation_sources.require_obligation_source(obligation_command.source_kind)
+    command.due_date_basis.require_collectible(native=True)
+    plane = _models(scope)
+    _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=obligation_command.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        obligation = accept_rated_obligation(
+            session,
+            scope=scope,
+            command=obligation_command,
+            accepted_source_kinds=frozenset({obligation_command.source_kind}),
+        )
+        _require_obligation_taxes(
+            session, scope=scope, plane=plane, obligations=(obligation,)
+        )
+        draft = create_draft_document(
+            session,
+            scope=scope,
+            command=CreateDraftDocument(
+                obligation_id=obligation.id,
+                description=command.description,
+                quantity=Decimal("1"),
+                unit_code=command.unit_code,
+                seller_snapshot=command.seller_snapshot,
+                customer_snapshot=command.customer_snapshot,
+                payment_instructions=command.payment_instructions,
+                brand_asset=command.brand_asset,
+                locale=command.locale,
+                timezone=command.timezone,
+                document_profile_code=command.document_profile_code,
+                document_profile_version=command.document_profile_version,
+                due_date_basis=command.due_date_basis,
+                party_tax_identities=command.party_tax_identities,
+            ),
+        )
+        invoice = issue_document(
+            session,
+            scope=scope,
+            command=IssueDocument(
+                document_id=draft.id,
+                series_code=command.series_code,
+                reference_date=command.reference_date,
+                due_at=command.due_at,
+                due_date_basis=command.due_date_basis,
+                actor_ref=command.actor_ref,
+                correlation_id=command.correlation_id,
+            ),
+            numbering=numbering,
+        )
+        line = session.execute(
+            _where_scope(
+                select(plane.line).where(
+                    plane.line.document_id == invoice.id,
+                    plane.line.obligation_id == obligation.id,
+                ),
+                scope,
+                plane.line,
+            )
+        ).scalar_one()
+        issued_fact_version = session.execute(
+            _where_scope(
+                select(plane.document_fact.fact_version).where(
+                    plane.document_fact.document_id == invoice.id,
+                    plane.document_fact.fact_version == 1,
+                ),
+                scope,
+                plane.document_fact,
+            )
+        ).scalar_one()
+        return {
+            "billing_account_id": str(invoice.billing_account_id),
+            "obligation_id": str(obligation.id),
+            "invoice_id": str(invoice.id),
+            "line_id": str(line.id),
+            "line_number": line.line_number,
+            "issued_fact_version": issued_fact_version,
+        }
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.invoice.issue.rated.v1",
+        key=_rated_obligation_natural_key(obligation_command),
+        fingerprint=fingerprint_of(asdict(command)),
+        operation=operation,
+    )
+    result = outcome.result
+    return IssuedRatedInvoiceV1(
+        scope=scope,
+        billing_account_id=UUID(str(result["billing_account_id"])),
+        obligation_id=UUID(str(result["obligation_id"])),
+        invoice_id=UUID(str(result["invoice_id"])),
+        line_id=UUID(str(result["line_id"])),
+        line_number=int(str(result["line_number"])),
+        issued_fact_version=int(str(result["issued_fact_version"])),
     )
 
 
@@ -5363,6 +5499,7 @@ def repair_document_artifact(
 
 
 __all__ = [
+    "issue_rated_invoice",
     "provision_opening_window",
     "seal_opening_window",
     "import_opening_account",
