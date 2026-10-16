@@ -1,5 +1,35 @@
 # Public surface and stability — dotmac-deployment-foundation
 
+## Required provider contract: descriptor and backup admission
+
+The active executor contract is narrowed: `Effects` and every selected
+`ExposureEffects` must expose a read-only `execution_descriptor: bytes`, the
+canonical descriptor bytes derived from the same private, owner-validated
+execution snapshot used for commands, rendering, product paths and firewall
+ownership. Snapshot before building those caches. Returning the caller's
+descriptor, a supplied digest or boolean, or rebinding provider A to descriptor
+B does not implement this contract. The executor recomputes identity and joins
+provider/spec/work/frozen authority before dispatch consumption or annotations.
+Missing contracts and mismatches refuse, including through the installed CLI.
+Existing external providers must implement this contract before execution; this
+is a required capability change, not an additive compatibility claim. Historical
+descriptor/plan wire schemas and their canonical bytes are unchanged. Release
+allocation remains a separate lifecycle decision; no new version is allocated
+by this source change.
+
+Selected local capture also requires pure `preflight_backup(dataset_code)`,
+sharing the actual provider's preparation path and raising for unsupported
+dataset/mode/options without host access or material resolution. Compose supports
+local PostgreSQL gzip capture only and refuses object stores, volumes, external
+capture, encryption and offsite requirements it cannot implement. Its capture
+result proves local archive integrity only; it does not prove configured
+retention, offsite storage or restoration. Existing retention selection is a
+separate owner (`backup.retention_keep`); capture adds no pruning or lifecycle
+engine. External recovery continues to require the existing signed receipt,
+verification set, identity and cadence/proof-age controls, checked before
+consumption and again at its execution step. Local backup verification must
+follow capture of the same declared local dataset.
+
 ## What is public
 
 - `ProductDeploymentSpec` and every type it exposes, plus the `SCHEMA` string.

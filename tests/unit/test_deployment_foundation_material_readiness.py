@@ -489,7 +489,7 @@ def test_full_executor_material_gates_order_bootstrap_and_handoff(
             events.append("bootstrap")
             return super().bootstrap_principal_credential(bootstrap)
 
-    effects = ProbeEffects()
+    effects = ProbeEffects(spec=spec)
     baseline, _digest = _plan_and_digest(spec, plan, effects=effects)
     execution_plan = v3_plan(
         render_execution_plan_v2(baseline.base, principal_bootstraps=(_bootstrap(),))
