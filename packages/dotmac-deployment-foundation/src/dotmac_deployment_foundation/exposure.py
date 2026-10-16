@@ -872,6 +872,14 @@ class ExposureEffects(Protocol):
     implementer has to rediscover.
     """
 
+    @property
+    def execution_descriptor(self) -> bytes:
+        """Canonical bytes from the private validated spec used for ownership.
+
+        Snapshot before deriving caches; never rebind to the executor's input.
+        """
+        ...
+
     def observe(self) -> HostObservation: ...
 
     def apply_compose(

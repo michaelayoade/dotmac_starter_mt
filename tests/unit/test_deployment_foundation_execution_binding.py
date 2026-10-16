@@ -100,8 +100,8 @@ class RecordingEffects(FakeEffects):  # type: ignore[misc]
     broken executor.
     """
 
-    def __init__(self, **overrides: object) -> None:
-        super().__init__(**overrides)
+    def __init__(self, *, spec: ProductDeploymentSpec, **overrides: object) -> None:
+        super().__init__(spec=spec, **overrides)
         self.mutations: list[tuple[str, str]] = []
 
     def snapshot(self) -> bytes:
@@ -234,7 +234,7 @@ def _plan_and_digest(
 def _fixture(**overrides: str):  # type: ignore[no-untyped-def]
     spec = load(**overrides)
     plan = build_plan(spec)
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     return spec, plan, effects
 
 

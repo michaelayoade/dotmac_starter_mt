@@ -582,11 +582,22 @@ class _FakeEffects:
     test: snapshot before mutate, re-observe after, restore from the snapshot.
     """
 
-    def __init__(self, *, before: HostObservation, after: HostObservation) -> None:
+    def __init__(
+        self,
+        *,
+        spec: ProductDeploymentSpec,
+        before: HostObservation,
+        after: HostObservation,
+    ) -> None:
+        self._execution_spec = spec.validated_execution_snapshot()
         self._observations = [before, after]
         self.calls: list[str] = []
         self.restored: list[ObservedChain] = []
         self.applied: list[tuple[str, ...]] = []
+
+    @property
+    def execution_descriptor(self) -> bytes:
+        return self._execution_spec.to_canonical_document().canonical_bytes()
 
     def observe(self) -> HostObservation:
         self.calls.append("observe")
@@ -617,7 +628,7 @@ def test_a_verifying_reconciliation_snapshots_applies_and_reobserves(
     recreate belongs to `_do_switch`, which has run by the time this does, so
     the reconciliation performs the one half nothing else performs.
     """
-    effects = _FakeEffects(before=_observation(), after=_observation())
+    effects = _FakeEffects(spec=spec, before=_observation(), after=_observation())
     outcome = reconcile(spec, effects)
 
     assert effects.calls[0] == "observe", "it looks BEFORE it touches anything"
@@ -644,7 +655,7 @@ def test_an_apply_that_does_not_verify_is_rolled_back_to_the_SNAPSHOT(
     after = _observation(
         sockets=CONFORMING_SOCKETS.replace("127.0.0.1:8003", f"{wildcard}:8003")
     )
-    effects = _FakeEffects(before=before, after=after)
+    effects = _FakeEffects(spec=spec, before=before, after=after)
 
     with pytest.raises(PreconditionFailed, match="did not verify"):
         reconcile(spec, effects, families=("ipv4",))
@@ -675,7 +686,7 @@ def test_the_reconciliation_takes_no_lock_of_its_own(
     """
     from dotmac_deployment_foundation.engine.lock import lock_path
 
-    effects = _FakeEffects(before=_observation(), after=_observation())
+    effects = _FakeEffects(spec=spec, before=_observation(), after=_observation())
     reconcile(spec, effects)
 
     assert not lock_path(spec.product, directory=tmp_path).exists(), (
