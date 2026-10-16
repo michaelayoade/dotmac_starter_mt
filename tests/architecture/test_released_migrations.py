@@ -6919,6 +6919,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-media-observations ──
+    "dotmac-media-observations-v0.2.0a1": (
+        "dotmac-media-observations",
+        "dac72ff13a47da58be4ef644c7c67ed3b4da127c",
+        {
+            "mo_0001_media_observations.py": (
+                "b274cb73037d314a275e7c23193229b139dd3d536cf5269b2ebc91b61b035bbf"
+            ),
+        },
+    ),
     "dotmac-media-observations-v0.1.0a1": (
         "dotmac-media-observations",
         "8f99413826e5adf3d35379ebc6deb79bcb5c8242",
