@@ -148,6 +148,8 @@ from dotmac_integration.discovery import ConnectorRegistry
 from dotmac_integration.execution import (
     ExecutionError,
     ProviderEventIdentityCollision,
+    ReceiptVerificationOrigin,
+    ReceiptVerificationOriginConflict,
     receive_verified,
 )
 from dotmac_integration.models import (
@@ -185,6 +187,8 @@ __all__ = [
     "EndpointNotUsable",
     "EndpointUnknown",
     "EventIdentityCollision",
+    "EventVerificationOriginConflict",
+    "EventVerificationOriginUnavailable",
     "HandlerUnavailable",
     "InboundEvent",
     "IngressCode",
@@ -265,6 +269,9 @@ class ReceiptBatchAddress(Protocol):
 
     @property
     def capability_id(self) -> str: ...
+
+    @property
+    def verification_origin(self) -> ReceiptVerificationOrigin: ...
 
 
 #: The engine's defaults, used when a connector leaves `media_type` unset.
@@ -616,6 +623,22 @@ class EventIdentityCollision(IngressRefused):
     STATUS = 503
 
 
+class EventVerificationOriginConflict(IngressRefused):
+    """The receipt retains its first context; this whole batch must unwind."""
+
+    MESSAGE = "a provider event id arrived with different verification context"
+    CODE = IngressCode.EVENT_IDENTITY_COLLISION
+    STATUS = 503
+
+
+class EventVerificationOriginUnavailable(IngressRefused):
+    """A manual prepared batch lacks the original context needed to record it."""
+
+    MESSAGE = "the prepared batch has no valid original verification context"
+    CODE = IngressCode.RECEIPT_WRITE_FAILED
+    STATUS = 503
+
+
 class ObservationRejected(IngressRefused):
     """A normalized event violates its capability's published observation schema.
 
@@ -768,6 +791,17 @@ class PreparedIngress:
     secret_refs: dict[str, str] = field(default_factory=dict)
     config_revision_id: UUID | None = None
     manifest_digest: str = ""
+
+    @property
+    def verification_origin(self) -> ReceiptVerificationOrigin:
+        return ReceiptVerificationOrigin(
+            installation_id=self.installation_id,
+            capability_binding_id=self.binding_id,
+            connector_key=self.connector_key,
+            manifest_digest=self.manifest_digest,
+            config_revision_id=self.config_revision_id,
+            verification_mode="ingress",
+        )
 
 
 # ── Phase 1: prepare ────────────────────────────────────────────────────────
@@ -1184,6 +1218,12 @@ def record_batch(
     from sqlalchemy.exc import StatementError
 
     _require_valid_observations(prepared, events, registry=registry)
+    verification_origin = None
+    if events:
+        try:
+            verification_origin = prepared.verification_origin
+        except (AttributeError, TypeError, ValueError):
+            raise EventVerificationOriginUnavailable() from None
     recorded: list[tuple[UUID, bool]] = []
     for event in events:
         try:
@@ -1204,6 +1244,7 @@ def record_batch(
                 # connector decision expressed as normalized data rather than a
                 # blanket copy.
                 headers=None,
+                verification_origin=verification_origin,
             )
             if is_new and event.disposition is InboundDisposition.RECORD_ONLY:
                 receipt.state = "processed"
@@ -1219,6 +1260,8 @@ def record_batch(
             recorded.append((receipt.id, is_new))
         except ProviderEventIdentityCollision:
             raise EventIdentityCollision() from None
+        except ReceiptVerificationOriginConflict:
+            raise EventVerificationOriginConflict() from None
         except StatementError as exc:
             # `StatementError`, not `IntegrityError`: the family that carries
             # `[parameters: ...]` is broader than the integrity half. A payload

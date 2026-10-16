@@ -57,6 +57,14 @@ def _enum(python_type: type[enum.StrEnum], name: str) -> sa.Enum:
 class PaymentIntent(Base, TimestampMixin):
     __tablename__ = "payment_intents"
     __table_args__ = (
+        # The PostgreSQL migration additionally rejects POSIX whitespace-only
+        # targets. The portable metadata check serves the SQLite unit adapter;
+        # the public command rejects all Python whitespace before persistence.
+        CheckConstraint(
+            "purpose != 'PURCHASE_FUNDING' OR "
+            "(target_reference IS NOT NULL AND length(trim(target_reference)) > 0)",
+            name="ck_payment_intents_purchase_target",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_payment_intents_tenant_id_id"),
         UniqueConstraint(
             "tenant_id", "reference", name="uq_payment_intents_tenant_reference"

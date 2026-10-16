@@ -75,6 +75,7 @@ class PaymentPurpose(enum.StrEnum):
     INVOICE_SETTLEMENT = "INVOICE_SETTLEMENT"
     ACCOUNT_CREDIT_DEPOSIT = "ACCOUNT_CREDIT_DEPOSIT"
     SERVICE_FEE = "SERVICE_FEE"
+    PURCHASE_FUNDING = "PURCHASE_FUNDING"
 
 
 class PaymentIntentStatus(enum.StrEnum):
@@ -115,6 +116,11 @@ class OpenPaymentIntent:
     migrated intent whose `opened_at` is its import timestamp cannot be
     compared against its source and fails the dossier's settlement-time drift
     check.
+
+    `PURCHASE_FUNDING` binds an opaque purchase or obligation before an invoice
+    exists. It requires a nonblank `target_reference`, preserved exactly on
+    replay. The purpose grants no spendable credit, cash qualification or
+    ledger-posting authority.
 
     `expires_at` is validated against `opened_at`, never against the moment the
     import happens to run. Both may be in the past for a historical intent, so

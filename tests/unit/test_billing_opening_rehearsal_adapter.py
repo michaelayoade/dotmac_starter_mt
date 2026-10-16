@@ -713,3 +713,587 @@ def test_duplicate_json_keys_refuse_for_every_json_read(tmp_path, capsys):
     )
     assert _refusal(capsys)["error"] == "malformed_input"
     assert not (tmp_path / "out.json").exists()
+
+
+def _explicit_original(payload):
+    """Synthetic original supplied independently; never a source qualification."""
+    from datetime import datetime
+
+    from tests.unit import test_billing_opening_receivable_contracts as evidence
+
+    row = payload["invoices"][0]
+    template = evidence._candidate().manifest.receivables[0].original
+    return dataclasses.replace(
+        template,
+        document_number=row["invoice_number"],
+        issued_at=datetime.fromisoformat(row["issued_at"]),
+        subtotal=evidence._money(10000),
+        tax_total=evidence._money(0),
+        grand_total=evidence._money(10000),
+        tax_snapshots=(),
+    )
+
+
+def test_explicit_typed_original_is_preserved_without_qualifying_preview():
+    from uuid import UUID
+
+    payload = _fixture("census_one_eligible_v2.json")
+    obs, sidecar = adapter.load_sub_observation(payload)
+    original = _explicit_original(payload)
+    run = adapter.assemble_rehearsal_run(
+        obs,
+        assembly=_assembly(),
+        sidecar=sidecar,
+        original_documents=((UUID(INVOICE_1), original),),
+    )
+    assert run.manifest.receivables[0].original is original
+    assert run.manifest.receivables[0].historical_discharges == ()
+    assert run.manifest.cash_lots == ()
+    assert {block.code for block in run.previews[0].blockers} == {
+        "verifier_unavailable"
+    }
+    assert run.manifest.receivables[0].collection.automated_collection_allowed is False
+
+
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "duplicate",
+        "unknown",
+        "number",
+        "issued",
+        "total",
+        "currency",
+        "excluded",
+        "unmapped",
+        "foreign_account",
+        "precision",
+    ],
+)
+@pytest.mark.parametrize("entrypoint", ["assemble", "census"])
+def test_explicit_original_mapping_refuses_misbinding(attack, entrypoint):
+    from datetime import timedelta
+    from uuid import UUID
+
+    from dotmac_kernel.money import Currency, Money
+
+    payload = _fixture("census_one_eligible_v2.json")
+    original = _explicit_original(payload)
+    invoice_id = UUID(INVOICE_1)
+    assembly = _assembly()
+    if attack == "unknown":
+        invoice_id = UUID(INVOICE_2)
+    elif attack == "number":
+        original = dataclasses.replace(original, document_number="foreign-original")
+    elif attack == "issued":
+        original = dataclasses.replace(
+            original, issued_at=original.issued_at + timedelta(days=1)
+        )
+    elif attack == "total":
+        original = dataclasses.replace(
+            original,
+            grand_total=Money(
+                original.grand_total.amount * 2, original.grand_total.currency
+            ),
+        )
+    elif attack == "currency":
+        original = dataclasses.replace(
+            original, grand_total=Money(original.grand_total.amount, Currency("USD", 2))
+        )
+    elif attack == "foreign_account":
+        payload["invoices"][0]["account_id"] = INVOICE_2
+    elif attack == "precision":
+        original = dataclasses.replace(
+            original, grand_total=Money(original.grand_total.amount, Currency("NGN", 3))
+        )
+    elif attack == "excluded":
+        payload["eligible_invoice_ids"] = []
+    elif attack == "unmapped":
+        assembly = dataclasses.replace(
+            assembly,
+            declaration=dataclasses.replace(assembly.declaration, invoice_mappings=()),
+        )
+    documents = ((invoice_id, original),) * (2 if attack == "duplicate" else 1)
+    obs, sidecar = adapter.load_sub_observation(payload)
+    with pytest.raises(
+        adapter.AdapterInputError, match="original_document_mapping_invalid"
+    ):
+        if entrypoint == "census":
+            adapter.rehearsal_census(
+                payload, assembly=assembly, original_documents=documents
+            )
+        else:
+            adapter.assemble_rehearsal_run(
+                obs, assembly=assembly, sidecar=sidecar, original_documents=documents
+            )
+
+
+@pytest.mark.parametrize(
+    "fixture", ["census_one_eligible_v2.json", "census_v3_documentary.json"]
+)
+def test_census_preserves_explicit_original_without_qualifying_report(fixture):
+    from uuid import UUID
+
+    from dotmac_billing.opening_receivable_validation import (
+        opening_manifest_fingerprint_v2,
+    )
+
+    payload = _fixture(fixture)
+    assembly = _assembly()
+    original = _explicit_original(payload)
+    documents = ((UUID(INVOICE_1), original),)
+    obs, sidecar = adapter.load_sub_observation(payload)
+    expected_run = adapter.assemble_rehearsal_run(
+        obs, assembly=assembly, sidecar=sidecar, original_documents=documents
+    )
+    without = adapter.rehearsal_census(payload, assembly=assembly)
+    artifact = adapter.rehearsal_census(
+        payload, assembly=assembly, original_documents=documents
+    )
+    assert artifact.provenance.manifest_fingerprint == (
+        opening_manifest_fingerprint_v2(expected_run.manifest)
+    )
+    assert artifact.provenance.manifest_fingerprint != (
+        without.provenance.manifest_fingerprint
+    )
+    assert artifact.provenance.content_fingerprint == obs.content_fingerprint
+    assert artifact.provenance.assembly_digest == assembly.assembly_digest
+    assert artifact.v3_documentary_sidecar == without.v3_documentary_sidecar
+    rendered = json.loads(render_opening_rehearsal_census(artifact))
+    assert "verifier_unavailable" in _all_codes(rendered)
+    assert "original_documentary_evidence_unavailable" in _codes(
+        rendered, "report_blockers"
+    )
+    assert artifact.rollup.complete_exact_reconciliation is False
+    assert artifact.blocked is True
+
+
+@pytest.mark.parametrize("documents", [[], (None,), ((INVOICE_1, None),)])
+def test_census_refuses_malformed_explicit_original_mapping(documents):
+    with pytest.raises(
+        adapter.AdapterInputError, match="original_document_mapping_invalid"
+    ):
+        adapter.rehearsal_census(
+            _fixture("census_one_eligible_v2.json"),
+            assembly=_assembly(),
+            original_documents=documents,
+        )
+
+
+def test_census_default_originals_preserve_unavailable_semantics():
+    payload = _fixture("census_v3_documentary.json")
+    assembly = _assembly()
+    default = adapter.rehearsal_census(payload, assembly=assembly)
+    explicit_empty = adapter.rehearsal_census(
+        payload, assembly=assembly, original_documents=()
+    )
+    assert render_opening_rehearsal_census(default) == (
+        render_opening_rehearsal_census(explicit_empty)
+    )
+    rendered = json.loads(render_opening_rehearsal_census(default))
+    assert "original_documentary_evidence_missing" in _all_codes(rendered)
+    assert "original_documentary_evidence_unavailable" in _codes(
+        rendered, "report_blockers"
+    )
+
+
+def _original_evidence_wire(payload, assembly=None):
+    import hashlib
+
+    from dotmac_billing.service import _wire_value
+
+    raw = json.dumps(payload).encode("utf-8")
+    assembly = assembly or _assembly()
+    wire = {
+        "schema": "billing.opening.rehearsal.original-evidence.v1",
+        "census_sha256": hashlib.sha256(raw).hexdigest(),
+        "assembly_digest": assembly.assembly_digest,
+        "invoices": [
+            {
+                "source_invoice_id": INVOICE_1,
+                "original": _wire_value(_explicit_original(payload)),
+                "historical_discharges": [],
+            }
+        ],
+    }
+    return raw, assembly, wire
+
+
+def _sidecar_cli(tmp_path, raw, assembly, wire):
+    from dotmac_billing.opening_rehearsal import opening_rehearsal_assembly_wire
+
+    census = tmp_path / "census.json"
+    census.write_bytes(raw)
+    assembly_path = tmp_path / "assembly.json"
+    assembly_path.write_text(
+        json.dumps(opening_rehearsal_assembly_wire(assembly.declaration))
+    )
+    evidence = tmp_path / "originals.json"
+    evidence.write_text(wire if isinstance(wire, str) else json.dumps(wire))
+    out = tmp_path / "out.json"
+    result = adapter.main(
+        [
+            "--census",
+            str(census),
+            "--assembly",
+            str(assembly_path),
+            "--original-evidence",
+            str(evidence),
+            "--out",
+            str(out),
+        ]
+    )
+    return result, out
+
+
+def test_cli_original_evidence_reaches_manifest_without_qualification(
+    tmp_path, monkeypatch
+):
+    payload = _fixture("census_one_eligible_v2.json")
+    raw, assembly, wire = _original_evidence_wire(payload)
+    seen = []
+    original_assemble = adapter._assemble
+
+    def capture(*args, **kwargs):
+        outcome = original_assemble(*args, **kwargs)
+        seen.append(outcome.run)
+        return outcome
+
+    monkeypatch.setattr(adapter, "_assemble", capture)
+    result, out = _sidecar_cli(tmp_path, raw, assembly, wire)
+    assert result == 1
+    assert seen[0].manifest.receivables[0].original == _explicit_original(payload)
+    assert seen[0].manifest.cash_lots == ()
+    artifact = json.loads(out.read_text())
+    assert "original_documentary_evidence_unavailable" in _all_codes(artifact)
+    assert "run_blocked" in _all_codes(artifact)
+
+
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "unknown",
+        "missing",
+        "version",
+        "type",
+        "nested_unknown",
+        "nested_missing",
+        "nested_type",
+        "duplicate_invoice",
+        "unknown_invoice",
+        "raw",
+        "assembly",
+        "duplicate_key",
+        "nonfinite",
+    ],
+)
+def test_cli_original_evidence_refuses_closed_shape_and_alignment(
+    tmp_path, capsys, attack
+):
+    raw, assembly, wire = _original_evidence_wire(
+        _fixture("census_one_eligible_v2.json")
+    )
+    if attack == "unknown":
+        wire["approved_by"] = "nobody"
+    elif attack == "missing":
+        del wire["census_sha256"]
+    elif attack == "version":
+        wire["schema"] = "billing.opening.rehearsal.original-evidence.v2"
+    elif attack == "type":
+        wire["invoices"] = {}
+    elif attack == "nested_unknown":
+        wire["invoices"][0]["original"]["approved_by"] = "nobody"
+    elif attack == "nested_missing":
+        del wire["invoices"][0]["original"]["fx_snapshot"]
+    elif attack == "nested_type":
+        wire["invoices"][0]["original"]["grand_total"]["minor_units"] = True
+    elif attack == "duplicate_invoice":
+        wire["invoices"] *= 2
+    elif attack == "unknown_invoice":
+        wire["invoices"][0]["source_invoice_id"] = PAYMENT_1
+    elif attack == "raw":
+        raw += b"\n"
+    elif attack == "assembly":
+        assembly = adapter.AssemblyInputs(
+            dataclasses.replace(
+                assembly.declaration, source_authority_ref="changed:source-authority"
+            )
+        )
+    elif attack == "duplicate_key":
+        wire = json.dumps(wire).replace("{", '{"x":1,"x":2,', 1)
+    elif attack == "nonfinite":
+        wire = json.dumps(wire).replace('"invoices":', '"untrusted":NaN,"invoices":')
+    result, out = _sidecar_cli(tmp_path, raw, assembly, wire)
+    assert result == 2
+    assert not out.exists()
+    assert json.loads(capsys.readouterr().out)["error"] in {
+        "malformed_original_evidence",
+        "original_document_mapping_invalid",
+    }
+
+
+def _discharge_evidence():
+    from datetime import datetime
+
+    from dotmac_billing.opening_receivable_contracts import OpeningHistoricalDischargeV1
+    from dotmac_billing.service import _wire_value
+
+    payload = _discharged_fixture("payment", "40.00", "40.00", "60.00")
+    declaration = _fixture("assembly.json")
+    declaration["discharge_mappings"] = [
+        {
+            "settlement_kind": "payment",
+            "settlement_id": SETTLEMENT_1,
+            "historical_reference": "application:one",
+            "source_id": PAYMENT_1,
+        }
+    ]
+    raw, assembly, wire = _original_evidence_wire(
+        payload, adapter.load_assembly(declaration)
+    )
+    instant = datetime.fromisoformat("2026-10-05T00:00:00+00:00")
+    effect = OpeningHistoricalDischargeV1(
+        "application:one",
+        "payment",
+        4000,
+        instant,
+        instant,
+        "qualified-payment-owner",
+        "opaque-parent-key",
+        "billing.settlement.accept",
+        "opaque-live-identity",
+        "independent-mapping:1",
+        "ledger:one",
+        "b" * 64,
+        "tax:not-applicable",
+        (),
+        None,
+    )
+    wire["invoices"][0]["historical_discharges"] = [_wire_value(effect)]
+    return payload, raw, assembly, wire, effect
+
+
+def test_cli_preserves_exact_discharge_evidence_and_namespace(tmp_path, monkeypatch):
+    payload, raw, assembly, wire, effect = _discharge_evidence()
+    seen = []
+    original_assemble = adapter._assemble
+
+    def capture(*args, **kwargs):
+        outcome = original_assemble(*args, **kwargs)
+        seen.append(outcome.run)
+        return outcome
+
+    monkeypatch.setattr(adapter, "_assemble", capture)
+    result, out = _sidecar_cli(tmp_path, raw, assembly, wire)
+    assert result == 1
+    assert seen[0].manifest.receivables[0].historical_discharges == (effect,)
+    assert seen[0].manifest.cash_lots == ()
+    assert "historical_discharge_evidence_unavailable" not in _all_codes(
+        json.loads(out.read_text())
+    )
+    assert "original_documentary_evidence_unavailable" in _all_codes(
+        json.loads(out.read_text())
+    )
+
+
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "reference",
+        "kind",
+        "amount",
+        "duplicate",
+        "source_id",
+        "inactive",
+        "foreign_invoice",
+        "duplicate_settlement",
+        "unmapped",
+        "excluded",
+    ],
+)
+def test_supplied_discharge_binding_fails_closed(tmp_path, capsys, attack):
+    import hashlib
+
+    payload, raw, assembly, wire, effect = _discharge_evidence()
+    history = wire["invoices"][0]["historical_discharges"]
+    if attack in {"reference", "kind", "amount"}:
+        key = {"reference": "reference", "kind": "kind", "amount": "amount_minor"}[
+            attack
+        ]
+        history[0][key] = {
+            "reference": "foreign",
+            "kind": "credit_note",
+            "amount": 3999,
+        }[attack]
+    elif attack == "duplicate":
+        history *= 2
+    elif attack == "source_id":
+        payload["settlements"][0]["source_id"] = PROOF_1
+    elif attack == "inactive":
+        payload["settlements"][0]["active"] = False
+    elif attack == "foreign_invoice":
+        payload["settlements"][0]["invoice_id"] = INVOICE_2
+    elif attack == "duplicate_settlement":
+        payload["settlements"] *= 2
+    elif attack == "unmapped":
+        assembly = adapter.load_assembly(_fixture("assembly.json"))
+        wire["assembly_digest"] = assembly.assembly_digest
+    elif attack == "excluded":
+        payload["exclusions"] = [{"source_id": INVOICE_1, "reason": "excluded"}]
+    raw = json.dumps(payload).encode()
+    wire["census_sha256"] = hashlib.sha256(raw).hexdigest()
+    result, out = _sidecar_cli(tmp_path, raw, assembly, wire)
+    assert result == 2
+    assert not out.exists()
+    assert json.loads(capsys.readouterr().out)["error"] in {
+        "historical_discharge_mapping_invalid",
+        "original_document_mapping_invalid",
+    }
+
+
+@pytest.mark.parametrize(
+    "attack", ["missing", "unknown", "bool_amount", "null_history"]
+)
+def test_original_evidence_public_parser_rejects_discharge_shape(attack):
+    from dotmac_billing import parse_opening_rehearsal_original_evidence
+    from dotmac_billing.opening_contracts import OpeningEvidenceError
+
+    payload, raw, assembly, wire, effect = _discharge_evidence()
+    row = wire["invoices"][0]
+    history = row["historical_discharges"][0]
+    if attack == "missing":
+        del history["replay_bindings"]
+    elif attack == "unknown":
+        history["qualified"] = True
+    elif attack == "bool_amount":
+        history["amount_minor"] = True
+    else:
+        row["historical_discharges"] = None
+    with pytest.raises(OpeningEvidenceError):
+        parse_opening_rehearsal_original_evidence(wire)
+
+
+def test_original_evidence_public_parser_retains_rich_typed_values():
+    from dotmac_billing import (
+        OpeningRehearsalInvoiceEvidenceV1,
+        OpeningRehearsalOriginalEvidenceV1,
+        parse_opening_rehearsal_original_evidence,
+    )
+
+    payload, raw, assembly, wire, effect = _discharge_evidence()
+    evidence = parse_opening_rehearsal_original_evidence(wire)
+    assert type(evidence) is OpeningRehearsalOriginalEvidenceV1
+    assert type(evidence.invoices[0]) is OpeningRehearsalInvoiceEvidenceV1
+    assert evidence.invoices[0].original == _explicit_original(payload)
+    assert evidence.invoices[0].historical_discharges == (effect,)
+
+
+def test_cli_original_evidence_preserves_v3_unavailable_history(tmp_path):
+    payload = _fixture("census_v3_documentary.json")
+    raw, assembly, wire = _original_evidence_wire(payload)
+    result, out = _sidecar_cli(tmp_path, raw, assembly, wire)
+    assert result == 1
+    artifact = json.loads(out.read_text())
+    default = _census(payload)
+    assert artifact["v3_documentary_sidecar"] == default["v3_documentary_sidecar"]
+    assert "original_documentary_evidence_unavailable" in _all_codes(artifact)
+
+
+@pytest.mark.parametrize("attack", ["excluded", "unmapped", "duplicate_observation"])
+def test_cli_original_evidence_refuses_ineligible_or_ambiguous_invoice(
+    tmp_path, capsys, attack
+):
+    import hashlib
+
+    payload = _fixture("census_one_eligible_v2.json")
+    raw, assembly, wire = _original_evidence_wire(payload)
+    if attack == "excluded":
+        payload["exclusions"] = [{"source_id": INVOICE_1, "reason": "excluded"}]
+    elif attack == "unmapped":
+        declaration = _fixture("assembly.json")
+        declaration["invoice_mappings"] = []
+        assembly = adapter.load_assembly(declaration)
+        wire["assembly_digest"] = assembly.assembly_digest
+    else:
+        payload["invoices"] *= 2
+    raw = json.dumps(payload).encode()
+    wire["census_sha256"] = hashlib.sha256(raw).hexdigest()
+    result, out = _sidecar_cli(tmp_path, raw, assembly, wire)
+    assert result == 2
+    assert not out.exists()
+    assert (
+        json.loads(capsys.readouterr().out)["error"]
+        == "original_document_mapping_invalid"
+    )
+
+
+def test_cli_discharge_identity_is_kind_and_id_not_global_uuid(tmp_path, monkeypatch):
+    import hashlib
+
+    from dotmac_billing.opening_rehearsal import opening_rehearsal_assembly_wire
+    from dotmac_billing.service import _wire_value
+
+    payload, raw, assembly, wire, payment = _discharge_evidence()
+    other_invoice = copy.deepcopy(payload["invoices"][0])
+    other_invoice.update(invoice_id=INVOICE_2, invoice_number="FIXTURE-INV-2")
+    payload["invoices"].append(other_invoice)
+    payload["eligible_invoice_ids"].append(INVOICE_2)
+    credit = copy.deepcopy(payload["settlements"][0])
+    credit.update(kind="credit_note", invoice_id=INVOICE_2, source_id=PROOF_1)
+    payload["settlements"].append(credit)
+    declaration = opening_rehearsal_assembly_wire(assembly.declaration)
+    declaration["invoice_mappings"].append(
+        {
+            "source_invoice_id": INVOICE_2,
+            "source_identity": {"kind": "invoice", "key": "invoice:fixture-2"},
+            "source_invoice_key": "invoice:fixture-2",
+        }
+    )
+    declaration["discharge_mappings"].append(
+        {
+            "settlement_kind": "credit_note",
+            "settlement_id": SETTLEMENT_1,
+            "historical_reference": "credit-application:two",
+            "source_id": PROOF_1,
+        }
+    )
+    assembly = adapter.load_assembly(declaration)
+    credit_effect = dataclasses.replace(
+        payment,
+        reference="credit-application:two",
+        kind="credit_note",
+        source_key="opaque-credit-parent",
+        live_identity="opaque-credit-identity",
+    )
+    wire["invoices"].append(
+        {
+            "source_invoice_id": INVOICE_2,
+            "original": _wire_value(
+                dataclasses.replace(
+                    _explicit_original(payload), document_number="FIXTURE-INV-2"
+                )
+            ),
+            "historical_discharges": [_wire_value(credit_effect)],
+        }
+    )
+    raw = json.dumps(payload).encode()
+    wire["census_sha256"] = hashlib.sha256(raw).hexdigest()
+    wire["assembly_digest"] = assembly.assembly_digest
+    seen = []
+    original_assemble = adapter._assemble
+
+    def capture(*args, **kwargs):
+        outcome = original_assemble(*args, **kwargs)
+        seen.append(outcome.run)
+        return outcome
+
+    monkeypatch.setattr(adapter, "_assemble", capture)
+    result, out = _sidecar_cli(tmp_path, raw, assembly, wire)
+    assert result == 1
+    assert out.exists()
+    rows = seen[0].manifest.receivables
+    assert rows[0].historical_discharges == (payment,)
+    assert rows[1].historical_discharges == (credit_effect,)
+    assert "historical_discharge_evidence_unavailable" not in _all_codes(
+        json.loads(out.read_text())
+    )

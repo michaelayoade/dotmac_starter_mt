@@ -12,13 +12,14 @@ from dataclasses import fields
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, DecimalException, localcontext
 from itertools import pairwise
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.money import Currency, Money, MoneyError
 
+from dotmac_billing._document_facts import _decode
 from dotmac_billing._opening_values import cash_decimal_context, minor_units_of
 from dotmac_billing.opening_contracts import (
     OpeningBlockerV1,
@@ -37,6 +38,7 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningRehearsalDeltaV1,
     OpeningRehearsalDischargeMappingV1,
     OpeningRehearsalInvoiceMappingV1,
+    OpeningRehearsalOriginalEvidenceV1,
     OpeningRehearsalReportV1,
     OpeningRehearsalRunV1,
 )
@@ -49,6 +51,7 @@ __all__ = [
     "opening_rehearsal_assembly_wire",
     "parse_opening_rehearsal_assembly",
     "parse_opening_rehearsal_json",
+    "parse_opening_rehearsal_original_evidence",
     "opening_rehearsal_census_wire",
     "render_opening_rehearsal_census",
     "render_opening_rehearsal_refusal",
@@ -1116,3 +1119,23 @@ def render_opening_rehearsal_refusal(code: str) -> str:
     if type(code) is not str or not code.strip():
         raise OpeningEvidenceError("a refusal needs a non-empty code")
     return json.dumps({"complete": False, "error": code}, sort_keys=True)
+
+
+def parse_opening_rehearsal_original_evidence(
+    payload: object,
+) -> OpeningRehearsalOriginalEvidenceV1:
+    """Decode the closed V1 sidecar without defaults or evidence qualification.
+
+    JSON text must first pass ``parse_opening_rehearsal_json`` to reject duplicate
+    keys and nonfinite constants. The canonical documentary codec checks every
+    nested field; OpeningCashValue validates the complete rich opening DTOs.
+    Exact census bytes and assembly alignment belong to the consuming boundary.
+    """
+    try:
+        with localcontext(cash_decimal_context()):
+            return cast(
+                OpeningRehearsalOriginalEvidenceV1,
+                _decode(payload, OpeningRehearsalOriginalEvidenceV1),
+            )
+    except (ValueError, TypeError, DecimalException, MoneyError) as exc:
+        raise OpeningEvidenceError("malformed original evidence") from exc

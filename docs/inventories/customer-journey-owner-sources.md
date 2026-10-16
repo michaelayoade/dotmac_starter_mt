@@ -52,6 +52,12 @@ external settlement fact.
 - Source: `app/models/billing.py` (`topup_intents`, `payments`),
   `app/models/payment_proof.py`.
 - Preserve: the source's top-up intent and proof-review suites.
+- Existing purchase checkout: `GatewayTopupIntentFlow.prepaid_period_purchase`
+  in `app/services/topup_intents.py` and purchase staging in
+  `app/services/gateway_topup_intents.py` require a purchase-bound intent before
+  invoices exist. Shared `PURCHASE_FUNDING` retains an exact opaque target;
+  it grants neither account credit nor cash qualification/ledger authority.
+  See [purchase extraction](payments-purchase-funding-extraction.md).
 - Exclude: invoices, credit notes, allocations, settlements, reconciliation
   evidence, refunds, reversals, withholding tax, ledger entries, collection
   accounts and provider credentials.

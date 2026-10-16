@@ -6853,6 +6853,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-inventory ──
+    "dotmac-inventory-v0.2.0a1": (
+        "dotmac-inventory",
+        "49f35ca6008ef36c3db69f3230782d8f83146ac9",
+        {
+            "iv_0001_inventory.py": (
+                "625aadcdce6c0b6f92ceecdb5c3f9606407aa720b326286c9c318582243b4114"
+            ),
+        },
+    ),
     "dotmac-inventory-v0.1.0a1": (
         "dotmac-inventory",
         "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
@@ -7342,7 +7351,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ap_0003` records approved-decision withdrawals; still editable until
     # `dotmac-approvals` 0.1.0a7 is tagged.
     "dotmac-approvals": frozenset(),
-    "dotmac-integration": frozenset(),
+    "dotmac-integration": frozenset({"ig_0016_receipt_origin.py"}),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),
@@ -7366,7 +7375,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "ao_0003_ack_attribution.py",
         }
     ),
-    "dotmac-payments": frozenset(),
+    "dotmac-payments": frozenset({"pm_0004_purchase_funding.py"}),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the
     # protected release tags it and its digest is recorded above.
