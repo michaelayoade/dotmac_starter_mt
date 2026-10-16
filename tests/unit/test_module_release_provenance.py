@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -1222,20 +1223,64 @@ def test_ci_job_run_body_sensitivity_plant_catches_an_interpolated_expression() 
     assert _interpolating_run_bodies(planted) != []
 
 
-def test_ci_job_invokes_the_provenance_script_with_the_base_env_var() -> None:
-    bodies = _run_bodies(_ci_job())
-    assert any(
-        'python scripts/module_release_provenance.py --base "$BASE_SHA"' in body
-        for body in bodies
+def _provenance_invocations_bound(job: dict) -> bool:
+    steps = [step for step in job["steps"] if "run" in step]
+    expected = {
+        "github.event_name == 'pull_request'": (
+            "python scripts/module_release_provenance.py "
+            '--pull-request-head "$PR_HEAD_SHA"',
+            "PR_HEAD_SHA",
+            "${{ github.event.pull_request.head.sha }}",
+        ),
+        "github.event_name == 'push'": (
+            'python scripts/module_release_provenance.py --base "$BASE_SHA"',
+            "BASE_SHA",
+            "${{ github.event.before }}",
+        ),
+    }
+    return len(steps) == 2 and all(
+        sum(
+            step.get("if") == condition
+            and step.get("run") == command
+            and step.get("env", {}).get(variable) == expression
+            and step.get("env", {}).get("GITHUB_TOKEN") == "${{ github.token }}"
+            and "github.event.pull_request.base.sha" not in str(step)
+            for step in steps
+        )
+        == 1
+        for condition, (command, variable, expression) in expected.items()
     )
 
 
-def test_ci_job_invocation_sensitivity_plant_catches_a_missing_base_flag() -> None:
-    plant_bodies = ["python scripts/module_release_provenance.py"]
-    assert not any(
-        'python scripts/module_release_provenance.py --base "$BASE_SHA"' in body
-        for body in plant_bodies
+def test_ci_job_binds_pr_merge_and_push_before_separately() -> None:
+    assert _provenance_invocations_bound(_ci_job())
+
+
+@pytest.mark.parametrize(
+    "plant", ["missing-flag", "old-event-base", "unquoted-head", "wrong-push"]
+)
+def test_ci_job_invocation_sensitivity_catches_missing_or_wrong_comparison(
+    plant: str,
+) -> None:
+    job = _ci_job()
+    steps = [step for step in job["steps"] if "run" in step]
+    pr = next(
+        step for step in steps if step["if"] == "github.event_name == 'pull_request'"
     )
+    push = next(step for step in steps if step["if"] == "github.event_name == 'push'")
+    if plant == "missing-flag":
+        pr["run"] = "python scripts/module_release_provenance.py"
+    elif plant == "old-event-base":
+        pr["run"] = 'python scripts/module_release_provenance.py --base "$BASE_SHA"'
+        pr["env"]["BASE_SHA"] = "${{ github.event.pull_request.base.sha }}"
+    elif plant == "unquoted-head":
+        pr["run"] = (
+            "python scripts/module_release_provenance.py "
+            "--pull-request-head $PR_HEAD_SHA"
+        )
+    else:
+        push["env"]["BASE_SHA"] = "${{ github.event.pull_request.base.sha }}"
+    assert not _provenance_invocations_bound(job)
 
 
 # ── run-name binds the dispatched module + version ──────────────────────────
@@ -1327,6 +1372,7 @@ def _git_in(path: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
+        env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
     ).stdout.strip()
 
 
@@ -1335,6 +1381,175 @@ def _commit(path: Path, name: str) -> str:
     _git_in(path, "add", name)
     _git_in(path, "commit", "-q", "-m", name)
     return _git_in(path, "rev-parse", "HEAD")
+
+
+def _synthetic_merge_repo(tmp_path: Path) -> tuple[Path, str, str, str]:
+    repo = tmp_path / "synthetic"
+    repo.mkdir()
+    _git_in(repo, "init", "-q")
+    _git_in(repo, "config", "user.name", "Fixture")
+    _git_in(repo, "config", "user.email", "fixture@example.invalid")
+    _commit(repo, "initial")
+    _git_in(repo, "checkout", "-q", "-b", "pull-request")
+    head = _commit(repo, "authored-change")
+    _git_in(repo, "checkout", "-q", "-b", "advanced-main", "HEAD^")
+    base = _commit(repo, "inherited-release-record")
+    _git_in(repo, "merge", "-q", "--no-ff", "pull-request", "-m", "synthetic merge")
+    return repo, base, head, _git_in(repo, "rev-parse", "HEAD")
+
+
+def test_pull_request_base_is_the_actual_synthetic_merge_first_parent(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo, base, head, merge = _synthetic_merge_repo(tmp_path)
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    # The first parent advanced after the PR branched; a moving remote ref
+    # is neither required nor consulted to select the immutable comparison.
+    assert (
+        provenance.pull_request_base(github_sha=merge, pull_request_head_sha=head)
+        == base
+    )
+
+
+@pytest.mark.parametrize("field", ["github_sha", "pull_request_head_sha"])
+@pytest.mark.parametrize("value", ["", "HEAD", "a" * 39, "A" * 40, "a" * 41])
+def test_pull_request_base_refuses_non_full_commit_inputs(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, field: str, value: str
+) -> None:
+    repo, _base, head, merge = _synthetic_merge_repo(tmp_path)
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    inputs = {"github_sha": merge, "pull_request_head_sha": head, field: value}
+    with pytest.raises(provenance.ProvenanceError, match="40-hex"):
+        provenance.pull_request_base(**inputs)
+
+
+def test_pull_request_base_refuses_a_different_checkout_or_event_head(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo, base, head, merge = _synthetic_merge_repo(tmp_path)
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    with pytest.raises(provenance.ProvenanceError, match="checked-out HEAD"):
+        provenance.pull_request_base(github_sha=base, pull_request_head_sha=head)
+    with pytest.raises(provenance.ProvenanceError, match="second parent"):
+        provenance.pull_request_base(github_sha=merge, pull_request_head_sha=base)
+
+
+def test_pull_request_cli_refuses_invalid_merge_before_reading_release_rows(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    repo, base, head, _merge = _synthetic_merge_repo(tmp_path)
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    monkeypatch.setenv("GITHUB_SHA", base)
+    assert provenance.main(["--pull-request-head", head]) == 2
+    assert "checked-out HEAD" in capsys.readouterr().err
+
+
+def test_cli_refuses_combining_push_base_and_pull_request_head(provenance) -> None:
+    with pytest.raises(SystemExit) as failure:
+        provenance.main(["--base", "a" * 40, "--pull-request-head", "b" * 40])
+    assert failure.value.code == 2
+
+
+@pytest.mark.parametrize("parent_count", [0, 1, 3])
+def test_pull_request_base_refuses_any_parent_count_other_than_two(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, parent_count: int
+) -> None:
+    repo, base, head, merge = _synthetic_merge_repo(tmp_path)
+    parents = [base, head, merge][:parent_count]
+    tree = _git_in(repo, "rev-parse", "HEAD^{tree}")
+    args = ["commit-tree", tree, "-m", "wrong parent count"]
+    for parent in parents:
+        args.extend(["-p", parent])
+    invalid = _git_in(repo, *args)
+    _git_in(repo, "update-ref", "HEAD", invalid)
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    with pytest.raises(provenance.ProvenanceError, match="exactly two parents"):
+        provenance.pull_request_base(github_sha=invalid, pull_request_head_sha=head)
+
+
+@pytest.mark.parametrize("missing_index", [0, 1])
+def test_pull_request_base_refuses_an_unavailable_parent_commit(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing_index: int
+) -> None:
+    repo, base, head, _merge = _synthetic_merge_repo(tmp_path)
+    parents = [base, head]
+    parents[missing_index] = "f" * 40
+    tree = _git_in(repo, "rev-parse", "HEAD^{tree}")
+    # hash-object deliberately stores a structurally valid commit whose
+    # parent is absent; commit-tree correctly refuses to author such a graph.
+    payload = (
+        f"tree {tree}\nparent {parents[0]}\nparent {parents[1]}\n"
+        "author Fixture <fixture@example.invalid> 1 +0000\n"
+        "committer Fixture <fixture@example.invalid> 1 +0000\n\nmissing parent\n"
+    )
+    commit_file = repo / "missing-parent.commit"
+    commit_file.write_text(payload)
+    invalid = _git_in(repo, "hash-object", "-t", "commit", "-w", str(commit_file))
+    _git_in(repo, "update-ref", "HEAD", invalid)
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    with pytest.raises(provenance.ProvenanceError, match="cannot resolve parent"):
+        provenance.pull_request_base(
+            github_sha=invalid, pull_request_head_sha=parents[1]
+        )
+
+
+def test_actual_merge_base_excludes_inherited_rows_but_preserves_authored_row_guard(
+    provenance, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo, base, head, merge = _synthetic_merge_repo(tmp_path)
+    monkeypatch.setattr(provenance, "REPO_ROOT", repo)
+    inherited = _row()
+    authored = _row(tag="dotmac-approvals-v0.1.0a2")
+    ledger = provenance.LEDGER_PATH
+    authority = provenance.release_authority.LEDGER_PATH
+    # Store the actual ledger bytes in real commit trees on the same graph.
+    _git_in(repo, "checkout", "-q", "-b", "recorded-main", base)
+    (repo / ledger).parent.mkdir(parents=True, exist_ok=True)
+    (repo / ledger).write_text(_wrap([inherited]))
+    (repo / authority).write_text("authority at actual base")
+    _git_in(repo, "add", ledger, authority)
+    _git_in(repo, "commit", "-q", "-m", "record inherited release")
+    actual_base = _git_in(repo, "rev-parse", "HEAD")
+    _git_in(
+        repo, "merge", "-q", "--no-ff", "pull-request", "-m", "fresh synthetic merge"
+    )
+    actual_merge = _git_in(repo, "rev-parse", "HEAD")
+    selected = provenance.pull_request_base(
+        github_sha=actual_merge, pull_request_head_sha=head
+    )
+    assert selected == actual_base and selected != base and selected != merge
+    base_text = _git_in(repo, "show", f"{selected}:{ledger}")
+    inherited_text = _git_in(repo, "show", f"HEAD:{ledger}")
+    assert provenance.new_rows(base_text, inherited_text) == []
+    base_authority = _git_in(repo, "show", f"{selected}:{authority}")
+    (repo / ledger).write_text(_wrap([inherited, authored]))
+    (repo / authority).write_text(base_authority + " edited by PR")
+    _git_in(repo, "add", ledger, authority)
+    tree = _git_in(repo, "write-tree")
+    authored_merge = _git_in(
+        repo,
+        "commit-tree",
+        tree,
+        "-p",
+        selected,
+        "-p",
+        head,
+        "-m",
+        "authored row and authority",
+    )
+    _git_in(repo, "update-ref", "HEAD", authored_merge)
+    assert (
+        provenance.pull_request_base(
+            github_sha=authored_merge, pull_request_head_sha=head
+        )
+        == selected
+    )
+    rows = provenance.new_rows(base_text, _git_in(repo, "show", f"HEAD:{ledger}"))
+    assert rows == [authored]
+    with pytest.raises(provenance.ProvenanceError, match="separate reviewed"):
+        provenance.refuse_authority_change_with_new_rows(
+            base_authority, _git_in(repo, "show", f"HEAD:{authority}"), rows
+        )
 
 
 def test_is_on_main_uses_first_parent_of_the_real_remote_branch(
