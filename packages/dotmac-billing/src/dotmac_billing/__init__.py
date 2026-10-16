@@ -12,6 +12,7 @@ from dotmac_billing.commands import (
     AcceptWithholdingDischarge,
     ApplyNonCashCredit,
     GrantNonCashCredit,
+    NumberingProvider,
     ReduceNonCashCreditGrant,
     ReverseNonCashCreditApplication,
     ReverseWithholdingDischarge,
@@ -35,10 +36,13 @@ from dotmac_billing.contracts import (
     GetInvoiceDocumentFactV1,
     InvoiceDocumentFactV1,
     InvoiceLineFactV1,
+    IssuedRatedInvoiceV1,
+    IssueRatedInvoiceV1,
     NonCashCreditClassificationV1,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
     NonCashCreditPolicyParameterV1,
+    ObligationSourceRegistry,
     PartyDocumentSnapshotV1,
     PartyTaxIdentitySnapshotV1,
     PaymentInstructionsSnapshotV1,
@@ -220,10 +224,16 @@ from dotmac_billing.queries import (
     get_receivable_position_v2,
     get_withholding_discharge,
 )
+from dotmac_billing.service import issue_rated_invoice
 
 __version__ = "0.1.0a8"
 
 __all__ = [
+    "IssueRatedInvoiceV1",
+    "IssuedRatedInvoiceV1",
+    "ObligationSourceRegistry",
+    "NumberingProvider",
+    "issue_rated_invoice",
     "BillingAccountObservationV1",
     "GetBillingAccountObservationV1",
     "get_billing_account_observation",

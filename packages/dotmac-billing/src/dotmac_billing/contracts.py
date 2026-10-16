@@ -7,10 +7,10 @@ derivations of immutable Billing effects, not cross-application contracts.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
@@ -248,6 +248,64 @@ class AcceptRatedObligationV1:
     tax_snapshots: tuple[AppliedTaxSnapshotV1, ...] = ()
     fx_snapshot: AppliedFxSnapshotV1 | None = None
     supersedes_obligation_id: UUID | None = None
+
+
+class ObligationSourceRegistry(Protocol):
+    """Assembly-supplied registry of uniquely declared obligation sources."""
+
+    def require_obligation_source(self, code: str) -> str:
+        """Return the declaring owner, or refuse an undeclared source."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class IssueRatedInvoiceV1:
+    """Issue one quantity-one invoice from an immutable rated obligation.
+
+    The assembly supplies already-frozen commercial, Tax and presentation
+    evidence. This command does not rate, confirm funding or declare sources.
+    Native collectible issuance always requires a verified due-date basis.
+    Source fact version participates in the existing obligation natural key:
+    a new version is a new identity, never correction of an issued invoice.
+    The assembly owns source revision/deduplication and routes corrections to
+    the existing Billing correction owner.
+    """
+
+    obligation: AcceptRatedObligationV1
+    description: str
+    unit_code: str
+    seller_snapshot: PartyDocumentSnapshotV1
+    customer_snapshot: PartyDocumentSnapshotV1
+    payment_instructions: PaymentInstructionsSnapshotV1
+    brand_asset: PresentationAssetReferenceV1
+    locale: str
+    timezone: str
+    document_profile_code: str
+    document_profile_version: str
+    series_code: str
+    reference_date: date
+    due_at: datetime
+    due_date_basis: DueDateBasisV1
+    actor_ref: str
+    correlation_id: str
+    party_tax_identities: tuple[PartyTaxIdentitySnapshotV1, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class IssuedRatedInvoiceV1:
+    """Original persisted issuance identities, stable across exact retries.
+
+    This receipt is not a current financial position or an authorization proof.
+    The issued fact version identifies the original immutable document fact.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    obligation_id: UUID
+    invoice_id: UUID
+    line_id: UUID
+    line_number: int
+    issued_fact_version: int
 
 
 class SettlementFundingLane(str, Enum):
@@ -1107,6 +1165,9 @@ class AccountingFactV3:
 
 
 __all__ = [
+    "IssueRatedInvoiceV1",
+    "IssuedRatedInvoiceV1",
+    "ObligationSourceRegistry",
     "BillingAccountObservationV1",
     "GetBillingAccountObservationV1",
     "ACCOUNTING_FACT_V3_CONTRACT",

@@ -823,3 +823,49 @@ isolation, missing/invalid input, dirty identity maps, relink/delete freshness a
 corrupt stored identity. Hosted execution remains pending. Billing `0.1.0a8` stays
 an unpublished candidate; this change neither bumps a version nor grants
 publication or production authority.
+
+## Public rated invoice authoring — 2026-10-15 candidate
+
+This bounded API delta composes Billing's existing `accept_rated_obligation`,
+`create_draft_document` and `issue_document` owners. `IssueRatedInvoiceV1` carries
+one already-rated obligation and the existing frozen document snapshots;
+`IssuedRatedInvoiceV1` returns persisted scope/account/obligation/invoice/line
+identities, line number and the original issued fact version. Quantity is exactly
+one. Numbering and the manifest-backed obligation-source registry are injected by
+the assembly; the command cannot declare trusted source kinds. Kernel's existing
+idempotency operation/savepoint contains all three stages, including number
+allocation, postings and facts; services never commit or roll back the root.
+This adds neither a ledger nor tax/rating/numbering authority.
+
+The real intended consumer is Sub `app/services/prepaid_period_purchases.py`,
+`settle_prepaid_period_purchase` / `settle_verified_prepaid_period_purchase`,
+which issues one invoice and one line per funded final service period (source
+inspection at prospective Sub bridge head
+`99313fb2cc0e179d13742d26a75e3a58c6720c6b`, in
+`dotmac_sub-billing-module-invoice-cash`). Its existing staged invoice/line and
+issuance logic is the financial reference, including quantity one, frozen price
+and tax evidence, confirmed funding, and per-period identity. This API reuses
+clean Billing's accepted implementation rather than adding a second algorithm.
+No Qualification prototype or API #845 dependency is introduced.
+
+Consumer composition is deferred: Sub still needs its module-line/product-FK
+bridge; frozen price and Tax-owner evidence mapping; owner conflict-savepoint
+and root transaction composition; and verified cash-source binding. No consumer,
+adoption, activation, legacy retirement, release, or production authority transfer
+is claimed. The historical published Billing baseline remains `0.1.0a1`;
+`0.1.0a8` and this source delta remain unpublished candidates. Hosted PostgreSQL
+canaries cover isolation, exact replay and changed replay, original persisted
+identities, one issuance effect, and failure atomicity; local static checks are
+not runtime evidence. No new schema target or migration is required by this API.
+
+The public authoring path validates persisted applied-tax evidence with the
+existing `_require_obligation_taxes` rule inside its outer operation, before
+creating the draft. Missing evidence for nonzero tax, mismatched currency or
+minor-unit precision, and a tax sum that differs from the rated obligation are
+refused atomically. Legacy single-line authoring behavior is unchanged.
+Source fact version remains part of Billing's established obligation natural
+identity: changing it creates a new identity, not a correction of an issued
+invoice. Assemblies retain source revision/deduplication ownership and must use
+the existing correction owner for documented obligations. Hosted canaries now
+compose the actual Numbering lineage and public allocator to verify number
+receipt/counter rollback, caller root rollback and concurrent public retries.
