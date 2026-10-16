@@ -23,7 +23,8 @@ Three invariants are the point of the module:
   review locks that intent before its proof and records acceptance only after
   the shared confirmation path succeeds.
 
-Version `0.1.0a2` is declared and unpublished. Sub remains the live writer until
+Version `0.1.0a2` is published. Successor `0.1.0a3` is proposed and unpublished;
+its release allocation and authorization remain separate. Sub remains the live writer until
 its history backfill, zero-drift shadow and separately authorized cutover pass.
 
 The tenant-only `pm` lineage owns `mod_payments`.
@@ -86,3 +87,12 @@ evidence and the database guard when rolling application source back; production
 migration downgrade is not a rollback procedure. PostgreSQL mutation, populated
 predecessor, lifecycle race/replay and caller rollback canaries require hosted
 CI acceptance; authoring them is not execution evidence.
+
+`PaymentPurpose.PURCHASE_FUNDING` binds a purchase or obligation before an
+invoice exists through the existing exact opaque `target_reference`. A nonblank
+destination is required and replay cannot change it or the purpose. Additive
+`pm_0004_purchase_funding` extends the purpose CHECK and rejects raw-DML
+changes to or deletion of the original checkout binding (identity, payer, target,
+purpose, requested money, provider/channel and opening/expiry). Downgrade refuses existing purchase-funding intents.
+This purpose grants no spendable credit, cash qualification or ledger posting.
+See the [product inventory](../../docs/inventories/payments-purchase-funding-extraction.md).
