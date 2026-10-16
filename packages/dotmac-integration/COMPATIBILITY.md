@@ -150,8 +150,9 @@ The POLL mode is executed by `prepare_poll` -> `invoke_poll` ->
 the normalized batch and next cursor then commit together. This is package
 machinery rather than a new SPI shape in a11. Released a18 sets
 `CURRENT_SPI_VERSION` to 1.6 for additive provisioning and
-synchronous request contracts. Proposed a19 changes receipt-origin persistence
-metadata only; it does not change the existing wire contract.
+synchronous request contracts. Proposed a19 adds receipt-origin persistence
+metadata and shared held-key product-query authentication; neither changes the
+existing wire contract or SPI.
 
 ## The ingress contract
 
