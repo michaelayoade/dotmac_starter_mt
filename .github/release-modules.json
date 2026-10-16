@@ -480,6 +480,7 @@
           "dotmac_billing/opening_validation.py",
           "dotmac_billing/py.typed",
           "dotmac_billing/queries.py",
+          "dotmac_billing/_cash_draw_queries.py",
           "dotmac_billing/service.py",
           "dotmac_billing/_receivable_backing.py",
           "dotmac_billing/migrations/versions/bi_0008_opening_receivables.py",
@@ -2383,6 +2384,8 @@
           "dotmac_payments/migrations/versions/pm_0003_confirmation_immutable.py",
           "dotmac_payments/migrations/versions/pm_0004_purchase_funding.py",
           "dotmac_payments/migrations/versions/pm_0005_merchant_context.py",
+          "dotmac_payments/migrations/versions/pm_0006_cash_qualification.py",
+          "dotmac_payments/cash_qualification.py",
           "dotmac_payments/models.py",
           "dotmac_payments/service.py"
         ],

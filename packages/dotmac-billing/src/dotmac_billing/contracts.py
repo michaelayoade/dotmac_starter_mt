@@ -459,6 +459,109 @@ class CurrentSettlementAllocationV1:
     state: Literal["current", "reduced", "removed", "inactive_backing"]
 
 
+class CashCreditDrawState(str, Enum):
+    CURRENT = "current"
+    REDUCED = "reduced"
+    REMOVED = "removed"
+    INACTIVE_BACKING = "inactive_backing"
+
+
+@dataclass(frozen=True, slots=True)
+class GetCurrentCashCreditDrawV1:
+    """Bind the exact original pooled-cash draw, never an invoice balance."""
+
+    scope: Scope
+    billing_account_id: UUID
+    posting_group_id: UUID
+    document_id: UUID
+    amount: Money
+    source_ref: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or (
+                isinstance(self.scope, TenantScope)
+                and not isinstance(self.scope.tenant_id, UUID)
+            )
+            or any(
+                not isinstance(value, UUID)
+                for value in (
+                    self.billing_account_id,
+                    self.posting_group_id,
+                    self.document_id,
+                )
+            )
+            or not isinstance(self.amount, Money)
+            or not self.amount.amount.is_finite()
+            or self.amount.amount <= 0
+            or not isinstance(self.source_ref, str)
+            or not self.source_ref.strip()
+            or len(self.source_ref) > 255
+        ):
+            raise BillingRuleViolation(
+                "cash_draw_request_invalid",
+                "draw requires exact identities, source reference and positive Money",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentCashCreditDrawV1:
+    """Account-fenced observation valid only within the caller transaction."""
+
+    scope: Scope
+    billing_account_id: UUID
+    posting_group_id: UUID
+    document_id: UUID
+    original_amount: Money
+    remaining_amount: Money
+    source_ref: str
+    state: CashCreditDrawState
+
+
+@dataclass(frozen=True, slots=True)
+class GetCurrentReceivablePositionV1:
+    """Observe the actual latest account position, without a caller watermark."""
+
+    scope: Scope
+    billing_account_id: UUID
+    currency: Currency
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or (
+                isinstance(self.scope, TenantScope)
+                and not isinstance(self.scope.tenant_id, UUID)
+            )
+            or not isinstance(self.billing_account_id, UUID)
+            or type(self.currency) is not Currency
+            or type(self.currency.minor_units) is not int
+            or not 0 <= self.currency.minor_units <= 6
+            or not self.currency.code.isascii()
+            or not self.currency.code.isupper()
+        ):
+            raise BillingRuleViolation(
+                "current_position_request_invalid",
+                "current position requires explicit scope, account and exact currency",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentReceivablePositionV1:
+    """Fresh account-fenced observation, distinct from an immutable snapshot.
+
+    None is reserved for proven pristine monetary history at source version zero.
+    The caller retains the account lock and owns the outer transaction.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    currency: Currency
+    source_version: int
+    position: ReceivablePositionV2 | None
+
+
 @dataclass(frozen=True, slots=True)
 class GetInvoiceDocumentFactV1:
     """Read one exact historical fact; no implicit latest-version selection."""
@@ -1225,6 +1328,11 @@ __all__ = [
     "ObligationSourceRegistry",
     "BillingAccountObservationV1",
     "GetBillingAccountObservationV1",
+    "GetCurrentReceivablePositionV1",
+    "CurrentReceivablePositionV1",
+    "GetCurrentCashCreditDrawV1",
+    "CurrentCashCreditDrawV1",
+    "CashCreditDrawState",
     "GetCurrentSettlementAllocationV1",
     "CurrentSettlementAllocationV1",
     "ACCOUNTING_FACT_V3_CONTRACT",

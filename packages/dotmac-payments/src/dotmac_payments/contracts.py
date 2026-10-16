@@ -204,6 +204,11 @@ __all__ = [
     "ReviewTransferProof",
     "SubmitTransferProof",
     "TransferProofState",
+    "OriginalProviderCashEvidenceV1",
+    "QualifyProviderCashV1",
+    "AuthorizedProviderCashV1",
+    "ProviderCashEvidenceAuthority",
+    "ProviderCashQualificationV1",
 ]
 
 
@@ -332,3 +337,81 @@ class GetOriginalMerchantContextV1:
     context_id: UUID
     transport: MerchantTransportContextV1
     captured_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OriginalProviderCashEvidenceV1:
+    """Immutable owner locator, not an authentication claim or a cash verdict."""
+
+    owner: str
+    reference: str
+    schema_version: str
+    sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class QualifyProviderCashV1:
+    command_id: UUID
+    original_evidence: OriginalProviderCashEvidenceV1
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizedProviderCashV1:
+    """Installed authority output only; never deserialize from caller payloads.
+
+    The authority resolves actual retained authenticated original operation
+    evidence, including its account-bound verification and accepted context.
+    Provider decoding, currency precision and successful-capture interpretation
+    belong to that authority; unsupported or missing paid_at must be refused.
+    """
+
+    scope: TenantScope
+    command_id: UUID
+    request_fingerprint: str
+    original_evidence: OriginalProviderCashEvidenceV1
+    transport: MerchantTransportContextV1
+    context_id: UUID
+    verified_at: datetime
+    transaction_kind: str
+    transaction_id: str
+    checkout_reference: str
+    status: str
+    money: Money
+    paid_at: datetime
+    observed_at: datetime
+
+
+class ProviderCashEvidenceAuthority(Protocol):
+    def verify_original(
+        self,
+        db: Session,
+        *,
+        scope: TenantScope,
+        request: QualifyProviderCashV1,
+        request_fingerprint: str,
+    ) -> AuthorizedProviderCashV1:
+        """Freshly authenticate actual original evidence or raise on uncertainty.
+
+        No default implementation exists. The product installs its trusted
+        server evidence owner; constructing this DTO is not proof. Read in the
+        caller transaction without mutating/completing it. Revalidate even on
+        replay and admission; never replace original transport with current
+        configuration or infer paid_at from creation/receipt/retrieval time.
+        """
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCashQualificationV1:
+    """Historical immutable cash fact; this is never an admission token."""
+
+    scope: TenantScope
+    qualification_id: UUID
+    command_id: UUID
+    request_fingerprint: str
+    original: AuthorizedProviderCashV1
+    physical_merchant_id: str
+    source_namespace: str
+    source_key: str
+    source_version: str
+    provenance_fingerprint: str

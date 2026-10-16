@@ -17,6 +17,7 @@ module = ModuleManifest(
     tables=TENANT_TABLES,
     platform_tables=(),
     outbox_event_types=(
+        "payments.provider_cash.qualified.v1",
         "payments.merchant_context.accepted.v1",
         "payments.merchant_context.ended.v1",
     ),

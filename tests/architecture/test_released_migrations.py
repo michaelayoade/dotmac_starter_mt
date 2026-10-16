@@ -7376,7 +7376,11 @@ UNRELEASED: dict[str, frozenset[str]] = {
         }
     ),
     "dotmac-payments": frozenset(
-        {"pm_0004_purchase_funding.py", "pm_0005_merchant_context.py"}
+        {
+            "pm_0004_purchase_funding.py",
+            "pm_0005_merchant_context.py",
+            "pm_0006_cash_qualification.py",
+        }
     ),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the

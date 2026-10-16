@@ -1288,20 +1288,9 @@ def get_confirmed_settlement(
     service._require_cash_source_claim(
         db, scope=scope, settlement_id=row["id"], command=command
     )
-    expected = fingerprint_of(
-        {
-            "amount": amount.amount,
-            "currency": amount.currency.code,
-            "minor_units": amount.currency.minor_units,
-            "occurred_at": command.occurred_at,
-            "source_version": command.source_version,
-        }
-    )
-    if expected != row["request_fingerprint"]:
-        _fail(
-            "settlement_evidence_corrupt",
-            "original settlement request fingerprint differs",
-        )
+    from dotmac_billing._cash_draw_queries import validate_confirmed_cash_origin
+
+    validate_confirmed_cash_origin(db, scope=scope, source=row)
     settlement = service._one(db, scope=scope, model=plane.settlement, row_id=row["id"])
     active = service._settlement_has_active_backing(
         db, scope=scope, settlement=settlement

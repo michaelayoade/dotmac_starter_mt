@@ -100,10 +100,51 @@ implementation belongs in these shared records.
 
 Sub remains the thin product adapter. Payments must ultimately own the shared
 merchant-qualified namespace/transaction/economic-version codec and successful
-cash qualification against the original frozen intent. Those qualification
-contracts are a following source slice, not supplied by the context records
-alone. Integration supplies actual retained authenticated transport provenance
+cash qualification against actual original authenticated provider evidence.
+The product coordinator compares the retained checkout reference and Money to
+its actual frozen live intent; historical opening cash requires no invented
+local intent. Qualification is supplied by the following source slice, never
+by context records alone. Integration supplies actual retained authenticated transport provenance
 through its versioned delivery boundary, never a foreign platform-table query.
 Paystack capture time must come from explicit `paid_at`; unsupported Flutterwave
 merchant/capture semantics remain unresolved. No current, received, retrieved or
 creation timestamp substitutes for missing capture evidence.
+
+## Provider cash qualification slice (2026-10-16, unpublished)
+
+Product-first evidence: the current Sub settlement owner compares original
+checkout/reference/provider/Money and rejects conflicting replay; the event
+owner normalizes provider facts but its v1 `occurred_at` collapses distinct
+creation/payment clocks. The capture candidate preserves explicit
+`provider_paid_at` separately from retrieval time. Paystack creation time and
+Flutterwave event/creation time are not accepted substitutes. The gateway
+Finance owner supplies reviewed original configuration, not provider cash proof.
+These existing boundaries require one portable immutable qualification fact in
+Payments, with provider decoding, RBAC, local FKs and product mapping retained
+outside it. Knowledge was searched with `project:dotmac_starter_mt` and canonical
+`dotmac-billing-cutover-orchestration-2026-10-14` v129 retrieved; no scope denial.
+
+The new command contains only its identity and a typed immutable original
+owner/reference/schema/digest. An installed authority must freshly resolve
+actual authenticated original evidence, bind the exact scope/request/evidence,
+and attest original transport, accepted context, verification clock, successful
+transaction/reference, exact Money and explicit payment clock. DTO construction
+is not evidence and no permissive default authority is supplied. The shared
+owner checks every nested value, persisted original context and retained provider checkout reference. The product coordinator compares that
+reference and Money to its actual live checkout/account/purchase; opening history
+requires no fabricated Payments intent or confirmation.
+
+Economic identity is the algorithm-versioned digest of provider/environment/
+physical merchant/transaction kind plus the exact transaction key. The source
+version digests complete economic capture facts, excluding local IDs,
+configuration, review/retrieval times and evidence provenance. Separate original
+provenance is retained. Opening and live consumers must reuse this same tuple;
+local confirmation UUID/version-one and caller-asserted namespaces cannot name
+cash. A second binding for the same physical cash is refused.
+
+Qualification replay re-verifies original evidence and preserves original facts
+after context termination. Every new financial effect must call the separate
+admission guard in its own outer transaction; that guard takes the same
+transport lock and re-observes applicable unended original context under READ
+WRITE READ COMMITTED through outer commit. Historical queries grant no admission.
+No refund, ledger posting, custody platform or product policy is introduced.

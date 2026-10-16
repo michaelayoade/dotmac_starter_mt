@@ -1,8 +1,16 @@
 """Payment intent and confirmation-correlation owner."""
 
+from dotmac_payments.cash_qualification import (
+    get_provider_cash_qualification,
+    provider_cash_economic_identity,
+    provider_cash_request_fingerprint,
+    qualify_provider_cash,
+    require_provider_cash_admission,
+)
 from dotmac_payments.contracts import (
     AcceptMerchantContextV1,
     AuthorizedMerchantReviewV1,
+    AuthorizedProviderCashV1,
     ConfirmationNotFound,
     ConfirmationSource,
     ConfirmedCashObservationV1,
@@ -18,10 +26,14 @@ from dotmac_payments.contracts import (
     MerchantReviewOperation,
     MerchantTransportContextV1,
     OpenPaymentIntent,
+    OriginalProviderCashEvidenceV1,
     PaymentError,
     PaymentIntentObservationV1,
     PaymentIntentStatus,
     PaymentPurpose,
+    ProviderCashEvidenceAuthority,
+    ProviderCashQualificationV1,
+    QualifyProviderCashV1,
     RecordConfirmation,
     ResolveMerchantContextV1,
     ReviewTransferProof,
@@ -104,4 +116,14 @@ __all__ = [
     "review_transfer_proof",
     "submit_transfer_proof",
     "versions_dir",
+    "AuthorizedProviderCashV1",
+    "OriginalProviderCashEvidenceV1",
+    "ProviderCashEvidenceAuthority",
+    "ProviderCashQualificationV1",
+    "QualifyProviderCashV1",
+    "get_provider_cash_qualification",
+    "provider_cash_economic_identity",
+    "provider_cash_request_fingerprint",
+    "qualify_provider_cash",
+    "require_provider_cash_admission",
 ]

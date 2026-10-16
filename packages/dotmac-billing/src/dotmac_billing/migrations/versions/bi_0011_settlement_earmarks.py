@@ -192,12 +192,21 @@ def downgrade() -> None:
             op.execute(
                 f"ALTER TABLE {_SCHEMA}.settlement_earmarks NO FORCE ROW LEVEL SECURITY"
             )
-        op.execute(f"""
+        guard = {
+            "": """
             DO $$ BEGIN
-              IF EXISTS (SELECT 1 FROM {_SCHEMA}.{prefix}settlement_earmarks)
+              IF EXISTS (SELECT 1 FROM mod_billing.settlement_earmarks)
               THEN RAISE EXCEPTION 'cannot downgrade retained settlement earmarks' USING ERRCODE = '23514'; END IF;
             END $$;
-        """)
+            """,
+            "platform_": """
+            DO $$ BEGIN
+              IF EXISTS (SELECT 1 FROM mod_billing.platform_settlement_earmarks)
+              THEN RAISE EXCEPTION 'cannot downgrade retained settlement earmarks' USING ERRCODE = '23514'; END IF;
+            END $$;
+            """,
+        }[prefix]
+        op.execute(guard)
         if not prefix:
             op.execute(
                 f"ALTER TABLE {_SCHEMA}.settlement_earmarks FORCE ROW LEVEL SECURITY"

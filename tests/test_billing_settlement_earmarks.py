@@ -1102,3 +1102,43 @@ def test_unearmarked_backing_removal_requires_zero_consumption_and_retains_histo
             scope=scope,
             request=GetConfirmedSettlementV1(scope, account.id, settlement.id),
         ).active_backing
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_confirmed_receipt_original_hash_keeps_offset_spelling_opaque(scratch, plane):
+    from datetime import timedelta, timezone
+    from decimal import Decimal
+
+    from dotmac_kernel.money import Money
+
+    scope, url = _scope_url(scratch, plane)
+    with b._session(url, scope) as db:
+        account = service.create_billing_account(
+            db,
+            scope=scope,
+            external_account_ref=str(uuid4()),
+            currency="NGN",
+            minor_units=2,
+        )
+        offered = b._settlement_command(
+            account.id, scope=scope, source_key=str(uuid4()), amount="120"
+        )
+        offered = replace(
+            offered,
+            occurred_at=offered.occurred_at.astimezone(timezone(timedelta(hours=1))),
+            amount=Money.of(Decimal("120.0000"), offered.amount.currency),
+        )
+        source = service.accept_settlement(
+            db,
+            scope=scope,
+            command=offered,
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
+        )
+        request = GetConfirmedSettlementV1(scope, account.id, source.id)
+        original_hash = source.request_fingerprint
+        db.commit()
+    with b._session(url, scope) as db:
+        observed = get_confirmed_settlement(db, scope=scope, request=request)
+        assert observed.amount == offered.amount and observed.active_backing
+        assert observed.request_fingerprint == original_hash
+        assert observed.occurred_at == offered.occurred_at

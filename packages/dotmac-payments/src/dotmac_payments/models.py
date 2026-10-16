@@ -337,12 +337,87 @@ def _reject_merchant_context_mutation(*_args: object) -> None:
     raise Conflict("merchant review history is append-only")
 
 
+class ProviderCashQualification(Base):
+    """Append-only original provider cash qualification, never a ledger."""
+
+    __tablename__ = "provider_cash_qualifications"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_provider_cash_tenant_id"),
+        UniqueConstraint("tenant_id", "command_id", name="uq_provider_cash_command"),
+        UniqueConstraint(
+            "tenant_id",
+            "provider_type",
+            "environment",
+            "physical_merchant_id",
+            "transaction_kind",
+            "transaction_id",
+            name="uq_provider_cash_physical_transaction",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "context_id"],
+            [f"{SCHEMA}.merchant_contexts.tenant_id", f"{SCHEMA}.merchant_contexts.id"],
+            ondelete="RESTRICT",
+            name="fk_provider_cash_context",
+        ),
+        CheckConstraint(
+            "amount > 0 AND minor_units BETWEEN 0 AND 6 "
+            "AND amount = round(amount,minor_units)",
+            name="ck_provider_cash_money",
+        ),
+        CheckConstraint("status = 'succeeded'", name="ck_provider_cash_status"),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="RESTRICT"), nullable=False
+    )
+    command_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_owner: Mapped[str] = mapped_column(String(160), nullable=False)
+    evidence_reference: Mapped[str] = mapped_column(String(512), nullable=False)
+    evidence_schema_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    evidence_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    context_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    environment: Mapped[str] = mapped_column(String(40), nullable=False)
+    physical_merchant_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    installation_reference: Mapped[str] = mapped_column(String(160), nullable=False)
+    capability_reference: Mapped[str] = mapped_column(String(160), nullable=False)
+    config_revision_reference: Mapped[str] = mapped_column(String(160), nullable=False)
+    config_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    transaction_kind: Mapped[str] = mapped_column(String(80), nullable=False)
+    transaction_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    checkout_reference: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    source_namespace: Mapped[str] = mapped_column(String(80), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    provenance_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+@event.listens_for(ProviderCashQualification, "before_update")
+@event.listens_for(ProviderCashQualification, "before_delete")
+def _reject_provider_cash_mutation(*_args: object) -> None:
+    raise Conflict("provider cash qualifications are append-only")
+
+
 TENANT_TABLES = (
     "payment_intents",
     "payment_transfer_proofs",
     "payment_confirmations",
     "merchant_contexts",
     "merchant_context_ends",
+    "provider_cash_qualifications",
 )
 _TABLES: dict[str, sa.Table] = {
     model.__tablename__: cast(sa.Table, model.__table__)
@@ -352,6 +427,7 @@ _TABLES: dict[str, sa.Table] = {
         PaymentConfirmation,
         MerchantContext,
         MerchantContextEnd,
+        ProviderCashQualification,
     )
 }
 
@@ -361,6 +437,7 @@ def metadata_table(name: str) -> sa.Table:
 
 
 __all__ = [
+    "ProviderCashQualification",
     "MerchantContext",
     "MerchantContextEnd",
     "MONEY",

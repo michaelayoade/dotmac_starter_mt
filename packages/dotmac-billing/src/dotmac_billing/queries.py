@@ -19,8 +19,12 @@ from dotmac_billing._opening_values import cash_decimal_context
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
     BillingAccountObservationV1,
+    CurrentCashCreditDrawV1,
+    CurrentReceivablePositionV1,
     CurrentSettlementAllocationV1,
     GetBillingAccountObservationV1,
+    GetCurrentCashCreditDrawV1,
+    GetCurrentReceivablePositionV1,
     GetCurrentSettlementAllocationV1,
     GetInvoiceDocumentFactV1,
     NonCashCreditEffectV1,
@@ -173,6 +177,8 @@ def get_invoice_document_fact(
 __all__ = [
     "get_billing_account_observation",
     "get_current_settlement_allocation",
+    "get_current_cash_credit_draw",
+    "get_current_receivable_position",
     "get_receivable_position_v2",
     "get_non_cash_credit_grant",
     "get_non_cash_credit_effect",
@@ -781,4 +787,215 @@ def get_current_settlement_allocation(
             request.amount,
             Money.of(remaining, currency),
             state,
+        )
+
+
+def get_current_cash_credit_draw(
+    db: Session, *, scope: Scope, request: GetCurrentCashCreditDrawV1
+) -> CurrentCashCreditDrawV1:
+    """Observe exact pooled funding while retaining the account fence to commit."""
+    from dotmac_billing._cash_draw_queries import observe_cash_credit_draw
+
+    return observe_cash_credit_draw(db, scope=scope, request=request)
+
+
+def get_current_receivable_position(
+    db: Session, *, scope: Scope, request: GetCurrentReceivablePositionV1
+) -> CurrentReceivablePositionV1:
+    """Re-observe actual latest persisted account history under its outer fence.
+
+    This is current admission evidence in a read-write READ COMMITTED caller
+    transaction. It is distinct from reading a caller-selected historical V2.
+    """
+    from sqlalchemy import text
+
+    from dotmac_billing.engine import Effect, EffectLane, rebuild_position
+    from dotmac_billing.opening_queries import _scoped, _table
+
+    def refuse(message: str) -> NoReturn:
+        raise BillingRuleViolation("current_position_unavailable", message)
+
+    if type(request) is not GetCurrentReceivablePositionV1:
+        refuse("unsupported current position request")
+    request.__post_init__()
+    if not isinstance(scope, TenantScope | PlatformScope) or scope != request.scope:
+        refuse("current position scope disagrees")
+    currency = request.currency
+
+    def rows(name: str) -> list[Any]:
+        table = _table(scope, name)
+        account_filter = (
+            table.c.fact_payload["billing_account_id"].as_string()
+            == str(request.billing_account_id)
+            if name == "accounting_facts"
+            else table.c.billing_account_id == request.billing_account_id
+        )
+        return list(
+            db.execute(
+                _scoped(select(table).where(account_filter), scope, table)
+            ).mappings()
+        )
+
+    with db.no_autoflush, localcontext(cash_decimal_context()):
+        if (
+            db.connection().get_isolation_level() != "READ COMMITTED"
+            or db.execute(text("SHOW transaction_read_only")).scalar_one() != "off"
+        ):
+            refuse("current position requires read-write READ COMMITTED")
+        table = _table(scope, "billing_accounts")
+        account = (
+            db.execute(
+                _scoped(
+                    select(table)
+                    .where(table.c.id == request.billing_account_id)
+                    .with_for_update(),
+                    scope,
+                    table,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if account is None or (account["currency"], account["minor_units"]) != (
+            currency.code,
+            currency.minor_units,
+        ):
+            refuse("current position account currency disagrees")
+        groups = rows("posting_groups")
+        if not groups:
+            for name in (
+                "posting_effects",
+                "allocation_effects",
+                "accounting_facts",
+                "receivable_position_facts",
+                "receivable_position_facts_v2",
+                "confirmed_settlements",
+                "cash_source_claims",
+                "withholding_discharges",
+                "non_cash_credit_grants",
+                "non_cash_credit_effects",
+                "opening_import_receipts",
+                "opening_cash_lots",
+                "opening_cash_effects",
+                "opening_receivable_bases",
+                "receivable_exposure_facts",
+                "receivable_exposure_facts_v2",
+            ):
+                if rows(name):
+                    refuse("account without posting groups has monetary history")
+            if any(row["issued_at"] is not None for row in rows("documents")):
+                refuse("account without posting groups contains issued documents")
+            return CurrentReceivablePositionV1(
+                scope, request.billing_account_id, currency, 0, None
+            )
+        latest = max(groups, key=lambda row: row["source_version"])
+        version = latest["source_version"]
+        if (
+            type(version) is not int
+            or version < 1
+            or sorted(row["source_version"] for row in groups)
+            != list(range(1, version + 1))
+        ):
+            refuse("account posting source versions are incomplete or ambiguous")
+        for row in groups:
+            if (row["currency"], row["minor_units"]) != (
+                currency.code,
+                currency.minor_units,
+            ):
+                refuse("account posting currency disagrees")
+        position = get_receivable_position_v2(
+            db,
+            scope=scope,
+            billing_account_id=request.billing_account_id,
+            source_version=version,
+        )
+        if (
+            position.scope != scope
+            or position.billing_account_id != request.billing_account_id
+            or position.source_version != version
+            or position.posting_group_watermark != latest["id"]
+            or position.source_owner != "dotmac-billing"
+            or position.source_authority != "internal"
+            or position.projection_mode != "authoritative"
+            or position.derived_from != "posting_groups"
+            or position.completeness != "complete"
+            or position.completeness_reason_code is not None
+            or any(
+                money.currency != currency
+                for money in (
+                    position.collectible_receivable,
+                    position.available_credit,
+                    position.prepaid_funding,
+                    position.available_non_cash_credit,
+                )
+            )
+        ):
+            refuse("latest account position is not exact complete Billing evidence")
+        effects = rows("posting_effects")
+        group_ids = {row["id"] for row in groups}
+        for row in effects:
+            if (
+                row["posting_group_id"] not in group_ids
+                or (row["currency"], row["minor_units"])
+                != (currency.code, currency.minor_units)
+                or not row["amount_delta"].is_finite()
+                or Money.of(row["amount_delta"], currency).amount != row["amount_delta"]
+            ):
+                refuse("account posting effect envelope is corrupt")
+        rebuilt = rebuild_position(
+            (
+                Effect(
+                    EffectLane(row["lane"]),
+                    row["amount_delta"],
+                    row["currency"],
+                    row["minor_units"],
+                )
+                for row in effects
+            ),
+            currency=currency.code,
+            minor_units=currency.minor_units,
+        )
+        original = next(
+            (
+                row
+                for row in rows("receivable_position_facts")
+                if row["source_version"] == version
+            ),
+            None,
+        )
+        if (
+            original is None
+            or original["state_fingerprint"] != rebuilt.state_fingerprint
+            or original["rebuild_fingerprint"] != rebuilt.state_fingerprint
+            or any(
+                getattr(position, field).amount != getattr(rebuilt, field)
+                for field in (
+                    "collectible_receivable",
+                    "available_credit",
+                    "prepaid_funding",
+                )
+            )
+        ):
+            refuse("latest position disagrees with persisted monetary backing")
+        from dotmac_billing._receivable_backing import resolve_receivable_backing
+
+        collectible = Decimal(0)
+        for document in rows("documents"):
+            if document["document_kind"] != "invoice" or document["issued_at"] is None:
+                continue
+            backing = resolve_receivable_backing(
+                db, scope=scope, document_id=document["id"]
+            )
+            if backing.active:
+                collectible += backing.remaining
+        if collectible != rebuilt.collectible_receivable:
+            refuse("current invoice backing disagrees with latest receivable")
+        # Re-read under the retained fence, never bind to a caller watermark.
+        observed = rows("posting_groups")
+        if {row["id"] for row in observed} != group_ids or max(
+            row["source_version"] for row in observed
+        ) != version:
+            refuse("account source version changed during observation")
+        return CurrentReceivablePositionV1(
+            scope, request.billing_account_id, currency, version, position
         )

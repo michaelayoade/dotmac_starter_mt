@@ -988,3 +988,53 @@ inverse descendants so legitimate restored funding can be corrected again.
 The current-allocation test now refuses backing removal while its allocation
 remains, then proves the linked deallocation and backing inverse sequence.
 Authored regressions and independent source review are not hosted acceptance.
+
+### 2026-10-16 — current pooled-credit draw prerequisite (source inventory)
+
+Sub's funding-event and nightly renewal owners still call its legacy
+`confirm_prepaid_service_renewal` and use invoice paid-state replay. The current
+Sub source candidate supplies commercial snapshots and module anchors, but its
+checkout-bound prepaid participant requires a genuine full prepaid receipt and
+cannot represent automatic renewal funded from pooled account credit.
+
+| Existing source | Retain or lift | Demonstrated gap |
+| --- | --- | --- |
+| Sub `prepaid_service_renewals.py` recurring renewal and nightly account savepoint | Original period/commercial decision, account isolation and exact renewal replay | Replace legacy invoice/payment references with real module document, line and credit-draw facts; do not invent checkout or payment rows. |
+| Billing `apply_available_credit` | Existing ordinary and mixed opening-cash draw commands and immutable posting facts | The returned posting group needs a current, source-specific funding observation. Historical accounting facts do not establish remaining funding. |
+| Billing `get_current_settlement_allocation` | Persisted scalar reads, exact source binding and account serialization | Its one-allocation-root contract cannot represent multi-receipt or mixed opening draws. Preserve that existing contract. |
+| Billing `_cash_draw_remaining` and linked correction guards | Existing source ownership, capacity and inverse validation | Direct-child totals alone cannot prove descendant inverse history or distinguish replacement funding from the original draw. |
+
+The proposed public current-draw query belongs to existing Billing a8, without
+new tables or migrations. It must retain the account fence under READ COMMITTED,
+validate original group/document/account/Money/source reference and complete
+root membership, follow supported immutable inverse descendants, and observe
+original receipt/opening/invoice backing. Reduced, removed or inactive original
+funding cannot become current merely because another receipt funds the invoice.
+Ambiguous or unsupported ancestry refuses. Sub retains its renewal records,
+entitlement/coverage projections, eligibility, event outcomes and transaction
+owner; it does not reconstruct module posting lineage.
+
+This inventory precedes implementation. Both-plane migrated PostgreSQL,
+mixed-source inverse, precision, dirty-ORM, malformed-lineage and locking
+canaries are required in hosted CI; no runtime acceptance or adoption is claimed.
+
+The same renewal caller audit demonstrated a second narrow observation gap.
+`BillingAccountObservationV1` supplies identity without a lock or balance;
+`get_receivable_position_v2` reads an explicitly supplied historical version.
+Neither establishes ordinary-invoice-first admission before a new renewal.
+The proposed current-position query retains the account fence under READ
+COMMITTED, derives the actual maximum posting-group source version and verifies
+that exact position. A typed nullable position is permitted only for a proven
+pristine version-zero account without financial groups, effects or facts. No
+caller watermark, invented historical version or assumed zero debt is accepted.
+Sub keeps the renewal eligibility decision; Billing supplies current ledger facts.
+
+Source review also found that current-draw and confirmed-settlement observations
+rehashed a published request fingerprint from database-round-tripped values.
+PostgreSQL can normalize an accepted non-UTC timestamp or Decimal representation,
+so that reconstruction can reject legitimate immutable cash. Preserve the
+original request fingerprint as opaque recorded provenance and validate the
+permanent source claim and original accounting/posting evidence semantically.
+Do not rewrite published acceptance hashes or depend on purgeable idempotency
+records for durable financial observations. Fresh-session non-UTC, exact-money
+and idempotency-retention canaries must prove this distinction.
