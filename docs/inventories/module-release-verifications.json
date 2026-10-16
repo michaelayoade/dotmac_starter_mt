@@ -243,6 +243,28 @@
           "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-forms",
+      "version": "0.2.0a1",
+      "tag": "dotmac-forms-v0.2.0a1",
+      "tag_object": "b68fb147b0f6fd409f5bf9b3328d19b02a5ecc17",
+      "peeled_commit": "95271a1e369e4b19eaae2d475f5d745356f5fdf8",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_forms-0.2.0a1-cp312-cp312-manylinux_2_35_x86_64.whl": "7432bf2a4817e129dfe0c7e03997abc12c069c2735dbf33a9913fb1a173ede22"
+      },
+      "verification_run_id": "38856028531",
+      "source_run_id": "38856028531",
+      "release_authority_digest": "sha256:eba56abff71d545562a970b87939624cd97963baefc651853dae32f0eedd22d0",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+          "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
+        }
+      ]
     }
   ]
 }
