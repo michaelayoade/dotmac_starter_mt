@@ -126,7 +126,8 @@ they are not approval, qualification or activation authority.
 
 ### Explicit originals and nonempty contract canary — 2026-10-16
 
-The existing adapter's Python `assemble_rehearsal_run` accepts an optional tuple
+The existing adapter's Python `assemble_rehearsal_run` and `rehearsal_census`
+accept an optional keyword-only `original_documents` tuple
 of `(source_invoice_id, OpeningOriginalDocumentV1)` inputs. It preserves supplied
 originals only for eligible, observed, mapped invoices and refuses duplicate,
 unknown, excluded, unmapped, number/time/total/currency-mismatched mappings.
@@ -136,6 +137,21 @@ a normal nonempty source export still counts missing originals and verifier
 unavailability. Documentary digests and mapping declarations are content
 identity, never qualification. The existing importer verifier must independently
 qualify the exact command and supplied original evidence.
+
+The census API threads that typed tuple through the existing assembly checks,
+and its manifest fingerprint identifies the resulting candidate manifest. The
+source fingerprint and assembly digest retain their existing meanings; the
+tuple is not a snapshot-bound evidence sidecar. V3 historical-unavailable
+observations remain counted even when a typed original is supplied. Focused
+adapter canaries cover this bridge, malformed and misbound mappings, and the
+continued documentary and verifier blockers; hosted execution is required.
+
+CLI original input remains unsupported: Billing's only reusable generic decoder
+is the private `_document_facts._decode` used by persisted opening reads.
+The public `decode_invoice_document_fact` accepts `InvoiceDocumentFactV1`, not
+`OpeningOriginalDocumentV1`. A strict CLI sidecar bound to the source fingerprint
+and assembly digest needs an owner-approved original-document wire/parser
+contract; this slice introduces no private-codec import or duplicate codec.
 
 `tests/test_billing_opening_rehearsal_import.py` adds a hosted migrated-PostgreSQL
 canary for both planes, using the existing synthetic one-eligible-invoice export

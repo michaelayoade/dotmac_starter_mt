@@ -770,7 +770,8 @@ def test_explicit_typed_original_is_preserved_without_qualifying_preview():
         "precision",
     ],
 )
-def test_explicit_original_mapping_refuses_misbinding(attack):
+@pytest.mark.parametrize("entrypoint", ["assemble", "census"])
+def test_explicit_original_mapping_refuses_misbinding(attack, entrypoint):
     from datetime import timedelta
     from uuid import UUID
 
@@ -817,6 +818,80 @@ def test_explicit_original_mapping_refuses_misbinding(attack):
     with pytest.raises(
         adapter.AdapterInputError, match="original_document_mapping_invalid"
     ):
-        adapter.assemble_rehearsal_run(
-            obs, assembly=assembly, sidecar=sidecar, original_documents=documents
+        if entrypoint == "census":
+            adapter.rehearsal_census(
+                payload, assembly=assembly, original_documents=documents
+            )
+        else:
+            adapter.assemble_rehearsal_run(
+                obs, assembly=assembly, sidecar=sidecar, original_documents=documents
+            )
+
+
+@pytest.mark.parametrize(
+    "fixture", ["census_one_eligible_v2.json", "census_v3_documentary.json"]
+)
+def test_census_preserves_explicit_original_without_qualifying_report(fixture):
+    from uuid import UUID
+
+    from dotmac_billing.opening_receivable_validation import (
+        opening_manifest_fingerprint_v2,
+    )
+
+    payload = _fixture(fixture)
+    assembly = _assembly()
+    original = _explicit_original(payload)
+    documents = ((UUID(INVOICE_1), original),)
+    obs, sidecar = adapter.load_sub_observation(payload)
+    expected_run = adapter.assemble_rehearsal_run(
+        obs, assembly=assembly, sidecar=sidecar, original_documents=documents
+    )
+    without = adapter.rehearsal_census(payload, assembly=assembly)
+    artifact = adapter.rehearsal_census(
+        payload, assembly=assembly, original_documents=documents
+    )
+    assert artifact.provenance.manifest_fingerprint == (
+        opening_manifest_fingerprint_v2(expected_run.manifest)
+    )
+    assert artifact.provenance.manifest_fingerprint != (
+        without.provenance.manifest_fingerprint
+    )
+    assert artifact.provenance.content_fingerprint == obs.content_fingerprint
+    assert artifact.provenance.assembly_digest == assembly.assembly_digest
+    assert artifact.v3_documentary_sidecar == without.v3_documentary_sidecar
+    rendered = json.loads(render_opening_rehearsal_census(artifact))
+    assert "verifier_unavailable" in _all_codes(rendered)
+    assert "original_documentary_evidence_unavailable" in _codes(
+        rendered, "report_blockers"
+    )
+    assert artifact.rollup.complete_exact_reconciliation is False
+    assert artifact.blocked is True
+
+
+@pytest.mark.parametrize("documents", [[], (None,), ((INVOICE_1, None),)])
+def test_census_refuses_malformed_explicit_original_mapping(documents):
+    with pytest.raises(
+        adapter.AdapterInputError, match="original_document_mapping_invalid"
+    ):
+        adapter.rehearsal_census(
+            _fixture("census_one_eligible_v2.json"),
+            assembly=_assembly(),
+            original_documents=documents,
         )
+
+
+def test_census_default_originals_preserve_unavailable_semantics():
+    payload = _fixture("census_v3_documentary.json")
+    assembly = _assembly()
+    default = adapter.rehearsal_census(payload, assembly=assembly)
+    explicit_empty = adapter.rehearsal_census(
+        payload, assembly=assembly, original_documents=()
+    )
+    assert render_opening_rehearsal_census(default) == (
+        render_opening_rehearsal_census(explicit_empty)
+    )
+    rendered = json.loads(render_opening_rehearsal_census(default))
+    assert "original_documentary_evidence_missing" in _all_codes(rendered)
+    assert "original_documentary_evidence_unavailable" in _codes(
+        rendered, "report_blockers"
+    )

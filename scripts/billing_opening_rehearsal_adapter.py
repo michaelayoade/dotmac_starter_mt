@@ -1042,11 +1042,19 @@ def _counts(
 
 
 def rehearsal_census(
-    payload: Mapping[str, object], *, assembly: AssemblyInputs
+    payload: Mapping[str, object],
+    *,
+    assembly: AssemblyInputs,
+    original_documents: tuple[tuple[UUID, OpeningOriginalDocumentV1], ...] = (),
 ) -> OpeningRehearsalCensusV1:
-    """Run the full census over one Sub document and return the artifact."""
+    """Run the census, preserving independently supplied typed originals.
+
+    Originals use the same mapping checks as ``assemble_rehearsal_run``;
+    supplying them does not qualify the preview or discharge report blockers.
+    V3 historical-unavailable observations remain visible in the artifact.
+    """
     obs, sidecar = load_sub_observation(payload)
-    outcome = _assemble(obs, sidecar, assembly)
+    outcome = _assemble(obs, sidecar, assembly, original_documents)
     run = outcome.run
     report = report_opening_rehearsal(run)
     raw_by_partition = dict(outcome.raw_blockers)
