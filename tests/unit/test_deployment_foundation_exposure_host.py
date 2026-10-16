@@ -487,3 +487,39 @@ def test_the_reconciliation_takes_no_lock_of_its_own(
     host = FakeHost()
     reconcile(spec, _effects(host, spec))
     assert not lock_path(spec.product, directory=tmp_path).exists()
+
+
+def test_real_exposure_provider_command_keeps_detached_product_after_caller_mutation(
+    tmp_path: Path,
+) -> None:
+    spec = ProductDeploymentSpec.loads(_DESCRIPTOR)
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(list(argv))
+        return CommandResult(0)
+
+    effects = ComposeHostExposureEffects(spec, deploy_dir=tmp_path, runner=runner)
+    object.__setattr__(spec, "product", "unapproved-product")
+    effects.apply_compose(APPLY_COMMAND, timeout_seconds=30)
+    argv = calls[-1]
+    assert argv[argv.index("--project-name") + 1] == "acme"
+    assert effects.comment == OWNER
+    assert "unapproved-product" not in argv
+
+
+def test_exposure_provider_refuses_unparsed_replacement_before_any_runner_call(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from dotmac_deployment_foundation.errors import SpecError
+
+    spec = replace(ProductDeploymentSpec.loads(_DESCRIPTOR))
+    calls = []
+    with pytest.raises(SpecError) as caught:
+        ComposeHostExposureEffects(
+            spec, deploy_dir=tmp_path, runner=lambda argv, **kw: calls.append(argv)
+        )
+    assert caught.value.code == "spec.execution_parse_input_missing"
+    assert calls == []

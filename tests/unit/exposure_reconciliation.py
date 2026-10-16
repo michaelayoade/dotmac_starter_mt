@@ -57,7 +57,7 @@ def authorized_executor(
 ) -> tuple[Executor, DeploymentOutcome]:
     """A real `Executor`, authorized for exposure, plus a fresh outcome."""
     plan = build_plan(spec)
-    effects = RecordingEffects()
+    effects = RecordingEffects(spec=spec)
     # The same V1 base `_plan_and_digest` renders, carrying the exposure acts
     # in its V2 layer, wrapped as the V3 plan the grant is issued for — so the
     # receipt's execution plan digest is the digest of exactly this plan.

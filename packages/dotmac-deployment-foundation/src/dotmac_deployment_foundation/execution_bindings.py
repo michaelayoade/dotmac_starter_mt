@@ -83,6 +83,10 @@ class ExecutionBindings:
     provider: str
     #: ``(spec, deploy_dir) -> Effects``. None when the assembly injects
     #: verifiers only and keeps the in-package provider.
+    #: Executable providers must expose ``execution_descriptor: bytes`` from
+    #: their private validated execution snapshot and pure ``preflight_backup``
+    #: for selected local capture. The Executor checks these before consumption;
+    #: factories must never rebind an already-constructed provider to a new spec.
     build_effects: Callable[..., Any] | None = None
     authorization_verifier: AuthorizationVerifier | None = None
     #: Fixed at assembly installation/discovery; never selected from request
@@ -105,6 +109,8 @@ class ExecutionBindings:
     build_recovery_session: Callable[..., Any] | None = None
     #: ``(spec, deploy_dir) -> ExposureEffects``. Supplies the seam through
     #: which `Executor` reconciles a target's firewall rules.
+    #: Requires the same immutable ``execution_descriptor`` contract, derived
+    #: from the snapshot actually used for firewall ownership and rendering.
     #:
     #: It is here, rather than being constructed inside the CLI, because it was
     #: constructed inside the CLI and that was the defect. `cmd_exposure_apply`

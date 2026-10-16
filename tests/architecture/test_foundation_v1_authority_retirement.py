@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 UNIT = ROOT / "tests" / "unit"
 SOURCE = (
@@ -168,6 +170,9 @@ def test_pre_effect_consumption_is_owned_by_the_fixed_v3_provider() -> None:
             and node.func.attr in {"_verify_host_source", "_require_execution_plan"}
         }
         assert calls["_verify_host_source"] < calls["_require_execution_plan"]
+        if name == "rollback":
+            _assert_historical_rollback_is_readonly(methods)
+            continue
         statements = methods[name].body
         consumption_at = next(
             index
@@ -199,3 +204,115 @@ def test_pre_effect_consumption_is_owned_by_the_fixed_v3_provider() -> None:
         and node.func.id == "require_committed_consumption_v3"
         for node in ast.walk(pre_effect)
     )
+
+
+def _assert_historical_rollback_is_readonly(
+    methods: dict[str, ast.FunctionDef],
+) -> None:
+    rollback = methods["rollback"]
+    # Closed read-only path: a new effect hidden in a branch must fail too.
+    allowed_calls = {
+        "lock.require_held",
+        "self._verify_host_source",
+        "self._snapshot_spec",
+        "self._grant.require",
+        "self._descriptor_digest",
+        "self._snapshot_authority",
+        "self._require_execution_plan",
+        "PreconditionFailed",
+    }
+    assert not any(isinstance(node, ast.Return) for node in ast.walk(rollback))
+    calls = [node for node in ast.walk(rollback) if isinstance(node, ast.Call)]
+    assert {ast.unparse(node.func) for node in calls} <= allowed_calls
+    checks = [
+        node
+        for node in calls
+        if ast.unparse(node.func) == "self._require_execution_plan"
+    ]
+    assert len(checks) == 1
+    check = checks[0]
+    assert len(check.args) == 1 and ast.literal_eval(check.args[0]) == "rollback"
+    assert len(check.keywords) == 1
+    assert check.keywords[0].arg == "consume"
+    assert isinstance(check.keywords[0].value, ast.Constant)
+    assert check.keywords[0].value.value is False
+    assert isinstance(rollback.body[-2], ast.Expr)
+    assert rollback.body[-2].value is check
+    refusal = rollback.body[-1]
+    assert isinstance(refusal, ast.Raise)
+    assert isinstance(refusal.exc, ast.Call)
+    assert ast.unparse(refusal.exc.func) == "PreconditionFailed"
+    codes = [keyword.value for keyword in refusal.exc.keywords if keyword.arg == "code"]
+    assert len(codes) == 1
+    assert isinstance(codes[0], ast.Constant)
+    assert codes[0].value == "execution_plan.rollback_target_unbound"
+
+    # consume=False must leave the authority helper before its sole committing
+    # owner call. Naming a flag without a live branch would not prove refusal.
+    boundary = methods["_require_execution_plan"].body
+    commits = [
+        (index, node)
+        for index, statement in enumerate(boundary)
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "require_committed_consumption_v3"
+    ]
+    assert len(commits) == 1
+    readonly = [
+        index
+        for index, statement in enumerate(boundary)
+        if isinstance(statement, ast.If)
+        and ast.unparse(statement.test) == "not consume"
+        and not statement.orelse
+        and len(statement.body) == 1
+        and isinstance(statement.body[0], ast.Return)
+        and ast.unparse(statement.body[0].value) == "(digest, '')"
+    ]
+    assert len(readonly) == 1 and readonly[0] < commits[0][0]
+
+
+@pytest.mark.parametrize(
+    "mutant",
+    ["consume", "annotation", "effect", "evidence", "refusal", "readonly_return"],
+)
+def test_historical_rollback_readonly_check_rejects_effect_and_consume_mutants(
+    mutant: str,
+) -> None:
+    tree = ast.parse((SOURCE / "engine" / "run.py").read_text(encoding="utf-8"))
+    executor = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "Executor"
+    )
+    methods = {
+        node.name: node for node in executor.body if isinstance(node, ast.FunctionDef)
+    }
+    # Known-good control uses the identical validator before planting a defect.
+    _assert_historical_rollback_is_readonly(methods)
+    rollback = methods["rollback"]
+    if mutant == "consume":
+        check = rollback.body[-2].value
+        check.keywords[0].value = ast.Constant(value=True)
+    elif mutant == "refusal":
+        rollback.body[-1].exc.keywords[0].value = ast.Constant(value="wrong.refusal")
+    elif mutant == "readonly_return":
+        boundary = methods["_require_execution_plan"]
+        branch = next(
+            node
+            for node in boundary.body
+            if isinstance(node, ast.If) and ast.unparse(node.test) == "not consume"
+        )
+        branch.body = [ast.Pass()]
+    else:
+        planted = {
+            "annotation": "self._annotate('deployment.rollback', plan)",
+            "effect": (
+                "self._effects.switch(timeout_seconds=300, "
+                "image=plan.previous_image)"
+            ),
+            "evidence": "self._persist_evidence(None)",
+        }[mutant]
+        rollback.body.insert(-1, ast.parse(planted).body[0])
+    with pytest.raises(AssertionError):
+        _assert_historical_rollback_is_readonly(methods)

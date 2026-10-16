@@ -218,6 +218,7 @@ def _recording_effects(spec: ProductDeploymentSpec) -> Any:
     )
 
     effects = RecordingEffects(
+        spec=spec,
         labels={"org.opencontainers.image.revision": spec.source_revision},
         evidence=signed_evidence(revision=spec.source_revision),
         manifest=spec.manifest_digest,
@@ -268,12 +269,11 @@ def test_a_missing_recovery_receipt_refuses_before_any_effect(
     offered", and would happily find last quarter's."""
     effects = _recording_effects(external_spec)
     plan, executor = _executor_for(external_spec, effects)
-    outcome = executor.run(plan, lock=held_lock(external_spec.product))
-    assert not outcome.succeeded
-    assert outcome.failed_step is not None
-    assert outcome.failed_step.value == "verify_external_recovery_receipt"
-    assert "no recovery receipt was supplied" in outcome.failure
-    _assert_no_deployment_effect(effects)
+    before = effects.snapshot()
+    with pytest.raises(PreconditionFailed, match="no recovery receipt was supplied"):
+        executor.run(plan, lock=held_lock(external_spec.product))
+    assert not executor._grant.v3_provider.consumed
+    assert effects.snapshot() == before
 
 
 def test_an_accepted_recovery_receipt_lets_the_deploy_proceed(
@@ -308,11 +308,11 @@ def test_an_unsigned_recovery_receipt_refuses_at_the_engine(
         recovery_receipts={dataset.code: _envelope(_document(external_spec, dataset))},
         recovery_verifier=_Rejects(),
     )
-    outcome = executor.run(plan, lock=held_lock(external_spec.product))
-    assert not outcome.succeeded
-    assert outcome.failed_step is not None
-    assert outcome.failed_step.value == "verify_external_recovery_receipt"
-    _assert_no_deployment_effect(effects)
+    before = effects.snapshot()
+    with pytest.raises(PreconditionFailed):
+        executor.run(plan, lock=held_lock(external_spec.product))
+    assert not executor._grant.v3_provider.consumed
+    assert effects.snapshot() == before
 
 
 # ── 1. a typed executor, never a free-text owner ────────────────────────────
