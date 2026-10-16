@@ -162,6 +162,11 @@
       "reason": "INTENDED NATIVE IMPLEMENTATION CANDIDATE. User directed the Rust computation goal on 2026-10-15. Version 0.2.0a1 introduces a platform-specific private extension and cannot replace the earlier immutable pure-Python release. Hosted lock resolution, exact-wheel/source-archive parity and supported-interpreter qualification precede any publication request. No registry receipt, product adoption or writer switch is claimed. Remove this row only after the existing protected release facility publishes, installs, verifies and tags this exact candidate.",
       "state": "declared-unpublished"
     },
+    "dotmac-payments": {
+      "declared": "0.1.0a3",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED SOURCE PREPARATION ONLY. 0.1.0a2 remains published as dotmac-payments-v0.1.0a2 at 4fc0295da94ce62919966baaf1dd909f9af5dcbe with its released migration bytes and verification receipt unchanged. Proposed a3 extracts existing purchase checkout through PURCHASE_FUNDING and additive pm_0004_purchase_funding, freezing the original opaque checkout binding while retaining existing lifecycle and confirmation ownership. Hosted acceptance, independent review, successor allocation and authorized publication remain separate decisions. This row grants no release, artifact adoption, cash qualification, ledger posting or product writer switch. Remove only with the oracle-backed record of an authorized exact a3 publication.",
+      "state": "declared-unpublished"
+    },
     "dotmac-numbering": {
       "declared": "0.1.0a3",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a3 proposes a new modern-provenance candidate over the accepted source, including typed tenant/platform construction and strict idempotency-result validation since the published a2 source; it is not identical to the retained a2 artifact. Public API and Kernel floor >=0.1.0a66 remain unchanged. Hold through the Kernel a105 release and until root review plus Michael's new-source/release authorization; integrate the accepted record on main before any new build/release. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due. The legacy a2 tag/evidence are not rewritten. Remove this row only with the verified a3 publication record.",
