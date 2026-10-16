@@ -14,7 +14,7 @@ from typing import Literal
 from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
-from dotmac_kernel.money import Money
+from dotmac_kernel.money import Currency, Money
 
 from dotmac_billing.errors import BillingRuleViolation
 
@@ -308,6 +308,42 @@ class InvoiceDocumentFactV1:
     source_authority: Literal["internal", "provider_owned", "external_finance"]
     correlation_id: str
     presentation_model_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class GetBillingAccountObservationV1:
+    """Observe current persisted identity, without locking or authorizing a link."""
+
+    scope: Scope
+    account_id: UUID
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or not isinstance(self.account_id, UUID)
+            or (
+                isinstance(self.scope, TenantScope)
+                and not isinstance(self.scope.tenant_id, UUID)
+            )
+        ):
+            raise BillingRuleViolation(
+                "account_observation_request_invalid",
+                "account observation requires an explicit scope and UUID identity",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class BillingAccountObservationV1:
+    """Frozen copy of current account identity, not an immutable historical fact.
+
+    The external reference can change and the account can disappear. Re-observe
+    when needed; this value is neither a balance nor authorization evidence.
+    """
+
+    scope: Scope
+    account_id: UUID
+    external_account_ref: str
+    currency: Currency
 
 
 @dataclass(frozen=True, slots=True)
@@ -1071,6 +1107,8 @@ class AccountingFactV3:
 
 
 __all__ = [
+    "BillingAccountObservationV1",
+    "GetBillingAccountObservationV1",
     "ACCOUNTING_FACT_V3_CONTRACT",
     "RECEIVABLE_POSITION_V2_CONTRACT",
     "NonCashCreditEffectKind",

@@ -26,10 +26,12 @@ from dotmac_billing.contracts import (
     AccountingFactV3,
     AppliedFxSnapshotV1,
     AppliedTaxSnapshotV1,
+    BillingAccountObservationV1,
     DiscountSnapshotV1,
     DueDateBasisStatus,
     DueDateBasisV1,
     FinancialState,
+    GetBillingAccountObservationV1,
     GetInvoiceDocumentFactV1,
     InvoiceDocumentFactV1,
     InvoiceLineFactV1,
@@ -211,6 +213,7 @@ from dotmac_billing.opening_window_queries import (
     get_opening_window_seal,
 )
 from dotmac_billing.queries import (
+    get_billing_account_observation,
     get_invoice_document_fact,
     get_non_cash_credit_effect,
     get_non_cash_credit_grant,
@@ -221,6 +224,9 @@ from dotmac_billing.queries import (
 __version__ = "0.1.0a8"
 
 __all__ = [
+    "BillingAccountObservationV1",
+    "GetBillingAccountObservationV1",
+    "get_billing_account_observation",
     "OpeningWindowAdmissionV1",
     "OpeningWindowProvisionVerificationRequestV1",
     "OpeningWindowProvisionVerificationV1",
