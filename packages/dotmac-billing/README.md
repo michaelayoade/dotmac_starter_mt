@@ -69,10 +69,18 @@ the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
 The historical first release candidate is `0.1.0a1`; the current unreleased
-development successor is `0.1.0a2` and requires
-`dotmac-kernel>=0.1.0a89` plus
+development successor is `0.1.0a8` and requires
+`dotmac-kernel>=0.1.0a105` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.
+
+Opening-window refusal recovery consumes the public
+`dotmac_kernel.transactions.conflict_savepoint_requires_rollback` observer.
+Kernel a98 introduced the module but a98 through a104 export only
+`conflict_savepoint`; the rollback observer requires a105. Billing retains its
+a89 namespace allocation. This dependency declaration is source preparation;
+verified Kernel publication and hosted floor checks remain required before
+Billing publication or adoption.
 
 
 `ApplyAvailableCreditCommand` and `apply_available_credit` draw an explicit

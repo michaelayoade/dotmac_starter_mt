@@ -12,6 +12,14 @@ candidate first adopter on the tenant plane and the Vendor Control Plane is the
 candidate second adopter on the platform plane; no production authority switch
 is part of this package change.
 
+`0.1.0a2` is an unpublished successor proposal, held pending review and
+Michael's source/release authorization after acceptance of the Kernel a105
+publication record. It preserves a1 runtime behavior, public API and migrations,
+with the same Kernel floor (`>=0.1.0a89`), and requires a fresh build and modern
+release provenance under the new version. The legacy a1 release is not reissued
+or relabeled. Do not treat a2 as available for adoption; see the
+[unreleased changelog](CHANGELOG.md).
+
 ## Canonical persistence path
 
 `dotmac_collections.service` provides the only module writers for policy

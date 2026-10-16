@@ -1,5 +1,22 @@
 # Changelog
 
+## UNRELEASED — 0.1.0a2 proposal
+
+Proposed successor for a fresh build through the modern release provenance
+lane, pending review and Michael's source/release authorization after the
+Kernel a105 publication record is accepted. This version has not been built
+or published.
+
+- Runtime behavior, public API and migrations remain unchanged from the
+  published a1 source; the Kernel floor remains `>=0.1.0a89`.
+- Declare a new `0.1.0a2` candidate identity rather than reissue a1 or relabel
+  its legacy tag. The version and release documentation change in this
+  proposal; the a1 tag and historical evidence remain unchanged.
+- A fresh build, publication, install-back verification, canonical tag evidence
+  and accepted release record remain required before a2 can be adopted as a
+  published release. This proposal does not establish a product authority
+  switch.
+
 ## 0.1.0a1 - Unreleased
 
 - Publish the complete typed adopter surface at `dotmac_collections` while

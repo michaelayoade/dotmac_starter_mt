@@ -1,0 +1,15 @@
+[package]
+name = "dotmac-finance-native"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90.0"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "=0.29.0", features = ["extension-module"] }
+dotmac-decimal-core = { path = "decimal-core", version = "=0.1.0" }
+num-bigint = "=0.4.6"

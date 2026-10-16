@@ -467,3 +467,171 @@ def test_every_crash_point_recovers_through_rollback(env: Env, point: str) -> No
     env.controller().expire(lease)
     env.assert_clean(lease)
     assert baseline_ok()
+
+
+@pytest.mark.parametrize(
+    "defect", ["expired", "changed-purpose", "changed-capability", "legacy"]
+)
+def test_new_purpose_approval_refuses_before_lease_effect(env, defect):
+    import datetime
+
+    qualification = env.qualification()
+    if defect == "expired":
+        env.approve(
+            expires_at=(
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1)
+            ).isoformat()
+        )
+    elif defect == "changed-purpose":
+        qualification["authority"]["purpose"] = "admitted_execution"
+    elif defect == "changed-capability":
+        qualification["authority"]["capability_digest"] = "f" * 64
+    else:
+        qualification.pop("authority")
+    with pytest.raises(hc.ControllerRefused):
+        env.controller().prepare(
+            {
+                "protocol": hp.PROTOCOL,
+                "op": "prepare",
+                "bootstrap_manifest": env.bootstrap,
+                "qualification": qualification,
+                "policy_digest": hp.digest(env.policy),
+            }
+        )
+    assert env.journal() is None
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        None,
+        "expired",
+        "removed",
+        "config-digest",
+        "capability-digest",
+        "qualification-digest",
+        "approved-false",
+    ],
+)
+def test_grant_rechecks_exact_protected_approval_after_report(
+    env: Env, monkeypatch, defect
+):
+    import copy
+    import datetime
+
+    lease = env.start()
+    reported = env.wait_state(lease, {"REPORTED"})
+    assert reported["expires_at_monotonic_ns"] > env.host.now_ns()
+    if defect == "expired":
+        env.approve(
+            expires_at=(
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1)
+            ).isoformat()
+        )
+    elif defect == "removed":
+        (env.paths.config_root / "approval.json").unlink()
+    elif defect in {"config-digest", "capability-digest"}:
+        changed = copy.deepcopy(reported["qualification"])
+        changed["authority"][defect.replace("-", "_")] = "f" * 64
+        env.approve(qualification_digest=hp.digest(changed))
+    elif defect == "qualification-digest":
+        env.approve(qualification_digest="f" * 64)
+    elif defect == "approved-false":
+        env.approve(approved=False)
+    applied_before = len(env.host.applied)
+    published = []
+    write = hc.Controller._write_lease_file
+
+    def observe(controller, journal, name, value):
+        if name == hp.GRANT_NAME:
+            published.append(name)
+        return write(controller, journal, name, value)
+
+    monkeypatch.setattr(hc.Controller, "_write_lease_file", observe)
+    if defect is None:
+        assert env.grant(lease)["state"] == "GRANTED"
+        assert published == [hp.GRANT_NAME]
+        env.cleanup(lease)
+    else:
+        with pytest.raises(hc.ControllerRefused, match="approval.missing"):
+            env.grant(lease)
+        assert published == []
+        assert not any(
+            "tcp dport 443" in script for script in env.host.applied[applied_before:]
+        )
+    closed = env.assert_clean(lease)
+    if defect is not None:
+        assert closed["grant"] is None and closed["grant_digest"] is None
+    assert closed["qualification"] == reported["qualification"]
+
+
+@pytest.mark.parametrize("approval", ["expired", "removed"])
+def test_real_legacy_qualification_journal_cleanup_ignores_approval(env: Env, approval):
+    import copy
+    import datetime
+
+    lease = env.start(["sleep", "20"])
+    controller = env.controller()
+    with controller.locked():
+        journal = controller.load()
+        legacy = copy.deepcopy(journal["qualification"])
+        legacy.pop("authority")
+        journal["qualification"] = legacy
+        controller.save(journal)
+    digest = hp.digest(legacy)
+    if approval == "removed":
+        (env.paths.config_root / "approval.json").unlink()
+    else:
+        env.approve(
+            expires_at=(
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1)
+            ).isoformat()
+        )
+    assert (
+        controller.status({"protocol": hp.PROTOCOL, "op": "status", "lease_id": lease})[
+            "lease_id"
+        ]
+        == lease
+    )
+    env.cleanup(lease)
+    closed = env.assert_clean(lease)
+    assert closed["qualification"] == legacy
+    assert hp.digest(closed["qualification"]) == digest
+
+
+@pytest.mark.parametrize("checkpoint", ["grant.validated", "grant.recorded"])
+def test_approval_expiring_during_grant_effects_never_publishes(
+    env: Env, monkeypatch, checkpoint
+):
+    import datetime
+
+    lease = env.start()
+    env.wait_state(lease, {"REPORTED"})
+    applied_before = len(env.host.applied)
+    published = []
+    write = hc.Controller._write_lease_file
+
+    def observe(controller, journal, name, value):
+        if name == hp.GRANT_NAME:
+            published.append(name)
+        return write(controller, journal, name, value)
+
+    def expire():
+        env.approve(
+            expires_at=(
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1)
+            ).isoformat()
+        )
+
+    monkeypatch.setattr(hc.Controller, "_write_lease_file", observe)
+    env.host.on_checkpoint[checkpoint] = expire
+    with pytest.raises(hc.ControllerRefused, match="approval.missing"):
+        env.grant(lease)
+    assert published == []
+    if checkpoint == "grant.validated":
+        assert not any(
+            "tcp dport 443" in script for script in env.host.applied[applied_before:]
+        )
+    closed = env.assert_clean(lease)
+    assert closed["grant"] is None and closed["grant_digest"] is None
+    assert closed["token_request_started"] is False

@@ -61,6 +61,13 @@ def test_protected_configuration_is_one_shot_and_defensively_copied(monkeypatch)
         "runtime_pins": dict.fromkeys(module.RUNTIME_ROLES, "b" * 64),
         "github_run_id": 12,
         "qualification": {
+            "authority": {
+                "schema": "dotmac.lane3.qualification-purpose.v2",
+                "purpose": "qualification",
+                "config_digest": "a" * 64,
+                "capability_digest": "b" * 64,
+                "evidence_digest": None,
+            },
             "repository_id": 1,
             "run_id": 12,
             "run_attempt": 1,
@@ -495,7 +502,9 @@ def test_actual_coordinator_cli_measures_source_before_fixed_prepare_command(
 
     monkeypatch.setattr(module, "measured", measure)
     monkeypatch.setattr(
-        module, "_run_owned", lambda args, deadline: calls.append((args, deadline))
+        module,
+        "_run_owned",
+        lambda args, deadline, **kwargs: calls.append((args, deadline)),
     )
     if drift:
         with pytest.raises(module.CampaignRefused):
@@ -537,7 +546,9 @@ def test_actual_launch_cli_inherits_the_original_parent_deadline(monkeypatch):
     monkeypatch.setattr(module, "measured", lambda *args: b"synthetic")
     monkeypatch.setattr(module, "coordinator_binding", lambda: {})
     monkeypatch.setattr(
-        module, "_run_owned", lambda args, deadline: calls.append((args, deadline))
+        module,
+        "_run_owned",
+        lambda args, deadline, **kwargs: calls.append((args, deadline)),
     )
     module.coordinator_cli("launch", 160.125, 12)
     assert calls[0][0][-4:] == [
@@ -572,6 +583,13 @@ def real_owned_journal(monkeypatch):
             "workflow_sha": "a" * 40,
             "workflow_blob": "b" * 40,
             "starter_commit": "c" * 40,
+            "authority": {
+                "schema": "dotmac.lane3.qualification-purpose.v2",
+                "purpose": "qualification",
+                "config_digest": "a" * 64,
+                "capability_digest": "b" * 64,
+                "evidence_digest": None,
+            },
             "approval_digest": "d" * 64,
             "admission_digest": "e" * 64,
             "supplier_digest": "f" * 64,
@@ -579,6 +597,8 @@ def real_owned_journal(monkeypatch):
         state_path = directory / "state.json"
         config_path = directory / "coordinator.json"
         config = {
+            "schema": "dotmac.lane3.handoff-coordinator.v2",
+            "purpose": "qualification",
             "state_path": str(state_path),
             "runner_org": "synthetic-org",
             "runner_group_id": 4,
@@ -601,6 +621,7 @@ def real_owned_journal(monkeypatch):
             "bootstrap_manifest_sha256": "b" * 64,
             "bootstrap_proposal_sha256": "c" * 64,
         }
+        qualification["authority"]["config_digest"] = protocol.digest(config)
         config_raw = protocol.canonical_json(config)
         config_path.write_bytes(config_raw)
         config_path.chmod(0o600)
@@ -621,7 +642,7 @@ def real_owned_journal(monkeypatch):
         }
         monkeypatch.setattr(module, "deployment_inputs", lambda: binding)
         prepared = {
-            "schema": "dotmac.lane3.handoff-coordinator-state.v1",
+            "schema": "dotmac.lane3.handoff-coordinator-state.v2",
             "lease_id": "d" * 32,
             "qualification": qualification,
             "bootstrap_manifest_digest": "b" * 64,
@@ -693,9 +714,19 @@ def test_closure_routes_must_match_pinned_coordinator_configuration(
         "runner_org": "synthetic-org",
         "runner_group_id": 4,
         "ssh_destination": "synthetic-host",
-        "qualification": {},
+        "qualification": {
+            "authority": {
+                "schema": "dotmac.lane3.qualification-purpose.v2",
+                "purpose": "qualification",
+                "config_digest": "a" * 64,
+                "capability_digest": "b" * 64,
+                "evidence_digest": None,
+            },
+        },
     }
     config = {
+        "schema": "dotmac.lane3.handoff-coordinator.v2",
+        "purpose": "qualification",
         "state_path": str(binding["state_path"]),
         "runner_org": "synthetic-org",
         "runner_group_id": 4,
@@ -706,6 +737,11 @@ def test_closure_routes_must_match_pinned_coordinator_configuration(
             + "/lane3_handoff_install.py",
         },
     }
+    binding["qualification"]["authority"]["config_digest"] = hashlib.sha256(
+        json.dumps(
+            config, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+    ).hexdigest()
     if defect == "foreign-target":
         config["management"]["ssh_alias"] = "unapproved-host"
     elif defect == "foreign-group":
@@ -716,6 +752,11 @@ def test_closure_routes_must_match_pinned_coordinator_configuration(
         config["state_path"] = "/other/state"
     monkeypatch.setattr(module, "deployment_inputs", lambda: binding)
     monkeypatch.setattr(module, "measured", lambda *args: json.dumps(config).encode())
+    monkeypatch.setattr(
+        module,
+        "load_module",
+        lambda role: importlib.import_module("lane3_handoff_protocol"),
+    )
     if defect:
         with pytest.raises(module.CampaignRefused, match="coordinator-binding"):
             module.coordinator_binding()
@@ -810,3 +851,194 @@ def test_b8_prepared_custody_precedes_public_prepare_and_is_consumed_once(
     with pytest.raises(module.CampaignRefused):
         exchange.exchange(process)
     assert events.count("prepare") == 1
+
+
+@pytest.mark.parametrize(
+    "phase", ["retain", "gate_prepare", "prepare", "gate_bootstrap", "launch"]
+)
+def test_failure_phase_is_preserved_and_cleanup_does_not_replace_it(
+    monkeypatch, tmp_path, phase
+):
+    module, management, _, _ = management_fixture(monkeypatch, tmp_path)
+    original_call, original_coordinator = management._call, module.coordinator_cli
+
+    def call(op, age, deadline):
+        if op == phase:
+            raise module.CampaignRefused("management-unproved")
+        return original_call(op, age, deadline)
+
+    def coordinator(op, deadline, run_id=None):
+        if op == phase:
+            raise module.CampaignRefused("code-pin")
+        return original_coordinator(op, deadline, run_id)
+
+    def cleanup():
+        raise RuntimeError("PRIVATE-CANARY")
+
+    monkeypatch.setattr(management, "_call", call)
+    monkeypatch.setattr(module, "coordinator_cli", coordinator)
+    monkeypatch.setattr(management, "failure_finalize", cleanup)
+    with pytest.raises(module.CampaignRefused) as error:
+        management.retained_launch()
+    value = module.failure_diagnostic(error.value)
+    assert value["phase"] == phase
+    assert value["cleanup"] == "unproven"
+    assert value["category"] == (
+        "code-pin" if phase in ("prepare", "launch") else "management-unproved"
+    )
+    assert "PRIVATE" not in repr(error.value) + json.dumps(value)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"status":"REFUSED","category":"binding.mismatch"}',
+        b'{"status":"REFUSED","category":"PRIVATE-CANARY"}',
+        b'{"status":"REFUSED","category":"internal","secret":"PRIVATE-CANARY"}',
+        b'{"status":"REFUSED","category":"internal","category":"binding.mismatch"}',
+        b'{"status":"REFUSED","category":NaN}',
+        b"PRIVATE-CANARY",
+        b'{"status":"REFUSED"',
+    ],
+)
+def test_only_measured_coordinator_child_can_preserve_exact_safe_nonzero_refusal(raw):
+    module = operator()
+    code = "import sys;sys.stdout.buffer.write(" + repr(raw) + ");sys.exit(1)"
+    args = [sys.executable, "-I", "-B", "-c", code]
+    categories = importlib.import_module("lane3_handoff_protocol").CATEGORIES
+    for allow in (None, categories):
+        with pytest.raises(module.CampaignRefused) as error:
+            module._run_owned(args, time.monotonic() + 10, refusal_categories=allow)
+        diagnostic = module.failure_diagnostic(error.value)
+        expected = (
+            "binding.mismatch"
+            if allow is not None
+            and raw == b'{"status":"REFUSED","category":"binding.mismatch"}'
+            else "subprocess-unproved"
+        )
+        assert diagnostic["category"] == expected
+        assert "PRIVATE" not in repr(error.value) + json.dumps(diagnostic)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"category": "PRIVATE-CANARY"},
+        {"phase": "PRIVATE-CANARY"},
+        {"stage": "PRIVATE-CANARY"},
+        {"extra": "PRIVATE-CANARY"},
+        {"cleanup": float("nan")},
+    ],
+)
+def test_bridge_diagnostic_is_exact_bounded_and_never_advances_phase(
+    monkeypatch, change
+):
+    module = operator()
+    management = module.ManagementStdio(None)
+    diagnostic = {
+        "phase": "retain",
+        "stage": "old-stop-readback",
+        "category": "systemd-unproven",
+        "cleanup": "completed",
+    }
+    diagnostic.update(change)
+    management.pipe = SimpleNamespace(
+        send=lambda *args: None,
+        receive=lambda *args: {"status": "REFUSED", "diagnostic": diagnostic},
+    )
+    monkeypatch.setattr(module, "key_age", lambda age: None)
+    with pytest.raises(module.CampaignRefused) as error:
+        management._call("retain", 30, time.monotonic() + 10)
+    assert management.phase == "initial"
+    assert "PRIVATE" not in repr(error.value) + json.dumps(
+        module.failure_diagnostic(error.value)
+    )
+    assert module.failure_diagnostic(error.value)["category"] == "management-unproved"
+
+
+def test_bridge_valid_refusal_survives_without_accepting_a_pass(monkeypatch):
+    module = operator()
+    management = module.ManagementStdio(None)
+    diagnostic = {
+        "phase": "retain",
+        "stage": "old-stop-readback",
+        "category": "systemd-unproven",
+        "cleanup": "completed",
+    }
+    management.pipe = SimpleNamespace(
+        send=lambda *args: None,
+        receive=lambda *args: {"status": "REFUSED", "diagnostic": diagnostic},
+    )
+    monkeypatch.setattr(module, "key_age", lambda age: None)
+    with pytest.raises(module.CampaignRefused) as error:
+        management._call("retain", 30, time.monotonic() + 10)
+    assert module.failure_diagnostic(error.value) == diagnostic
+    assert management.phase == "initial"
+
+
+def test_coordinator_diagnostic_wire_vocabulary_matches_protocol_owner():
+    assert (
+        operator().COORDINATOR_FAILURE_CATEGORIES
+        == importlib.import_module("lane3_handoff_protocol").CATEGORIES
+    )
+
+
+def test_owner_adapter_revalidates_mutated_metadata_and_ignores_duck_types():
+    module = operator()
+    error = module.CampaignRefused("code-pin")
+    error.diagnostic["category"] = "PRIVATE-CANARY"
+    for candidate in (
+        error,
+        SimpleNamespace(diagnostic={"category": "PRIVATE-CANARY"}),
+    ):
+        assert module.failure_diagnostic(candidate)["category"] == "unproven"
+        assert "PRIVATE" not in json.dumps(module.failure_diagnostic(candidate))
+
+
+def test_successful_finalization_cannot_erase_unproven_transition_cleanup(
+    monkeypatch, tmp_path
+):
+    module, management, _, _ = management_fixture(monkeypatch, tmp_path)
+    original = {
+        "phase": "retain",
+        "stage": "arm",
+        "category": "systemd-unproven",
+        "cleanup": "unproven",
+    }
+
+    def refuse(*args):
+        raise module.CampaignRefused("management-unproved", diagnostic=original)
+
+    monkeypatch.setattr(management, "_call", refuse)
+    monkeypatch.setattr(management, "failure_finalize", lambda: None)
+    with pytest.raises(module.CampaignRefused) as error:
+        management.retained_launch()
+    assert module.failure_diagnostic(error.value) == original
+
+
+def test_coordinator_configuration_digest_uses_measured_protocol_owner(
+    real_owned_journal, monkeypatch
+):
+    module, _, _, _, _ = real_owned_journal
+    loader = module.load_module
+    calls = []
+
+    def measured_owner(role):
+        owner = loader(role)
+        digest = owner.digest
+
+        def observed(value):
+            calls.append((role, value))
+            return digest(value)
+
+        owner.digest = observed
+        return owner
+
+    monkeypatch.setattr(module, "load_module", measured_owner)
+    config = module.coordinator_binding()
+    assert calls == [("protocol", config)]
+    binding = module.deployment_inputs()
+    path = binding["runtime"] / "lane3_handoff_protocol.py"
+    path.write_bytes(path.read_bytes() + b"\n# changed reviewed protocol bytes\n")
+    with pytest.raises(module.CampaignRefused, match="code-pin"):
+        module.coordinator_binding()

@@ -20,6 +20,7 @@ import pytest
 from dotmac_deployment_foundation.rehearsal import ExecutionRunBindingV1
 
 from tests.unit.foundation_v3_support import WHEEL
+from tests.unit.lane3_evidence_support import REFERENCE, write_topology
 from tests.unit.test_deployment_foundation_rehearsal_receipt_v2 import (
     REVISION,
     Subject,
@@ -53,7 +54,7 @@ TOPOLOGY: dict[str, Any] = {
     "runner_group": {"name": "lane3-exposure-protected", "id": GROUP_ID},
     "admitted_launcher_revisions": [LAUNCHER],
     "receipt_artifact": "lane3-rehearsal-receipt",
-    "admission_evidence": "docs/LANE3_EXECUTION_TOPOLOGY.md#7 run 1",
+    "admission_evidence": REFERENCE,
 }
 
 RUN: dict[str, Any] = {
@@ -103,8 +104,9 @@ def _network(
 
 
 def _main(tmp_path: pathlib.Path, topology: dict[str, Any] | None) -> int:
-    path = tmp_path / "lane3-execution.json"
-    path.write_text(json.dumps(topology if topology is not None else {}))
+    path = pathlib.Path(
+        write_topology(tmp_path, topology if topology is not None else {})
+    )
     return require_rehearsal.main(
         [
             REVISION,

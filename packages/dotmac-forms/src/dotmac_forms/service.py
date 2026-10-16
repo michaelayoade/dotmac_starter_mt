@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_forms._native import review_answers
 from dotmac_forms.contracts import (
     AnswerInput,
     AnswerValue,
@@ -35,7 +36,6 @@ from dotmac_forms.models import (
 )
 
 CHOICE_TYPES = {FieldType.SINGLE_CHOICE, FieldType.MULTI_CHOICE, FieldType.DROPDOWN}
-FILE_TYPES = {FieldType.FILE, FieldType.IMAGE, FieldType.PDF}
 
 
 class FormError(ValueError):
@@ -327,22 +327,9 @@ def publish_version(
     return version
 
 
-def _blank(value: AnswerValue) -> bool:
-    return value is None or value == "" or value == ()
-
-
-def _review(
-    field: FormField, value: AnswerValue, options: dict[str, str]
-) -> ReviewedAnswer:
+def _parse_answer(field: FormField, value: AnswerValue) -> ReviewedAnswer:
+    """Python owns Decimal, ISO date, URL and email parsing semantics."""
     kind = FieldType(field.field_type)
-    if _blank(value):
-        if field.required:
-            raise FormValidationError(f"{field.key} is required")
-        return ReviewedAnswer(None, None)
-    if kind in {FieldType.TEXT, FieldType.LONG_TEXT, FieldType.PHONE}:
-        if not isinstance(value, str):
-            raise FormValidationError(f"{field.key} must be text")
-        return ReviewedAnswer(value.strip(), value.strip())
     if kind is FieldType.EMAIL:
         if (
             not isinstance(value, str)
@@ -373,33 +360,81 @@ def _review(
         except ValueError as exc:
             raise FormValidationError(f"{field.key} must be an ISO date") from exc
         return ReviewedAnswer(parsed_date.isoformat(), parsed_date.isoformat())
-    if kind in {FieldType.SINGLE_CHOICE, FieldType.DROPDOWN}:
-        if not isinstance(value, str) or value not in options:
-            raise FormValidationError(f"{field.key} must name a declared option")
-        return ReviewedAnswer(value, options[value])
-    if kind is FieldType.MULTI_CHOICE:
-        if (
-            not isinstance(value, tuple)
-            or not value
-            or any(v not in options for v in value)
-        ):
-            raise FormValidationError(f"{field.key} must name declared options")
-        selected = tuple(dict.fromkeys(value))
-        return ReviewedAnswer(list(selected), ", ".join(options[v] for v in selected))
-    if kind in {FieldType.CHECKBOX, FieldType.YES_NO, FieldType.CONSENT}:
-        if not isinstance(value, bool):
-            raise FormValidationError(f"{field.key} must be true or false")
-        return ReviewedAnswer(value, "Yes" if value else "No")
-    if kind is FieldType.RATING:
-        if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 5:
-            raise FormValidationError(f"{field.key} must be a rating from 1 to 5")
-        return ReviewedAnswer(value, str(value))
-    if kind in FILE_TYPES:
-        if not isinstance(value, str) or not value.strip():
-            raise FormValidationError(f"{field.key} must be an opaque file reference")
-        ref = value.strip()
-        return ReviewedAnswer(ref, ref, ref)
-    raise FormValidationError(f"unsupported field type {kind.value}")
+    raise FormValidationError(f"unsupported parser field type {kind.value}")
+
+
+def _value_snapshot(value: AnswerValue) -> tuple[str, bytes, list[bytes]]:
+    if value is None:
+        return "none", b"", []
+    if isinstance(value, str):
+        return "text", value.encode("utf-8", "surrogatepass"), []
+    if isinstance(value, tuple):
+        if not all(isinstance(item, str) for item in value):
+            return "other", b"", []
+        return "tuple", b"", [item.encode("utf-8", "surrogatepass") for item in value]
+    if isinstance(value, bool):
+        return "bool", b"true" if value else b"false", []
+    if isinstance(value, int):
+        # Only ratings consume this representation; parser values stay Python-owned.
+        return "int", str(value).encode("ascii") if 1 <= value <= 5 else b"invalid", []
+    return "other", b"", []
+
+
+def _review_answers(
+    fields: list[FormField],
+    values: list[AnswerValue],
+    options: dict[UUID, dict[str, str]],
+) -> list[ReviewedAnswer]:
+    snapshots = []
+    for field, value in zip(fields, values, strict=True):
+        tag, text, items = _value_snapshot(value)
+        snapshots.append(
+            (
+                field.key,
+                field.field_type,
+                field.required,
+                tag,
+                text,
+                items,
+                [
+                    (
+                        option.encode("utf-8", "surrogatepass"),
+                        label.encode("utf-8", "surrogatepass"),
+                    )
+                    for option, label in options.get(field.id, {}).items()
+                ],
+            )
+        )
+    results = review_answers(snapshots)
+    reviewed = []
+    for field, value, (tag, text, items, display, file_ref) in zip(
+        fields, values, results, strict=True
+    ):
+        decoded = text.decode("utf-8", "surrogatepass")
+        decoded_display = (
+            display.decode("utf-8", "surrogatepass") if display is not None else None
+        )
+        decoded_file = (
+            file_ref.decode("utf-8", "surrogatepass") if file_ref is not None else None
+        )
+        if tag == "error":
+            raise FormValidationError(decoded)
+        if tag == "parser":
+            reviewed.append(_parse_answer(field, value))
+        else:
+            normalized: object | None
+            if tag == "blank":
+                normalized = None
+            elif tag == "multi":
+                normalized = [item.decode("utf-8", "surrogatepass") for item in items]
+            elif tag == "bool":
+                normalized = decoded == "true"
+            elif tag == "rating":
+                normalized = int(decoded)
+            else:
+                normalized = decoded
+            reviewed.append(ReviewedAnswer(normalized, decoded_display, decoded_file))
+    return reviewed
 
 
 def submit_form(
@@ -437,12 +472,13 @@ def submit_form(
     options: dict[UUID, dict[str, str]] = {}
     for option_row in option_rows:
         options.setdefault(option_row.field_id, {})[option_row.value] = option_row.label
-    reviewed: list[tuple[FormField, ReviewedAnswer]] = []
-    for field in fields:
-        answer = supplied.get(field.key, AnswerInput(field.key, None))
-        reviewed.append(
-            (field, _review(field, answer.value, options.get(field.id, {})))
-        )
+    field_list = list(fields)
+    values = [
+        supplied.get(field.key, AnswerInput(field.key, None)).value for field in fields
+    ]
+    reviewed = list(
+        zip(field_list, _review_answers(field_list, values, options), strict=True)
+    )
     request_fingerprint = fingerprint(
         {
             "form_version_id": str(version.id),

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 # SQL identifiers are fixed Billing plane/model table names; values are bound.
 # ruff: noqa: S608
+from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal, Inexact, Rounded, localcontext
@@ -53,10 +54,13 @@ from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.idempotency import IdempotencyConflict
 from dotmac_kernel.planes import ModulePlane
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, event, func, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
 
 from alembic import command as alembic_command
+from tests import billing_opening_window_fixtures as window_fixture
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as runtime
 from tests import test_billing_withholding_persistence as predecessor
@@ -65,10 +69,127 @@ from tests.unit import test_billing_opening_manifest as preflight
 REVISION = "bi_0007_opening_cash"
 
 
-@pytest.fixture(scope="module")
+class _OpeningScratch(tuple):
+    """Per-test migrated database and its explicit ephemeral role custody."""
+
+    def __new__(cls, urls):
+        instance = super().__new__(cls, urls)
+        instance.principals = {}
+        instance.windows = {}
+        return instance
+
+
+@contextmanager
+def _opening_scratch(urls, planes=("tenant", "platform")):
+    scratch = _OpeningScratch(urls)
+    with ExitStack() as stack:
+        for plane in planes:
+            scratch.principals[plane] = stack.enter_context(
+                window_fixture._principal(scratch, plane)
+            )
+        yield scratch
+
+
+@pytest.fixture
 def scratch():
     with b._scratch_database((ModulePlane.TENANT, ModulePlane.PLATFORM)) as urls:
-        yield urls
+        with _opening_scratch(urls) as scoped:
+            yield scoped
+
+
+@contextmanager
+def _session(scratch, url, scope):
+    """Privileged fixture transport; actual ordinary role owns caller work.
+
+    The ordinary LOGIN has no membership in the opening principal. Only this
+    test harness can select the restricted role, without a second transaction.
+    Role-boundary attacks deliberately use b._session and the real LOGIN.
+    """
+    plane = "tenant" if isinstance(scope, TenantScope) else "platform"
+    ordinary = make_url(url).username
+    database = make_url(url).database
+    engine = create_engine(b._url_for(b._superuser_url(), database))
+    with Session(engine) as session:
+
+        @event.listens_for(session, "after_begin")
+        def ordinary_role(_session, _transaction, connection):
+            if _transaction.nested:
+                return
+            connection.execute(text(f'SET LOCAL ROLE "{ordinary}"'))
+            if isinstance(scope, TenantScope):
+                connection.execute(
+                    text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                    {"tenant": str(scope.tenant_id)},
+                )
+
+        session.info["opening_scratch"] = scratch
+        session.info["opening_principal"] = scratch.principals[plane]
+        session.info["opening_ordinary_role"] = ordinary
+        assert session.scalar(text("SELECT current_user")) == ordinary
+        try:
+            yield session
+        finally:
+            session.close()
+            engine.dispose()
+
+
+@contextmanager
+def _as_opening_principal(session):
+    """Select actual restricted current_user inside the unchanged caller root."""
+    ordinary = session.info["opening_ordinary_role"]
+    principal = session.info["opening_principal"][0]
+    assert session.scalar(text("SELECT current_user")) == ordinary
+    root = session.get_transaction()
+    connection = session.connection().connection.driver_connection
+    session.execute(text(f'SET LOCAL ROLE "{principal}"'))
+    assert session.scalar(text("SELECT current_user")) == principal
+    try:
+        yield
+    except BaseException as original:
+        # A PostgreSQL-aborted root cannot execute cleanup SQL. Preserve its
+        # original error; caller rollback resets LOCAL and after_begin restores
+        # the ordinary role. Never finish the caller transaction here.
+        try:
+            if session.is_active and connection.info.transaction_status != 3:
+                session.execute(text(f'SET LOCAL ROLE "{ordinary}"'))
+        except BaseException as cleanup:
+            raise original from cleanup
+        raise
+    else:
+        assert session.get_transaction() is root
+        session.execute(text(f'SET LOCAL ROLE "{ordinary}"'))
+        assert session.scalar(text("SELECT current_user")) == ordinary
+
+
+def _prepare_window(session, scope, command):
+    """Explicitly freeze the entire scenario manifest before admission."""
+    scratch = session.info["opening_scratch"]
+    if scope not in scratch.windows:
+        scratch.windows[scope] = window_fixture._provision(
+            scratch, scope, session.info["opening_principal"], command
+        )
+    return scratch.windows[scope]
+
+
+def _import_command(session, *, scope, command, verifier=None, version=1):
+    """Actual restricted current_user, with the original caller transaction."""
+    with _as_opening_principal(session):
+        operation = (
+            s.import_opening_account if version == 1 else s.import_opening_account_v2
+        )
+        return operation(session, scope=scope, command=command, verifier=verifier)
+
+
+def _seal_window(session, scope):
+    """Close complete opening custody before ordinary lifecycle operations."""
+    window = session.info["opening_scratch"].windows[scope]
+    with _as_opening_principal(session):
+        return s.seal_opening_window(
+            session,
+            scope=scope,
+            command=window_fixture._seal_command(session, scope, window),
+            verifier=window_fixture.TrustedWindowVerifier(),
+        )
 
 
 class TrustedVerifier:
@@ -252,7 +373,8 @@ def _command(
 
 def _import(session, scope, account_id, **kwargs):
     cmd = _command(session, scope, account_id, **kwargs)
-    receipt = s.import_opening_account(
+    _prepare_window(session, scope, cmd)
+    receipt = _import_command(
         session, scope=scope, command=cmd, verifier=TrustedVerifier()
     )
     return cmd, receipt
@@ -315,7 +437,7 @@ def test_pristine_import_admits_only_verified_residual_with_distinct_accounting(
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         cmd, receipt = _import(session, scope, account_id)
         assert receipt.total_residual == b._money("60.00")
@@ -360,7 +482,7 @@ def test_pristine_import_admits_only_verified_residual_with_distinct_accounting(
         ) == ((1, None, fact.opening_cash_effects[0].effect_id),)
         assert fact.opening_cash_effects[0].effect_kind == "recognition"
         session.commit()
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         assert (
             q.get_opening_import_receipt(
                 session, scope=scope, receipt_id=receipt.receipt_id
@@ -378,8 +500,9 @@ def test_pristine_import_admits_only_verified_residual_with_distinct_accounting(
         assert q.get_opening_cash_lot_position(
             session, scope=scope, lot_id=lot.lot_id
         ).remaining == b._money("60.00")
+        _prepare_window(session, scope, cmd)
         assert (
-            s.import_opening_account(
+            _import_command(
                 session, scope=scope, command=cmd, verifier=TrustedVerifier()
             )
             == receipt
@@ -416,7 +539,7 @@ def _retry_count(session, plane, operation, key):
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_preview_and_matching_caller_digests_never_authorize_import(scratch, plane):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         cmd = _command(session, scope, account_id)
         preview_request = OpeningPreviewRequestV1(
@@ -434,9 +557,8 @@ def test_preview_and_matching_caller_digests_never_authorize_import(scratch, pla
 
         for verifier in (None, PreviewOnly()):
             with pytest.raises(BillingRuleViolation):
-                s.import_opening_account(
-                    session, scope=scope, command=cmd, verifier=verifier
-                )
+                _prepare_window(session, scope, cmd)
+                _import_command(session, scope=scope, command=cmd, verifier=verifier)
             assert _counts(session, plane, account_id) == before
 
 
@@ -458,7 +580,7 @@ def test_import_verifier_is_bound_to_full_exact_command_before_replay(
     scratch, plane, field
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         cmd, receipt = _import(session, scope, account_id)
         session.commit()
@@ -478,7 +600,8 @@ def test_import_verifier_is_bound_to_full_exact_command_before_replay(
 
         before = _counts(session, plane, account_id)
         with pytest.raises(BillingRuleViolation):
-            s.import_opening_account(
+            _prepare_window(session, scope, cmd)
+            _import_command(
                 session, scope=scope, command=cmd, verifier=TrustedVerifier(wrong)
             )
         assert _counts(session, plane, account_id) == before
@@ -495,7 +618,7 @@ def test_import_rejects_stale_target_and_changed_content_without_partial_artifac
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         cmd = _command(session, scope, account_id)
         for target in (
@@ -504,19 +627,24 @@ def test_import_rejects_stale_target_and_changed_content_without_partial_artifac
         ):
             before = _counts(session, plane, account_id)
             with pytest.raises((BillingRuleViolation, BillingConflict)):
-                s.import_opening_account(
+                _prepare_window(session, scope, replace(cmd, target=target))
+                _import_command(
                     session,
                     scope=scope,
                     command=replace(cmd, target=target),
                     verifier=TrustedVerifier(),
                 )
             assert _counts(session, plane, account_id) == before
-        receipt = s.import_opening_account(
+        _prepare_window(session, scope, cmd)
+        receipt = _import_command(
             session, scope=scope, command=cmd, verifier=TrustedVerifier()
         )
         session.commit()
         with pytest.raises((IdempotencyConflict, BillingConflict)):
-            s.import_opening_account(
+            _prepare_window(
+                session, scope, replace(cmd, occurred_at=b.NOW + b.timedelta(seconds=1))
+            )
+            _import_command(
                 session,
                 scope=scope,
                 command=replace(cmd, occurred_at=b.NOW + b.timedelta(seconds=1)),
@@ -534,7 +662,7 @@ def test_import_rejects_stale_target_and_changed_content_without_partial_artifac
 def test_live_callback_and_import_share_one_permanent_source_claim(scratch, plane):
     scope, url = runtime._scope_url(scratch, plane)
     key = str(uuid4())
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id, source_key=key)
         session.commit()
@@ -566,9 +694,10 @@ def test_live_callback_and_import_share_one_permanent_source_claim(scratch, plan
 def test_import_and_live_callback_race_cannot_double_recognize_cash(scratch, plane):
     scope, url = runtime._scope_url(scratch, plane)
     key = str(uuid4())
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         cmd = _command(session, scope, account_id, source_key=key)
+        _prepare_window(session, scope, cmd)
         session.commit()
     offered = replace(
         b._settlement_command(account_id, scope=scope, source_key=key, amount="100.00"),
@@ -578,10 +707,11 @@ def test_import_and_live_callback_race_cannot_double_recognize_cash(scratch, pla
 
     def run(kind):
         try:
-            with b._session(url, scope) as session:
+            with _session(scratch, url, scope) as session:
                 barrier.wait(timeout=20)
                 if kind == "opening":
-                    s.import_opening_account(
+                    _prepare_window(session, scope, cmd)
+                    _import_command(
                         session, scope=scope, command=cmd, verifier=TrustedVerifier()
                     )
                 else:
@@ -606,7 +736,7 @@ def test_import_and_live_callback_race_cannot_double_recognize_cash(scratch, pla
     assert isinstance(
         errors[0], BillingConflict | BillingRuleViolation | IdempotencyConflict
     )
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         tables = _models(plane)
         claims = session.scalars(
             select(tables["CashSourceClaim"]).where(
@@ -627,7 +757,7 @@ def test_caller_rollback_removes_receipts_claims_lots_effects_and_outbox(
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         before = _counts(session, plane, account_id)
         cmd, receipt = _import(session, scope, account_id)
@@ -658,9 +788,10 @@ def test_mixed_cash_draw_and_partial_full_inverse_keep_both_real_source_lineages
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
+        _seal_window(session, scope)
         ordinary = s.accept_settlement(
             session,
             scope=scope,
@@ -760,7 +891,7 @@ def test_legacy_reversal_deallocation_and_reallocation_cannot_split_mixed_cash_d
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _import(session, scope, account_id)
         ordinary = s.accept_settlement(
@@ -829,9 +960,10 @@ def test_legacy_reversal_deallocation_and_reallocation_cannot_split_mixed_cash_d
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_unused_refund_requires_evidence_and_full_qualified_correction(scratch, plane):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
+        _seal_window(session, scope)
         offered = _refund(scope, receipt.lot_ids[0], "20.00")
         with pytest.raises(BillingRuleViolation):
             s.record_opening_cash_refund(session, scope=scope, command=offered)
@@ -907,9 +1039,10 @@ def test_import_unwind_requires_zero_net_uses_fresh_authority_and_never_frees_so
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         cmd, receipt = _import(session, scope, account_id)
+        _seal_window(session, scope)
         refund = s.record_opening_cash_refund(
             session,
             scope=scope,
@@ -959,8 +1092,9 @@ def test_import_unwind_requires_zero_net_uses_fresh_authority_and_never_frees_so
         assert q.get_opening_cash_lot_position(
             session, scope=scope, lot_id=receipt.lot_ids[0]
         ).unwound
+        _prepare_window(session, scope, cmd)
         assert (
-            s.import_opening_account(
+            _import_command(
                 session, scope=scope, command=cmd, verifier=TrustedVerifier()
             )
             == receipt
@@ -984,7 +1118,8 @@ def test_import_unwind_requires_zero_net_uses_fresh_authority_and_never_frees_so
                 accepted_confirmation_evidence=frozenset({"provider_settled"}),
             )
         with pytest.raises((BillingRuleViolation, BillingConflict)):
-            s.import_opening_account(
+            _prepare_window(session, scope, replace(cmd, idempotency_key=str(uuid4())))
+            _import_command(
                 session,
                 scope=scope,
                 command=replace(cmd, idempotency_key=str(uuid4())),
@@ -1013,7 +1148,7 @@ def test_failure_after_opening_artifacts_and_real_outbox_rolls_back_only_operati
     scratch, plane, monkeypatch
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         pending = s.create_billing_account(
             session,
@@ -1058,7 +1193,8 @@ def test_failure_after_opening_artifacts_and_real_outbox_rolls_back_only_operati
         with pytest.raises(
             RuntimeError, match="fault after opening artifacts and outbox"
         ):
-            s.import_opening_account(
+            _prepare_window(session, scope, cmd)
+            _import_command(
                 session, scope=scope, command=cmd, verifier=TrustedVerifier()
             )
         assert observed
@@ -1072,7 +1208,8 @@ def test_failure_after_opening_artifacts_and_real_outbox_rolls_back_only_operati
         assert session.scalar(select(func.count()).select_from(outbox)) == before_events
         assert session.get(_models(plane)["BillingAccount"], pending_id) is not None
         monkeypatch.setattr(s, "_emit", real_emit)
-        assert s.import_opening_account(
+        _prepare_window(session, scope, cmd)
+        assert _import_command(
             session, scope=scope, command=cmd, verifier=TrustedVerifier()
         ).total_residual == b._money("60")
         session.rollback()
@@ -1083,7 +1220,7 @@ def test_opening_queries_read_persisted_immutable_evidence_without_autoflush(
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
         session.commit()
@@ -1106,7 +1243,7 @@ def test_opening_queries_read_persisted_immutable_evidence_without_autoflush(
 
 def test_tenant_opening_evidence_isolated_and_both_role_boundaries_enforced(scratch):
     scope, url = runtime._scope_url(scratch, "tenant")
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
         session.commit()
@@ -1144,7 +1281,7 @@ def test_tenant_opening_evidence_isolated_and_both_role_boundaries_enforced(scra
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_owner_and_online_role_cannot_amend_or_delete_opening_history(scratch, plane):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
         session.commit()
@@ -1182,7 +1319,7 @@ def test_owner_and_online_role_cannot_amend_or_delete_opening_history(scratch, p
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_claim_xor_and_account_affinity_cannot_be_forged_by_direct_sql(scratch, plane):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         other_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
@@ -1256,7 +1393,7 @@ def test_numeric20_6_import_is_exact_under_full_hostile_decimal_context(scratch,
     from dotmac_kernel.money import Currency, Money
 
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope, precision=6)
         cmd = _command(session, scope, account_id, amounts=(123456789,), precision=6)
         expected_digest = opening_cash_command_digest(cmd)
@@ -1274,7 +1411,8 @@ def test_numeric20_6_import_is_exact_under_full_hostile_decimal_context(scratch,
                 dict(ambient.flags),
                 dict(ambient.traps),
             )
-            receipt = s.import_opening_account(
+            _prepare_window(session, scope, cmd)
+            receipt = _import_command(
                 session, scope=scope, command=cmd, verifier=TrustedVerifier()
             )
             lot = q.get_opening_cash_lot_position(
@@ -1514,9 +1652,12 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
         # Preserve the exact bi6-to-bi7 assertions above; current runtime then
         # executes only after its additional immutable AR lineage is installed.
         alembic_command.upgrade(
-            predecessor._config((selection,)), "bi_0008_opening_receivables"
+            predecessor._config((selection,)), "bi_0009_opening_window"
         )
-        with b._session(url, scope) as session:
+        with (
+            _opening_scratch(urls, (plane,)) as scratch,
+            _session(scratch, url, scope) as session,
+        ):
             assert (
                 s.accept_settlement(
                     session,
@@ -1538,7 +1679,7 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_draw_and_refund_race_share_one_unused_opening_room(scratch, plane):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
         invoice = _invoice(session, scope, account_id)
@@ -1552,7 +1693,7 @@ def test_draw_and_refund_race_share_one_unused_opening_room(scratch, plane):
 
     def run(kind):
         try:
-            with b._session(url, scope) as session:
+            with _session(scratch, url, scope) as session:
                 barrier.wait(timeout=20)
                 if kind == "draw":
                     s.apply_available_credit(session, scope=scope, command=draw)
@@ -1573,7 +1714,7 @@ def test_draw_and_refund_race_share_one_unused_opening_room(scratch, plane):
         assert not thread.is_alive()
     assert len(successes) == len(errors) == 1
     assert isinstance(errors[0], BillingRuleViolation | BillingConflict)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         position = q.get_opening_cash_lot_position(
             session, scope=scope, lot_id=receipt.lot_ids[0]
         )
@@ -1589,7 +1730,7 @@ def test_fault_after_both_mixed_inverse_halves_keeps_original_draw_and_cash_room
     scratch, plane, monkeypatch
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
         s.accept_settlement(
@@ -1680,7 +1821,7 @@ def test_deferred_completeness_requires_accounting_and_both_position_versions(
     scope, url = runtime._scope_url(scratch, plane)
     prefix = "" if plane == "tenant" else "Platform"
     omitted_model = getattr(models, prefix + missing)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         before = _counts(session, plane, account_id)
         real_add = session.add
@@ -1722,7 +1863,7 @@ def test_refund_qualification_is_bound_to_exact_cash_source_and_command(
     scratch, plane, field
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
         session.commit()
@@ -1762,7 +1903,7 @@ def test_refund_authority_cannot_be_reused_as_correction_or_migration_unwind_aut
         def verify_import_reversal(self, request):
             return True
 
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id)
         refund = s.record_opening_cash_refund(
@@ -1809,7 +1950,7 @@ def test_expired_import_retry_record_never_releases_permanent_cash_identity(
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         cmd, receipt = _import(session, scope, account_id)
         session.commit()
@@ -1823,10 +1964,11 @@ def test_expired_import_retry_record_never_releases_permanent_cash_identity(
             )
         )
     engine.dispose()
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         before = _counts(session, plane, account_id)
         with pytest.raises((BillingRuleViolation, BillingConflict)):
-            s.import_opening_account(
+            _prepare_window(session, scope, cmd)
+            _import_command(
                 session, scope=scope, command=cmd, verifier=TrustedVerifier()
             )
         assert _counts(session, plane, account_id) == before
@@ -1847,7 +1989,7 @@ def test_direct_sql_room_guards_distinguish_lot_room_from_original_inverse_room(
     scratch, plane, attack
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _import(
             session,
@@ -1947,7 +2089,7 @@ def test_unused_cash_cannot_mask_reversal_of_settlement_beneath_active_mixed_dra
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id, amounts=(10000,))
         s.accept_settlement(
@@ -2018,7 +2160,7 @@ def test_zero_residual_receipt_identity_survives_complete_opening_unwind(
     scratch, plane
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         offered, receipt = _import(session, scope, account_id, amounts=(0, 6000))
         assert len(receipt.lot_ids) == 2
@@ -2086,7 +2228,7 @@ def test_zero_residual_receipt_identity_survives_complete_opening_unwind(
 def _semantic_query_history(scratch, plane):
     """Committed valid sources for recomputed-hash query counterexamples."""
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _, receipt = _import(session, scope, account_id, amounts=(10000,))
         s.accept_settlement(
@@ -2210,7 +2352,7 @@ def test_opening_queries_refuse_semantic_tampering_even_with_recomputed_kernel_h
     # Owner-only fixture corruption. Disable only the actual UPDATE/DELETE
     # append trigger, never INSERT admission, FK/RLS or completeness guards.
     # No corrupted history is committed or repaired: rollback restores it.
-    with b._session(scratch[0], scope) as owner:
+    with _session(scratch, scratch[0], scope) as owner:
         untouched = read(owner)
         row = owner.execute(select(table).where(predicate)).mappings().one()
         payload = deepcopy(row[payload_column])
@@ -2308,7 +2450,7 @@ def test_two_pending_opening_draws_commit_with_distinct_historical_exposure(
         if plane == "tenant"
         else models.PlatformReceivableExposureFact
     )
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _import(session, scope, account_id, amounts=(10000,))
         invoice = _invoice(session, scope, account_id)
@@ -2365,7 +2507,7 @@ def test_exposure_cutoff_handles_wht_noncash_credit_and_credit_void_between_draw
         if plane == "tenant"
         else models.PlatformReceivableExposureFact
     )
-    with b._session(url, scope) as session:
+    with _session(scratch, url, scope) as session:
         account_id = _new_account(session, scope)
         _import(session, scope, account_id, amounts=(10000,))
         invoice = _invoice(session, scope, account_id)
@@ -2570,9 +2712,10 @@ def test_unposted_native_write_after_acquired_snapshot_cannot_hide_from_import(
     scratch, plane, kind, native_commits, isolation
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with _session(scratch, url, scope) as db:
         account_id = _new_account(db, scope)
         command = _command(db, scope, account_id)
+        _prepare_window(db, scope, command)
         write, native_model = _native_target_write(db, scope, account_id, kind)
         db.commit()
     acquired, completed = Barrier(2), Barrier(2)
@@ -2580,14 +2723,15 @@ def test_unposted_native_write_after_acquired_snapshot_cannot_hide_from_import(
 
     def importer():
         try:
-            with b._session(url, scope) as db:
+            with _session(scratch, url, scope) as db:
                 _assert_target_isolation(db, isolation)
                 assert _native_target_count(db, native_model, account_id) == 0
                 assert _counts(db, plane, account_id)["PostingGroup"] == 0
                 snapshots.append(db.scalar(text("SELECT pg_current_snapshot()::text")))
                 acquired.wait(timeout=30)
                 completed.wait(timeout=30)
-                receipt = s.import_opening_account(
+                _prepare_window(db, scope, command)
+                receipt = _import_command(
                     db, scope=scope, command=command, verifier=TrustedVerifier()
                 )
                 db.commit()
@@ -2597,7 +2741,7 @@ def test_unposted_native_write_after_acquired_snapshot_cannot_hide_from_import(
 
     def native_writer():
         try:
-            with b._session(url, scope) as db:
+            with _session(scratch, url, scope) as db:
                 acquired.wait(timeout=30)
                 native_ids.append(write(db))
                 if native_commits:
@@ -2618,7 +2762,7 @@ def test_unposted_native_write_after_acquired_snapshot_cannot_hide_from_import(
         assert not thread.is_alive()
     assert snapshots and snapshots[0]
     assert len(native_ids) == 1 and writer_errors == []
-    with b._session(url, scope) as db:
+    with _session(scratch, url, scope) as db:
         assert _native_target_count(db, native_model, account_id) == int(native_commits)
         if native_commits:
             assert receipts == [] and len(refusals) == 1
@@ -2634,15 +2778,17 @@ def test_unposted_native_write_after_acquired_snapshot_cannot_hide_from_import(
             # A serialization refusal needs a new transaction. The new snapshot
             # now sees the unposted native evidence and truthfully refuses it.
             with pytest.raises(BillingRuleViolation) as fresh:
-                s.import_opening_account(
+                _prepare_window(db, scope, command)
+                _import_command(
                     db, scope=scope, command=command, verifier=TrustedVerifier()
                 )
             assert fresh.value.code == "billing.opening_target_not_pristine"
         else:
             assert refusals == [] and len(receipts) == 1
             assert _position(db, scope, account_id).available_credit == Decimal("60")
+            _prepare_window(db, scope, command)
             assert (
-                s.import_opening_account(
+                _import_command(
                     db, scope=scope, command=command, verifier=TrustedVerifier()
                 )
                 == receipts[0]
@@ -2657,13 +2803,14 @@ def test_same_outer_transaction_import_and_native_write_have_explicit_order(
     scratch, plane, kind, import_first
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with _session(scratch, url, scope) as db:
         account_id = _new_account(db, scope)
         command = _command(db, scope, account_id)
         write, native_model = _native_target_write(db, scope, account_id, kind)
         db.commit()
         if import_first:
-            receipt = s.import_opening_account(
+            _prepare_window(db, scope, command)
+            receipt = _import_command(
                 db, scope=scope, command=command, verifier=TrustedVerifier()
             )
             write(db)
@@ -2679,7 +2826,8 @@ def test_same_outer_transaction_import_and_native_write_have_explicit_order(
         else:
             write(db)
             with pytest.raises(BillingRuleViolation) as refusal:
-                s.import_opening_account(
+                _prepare_window(db, scope, command)
+                _import_command(
                     db, scope=scope, command=command, verifier=TrustedVerifier()
                 )
             assert refusal.value.code == "billing.opening_target_not_pristine"
@@ -2695,7 +2843,7 @@ def test_read_committed_prior_native_state_is_refused_by_service_and_sql_admissi
     scratch, plane, kind, monkeypatch
 ):
     scope, url = runtime._scope_url(scratch, plane)
-    with b._session(url, scope) as db:
+    with _session(scratch, url, scope) as db:
         account_id = _new_account(db, scope)
         command = _command(db, scope, account_id)
         write, native_model = _native_target_write(db, scope, account_id, kind)
@@ -2705,7 +2853,8 @@ def test_read_committed_prior_native_state_is_refused_by_service_and_sql_admissi
         assert _native_target_count(db, native_model, account_id) == 1
         before = _counts(db, plane, account_id)
         with pytest.raises(BillingRuleViolation) as refusal:
-            s.import_opening_account(
+            _prepare_window(db, scope, command)
+            _import_command(
                 db, scope=scope, command=command, verifier=TrustedVerifier()
             )
         assert refusal.value.code == "billing.opening_target_not_pristine"
@@ -2718,7 +2867,8 @@ def test_read_committed_prior_native_state_is_refused_by_service_and_sql_admissi
                 s, "_require_pristine_opening_target", lambda *args, **kwargs: None
             )
             with pytest.raises(DBAPIError) as error:
-                s.import_opening_account(
+                _prepare_window(db, scope, command)
+                _import_command(
                     db, scope=scope, command=command, verifier=TrustedVerifier()
                 )
         assert error.value.orig.sqlstate == "23514"

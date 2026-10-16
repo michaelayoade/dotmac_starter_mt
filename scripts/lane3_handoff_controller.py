@@ -1199,6 +1199,7 @@ def validate_mgmt(value: Any) -> dict[str, Any]:
 
 
 QUALIFICATION_KEYS: Final = {
+    "authority",
     "repository_id",
     "run_id",
     "run_attempt",
@@ -1220,6 +1221,7 @@ def validate_qualification(value: Any) -> dict[str, Any]:
     if value["run_attempt"] != 1:
         raise refused("approval.missing")
     try:
+        hp.validate_authority(value["authority"])
         for key in ("workflow_sha", "workflow_blob", "starter_commit"):
             hp.hex40(value[key])
         for key in ("approval_digest", "admission_digest", "supplier_digest"):
@@ -1397,7 +1399,10 @@ class Controller:
         cdigest: str,
         qualification: Mapping[str, Any],
     ) -> None:
-        doc = strict_json(read_protected(self.paths.config_root / "approval.json"))
+        try:
+            doc = strict_json(read_protected(self.paths.config_root / "approval.json"))
+        except ControllerRefused:
+            raise refused("approval.missing") from None
         doc = _exact(
             doc,
             {
@@ -2135,6 +2140,16 @@ class Controller:
                 "controller_digest": j["controller_digest"],
             }
         )
+
+        def require_current_approval() -> None:
+            self._approval(
+                j["bootstrap_manifest_digest"],
+                j["policy_digest"],
+                j["controller_digest"],
+                j["qualification"],
+            )
+
+        require_current_approval()
         # A broker address already opened for bootstrap needs no second rule.
         # Overlap is allowed by the design and never proves token contact was
         # impossible; the no-token-before-grant rule is the workflow's.
@@ -2159,6 +2174,7 @@ class Controller:
         _history(j, "VALIDATED", now)
         self.save(j)  # PREPARED transaction: rollback knows the planned rules
         self._checkpoint("grant.validated")
+        require_current_approval()
         fw = Firewall(**j["firewall"])
         self._install(j, fw, new)
         j["rules"], j["planned"] = [*j["rules"], *new], []
@@ -2167,6 +2183,9 @@ class Controller:
         after = self.host.now_ns()
         if deadline - after < hp.GRANT_MIN_REMAINING_NS or j["state"] != "VALIDATED":
             raise refused("deadline.insufficient")
+        # Effect/readback time cannot borrow an approval that has expired or
+        # been removed/substituted since validation. Cleanup ignores approval.
+        require_current_approval()
         # Publish only after exact readback and another expiry check.
         self._write_lease_file(j, hp.GRANT_NAME, grant)
         self._checkpoint("grant.published")

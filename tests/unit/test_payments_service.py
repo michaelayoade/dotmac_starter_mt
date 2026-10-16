@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -104,6 +104,135 @@ def test_opening_is_idempotent_on_the_reference(db: Session) -> None:
                 channel="web",
             ),
         )
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        "payer",
+        "target",
+        "no_target",
+        "purpose",
+        "provider",
+        "channel",
+        "amount",
+        "currency",
+        "scale",
+        "opening",
+        "expiry",
+        "no_expiry",
+    ],
+)
+def test_intent_replay_rejects_each_changed_request_binding(db, changed):
+    from dotmac_kernel.money import Currency
+
+    scope = TenantScope(TENANT_A)
+    command = OpenPaymentIntent(
+        payer_reference="customer:1",
+        target_reference="invoice:1",
+        purpose=PaymentPurpose.INVOICE_SETTLEMENT,
+        requested=Money.of("15000", NGN),
+        reference="bound-request",
+        provider_type="paystack",
+        channel="web",
+        opened_at=NOW,
+        expires_at=NOW + timedelta(hours=1),
+    )
+    first = open_payment_intent(db, scope=scope, command=command)
+    changes = {
+        "payer": {"payer_reference": "customer:2"},
+        "target": {"target_reference": "invoice:2"},
+        "no_target": {"target_reference": None},
+        "purpose": {"purpose": PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT},
+        "provider": {"provider_type": "flutterwave"},
+        "channel": {"channel": "transfer"},
+        "amount": {"requested": Money.of("14999", NGN)},
+        "currency": {"requested": Money.of("15000", USD)},
+        "scale": {"requested": Money.of("15000", Currency("NGN", 3))},
+        "opening": {"opened_at": NOW + timedelta(seconds=1)},
+        "expiry": {"expires_at": NOW + timedelta(hours=2)},
+        "no_expiry": {"expires_at": None},
+    }
+    with pytest.raises(Conflict):
+        open_payment_intent(
+            db, scope=scope, command=replace(command, **changes[changed])
+        )
+    db.expire_all()
+    assert open_payment_intent(db, scope=scope, command=command).id == first.id
+    assert db.scalar(select(func.count()).select_from(models.PaymentIntent)) == 1
+
+
+@pytest.mark.parametrize("changed", ["target", "expiry"])
+def test_intent_replay_cannot_add_an_absent_binding(db, changed):
+    scope = TenantScope(TENANT_A)
+    first = _intent(db, scope)
+    with pytest.raises(Conflict):
+        _intent(
+            db,
+            scope,
+            **(
+                {"target_reference": "invoice:1"}
+                if changed == "target"
+                else {"expires_at": NOW + timedelta(hours=1)}
+            ),
+        )
+    assert first.target_reference is None
+    assert first.expires_at is None
+
+
+def test_intent_replay_normalizes_identity_and_preserves_terminal_facts(db):
+    scope = TenantScope(TENANT_A)
+    command = OpenPaymentIntent(
+        payer_reference=" customer:1 ",
+        target_reference="invoice:1",
+        purpose=PaymentPurpose.INVOICE_SETTLEMENT,
+        requested=Money.of("15000", NGN),
+        reference=" bound-request ",
+        provider_type=" paystack ",
+        channel=" web ",
+        opened_at=NOW,
+        expires_at=NOW + timedelta(hours=1),
+    )
+    first = open_payment_intent(db, scope=scope, command=command)
+    assert open_payment_intent(db, scope=scope, command=command).id == first.id
+    expire_payment_intent(db, scope=scope, intent_id=first.id, now=command.expires_at)
+    db.expire_all()
+    offset = timezone(timedelta(hours=1))
+    replay = open_payment_intent(
+        db,
+        scope=scope,
+        command=replace(
+            command,
+            reference="bound-request",
+            payer_reference="customer:1",
+            provider_type="PAYSTACK",
+            channel="WEB",
+            opened_at=NOW.astimezone(offset),
+            expires_at=command.expires_at.astimezone(offset),
+        ),
+    )
+    assert replay.id == first.id
+    assert replay.status is PaymentIntentStatus.EXPIRED
+    assert replay.settled_at.replace(tzinfo=UTC) == command.expires_at
+    assert (
+        open_payment_intent(
+            db, scope=scope, command=replace(command, opened_at=None)
+        ).id
+        == first.id
+    )
+
+
+def test_intent_reference_namespace_is_tenant_only(db):
+    from dotmac_kernel.cache import PlatformScope
+
+    first = _intent(db, TenantScope(TENANT_A), target_reference="invoice:a")
+    second = _intent(db, TenantScope(TENANT_B), target_reference="invoice:b")
+    assert first.id != second.id
+    assert (
+        _intent(db, TenantScope(TENANT_A), target_reference="invoice:a").id == first.id
+    )
+    with pytest.raises(TypeError, match="requires TenantScope"):
+        _intent(db, PlatformScope())
 
 
 def test_a_confirmation_settles_the_intent_it_names(db: Session) -> None:
@@ -677,3 +806,61 @@ def test_proof_acceptance_cannot_round_inconsistent_stored_precision(db):
         )
     assert proof.state is TransferProofState.SUBMITTED
     assert db.scalar(select(func.count()).select_from(models.PaymentConfirmation)) == 0
+
+
+def test_intent_lookup_public_observation_is_frozen_and_requires_tenant(db):
+    from dataclasses import FrozenInstanceError
+
+    from dotmac_kernel.cache import PlatformScope
+    from dotmac_payments import GetPaymentIntentV1, get_payment_intent_v1
+
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    observation = get_payment_intent_v1(
+        db, scope=scope, query=GetPaymentIntentV1(intent.reference)
+    )
+    assert observation.intent_id == intent.id
+    assert observation.scope == scope
+    with pytest.raises(FrozenInstanceError):
+        observation.reference = "changed"
+    with pytest.raises(ValueError, match="reference must not be empty"):
+        get_payment_intent_v1(db, scope=scope, query=GetPaymentIntentV1(" \t "))
+    with pytest.raises(TypeError, match="requires TenantScope"):
+        get_payment_intent_v1(
+            db, scope=PlatformScope(), query=GetPaymentIntentV1(intent.reference)
+        )
+
+
+@pytest.mark.parametrize(
+    "changes,error",
+    [
+        ({"minor_units": None}, "UnresolvedMoneyPrecision"),
+        (
+            {"requested_amount": Decimal("123.456"), "minor_units": 2},
+            "UnresolvedMoneyPrecision",
+        ),
+        ({"currency_code": "ngn"}, "Conflict"),
+    ],
+)
+def test_intent_lookup_refuses_corrupt_persisted_money(db, changes, error):
+    from dotmac_payments import (
+        GetPaymentIntentV1,
+        UnresolvedMoneyPrecision,
+        get_payment_intent_v1,
+    )
+
+    scope = TenantScope(TENANT_A)
+    intent = _intent(db, scope)
+    db.execute(
+        models.PaymentIntent.__table__.update()
+        .where(models.PaymentIntent.id == intent.id)
+        .values(**changes)
+    )
+    expected_error = {
+        "UnresolvedMoneyPrecision": UnresolvedMoneyPrecision,
+        "Conflict": Conflict,
+    }[error]
+    with pytest.raises(expected_error):
+        get_payment_intent_v1(
+            db, scope=scope, query=GetPaymentIntentV1(intent.reference)
+        )

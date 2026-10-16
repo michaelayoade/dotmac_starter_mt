@@ -30,6 +30,7 @@ import itertools
 import json
 import re
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -100,10 +101,9 @@ def test_the_version_is_a_pep440_release_prerelease_or_development_marker() -> N
 # their allocations remain recorded there.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # The commerce cohort: kernel a89 added BILLING/COLLECTIONS/ORDERS/
-    # SUBSCRIPTIONS to MIGRATION_OWNER_LEDGER, and Billing and Collections
-    # consume nothing newer, so their allocation IS their floor. Subscriptions
-    # shares the allocation but not the floor -- see CAPABILITY_RAISED_FLOORS.
-    "dotmac-billing": "0.1.0a89",
+    # SUBSCRIPTIONS to MIGRATION_OWNER_LEDGER. Collections consumes nothing
+    # newer; Billing and Subscriptions consume later capabilities recorded in
+    # CAPABILITY_RAISED_FLOORS.
     "dotmac-collections": "0.1.0a89",
     "dotmac-forms": "0.1.0a88",
     "dotmac-platform-health": "0.1.0a88",
@@ -189,6 +189,10 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # Opening-window refusal recovery observes Kernel's exact-root rollback
+    # latch. transactions.py existed in a98, but published a98-a104 export
+    # only conflict_savepoint; the latch requires a105. a89 allocated Billing.
+    "dotmac-billing": ("0.1.0a105", "0.1.0a89"),
     # Files has been raised three times and the table records only the highest:
     # mod_files was ALLOCATED in a54, a56 made fi_0001's prerequisite
     # declarations installable, a61 carried ADR-0028's `supported_plane_sets`
@@ -540,7 +544,36 @@ def _kernel_tag_serials() -> set[int]:
     return serials
 
 
-def _first_published_kernel_tag_containing(path: str) -> str:
+def _public_exports(source: str) -> set[str]:
+    """Read the explicit public contract without importing released code."""
+    tree = ast.parse(source)
+    bound = {
+        alias.asname or alias.name
+        for node in tree.body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+    } | {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    }
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in node.targets
+        ):
+            exports = ast.literal_eval(node.value)
+            assert isinstance(exports, list | tuple) and all(
+                isinstance(name, str) for name in exports
+            ), "published __all__ must be a literal sequence of names"
+            assert set(exports) <= bound, "published exports must bind real symbols"
+            return set(exports)
+    pytest.fail("published surface has no explicit __all__")
+
+
+def _first_published_kernel_tag_containing(
+    path: str, *, public_symbols: frozenset[str] = frozenset()
+) -> str:
     """Derive a public-surface floor from immutable released source.
 
     A changelog claim or a copied version literal cannot establish when an
@@ -565,9 +598,65 @@ def _first_published_kernel_tag_containing(path: str) -> str:
             1,
             128,
         }, f"git could not inspect {tag}:{path}: {result.stderr.strip()}"
-        if result.returncode == 0:
-            return f"0.1.0a{serial}"
-    pytest.fail(f"no visible published kernel tag contains {path}")
+        if result.returncode != 0:
+            continue
+        if public_symbols:
+            released = subprocess.run(  # noqa: S603 — fixed git argv, no shell
+                ["git", "show", f"{tag}:{path}"],  # noqa: S607
+                cwd=PACKAGES.parent,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert released.returncode == 0, released.stderr.strip()
+            if not public_symbols <= _public_exports(released.stdout):
+                continue
+        return f"0.1.0a{serial}"
+    pytest.fail(
+        f"no visible published kernel tag contains {path} "
+        f"with public exports {sorted(public_symbols)}"
+    )
+
+
+def _transaction_symbols_used(source: str) -> frozenset[str]:
+    """Resolve direct aliases and module attributes; prose is not consumption."""
+    tree = ast.parse(source)
+    direct: dict[str, str] = {}
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "dotmac_kernel.transactions":
+                direct.update(
+                    (alias.asname or alias.name, alias.name) for alias in node.names
+                )
+            elif node.module == "dotmac_kernel":
+                modules.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "transactions"
+                )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "dotmac_kernel.transactions":
+                    modules.add(alias.asname or alias.name)
+                elif alias.name == "dotmac_kernel":
+                    modules.add(f"{alias.asname or alias.name}.transactions")
+    used = {
+        direct[node.id]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id in direct
+    }
+    used.update(
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, ast.Load)
+        and ast.unparse(node.value) in modules
+    )
+    assert "*" not in direct, "transaction wildcard imports conceal consumed symbols"
+    return frozenset(used)
 
 
 def _mentions_the_transaction_surface(source: Path) -> bool:
@@ -579,10 +668,7 @@ def _mentions_the_transaction_surface(source: Path) -> bool:
     surface through the other and keep a stale floor -- the very defect this
     derivation exists to catch, reintroduced through a narrower detector.
     """
-    text = source.read_text(encoding="utf-8")
-    return "dotmac_kernel.transactions" in text or (
-        "from dotmac_kernel import" in text and "transactions" in text
-    )
+    return bool(_transaction_symbols_used(source.read_text(encoding="utf-8")))
 
 
 def _distributions_consuming_the_transaction_surface() -> tuple[str, ...]:
@@ -616,23 +702,22 @@ def _distributions_consuming_the_transaction_surface() -> tuple[str, ...]:
 def test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
     distribution: str,
 ) -> None:
-    """The a98 floor is derived from tags, not repeated as an assertion.
+    """The consumed symbols' floor is derived from tags, never from file presence.
 
-    Both distributions actually import the public surface, and their declared
+    Distributions actually use the public surface, and their declared
     capability-raised floor must be the earliest published tag containing its
-    implementation. This fails if an earlier tag gains the file, the floor is
-    needlessly raised, or a source repair loses the import while retaining its
-    compatibility cost.
+    public exports. File presence alone cannot prove a later-added symbol's
+    availability. This also refuses a needlessly raised floor or a source
+    repair that drops consumption while retaining its compatibility cost.
     """
     package_dir = PACKAGES / distribution
-    imports_surface = any(
-        isinstance(node, ast.ImportFrom)
-        and node.module == "dotmac_kernel.transactions"
-        and any(alias.name == "conflict_savepoint" for alias in node.names)
-        for source in package_dir.rglob("*.py")
-        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+    symbols = frozenset().union(
+        *(
+            _transaction_symbols_used(source.read_text(encoding="utf-8"))
+            for source in (package_dir / "src").rglob("*.py")
+        )
     )
-    assert imports_surface, f"{distribution} no longer consumes the transaction surface"
+    assert symbols, f"{distribution} no longer consumes the transaction surface"
     floor, _allocation = CAPABILITY_RAISED_FLOORS[distribution]
     # A consumer that also imports a LATER public surface floors at the later
     # surface's first tag; every surface's tag is still derived, never typed.
@@ -646,12 +731,15 @@ def test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
             for source in package_dir.rglob("*.py")
             for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
         ), f"{distribution} no longer imports {dotted}; drop it from the map"
-    surfaces = (
+    transaction_floor = _first_published_kernel_tag_containing(
         "packages/dotmac-kernel/src/dotmac_kernel/transactions.py",
-        *later,
+        public_symbols=symbols,
     )
     expected = max(
-        (_first_published_kernel_tag_containing(path) for path in surfaces),
+        (
+            transaction_floor,
+            *(_first_published_kernel_tag_containing(path) for path in later),
+        ),
         key=lambda version: int(version.rsplit("a", 1)[1]),
     )
     assert floor == expected, (
@@ -670,6 +758,101 @@ LATER_SURFACES_RAISING_THE_FLOOR: dict[str, tuple[str, ...]] = {
         "packages/dotmac-kernel/src/dotmac_kernel/product_database_catalog.py",
     ),
 }
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from dotmac_kernel.transactions import "
+        "conflict_savepoint_requires_rollback as latch\nlatch(db)",
+        "import dotmac_kernel.transactions as tx\n"
+        "tx.conflict_savepoint_requires_rollback(db)",
+        "from dotmac_kernel import transactions as tx\n"
+        "tx.conflict_savepoint_requires_rollback(db)",
+        "import dotmac_kernel.transactions\n"
+        "dotmac_kernel.transactions.conflict_savepoint_requires_rollback(db)",
+        "import dotmac_kernel as kernel\n"
+        "kernel.transactions.conflict_savepoint_requires_rollback(db)",
+    ],
+)
+def test_transaction_consumption_resolves_aliases_and_module_attributes(
+    source: str,
+) -> None:
+    assert _transaction_symbols_used(source) == {"conflict_savepoint_requires_rollback"}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        '"from dotmac_kernel.transactions import conflict_savepoint"',
+        "# dotmac_kernel.transactions.conflict_savepoint(db)",
+        "from dotmac_kernel.transactions import conflict_savepoint",
+    ],
+)
+def test_transaction_prose_and_unused_imports_are_not_consumption(source: str) -> None:
+    assert not _transaction_symbols_used(source)
+
+
+@pytest.mark.parametrize(
+    ("floor", "symbol", "publish_latch", "refusal"),
+    [
+        ("0.1.0a105", "conflict_savepoint_requires_rollback", True, None),
+        ("0.1.0a89", "conflict_savepoint_requires_rollback", True, "not 0.1.0a89"),
+        ("0.1.0a98", "conflict_savepoint_requires_rollback", True, "not 0.1.0a98"),
+        (
+            "0.1.0a105",
+            "conflict_savepoint_requires_rollback",
+            False,
+            "no visible published",
+        ),
+        ("0.1.0a105", "unknown_transaction_export", True, "no visible published"),
+    ],
+)
+def test_transaction_floor_guard_uses_released_exports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    floor: str,
+    symbol: str,
+    publish_latch: bool,
+    refusal: str | None,
+) -> None:
+    """Plant stale floors and module-present/export-absent published artifacts."""
+    source_dir = tmp_path / "dotmac-billing" / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "service.py").write_text(
+        f"from dotmac_kernel.transactions import {symbol} as latch\nlatch(db)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "PACKAGES", tmp_path)
+    monkeypatch.setitem(CAPABILITY_RAISED_FLOORS, "dotmac-billing", (floor, "0.1.0a89"))
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_kernel_tag_serials",
+        lambda: {98, 104, 105},
+    )
+
+    def released_source(
+        argv: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        exports = ["conflict_savepoint"]
+        if publish_latch and argv[-1].startswith("dotmac-kernel-v0.1.0a105:"):
+            exports.append("conflict_savepoint_requires_rollback")
+        source = (
+            f"from dotmac_kernel._transactions import {', '.join(exports)}\n"
+            f"__all__ = {exports!r}\n"
+        )
+        return subprocess.CompletedProcess(argv, 0, source, "")
+
+    monkeypatch.setattr(subprocess, "run", released_source)
+    if refusal is None:
+        test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
+            "dotmac-billing"
+        )
+    else:
+        with pytest.raises((AssertionError, pytest.fail.Exception), match=refusal):
+            test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
+                "dotmac-billing"
+            )
 
 
 @pytest.mark.parametrize(

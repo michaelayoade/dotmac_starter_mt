@@ -1,5 +1,12 @@
 # dotmac-finance changelog
 
+## 0.2.0a1 — Unreleased
+
+- Compute ordered carrying and unimpaired depreciation trajectories in a private
+  Rust batch with checksum-pinned, statically bundled libmpdec. Preserve Decimal
+  context, ordered failures and the existing Python service/persistence loop.
+- Source builds carry the shared arithmetic source crate and upstream license.
+
 ## 0.1.0a1 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and

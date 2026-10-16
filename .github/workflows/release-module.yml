@@ -161,7 +161,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Matches native qualification: GLIBC 2.35 wheels load on Debian 12 (2.36).
+    runs-on: ubuntu-22.04
     outputs:
       package_dir: ${{ steps.resolve.outputs.package_dir }}
       tag: ${{ steps.resolve.outputs.tag }}
@@ -254,6 +255,22 @@ jobs:
           name: ${{ inputs.module }}-smoke-dependencies
           path: smoke-dependencies/smoke-dependencies.json
           retention-days: 90
+
+      # The native wheel is built once above. Load those SAME bytes in the
+      # first adopter's compiler-free Debian 12 / CPython 3.12 runtime before
+      # publication, so a newer runner GLIBC cannot silently reach consumers.
+      - name: Verify native wheel in the supported Debian runtime
+        if: steps.resolve.outputs.native_package != ''
+        env:
+          PACKAGE_DIR: ${{ steps.resolve.outputs.package_dir }}
+        run: |
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/source:ro" --workdir /source \
+            python:3.12-slim-bookworm \
+            python scripts/release_module.py verify-wheel "$MODULE" \
+              --dist "$PACKAGE_DIR/dist" \
+              --kernel-dist /source/kernel-dist \
+              --dependency-dist /source/dependency-dist
 
       - name: Upload built artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

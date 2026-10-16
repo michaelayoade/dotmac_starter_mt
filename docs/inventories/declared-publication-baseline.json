@@ -79,7 +79,12 @@
     },
     "dotmac-billing": {
       "declared": "0.1.0a8",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a8 extends cash-only V1 with an atomic evidenced open-receivables plus cash V2 import, immutable historical invoice backing and discharge replay bindings, distinct V5 accounting, truthful collection-provenance V2 exposure and full inverse lifecycle. Original documentary facts and qualified live source identity are mandatory; unsupported opening lanes remain refused. Implementation review, hosted acceptance and Michael source approval are pending. Publication is already authorized by the closed allowlist; verified artifact adoption and production activation remain separate. No product pins change.",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Published a1 remains unchanged. Candidate a8 includes evidenced open-receivables plus cash V2 import, immutable original documentary backing and discharge replay, distinct V5 accounting and full guarded inverse lifecycle. The current unpublished source addition requires a permanent one-scope opening window, operation-specific trusted verification, an independently restricted migration principal, exact manifest admission and a one-way seal. Pure rehearsal reports bind source, manifest and imported controls; missing authentic historical documentary evidence remains an explicit blocker, and positive three-run examples cover only genuinely empty financial populations. Core components passed independent static review; composition review, current-head hosted acceptance and Michael source approval remain required. The previously authorized package publication allowlist does not activate importers or writers. Exact provenance publication, verified artifact adoption and production activation remain separate. No product pins change.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-collections": {
+      "declared": "0.1.0a2",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 proposes a fresh modern-provenance build under a new version; runtime behavior, public API and migrations remain unchanged from the published a1 source, and the Kernel floor remains >=0.1.0a89. The legacy a1 release is not reissued or relabeled. Hold pending root review and Michael's source/release authorization, acceptance of the Kernel a105 publication record on main, and a refreshed tag/census check before integration. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due; this proposal does not switch product authority. Remove this row only with the verified a2 publication record.",
       "state": "declared-unpublished"
     },
     "dotmac-connector-flutterwave": {
@@ -137,14 +142,9 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a104+dev",
-      "reason": "This row tracks Kernel source whose protected publication-record transition is not yet complete, including strict fresh settings resolution and the exact-root conflict-savepoint completion protocol. A +dev declaration is deliberately unpublishable and does not allocate a successor. Separately authorized allocation replaces +dev with the exact next public version while the row remains declared-unpublished; remove the row only after protected publication verifies and records that exact release.",
-      "state": "declared-unpublished"
-    },
-    "dotmac-payments": {
-      "declared": "0.1.0a2",
-      "reason": "DECLARED FOR THE CONFIRMED-INTAKE SAFETY PREREQUISITE, NOT YET RELEASED. Published a1 peels from dotmac-payments-v0.1.0a1 to 04b9771320b865b66d1322660fc6d3590605c973; the tag oracle on 2026-10-13 contained no a2 tag. a2 adds exact immutable confirmation replay and serialized intent/proof lifecycle mutations, so those behaviors cannot silently replace the published a1 artifact. Remove this row only after the protected module release installs, verifies and tags exact 0.1.0a2. Declaration and hosted source tests are not publication or Sub writer-switch evidence; Sub remains authoritative pending backfill, zero-drift shadow and separately authorized cutover.",
+    "dotmac-numbering": {
+      "declared": "0.1.0a3",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a3 proposes a new modern-provenance candidate over the accepted source, including typed tenant/platform construction and strict idempotency-result validation since the published a2 source; it is not identical to the retained a2 artifact. Public API and Kernel floor >=0.1.0a66 remain unchanged. Hold through the Kernel a105 release and until root review plus Michael's new-source/release authorization; integrate the accepted record on main before any new build/release. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due. The legacy a2 tag/evidence are not rewritten. Remove this row only with the verified a3 publication record.",
       "state": "declared-unpublished"
     },
     "dotmac-platform-health": {

@@ -10,7 +10,7 @@ from dotmac_media_observations.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="media_observations",
-    version="0.1.0a1",
+    version="0.2.0a1",
     core=False,
     short_code="mediaobs",
     migration_prefix="mo",

@@ -23,6 +23,7 @@ from typing import Any
 
 import pytest
 
+from tests.unit.lane3_evidence_support import write_topology
 from tests.unit.test_lane3_receipt_v2 import API_RUN, DOCUMENT, ENVIRON
 from tests.unit.test_lane3_topology_source import HOST as TOPO_HOST
 from tests.unit.test_lane3_topology_source import VALUES as TOPO_VALUES
@@ -45,6 +46,10 @@ def _load() -> Any:
 
 runner = _load()
 producer = sys.modules["lane3_receipt_v2"]
+
+
+def _write_topology(tmp_path: pathlib.Path, document: Any) -> str:
+    return write_topology(tmp_path, document)
 
 
 def _write(tmp_path: pathlib.Path, name: str, document: Any) -> str:
@@ -97,7 +102,7 @@ def _argv(
         _write(tmp_path, "api-run.json", API_RUN if api is None else api),
     ]
     if topology is not None:
-        argv += ["--topology", _write(tmp_path, "lane3-execution.json", topology)]
+        argv += ["--topology", _write_topology(tmp_path, topology)]
     return argv
 
 

@@ -1124,3 +1124,24 @@ alongside a long-running, repairable saga without acquiring two authorities.
 **Let Collections suspend directly.** A financial policy engine would become a
 second writer of domain/hosting state and could bypass non-financial holds,
 retention policy, transfer locks and destructive-action approval.
+
+## Amendment, 2026-10-15: Sub billing programme sequencing
+
+For Michael's Sub billing programme under ADR-0020 M1/M6/M8, Sub tenant-plane
+Billing adoption may be prepared before Vendor CP or another greenfield adopter.
+This is a bounded waiver of the earlier Vendor-first Billing recommendation
+for this programme only. Vendor CP remains a later platform-plane candidate;
+it has no fake tenant. Complete domain owners, exact released package pins,
+assembly composition, one caller-owned transaction authority, independent module
+migration lineages, genuine consumer adoption evidence, rehearsal, and writer-
+retirement proof remain required.
+
+Sub caller migration is incremental, but the ledger authority transition is one
+global flip after all required callers and one-writer controls are ready. No
+account cohorts switch independently and no dual-write period is introduced.
+ERP's new receiver is not a prerequisite: its existing feed must consume or
+safely queue committed Billing facts under the agreed contract, and ERP retains
+GL and statutory accounting. These sequencing clarifications do not assert
+that any consumer is live or any rehearsal, retirement, or authority switch is
+complete. Other module adoption orders and their greenfield-first safeguards
+are unchanged.

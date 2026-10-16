@@ -10,8 +10,17 @@ boundary, product command owner, or persistence facility.
 | Sub `71374556bf3d1fe74f1b46f15c1113e6ad2f809a` | `app/services/owner_commands.py::_reject_helper_commit`, `_record_helper_rollback`, `execute_owner_savepoint`; `tests/test_owner_commands.py` | Qualifying product source for guarded completion: authorize only the helper's exact nested handle, validate it after the body, explicitly roll back an attached inactive handle after flush failure, retain authorization through rollback events, and clean up in `finally`. Production owner command infrastructure already consumes this helper. Its mutable product-private authorization slot is generalized into the typed Kernel lifecycle below. |
 | ERP `93d7e111d9278b8377bac311e78308c99f51da79` | `app/db/__init__.py::transaction`, `atomic_operation`; repository search of `app/services`, `app/db`, and `tests` for `begin_nested`, `before_commit`, `after_soft_rollback` | Existing nested savepoint helpers have no guarded lifecycle observer or single-use release claim. `transaction` can own an outer commit; that behavior is outside this extension's contract. No qualifying lifecycle guard or dedicated parity suite was found. |
 
-The named candidate scope is Kernel, Sub, ERP and Sub's Numbering composition;
-no additional product is claimed as an adopter. Kernel's existing
+The named candidate scope is Kernel, Sub, ERP, Billing opening-window refusal
+recovery and Sub's Numbering composition. Billing source at
+`5d69eaa7fd9a9ef4848812f54a994d71558865c8` imports and calls
+`conflict_savepoint_requires_rollback` from `dotmac_kernel.transactions` in
+`packages/dotmac-billing/src/dotmac_billing/service.py` before its refusal
+recheck. This is a real source consumer of the public rollback observer; it
+grants no transaction completion authority. Billing's prepared kernel floor is
+a105, while its namespace was allocated in a89. Published a98-a104 export only
+`conflict_savepoint`; verified a105 publication and hosted positive/negative
+floor probes remain prerequisites for Billing release or adoption. No product
+adoption is established by this source update. Kernel's existing
 `EXTRACTION.toml` remains the package dossier; this inventory records this
 bounded lane's source audit and parity requirements rather than relabeling the
 historical package as a new greenfield extraction.
@@ -71,9 +80,12 @@ temporary table is used for that proof. Post-release and secondary cleanup
 listener failures assert original exception identity, refusal of caught-error
 completion, latch isolation and clearing on root rollback/session reuse.
 
-Sub Numbering is the intended first adopter after a released Kernel dependency
-exports this protocol and hosted composition tests pass. No release, adoption,
-deployment or local-copy retirement is asserted by this source change. Sub's
+Billing opening-window recovery consumes the rollback observer in source; its
+publication remains gated on the released a105 artifact and hosted floor proof.
+Sub Numbering is a separate intended adopter of the guarded completion protocol
+after a released Kernel dependency exports it and hosted composition tests pass.
+No release, adoption, deployment or local-copy retirement is asserted by this
+source change. Sub's
 owner command executor remains the product boundary; its private optional-step
 helper is not retired by the Numbering bridge. Drift evidence is the focused
 Kernel contract suite plus Sub's owner-command/Numbering composition suite,

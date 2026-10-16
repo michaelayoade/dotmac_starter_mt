@@ -450,7 +450,7 @@
       "package_dir": "packages/dotmac-billing",
       "import_name": "dotmac_billing",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a89",
+      "kernel_floor": "0.1.0a105",
       "db_schema": "mod_billing",
       "tag_prefix": "dotmac-billing-v",
       "wheel_contents": {
@@ -485,7 +485,12 @@
           "dotmac_billing/migrations/versions/bi_0008_opening_receivables.py",
           "dotmac_billing/opening_receivable_contracts.py",
           "dotmac_billing/opening_receivable_validation.py",
-          "dotmac_billing/opening_receivable_queries.py"
+          "dotmac_billing/opening_receivable_queries.py",
+      "dotmac_billing/migrations/versions/bi_0009_opening_window.py",
+      "dotmac_billing/opening_window_contracts.py",
+      "dotmac_billing/opening_window_queries.py",
+      "dotmac_billing/opening_rehearsal_contracts.py",
+      "dotmac_billing/opening_rehearsal.py"
         ],
         "forbidden_prefixes": [
           "app/",

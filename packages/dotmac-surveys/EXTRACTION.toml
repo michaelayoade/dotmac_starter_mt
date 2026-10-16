@@ -22,6 +22,7 @@ revalidation_revisions = [
   "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
 ]
 source_paths = [
+  "dotmac_starter_mt:packages/dotmac-surveys/native",
   "dotmac_sub:app/models/comms.py",
   "dotmac_sub:app/schemas/comms.py",
   "dotmac_sub:app/services/surveys.py",
@@ -35,6 +36,7 @@ source_paths = [
   "dotmac_starter_mt:packages/dotmac-surveys/src/dotmac_surveys",
 ]
 preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_surveys_native.py",
   "dotmac_sub:tests/test_surveys.py",
   "dotmac_sub:tests/architecture/test_survey_boundary.py",
   "dotmac_sub:tests/test_ticket_csat.py",
@@ -49,6 +51,7 @@ contract_consumers = []
 candidate_consumers = ["dotmac_sub", "dotmac_erp"]
 composition_boundary = "ADR-0024 and ADR-0053: every adopter installs its own sv lineage and owns only its local feedback rows. A subject owner decides eligibility, recipient, rerating and consequences, then its application adapter asks dotmac-surveys to issue an invitation using bounded opaque recipient_ref, source_owner, source_event_id and subject_ref values. The module has no product foreign key, imports neither the assembly nor a sibling module, and cannot mutate a ticket, work order, service, conversation or employee. Delivery is requested through the product outbox and remains with delivery/Integrator; the module owns no channel, provider, attempt or retry state."
 inventory_evidence = [
+  "docs/inventories/rust-computation-sources.md",
   "docs/inventories/surveys-sources.md",
   "docs/adr/0053-surveys-own-feedback-evidence-not-subject-consequences.md",
   "docs/inventories/module-extraction-sources.md",
@@ -56,7 +59,7 @@ inventory_evidence = [
 first_cutover = "dotmac_sub is cutover 1 because communications.surveys is the only checked-in named owner with focused typed lifecycle, response and architecture proof. Sub composes the tenant sv lineage, maps existing definitions/invitations/responses with an explicit operator tenant, and uses product adapters from ticket.resolution_confirmed and work_order.field_outcome_recorded without moving either trigger vocabulary into the module. The separate support.ticket_lifecycle metadata.csat writer is shadowed in the same slice and retired only after the ticket read projection resolves the module response fact. CRM retires through Sub and is not a consumer. ERP is cutover 2 after focused characterization of HR anonymity, date-window eligibility, response identity, all six local question types and aggregates; targeting, employee identity and HR consequences stay in ERP."
 shadow_and_drift = "For every Sub definition, compare normalized name/slug/question order and lifecycle; for every eligible owner event, compare the selected survey, opaque recipient/subject mapping and one-invitation semantic identity; for every tracked/public response, compare refusal reason, normalized answers, rating, NPS and aggregate projections. Expected deltas are classified before cutover: tenant_id and FORCE RLS are new; product FKs and trigger enums leave the module; provider delivery state remains in Sub's outbox; activated definitions become immutable; response evidence replaces mutable Ticket metadata CSAT; aggregates use exact Decimal rather than CRM float. Backfill never infers eligibility from timestamps and never copies raw provider payloads. Cutover requires zero unexplained differences, PostgreSQL cross-tenant proof and one sealed response writer."
 local_copy_retirement = "After Sub's one-writer seal, retire the Survey/SurveyInvitation/SurveyResponse persistence and generic writers in app.models.comms and app.services.surveys, plus the mutable Ticket metadata.csat writer. Retain thin Sub adapters for survey selection, subject eligibility, public presentation, audit/event declarations and consequences. CRM's generic fork, conversation CSAT delivery engine and tasks retire through the existing CRM-to-Sub programme; delivery/retry functionality relocates only to the established delivery/Integrator owners, never into this module. ERP later retires only its overlapping definition/question/response/aggregate persistence after HR policy adapters are proven. Two-directional model/caller/table ratchets reach zero before any local owner is declared retired."
-next_action = "Validate the audit-complete package on Observer in a fresh worktree pinned to the exact branch commit. Then land Sub's expand migration and typed composition adapter as the first adoption slice. Keep kernel a84 and Surveys a1 unpublished until that proof. Do not compose dotmac-surveys from the Starter reference assembly, and do not add routers, product trigger enums, delivery, targeting, workforce policy, performance scoring or retention behavior without an adopter-owned contract and canaries."
+next_action = "2026-10-15: qualify and release the 0.2.0a1 private-native successor through the existing protected module lane after exact-head hosted CI, wheel/source-archive parity and supported-interpreter checks. Preserve prior immutable release identities. Publication transfers no product data or writer authority. Sub adoption still requires metric and refusal parity, tenant composition, backfill and shadow, then a sealed one-writer authority switch before full module cutover. Do not compose this module into the Starter reference assembly or add routers, product trigger enums, delivery, targeting, workforce policy, performance scoring or retention behavior without an adopter-owned contract and canaries."
 
 # Typed product claims. Sub was rostered in Governance as having no scheduled
 # ISP work; this dossier's own `first_cutover` opens "dotmac_sub is cutover 1".

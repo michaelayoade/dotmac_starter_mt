@@ -38,6 +38,14 @@ KERNEL_VERSIONS = (
 )
 
 _INTERNAL_RELATIONS = (
+    ("opening_window_admissions", ("window_id",), "opening_windows", ("id",)),
+    (
+        "opening_window_admissions",
+        ("receipt_id", "billing_account_id"),
+        "opening_import_receipts",
+        ("id", "billing_account_id"),
+    ),
+    ("opening_window_seals", ("window_id",), "opening_windows", ("id",)),
     (
         "opening_receivable_bases",
         ("receipt_id", "billing_account_id"),
@@ -837,14 +845,14 @@ def test_runtime_version_and_authorized_kernel_floor_agree() -> None:
     package = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))
     declared = package["tool"]["poetry"]["version"]
     assert dotmac_billing.__version__ == module.version == declared
-    assert package["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a89"
+    assert package["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a105"
     assert package["tool"]["poetry"]["dependencies"]["alembic"] == ">=1.13"
 
     release_modules = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]
     entry = release_modules["dotmac-billing"]
-    assert entry["kernel_floor"] == "0.1.0a89"
+    assert entry["kernel_floor"] == "0.1.0a105"
     assert entry["db_schema"] == models.SCHEMA
     assert entry["import_name"] == "dotmac_billing"
     assert entry["tag_prefix"] == "dotmac-billing-v"

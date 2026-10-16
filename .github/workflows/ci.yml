@@ -41,6 +41,7 @@ jobs:
             migration-gate,
             ui-check,
             module-catalog-check,
+            native-check,
             # Offline and tag-free on purpose: it compares the checked-in
             # released-manifest ledger with the working tree, so it runs here
             # where `actions/checkout` fetches no tags. The tag cross-check that
@@ -62,10 +63,13 @@ jobs:
         with:
           python-version: "3.12"
       - uses: ./.github/actions/setup-poetry
+      # Native editable extensions live in package src trees, outside .venv.
+      # Restoring only .venv would let Poetry skip a build whose .so is absent
+      # in this checkout. Cache downloads, never incomplete editable installs.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+          path: ~/.cache/pypoetry/artifacts
+          key: poetry-artifacts-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
       # Poetry delegates venv creation to `virtualenv`, which on this runner
       # rejects the argv Poetry builds:
       #   virtualenv: error: argument dest: the destination . is not write-able at /
@@ -259,8 +263,8 @@ jobs:
       - uses: ./.github/actions/setup-poetry
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+          path: ~/.cache/pypoetry/artifacts
+          key: poetry-artifacts-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
       # Poetry delegates venv creation to `virtualenv`, which on this runner
       # rejects the argv Poetry builds:
       #   virtualenv: error: argument dest: the destination . is not write-able at /
@@ -312,8 +316,8 @@ jobs:
       - uses: ./.github/actions/setup-poetry
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+          path: ~/.cache/pypoetry/artifacts
+          key: poetry-artifacts-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
       # Poetry delegates venv creation to `virtualenv`, which on this runner
       # rejects the argv Poetry builds:
       #   virtualenv: error: argument dest: the destination . is not write-able at /
@@ -465,13 +469,16 @@ jobs:
           FLOOR_PYTHON: python${{ matrix.python-version }}
         run: bash scripts/module_floor_check.sh
 
+  native-compute:
+    uses: ./.github/workflows/native-compute.yml
+
   docker-build:
     runs-on: ubuntu-latest
     # ADR-0006 D1: the composed migration gate must REJECT an incoherent
     # composition before an image exists at all — an image whose lineages
     # collide is an image that corrupts a database on deploy. `quality` carries
     # the `migration-gate` matrix entry, so gating on it is the enforcement.
-    needs: quality
+    needs: [quality, native-compute]
     # Builds the prod image and health-gates it before merge. Port/tag are
     # job-local env, not magic numbers, so they can be bumped in one place.
     env:
@@ -529,6 +536,12 @@ jobs:
           echo "the engine on this runner accepts the rendered project"
 
       - run: docker build --build-arg APP_PORT=${{ env.APP_PORT }} -t ${{ env.IMAGE_TAG }} .
+      - name: Verify final runtime entrypoints and native closure
+        env:
+          NATIVE_IMAGE: ${{ env.IMAGE_TAG }}
+        run: |
+          docker run --rm "$NATIVE_IMAGE" alembic --version
+          docker run --rm "$NATIVE_IMAGE" python -c 'import dotmac_positioning._native, dotmac_network_topology._native, dotmac_fiber_plant._native, dotmac_media_observations._native, dotmac_imports._native, dotmac_web_analytics._native, dotmac_forms._native, dotmac_surveys._native, dotmac_inventory._native, dotmac_finance._native'
       - run: |
           docker run -d --name ${{ env.SMOKE_CONTAINER }} -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
             -e DATABASE_URL=postgresql+psycopg://x:x@localhost/x ${{ env.IMAGE_TAG }}
