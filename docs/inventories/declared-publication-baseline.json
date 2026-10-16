@@ -142,6 +142,11 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-integration": {
+      "declared": "0.1.0a19",
+      "reason": "PROPOSED, UNPUBLISHED SOURCE CANDIDATE. Retains the original engine verification context while preserving legacy receipt origin as unknown; performs no backfill, changes no existing wire contract, and makes no cash-qualification claim. This declaration is not publication or adoption evidence. Remove only after the exact candidate has its authorized release verification and immutable receipt. NOT to be repaired by editing the version: this successor remains unpublished until its separately authorized release is verified and immutably recorded.",
+      "state": "declared-unpublished"
+    },
     "dotmac-kernel": {
       "declared": "0.1.0a105+dev",
       "reason": "DEVELOPMENT SOURCE AFTER VERIFIED a105. Reserve learning / mod_learning / lr before the Academy-sourced module is implemented. This local development identity is not published or pinnable; the immutable a105 release and its verification records remain unchanged. A future numeric Kernel release requires the existing protected authorization, allocation and build-once publication sequence. Remove this development row only when the corresponding authorized successor has its verified publication record.",
@@ -150,6 +155,11 @@
     "dotmac-numbering": {
       "declared": "0.1.0a3",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a3 proposes a new modern-provenance candidate over the accepted source, including typed tenant/platform construction and strict idempotency-result validation since the published a2 source; it is not identical to the retained a2 artifact. Public API and Kernel floor >=0.1.0a66 remain unchanged. Hold through the Kernel a105 release and until root review plus Michael's new-source/release authorization; integrate the accepted record on main before any new build/release. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due. The legacy a2 tag/evidence are not rewritten. Remove this row only with the verified a3 publication record.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-payments": {
+      "declared": "0.1.0a3",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED SOURCE PREPARATION ONLY. 0.1.0a2 remains published as dotmac-payments-v0.1.0a2 at 4fc0295da94ce62919966baaf1dd909f9af5dcbe with its released migration bytes and verification receipt unchanged. Proposed a3 extracts existing purchase checkout through PURCHASE_FUNDING and additive pm_0004_purchase_funding, freezing the original opaque checkout binding while retaining existing lifecycle and confirmation ownership. Hosted acceptance, independent review, successor allocation and authorized publication remain separate decisions. This row grants no release, artifact adoption, cash qualification, ledger posting or product writer switch. Remove only with the oracle-backed record of an authorized exact a3 publication.",
       "state": "declared-unpublished"
     },
     "dotmac-platform-health": {

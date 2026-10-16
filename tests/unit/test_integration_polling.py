@@ -93,7 +93,13 @@ def _seed(
             installation_id=installation.id,
             revision=1,
             schema_version="1",
-            config_digest="c" * 64,
+            config_digest=payload_digest(
+                {
+                    "config": {"variant": "primary"},
+                    "secret_refs": {"token": "bao://integrator/poll/token"},
+                    "schema_version": "1",
+                }
+            ),
             config_json={"variant": "primary"},
             secret_refs={"token": "bao://integrator/poll/token"},
         )
@@ -486,3 +492,77 @@ def test_a_stale_worker_cannot_leave_receipts_past_its_lost_cursor(
             )
             is None
         )
+
+
+def test_original_prepared_poll_constructor_still_invokes_but_cannot_fake_origin(
+    engine: Engine,
+) -> None:
+    from dotmac_integration.ingress import EventVerificationOriginUnavailable
+    from dotmac_integration.polling import PreparedPoll
+
+    events = (
+        InboundEvent(
+            provider_event_id="old-constructor", event_type="received", payload={}
+        ),
+    )
+    registry, _, checkpoint_id = _seed(engine, events=events)
+    with Session(engine) as db:
+        prepared = prepare_poll(db, checkpoint_id=checkpoint_id, registry=registry)
+        # The positional shape published in a18, without a manifest argument.
+        old_shape = PreparedPoll(
+            prepared.checkpoint_id,
+            prepared.expected_version,
+            prepared.installation_id,
+            prepared.binding_id,
+            prepared.connector_key,
+            prepared.capability_id,
+            prepared.job_key,
+            prepared.cursor,
+            prepared.config,
+            prepared.secret_refs,
+            prepared.config_revision_id,
+        )
+        batch = invoke_poll(
+            old_shape, registry=registry, resolve_secrets=lambda refs: {}
+        )
+        assert batch.events == events
+        with pytest.raises(EventVerificationOriginUnavailable):
+            record_poll_batch(db, old_shape, batch)
+        assert db.scalar(select(InboxReceipt.id)) is None
+        assert (
+            db.get(PollingCheckpoint, checkpoint_id).version
+            == prepared.expected_version
+        )
+
+
+def test_old_structural_batch_address_refuses_before_receipts_or_cursor_move(
+    engine: Engine,
+) -> None:
+    from types import SimpleNamespace
+
+    from dotmac_integration.ingress import EventVerificationOriginUnavailable
+    from dotmac_integration.polling import PollBatch
+
+    events = (
+        InboundEvent(
+            provider_event_id="old-address", event_type="received", payload={}
+        ),
+    )
+    registry, _, checkpoint_id = _seed(engine, events=events)
+    with Session(engine) as db:
+        prepared = prepare_poll(db, checkpoint_id=checkpoint_id, registry=registry)
+        # The original structural inbox address, plus polling's cursor address.
+        # There is no verification_origin property to evaluate.
+        old_address = SimpleNamespace(
+            installation_id=prepared.installation_id,
+            binding_id=prepared.binding_id,
+            capability_id=prepared.capability_id,
+            checkpoint_id=prepared.checkpoint_id,
+            expected_version=prepared.expected_version,
+        )
+        with pytest.raises(EventVerificationOriginUnavailable):
+            record_poll_batch(db, old_address, PollBatch(events, "must-not-advance"))
+        assert db.scalar(select(InboxReceipt.id)) is None
+        checkpoint = db.get(PollingCheckpoint, checkpoint_id)
+        assert checkpoint.version == prepared.expected_version
+        assert checkpoint.cursor_json == {"cursor": prepared.cursor}

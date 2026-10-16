@@ -370,6 +370,13 @@ class DocumentLine(Base, _TenantRow, _DocumentLineColumns):
         UniqueConstraint("tenant_id", "id", name="uq_document_lines_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
+            "id",
+            "document_id",
+            "billing_account_id",
+            name="uq_document_lines_source_key",
+        ),
+        UniqueConstraint(
+            "tenant_id",
             "document_id",
             "line_number",
             name="uq_document_lines_tenant_line",
@@ -412,6 +419,12 @@ class PlatformDocumentLine(Base, _DocumentLineColumns):
             "document_id", "line_number", name="uq_platform_document_lines_line"
         ),
         UniqueConstraint("obligation_id", name="uq_platform_document_lines_obligation"),
+        UniqueConstraint(
+            "id",
+            "document_id",
+            "billing_account_id",
+            name="uq_platform_document_lines_source_key",
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -2493,7 +2506,168 @@ class PlatformOpeningWindowSeal(Base, _SealColumns):
     )
 
 
+class _SettlementEarmarkColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    settlement_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    amount: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    producer_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class _SettlementEarmarkTargetColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    earmark_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    source_system: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_fact_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_fact_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    amount: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class _SettlementEarmarkEffectColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    earmark_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    posting_group_id: Mapped[UUID | None] = mapped_column(Uuid())
+    allocation_id: Mapped[UUID | None] = mapped_column(Uuid())
+    original_effect_id: Mapped[UUID | None] = mapped_column(Uuid())
+    effect_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    held_delta: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+def _earmark_constraints(*, tenant: bool, kind: str) -> tuple[object, ...]:
+    prefix = "" if tenant else "platform_"
+    scope = ["tenant_id"] if tenant else []
+    table = (
+        prefix
+        + "settlement_earmark"
+        + {"claim": "s", "target": "_targets", "effect": "_effects"}[kind]
+    )
+    constraints: list[object] = [
+        UniqueConstraint(
+            *scope, "id", "billing_account_id", name=f"uq_{table}_account"
+        ),
+        ForeignKeyConstraint(
+            [*scope, "billing_account_id"],
+            [f"{SCHEMA}.{prefix}billing_accounts.{key}" for key in (*scope, "id")],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("minor_units BETWEEN 0 AND 6"),
+    ]
+    links = (
+        [("settlement_id", "confirmed_settlements")]
+        if kind == "claim"
+        else [("earmark_id", "settlement_earmarks")]
+    )
+    if kind == "effect":
+        links += [
+            ("posting_group_id", "posting_groups"),
+            ("allocation_id", "allocation_effects"),
+            ("original_effect_id", "settlement_earmark_effects"),
+        ]
+        constraints += [
+            CheckConstraint("held_delta <> 0"),
+            CheckConstraint(
+                "effect_kind IN ('consumption','restore','release','release_inverse',"
+                "'refund','refund_inverse','backing','backing_inverse')"
+            ),
+        ]
+    else:
+        constraints.append(CheckConstraint("amount > 0"))
+    if kind == "claim":
+        constraints.append(
+            UniqueConstraint(
+                *scope,
+                "id",
+                "billing_account_id",
+                "settlement_id",
+                name=f"uq_{table}_settlement_binding",
+            )
+        )
+        constraints.append(
+            UniqueConstraint(*scope, "settlement_id", name=f"uq_{table}_settlement")
+        )
+    if kind == "target":
+        constraints.append(
+            UniqueConstraint(
+                *scope,
+                "earmark_id",
+                "source_system",
+                "source_kind",
+                "source_fact_id",
+                "source_fact_version",
+                name=f"uq_{table}_source",
+            )
+        )
+    for column, target in links:
+        constraints.append(
+            ForeignKeyConstraint(
+                [*scope, column, "billing_account_id"],
+                [
+                    f"{SCHEMA}.{prefix}{target}.{key}"
+                    for key in (*scope, "id", "billing_account_id")
+                ],
+                ondelete="RESTRICT",
+            )
+        )
+    return (*constraints, schema_table_args(SCHEMA))
+
+
+class SettlementEarmark(Base, _WindowTenantRow, _SettlementEarmarkColumns):
+    __tablename__ = "settlement_earmarks"
+    __table_args__ = _earmark_constraints(tenant=True, kind="claim")
+
+
+class PlatformSettlementEarmark(Base, _SettlementEarmarkColumns):
+    __tablename__ = "platform_settlement_earmarks"
+    __table_args__ = _earmark_constraints(tenant=False, kind="claim")
+
+
+class SettlementEarmarkTarget(Base, _WindowTenantRow, _SettlementEarmarkTargetColumns):
+    __tablename__ = "settlement_earmark_targets"
+    __table_args__ = _earmark_constraints(tenant=True, kind="target")
+
+
+class PlatformSettlementEarmarkTarget(Base, _SettlementEarmarkTargetColumns):
+    __tablename__ = "platform_settlement_earmark_targets"
+    __table_args__ = _earmark_constraints(tenant=False, kind="target")
+
+
+class SettlementEarmarkEffect(Base, _WindowTenantRow, _SettlementEarmarkEffectColumns):
+    __tablename__ = "settlement_earmark_effects"
+    __table_args__ = _earmark_constraints(tenant=True, kind="effect")
+
+
+class PlatformSettlementEarmarkEffect(Base, _SettlementEarmarkEffectColumns):
+    __tablename__ = "platform_settlement_earmark_effects"
+    __table_args__ = _earmark_constraints(tenant=False, kind="effect")
+
+
 TENANT_TABLES = (
+    "settlement_earmarks",
+    "settlement_earmark_targets",
+    "settlement_earmark_effects",
     "opening_windows",
     "opening_window_admissions",
     "opening_window_seals",
@@ -2529,6 +2703,9 @@ TENANT_TABLES = (
 )
 
 PLATFORM_TABLES = (
+    "platform_settlement_earmarks",
+    "platform_settlement_earmark_targets",
+    "platform_settlement_earmark_effects",
     "platform_opening_windows",
     "platform_opening_window_admissions",
     "platform_opening_window_seals",
@@ -2564,6 +2741,12 @@ PLATFORM_TABLES = (
 )
 
 __all__ = [
+    "SettlementEarmark",
+    "PlatformSettlementEarmark",
+    "SettlementEarmarkTarget",
+    "PlatformSettlementEarmarkTarget",
+    "SettlementEarmarkEffect",
+    "PlatformSettlementEarmarkEffect",
     "OpeningWindow",
     "PlatformOpeningWindow",
     "OpeningWindowAdmission",

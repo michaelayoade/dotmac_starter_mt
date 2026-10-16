@@ -480,6 +480,7 @@
           "dotmac_billing/opening_validation.py",
           "dotmac_billing/py.typed",
           "dotmac_billing/queries.py",
+          "dotmac_billing/_cash_draw_queries.py",
           "dotmac_billing/service.py",
           "dotmac_billing/_receivable_backing.py",
           "dotmac_billing/migrations/versions/bi_0008_opening_receivables.py",
@@ -487,6 +488,11 @@
           "dotmac_billing/opening_receivable_validation.py",
           "dotmac_billing/opening_receivable_queries.py",
       "dotmac_billing/migrations/versions/bi_0009_opening_window.py",
+      "dotmac_billing/migrations/versions/bi_0010_line_source_key.py",
+      "dotmac_billing/migrations/versions/bi_0011_settlement_earmarks.py",
+      "dotmac_billing/earmark_contracts.py",
+      "dotmac_billing/earmark_authority.py",
+      "dotmac_billing/earmarks.py",
       "dotmac_billing/opening_window_contracts.py",
       "dotmac_billing/opening_window_queries.py",
       "dotmac_billing/opening_rehearsal_contracts.py",
@@ -1805,6 +1811,7 @@
           "dotmac_integration/manifest.py",
           "dotmac_integration/spi.py",
           "dotmac_integration/query_contract.py",
+          "dotmac_integration/receipt_delivery.py",
           "dotmac_integration/ingress.py",
           "dotmac_integration/polling.py",
           "dotmac_integration/discovery.py",
@@ -1826,7 +1833,8 @@
           "dotmac_integration/migrations/versions/ig_0012_delivery_evidence.py",
           "dotmac_integration/migrations/versions/ig_0013_delivery_result.py",
           "dotmac_integration/migrations/versions/ig_0014_polling_evidence.py",
-          "dotmac_integration/migrations/versions/ig_0015_descriptor_contract.py"
+          "dotmac_integration/migrations/versions/ig_0015_descriptor_contract.py",
+          "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -2374,6 +2382,10 @@
           "dotmac_payments/migrations/versions/pm_0001_payment_intents.py",
           "dotmac_payments/migrations/versions/pm_0002_money_precision.py",
           "dotmac_payments/migrations/versions/pm_0003_confirmation_immutable.py",
+          "dotmac_payments/migrations/versions/pm_0004_purchase_funding.py",
+          "dotmac_payments/migrations/versions/pm_0005_merchant_context.py",
+          "dotmac_payments/migrations/versions/pm_0006_cash_qualification.py",
+          "dotmac_payments/cash_qualification.py",
           "dotmac_payments/models.py",
           "dotmac_payments/service.py"
         ],

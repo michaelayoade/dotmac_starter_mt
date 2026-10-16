@@ -23,12 +23,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
-from dotmac_integration.execution import advance_checkpoint
+from dotmac_integration.execution import (
+    ExecutionError,
+    ReceiptVerificationOrigin,
+    _prepared_config_digest,
+    _require_prepared_config_snapshot,
+    advance_checkpoint,
+)
 from dotmac_integration.ingress import record_batch
 from dotmac_integration.models import (
     CapabilityBinding,
@@ -151,6 +158,22 @@ class PreparedPoll:
     config: dict[str, object]
     secret_refs: dict[str, str]
     config_revision_id: UUID | None
+    manifest_digest: str = ""
+    config_digest: str | None = None
+    config_schema_version: str | None = None
+
+    @property
+    def verification_origin(self) -> ReceiptVerificationOrigin:
+        _require_prepared_config_snapshot(self)
+        return ReceiptVerificationOrigin(
+            installation_id=self.installation_id,
+            capability_binding_id=self.binding_id,
+            connector_key=self.connector_key,
+            manifest_digest=self.manifest_digest,
+            config_revision_id=self.config_revision_id,
+            config_digest=self.config_digest,
+            verification_mode="poll",
+        )
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -395,6 +418,27 @@ def prepare_poll(
         if installation.current_config_revision_id
         else None
     )
+    if installation.current_config_revision_id is not None and revision is None:
+        raise PollUnavailable("prepared configuration is unavailable or inconsistent")
+    # Detach the exact handler inputs before hashing: nested dictionaries must
+    # not retain aliases to an ORM configuration changed after preparation.
+    config = deepcopy(dict((revision.config_json if revision else {}) or {}))
+    secret_refs = deepcopy(dict((revision.secret_refs if revision else {}) or {}))
+    try:
+        config_digest = (
+            _prepared_config_digest(
+                revision,
+                installation_id=installation.id,
+                config=config,
+                secret_refs=secret_refs,
+            )
+            if revision is not None
+            else None
+        )
+    except ExecutionError:
+        raise PollUnavailable(
+            "prepared configuration is unavailable or inconsistent"
+        ) from None
     return PreparedPoll(
         checkpoint_id=checkpoint.id,
         expected_version=checkpoint.version,
@@ -404,9 +448,12 @@ def prepare_poll(
         capability_id=binding.capability_id,
         job_key=checkpoint.job_key,
         cursor=_cursor(checkpoint.cursor_json),
-        config=dict((revision.config_json if revision else {}) or {}),
-        secret_refs=dict((revision.secret_refs if revision else {}) or {}),
+        config=config,
+        secret_refs=secret_refs,
         config_revision_id=revision.id if revision else None,
+        config_digest=config_digest,
+        config_schema_version=revision.schema_version if revision else None,
+        manifest_digest=installation.manifest_digest,
     )
 
 
@@ -432,12 +479,14 @@ def invoke_poll(
     resolve_secrets: SecretResolver,
 ) -> PollBatch:
     """Call the connector. No session or transaction exists by signature."""
+    _require_prepared_config_snapshot(prepared)
     handler = _handler(prepared, registry)
     try:
         secrets = dict(resolve_secrets(prepared.secret_refs))
     except Exception:
         raise PollSecretsUnavailable("poll secret material is unavailable") from None
     try:
+        _require_prepared_config_snapshot(prepared)
         try:
             returned = handler.poll(
                 prepared.cursor,
@@ -449,6 +498,7 @@ def invoke_poll(
     finally:
         secrets = {}
 
+    _require_prepared_config_snapshot(prepared)
     if not isinstance(returned, tuple) or len(returned) != 2:
         raise PollContractError("poll handler must return events and a cursor")
     events, next_cursor = returned

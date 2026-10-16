@@ -6,6 +6,7 @@ import ast
 from collections.abc import Mapping
 from pathlib import Path
 
+import pytest
 from dotmac_billing.contracts import DOCUMENT_FACT_CONTRACT
 from dotmac_billing.manifest import module as billing_module
 from dotmac_collections.manifest import module as collections_module
@@ -23,7 +24,14 @@ def _emitted_event_types(
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
             continue
-        if not isinstance(node.func, ast.Name) or node.func.id != "_emit":
+        direct = isinstance(node.func, ast.Name) and node.func.id == "_emit"
+        delegated = (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "service"
+            and node.func.attr == "_emit"
+        )
+        if not (direct or delegated):
             continue
         event_type = next(
             (keyword.value for keyword in node.keywords if keyword.arg == "event_type"),
@@ -39,19 +47,22 @@ def _emitted_event_types(
 
 
 def _source(package: str) -> str:
-    return (
-        REPO_ROOT / f"packages/{package}/src/{package.replace('-', '_')}/service.py"
-    ).read_text(encoding="utf-8")
+    # Emission belongs to the module, including delegated owners such as earmarks.
+    root = REPO_ROOT / f"packages/{package}/src/{package.replace('-', '_')}"
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(root.rglob("*.py"))
+    )
 
 
-def test_detector_rejects_an_undeclared_event_type() -> None:
+@pytest.mark.parametrize("emitter", ["_emit", "service._emit"])
+def test_detector_rejects_an_undeclared_event_type(emitter: str) -> None:
     emitted = _emitted_event_types(
-        "def probe():\n    _emit(db, event_type='commercial.undeclared.v1')\n"
+        f"def probe():\n    {emitter}(db, event_type='commercial.undeclared.v1')\n"
     )
     assert emitted - {"commercial.declared.v1"} == {"commercial.undeclared.v1"}
 
 
-def test_billing_declares_exactly_the_events_its_service_emits() -> None:
+def test_billing_declares_exactly_the_events_its_module_emits() -> None:
     emitted = _emitted_event_types(
         _source("dotmac-billing"),
         constants={"DOCUMENT_FACT_CONTRACT": DOCUMENT_FACT_CONTRACT},
@@ -74,6 +85,8 @@ def test_billing_declares_exactly_the_events_its_service_emits() -> None:
             "billing.receivable.position.v1",
             "billing.receivable.position.v2",
             "billing.settlement.accepted.v1",
+            "billing.settlement.earmarked.v1",
+            "billing.settlement.earmark.changed.v1",
         }
     )
 

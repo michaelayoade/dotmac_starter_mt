@@ -47,6 +47,7 @@ from dotmac_integration import (
     classify_poll_failure,
     due_polling_jobs,
     is_retry_eligible,
+    payload_digest,
     poll_backoff_seconds,
     poll_failure_history,
     poll_once,
@@ -123,7 +124,13 @@ def _seed(
             installation_id=installation.id,
             revision=1,
             schema_version="1",
-            config_digest="c" * 64,
+            config_digest=payload_digest(
+                {
+                    "config": {"variant": "primary"},
+                    "secret_refs": {"token": "bao://integrator/poll/token"},
+                    "schema_version": "1",
+                }
+            ),
             config_json={"variant": "primary"},
             secret_refs={"token": "bao://integrator/poll/token"},
         )

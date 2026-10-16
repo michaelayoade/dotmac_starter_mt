@@ -71,8 +71,11 @@ from dotmac_billing.contracts import (
     FinancialState,
     InvoiceDocumentFactV1,
     InvoiceLineFactV1,
+    IssuedRatedInvoiceV1,
+    IssueRatedInvoiceV1,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
+    ObligationSourceRegistry,
     PartyDocumentSnapshotV1,
     PartyTaxIdentitySnapshotV1,
     PaymentInstructionsSnapshotV1,
@@ -89,6 +92,17 @@ from dotmac_billing.contracts import (
     WithholdingDischargeEffectV1,
     _non_cash_identity,
     _withholding_money,
+)
+from dotmac_billing.earmarks import (
+    _check_permit,
+    _EarmarkPermit,
+    _touch_account,
+    allocation_remaining,
+    guard_post_group,
+    persist_capacity_plans,
+    require_claim_correction,
+    require_group_correction,
+    unrestricted_settlement_room,
 )
 from dotmac_billing.engine import Effect, EffectLane, PositionState, rebuild_position
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
@@ -462,6 +476,8 @@ def _one(
     statement = select(model).where(model.id == row_id)
     statement = _where_scope(statement, scope, model)
     if lock:
+        if model in (models.BillingAccount, models.PlatformBillingAccount):
+            _touch_account(db, scope, row_id)
         statement = statement.with_for_update()
     row = db.execute(statement).scalar_one_or_none()
     if row is None:
@@ -543,6 +559,20 @@ def create_billing_account(
     return cast(_AccountRow, row)
 
 
+def _rated_obligation_natural_key(command: AcceptRatedObligationV1) -> str:
+    natural_payload = {
+        "contract_line_ref": command.contract_line_ref,
+        "contract_version": command.contract_version,
+        "charge_component": command.charge_component,
+        "source_fact_id": command.source_fact_id,
+        "source_fact_version": command.source_fact_version,
+        "period_start": command.service_period.starts_at,
+        "period_end": command.service_period.ends_at,
+        "currency": command.total_amount.currency.code,
+    }
+    return fingerprint_of(natural_payload)
+
+
 def accept_rated_obligation(
     db: Session,
     *,
@@ -576,17 +606,7 @@ def accept_rated_obligation(
         lock=True,
     )
     _require_account_money(account, command.total_amount)
-    natural_payload = {
-        "contract_line_ref": command.contract_line_ref,
-        "contract_version": command.contract_version,
-        "charge_component": command.charge_component,
-        "source_fact_id": command.source_fact_id,
-        "source_fact_version": command.source_fact_version,
-        "period_start": command.service_period.starts_at,
-        "period_end": command.service_period.ends_at,
-        "currency": command.total_amount.currency.code,
-    }
-    natural_key = fingerprint_of(natural_payload)
+    natural_key = _rated_obligation_natural_key(command)
     offered = fingerprint_of(asdict(command))
 
     def operation(session: Session) -> dict[str, object]:
@@ -840,6 +860,135 @@ def create_draft_document(
             model=plane.document,
             row_id=UUID(str(outcome.result["document_id"])),
         ),
+    )
+
+
+def issue_rated_invoice(
+    db: Session,
+    *,
+    scope: Scope,
+    command: IssueRatedInvoiceV1,
+    obligation_sources: ObligationSourceRegistry,
+    numbering: NumberingProvider,
+) -> IssuedRatedInvoiceV1:
+    """Atomically compose existing Billing owners; leave the root to the caller.
+
+    Kernel's existing idempotency savepoint contains acceptance, drafting,
+    numbering, issuance, postings and facts. The account lock serializes retries
+    before consulting that ledger; changed inputs retain its conflict semantics.
+    The numbering adapter must allocate transactionally in the supplied session.
+    """
+    if not isinstance(command, IssueRatedInvoiceV1) or not isinstance(
+        command.obligation, AcceptRatedObligationV1
+    ):
+        raise BillingRuleViolation("invalid_command", "expected IssueRatedInvoiceV1")
+    if not isinstance(scope, TenantScope | PlatformScope):
+        raise BillingRuleViolation(
+            "invalid_scope", "an explicit Billing scope is required"
+        )
+    obligation_command = command.obligation
+    _require_scope_matches(routed=scope, declared=obligation_command.scope)
+    obligation_sources.require_obligation_source(obligation_command.source_kind)
+    command.due_date_basis.require_collectible(native=True)
+    plane = _models(scope)
+    _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=obligation_command.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        obligation = accept_rated_obligation(
+            session,
+            scope=scope,
+            command=obligation_command,
+            accepted_source_kinds=frozenset({obligation_command.source_kind}),
+        )
+        _require_obligation_taxes(
+            session, scope=scope, plane=plane, obligations=(obligation,)
+        )
+        draft = create_draft_document(
+            session,
+            scope=scope,
+            command=CreateDraftDocument(
+                obligation_id=obligation.id,
+                description=command.description,
+                quantity=Decimal("1"),
+                unit_code=command.unit_code,
+                seller_snapshot=command.seller_snapshot,
+                customer_snapshot=command.customer_snapshot,
+                payment_instructions=command.payment_instructions,
+                brand_asset=command.brand_asset,
+                locale=command.locale,
+                timezone=command.timezone,
+                document_profile_code=command.document_profile_code,
+                document_profile_version=command.document_profile_version,
+                due_date_basis=command.due_date_basis,
+                party_tax_identities=command.party_tax_identities,
+            ),
+        )
+        invoice = issue_document(
+            session,
+            scope=scope,
+            command=IssueDocument(
+                document_id=draft.id,
+                series_code=command.series_code,
+                reference_date=command.reference_date,
+                due_at=command.due_at,
+                due_date_basis=command.due_date_basis,
+                actor_ref=command.actor_ref,
+                correlation_id=command.correlation_id,
+            ),
+            numbering=numbering,
+        )
+        line = session.execute(
+            _where_scope(
+                select(plane.line).where(
+                    plane.line.document_id == invoice.id,
+                    plane.line.obligation_id == obligation.id,
+                ),
+                scope,
+                plane.line,
+            )
+        ).scalar_one()
+        issued_fact_version = session.execute(
+            _where_scope(
+                select(plane.document_fact.fact_version).where(
+                    plane.document_fact.document_id == invoice.id,
+                    plane.document_fact.fact_version == 1,
+                ),
+                scope,
+                plane.document_fact,
+            )
+        ).scalar_one()
+        return {
+            "billing_account_id": str(invoice.billing_account_id),
+            "obligation_id": str(obligation.id),
+            "invoice_id": str(invoice.id),
+            "line_id": str(line.id),
+            "line_number": line.line_number,
+            "issued_fact_version": issued_fact_version,
+        }
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.invoice.issue.rated.v1",
+        key=_rated_obligation_natural_key(obligation_command),
+        fingerprint=fingerprint_of(asdict(command)),
+        operation=operation,
+    )
+    result = outcome.result
+    return IssuedRatedInvoiceV1(
+        scope=scope,
+        billing_account_id=UUID(str(result["billing_account_id"])),
+        obligation_id=UUID(str(result["obligation_id"])),
+        invoice_id=UUID(str(result["invoice_id"])),
+        line_id=UUID(str(result["line_id"])),
+        line_number=int(str(result["line_number"])),
+        issued_fact_version=int(str(result["issued_fact_version"])),
     )
 
 
@@ -1523,10 +1672,25 @@ def _post_group(
     opening_effects: tuple[OpeningCashEffectV1, ...] = (),
     cash_source_order: tuple[CashCreditSourceOrderV1, ...] = (),
     corrects_posting_group_id: UUID | None = None,
+    _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
     plane = _models(scope)
-    allocation_inputs = tuple(allocations)
+    allocation_inputs = tuple(
+        replace(item, allocation_id=item.allocation_id or uuid4())
+        for item in allocations
+    )
     _one(db, scope=scope, model=plane.account, row_id=account_id, lock=True)
+    capacity_plans = guard_post_group(
+        db,
+        scope=scope,
+        account_id=account_id,
+        kind=kind,
+        allocations=allocation_inputs,
+        opening_effects=opening_effects,
+        reverses_group_id=reverses_group_id,
+        corrects_posting_group_id=corrects_posting_group_id,
+        permit=_earmark_permit,
+    )
     group_id = opening_group_id or uuid4()
     source_version = _next_source_version(
         db, scope=scope, plane=plane, account_id=account_id
@@ -1709,6 +1873,15 @@ def _post_group(
         allocation_rows.append(row)
         db.add(row)
     db.flush()
+    persist_capacity_plans(
+        db,
+        scope=scope,
+        plans=capacity_plans,
+        posting_group_id=group_id,
+        source_ref=source_ref,
+        occurred_at=occurred_at,
+        permit=_earmark_permit,
+    )
     position = rebuild_receivable_position(
         db,
         scope=scope,
@@ -4402,7 +4575,12 @@ def apply_available_credit(
                     "settlement_room_ambiguous",
                     "settlement consumption exceeds its evidence",
                 )
-            settlement_room = settlement.amount - used
+            settlement_room = unrestricted_settlement_room(
+                session,
+                scope=scope,
+                settlement_id=settlement.id,
+                actual_room=settlement.amount - used,
+            )
             amount = min(remaining, settlement_room)
             if amount > 0:
                 allocations.append(
@@ -4457,7 +4635,7 @@ def apply_available_credit(
                 )
                 if quantity == 0:
                     continue
-                amount = money_from_minor(
+                opening_amount = money_from_minor(
                     quantity, account.currency, account.minor_units
                 )
                 effect = _opening_effect(
@@ -4466,7 +4644,7 @@ def apply_available_credit(
                     group_id=group_id,
                     sequence=len(opening) + 1,
                     kind="application",
-                    amount=amount,
+                    amount=opening_amount,
                     source_ref=command.source_ref,
                     request_digest=digest,
                     occurred_at=command.occurred_at,
@@ -4479,7 +4657,7 @@ def apply_available_credit(
                         len(source_order) + 1, None, effect.effect_id
                     )
                 )
-                remaining -= amount.amount
+                remaining -= opening_amount.amount
                 if remaining == 0:
                     break
         if remaining != 0:
@@ -4635,8 +4813,13 @@ def allocate_settlement(
 
 
 def deallocate_settlement(
-    db: Session, *, scope: Scope, command: DeallocationCommand
+    db: Session,
+    *,
+    scope: Scope,
+    command: DeallocationCommand,
+    _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
+    _check_permit(_earmark_permit, scope, command)
     plane = _models(scope)
     original = _one(
         db, scope=scope, model=plane.allocation, row_id=command.allocation_id
@@ -4651,6 +4834,9 @@ def deallocate_settlement(
         model=plane.settlement,
         row_id=original.settlement_id,
     )
+    require_claim_correction(
+        db, scope=scope, settlement_id=settlement.id, permit=_earmark_permit
+    )
     _one(
         db,
         scope=scope,
@@ -4662,15 +4848,7 @@ def deallocate_settlement(
         command.amount,
         _money(original.amount_delta, original.currency, original.minor_units),
     )
-    offsets_statement = select(
-        func.coalesce(func.sum(plane.allocation.amount_delta), 0)
-    ).where(plane.allocation.offsets_allocation_id == original.id)
-    offset = Decimal(
-        db.execute(
-            _where_scope(offsets_statement, scope, plane.allocation)
-        ).scalar_one()
-    )
-    remaining = original.amount_delta + offset
+    remaining = allocation_remaining(db, scope=scope, allocation_id=original.id)
     if command.amount.amount <= 0 or command.amount.amount > remaining:
         raise BillingRuleViolation(
             "deallocation_exceeds_allocation",
@@ -4683,6 +4861,7 @@ def deallocate_settlement(
         key=command.source_ref,
         fingerprint=fingerprint_of(asdict(command)),
         account_id=settlement.billing_account_id,
+        _earmark_permit=_earmark_permit,
         kind="deallocation",
         opening_allocation_group_id=original.posting_group_id,
         money=command.amount,
@@ -4704,11 +4883,19 @@ def deallocate_settlement(
 
 
 def reallocate_settlement(
-    db: Session, *, scope: Scope, command: ReallocationCommand
+    db: Session,
+    *,
+    scope: Scope,
+    command: ReallocationCommand,
+    _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
+    _check_permit(_earmark_permit, scope, command)
     plane = _models(scope)
     settlement = _one(
         db, scope=scope, model=plane.settlement, row_id=command.settlement_id
+    )
+    require_claim_correction(
+        db, scope=scope, settlement_id=settlement.id, permit=_earmark_permit
     )
     _one(
         db,
@@ -4751,6 +4938,7 @@ def reallocate_settlement(
         key=command.source_ref,
         fingerprint=fingerprint_of(asdict(command)),
         account_id=settlement.billing_account_id,
+        _earmark_permit=_earmark_permit,
         kind="reallocation",
         opening_document_id=source.id,
         money=command.amount,
@@ -4774,11 +4962,19 @@ def reallocate_settlement(
 
 
 def refund_settlement(
-    db: Session, *, scope: Scope, command: RefundCommand
+    db: Session,
+    *,
+    scope: Scope,
+    command: RefundCommand,
+    _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
+    _check_permit(_earmark_permit, scope, command)
     plane = _models(scope)
     settlement = _one(
         db, scope=scope, model=plane.settlement, row_id=command.settlement_id
+    )
+    require_claim_correction(
+        db, scope=scope, settlement_id=settlement.id, permit=_earmark_permit
     )
     _one(
         db,
@@ -4805,6 +5001,7 @@ def refund_settlement(
         key=command.source_ref,
         fingerprint=fingerprint_of(asdict(command)),
         account_id=settlement.billing_account_id,
+        _earmark_permit=_earmark_permit,
         kind="refund",
         money=command.amount,
         occurred_at=command.occurred_at,
@@ -4835,6 +5032,7 @@ def _posting_command(
     allocations: Iterable[_AllocationInput],
     opening_allocation_group_id: UUID | None = None,
     opening_document_id: UUID | None = None,
+    _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
     plane = _models(scope)
 
@@ -4856,6 +5054,7 @@ def _posting_command(
             occurred_at=occurred_at,
             effects=effects,
             allocations=allocations,
+            _earmark_permit=_earmark_permit,
         )
         return {"posting_group_id": str(group.id)}
 
@@ -4927,6 +5126,7 @@ def _reverse_group(
     occurred_at: datetime,
     source_ref: str,
     exposure_document_ids: Iterable[UUID] = (),
+    _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
     if original.group_kind in ("withholding_accepted", "withholding_reversed"):
         raise BillingRuleViolation(
@@ -4981,12 +5181,18 @@ def _reverse_group(
         ),
         exposure_document_ids=exposure_document_ids,
         reverses_group_id=original.id,
+        _earmark_permit=_earmark_permit,
     )
 
 
 def reverse_posting_group(
-    db: Session, *, scope: Scope, command: ReversePostingGroupCommand
+    db: Session,
+    *,
+    scope: Scope,
+    command: ReversePostingGroupCommand,
+    _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
+    _check_permit(_earmark_permit, scope, command)
     plane = _models(scope)
     original_evidence = _one(
         db,
@@ -5000,6 +5206,9 @@ def reverse_posting_group(
         model=plane.account,
         row_id=original_evidence.billing_account_id,
         lock=True,
+    )
+    require_group_correction(
+        db, scope=scope, group_id=original_evidence.id, permit=_earmark_permit
     )
     _require_non_cash_reversal_owner(db, scope=scope, original=original_evidence)
     _require_opening_reversal_owner(db, scope=scope, original=original_evidence)
@@ -5028,6 +5237,7 @@ def reverse_posting_group(
             original=original,
             occurred_at=command.occurred_at,
             source_ref=command.source_ref,
+            _earmark_permit=_earmark_permit,
         )
         return {"posting_group_id": str(group.id)}
 
@@ -5363,6 +5573,7 @@ def repair_document_artifact(
 
 
 __all__ = [
+    "issue_rated_invoice",
     "provision_opening_window",
     "seal_opening_window",
     "import_opening_account",
@@ -6496,12 +6707,14 @@ def reverse_cash_credit_draw(
     *,
     scope: Scope,
     command: ReverseCashCreditDrawV1,
+    _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
     """Finance assembly authorization remains the ordinary Billing perimeter.
 
     authorization_ref retains its audit binding; it is not itself a permission.
     This command restores credit/AR and never attests external cash receipt.
     """
+    _check_permit(_earmark_permit, scope, command)
     if type(command) is not ReverseCashCreditDrawV1:
         raise BillingRuleViolation(
             "opening_command_invalid", "expected ReverseCashCreditDrawV1"
@@ -6515,6 +6728,9 @@ def reverse_cash_credit_draw(
             "opening_draw_invalid",
             "inverse requires an original opening-bearing cash draw",
         )
+    require_group_correction(
+        db, scope=scope, group_id=fact.posting_group_id, permit=_earmark_permit
+    )
     plane = _models(scope)
     account = _one(
         db, scope=scope, model=plane.account, row_id=fact.billing_account_id, lock=True
@@ -6627,6 +6843,7 @@ def reverse_cash_credit_draw(
             opening_effects=tuple(opening),
             cash_source_order=tuple(order),
             corrects_posting_group_id=fact.posting_group_id,
+            _earmark_permit=_earmark_permit,
         )
         return {"posting_group_id": str(group.id)}
 

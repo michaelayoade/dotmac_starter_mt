@@ -325,6 +325,10 @@ def _tenant_engine(url: str, tenant_id: uuid.UUID) -> Engine:
                 "SELECT set_config('app.current_tenant', %s, false)",
                 (str(tenant_id),),
             )
+        # Session-level SET inside the implicit connect transaction is
+        # reverted when that transaction later rolls back; commit it so
+        # rollback proofs keep their tenant visibility.
+        dbapi_connection.commit()
 
     return engine
 

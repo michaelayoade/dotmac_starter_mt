@@ -33,6 +33,21 @@ file bytes. Artifact creation locks the invoice lifecycle and refuses a new
 medium after cancellation; a pre-existing idempotent command still replays its
 historical relation.
 
+`get_current_settlement_allocation` observes one exact original allocation via
+`GetCurrentSettlementAllocationV1` and returns frozen
+`CurrentSettlementAllocationV1`. It locks the Billing account in the caller's
+READ COMMITTED transaction, validates exact scope/account/group/settlement/invoice
+and Money, live invoice issuance and settlement acceptance backing, and follows
+linked deallocation and reversal effects. Its state is `current`, `reduced`,
+`removed`, or `inactive_backing`; only `current` with the exact original and
+remaining Money proves full present funding. Reallocation lacks an original
+allocation pointer and is refused for that settlement/invoice pair. Missing,
+malformed or ambiguous lineage and other isolation levels are refused. No
+aggregate balance or immutable accounting fact substitutes for this check.
+Re-observe before each product decision within the same transaction; a returned
+observation is not a reusable admission token. Allocation command replay retains
+its historical semantics. This source addition is not a published package.
+
 Settlement replay preserves the published source-key and money/version
 fingerprint algorithm. Billing additionally compares persisted account, funding
 lane, confirmation evidence and exact source identifiers before returning a

@@ -117,9 +117,20 @@ MODULE_MODELS = (
 
 
 @pytest.fixture(autouse=True)
-def _installed_integration_audit_actions() -> None:
-    """The standalone module tests compose its declaration registry."""
+def _installed_integration_audit_actions():
+    """The standalone module tests compose its declaration registry.
+
+    The registry is process-global and this fixture is imported by the
+    hosted receipt-origin canaries, which share a process with app-level
+    tests. Restore whatever registry was active before so the standalone
+    composition cannot truncate the app's declarations for later tests.
+    """
+    from dotmac_kernel import audit_actions as _audit_actions
+
+    previous = _audit_actions._active_registry
     install_audit_actions(AuditActionRegistry.from_manifests([module]))
+    yield
+    _audit_actions._active_registry = previous
 
 
 # ── A connector that RECEIVES ───────────────────────────────────────────────
@@ -1984,3 +1995,36 @@ def test_the_address_wrapper_is_what_keeps_the_key_out_of_frame_locals() -> None
 
     # And it is the WRAPPER doing the work, not the value being unusual.
     assert key in repr(key)
+
+
+def test_receive_persists_only_the_engine_prepared_original_context(
+    db: Session,
+) -> None:
+    from dotmac_integration.execution import receipt_verification_origin
+
+    events = (
+        InboundEvent(
+            provider_event_id="origin-event",
+            event_type="received",
+            payload={
+                "connector_key": "payload-forgery",
+                "manifest_digest": "f" * 64,
+                "config_revision_id": str(uuid.uuid4()),
+            },
+        ),
+    )
+    fake = IngressFake(events=events)
+    registry = registry_for(fake)
+    _, _, key = build(db, registry)
+    prepared = prepare_ingress(db, endpoint=address(key), registry=registry)
+    outcome = receive(
+        Uow(db),
+        endpoint=address(key),
+        request=delivery_request(),
+        registry=registry,
+        resolve_secrets=resolver(),
+    )
+    assert outcome.receipt_ids
+    receipt = db.get(InboxReceipt, outcome.receipt_ids[0])
+    assert receipt_verification_origin(receipt) == prepared.verification_origin
+    assert [hook for hook, *_ in fake.seen] == ["verify", "normalize"]
