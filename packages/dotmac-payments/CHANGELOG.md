@@ -1,6 +1,19 @@
 # Changelog — dotmac-payments
 
-## 0.1.0a2 — 2026-10-13 (declared, unpublished)
+## 0.1.0a3 — proposed, unpublished
+
+- Extract existing purchase checkout as `PURCHASE_FUNDING`, requiring an exact
+  opaque destination before invoices exist; reuse opening, lookup and immutable
+  confirmation contracts without granting financial authority.
+- Add tenant-only `pm_0004_purchase_funding` to extend the published purpose
+  CHECK and protect the full original purchase checkout binding from mutation
+  or deletion. Preserve old
+  rows, RLS, grants and confirmation immutability; refuse downgrade with funding
+  intents. Published a2 migrations and release history remain unchanged.
+- Successor identity is proposed source metadata, not release allocation or
+  publication approval. Hosted runtime acceptance remains pending.
+
+## 0.1.0a2 — 2026-10-13 (published)
 
 - Enforce confirmed-cash UPDATE/DELETE refusal at the PostgreSQL boundary,
   including deletion cascades, while preserving intent/proof lifecycle writes.

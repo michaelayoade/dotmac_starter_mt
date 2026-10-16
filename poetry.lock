@@ -1573,7 +1573,7 @@ url = "packages/dotmac-payables"
 
 [[package]]
 name = "dotmac-payments"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Payment intent and confirmation correlation"
 optional = false
 python-versions = ">=3.11,<3.14"

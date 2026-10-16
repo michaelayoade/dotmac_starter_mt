@@ -152,6 +152,10 @@ def open_payment_intent(
     provider_type = _required(command.provider_type, "provider type").upper()
     channel = _required(command.channel, "channel").upper()
     requested = _positive(command.requested, "requested amount")
+    if command.purpose == PaymentPurpose.PURCHASE_FUNDING and (
+        command.target_reference is None or not command.target_reference.strip()
+    ):
+        raise Conflict("purchase funding requires a nonblank target reference")
     existing = db.scalar(
         select(PaymentIntent).where(
             PaymentIntent.tenant_id == tenant_id, PaymentIntent.reference == reference

@@ -864,3 +864,56 @@ def test_intent_lookup_refuses_corrupt_persisted_money(db, changes, error):
         get_payment_intent_v1(
             db, scope=scope, query=GetPaymentIntentV1(intent.reference)
         )
+
+
+@pytest.mark.parametrize("target", [None, "", "   ", "\t\r\n"])
+def test_purchase_funding_requires_an_exact_target(db: Session, target) -> None:
+    with pytest.raises(Conflict, match="purchase funding requires"):
+        open_payment_intent(
+            db,
+            scope=TenantScope(TENANT_A),
+            command=OpenPaymentIntent(
+                payer_reference="payer:1",
+                purpose=PaymentPurpose.PURCHASE_FUNDING,
+                target_reference=target,
+                requested=Money.of("15000", NGN),
+                reference="purchase-funding",
+                provider_type="paystack",
+                channel="web",
+                opened_at=NOW,
+            ),
+        )
+
+
+def test_purchase_funding_is_exact_and_platform_scope_is_refused(db: Session) -> None:
+    from dotmac_kernel.cache import PlatformScope
+    from dotmac_payments import GetPaymentIntentV1, get_payment_intent_v1
+
+    scope = TenantScope(TENANT_A)
+    command = OpenPaymentIntent(
+        payer_reference="payer:1",
+        purpose=PaymentPurpose.PURCHASE_FUNDING,
+        target_reference="purchase:1 ",
+        requested=Money.of("15000", NGN),
+        reference="purchase-funding",
+        provider_type="paystack",
+        channel="web",
+        opened_at=NOW,
+    )
+    intent = open_payment_intent(db, scope=scope, command=command)
+    assert open_payment_intent(db, scope=scope, command=command).id == intent.id
+    observed = get_payment_intent_v1(
+        db, scope=scope, query=GetPaymentIntentV1(command.reference)
+    )
+    assert observed.purpose is PaymentPurpose.PURCHASE_FUNDING
+    assert observed.target_reference == command.target_reference
+    for changed in (
+        replace(command, target_reference="purchase:1"),
+        replace(command, target_reference="purchase:2"),
+        replace(command, purpose=PaymentPurpose.INVOICE_SETTLEMENT),
+        replace(command, purpose=PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT),
+    ):
+        with pytest.raises(Conflict):
+            open_payment_intent(db, scope=scope, command=changed)
+    with pytest.raises(TypeError, match="TenantScope"):
+        open_payment_intent(db, scope=PlatformScope(), command=command)

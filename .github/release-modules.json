@@ -2374,6 +2374,7 @@
           "dotmac_payments/migrations/versions/pm_0001_payment_intents.py",
           "dotmac_payments/migrations/versions/pm_0002_money_precision.py",
           "dotmac_payments/migrations/versions/pm_0003_confirmation_immutable.py",
+          "dotmac_payments/migrations/versions/pm_0004_purchase_funding.py",
           "dotmac_payments/models.py",
           "dotmac_payments/service.py"
         ],
