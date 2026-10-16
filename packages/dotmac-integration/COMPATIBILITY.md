@@ -9,7 +9,7 @@ document is the bug.
 | | |
 |---|---|
 | Released | `0.1.0a1` through **`0.1.0a18`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention, a15 adds typed outbound repair and runtime safety, and a16 adds the domain-owned payload gate plus durable polling evidence, and a17 adds product-port descriptor v3, carrying the domain's payload contract or dated grace separately from the product wire without changing SPI 1.4 |
-| Declared, unpublished | `0.1.0a19` preserves unknown legacy receipt origin without backfill. It changes no existing wire contract and makes no cash-qualification claim; do not exact-pin it |
+| Declared, unpublished | `0.1.0a19` preserves unknown legacy receipt origin without backfill and adds shared held-key product authentication without changing the SPI. It changes no existing wire contract and makes no cash-qualification claim; do not exact-pin it |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
@@ -370,6 +370,29 @@ encounter with the SPI a secrets problem.
 The kit **owns no rules**. Every mode refusal is `spi.verify_plugin_modes`,
 which `discovery.discover` also runs; the kit only translates it into an
 `AssertionError` an author's suite can read.
+
+## Held-key product-query authentication
+
+The additive public `ProductCaller`, `ProductPrincipal`,
+`ProductAuthenticationFailed` and `ProductAuthenticator` API extracts
+Integrator's held-key query authentication. The caller protocol describes the
+existing declaration through read-only properties; the authenticator requires
+an explicitly injected lookup of already-held material. Its implementation
+submodule uses only the standard library. The existing package initializer
+retains its other imports.
+
+Authentication captures callers once, looks up every caller on each attempt,
+compares held material with `secrets.compare_digest`, and selects the last
+matching caller before checking exact required-scope membership. It returns a
+fresh frozen principal with frozenset grants. Missing matches and missing scopes
+retain the opaque `product authentication failed` refusal; lookup and comparison
+exceptions retain their existing propagation, including non-ASCII comparison
+`TypeError`. Empty held strings retain exact-comparison behavior.
+
+The assembly retains caller validation, Kernel lookup defaults, held-material
+loading and refresh, HTTP headers and status mapping, and submitted-binding
+authorization. This API adds no health receiver or health-source binding,
+runtime dependency, migration or connector SPI change.
 
 ## What the module may never contain
 

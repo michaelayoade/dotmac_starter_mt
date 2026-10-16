@@ -15,6 +15,12 @@ remain required.
 
 ### Added
 
+- Shared migration configuration helpers select explicitly supplied owner
+  material, refuse blank values, and allow only an explicitly supplied fallback.
+  The Alembic configuration writer preserves percent-encoded URLs without
+  importing an engine, session owner or settings inside the helper. The
+  reference migration adapter uses these same helpers; runtime database
+  authority is unchanged.
 - Optional typed `RequestEvidenceConfigurationV1` in the product assembly
   selects Kernel's request-evidence context instead of the legacy request
   metadata writer. Non-writing observation remains available, and omission

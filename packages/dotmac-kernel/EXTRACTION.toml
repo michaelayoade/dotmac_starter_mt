@@ -39,6 +39,13 @@ request_evidence_context_source_revisions = [
   "dotmac_sub:7c1d271dad54ad178fb90083305363f855622175",
 ]
 source_paths = [
+  # Migration configuration (2026-10-16), bounded migration-boundary extension.
+  # Sub selector/write seam audited at 935125cafbf0b395b0c6bed1e4a49b13968f924c;
+  # ERP strict-owner seam at 93d7e111d9278b8377bac311e78308c99f51da79.
+  "dotmac_sub:app/config.py",
+  "dotmac_sub:alembic/env.py",
+  "dotmac_erp:alembic/env.py",
+  "dotmac_starter_mt:alembic/env.py",
   # Conflict-savepoint composition (2026-10-14): bounded existing facility
   # extension; Sub's exact-handle guarded completion is the product source.
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/_transactions.py",
@@ -143,6 +150,8 @@ source_paths = [
   "dotmac_sub:app/services/audit_helpers.py",
 ]
 preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_migration_configuration.py",
+  "dotmac_starter_mt:tests/architecture/test_migration_configuration_is_pure.py",
   "dotmac_starter_mt:tests/architecture/test_kernel_public_surface.py",
   "dotmac_starter_mt:tests/unit/test_settings_service.py",
   "dotmac_starter_mt:tests/unit/test_setting_scopes.py",
@@ -226,6 +235,7 @@ candidate_consumers = [
   "dotmac_academy_app",
 ]
 inventory_evidence = [
+  "docs/inventories/kernel-migration-configuration-sources.md",
   "docs/inventories/kernel-conflict-savepoint-composition.md",
   # Semantic encoding (2026-09-02). The negative inventory licensing the
   # greenfield classification: seven repositories at immutable origin/main

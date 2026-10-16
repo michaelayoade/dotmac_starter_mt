@@ -1,5 +1,19 @@
 # Changelog — dotmac-integration
 
+## Unreleased — held-key product-query authentication
+
+- Extract Integrator's authenticator from
+  `ff6796aaa0d063b2d30327748e64627f0bccb394`,
+  `src/dotmac_integrator/product_auth.py`, into the additive public
+  `ProductCaller`, `ProductPrincipal`, `ProductAuthenticationFailed` and
+  `ProductAuthenticator` API. The stdlib-only implementation requires injected
+  held-material lookup and preserves the existing comparison, last-match,
+  exact-scope and immutable-principal behavior.
+- Port the source authentication tests with traversal, precedence, rotation
+  and exception-propagation cases. Hosted validation and released-wheel
+  consumer cutover remain pending. This adds no health receiver, health-source
+  binding, dependency, migration or connector SPI change.
+
 ## Release state — read this before pinning
 
 **Eighteen versions have been released. Pin `0.1.0a18`.** The a18 publication
@@ -98,6 +112,8 @@ cash-qualification claim. a19 remains unpublished and must not be exact-pinned.
 
 ## 0.1.0a19 — unreleased
 
+- Adds the shared held-key product-query authentication API described above; no consumer adoption is claimed.
+
 - Preserves receipt origin as unknown for legacy records; it does not backfill
   historical rows.
 - Adds no change to an existing wire contract and makes no cash-qualification
@@ -106,9 +122,8 @@ cash-qualification claim. a19 remains unpublished and must not be exact-pinned.
 
 ## 0.1.0a18 — unreleased
 
-a17 is published (tag `dotmac-integration-v0.1.0a17`); a18 was allocated
-ahead of source so the durable provisioning-runtime work could not share a
-version number with a17's published contract. That work has now landed:
+Verified publication run `37612462253` binds this release to
+`a7dc7a41d11c37a1b93d8e307e80731ce3275f11`. Its additions include:
 
 - Adds **SPI 1.5**: a fourth closed `ConnectorMode`, `PROVISION`, with one
   `ProvisioningHandler` implementing `plan` / `apply` / `observe` / `cancel`.

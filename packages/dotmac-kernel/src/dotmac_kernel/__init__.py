@@ -427,6 +427,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.middleware.tenant",
         "dotmac_kernel.migrations",
         "dotmac_kernel.migrations.catalog",
+        "dotmac_kernel.migrations.configuration",
         "dotmac_kernel.migrations.gate",
         # Public because an ASSEMBLY must declare its prerequisite bindings and
         # a MODULE migration must verify them — both are consumer-facing halves
