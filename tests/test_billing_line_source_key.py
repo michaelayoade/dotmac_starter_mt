@@ -8,13 +8,13 @@ import os
 import uuid
 
 import pytest
-from alembic.config import Config
 from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from alembic import command
+from alembic.config import Config
 from tests import test_billing_isolation as billing
 
 REVISION = "bi_0010_line_source_key"
