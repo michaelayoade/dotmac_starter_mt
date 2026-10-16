@@ -287,6 +287,28 @@
           "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-network-topology",
+      "version": "0.2.0a1",
+      "tag": "dotmac-network-topology-v0.2.0a1",
+      "tag_object": "cf086046a5444f225375bfd129cf934da9f30838",
+      "peeled_commit": "c3029f3206f0d474a24711a58b298a3919e11126",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_network_topology-0.2.0a1-cp312-cp312-manylinux_2_35_x86_64.whl": "9562f65794d866c8c48fe021688e98b80f0aa35fef1f4b3d153d3767559b9052"
+      },
+      "verification_run_id": "38875680856",
+      "source_run_id": "38875680856",
+      "release_authority_digest": "sha256:eba56abff71d545562a970b87939624cd97963baefc651853dae32f0eedd22d0",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+          "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
+        }
+      ]
     }
   ]
 }

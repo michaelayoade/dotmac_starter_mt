@@ -6970,6 +6970,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-network-topology ──
+    "dotmac-network-topology-v0.2.0a1": (
+        "dotmac-network-topology",
+        "c3029f3206f0d474a24711a58b298a3919e11126",
+        {
+            "nt_0001_network_topology.py": (
+                "b47d4600830b07a8d3c1034c397a4e347446e15d84260c4ee473c7a3e9d5632e"
+            ),
+        },
+    ),
     "dotmac-network-topology-v0.1.0a1": (
         "dotmac-network-topology",
         "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
