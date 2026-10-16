@@ -487,6 +487,7 @@
           "dotmac_billing/opening_receivable_validation.py",
           "dotmac_billing/opening_receivable_queries.py",
       "dotmac_billing/migrations/versions/bi_0009_opening_window.py",
+      "dotmac_billing/migrations/versions/bi_0010_line_source_key.py",
       "dotmac_billing/opening_window_contracts.py",
       "dotmac_billing/opening_window_queries.py",
       "dotmac_billing/opening_rehearsal_contracts.py",

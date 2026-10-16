@@ -7393,6 +7393,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "bi_0007_opening_cash.py",
             "bi_0008_opening_receivables.py",
             "bi_0009_opening_window.py",
+            "bi_0010_line_source_key.py",
         }
     ),
     "dotmac-collections": frozenset(),
