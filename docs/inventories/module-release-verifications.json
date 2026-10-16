@@ -309,6 +309,28 @@
           "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-fiber-plant",
+      "version": "0.2.0a1",
+      "tag": "dotmac-fiber-plant-v0.2.0a1",
+      "tag_object": "8bc3e63f8723d170d1165f5acb58b332ff2ea27b",
+      "peeled_commit": "4f3d9e4b6d26114d9a5d949fbe0b0626a1400f77",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_fiber_plant-0.2.0a1-cp312-cp312-manylinux_2_35_x86_64.whl": "6f14e819d1e6b2969360d63f19b9b22f65f2792ea82d00c52826f05e229ebed1"
+      },
+      "verification_run_id": "38884450813",
+      "source_run_id": "38884450813",
+      "release_authority_digest": "sha256:eba56abff71d545562a970b87939624cd97963baefc651853dae32f0eedd22d0",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a105-py3-none-any.whl",
+          "sha256": "20c63b595fbb91844eaf75492e0be4a77711b4f5715d55e7074a3d24da427c80"
+        }
+      ]
     }
   ]
 }
