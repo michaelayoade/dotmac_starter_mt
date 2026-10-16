@@ -694,8 +694,49 @@ def new_rows(base_text: str, head_text: str) -> list[dict]:
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=False
+        ["git", *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
     )
+
+
+def pull_request_base(*, github_sha: str, pull_request_head_sha: str) -> str:
+    """Return the actual base of GitHub's checked-out synthetic PR merge.
+
+    The event's base SHA can predate this merge's first parent. Prove the
+    immutable merge identity and both parent objects before diffing its rows.
+    Raw commit headers retain the parent count even in a shallow checkout.
+    """
+    for label, sha in (
+        ("GITHUB_SHA", github_sha),
+        ("pull-request head SHA", pull_request_head_sha),
+    ):
+        if not _BASE_SHA.fullmatch(sha):
+            raise ProvenanceError(f"{label} must be one immutable 40-hex commit")
+    checked_out = _git("rev-parse", "--verify", "HEAD")
+    if checked_out.returncode != 0 or checked_out.stdout.strip() != github_sha:
+        raise ProvenanceError("checked-out HEAD does not equal GITHUB_SHA")
+    commit = _git("cat-file", "commit", github_sha)
+    if commit.returncode != 0:
+        raise ProvenanceError("GITHUB_SHA cannot be read as a merge commit")
+    headers = commit.stdout.split("\n\n", 1)[0].splitlines()
+    parents = [
+        line.removeprefix("parent ") for line in headers if line.startswith("parent ")
+    ]
+    if len(parents) != 2 or any(not _BASE_SHA.fullmatch(parent) for parent in parents):
+        raise ProvenanceError("pull-request merge must have exactly two parents")
+    if parents[1] != pull_request_head_sha:
+        raise ProvenanceError(
+            "merge second parent does not equal the pull-request head SHA"
+        )
+    for parent in parents:
+        resolved = _git("cat-file", "-t", parent)
+        if resolved.returncode != 0 or resolved.stdout.strip() != "commit":
+            raise ProvenanceError(f"cannot resolve parent {parent} as a commit")
+    return parents[0]
 
 
 MAIN_REF = "refs/remotes/origin/main"
@@ -867,14 +908,32 @@ def _module_at(commit: str, path: str):
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--base", required=True, help="the immutable 40-hex base commit to diff against"
+    comparison = parser.add_mutually_exclusive_group(required=True)
+    comparison.add_argument(
+        "--base", help="the immutable 40-hex base commit to diff against (push)"
+    )
+    comparison.add_argument(
+        "--pull-request-head",
+        help="the immutable event head SHA; validate the checked-out synthetic merge",
     )
     parser.add_argument("--wait-seconds", type=int, default=1200)
     parser.add_argument("--poll-seconds", type=int, default=20)
     args = parser.parse_args(argv)
 
-    if not _BASE_SHA.fullmatch(args.base):
+    try:
+        base = (
+            pull_request_base(
+                github_sha=os.environ.get("GITHUB_SHA", ""),
+                pull_request_head_sha=args.pull_request_head,
+            )
+            if args.pull_request_head is not None
+            else args.base
+        )
+    except ProvenanceError as failure:
+        print(f"module release provenance REFUSED: {failure}", file=sys.stderr)
+        return 2
+
+    if not _BASE_SHA.fullmatch(base):
         print(
             "module release provenance REFUSED: --base must be one immutable "
             "40-hex commit",
@@ -890,11 +949,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    base_result = _git("show", f"{args.base}:{LEDGER_PATH}")
+    base_result = _git("show", f"{base}:{LEDGER_PATH}")
     if base_result.returncode != 0:
         print(
-            f"module release provenance REFUSED: base {args.base} has no "
-            f"{LEDGER_PATH}",
+            f"module release provenance REFUSED: base {base} has no {LEDGER_PATH}",
             file=sys.stderr,
         )
         return 2
@@ -912,7 +970,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"module release provenance REFUSED: {failure}", file=sys.stderr)
         return 1
 
-    base_authority = _git("show", f"{args.base}:{release_authority.LEDGER_PATH}")
+    base_authority = _git("show", f"{base}:{release_authority.LEDGER_PATH}")
     head_authority = _git("show", f"HEAD:{release_authority.LEDGER_PATH}")
     base_authority_text = (
         base_authority.stdout if base_authority.returncode == 0 else None

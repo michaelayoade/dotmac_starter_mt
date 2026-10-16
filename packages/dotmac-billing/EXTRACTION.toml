@@ -1,4 +1,6 @@
 schema_version = 1
+line_source_key_evidence_revisions = ["dotmac_sub:99313fb2cc0e179d13742d26a75e3a58c6720c6b"]
+line_source_key_source_note = "PORT-DELTA provider prerequisite for Sub prepaid-period purchases and entitlements: bi_0010_line_source_key adds ordinary exact scope/line/document/account unique FK targets on selected Billing planes. Existing line/document/account FKs, issued-line guards and ACLs remain unchanged. Sub's post-693 nullable bridge is planned, preserving legacy FKs without historical backfill or closed-invoice migration. Probe DDL is hosted PostgreSQL provider evidence only, not a deployed consumer schema, qualified cash or payment-status proof. See docs/inventories/billing-extraction-dossier.md."
 package = "dotmac-billing"
 classification = "optional-module"
 status = "audit-complete"
@@ -117,6 +119,9 @@ preserved_tests = [
   "dotmac_vendor_control_plane:tests/unit/test_contracts.py",
   "dotmac_vendor_control_plane:tests/migration/test_replay_concurrency.py",
 ]
+account_observation_source_note = "PORT-DELTA on the accepted clean Billing account owner and public invoice-fact table-select/no-autoflush query pattern. Prospective dotmac_sub ModuleBillingAccountBinding (app/models/billing.py), referenced by the concrete source-only get_module_invoice_billing_account consumer at Sub 60ff4a755636ce55a8f683806bdf3a6b1d8b1929 in app/services/provider_payment_settlements.py and tests/integration/test_provider_invoice_module_cash_pg.py (runtime/type acceptance waits for publication and exact pin), needs current account currency/minor units/external reference which composite FKs cannot prove. Existing Sub subscriber identity queries do not read clean module accounts. No adoption, immutable external reference, monetary authority, release or lock proof is claimed; see docs/inventories/billing-extraction-dossier.md dated account-observation addendum."
+current_allocation_observation_source_note = "PORT-DELTA: concrete Sub fund_prepaid_module_period_entitlement caller requires exact CURRENT settlement allocation after allocate_settlement idempotent replay. Billing-owned frozen request/observation and scalar query retain the account lock in READ COMMITTED, validate current invoice and confirmed settlement backing, and follow exact linked deallocation/reversal effects. Unlinked reallocation is refused rather than attributed from totals. Hosted PostgreSQL both-plane canaries authored; no runtime, publication, pin adoption or ledger activation claim."
+public_invoice_authoring_source_note = "PORT-DELTA: IssueRatedInvoiceV1 composes existing accepted obligation, quantity-one draft and issuance owners under Kernel idempotency/savepoint and returns persisted IssuedRatedInvoiceV1 identities. Intended real consumer is Sub prepaid_period_purchases settlement, one invoice per final funded period; module-line/product-FK bridge, frozen price/Tax evidence, owner/root conflict-savepoint composition and verified cash-source binding remain prerequisites. No adoption, activation or release is claimed; see dated billing-extraction-dossier addendum."
 contract_consumers = []
 candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_sub"]
 composition_boundary = "ADR-0024: each adopter installs its own selected Billing plane and owns its own rows. Billing imports no assembly, sibling owner, product, provider or ERP. RatedObligationOutputV1 is translated by an assembly to AcceptRatedObligationV1; confirmed Integrator observations become AcceptSettlementV1; Billing facts leave through typed events/APIs. The NumberingProvider is an assembly-supplied protocol, never a dotmac-numbering import. ERP maps immutable AccountingFactV1 values to ERP-owned accounts and periods and never writes operational receivables."
@@ -242,3 +247,8 @@ reason = "Inclusive-tax ordinary-credit fixture contradicts confirmed subtotal=t
 path = "dotmac_starter_mt:packages/dotmac-billing/src/dotmac_billing/service.py:accept_settlement"
 disposition = "port-delta"
 reason = "At accepted 05c6d256, preserve trust/scope/account and historical key/fingerprint/scalar replay; append exact scoped immutable source claim inside existing Kernel idempotent operation. No new confirmation authority or opening funding."
+
+[[source_dispositions]]
+path = "dotmac_sub:app/services/billing/payments.py:4804,5436;app/services/billing/account_credit.py:449;app/services/billing/_common.py:245,285;tests/test_prepaid_period_purchase_safety.py:144"
+disposition = "port-delta"
+reason = "Whole-receipt purchase reservation, matching-purchase allocation and held-versus-spendable credit algorithms qualify a Billing-core economic earmark. Preserve optional-consequence rollback/retry, exact Money and immutable linked corrections; exclude mutable legacy balances and product-specific module-table triggers. Sub694 remains a product source link. See the 2026-10-16 purchase-funding earmark inventory in billing-extraction-dossier.md; implementation, hosted acceptance, publication and activation remain separate."

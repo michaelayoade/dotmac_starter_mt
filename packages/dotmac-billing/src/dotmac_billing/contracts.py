@@ -1,20 +1,20 @@
 """Frozen Billing V1 commands and published facts.
 
-Allocation and coverage deliberately do not live here. They are internal
-derivations of immutable Billing effects, not cross-application contracts.
+Allocation effects remain Billing-owned derivations. A narrowly scoped current
+observation proves one exact settlement allocation within the caller transaction.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
-from dotmac_kernel.money import Money
+from dotmac_kernel.money import Currency, Money
 
 from dotmac_billing.errors import BillingRuleViolation
 
@@ -250,6 +250,64 @@ class AcceptRatedObligationV1:
     supersedes_obligation_id: UUID | None = None
 
 
+class ObligationSourceRegistry(Protocol):
+    """Assembly-supplied registry of uniquely declared obligation sources."""
+
+    def require_obligation_source(self, code: str) -> str:
+        """Return the declaring owner, or refuse an undeclared source."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class IssueRatedInvoiceV1:
+    """Issue one quantity-one invoice from an immutable rated obligation.
+
+    The assembly supplies already-frozen commercial, Tax and presentation
+    evidence. This command does not rate, confirm funding or declare sources.
+    Native collectible issuance always requires a verified due-date basis.
+    Source fact version participates in the existing obligation natural key:
+    a new version is a new identity, never correction of an issued invoice.
+    The assembly owns source revision/deduplication and routes corrections to
+    the existing Billing correction owner.
+    """
+
+    obligation: AcceptRatedObligationV1
+    description: str
+    unit_code: str
+    seller_snapshot: PartyDocumentSnapshotV1
+    customer_snapshot: PartyDocumentSnapshotV1
+    payment_instructions: PaymentInstructionsSnapshotV1
+    brand_asset: PresentationAssetReferenceV1
+    locale: str
+    timezone: str
+    document_profile_code: str
+    document_profile_version: str
+    series_code: str
+    reference_date: date
+    due_at: datetime
+    due_date_basis: DueDateBasisV1
+    actor_ref: str
+    correlation_id: str
+    party_tax_identities: tuple[PartyTaxIdentitySnapshotV1, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class IssuedRatedInvoiceV1:
+    """Original persisted issuance identities, stable across exact retries.
+
+    This receipt is not a current financial position or an authorization proof.
+    The issued fact version identifies the original immutable document fact.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    obligation_id: UUID
+    invoice_id: UUID
+    line_id: UUID
+    line_number: int
+    issued_fact_version: int
+
+
 class SettlementFundingLane(str, Enum):
     AVAILABLE_CREDIT = "available_credit"
     PREPAID_FUNDING = "prepaid_funding"
@@ -308,6 +366,200 @@ class InvoiceDocumentFactV1:
     source_authority: Literal["internal", "provider_owned", "external_finance"]
     correlation_id: str
     presentation_model_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class GetBillingAccountObservationV1:
+    """Observe current persisted identity, without locking or authorizing a link."""
+
+    scope: Scope
+    account_id: UUID
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or not isinstance(self.account_id, UUID)
+            or (
+                isinstance(self.scope, TenantScope)
+                and not isinstance(self.scope.tenant_id, UUID)
+            )
+        ):
+            raise BillingRuleViolation(
+                "account_observation_request_invalid",
+                "account observation requires an explicit scope and UUID identity",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class BillingAccountObservationV1:
+    """Frozen copy of current account identity, not an immutable historical fact.
+
+    The external reference can change and the account can disappear. Re-observe
+    when needed; this value is neither a balance nor authorization evidence.
+    """
+
+    scope: Scope
+    account_id: UUID
+    external_account_ref: str
+    currency: Currency
+
+
+@dataclass(frozen=True, slots=True)
+class GetCurrentSettlementAllocationV1:
+    """Observe one exact allocation, including current inverse effects."""
+
+    scope: Scope
+    billing_account_id: UUID
+    posting_group_id: UUID
+    settlement_id: UUID
+    document_id: UUID
+    amount: Money
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or (
+                isinstance(self.scope, TenantScope)
+                and not isinstance(self.scope.tenant_id, UUID)
+            )
+            or any(
+                not isinstance(value, UUID)
+                for value in (
+                    self.billing_account_id,
+                    self.posting_group_id,
+                    self.settlement_id,
+                    self.document_id,
+                )
+            )
+            or not isinstance(self.amount, Money)
+            or not self.amount.amount.is_finite()
+            or self.amount.amount <= 0
+        ):
+            raise BillingRuleViolation(
+                "allocation_observation_request_invalid",
+                "allocation observation requires UUID identities and positive Money",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentSettlementAllocationV1:
+    """Current transaction observation; re-observe before each product decision.
+
+    The account lock remains held by the caller transaction. This value is not
+    a historical fact or reusable admission token. Unlinked reductions refuse.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    posting_group_id: UUID
+    settlement_id: UUID
+    document_id: UUID
+    original_amount: Money
+    remaining_amount: Money
+    state: Literal["current", "reduced", "removed", "inactive_backing"]
+
+
+class CashCreditDrawState(str, Enum):
+    CURRENT = "current"
+    REDUCED = "reduced"
+    REMOVED = "removed"
+    INACTIVE_BACKING = "inactive_backing"
+
+
+@dataclass(frozen=True, slots=True)
+class GetCurrentCashCreditDrawV1:
+    """Bind the exact original pooled-cash draw, never an invoice balance."""
+
+    scope: Scope
+    billing_account_id: UUID
+    posting_group_id: UUID
+    document_id: UUID
+    amount: Money
+    source_ref: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or (
+                isinstance(self.scope, TenantScope)
+                and not isinstance(self.scope.tenant_id, UUID)
+            )
+            or any(
+                not isinstance(value, UUID)
+                for value in (
+                    self.billing_account_id,
+                    self.posting_group_id,
+                    self.document_id,
+                )
+            )
+            or not isinstance(self.amount, Money)
+            or not self.amount.amount.is_finite()
+            or self.amount.amount <= 0
+            or not isinstance(self.source_ref, str)
+            or not self.source_ref.strip()
+            or len(self.source_ref) > 255
+        ):
+            raise BillingRuleViolation(
+                "cash_draw_request_invalid",
+                "draw requires exact identities, source reference and positive Money",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentCashCreditDrawV1:
+    """Account-fenced observation valid only within the caller transaction."""
+
+    scope: Scope
+    billing_account_id: UUID
+    posting_group_id: UUID
+    document_id: UUID
+    original_amount: Money
+    remaining_amount: Money
+    source_ref: str
+    state: CashCreditDrawState
+
+
+@dataclass(frozen=True, slots=True)
+class GetCurrentReceivablePositionV1:
+    """Observe the actual latest account position, without a caller watermark."""
+
+    scope: Scope
+    billing_account_id: UUID
+    currency: Currency
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or (
+                isinstance(self.scope, TenantScope)
+                and not isinstance(self.scope.tenant_id, UUID)
+            )
+            or not isinstance(self.billing_account_id, UUID)
+            or type(self.currency) is not Currency
+            or type(self.currency.minor_units) is not int
+            or not 0 <= self.currency.minor_units <= 6
+            or not self.currency.code.isascii()
+            or not self.currency.code.isupper()
+        ):
+            raise BillingRuleViolation(
+                "current_position_request_invalid",
+                "current position requires explicit scope, account and exact currency",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentReceivablePositionV1:
+    """Fresh account-fenced observation, distinct from an immutable snapshot.
+
+    None is reserved for proven pristine monetary history at source version zero.
+    The caller retains the account lock and owns the outer transaction.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    currency: Currency
+    source_version: int
+    position: ReceivablePositionV2 | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1071,6 +1323,18 @@ class AccountingFactV3:
 
 
 __all__ = [
+    "IssueRatedInvoiceV1",
+    "IssuedRatedInvoiceV1",
+    "ObligationSourceRegistry",
+    "BillingAccountObservationV1",
+    "GetBillingAccountObservationV1",
+    "GetCurrentReceivablePositionV1",
+    "CurrentReceivablePositionV1",
+    "GetCurrentCashCreditDrawV1",
+    "CurrentCashCreditDrawV1",
+    "CashCreditDrawState",
+    "GetCurrentSettlementAllocationV1",
+    "CurrentSettlementAllocationV1",
     "ACCOUNTING_FACT_V3_CONTRACT",
     "RECEIVABLE_POSITION_V2_CONTRACT",
     "NonCashCreditEffectKind",

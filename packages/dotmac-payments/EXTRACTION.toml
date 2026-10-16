@@ -3,19 +3,21 @@ package = "dotmac-payments"
 classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
-owner = "Payment intent and its confirmation correlation"
-contract = "Own the payment intent lifecycle, submitted transfer proof and its review, and the append-only correlation between an intent and an external settlement fact. Payer, target receivable and document identifiers are opaque. NOT receivables, settlement allocation, invoice or credit application, bank accounts, general-ledger posting, refunds, provider credentials or provider transport."
+owner = "Payment intent, reviewed merchant context, provider cash qualification and external confirmation correlation"
+contract = "Own the payment intent lifecycle, submitted transfer proof and its review, immutable reviewed merchant-context authority, mandatory-authority qualification of original provider cash facts and the append-only correlation between an intent and an external settlement fact. Preserve physical economic identity separately from provenance and require fresh transaction-scoped admission for new financial use. Payer, purchase/obligation or receivable target, document and original transport/configuration identifiers are opaque. Merchant context alone does not qualify cash; an installed authenticated original-evidence authority remains required. NOT receivables, settlement allocation, invoice or credit application, bank accounts, general-ledger posting, refunds, provider credentials or provider transport."
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_revisions = [
   "dotmac_sub:9493ee4eef737f18b4813899a2d8f0537ed6d5c7",
   "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
 ]
 revalidation_revisions = [
-  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_sub:4e2e296f1be63c953cd9b4c7417bacc34e019d9c",
 ]
 source_paths = [
   "dotmac_sub:app/models/billing.py",
   "dotmac_sub:app/models/payment_proof.py",
+  "dotmac_sub:app/services/topup_intents.py",
+  "dotmac_sub:app/services/gateway_topup_intents.py",
   "dotmac_erp:app/models/finance/payments/payment_intent.py",
 ]
 preserved_tests = [
@@ -32,11 +34,12 @@ composition_boundary = "Adopters compose pm locally and correlate provider obser
 first_cutover = "Sub remains payment-intent owner until history backfill, read-only shadow and zero-drift correlation comparison complete and a separately authorized writer switch occurs."
 shadow_and_drift = "Compare intent reference, payer, purpose, currency and requested amount, terminal status and settlement time, and every confirmation by source, provider type, external reference, confirmed amount and observation instant; invoice allocation and ledger posting themselves remain outside."
 local_copy_retirement = "After cutover, reduce Sub's topup-intent and payment-confirmation writers to zero while Billing keeps allocation and Integrator keeps provider transport."
-next_action = "Validate and release the declared 0.1.0a2 immutable-confirmation replay, complete intent-request replay binding, intent/proof serialization and typed read-only reference lookup prerequisite, then compose the verified artifact in Sub and implement the intent/confirmation backfill plus the zero-drift correlation shadow. Provider verification, webhook and reconciliation callers resolve persisted intent bindings through the owner query and retain the original expiry; provider metadata cannot select the account or invoice. Sub remains the writer until a separately authorized cutover."
+next_action = "Validate the proposed unpublished 0.1.0a3 purchase-funding purpose and required exact opaque destination through genuine fresh and pm3 predecessor hosted canaries. Published 0.1.0a2 remains immutable. Successor allocation and release require separate release-owner authorization; then compose the verified artifact in Sub and implement the intent/confirmation backfill plus the zero-drift correlation shadow. Provider verification, webhook and reconciliation callers resolve persisted intent bindings through the owner query and retain the original expiry; provider metadata cannot select the account or invoice. Sub remains the writer until a separately authorized cutover."
 inventory_evidence = [
   "docs/inventories/customer-journey-owner-sources.md",
   "docs/inventories/payments-intent-replay-binding-extraction.md",
   "docs/inventories/payments-intent-lookup-extraction.md",
+  "docs/inventories/payments-purchase-funding-extraction.md",
 ]
 
 # Typed product claim. Sub is the qualifying source — these owners are extracted
@@ -47,10 +50,12 @@ inventory_evidence = [
 product = "dotmac_sub"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+revision = "4e2e296f1be63c953cd9b4c7417bacc34e019d9c"
 evidence_paths = [
   "app/models/billing.py",
   "app/models/payment_proof.py",
+  "app/services/topup_intents.py",
+  "app/services/gateway_topup_intents.py",
 ]
 
 [[product_writers]]

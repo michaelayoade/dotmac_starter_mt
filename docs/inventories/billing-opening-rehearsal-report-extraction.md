@@ -66,8 +66,10 @@ this report, and local static checks do not establish runtime acceptance.
 Sub -> Starter translator for the rehearsal census: it mechanically projects
 Sub's serialized `sub-billing-opening-census-v2`/`-v3` export onto
 `OpeningSubObservationV2`, assembles a candidate manifest from an explicit
-assembly file only (`cash_lots=()`, `original=None` always), and counts the
-pure preflight/report blockers per partition. It opens no database session,
+assembly file (`cash_lots=()`), optionally preserves explicitly supplied originals
+and historical effects from a bound evidence sidecar, and counts the pure
+preflight/report blockers per partition. Without that sidecar CLI originals
+remain unavailable. It opens no database session,
 calls no writer, constructs no verifier, qualifies no cash and computes no
 tax. Its unit tests live in
 `tests/unit/test_billing_opening_rehearsal_adapter.py` with hand-authored
@@ -122,3 +124,115 @@ versioned `OpeningRehearsalAssemblyV1` (every field the adapter reads) and
 
 The adapter now holds no canonicalizing call. Digests identify content only;
 they are not approval, qualification or activation authority.
+
+
+### Explicit originals and nonempty contract canary — 2026-10-16
+
+The existing adapter's Python `assemble_rehearsal_run` and `rehearsal_census`
+accept an optional keyword-only `original_documents` tuple
+of `(source_invoice_id, OpeningOriginalDocumentV1)` inputs. It preserves supplied
+originals only for eligible, observed, mapped invoices and refuses duplicate,
+unknown, excluded, unmapped, number/time/total/currency-mismatched mappings.
+No original is constructed from V2 financial observations or V3 current
+documentary observations. The closed assembly JSON remains unchanged; without the optional evidence
+sidecar a normal nonempty source export still counts missing originals and
+verifier unavailability. Documentary digests and mapping declarations are content
+identity, never qualification. The existing importer verifier must independently
+qualify the exact command and supplied original evidence.
+
+The census API threads that typed tuple through the existing assembly checks,
+and its manifest fingerprint identifies the resulting candidate manifest. The
+source fingerprint and assembly digest retain their existing meanings; the
+tuple is not a snapshot-bound evidence sidecar. V3 historical-unavailable
+observations remain counted even when a typed original is supplied. Focused
+adapter canaries cover this bridge, malformed and misbound mappings, and the
+continued documentary and verifier blockers; hosted execution is required.
+
+CLI original input remains unsupported: Billing's only reusable generic decoder
+is the private `_document_facts._decode` used by persisted opening reads.
+The public `decode_invoice_document_fact` accepts `InvoiceDocumentFactV1`, not
+`OpeningOriginalDocumentV1`. A strict CLI sidecar bound to the source fingerprint
+and assembly digest needs an owner-approved original-document wire/parser
+contract; this slice introduces no private-codec import or duplicate codec.
+
+`tests/test_billing_opening_rehearsal_import.py` adds a hosted migrated-PostgreSQL
+canary for both planes, using the existing synthetic one-eligible-invoice export
+fixture, an explicitly synthetic typed original, a verifier restricted to that
+exact fixture command, and the existing real restricted-principal window fixture.
+It asserts three distinct nonempty synthetic capture reports remain blocked on
+`original_documentary_evidence_unavailable`, exact per-account
+100.00 NGN receivable / zero cash residual, manual collection-evidence hold,
+changed-original/command refusal, actual import, persisted documentary basis,
+idempotent replay and permanent seal. This is an adapter-to-importer contract
+canary; it does not query a Sub database or establish authentic original evidence,
+production qualification, three live-cutoff captures or a production rehearsal.
+Hosted execution is required; local static checks are not runtime evidence.
+The report owner intentionally emits that blocker unconditionally for each V2
+mapped eligible invoice, even when an independently supplied original and
+qualified import preview exist. `compare_opening_rehearsals` therefore remains
+`run_blocked`; no complete nonempty report is claimed or simulated. Cash
+qualification remains unsupported. Historical discharges are preserved only
+when explicitly supplied and bound to existing observed settlements and assembly
+mappings; the default path supplies no historical effects.
+
+
+### Aligned original-evidence CLI bridge — 2026-10-16
+
+`--original-evidence PATH` optionally supplies the closed
+`billing.opening.rehearsal.original-evidence.v1` shape:
+
+```json
+{
+  "schema": "billing.opening.rehearsal.original-evidence.v1",
+  "census_sha256": "<64 lowercase hex: SHA-256 of exact census file bytes>",
+  "assembly_digest": "<existing canonical opening_rehearsal_assembly_digest>",
+  "invoices": [
+    {
+      "source_invoice_id": "<source invoice UUID>",
+      "original": "<complete OpeningOriginalDocumentV1 JSON object>",
+      "historical_discharges": ["<complete OpeningHistoricalDischargeV1 JSON object>"]
+    }
+  ]
+}
+```
+
+The angle-bracket strings illustrate required values, not valid sample DTOs.
+`OpeningRehearsalOriginalEvidenceV1` and `OpeningRehearsalInvoiceEvidenceV1`
+are owned by `opening_rehearsal_contracts`; the public
+`parse_opening_rehearsal_original_evidence` reuses Billing's canonical
+schema decoder inside the package. All declared fields are required, including
+nullable fields and `replay_bindings`; unknown fields, wrong types, unsupported
+versions and duplicate invoice records refuse. Nested money is represented by
+`{"amount": "100.00", "currency": "NGN", "minor_units": 2}`; decimal values are
+strings, instants ISO text, and immutable tuples JSON arrays. Every input JSON
+file passes `parse_opening_rehearsal_json`, rejecting duplicate keys and
+nonfinite constants. No schema fallback, defaults, tax calculation or evidence
+reconstruction is performed.
+
+The adapter reads census bytes once. Before passing evidence to assembly it
+requires both the exact raw-file SHA-256 and the existing canonical assembly
+digest to agree. Even whitespace changes to the census require a newly aligned
+sidecar. Invoice originals must bind to unique eligible, observed and mapped
+invoices with matching original number, issue instant, total, currency and
+precision. Supplied historical effects must bind uniquely to explicit assembly
+discharge references and observed active settlement kind/id/source-id mappings,
+the same invoice and exact minor-unit amount. Unknown, excluded, unmapped,
+duplicate or mismatched supplied records refuse. Missing evidence remains a
+counted blocker; it is never synthesized. The Python entry points also accept
+explicit typed `historical_discharges` tuples of `(source_invoice_id, effects)`
+alongside `original_documents`.
+
+Parent namespaces, live identities, evidence references and mapping versions
+remain the supplied rich evidence: the CLI makes no qualification claim about
+them and invents no namespace mapping. Alignment hashes identify content only.
+The existing importer verifier must independently qualify the exact command
+and evidence before any import. Documentary/verifier report blockers remain,
+V3 historical-unavailable observations remain visible, and `cash_lots=()` still.
+Omitting the new option preserves prior output and default semantics. This
+bridge adds no storage, custody, verifier, cash writer or production operation.
+
+Focused hosted proofs cover closed/nested parsing, changed raw census or
+assembly, duplicate/unknown/mismatched invoice and settlement inputs, propagation
+of actual originals/effects into manifests and reports, preserved V3 observations
+and refusal to qualify an original alone. These proofs are authored for hosted
+CI; local pinned Ruff and stdlib static checks do not establish runtime acceptance.

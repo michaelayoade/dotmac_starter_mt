@@ -1022,3 +1022,461 @@ def test_intent_reference_lookup_is_fresh_scoped_and_rollback_owned(
         session.rollback()
     with _tenant_session(app_url, scope.tenant_id) as session:
         assert get_payment_intent_v1(session, scope=scope, query=rollback_query) is None
+
+
+def _purchase_migration_snapshot(connection):
+    rows = {
+        table: connection.execute(
+            text(f"SELECT to_jsonb(t) FROM mod_payments.{table} t ORDER BY id")  # noqa: S608 — closed TABLES
+        )
+        .scalars()
+        .all()
+        for table in TABLES
+    }
+    posture = connection.execute(
+        text(
+            "SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, c.relacl::text "
+            "FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n "
+            "ON n.oid = c.relnamespace WHERE n.nspname = 'mod_payments' "
+            "AND c.relkind = 'r' ORDER BY c.relname"
+        )
+    ).all()
+    policies = connection.execute(
+        text(
+            "SELECT * FROM pg_catalog.pg_policies "
+            "WHERE schemaname = 'mod_payments' ORDER BY tablename, policyname"
+        )
+    ).all()
+    confirmation_guard = connection.execute(
+        text(
+            "SELECT pg_catalog.pg_get_triggerdef(t.oid) FROM pg_catalog.pg_trigger t "
+            "WHERE t.tgrelid = 'mod_payments.payment_confirmations'::regclass "
+            "AND NOT t.tgisinternal ORDER BY t.tgname"
+        )
+    ).all()
+    return rows, posture, policies, confirmation_guard
+
+
+@pytest.mark.parametrize(
+    "migrated", ["heads", "pm_0003_confirmation_immutable"], indirect=True
+)
+def test_purchase_funding_fresh_and_populated_pm3_upgrade(migrated):
+    """Real pm3 DDL/data, never a stamp or metadata-created predecessor."""
+    from dotmac_kernel.cache import PlatformScope
+    from dotmac_payments import (
+        GetConfirmedCashV1,
+        GetPaymentIntentV1,
+        get_confirmed_cash_v1,
+        get_payment_intent_v1,
+    )
+    from sqlalchemy.exc import DBAPIError
+
+    from alembic import command as alembic_command
+
+    scope, legacy_id, legacy_confirmation = _confirmed_evidence(
+        migrated, with_proof=True
+    )
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        for purpose in (
+            PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT,
+            PaymentPurpose.SERVICE_FEE,
+        ):
+            open_payment_intent(
+                session,
+                scope=scope,
+                command=OpenPaymentIntent(
+                    reference=f"legacy-{purpose.value}",
+                    payer_reference="legacy:payer",
+                    purpose=purpose,
+                    requested=Money.of("15000", currency("NGN")),
+                    provider_type="paystack",
+                    channel="web",
+                    opened_at=datetime(2026, 10, 13, tzinfo=UTC),
+                ),
+            )
+        session.commit()
+    # Heads now extend past pm_0004; descend through the still-empty
+    # successor tables so the pm3-to-pm4 round trip below starts at pm_0004.
+    admin = create_engine(migrated[0])
+    with admin.connect() as connection:
+        past_pm4 = (
+            connection.scalar(
+                text("SELECT to_regclass('mod_payments.merchant_contexts')")
+            )
+            is not None
+        )
+    if past_pm4:
+        alembic_command.downgrade(_payments_config(), "pm_0004_purchase_funding")
+    with admin.begin() as connection:
+        before = _purchase_migration_snapshot(connection)
+    alembic_command.upgrade(_payments_config(), "pm_0004_purchase_funding")
+    with admin.begin() as connection:
+        assert _purchase_migration_snapshot(connection) == before
+    # With only legacy evidence, round-trip downgrade preserves all original rows
+    # and pm3's confirmation immutability. Funding evidence later prevents it.
+    alembic_command.downgrade(_payments_config(), "pm_0003_confirmation_immutable")
+    alembic_command.upgrade(_payments_config(), "pm_0004_purchase_funding")
+    with admin.begin() as connection:
+        assert _purchase_migration_snapshot(connection) == before
+
+    now = datetime(2026, 10, 13, tzinfo=UTC)
+    money = Money.of("15000", currency("NGN"))
+    opening = OpenPaymentIntent(
+        reference="purchase-funding",
+        payer_reference="payer:purchase",
+        target_reference="obligation:purchase-1 ",
+        purpose=PaymentPurpose.PURCHASE_FUNDING,
+        requested=money,
+        provider_type="paystack",
+        channel="web",
+        opened_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        intent = open_payment_intent(session, scope=scope, command=opening)
+        intent_id = intent.id
+        assert (
+            open_payment_intent(session, scope=scope, command=opening).id == intent_id
+        )
+        query = GetPaymentIntentV1(opening.reference)
+        observation = get_payment_intent_v1(session, scope=scope, query=query)
+        assert observation.purpose is PaymentPurpose.PURCHASE_FUNDING
+        assert observation.target_reference == opening.target_reference
+        for changed in (
+            replace(opening, target_reference="obligation:purchase-1"),
+            replace(opening, target_reference="obligation:purchase-2"),
+            replace(opening, target_reference=None),
+            *(
+                replace(opening, purpose=purpose)
+                for purpose in (
+                    PaymentPurpose.INVOICE_SETTLEMENT,
+                    PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT,
+                    PaymentPurpose.SERVICE_FEE,
+                )
+            ),
+        ):
+            with pytest.raises(Conflict):
+                open_payment_intent(session, scope=scope, command=changed)
+        with pytest.raises(TypeError, match="TenantScope"):
+            open_payment_intent(session, scope=PlatformScope(), command=opening)
+        confirmation_command = RecordConfirmation(
+            intent_id=intent_id,
+            source=ConfirmationSource.PROVIDER_CALLBACK,
+            external_reference="purchase-provider-fact",
+            confirmed=money,
+            observed_at=now,
+        )
+        confirmation = record_confirmation(
+            session, scope=scope, command=confirmation_command
+        )
+        confirmation_id = confirmation.id
+        assert (
+            record_confirmation(session, scope=scope, command=confirmation_command).id
+            == confirmation_id
+        )
+        cash = get_confirmed_cash_v1(
+            session, scope=scope, query=GetConfirmedCashV1(confirmation_id)
+        )
+        assert cash.intent_id == intent_id
+        assert cash.confirmed == money
+        with pytest.raises(Conflict):
+            record_confirmation(
+                session,
+                scope=scope,
+                command=replace(confirmation_command, intent_id=legacy_id),
+            )
+        assert (
+            get_confirmed_cash_v1(
+                session, scope=scope, query=GetConfirmedCashV1(legacy_confirmation)
+            ).intent_id
+            == legacy_id
+        )
+        session.commit()
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        assert (
+            open_payment_intent(session, scope=scope, command=opening).status
+            is PaymentIntentStatus.CONFIRMED
+        )
+        assert (
+            get_payment_intent_v1(session, scope=scope, query=query).target_reference
+            == opening.target_reference
+        )
+        # A no-op binding update remains compatible with lifecycle writes.
+        session.execute(
+            PaymentIntent.__table__.update()
+            .where(PaymentIntent.id == intent_id)
+            .values(target_reference=opening.target_reference)
+        )
+        pending_id = open_payment_intent(
+            session, scope=scope, command=replace(opening, reference="purchase-pending")
+        ).id
+        # Raw insert cannot bypass the required target or expanded finite purpose set.
+        inserted = dict(
+            session.execute(
+                select(PaymentIntent.__table__).where(PaymentIntent.id == intent_id)
+            )
+            .mappings()
+            .one()
+        )
+        for invalid in (
+            {"target_reference": None},
+            {"target_reference": "   "},
+            {"target_reference": "\t\r\n"},
+            {"purpose": "UNDECLARED_PURPOSE"},
+        ):
+            forged = {
+                **inserted,
+                **invalid,
+                "id": uuid.uuid4(),
+                "reference": str(uuid.uuid4()),
+            }
+            with pytest.raises(DBAPIError), session.begin_nested():
+                session.execute(PaymentIntent.__table__.insert().values(**forged))
+        session.commit()
+
+    for actor in migrated:
+        engine = create_engine(actor)
+        with engine.begin() as connection:
+            connection.execute(
+                text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                {"tenant": str(scope.tenant_id)},
+            )
+            for values in (
+                {"target_reference": "obligation:other"},
+                {"purpose": PaymentPurpose.INVOICE_SETTLEMENT},
+            ):
+                with (
+                    pytest.raises(DBAPIError, match="binding is immutable"),
+                    connection.begin_nested(),
+                ):
+                    connection.execute(
+                        PaymentIntent.__table__.update()
+                        .where(PaymentIntent.id == intent_id)
+                        .values(**values)
+                    )
+            with (
+                pytest.raises(DBAPIError, match="binding is immutable"),
+                connection.begin_nested(),
+            ):
+                connection.execute(
+                    PaymentIntent.__table__.delete().where(
+                        PaymentIntent.id == pending_id
+                    )
+                )
+            with pytest.raises(DBAPIError), connection.begin_nested():
+                connection.execute(
+                    PaymentConfirmation.__table__.update()
+                    .where(PaymentConfirmation.id == confirmation_id)
+                    .values(confirmed_amount=1)
+                )
+        engine.dispose()
+
+    foreign, _, _, _ = _seed_pending(migrated)
+    with _tenant_session(migrated[1], foreign.tenant_id) as session:
+        assert get_payment_intent_v1(session, scope=foreign, query=query) is None
+        assert session.get(PaymentConfirmation, confirmation_id) is None
+        assert (
+            session.execute(
+                PaymentIntent.__table__.update()
+                .where(PaymentIntent.id == intent_id)
+                .values(channel="FOREIGN")
+            ).rowcount
+            == 0
+        )
+        other = open_payment_intent(
+            session,
+            scope=foreign,
+            command=replace(opening, target_reference="obligation:foreign"),
+        )
+        assert other.id != intent_id
+        forged = dict(
+            session.execute(
+                select(PaymentIntent.__table__).where(PaymentIntent.id == other.id)
+            )
+            .mappings()
+            .one()
+        )
+        forged.update(
+            id=uuid.uuid4(), tenant_id=scope.tenant_id, reference="forged-purchase"
+        )
+        with (
+            pytest.raises(DBAPIError, match="row-level security"),
+            session.begin_nested(),
+        ):
+            session.execute(PaymentIntent.__table__.insert().values(**forged))
+        session.rollback()
+    with pytest.raises(RuntimeError, match="purchase funding intents exist"):
+        alembic_command.downgrade(_payments_config(), "pm_0003_confirmation_immutable")
+    with admin.begin() as connection:
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM mod_payments.payment_intents "
+                    "WHERE purpose = 'PURCHASE_FUNDING'"
+                )
+            )
+            == 2
+        )
+    admin.dispose()
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+@pytest.mark.parametrize("actor", ["owner", "app_user"])
+def test_purchase_checkout_binding_cannot_move_or_reopen(migrated, confirmed, actor):
+    """A reference move must not free its natural key for a different purchase."""
+    from dotmac_payments import GetPaymentIntentV1, get_payment_intent_v1
+    from sqlalchemy.exc import DBAPIError
+
+    scope, _, _, now = _seed_pending(migrated)
+    opening = OpenPaymentIntent(
+        reference="purchase-immutable-reference",
+        payer_reference="payer:purchase",
+        target_reference="purchase:original",
+        purpose=PaymentPurpose.PURCHASE_FUNDING,
+        requested=Money.of("15000", currency("NGN")),
+        provider_type="paystack",
+        channel="web",
+        opened_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        intent = open_payment_intent(session, scope=scope, command=opening)
+        intent_id = intent.id
+        if confirmed:
+            record_confirmation(
+                session,
+                scope=scope,
+                command=RecordConfirmation(
+                    intent_id=intent_id,
+                    source=ConfirmationSource.PROVIDER_CALLBACK,
+                    external_reference="immutable-purchase-confirmation",
+                    confirmed=opening.requested,
+                    observed_at=now,
+                ),
+            )
+        expected = get_payment_intent_v1(
+            session, scope=scope, query=GetPaymentIntentV1(opening.reference)
+        )
+        session.commit()
+    foreign, _, _, _ = _seed_pending(migrated)
+    engine = create_engine(migrated[0 if actor == "owner" else 1])
+    with engine.begin() as connection:
+        connection.execute(
+            text("SELECT set_config('app.current_tenant', :tenant, true)"),
+            {"tenant": str(scope.tenant_id)},
+        )
+        for values in (
+            {"id": uuid.uuid4()},
+            {"tenant_id": foreign.tenant_id},
+            {"reference": "purchase-moved"},
+            {"payer_reference": "payer:other"},
+            {"target_reference": "purchase:other"},
+            {"purpose": PaymentPurpose.SERVICE_FEE},
+            {"requested_amount": 16000},
+            {"currency_code": "USD"},
+            {"minor_units": 3},
+            {"provider_type": "OTHER"},
+            {"channel": "OTHER"},
+            {"opened_at": now + timedelta(minutes=1)},
+            {"expires_at": now + timedelta(hours=2)},
+        ):
+            # FK/RLS may refuse identity changes before the AFTER guard; every
+            # path must refuse, without weakening the original row or its key.
+            with pytest.raises(DBAPIError), connection.begin_nested():
+                connection.execute(
+                    PaymentIntent.__table__.update()
+                    .where(PaymentIntent.id == intent_id)
+                    .values(**values)
+                )
+    engine.dispose()
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        assert (
+            get_payment_intent_v1(
+                session, scope=scope, query=GetPaymentIntentV1(opening.reference)
+            )
+            == expected
+        )
+        assert (
+            get_payment_intent_v1(
+                session, scope=scope, query=GetPaymentIntentV1("purchase-moved")
+            )
+            is None
+        )
+        with pytest.raises(Conflict, match="different target"):
+            open_payment_intent(
+                session,
+                scope=scope,
+                command=replace(opening, target_reference="purchase:replacement"),
+            )
+        assert (
+            open_payment_intent(session, scope=scope, command=opening).id == intent_id
+        )
+
+
+def test_purchase_binding_guard_observes_later_before_trigger(migrated):
+    """A BEFORE guard would miss a later trigger's otherwise valid mutation."""
+    from sqlalchemy.exc import DBAPIError
+
+    scope, _, _, now = _seed_pending(migrated)
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        intent = open_payment_intent(
+            session,
+            scope=scope,
+            command=OpenPaymentIntent(
+                reference="purchase-before-trigger",
+                payer_reference="payer:1",
+                target_reference="purchase:1",
+                purpose=PaymentPurpose.PURCHASE_FUNDING,
+                requested=Money.of("15000", currency("NGN")),
+                provider_type="paystack",
+                channel="web",
+                opened_at=now,
+            ),
+        )
+        intent_id = intent.id
+        session.commit()
+    admin = create_engine(migrated[0])
+    with admin.begin() as connection:
+        connection.execute(
+            text("""
+            CREATE FUNCTION mod_payments.test_late_purchase_mutator()
+            RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
+            BEGIN
+                NEW.reference := 'purchase-trigger-moved';
+                RETURN NEW;
+            END; $$;
+            CREATE TRIGGER zzz_test_late_purchase_mutator
+            BEFORE UPDATE ON mod_payments.payment_intents
+            FOR EACH ROW EXECUTE FUNCTION mod_payments.test_late_purchase_mutator();
+        """)
+        )
+    try:
+        with _tenant_session(migrated[1], scope.tenant_id) as session:
+            with (
+                pytest.raises(DBAPIError, match="binding is immutable"),
+                session.begin_nested(),
+            ):
+                session.execute(
+                    PaymentIntent.__table__.update()
+                    .where(PaymentIntent.id == intent_id)
+                    .values(channel="WEB")
+                )
+            assert (
+                session.scalar(
+                    select(PaymentIntent.reference).where(PaymentIntent.id == intent_id)
+                )
+                == "purchase-before-trigger"
+            )
+            session.rollback()
+    finally:
+        with admin.begin() as connection:
+            connection.execute(
+                text(
+                    "DROP TRIGGER zzz_test_late_purchase_mutator "
+                    "ON mod_payments.payment_intents"
+                )
+            )
+            connection.execute(
+                text("DROP FUNCTION mod_payments.test_late_purchase_mutator()")
+            )
+        admin.dispose()
