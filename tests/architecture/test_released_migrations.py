@@ -7020,6 +7020,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-positioning ──
+    "dotmac-positioning-v0.2.0a1": (
+        "dotmac-positioning",
+        "e6844ad04b42a609f329822e47427a062cac02e3",
+        {
+            "po_0001_positioning.py": (
+                "153136b3f1441e03f26626502808b5081ac3a39678bf7d40be5712c49e70d16f"
+            ),
+        },
+    ),
     "dotmac-positioning-v0.1.0a1": (
         "dotmac-positioning",
         "75a26abd3f866ebe24c4881a3958439d423034c7",
