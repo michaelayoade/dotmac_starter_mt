@@ -370,6 +370,29 @@ The kit **owns no rules**. Every mode refusal is `spi.verify_plugin_modes`,
 which `discovery.discover` also runs; the kit only translates it into an
 `AssertionError` an author's suite can read.
 
+## Held-key product-query authentication
+
+The additive public `ProductCaller`, `ProductPrincipal`,
+`ProductAuthenticationFailed` and `ProductAuthenticator` API extracts
+Integrator's held-key query authentication. The caller protocol describes the
+existing declaration through read-only properties; the authenticator requires
+an explicitly injected lookup of already-held material. Its implementation
+submodule uses only the standard library. The existing package initializer
+retains its other imports.
+
+Authentication captures callers once, looks up every caller on each attempt,
+compares held material with `secrets.compare_digest`, and selects the last
+matching caller before checking exact required-scope membership. It returns a
+fresh frozen principal with frozenset grants. Missing matches and missing scopes
+retain the opaque `product authentication failed` refusal; lookup and comparison
+exceptions retain their existing propagation, including non-ASCII comparison
+`TypeError`. Empty held strings retain exact-comparison behavior.
+
+The assembly retains caller validation, Kernel lookup defaults, held-material
+loading and refresh, HTTP headers and status mapping, and submitted-binding
+authorization. This API adds no health receiver or health-source binding,
+runtime dependency, migration or connector SPI change.
+
 ## What the module may never contain
 
 ADR-0024 § 7: no fixed provider enum, no import list, no `if provider == ...`

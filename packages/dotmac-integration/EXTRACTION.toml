@@ -43,11 +43,12 @@ planes = "platform-only"
 # integration_runs with mutating APIs and product call sites -- alongside the
 # direct connector surface frozen in external-connector-sources.md. Both are
 # deletion rather than a second extraction source.
-source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_crm"]
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_crm", "dotmac_integrator"]
 source_revisions = [
   "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
   "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
   "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+  "dotmac_integrator:ff6796aaa0d063b2d30327748e64627f0bccb394",
 ]
 source_paths = [
   # The seven tables — the mature part, and the reason this is product-first
@@ -73,6 +74,11 @@ source_paths = [
   # blocker and field-name vocabulary. Its domain reads stay in Sub; only the
   # provider-neutral aggregation/refusal shape is ported.
   "dotmac_sub:app/services/team_inbox_integrator_mirror.py",
+  # Later held-key authentication extraction; HTTP/settings remain in assembly.
+  "dotmac_integrator:src/dotmac_integrator/product_auth.py",
+  "dotmac_integrator:src/dotmac_integrator/settings.py",
+  "dotmac_integrator:src/dotmac_integrator/secret_loading.py",
+  "dotmac_integrator:src/dotmac_integrator/assembly.py",
 ]
 preserved_tests = [
   # The four that port. Carried WITH the code they prove, slice by slice.
@@ -80,6 +86,7 @@ preserved_tests = [
   "dotmac_sub:tests/test_integration_manifest_adoption.py",
   "dotmac_sub:tests/test_integration_delivery.py",
   "dotmac_sub:tests/test_integration_installation_api.py",
+  "dotmac_integrator:tests/unit/test_product_auth.py",
 ]
 # The comparison is a later product-first source, separate from the original
 # nine-suite engine extraction accounting below. Its product DB reads stay in
@@ -378,6 +385,18 @@ next_action = "Publish dotmac-integration a17, then make Sub publish authenticat
 "exclude-superseded" = "Covers storing and masking secret VALUES. The new contract stores REFERENCES only, so the behaviour under test cannot occur — a ported test would assert a property the design forbids."
 "move-to-assembly" = "Container/runtime end-to-end verification. Belongs to the dotmac_integrator deployment, not to the module."
 
+[held_key_product_auth]
+source_revision = "dotmac_integrator:ff6796aaa0d063b2d30327748e64627f0bccb394"
+source_path = "src/dotmac_integrator/product_auth.py"
+preserved_tests = "dotmac_integrator:tests/unit/test_product_auth.py"
+ported_to = "tests/unit/test_integration_product_auth.py"
+public_api = ["ProductCaller", "ProductPrincipal", "ProductAuthenticationFailed", "ProductAuthenticator"]
+contract = "Existing platform-plane product-query held-key authentication, extracted unchanged with a structural caller protocol and required injected held-material lookup. Scan all callers; last matching caller wins; exact scope membership; frozen principal; existing lookup/comparison exception propagation. No health receiver or health-source binding."
+retained_in_assembly = "Pydantic caller validation, Kernel get_secret default, startup/refresh, X-Api-Key handling, HTTP 401 mapping and submitted-binding authorization."
+first_cutover = "Pending publication and installed-back verification of the additive public API, then exact released-wheel pin and thin Integrator adapter; no consumer adoption is claimed."
+drift_proof = "Hosted Starter parity tests and Integrator consumer tests against the exact installed released wheel; AST comparison establishes source algorithm identity only, not runtime test evidence."
+local_copy_retirement = "Remove Integrator's local principal, exception and comparison loop in the same change as its exact released-wheel pin; retain only the constructor compatibility subclass and HTTP adapter."
+
 [[product_writers]]
 product = "dotmac_crm"
 writer_state = "legacy_writer"
@@ -396,3 +415,9 @@ writer_state = "qualifying_source"
 retirement_required = true
 revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = ["app/models/integration_platform.py", "app/services/integrations/installations.py", "app/services/integrations/manifest.py", "app/services/integrations/registry.py"]
+[[product_writers]]
+product = "dotmac_integrator"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "ff6796aaa0d063b2d30327748e64627f0bccb394"
+evidence_paths = ["src/dotmac_integrator/product_auth.py", "src/dotmac_integrator/settings.py", "src/dotmac_integrator/secret_loading.py", "src/dotmac_integrator/assembly.py", "tests/unit/test_product_auth.py"]

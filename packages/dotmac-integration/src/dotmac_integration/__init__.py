@@ -384,6 +384,12 @@ from dotmac_integration.polling import (
     prepare_poll,
     record_poll_batch,
 )
+from dotmac_integration.product_auth import (
+    ProductAuthenticationFailed,
+    ProductAuthenticator,
+    ProductCaller,
+    ProductPrincipal,
+)
 from dotmac_integration.provision_contract import (
     ProvisionHandlerRaised,
     ProvisionInvocationError,
@@ -672,6 +678,10 @@ __all__ = [
     "DeliveryReport",
     "FingerprintConflict",
     "ProductAcceptance",
+    "ProductAuthenticationFailed",
+    "ProductAuthenticator",
+    "ProductCaller",
+    "ProductPrincipal",
     "PRODUCT_OBSERVATION_SCHEMA_VERSION",
     "ProductObservationSource",
     "ProductPortClient",

@@ -1,5 +1,19 @@
 # Changelog — dotmac-integration
 
+## Unreleased — held-key product-query authentication
+
+- Extract Integrator's authenticator from
+  `ff6796aaa0d063b2d30327748e64627f0bccb394`,
+  `src/dotmac_integrator/product_auth.py`, into the additive public
+  `ProductCaller`, `ProductPrincipal`, `ProductAuthenticationFailed` and
+  `ProductAuthenticator` API. The stdlib-only implementation requires injected
+  held-material lookup and preserves the existing comparison, last-match,
+  exact-scope and immutable-principal behavior.
+- Port the source authentication tests with traversal, precedence, rotation
+  and exception-propagation cases. Hosted validation and released-wheel
+  consumer cutover remain pending. This adds no health receiver, health-source
+  binding, dependency, migration or connector SPI change.
+
 ## Release state — read this before pinning
 
 **Seventeen versions have been released. Pin `0.1.0a17`.** Tags
