@@ -67,14 +67,24 @@ preview adoption merged in PR #715 at
 `d1c1c7975eead7cb716fc4d590dabe97b6eebcdd` after its installed-native canary and
 all required checks passed.
 
-The remaining nine `0.2.0a1` distributions retain their existing public module
-APIs and private Rust implementations. Hosted qualification and the release lane
-must inspect the exact
-wheel and source archive, verify supported interpreters and compiler-free
-CPython 3.12 Debian Bookworm installation, publish those bytes, install back from
-the registry, prove native loading, tag and reconcile the generated release
-record. Each release has its own run and named freeze through truthful green
-protected main. Qualification or a package pin alone is not product adoption.
+On 2026-10-16, qualification and release of the nine `0.2.0a1` native
+successors completed through the protected module lane. They retain their
+existing public module APIs and private Rust implementations. Hosted computation
+qualification exercised installed original candidate wheels and wheels rebuilt
+from their source archives on CPython 3.11, 3.12 and 3.13; broader service
+integration ran on CPython 3.12. The release lane built separate release
+artifacts, verified compiler-free CPython 3.12 Debian Bookworm installation,
+published the retained bytes, installed them back from the registry, proved
+registration and native loading, and tagged each release. Registry verification
+established byte identity with the retained release artifacts and smoke results
+for installation, registration and native loading; it did not run the full
+computation/parity suite.
+Each release completed its own run and named freeze through the generated
+release record's merge and truthful green protected main. Canonical per-module
+publication and registry-verification receipts, including immutable run, source,
+tag and artifact coordinates, are recorded in
+`docs/inventories/module-release-verifications.json`. Qualification or a
+package pin alone is not product adoption.
 
 | Native successor | Existing use to assess | Product boundary |
 | --- | --- | --- |
@@ -104,8 +114,9 @@ measurements. No additional compatible bounded consumer was established; qualify
 and release the existing APIs without changing those product policies or moving
 SQL aggregates into Python merely to create a native caller.
 
-No remaining native successor is claimed published by this continuation. Exact
-publication evidence belongs in the existing release-verification records.
+The nine native successors are qualified and released; exact publication
+evidence is recorded in `docs/inventories/module-release-verifications.json`.
+This release completion establishes no additional product adoption.
 Any bounded product slice must exercise the installed extension through the
 public owner, replace its displaced arithmetic, and pass meaningful parity and
 ownership checks plus the complete hosted CI set. Computation adoption is not a
