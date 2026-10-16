@@ -4044,7 +4044,12 @@ activation. Current Sub V2 lacks authentic full original-documentary and some
 historical-discharge evidence: nonempty eligible-invoice rehearsals therefore
 remain explicitly blocked. A matching net balance or admissible import preview
 does not remove that limitation. The source-to-observation assembly adapter,
-real capture and trusted qualification remain owed.
+real capture and trusted qualification remain owed. The existing adapter Python
+API can preserve independently supplied typed originals after checking their
+source-invoice binding; its CLI still supplies none. A synthetic nonempty
+adapter/import/seal canary exercises the real importer on migrated PostgreSQL
+in hosted CI, with an exact fixture-bound verifier. It proves that contract path
+only, not authentic Sub originals or production rehearsal.
 
 Source inventories: [opening window](inventories/billing-opening-window-extraction.md)
 and [rehearsal report](inventories/billing-opening-rehearsal-report-extraction.md).

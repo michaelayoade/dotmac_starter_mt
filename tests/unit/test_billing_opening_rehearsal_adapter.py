@@ -713,3 +713,110 @@ def test_duplicate_json_keys_refuse_for_every_json_read(tmp_path, capsys):
     )
     assert _refusal(capsys)["error"] == "malformed_input"
     assert not (tmp_path / "out.json").exists()
+
+
+def _explicit_original(payload):
+    """Synthetic original supplied independently; never a source qualification."""
+    from datetime import datetime
+
+    from tests.unit import test_billing_opening_receivable_contracts as evidence
+
+    row = payload["invoices"][0]
+    template = evidence._candidate().manifest.receivables[0].original
+    return dataclasses.replace(
+        template,
+        document_number=row["invoice_number"],
+        issued_at=datetime.fromisoformat(row["issued_at"]),
+        subtotal=evidence._money(10000),
+        tax_total=evidence._money(0),
+        grand_total=evidence._money(10000),
+        tax_snapshots=(),
+    )
+
+
+def test_explicit_typed_original_is_preserved_without_qualifying_preview():
+    from uuid import UUID
+
+    payload = _fixture("census_one_eligible_v2.json")
+    obs, sidecar = adapter.load_sub_observation(payload)
+    original = _explicit_original(payload)
+    run = adapter.assemble_rehearsal_run(
+        obs,
+        assembly=_assembly(),
+        sidecar=sidecar,
+        original_documents=((UUID(INVOICE_1), original),),
+    )
+    assert run.manifest.receivables[0].original is original
+    assert run.manifest.receivables[0].historical_discharges == ()
+    assert run.manifest.cash_lots == ()
+    assert {block.code for block in run.previews[0].blockers} == {
+        "verifier_unavailable"
+    }
+    assert run.manifest.receivables[0].collection.automated_collection_allowed is False
+
+
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "duplicate",
+        "unknown",
+        "number",
+        "issued",
+        "total",
+        "currency",
+        "excluded",
+        "unmapped",
+        "foreign_account",
+        "precision",
+    ],
+)
+def test_explicit_original_mapping_refuses_misbinding(attack):
+    from datetime import timedelta
+    from uuid import UUID
+
+    from dotmac_kernel.money import Currency, Money
+
+    payload = _fixture("census_one_eligible_v2.json")
+    original = _explicit_original(payload)
+    invoice_id = UUID(INVOICE_1)
+    assembly = _assembly()
+    if attack == "unknown":
+        invoice_id = UUID(INVOICE_2)
+    elif attack == "number":
+        original = dataclasses.replace(original, document_number="foreign-original")
+    elif attack == "issued":
+        original = dataclasses.replace(
+            original, issued_at=original.issued_at + timedelta(days=1)
+        )
+    elif attack == "total":
+        original = dataclasses.replace(
+            original,
+            grand_total=Money(
+                original.grand_total.amount * 2, original.grand_total.currency
+            ),
+        )
+    elif attack == "currency":
+        original = dataclasses.replace(
+            original, grand_total=Money(original.grand_total.amount, Currency("USD", 2))
+        )
+    elif attack == "foreign_account":
+        payload["invoices"][0]["account_id"] = INVOICE_2
+    elif attack == "precision":
+        original = dataclasses.replace(
+            original, grand_total=Money(original.grand_total.amount, Currency("NGN", 3))
+        )
+    elif attack == "excluded":
+        payload["eligible_invoice_ids"] = []
+    elif attack == "unmapped":
+        assembly = dataclasses.replace(
+            assembly,
+            declaration=dataclasses.replace(assembly.declaration, invoice_mappings=()),
+        )
+    documents = ((invoice_id, original),) * (2 if attack == "duplicate" else 1)
+    obs, sidecar = adapter.load_sub_observation(payload)
+    with pytest.raises(
+        adapter.AdapterInputError, match="original_document_mapping_invalid"
+    ):
+        adapter.assemble_rehearsal_run(
+            obs, assembly=assembly, sidecar=sidecar, original_documents=documents
+        )

@@ -66,7 +66,7 @@ this report, and local static checks do not establish runtime acceptance.
 Sub -> Starter translator for the rehearsal census: it mechanically projects
 Sub's serialized `sub-billing-opening-census-v2`/`-v3` export onto
 `OpeningSubObservationV2`, assembles a candidate manifest from an explicit
-assembly file only (`cash_lots=()`, `original=None` always), and counts the
+assembly file only (`cash_lots=()`, CLI originals unavailable), and counts the
 pure preflight/report blockers per partition. It opens no database session,
 calls no writer, constructs no verifier, qualifies no cash and computes no
 tax. Its unit tests live in
@@ -122,3 +122,35 @@ versioned `OpeningRehearsalAssemblyV1` (every field the adapter reads) and
 
 The adapter now holds no canonicalizing call. Digests identify content only;
 they are not approval, qualification or activation authority.
+
+
+### Explicit originals and nonempty contract canary — 2026-10-16
+
+The existing adapter's Python `assemble_rehearsal_run` accepts an optional tuple
+of `(source_invoice_id, OpeningOriginalDocumentV1)` inputs. It preserves supplied
+originals only for eligible, observed, mapped invoices and refuses duplicate,
+unknown, excluded, unmapped, number/time/total/currency-mismatched mappings.
+No original is constructed from V2 financial observations or V3 current
+documentary observations. The closed assembly JSON and CLI remain unchanged;
+a normal nonempty source export still counts missing originals and verifier
+unavailability. Documentary digests and mapping declarations are content
+identity, never qualification. The existing importer verifier must independently
+qualify the exact command and supplied original evidence.
+
+`tests/test_billing_opening_rehearsal_import.py` adds a hosted migrated-PostgreSQL
+canary for both planes, using the existing synthetic one-eligible-invoice export
+fixture, an explicitly synthetic typed original, a verifier restricted to that
+exact fixture command, and the existing real restricted-principal window fixture.
+It asserts three distinct nonempty synthetic capture reports remain blocked on
+`original_documentary_evidence_unavailable`, exact per-account
+100.00 NGN receivable / zero cash residual, manual collection-evidence hold,
+changed-original/command refusal, actual import, persisted documentary basis,
+idempotent replay and permanent seal. This is an adapter-to-importer contract
+canary; it does not query a Sub database or establish authentic original evidence,
+production qualification, three live-cutoff captures or a production rehearsal.
+Hosted execution is required; local static checks are not runtime evidence.
+The report owner intentionally emits that blocker unconditionally for each V2
+mapped eligible invoice, even when an independently supplied original and
+qualified import preview exist. `compare_opening_rehearsals` therefore remains
+`run_blocked`; no complete nonempty report is claimed or simulated. Cash and
+historical-discharge mapping remain unsupported by this adapter.
