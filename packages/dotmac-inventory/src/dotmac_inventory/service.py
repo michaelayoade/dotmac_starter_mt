@@ -42,6 +42,7 @@ from dotmac_inventory.models import (
 )
 from dotmac_inventory.valuation import (
     ValuationState,
+    _sum_quantized_columns,
     lower_of_cost_and_nrv,
     quantize,
     receive_weighted_average,
@@ -1190,11 +1191,11 @@ def _rebuild_balance(
             )
         ).all()
     )
-    quantity_on_hand = quantize(
-        sum((Decimal(row.quantity_delta) for row in movements), Decimal("0"))
-    )
-    total_value = quantize(
-        sum((Decimal(row.value_delta) for row in movements), Decimal("0"))
+    quantity_on_hand, total_value = _sum_quantized_columns(
+        (
+            tuple(Decimal(row.quantity_delta) for row in movements),
+            tuple(Decimal(row.value_delta) for row in movements),
+        )
     )
     if quantity_on_hand < 0 or total_value < 0:
         raise InventoryError("movement ledger rebuild produced negative stock or value")
@@ -1213,8 +1214,8 @@ def _rebuild_balance(
             )
         ).all()
     )
-    reserved = quantize(
-        sum((Decimal(row.quantity_remaining) for row in reservations), Decimal("0"))
+    (reserved,) = _sum_quantized_columns(
+        (tuple(Decimal(row.quantity_remaining) for row in reservations),)
     )
     if reserved > quantity_on_hand:
         raise InventoryError("active reservations exceed rebuilt stock")

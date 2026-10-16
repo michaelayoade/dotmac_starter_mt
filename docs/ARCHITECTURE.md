@@ -1,5 +1,84 @@
 # Architecture
 
+## Native domain computation candidates (2026-10-15)
+
+The Rust implementation branch introduces private `_native` extensions owned by
+Imports, Web Analytics, Network Topology, Fiber Plant, Media Observations,
+Positioning, Forms, Surveys, Inventory and Finance. Each extension ships inside
+its independently versioned domain distribution; there is no new shared database
+or generic domain service. These are unpublished `0.2.0a1` source candidates.
+Hosted qualification gates the existing release controls and establishes no
+product adoption.
+
+| Computation | Native owner | Python authority retained |
+| --- | --- | --- |
+| Bounded CSV row normalization and fused field projection | `dotmac_imports._native` | Standard-library CSV grammar, encoding, headings, field declarations, source verification, durable partitions, row ledger and domain application |
+| Shared visitor ordering, sessions, dimension counts and funnels | `dotmac_web_analytics._native` | Event declarations, privacy admission, timezone buckets, fingerprints, generation records and persistence |
+| Batched exact-integer shortest paths | `dotmac_network_topology._native` | Tenant-selected active link snapshot, path policy, stored reachability and outbox |
+| Deterministic continuity BFS | `dotmac_fiber_plant._native` | Tenant-selected terminations/splices, endpoint selection and evidence |
+| Linear functional-hierarchy cycle detection | `dotmac_media_observations._native` | Provider-neutral fact selection, active scopes, lifecycle projection and persistence |
+| Batched circle/polygon membership | `dotmac_positioning._native` | Explicit product-selected fence ids, shape validation, current-observation admission and locked entry/exit state |
+| Batched structural form answer validation | `dotmac_forms._native` | Established Decimal/date/URL/email parsers, ordered errors, submission admission, snapshots and effects |
+| Sequential exact-decimal ledger totals | `dotmac_inventory._native` | Decimal context selection and signal replay, tenant-selected ledger/reservations, stock refusal, unit division and persistence |
+| Batched survey validation and cohort arithmetic | `dotmac_surveys._native` | Unicode normalization, labels, declaration/lifecycle policy, accepted value conversion/comparison and ordered Decimal signal replay, response persistence |
+| Ordered asset depreciation trajectories | `dotmac_finance._native` | Input policy, final caps, Decimal signal replay, book selection, line/total write order, accounting consequences and posting |
+
+Native calls receive owned primitive snapshots and detach from the Python
+interpreter during computation. They open no sessions, hold no tenant cache,
+read no credentials and emit no business effects. The Python runtime uses the
+native result directly; there is no silent Python algorithm fallback. Timezone
+and exact Decimal authority are not moved into an approximate native type.
+
+`scripts/native-build.toml` owns the compiler/binding/build-tool pins.
+`scripts/sync_native_builds.py` renders identical standalone Poetry hooks into
+each native package. An extracted source archive carries that hook and all
+locked Cargo inputs; it needs no checkout helper. Poetry retains distribution
+metadata authority and emits an accurately tagged platform/interpreter wheel.
+The intermediate Maturin wheel is a build input, never a separately published
+distribution. The hook accepts only the owning extension and refuses unrelated
+libraries or runtime dependencies.
+
+Hosted native qualification is a dependency of image construction. It verifies
+the generated inputs, builds and installs retained wheels, reconstructs wheels
+from extracted source archives, exercises the owning module suites, and records
+artifact hashes. The runtime image preserves Python console entrypoints and
+compiled modules while excluding the Rust compiler/toolchain. The existing
+release facilities retain all publication, registry read-back and trust authority.
+
+The initial binary release target is CPython 3.12 on Linux x86_64, qualified by
+loading the retained wheels in `python:3.12-slim-bookworm` without a Rust
+compiler. The release lane repeats that target-image smoke before publication;
+manifest registration alone cannot prove that the native extension loads.
+Python 3.11 and 3.13 have hosted source-build/parity qualification, but the
+single-wheel publication contract does not claim prebuilt binaries for them.
+Source installations require the compiler and build tools pinned above.
+ERP's existing durable customer CSV preparation is the first downstream slice:
+it already delegates preview parsing and mapping inference to `dotmac-imports`.
+Adoption requires a verified registry release, an exact product pin/lock, and a
+product workflow canary exercising the installed extension. This is not an
+apply-worker acceleration claim or a production deployment claim.
+
+The existing published-source drift ratchet enrolls native inputs present at
+either the release tag or current source revision. `NativePackageSource.v1`
+fingerprints Git modes, kinds and object identities for Python/native sources,
+the build hook and packaging configuration. Removing inputs cannot escape the
+check. These fingerprints use distinct fields and preserve historical Python
+tree identities; unrelated extraction and changelog documents stay outside it.
+
+Source qualification and implementation boundaries are recorded in
+[`inventories/rust-computation-sources.md`](inventories/rust-computation-sources.md).
+Inventory now has a source implementation of sequential quantity/value/reservation
+reductions using statically bundled, checksum-pinned libmpdec 4.0.1. Finance
+depreciation and survey cohort arithmetic use the same private source
+crate, `native/decimal-core`, embedded byte-for-byte into each owning source
+archive. The generator rejects stale copies; no shared Python distribution or
+runtime module dependency is introduced. All three preserve sequential Decimal
+rounding, sticky flags and first trapped operation. All ten candidates passed
+hosted exact-wheel, extracted-source-archive and full repository CI at PR #843
+head `2184ad1969012de3022470d152dc2e7891198d40`, run `38709519486`.
+Release-readiness changes require fresh qualification and do not inherit that
+result.
+
 This expands the `CLAUDE.md` summary. See `docs/adr/0001-multi-tenant-architecture.md`
 for the founding tenancy design and `docs/adr/0002-starter-consolidation.md`
 for how this repo came to be the org's one starter. ADR-0003 defines the
@@ -2453,6 +2532,9 @@ made concrete — every model has exactly one declared owner.
 | `DocumentEvent` / `PlatformDocumentEvent` | `mod_billing.document_events` / `platform_document_events` | `dotmac-billing` optional module | Append-only issuance/void evidence; corrections append and never rewrite the issued document. |
 | `ConfirmedSettlement` / `PlatformConfirmedSettlement` | `mod_billing.confirmed_settlements` / `platform_confirmed_settlements` | `dotmac-billing` optional module | Independently confirmed, provider-neutral kernel-Money evidence keyed by source settlement identity and fingerprint. Cash-backed available-credit draws retain each source settlement's allocation edge, serialize on the account and cap spending against both the rebuilt credit lane and eligible source room; reversed funding cannot back a new allocation. Non-cash grants and opening-balance credit require separate source contracts. |
 | `CashSourceClaim` / `PlatformCashSourceClaim` | `mod_billing.cash_source_claims` / `platform_cash_source_claims` | `dotmac-billing` optional module | Permanent exact source-receipt identity, structurally bound to exactly one confirmed settlement or opening cash lot in its scope/account/currency/precision. The settlement or opening import owner records the claim; unwind retains it, and historical backfill copies provenance without rewriting money. |
+| `OpeningWindow` / `PlatformOpeningWindow` | `mod_billing.opening_windows` / `platform_opening_windows` | `dotmac-billing` optional module | Permanent single opening namespace per scope, holding the exact frozen manifest and independently restricted migration principal. Technical provisioning and trusted operation verification are required; an epoch cannot create a second window. |
+| `OpeningWindowAdmission` / `PlatformOpeningWindowAdmission` | `mod_billing.opening_window_admissions` / `platform_opening_window_admissions` | `dotmac-billing` optional module | Immutable receipt admission into the exact frozen window manifest, serialized through the physical window row before account mutation. Historical receipts cannot bootstrap an admitted window. |
+| `OpeningWindowSeal` / `PlatformOpeningWindowSeal` | `mod_billing.opening_window_seals` / `platform_opening_window_seals` | `dotmac-billing` optional module | Permanent one-way seal checked against freshly verified authority and complete local admissions under the window lock. New imports, including history-less accounts, fail after sealing; authenticated exact retries and separately guarded inverses preserve their evidence. |
 | `OpeningImportReceipt` / `PlatformOpeningImportReceipt` | `mod_billing.opening_import_receipts` / `platform_opening_import_receipts` | `dotmac-billing` optional module | Immutable cash-only V1 or atomic receivables-plus-cash V2 import and full unwind, complete manifest and import-specific verification, target precondition and resulting posting watermark. |
 | `OpeningCashLot` / `PlatformOpeningCashLot` | `mod_billing.opening_cash_lots` / `platform_opening_cash_lots` | `dotmac-billing` optional module | Qualified historical cash backing, original consumption and residual provenance, structurally bound to its permanent shared source claim and import receipt. |
 | `OpeningCashEffect` / `PlatformOpeningCashEffect` | `mod_billing.opening_cash_effects` / `platform_opening_cash_effects` | `dotmac-billing` optional module | Immutable recognition, invoice application, refund or linked correction with exact lot, posting group and original effect identity. |
@@ -2595,6 +2677,7 @@ write:
 | Subscription offers, versions, prices, contracts, lines and recurring occurrences | `dotmac_subscriptions.service` is the sole writer on both declared planes through its typed publish/withdraw, record/end, resolve, generate and acknowledge operations. It uses the caller's session and flushes only. The occurrence and Subscriptions-owned `RatedObligationOutputV1` stage atomically; Billing owns only its distinct `AcceptRatedObligationV1` input, and access/Billing owners are assembly-wired consumers, never sibling imports. No product is claimed as cut over. |
 | Billing obligations, documents, settlements, withholding discharges, posting effects, account positions, invoice exposures, official artifact relations and accounting facts | `dotmac_billing.service` is the sole writer on both declared planes through its typed accept/issue/void/credit/allocation/correction/rebuild/artifact-record/artifact-repair operations. It uses the caller's session and flushes only, and every emitted kernel-outbox routing code is declared by its module manifest. Dedicated withholding accept/reverse commands reduce only AR and append exact corrections; V2 accounting facts carry their distinct evidence while V1 remains unchanged. Ordinary non-cash grants, source-specific applications, partial application reversals and unused reductions append immutable typed evidence on a separate balance lane; their AccountingFactV3 and four-balance ReceivablePositionV2 preserve historical V1 and WHT V2 meaning. Every subsequent posting group produces a fresh V2 position. Grant/effect and exact V2 queries verify stored scalar evidence without autoflush or live configuration reconstruction. Finance permission and genuine Tax-evidence mapping belong to the trusted adopter. Billing owns both aggregate and exposure financial state; Collections receives only an assembly-translated `ReceivableExposureV1`, and ERP receives immutable accounting facts. |
 | Billing confirmed-cash receipt identity | `dotmac_billing.service.accept_settlement` creates and verifies immutable cash-source claims within its existing caller-owned idempotent operation. Exact source-system/key uniqueness spans accounts in each scope; deferred database completeness and structural FKs bind every settlement to its claim. No separate reservation API or opening funding writer is introduced. |
+| Billing opening window, admissions and seal | `dotmac_billing.service` owns technical provisioning, verified import admission and `seal_opening_window`; `bi_0009_opening_window` owns structural immutability, scope uniqueness, role closure and database guards. The assembly independently qualifies each operation and the restricted migration principal; the caller alone completes its outer transaction. No ordinary runtime writer can open or reopen the migration window. |
 | Billing opening cash and its dependent uses | `dotmac_billing.service` owns import, mixed-source credit draw, atomic mixed draw inverse, evidenced refund and refund correction, and full import unwind. Its opening queries return verified immutable evidence and remaining room. The existing caller owns the outer transaction; the assembly verifier owns source, refund and migration evidence qualification. No provider transfer or production authority activation occurs in these commands. |
 | Collections policy, cases, arrangements, grace, notice/action request evidence and receipts | `dotmac_collections.service` is the sole writer on both declared planes. A typed `Scope` selects mirrored models and the matching kernel idempotency ledger; `CollectionCaseService.assess` and `process_step_due` reread `ReceivableObservationV1` and fail closed before action. Case transitions stage exact timer schedule/cancel operations through the caller-owned `CollectionsTimer` port. Accepted requests and manifest-declared kernel outbox intents flush atomically; accepted or retryable owner receipts schedule only the next immutable policy step/retry. Replay emits no duplicate. Collections never writes Billing financial state or the owning product's service state, and neither candidate adopter is claimed as cut over. |
 | Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |
@@ -3429,6 +3512,15 @@ commit even if the original error was swallowed. Only the matching root ending
 clears it. The caller must abort the root, and Kernel preserves the original
 failure across cleanup errors. Ordinary flush conflicts that prove exact
 savepoint rollback remain recoverable.
+Billing opening-window refusal recovery is a source consumer of
+`conflict_savepoint_requires_rollback`: before rechecking a refused opening
+operation it verifies that the same root remains active, the enclosing savepoint
+is restored, and Kernel has not latched that root for rollback. Billing declares
+Kernel `>=0.1.0a105`; its namespace allocation remains a89. Published a98-a104
+contain the transaction module but export only `conflict_savepoint`. The source
+dependency is not publication evidence: verified a105 artifacts and hosted floor
+checks are required before Billing release/adoption. Sub Numbering remains a
+separate composition gate below.
 No service receives authority to commit or roll back the outer transaction.
 `ConflictSavepointProtocolError` refuses replaced or prematurely completed
 helper state. The Sub command bridge still requires a verified released
@@ -3792,6 +3884,7 @@ runtime or Gate 0 acceptance. Its owners and consumers are:
 |---|---|---|
 | `lane3_broker_origin.py`, `lane3_handoff_protocol.py` | Starter: exact-origin grammar and bounded, value-free protocol | Controller, coordinator and job client |
 | `lane3_handoff_coordinator.py`, `lane3_handoff_resolver.py` | Starter: authoritative GitHub qualification, immutable source installation, exact DNS capture and durable JIT cleanup | Independently approved host ceremony |
+| `lane3_handoff_coordinator.py::parse_config`, `authority_binding`, `assemble_v2_config`; `lane3_execution.py::require_admission_evidence` | Starter: explicit reviewed proof source capability, v2 qualification/config digest and same-commit admission DATA validation; candidate execution remains unsupported | Existing controller independent approval and measured runtime bundle; explicit private factory adapter |
 | `lane3_campaign_bootstrap.py` | Starter: measure the closed private bootstrap union/observation-age profile, require complete positive-TTL observations and identical chains from both configured TCP resolvers, retain all record/acquisition provenance, and freeze the deduplicated union with 60-second earliest-capture age | Root preview/freeze and the actual coordinator launch path under the original campaign deadline; broker TTL/grant policy remains separately owned |
 | `lane3_handoff_controller.py` | Starter: root lease journal, task identity, UID-scoped firewall, launch budget, exact-owned rollback and fresh read-only WireGuard checks | Coordinator and authenticated consumed-lease client over the private socket |
 | `lane3_handoff_install.py` | Starter: immutable installation bundle, protected independent configuration, locked management dispatch, durable install rollback, explicit uninstall and boot-readiness barrier | Host administrator and the fixed coordinator management channel |
@@ -3920,6 +4013,43 @@ runtime participants flush the caller's transaction; no second transaction
 or replay engine is introduced. Publication, verified adoption, source-proof
 adapters, full-population closure and production authority transfer remain
 separate gates. Source qualification: [receivables inventory](inventories/billing-opening-receivables-extraction.md).
+
+### Billing opening-window custody and rehearsal (unpublished candidate)
+
+`dotmac_billing.service.provision_opening_window` and `seal_opening_window`
+own one permanent window per Billing scope. Additive `bi_0009` adds window,
+admission and seal tables on both planes; platform uses a real singleton.
+Provisioning requires the schema operator plus a trusted operation-specific
+verification port. It binds one complete V1/V2 manifest and an actual restricted
+principal's name/OID, without creating a LOGIN role or granting import rights.
+Product provisioning supplies the narrowly scoped DML closure separately.
+
+Database admission rejects ordinary roles, unsafe role-membership paths and
+receipt manifests differing from the frozen window. Every new opening path
+physically touches that window before account admission; sealing serializes
+through the same row, freshly verifies external authority under that boundary,
+and compares the complete local admission population. Missing windows and new
+imports after sealing fail closed, including history-less accounts. Epochs
+cannot reopen admission. Exact authenticated retries retain their original
+receipt without a new posting. Existing guarded linked inverses remain distinct
+from opening or activation authority. Downgrade refuses to erase custody.
+
+`report_opening_rehearsal` and `compare_opening_rehearsals` are pure observations
+over typed source projections, exact mappings and real V2 preflight results.
+They keep original documentary/discharge totals and financial residuals
+separate, expose unclassified deltas, and bind three distinct complete capture
+reports. They never qualify cash, import money, seal a window or authorize
+activation. Current Sub V2 lacks authentic full original-documentary and some
+historical-discharge evidence: nonempty eligible-invoice rehearsals therefore
+remain explicitly blocked. A matching net balance or admissible import preview
+does not remove that limitation. The source-to-observation assembly adapter,
+real capture and trusted qualification remain owed.
+
+Source inventories: [opening window](inventories/billing-opening-window-extraction.md)
+and [rehearsal report](inventories/billing-opening-rehearsal-report-extraction.md).
+Authored canaries include both-plane role/SQL refusals, exact replay, concurrent
+admission/seal, whole-caller rollback and ordinary post-seal lifecycle. Static
+review is not hosted runtime acceptance or a production authority switch.
 
 ### Billing cash-only opening lifecycle (unpublished candidate)
 

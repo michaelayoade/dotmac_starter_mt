@@ -484,6 +484,9 @@ def test_genuine_bi0005_upgrade_preserves_all_history_and_backfills_exact_identi
         # Preserve the complete bi5 history inventory. Later opening tables
         # do not exist at either endpoint of this bi5 -> bi6 upgrade canary.
         later_tables = {
+            "opening_windows",
+            "opening_window_admissions",
+            "opening_window_seals",
             "cash_source_claims",
             "opening_import_receipts",
             "opening_cash_lots",

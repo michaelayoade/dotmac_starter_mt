@@ -4,6 +4,12 @@ All notable changes follow Semantic Versioning.
 
 ## 0.1.0a8 — UNRELEASED
 
+- Require Kernel `>=0.1.0a105` for the public exact-root rollback-latch
+  observer consumed by opening-window refusal recovery. Published a98-a104
+  contain the transaction module but omit this export; a89 remains Billing's
+  namespace allocation. This source dependency update does not establish
+  Kernel or Billing publication, hosted acceptance, or product adoption.
+
 - Add atomic V2 opening receivables plus cash, preserving original documentary
   invoice totals, individually evidenced historical discharges and exact
   residuals without native issuance, new revenue or historical cash replay.

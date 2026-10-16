@@ -129,12 +129,14 @@ module-catalog: ## Regenerate the composable-module discovery catalogue
 	poetry run python scripts/module_catalog.py
 module-catalog-check: ## Fail if the committed module catalogue is stale
 	poetry run python scripts/module_catalog.py --check
+native-check: ## Verify generated native build hooks and pinned inputs
+	python3 scripts/sync_native_builds.py --check
 poetry-lock-check: ## Exact Poetry pin + committed root lock (never regenerates)
 	python3 scripts/check_poetry_toolchain.py --active
 	poetry check --lock
 format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
-check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check manifest-digest-check product-writer-check rehearsal-status-check deployment-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets + deployment descriptor
+check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check native-check manifest-digest-check product-writer-check rehearsal-status-check deployment-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets + deployment descriptor
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests

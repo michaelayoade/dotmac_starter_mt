@@ -46,6 +46,7 @@ def test_bundle_requires_exact_original_supplier_and_complete_runtime():
 def test_legacy_closure_is_prior_evidence_and_cannot_be_a_new_target():
     legacy = manifest()
     legacy["runtime"].pop("lane3_campaign_bootstrap.py")
+    legacy["runtime"].pop("lane3_execution.py")
     assert set(legacy["runtime"]) == set(hi.LEGACY_RUNTIME_MODULES)
     hi.validate_manifest(legacy, allow_legacy_runtime=True)
     with pytest.raises(hi.InstallRefused):
@@ -275,3 +276,12 @@ def test_wants_link_validation_preserves_only_exact_root_owned_links(
         installer.remove_wants_link()
         filesystem.unlink.assert_called_once_with(link.name, dir_fd=descriptor)
         filesystem.fsync.assert_called_once_with(descriptor)
+
+
+def test_previous_runtime_without_validator_is_recovery_only():
+    prior = manifest()
+    prior["runtime"].pop("lane3_execution.py")
+    assert set(prior["runtime"]) == set(hi.PRIOR_RUNTIME_MODULES)
+    hi.validate_manifest(prior, allow_legacy_runtime=True)
+    with pytest.raises(hi.InstallRefused):
+        hi.validate_manifest(prior)

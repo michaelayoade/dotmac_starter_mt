@@ -677,7 +677,7 @@ develop = true
 
 [package.dependencies]
 alembic = ">=1.13"
-dotmac-kernel = ">=0.1.0a89"
+dotmac-kernel = ">=0.1.0a105"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -723,7 +723,7 @@ url = "packages/dotmac-campaigns"
 
 [[package]]
 name = "dotmac-collections"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac dual-plane collections policy and case owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1113,7 +1113,7 @@ url = "packages/dotmac-expenses"
 
 [[package]]
 name = "dotmac-fiber-plant"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant outside-plant structure, strand, splice, termination and continuity owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1149,7 +1149,7 @@ url = "packages/dotmac-files"
 
 [[package]]
 name = "dotmac-finance"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant fixed-asset books, depreciation and immutable accounting consequences"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1167,7 +1167,7 @@ url = "packages/dotmac-finance"
 
 [[package]]
 name = "dotmac-forms"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant form definitions, immutable versions and validated submission evidence"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1221,7 +1221,7 @@ url = "packages/dotmac-fx-policy"
 
 [[package]]
 name = "dotmac-imports"
-version = "0.1.0a2"
+version = "0.2.0a1"
 description = "DotMac bulk-import run ledger, dry-run/apply promotion and column mapping"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1294,7 +1294,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-inventory"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Dotmac Inventory — tenant-local stock ledger, reservations, traceability, and valuation"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1375,7 +1375,7 @@ url = "packages/dotmac-licensing"
 
 [[package]]
 name = "dotmac-media-observations"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Provider-neutral immutable external media observations and rebuildable projections"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1483,7 +1483,7 @@ url = "packages/dotmac-network-observability"
 
 [[package]]
 name = "dotmac-network-topology"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant declared/observed link, path, reachability and topology-projection owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1501,7 +1501,7 @@ url = "packages/dotmac-network-topology"
 
 [[package]]
 name = "dotmac-numbering"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane document-series allocation with immutable receipts"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1663,7 +1663,7 @@ url = "packages/dotmac-pon-access"
 
 [[package]]
 name = "dotmac-positioning"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2054,7 +2054,7 @@ url = "packages/dotmac-support-access"
 
 [[package]]
 name = "dotmac-surveys"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Dotmac Surveys — tenant-scoped feedback definitions, invitations, responses, and aggregate evidence"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2179,7 +2179,7 @@ url = "packages/dotmac-usage-rating"
 
 [[package]]
 name = "dotmac-web-analytics"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Privacy-first first-party website observations and deterministic analytical projections"
 optional = false
 python-versions = ">=3.11,<3.14"

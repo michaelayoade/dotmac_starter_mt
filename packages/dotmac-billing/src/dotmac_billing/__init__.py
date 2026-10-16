@@ -1,4 +1,4 @@
-"""Public Billing V1 surface."""
+"""Public Billing contracts, queries and owner commands."""
 
 from dotmac_billing.authority import (
     AuthorityBinding,
@@ -160,9 +160,55 @@ from dotmac_billing.opening_receivable_validation import (
     opening_withholding_component_identity,
     preview_opening_account_import_v2,
 )
+from dotmac_billing.opening_rehearsal import (
+    compare_opening_rehearsals,
+    opening_rehearsal_assembly_digest,
+    render_opening_rehearsal_census,
+    render_opening_rehearsal_refusal,
+    report_opening_rehearsal,
+)
+from dotmac_billing.opening_rehearsal_contracts import (
+    OpeningObservedControlV1,
+    OpeningObservedInvoiceV1,
+    OpeningObservedLaneV1,
+    OpeningObservedPopulationV1,
+    OpeningObservedPrecisionV1,
+    OpeningObservedSettlementV1,
+    OpeningRehearsalAssemblyV1,
+    OpeningRehearsalBindingV1,
+    OpeningRehearsalCensusV1,
+    OpeningRehearsalComparisonV1,
+    OpeningRehearsalDeltaV1,
+    OpeningRehearsalDischargeMappingV1,
+    OpeningRehearsalInvoiceMappingV1,
+    OpeningRehearsalMappingV1,
+    OpeningRehearsalReportV1,
+    OpeningRehearsalRunV1,
+    OpeningSubObservationV2,
+)
 from dotmac_billing.opening_validation import (
     opening_manifest_fingerprint,
     preview_opening_account_import,
+)
+from dotmac_billing.opening_window_contracts import (
+    OpeningWindowAdmissionV1,
+    OpeningWindowProvisionVerificationRequestV1,
+    OpeningWindowProvisionVerificationV1,
+    OpeningWindowProvisionVerifier,
+    OpeningWindowSealV1,
+    OpeningWindowSealVerificationRequestV1,
+    OpeningWindowSealVerificationV1,
+    OpeningWindowSealVerifier,
+    OpeningWindowV1,
+    ProvisionOpeningWindowV1,
+    SealOpeningWindowV1,
+    StoredOpeningWindowV1,
+    opening_admission_population_digest,
+)
+from dotmac_billing.opening_window_queries import (
+    get_opening_window,
+    get_opening_window_admissions,
+    get_opening_window_seal,
 )
 from dotmac_billing.queries import (
     get_invoice_document_fact,
@@ -175,6 +221,44 @@ from dotmac_billing.queries import (
 __version__ = "0.1.0a8"
 
 __all__ = [
+    "OpeningWindowAdmissionV1",
+    "OpeningWindowProvisionVerificationRequestV1",
+    "OpeningWindowProvisionVerificationV1",
+    "OpeningWindowProvisionVerifier",
+    "OpeningWindowSealV1",
+    "OpeningWindowSealVerificationRequestV1",
+    "OpeningWindowSealVerificationV1",
+    "OpeningWindowSealVerifier",
+    "OpeningWindowV1",
+    "ProvisionOpeningWindowV1",
+    "SealOpeningWindowV1",
+    "StoredOpeningWindowV1",
+    "opening_admission_population_digest",
+    "get_opening_window",
+    "get_opening_window_admissions",
+    "get_opening_window_seal",
+    "OpeningObservedControlV1",
+    "OpeningObservedInvoiceV1",
+    "OpeningObservedLaneV1",
+    "OpeningObservedPopulationV1",
+    "OpeningObservedPrecisionV1",
+    "OpeningObservedSettlementV1",
+    "OpeningRehearsalBindingV1",
+    "OpeningRehearsalComparisonV1",
+    "OpeningRehearsalDeltaV1",
+    "OpeningRehearsalDischargeMappingV1",
+    "OpeningRehearsalInvoiceMappingV1",
+    "OpeningRehearsalMappingV1",
+    "OpeningRehearsalReportV1",
+    "OpeningRehearsalRunV1",
+    "OpeningSubObservationV2",
+    "compare_opening_rehearsals",
+    "opening_rehearsal_assembly_digest",
+    "render_opening_rehearsal_census",
+    "render_opening_rehearsal_refusal",
+    "OpeningRehearsalAssemblyV1",
+    "OpeningRehearsalCensusV1",
+    "report_opening_rehearsal",
     "OpeningCollectionEvidenceV1",
     "OpeningOriginalDocumentV1",
     "OpeningReplayBindingV1",

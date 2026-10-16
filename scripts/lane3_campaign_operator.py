@@ -33,6 +33,7 @@ RUNTIME_ROLES = frozenset(
         "lane3_openbao_topology.py",
         "lane3_broker_origin.py",
         "lane3_handoff_coordinator.py",
+        "lane3_execution.py",
         "lane3_topology.py",
         "lane3_handoff_protocol.py",
         "lane3_handoff_controller.py",
@@ -55,8 +56,229 @@ CLEANUP = frozenset(
 )
 
 
+LOCAL_FAILURE_CATEGORIES = frozenset(
+    (
+        "actual-run-required",
+        "archive-unproved",
+        "b8-cleanup-unproved",
+        "b8-result",
+        "bootstrap-unproved",
+        "cleanup-unproved",
+        "closure-role",
+        "code-pin",
+        "coordinator-binding",
+        "coordinator-role",
+        "coordinator-state-present",
+        "csr-schema",
+        "custody-not-prepared",
+        "custody-order",
+        "deadline",
+        "duplicate-key",
+        "failure-state-unproved",
+        "finish-order",
+        "group-not-empty",
+        "issuer-external-pin",
+        "key-age",
+        "key-receipt",
+        "management-order",
+        "management-removal-unproved",
+        "management-unproved",
+        "module-role",
+        "nonfinite-json",
+        "object-required",
+        "owned-file",
+        "pipe-deadline",
+        "pipe-eof",
+        "pipe-size",
+        "prepare-unproved",
+        "protected-deployment-required",
+        "protected-parent",
+        "state-ownership-unproved",
+        "subprocess-deadline",
+        "subprocess-eof",
+        "subprocess-size",
+        "subprocess-unproved",
+        "unproven",
+    )
+)
+# Explicit wire whitelist; does not import or execute the host management role.
+MANAGEMENT_FAILURE_CATEGORIES = frozenset(
+    (
+        "binding",
+        "bridge-lock",
+        "code-pin",
+        "duplicate-key",
+        "finish-already-attempted",
+        "input-deadline",
+        "input-schema",
+        "installation-pin",
+        "invocation",
+        "line-too-long",
+        "module-role",
+        "object-required",
+        "order",
+        "original-clock",
+        "original-expired",
+        "original-timer",
+        "original-timer-drift",
+        "protected-file",
+        "protected-parent",
+        "protocol",
+        "receipt-missing",
+        "truncated-line",
+    )
+) | frozenset(
+    (
+        "activation-stop-unproven",
+        "already-attempted",
+        "arm-unowned",
+        "binding-invalid",
+        "binding-mismatch",
+        "cleanup-unproven",
+        "deadline-invalid",
+        "file-unproven",
+        "gate-unproven",
+        "helper-unproven",
+        "lease-active",
+        "lock-busy",
+        "lock-unproven",
+        "marker-unproven",
+        "old-stop-unproven",
+        "preflight-unproven",
+        "receipt-stale",
+        "receipt-unproven",
+        "root-required",
+        "state-unproven",
+        "systemd-unproven",
+        "timer-collision",
+        "timer-remover-active",
+        "timer-unproven",
+        "transition-unproven",
+        "unexpected",
+        "unit-unowned",
+        "usage-refused",
+    )
+)
+COORDINATOR_FAILURE_CATEGORIES = frozenset(
+    (
+        "admission.invalid",
+        "execution.unsupported",
+        "approval.missing",
+        "assignment.ambiguous",
+        "binding.mismatch",
+        "boot.mismatch",
+        "deadline.insufficient",
+        "frame.invalid",
+        "grant.consumed",
+        "grant.mismatch",
+        "install.failed",
+        "internal",
+        "lease.expired",
+        "lease.unknown",
+        "nonce.mismatch",
+        "origin.flags",
+        "origin.invalid",
+        "origin.not_admitted",
+        "peer.refused",
+        "protocol.mismatch",
+        "report.changed",
+        "schema.invalid",
+        "snapshot.refused",
+        "state.invalid",
+    )
+)
+FAILURE_PHASES = frozenset(
+    {
+        "unproven",
+        "retain",
+        "gate_prepare",
+        "prepare",
+        "gate_bootstrap",
+        "launch",
+        "decide",
+        "finish",
+        "cleanup",
+    }
+)
+FAILURE_STAGES = frozenset(
+    {
+        "unproven",
+        "bridge",
+        "coordinator",
+        "operator",
+        "preflight",
+        "arm",
+        "first-bindings",
+        "first-retained-check",
+        "old-stop",
+        "old-stop-readback",
+        "second-bindings",
+        "second-retained-check",
+    }
+)
+CLEANUP_OUTCOMES = frozenset({"not_attempted", "completed", "unproven"})
+
+
+def _diagnostic(value, categories):
+    if type(value) is not dict or set(value) != {
+        "phase",
+        "stage",
+        "category",
+        "cleanup",
+    }:
+        return None
+    for key, allowed in (
+        ("phase", FAILURE_PHASES),
+        ("stage", FAILURE_STAGES),
+        ("category", categories),
+        ("cleanup", CLEANUP_OUTCOMES),
+    ):
+        if type(value[key]) is not str or value[key] not in allowed:
+            return None
+    return dict(value)
+
+
 class CampaignRefused(RuntimeError):
-    pass
+    """A finite diagnostic, safe to copy through the measured owner adapter."""
+
+    def __init__(self, category, *, diagnostic=None, categories=()):
+        category = (
+            category
+            if type(category) is str and category in LOCAL_FAILURE_CATEGORIES
+            else "unproven"
+        )
+        super().__init__(category)
+        self.diagnostic = _diagnostic(
+            diagnostic,
+            LOCAL_FAILURE_CATEGORIES
+            | MANAGEMENT_FAILURE_CATEGORIES
+            | (frozenset(categories) & COORDINATOR_FAILURE_CATEGORIES),
+        ) or {
+            "phase": "unproven",
+            "stage": "unproven",
+            "category": category,
+            "cleanup": "not_attempted",
+        }
+
+
+def failure_diagnostic(error):
+    """Public caller adapter: never copy arbitrary exception attributes/text."""
+    if type(error) is CampaignRefused:
+        # Constructor validation is the sole ingress; return a defensive copy.
+        value = _diagnostic(
+            error.diagnostic,
+            LOCAL_FAILURE_CATEGORIES
+            | MANAGEMENT_FAILURE_CATEGORIES
+            | COORDINATOR_FAILURE_CATEGORIES,
+        )
+        if value is not None:
+            return value
+    return {
+        "phase": "unproven",
+        "stage": "unproven",
+        "category": "unproven",
+        "cleanup": "not_attempted",
+    }
 
 
 def configure(deployment):
@@ -136,6 +358,7 @@ def configure(deployment):
         raise ValueError("deployment-qualification")
     qualification = candidate["qualification"]
     if set(qualification) != {
+        "authority",
         "repository_id",
         "run_id",
         "run_attempt",
@@ -147,6 +370,27 @@ def configure(deployment):
         "admission_digest",
         "supplier_digest",
     }:
+        raise ValueError("deployment-qualification")
+    authority = qualification["authority"]
+    if (
+        type(authority) is not dict
+        or set(authority)
+        != {
+            "schema",
+            "purpose",
+            "config_digest",
+            "capability_digest",
+            "evidence_digest",
+        }
+        or authority["schema"] != "dotmac.lane3.qualification-purpose.v2"
+        or authority["purpose"] != "qualification"
+        or authority["evidence_digest"] is not None
+        or any(
+            type(authority[key]) is not str
+            or re.fullmatch("[0-9a-f]{64}", authority[key]) is None
+            for key in ("config_digest", "capability_digest")
+        )
+    ):
         raise ValueError("deployment-qualification")
     for key in ("repository_id", "run_id", "run_attempt", "environment_id"):
         if type(qualification[key]) is not int or qualification[key] <= 0:
@@ -338,7 +582,7 @@ def settle(process):
             stream.close()
 
 
-def _run_owned(args, deadline, request=None):
+def _run_owned(args, deadline, request=None, *, refusal_categories=None):
     """Internal fixed-role launcher, bounded output and owned process group."""
     remaining(deadline)
     process = subprocess.Popen(
@@ -387,6 +631,31 @@ def _run_owned(args, deadline, request=None):
                     raise CampaignRefused("subprocess-size")
         process.wait(timeout=remaining(deadline))
         if process.returncode != 0:
+            if refusal_categories is not None:
+                try:
+                    reply = decode(out)
+                    if (
+                        set(reply) == {"status", "category"}
+                        and reply["status"] == "REFUSED"
+                        and type(reply["category"]) is str
+                        and reply["category"] in refusal_categories
+                        and reply["category"] in COORDINATOR_FAILURE_CATEGORIES
+                    ):
+                        raise CampaignRefused(
+                            "subprocess-unproved",
+                            diagnostic={
+                                "phase": "unproven",
+                                "stage": "coordinator",
+                                "category": reply["category"],
+                                "cleanup": "not_attempted",
+                            },
+                            categories=refusal_categories,
+                        )
+                except CampaignRefused as exc:
+                    if exc.diagnostic["stage"] == "coordinator":
+                        raise
+                except (ValueError, TypeError, UnicodeError):
+                    pass
             raise CampaignRefused("subprocess-unproved")
         return decode(out)
     finally:
@@ -413,6 +682,13 @@ def coordinator_binding():
         or config["runner_group_id"] != binding["runner_group_id"]
         or config.get("management")
         != {"ssh_alias": binding["ssh_destination"], "controller_path": dispatcher}
+    ):
+        raise CampaignRefused("coordinator-binding")
+    authority = binding["qualification"]["authority"]
+    if (
+        config.get("schema") != "dotmac.lane3.handoff-coordinator.v2"
+        or config.get("purpose") != authority["purpose"]
+        or load_module("protocol").digest(config) != authority["config_digest"]
     ):
         raise CampaignRefused("coordinator-binding")
     for key in (
@@ -451,7 +727,7 @@ def coordinator_cli(operation, deadline, run_id=None):
             args += ["--deadline-monotonic-ns", str(int(deadline * 1_000_000_000))]
     elif run_id is not None:
         raise CampaignRefused("coordinator-role")
-    return _run_owned(args, deadline)
+    return _run_owned(args, deadline, refusal_categories=COORDINATOR_FAILURE_CATEGORIES)
 
 
 def closure_read(role, deadline, request=None):
@@ -537,7 +813,7 @@ def durable_owned_state():
             "bootstrap_proposal_sha256",
             "bootstrap_provenance_digest",
         }
-        or state["schema"] != "dotmac.lane3.handoff-coordinator-state.v1"
+        or state["schema"] != "dotmac.lane3.handoff-coordinator-state.v2"
         or state["qualification"] != binding["qualification"]
     ):
         raise CampaignRefused("state-ownership-unproved")
@@ -604,7 +880,14 @@ class ManagementStdio:
         self.pipe.send({"op": op}, until)
         reply = self.pipe.receive(until, 4096)
         if reply.get("status") != "PASS" or reply.get("op") != op:
-            raise CampaignRefused("management-unproved")
+            diagnostic = None
+            if set(reply) == {"status", "diagnostic"} and reply["status"] == "REFUSED":
+                diagnostic = _diagnostic(
+                    reply["diagnostic"], MANAGEMENT_FAILURE_CATEGORIES
+                )
+                if diagnostic is not None and diagnostic["phase"] != op:
+                    diagnostic = None
+            raise CampaignRefused("management-unproved", diagnostic=diagnostic)
         self.phase = {
             "retain": "retained",
             "gate_prepare": "prepared",
@@ -627,9 +910,12 @@ class ManagementStdio:
             raise CampaignRefused("coordinator-state-present")
         self.run_id = binding["github_run_id"]
         deadline = time.monotonic() + 60  # before retain; never reset by a gate
+        attempted_phase = "retain"
         try:
             self._call("retain", 30, deadline)
+            attempted_phase = "gate_prepare"
             self._call("gate_prepare", 30, deadline)
+            attempted_phase = "prepare"
             self.prepare_attempted = True
             prepared = coordinator_cli("prepare", deadline, self.run_id)
             protocol = load_module("protocol")
@@ -640,19 +926,32 @@ class ManagementStdio:
             ):
                 raise CampaignRefused("prepare-unproved")
             self.lease_id = prepared["lease_id"]
+            attempted_phase = "gate_bootstrap"
             self._call("gate_bootstrap", 60, deadline)
             if durable_owned_state()["lease_id"] != self.lease_id:
                 raise CampaignRefused("state-ownership-unproved")
+            attempted_phase = "launch"
             launched = coordinator_cli("launch", deadline, self.run_id)
             if launched != {"state": "BOOTSTRAP", "lease_id": self.lease_id}:
                 raise CampaignRefused("bootstrap-unproved")
             return launched
-        except BaseException:
+        except BaseException as exc:
+            diagnostic = failure_diagnostic(exc)
+            if diagnostic["phase"] == "unproven":
+                diagnostic["phase"] = attempted_phase
+                if diagnostic["stage"] == "unproven":
+                    diagnostic["stage"] = "operator"
             try:
                 self.failure_finalize()
+                if diagnostic["cleanup"] != "unproven":
+                    diagnostic["cleanup"] = "completed"
             except BaseException:  # timers remain independent authority
                 self.failure = "UNPROVEN"
-            raise
+                diagnostic["cleanup"] = "unproven"
+            if type(exc) is CampaignRefused:
+                exc.diagnostic = diagnostic
+                raise
+            raise CampaignRefused("unproven", diagnostic=diagnostic) from None
 
     def close(self):
         """Signal EOF only; the launcher still owns termination and reaping."""

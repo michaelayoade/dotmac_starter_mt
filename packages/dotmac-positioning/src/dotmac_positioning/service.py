@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -13,6 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_positioning import _native
 from dotmac_positioning.contracts import (
     CircleFence,
     CollectionGrantInput,
@@ -1257,46 +1257,8 @@ def deactivate_geofence(
     return row
 
 
-def _haversine_m(
-    latitude_a: float,
-    longitude_a: float,
-    latitude_b: float,
-    longitude_b: float,
-) -> float:
-    earth_radius_m = 6_371_000.0
-    phi_a = math.radians(latitude_a)
-    phi_b = math.radians(latitude_b)
-    delta_phi = math.radians(latitude_b - latitude_a)
-    delta_lambda = math.radians(longitude_b - longitude_a)
-    value = (
-        math.sin(delta_phi / 2) ** 2
-        + math.cos(phi_a) * math.cos(phi_b) * math.sin(delta_lambda / 2) ** 2
-    )
-    return 2 * earth_radius_m * math.asin(min(1.0, math.sqrt(value)))
-
-
-def _inside_polygon(
-    latitude: float,
-    longitude: float,
-    points: list[list[float]],
-) -> bool:
-    inside = False
-    previous = points[-1]
-    for current in points:
-        current_y, current_x = current
-        previous_y, previous_x = previous
-        crosses = (current_y > latitude) != (previous_y > latitude)
-        if crosses:
-            crossing_x = (previous_x - current_x) * (latitude - current_y) / (
-                previous_y - current_y
-            ) + current_x
-            if longitude < crossing_x:
-                inside = not inside
-        previous = current
-    return inside
-
-
-def _inside_geofence(row: Geofence, observation: PositionObservation) -> bool:
+def _native_shape(row: Geofence) -> _native.Shape:
+    """Marshal stored geometry without moving domain errors into native code."""
     if row.shape_kind == "circle":
         if (
             row.center_latitude is None
@@ -1304,21 +1266,17 @@ def _inside_geofence(row: Geofence, observation: PositionObservation) -> bool:
             or row.radius_m is None
         ):
             raise GeofenceConflict(f"circle geofence {row.id} is incomplete")
-        return (
-            _haversine_m(
-                row.center_latitude,
-                row.center_longitude,
-                observation.latitude,
-                observation.longitude,
-            )
-            <= row.radius_m
-        )
+        return ((row.center_latitude, row.center_longitude, row.radius_m), [])
     if row.shape_kind == "polygon" and row.polygon_points is not None:
-        return _inside_polygon(
-            observation.latitude,
-            observation.longitude,
-            row.polygon_points,
-        )
+        # Retain the previous empty-polygon error, and unpack each pair here so
+        # malformed stored geometry is refused before any state mutation.
+        if not row.polygon_points:
+            raise IndexError("list index out of range")
+        points = []
+        for point in row.polygon_points:
+            latitude, longitude = point
+            points.append((latitude, longitude))
+        return None, points
     raise GeofenceConflict(f"geofence {row.id} has an unsupported shape")
 
 
@@ -1356,8 +1314,12 @@ def _evaluate_selected_geofences(
     observation: PositionObservation,
     fences: tuple[Geofence, ...],
 ) -> tuple[GeofenceFactOutput, ...]:
-    for fence in fences:
-        inside = _inside_geofence(fence, observation)
+    memberships = _native.contains_batch(
+        latitude=observation.latitude,
+        longitude=observation.longitude,
+        shapes=[_native_shape(fence) for fence in fences],
+    )
+    for fence, inside in zip(fences, memberships, strict=True):
         state = db.scalars(
             select(GeofenceState)
             .where(

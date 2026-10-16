@@ -1,6 +1,9 @@
 # Sub billing cutover readiness
 
-As of 2026-10-13, this successor is stacked on PR #808 source `fd1f2feed85dbd5fb3fde2786410e6f8838f6ce0`. This is an implementation and
+As of 2026-10-14, this candidate builds on accepted source
+`f75c69e6586732b14a0eab6b55422c71e4ddefdf`, including the Billing a8 source
+integrated through PR #826 and the Kernel correction in PR #829.
+This is an implementation and
 evidence checklist, not production activation authority. Michael selected Sub
 first (M1; Vendor-first waived), prepaid pay-then-record (M6), and open items plus
 opening lanes only (M8). Clean Starter modules run locally inside Sub; the assembly
@@ -9,6 +12,30 @@ scenarios. Metadata identity, bespoke repairs and drift-reconciliation code are
 excluded from extraction. Historical source coordinates remain in the
 [package dossier](../../packages/dotmac-billing/EXTRACTION.toml) and
 [source variance](billing-source-variance.md).
+
+## Current opening-control candidate — 2026-10-14
+
+The candidate adds a permanent scope-wide window, actual restricted-principal
+binding, immutable admission/seal evidence and database-enforced closure on
+both planes. Exact authenticated retries preserve old receipts; new imports
+after sealing refuse even for a new account. Full unwind remains a separately
+verified linked inverse. V1–V5 accounting facts keep their distinct meaning.
+Existing original receipts are not silently bootstrapped into a new window.
+
+The pure rehearsal report consumes actual V2 preview contracts and typed Sub
+observations. It checks identities, partitions, documentary/discharge amounts
+and residuals separately, exposes blockers and requires three distinct complete
+captures. Actual Sub V2 does not supply full original-documentary or all WHT/
+non-cash historical evidence: nonempty eligible-invoice runs remain blocked.
+No net-balance tolerance, manual hold or admissible preview can waive that gap.
+The real source adapter and capture still need evidence. Source observations
+qualify no cash.
+
+Independent component static review and pinned checks passed. Fresh full
+hosted CI, new source approval, verified publication and Sub adoption remain
+required. No production principal, import, seal or authority switch has run.
+Earlier dated slice-status sections below retain their historical evidence;
+they do not replace this candidate's current head/base acceptance.
 
 ## Module, contract, retirement and gate matrix
 

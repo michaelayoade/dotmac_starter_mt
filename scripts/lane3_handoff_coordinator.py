@@ -40,6 +40,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -48,12 +49,15 @@ from typing import Any, Final
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import lane3_campaign_bootstrap as cb
+import lane3_execution as le
 import lane3_handoff_controller as hc
 import lane3_handoff_protocol as hp
 import lane3_handoff_resolver as hr
 
-CONFIG_SCHEMA: Final = "dotmac.lane3.handoff-coordinator.v1"
-STATE_SCHEMA: Final = "dotmac.lane3.handoff-coordinator-state.v1"
+LEGACY_CONFIG_SCHEMA: Final = "dotmac.lane3.handoff-coordinator.v1"
+CONFIG_SCHEMA: Final = "dotmac.lane3.handoff-coordinator.v2"
+LEGACY_STATE_SCHEMA: Final = "dotmac.lane3.handoff-coordinator-state.v1"
+STATE_SCHEMA: Final = "dotmac.lane3.handoff-coordinator-state.v2"
 ACTIVE_RUN: Final = frozenset(
     {"queued", "in_progress", "waiting", "requested", "pending"}
 )
@@ -93,6 +97,10 @@ def refused(label: str) -> CoordinatorRefused:
 
 @dataclasses.dataclass(frozen=True)
 class Config:
+    purpose: str | None
+    source_capability: Mapping[str, Any] | None
+    evidence_sha256: str | None
+    config_digest: str
     repository: str
     repository_id: int
     workflow_path: str
@@ -137,7 +145,7 @@ def _str(value: Any, pattern: re.Pattern[str]) -> str:
     return value
 
 
-def parse_config(value: Any) -> Config:
+def parse_config(value: Any, *, recovery: bool = False) -> Config:
     keys = {
         "schema",
         "repository",
@@ -164,8 +172,14 @@ def parse_config(value: Any) -> Config:
         "bootstrap_proposal_sha256",
         "state_path",
     }
+    legacy = isinstance(value, dict) and value.get("schema") == LEGACY_CONFIG_SCHEMA
+    if not legacy:
+        keys |= {"purpose", "source_capability", "evidence_sha256"}
     doc = _exact(value, keys, "config.invalid")
-    if doc["schema"] != CONFIG_SCHEMA:
+    if (legacy and not recovery) or doc["schema"] not in {
+        CONFIG_SCHEMA,
+        LEGACY_CONFIG_SCHEMA,
+    }:
         raise refused("config.invalid")
     try:
         for key in ("workflow_sha", "workflow_blob", "starter_commit"):
@@ -206,7 +220,53 @@ def parse_config(value: Any) -> Config:
         raise refused("config.invalid") from None
     if resolver != doc["resolver"]:
         raise refused("config.invalid")
+    purpose = None if legacy or recovery else doc["purpose"]
+    capability = None if legacy else doc["source_capability"]
+    evidence = None if legacy else doc["evidence_sha256"]
+    if not legacy and not recovery:
+        if type(purpose) is not str or purpose not in {
+            "qualification",
+            "admitted_execution",
+        }:
+            raise refused("config.invalid")
+        if purpose == "qualification":
+            expected_capability = {
+                "schema": "dotmac.lane3.source-capability.v1",
+                "purpose": "qualification",
+                **{
+                    key: doc[key]
+                    for key in (
+                        "repository",
+                        "workflow_path",
+                        "workflow_sha",
+                        "workflow_blob",
+                        "starter_repository",
+                        "starter_commit",
+                        "supplier_modules",
+                    )
+                },
+                "operations": [
+                    "github-oidc",
+                    "bounded-openbao-kv-read",
+                    "proof-record",
+                    "cleanup",
+                ],
+                "terminal": "execution-refused",
+            }
+            if capability != expected_capability or evidence is not None:
+                raise refused("config.invalid")
+        elif capability is not None:
+            raise refused("config.invalid")
+        if evidence is not None:
+            try:
+                hp.hex64(evidence)
+            except hp.ProtocolRefused:
+                raise refused("config.invalid") from None
     return Config(
+        purpose=purpose,
+        source_capability=capability,
+        evidence_sha256=evidence,
+        config_digest=hp.digest(doc),
         repository=_str(doc["repository"], _REPO),
         repository_id=_pos_int(doc["repository_id"]),
         workflow_path=_str(doc["workflow_path"], _WORKFLOW),
@@ -232,6 +292,42 @@ def parse_config(value: Any) -> Config:
         bootstrap_proposal_sha256=doc["bootstrap_proposal_sha256"],
         state_path=Path(_str(doc["state_path"], _ABS)),
     )
+
+
+def assemble_v2_config(
+    original: Mapping[str, Any],
+    *,
+    purpose: str,
+    source_capability: Mapping[str, Any] | None,
+    evidence_sha256: str | None,
+) -> dict[str, Any]:
+    """Pure factory adapter: explicit reviewed inputs, never inferred purpose.
+
+    Rendering is not authorization. The deployment owner separately pins the
+    rendered bytes, runtime closure and source classification in the packet.
+    """
+    document = hc.strict_json(hp.canonical_json(dict(original)))
+    document.update(
+        schema=CONFIG_SCHEMA,
+        purpose=purpose,
+        source_capability=source_capability,
+        evidence_sha256=evidence_sha256,
+    )
+    parse_config(document)
+    return hc.strict_json(hp.canonical_json(document))
+
+
+def authority_binding(cfg: Config) -> dict[str, Any]:
+    """Exact static tuple for the existing approval generator to compare."""
+    return {
+        "schema": "dotmac.lane3.qualification-purpose.v2",
+        "purpose": cfg.purpose,
+        "config_digest": cfg.config_digest,
+        "capability_digest": hp.digest(cfg.source_capability)
+        if cfg.source_capability
+        else None,
+        "evidence_digest": cfg.evidence_sha256,
+    }
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -312,6 +408,8 @@ def readback_binding(
 ) -> dict[str, Any]:
     """The independent binding, or a fixed refusal. Report text is checked
     against the readback; it never supplies a value of its own."""
+    if cfg.purpose not in {"qualification", "admitted_execution"}:
+        raise refused("config.invalid")
     expected = report["expected"]
     mismatch = "binding.mismatch"
     if (
@@ -543,7 +641,11 @@ def readback_binding(
             f"repos/{cfg.starter_repository}/contents/{path}?ref={cfg.starter_commit}",
             mismatch,
         )
-        if _field(doc, "encoding", str, mismatch) != "base64":
+        if (
+            _field(doc, "type", str, mismatch) != "file"
+            or _field(doc, "path", str, mismatch) != path
+            or _field(doc, "encoding", str, mismatch) != "base64"
+        ):
             raise refused(mismatch)
         try:
             content = base64.b64decode(
@@ -572,6 +674,7 @@ def readback_binding(
         admitted = hc.strict_json(raw)
     except (ValueError, hc.ControllerRefused):
         raise refused(mismatch) from None
+    authority = require_purpose(api, cfg, admitted, raw)
     revisions = admitted.get("admitted_launcher_revisions")
     if (
         admitted.get("execution_repository") != cfg.repository
@@ -617,6 +720,7 @@ def readback_binding(
     if len(supplier) != len(cfg.supplier_modules):
         raise refused(mismatch)
     qualification = {
+        "authority": authority,
         "repository_id": cfg.repository_id,
         "run_id": run_id,
         "run_attempt": attempt,
@@ -644,6 +748,131 @@ def readback_binding(
         "admission_digest": admission["sha256"],
         "supplier_digest": hp.digest(supplier),
     }
+
+
+def require_admission_tree(
+    api: Api, cfg: Config, topology: bytes, evidence: bytes
+) -> None:
+    """Git object modes forbid API content dereference of a repository symlink."""
+    label = "admission.invalid"
+    repository, commit = cfg.admission["repository"], cfg.admission["commit"]
+    document = _api(api, f"repos/{repository}/git/commits/{commit}", label)
+    if _field(document, "sha", str, label) != commit:
+        raise refused(label)
+    tree_sha = _field(_field(document, "tree", dict, label), "sha", str, label)
+    try:
+        hp.hex40(tree_sha)
+    except hp.ProtocolRefused:
+        raise refused(label) from None
+    tree = _api(api, f"repos/{repository}/git/trees/{tree_sha}?recursive=1", label)
+    entries = _field(tree, "tree", list, label)
+    if (
+        _field(tree, "sha", str, label) != tree_sha
+        or _field(tree, "truncated", bool, label) is not False
+        or len(entries) > 20000
+    ):
+        raise refused(label)
+    for path, raw in ((cfg.admission["path"], topology), (le.EVIDENCE_FILE, evidence)):
+        matches = [
+            entry
+            for entry in entries
+            if isinstance(entry, dict) and entry.get("path") == path
+        ]
+        git_blob = hashlib.sha1(
+            b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw,
+            usedforsecurity=False,
+        ).hexdigest()
+        if (
+            len(matches) != 1
+            or matches[0].get("mode") != "100644"
+            or matches[0].get("type") != "blob"
+            or matches[0].get("sha") != git_blob
+            or type(matches[0].get("size")) is not int
+            or matches[0]["size"] != len(raw)
+        ):
+            # Do not trust content API's apparent file type: GitHub may follow
+            # a symlink. The exact tree object is the independent mode owner.
+            raise refused(label)
+
+
+def require_purpose(
+    api: Api, cfg: Config, topology: Mapping[str, Any], topology_raw: bytes
+) -> dict[str, Any]:
+    """Reviewed config classifies exact source; runner text cannot select it.
+
+    The controller's independently staged approval binds the complete returned
+    qualification digest before any prepare effect. This is a source capability
+    declaration, not an inferred property of an arbitrary workflow name.
+    """
+    authority = authority_binding(cfg)
+    if cfg.purpose == "qualification":
+        if (
+            cfg.source_capability is None
+            or topology.get("admission_evidence") is not None
+        ):
+            raise refused("binding.mismatch")
+        return authority
+    if cfg.purpose != "admitted_execution":
+        raise refused("config.invalid")
+    # Data only: never import Python fetched through GitHub. The validator is
+    # part of the separately reviewed, measured installed runtime closure.
+    if (
+        cfg.admission["path"] != ".github/lane3-execution.json"
+        or cfg.evidence_sha256 is None
+    ):
+        raise refused("admission.invalid")
+    evidence = _api(
+        api,
+        f"repos/{cfg.admission['repository']}/contents/{le.EVIDENCE_FILE}?ref={cfg.admission['commit']}",
+        "admission.invalid",
+    )
+    try:
+        if (
+            not isinstance(evidence, dict)
+            or evidence.get("type") != "file"
+            or evidence.get("path") != le.EVIDENCE_FILE
+            or evidence.get("encoding") != "base64"
+        ):
+            raise ValueError()
+        raw = base64.b64decode(evidence["content"], validate=False)
+        if (
+            len(raw) > hc.MAX_CONFIG
+            or hashlib.sha256(raw).hexdigest() != cfg.evidence_sha256
+        ):
+            raise ValueError()
+        require_admission_tree(api, cfg, topology_raw, raw)
+        # Private fresh tree: no caller root, inherited symlinks or writable
+        # shared parents. Both blobs came from the SAME immutable API ref.
+        parent = cfg.state_path.parent
+        for ancestor in (parent, *parent.parents):
+            info = ancestor.lstat()
+            sticky_root = info.st_uid == 0 and bool(info.st_mode & stat.S_ISVTX)
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_uid not in {0, os.geteuid()}
+                or (stat.S_IMODE(info.st_mode) & 0o022 and not sticky_root)
+            ):
+                raise OSError()
+        with tempfile.TemporaryDirectory(
+            prefix="lane3-admission-", dir=parent
+        ) as directory:
+            root = Path(directory)
+            path = root / le.EVIDENCE_FILE
+            path.parent.mkdir(parents=True, mode=0o700)
+            path.write_bytes(raw)
+            path.chmod(0o400)
+            topology_path = root / ".github/lane3-execution.json"
+            topology_path.parent.mkdir(mode=0o700)
+            topology_path.write_bytes(topology_raw)
+            topology_path.chmod(0o400)
+            le.require_admission_evidence(
+                topology.get("admission_evidence"), repo_root=root
+            )
+    except (OSError, ValueError, KeyError, TypeError, le.TopologyRefused):
+        raise refused("admission.invalid") from None
+    # This coordinator currently has only a proof launcher. No candidate
+    # executor/ExecutionGrant owner is installed, even with valid evidence.
+    raise refused("execution.unsupported")
 
 
 def prelaunch_binding(api: Api, cfg: Config, run_id: int) -> dict[str, Any]:
@@ -965,9 +1194,11 @@ def serialized(
     return wrapped
 
 
-def load_state(path: Path) -> dict[str, Any]:
+def load_state(path: Path, *, recovery: bool = False) -> dict[str, Any]:
     value = read_json(path)
-    if value.get("schema") != STATE_SCHEMA:
+    if value.get("schema") not in (
+        {STATE_SCHEMA, LEGACY_STATE_SCHEMA} if recovery else {STATE_SCHEMA}
+    ):
         raise refused("state.invalid")
     return value
 
@@ -1025,6 +1256,10 @@ def op_prepare(cfg: Config, channel: Channel, api: Api, run_id: int) -> dict[str
 def op_launch(
     cfg: Config, channel: Channel, api: Api, run_id: int, *, deadline_ns: int
 ) -> dict[str, Any]:
+    if cfg.purpose is None:
+        raise refused("config.invalid")
+    if cfg.purpose == "admitted_execution":
+        prelaunch_binding(api, cfg, run_id)  # validates evidence, then unsupported
     state = load_state(cfg.state_path)
     if "runner_id" in state or "launch_intent" in state:
         # A POST with an uncertain response must never be repeated. Cleanup
@@ -1196,6 +1431,8 @@ def retain_bootstrap_provenance(
 
 @serialized
 def op_decide(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
+    if cfg.purpose is None:
+        raise refused("config.invalid")
     state = load_state(cfg.state_path)
     decision = decide(
         cfg=cfg,
@@ -1219,7 +1456,7 @@ def op_decide(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
 
 @serialized
 def op_cleanup(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
-    state = load_state(cfg.state_path)
+    state = load_state(cfg.state_path, recovery=True)
     reply = channel("cleanup", request("cleanup", lease_id=state["lease_id"]))
     if reply.get("state") != "CLOSED" or reply.get("lease_id") != state["lease_id"]:
         raise refused("state.invalid")
@@ -1300,13 +1537,22 @@ def op_cleanup(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
     return {"state": reply["state"], "evidence": reply["evidence"]}
 
 
+@serialized
+def op_status(cfg: Config, channel: Channel, api: Api) -> dict[str, Any]:
+    """Read only the existing owned lease, including explicit legacy recovery."""
+    state = load_state(cfg.state_path, recovery=True)
+    return channel("status", request("status", lease_id=state["lease_id"]))
+
+
 def main(argv: list[str]) -> int:
-    ops = {"prepare", "launch", "decide", "cleanup"}
+    ops = {"prepare", "launch", "decide", "cleanup", "status"}
     if len(argv) < 4 or argv[1] not in ops or argv[2] != "--config":
         print(json.dumps({"status": "REFUSED", "category": "operation.invalid"}))
         return 2
     try:
-        cfg = parse_config(read_json(Path(argv[3])))
+        cfg = parse_config(
+            read_json(Path(argv[3])), recovery=argv[1] in {"cleanup", "status"}
+        )
         channel = ssh_channel(cfg.ssh_alias, cfg.controller_path)
         op = argv[1]
         if op in {"prepare", "launch"}:
@@ -1332,6 +1578,7 @@ def main(argv: list[str]) -> int:
                 "prepare": op_prepare,
                 "decide": op_decide,
                 "cleanup": op_cleanup,
+                "status": op_status,
             }[op](cfg, channel, gh_api)
         print(json.dumps(result))
         return 0

@@ -11,6 +11,7 @@ import copy
 import json
 import pathlib
 import sys
+import tempfile
 from typing import Any
 
 import pytest
@@ -24,6 +25,7 @@ from dotmac_deployment_foundation.rehearsal import (
 )
 
 from tests.unit.foundation_v3_support import CONTROLLER, WHEEL
+from tests.unit.lane3_evidence_support import REFERENCE, write_evidence, write_topology
 from tests.unit.test_deployment_foundation_rehearsal_receipt_v2 import (
     REVISION,
     Subject,
@@ -57,9 +59,12 @@ DOCUMENT: dict[str, Any] = {
     "runner_group": {"name": "lane3-exposure-protected", "id": 4},
     "admitted_launcher_revisions": [LAUNCHER],
     "receipt_artifact": "lane3-rehearsal-receipt",
-    "admission_evidence": "docs/LANE3_EXECUTION_TOPOLOGY.md#7 run 1",
+    "admission_evidence": REFERENCE,
 }
-TOPOLOGY = lane3_execution.parse_topology(DOCUMENT)
+_FIXTURE_TMP = tempfile.TemporaryDirectory(prefix="lane3-evidence-")  # removed at exit
+_FIXTURE_ROOT = pathlib.Path(_FIXTURE_TMP.name)
+write_evidence(_FIXTURE_ROOT)
+TOPOLOGY = lane3_execution.parse_topology(DOCUMENT, repo_root=_FIXTURE_ROOT)
 
 ENVIRON: dict[str, str] = {
     "GITHUB_REPOSITORY_ID": str(REPO_ID),
@@ -244,9 +249,7 @@ def test_execution_is_unavailable_until_q1_is_answered(
 
 
 def _topology_file(tmp_path: pathlib.Path, document: dict[str, Any]) -> str:
-    path = tmp_path / "lane3-execution.json"
-    path.write_text(json.dumps(document), encoding="utf-8")
-    return str(path)
+    return write_topology(tmp_path, document)
 
 
 def _api_file(tmp_path: pathlib.Path, document: Any = None) -> str:

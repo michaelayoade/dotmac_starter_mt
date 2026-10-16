@@ -290,7 +290,9 @@ def _minimal_verified_document() -> str:
     )
 
 
-def _bare_origin_and_work(tmp_path: Path) -> tuple[Path, Path, str]:
+def _bare_origin_and_work(
+    tmp_path: Path, *, include_source_census: bool = False
+) -> tuple[Path, Path, str]:
     """A bare "origin" and a work clone with one commit, wired together."""
     origin = tmp_path / "origin.git"
     origin.mkdir()
@@ -299,6 +301,15 @@ def _bare_origin_and_work(tmp_path: Path) -> tuple[Path, Path, str]:
     work = tmp_path / "work"
     _init_repo(work)
     (work / "README.md").write_text("fixture repo\n", encoding="utf-8")
+    if include_source_census:
+        package = work / "packages" / _DISTRIBUTION
+        source = package / "src" / "dotmac_approvals"
+        source.mkdir(parents=True)
+        (source / "__init__.py").write_text("# fixture source\n", encoding="utf-8")
+        (package / "pyproject.toml").write_text(
+            f'[project]\nname = "{_DISTRIBUTION}"\nversion = "{_VERSION}"\n',
+            encoding="utf-8",
+        )
     commit = _commit_all(work, "initial commit")
     _run_git(["remote", "add", "origin", str(origin)], cwd=work)
     _run_git(["push", "origin", "main"], cwd=work)
@@ -324,9 +335,12 @@ def _tag_a_release(
     run_id: str,
     wheel_bytes: bytes,
     monkeypatch: pytest.MonkeyPatch,
+    include_source_census: bool = False,
 ) -> tuple[Path, Path, str, Path]:
     """Build the wheel, create+push the tag via the real script, return coordinates."""
-    origin, work, commit = _bare_origin_and_work(tmp_path)
+    origin, work, commit = _bare_origin_and_work(
+        tmp_path, include_source_census=include_source_census
+    )
     artifact_dir = tmp_path / "artifact"
     artifact_dir.mkdir()
     (artifact_dir / _WHEEL_NAME).write_bytes(wheel_bytes)
@@ -369,6 +383,23 @@ def _tag_a_release(
     )
     assert exit_code == 0
     return origin, work, commit, artifact_dir
+
+
+def _source_census_fixture(writer, work: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Run the real canonical census against only the throwaway repository."""
+    renderer = work / "scripts" / "published_source_drift.py"
+    renderer.parent.mkdir(parents=True)
+    renderer.write_bytes(
+        (PROJECT_ROOT / "scripts/published_source_drift.py").read_bytes()
+    )
+    baseline = work / "tests/architecture/published_source_drift_baseline.json"
+    baseline.parent.mkdir(parents=True)
+    baseline.write_text(
+        json.dumps({"released_total": 0, "drifted_total": 0, "drifted": []}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(writer, "SOURCE_DRIFT_BASELINE", baseline)
+    return baseline
 
 
 def test_write_path_then_read_back_produces_evidence_add_and_validate_row(
@@ -435,21 +466,21 @@ def test_full_write_record_records_the_verified_wheel_from_a_real_tag(
 ) -> None:
     """Drive `write_record` itself, not just its collaborators.
 
-    Every file `write_record` touches unconditionally is pointed at a
-    throwaway fixture EXCEPT the four it only reads for the (skipped, since
-    this distribution is not `dotmac-kernel`) kernel branch — those stay the
-    real, read-only repository files, exactly as `test_write_release_record.py`
-    already does for its non-kernel refusal tests.
+    Every file the module recorder writes is a throwaway fixture, including
+    the source census. Its canonical renderer sees the real fixture tag and
+    the matching committed package source; kernel-only inputs stay read-only.
     """
     origin, work, commit, artifact_dir = _tag_a_release(
         tmp_path,
         run_id="555000222",
         wheel_bytes=b"a different build's bytes",
         monkeypatch=monkeypatch,
+        include_source_census=True,
     )
 
     writer = _writer()
     monkeypatch.setattr(writer, "REPO_ROOT", work)
+    baseline = _source_census_fixture(writer, work, monkeypatch)
 
     released_tags_module = tmp_path / "released_tags.py"
     released_tags_module.write_text("RELEASED_TAGS: dict = {\n}\n", encoding="utf-8")
@@ -484,6 +515,10 @@ def test_full_write_record_records_the_verified_wheel_from_a_real_tag(
     assert recorded["releases"][0]["tag"] == _TAG
     assert recorded["releases"][0]["verification_run_id"] == "555000222"
     assert recorded["releases"][0]["source_run_id"] == "555000222"
+    census = json.loads(baseline.read_text(encoding="utf-8"))
+    assert census["released_total"] == 1
+    assert census["drifted_total"] == 0
+    assert census["drifted"] == []
 
     # Idempotent re-run converges rather than refusing.
     assert (
@@ -517,10 +552,13 @@ def test_write_record_requires_expected_run_id_and_commit_for_a_governed_module(
         run_id="555000333",
         wheel_bytes=b"bytes for the binding guard",
         monkeypatch=monkeypatch,
+        include_source_census=True,
     )
 
     writer = _writer()
     monkeypatch.setattr(writer, "REPO_ROOT", work)
+    baseline = _source_census_fixture(writer, work, monkeypatch)
+    baseline_before = baseline.read_bytes()
 
     released_tags_module = tmp_path / "released_tags.py"
     released_tags_module.write_text("RELEASED_TAGS: dict = {\n}\n", encoding="utf-8")
@@ -582,10 +620,14 @@ def test_write_record_requires_expected_run_id_and_commit_for_a_governed_module(
     )
 
     # Both correct — the matching, accepted case.
+    assert baseline.read_bytes() == baseline_before
     changed = writer.write_record(
         **common_kwargs, expected_run_id="555000333", expected_commit=commit
     )
     assert any("recorded the verified" in line for line in changed)
+    census = json.loads(baseline.read_text(encoding="utf-8"))
+    assert census["released_total"] == 1
+    assert census["drifted_total"] == 0
 
 
 def test_write_record_refuses_a_wheel_that_disagrees_with_the_tags_digest(

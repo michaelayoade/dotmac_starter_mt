@@ -1572,6 +1572,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # FIRST release rather than after an in-place edit forced the issue, which
     # is the only cheap moment to do it: one migration, one digest, no history
     # to reconstruct and no divergence to grandfather.
+    "dotmac-forms-v0.2.0a1": (
+        "dotmac-forms",
+        "95271a1e369e4b19eaae2d475f5d745356f5fdf8",
+        {
+            "fm_0001_forms.py": (
+                "0778d4f950acf049851c6876dcd5d34bb6ef23f37a4dcc35c6af38af3e6b8267"
+            ),
+        },
+    ),
     "dotmac-forms-v0.1.0a1": (
         "dotmac-forms",
         "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
@@ -1636,6 +1645,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payments ──
+    "dotmac-payments-v0.1.0a2": (
+        "dotmac-payments",
+        "4fc0295da94ce62919966baaf1dd909f9af5dcbe",
+        {
+            "pm_0001_payment_intents.py": (
+                "d3f253970bfb6ef1e98289bff1dc2853bf4964a995d406a92529527d3bdb55db"
+            ),
+            "pm_0002_money_precision.py": (
+                "6c16863cc542178b5b1ac17a5d431c8fbbc4e270dcd6d190d7d6c39652848ae8"
+            ),
+            "pm_0003_confirmation_immutable.py": (
+                "fc15f0e306afee6fc9b02970b0a3c4b2e9bb45d1fac9aa23095c699ac7b4bc41"
+            ),
+        },
+    ),
     "dotmac-payments-v0.1.0a1": (
         "dotmac-payments",
         "04b9771320b865b66d1322660fc6d3590605c973",
@@ -1646,6 +1670,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-imports ──
+    "dotmac-imports-v0.2.0a1": (
+        "dotmac-imports",
+        "008ccaeaebda6855ba34b8e70740e3859954a37b",
+        {
+            "im_0001_import_runs.py": (
+                "c6d6caa3765bf133da66f1c6fe9decb179a3a2a7638ec404e3bcae7dc4f5109a"
+            ),
+        },
+    ),
     "dotmac-imports-v0.1.0a2": (
         "dotmac-imports",
         "5876ffd0bce17172fa2dc6ac6d09b48d877fadf8",
@@ -6800,6 +6833,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-fiber-plant ──
+    "dotmac-fiber-plant-v0.2.0a1": (
+        "dotmac-fiber-plant",
+        "4f3d9e4b6d26114d9a5d949fbe0b0626a1400f77",
+        {
+            "fp_0001_fiber_plant.py": (
+                "7749f27a97b01c438613639dbc35cc971cab427821920619b6d434ea8b6a821b"
+            ),
+        },
+    ),
     "dotmac-fiber-plant-v0.1.0a1": (
         "dotmac-fiber-plant",
         "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
@@ -6810,6 +6852,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-finance ──
+    "dotmac-finance-v0.2.0a1": (
+        "dotmac-finance",
+        "e0c96d95aa03c1c4578715bccab2741cb6cb45ae",
+        {
+            "fn_0001_asset_accounting.py": (
+                "1f503d5056eabbcde45954152f250b631ee43b488d7f4d29056b69042f4c1c79"
+            ),
+        },
+    ),
     "dotmac-finance-v0.1.0a1": (
         "dotmac-finance",
         "20d24703e70e4d361de2f406165df4b36cbee507",
@@ -6820,6 +6871,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-inventory ──
+    "dotmac-inventory-v0.2.0a1": (
+        "dotmac-inventory",
+        "49f35ca6008ef36c3db69f3230782d8f83146ac9",
+        {
+            "iv_0001_inventory.py": (
+                "625aadcdce6c0b6f92ceecdb5c3f9606407aa720b326286c9c318582243b4114"
+            ),
+        },
+    ),
     "dotmac-inventory-v0.1.0a1": (
         "dotmac-inventory",
         "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
@@ -6859,6 +6919,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-media-observations ──
+    "dotmac-media-observations-v0.2.0a1": (
+        "dotmac-media-observations",
+        "dac72ff13a47da58be4ef644c7c67ed3b4da127c",
+        {
+            "mo_0001_media_observations.py": (
+                "b274cb73037d314a275e7c23193229b139dd3d536cf5269b2ebc91b61b035bbf"
+            ),
+        },
+    ),
     "dotmac-media-observations-v0.1.0a1": (
         "dotmac-media-observations",
         "8f99413826e5adf3d35379ebc6deb79bcb5c8242",
@@ -6919,6 +6988,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-network-topology ──
+    "dotmac-network-topology-v0.2.0a1": (
+        "dotmac-network-topology",
+        "c3029f3206f0d474a24711a58b298a3919e11126",
+        {
+            "nt_0001_network_topology.py": (
+                "b47d4600830b07a8d3c1034c397a4e347446e15d84260c4ee473c7a3e9d5632e"
+            ),
+        },
+    ),
     "dotmac-network-topology-v0.1.0a1": (
         "dotmac-network-topology",
         "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
@@ -6969,6 +7047,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-positioning ──
+    "dotmac-positioning-v0.2.0a1": (
+        "dotmac-positioning",
+        "e6844ad04b42a609f329822e47427a062cac02e3",
+        {
+            "po_0001_positioning.py": (
+                "153136b3f1441e03f26626502808b5081ac3a39678bf7d40be5712c49e70d16f"
+            ),
+        },
+    ),
     "dotmac-positioning-v0.1.0a1": (
         "dotmac-positioning",
         "75a26abd3f866ebe24c4881a3958439d423034c7",
@@ -7112,6 +7199,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-surveys ──
+    "dotmac-surveys-v0.2.0a1": (
+        "dotmac-surveys",
+        "194a657e98774568f3582a32a3b7b793fc568853",
+        {
+            "sv_0001_surveys.py": (
+                "8c86d1b7d756d81bf0aad746b8d222c434bdb2526ba353f3b3d231ce92fda7fe"
+            ),
+        },
+    ),
     "dotmac-surveys-v0.1.0a1": (
         "dotmac-surveys",
         "20d24703e70e4d361de2f406165df4b36cbee507",
@@ -7324,9 +7420,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "ao_0003_ack_attribution.py",
         }
     ),
-    "dotmac-payments": frozenset(
-        {"pm_0002_money_precision.py", "pm_0003_confirmation_immutable.py"}
-    ),
+    "dotmac-payments": frozenset(),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the
     # protected release tags it and its digest is recorded above.
@@ -7343,6 +7437,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "bi_0006_cash_source_claim.py",
             "bi_0007_opening_cash.py",
             "bi_0008_opening_receivables.py",
+            "bi_0009_opening_window.py",
         }
     ),
     "dotmac-collections": frozenset(),

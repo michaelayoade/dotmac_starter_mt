@@ -403,6 +403,13 @@ class Env:
             "workflow_blob": BLOB,
             "starter_commit": SHA,
             "environment_id": 4105,
+            "authority": {
+                "schema": "dotmac.lane3.qualification-purpose.v2",
+                "purpose": "qualification",
+                "config_digest": "a" * 64,
+                "capability_digest": "b" * 64,
+                "evidence_digest": None,
+            },
             "approval_digest": "a" * 64,
             "admission_digest": self.admission_digest,
             "supplier_digest": self.supplier_digest,

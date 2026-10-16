@@ -2361,7 +2361,142 @@ class PlatformReceivableExposureFactV2(Base, _OpeningExposureColumns):
     __table_args__ = _opening_exposure_constraints(False)
 
 
+class _WindowTenantRow:
+    @declared_attr
+    def tenant_id(cls) -> Mapped[UUID]:
+        return mapped_column(
+            Uuid(),
+            ForeignKey(Tenant.__table__.c.id, ondelete="RESTRICT"),
+            nullable=False,
+        )
+
+
+class _WindowColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    epoch: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    manifest_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    manifest_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    principal_name: Mapped[str] = mapped_column(String(63), nullable=False)
+    principal_oid: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    provision_authority_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    generation: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class OpeningWindow(Base, _WindowTenantRow, _WindowColumns):
+    __tablename__ = "opening_windows"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_opening_window_scope"),
+        UniqueConstraint("tenant_id", "id", name="uq_opening_window_scoped_id"),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningWindow(Base, _WindowColumns):
+    __tablename__ = "platform_opening_windows"
+    __table_args__ = (
+        Index("uq_platform_opening_window_singleton", text("(true)"), unique=True),
+        schema_table_args(SCHEMA),
+    )
+
+
+class _AdmissionColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    request_identity: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class OpeningWindowAdmission(Base, _WindowTenantRow, _AdmissionColumns):
+    __tablename__ = "opening_window_admissions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "receipt_id", name="uq_window_admission_receipt"),
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "receipt_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.opening_import_receipts.tenant_id",
+                f"{SCHEMA}.opening_import_receipts.id",
+                f"{SCHEMA}.opening_import_receipts.billing_account_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningWindowAdmission(Base, _AdmissionColumns):
+    __tablename__ = "platform_opening_window_admissions"
+    __table_args__ = (
+        UniqueConstraint("receipt_id", name="uq_platform_window_admission_receipt"),
+        ForeignKeyConstraint(
+            ["window_id"],
+            [f"{SCHEMA}.platform_opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["receipt_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.platform_opening_import_receipts.id",
+                f"{SCHEMA}.platform_opening_import_receipts.billing_account_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class _SealColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    population_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    population_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    coupled_watermark: Mapped[str] = mapped_column(Text, nullable=False)
+    command_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class OpeningWindowSeal(Base, _WindowTenantRow, _SealColumns):
+    __tablename__ = "opening_window_seals"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "window_id", name="uq_window_seal"),
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningWindowSeal(Base, _SealColumns):
+    __tablename__ = "platform_opening_window_seals"
+    __table_args__ = (
+        UniqueConstraint("window_id", name="uq_platform_window_seal"),
+        ForeignKeyConstraint(
+            ["window_id"],
+            [f"{SCHEMA}.platform_opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
 TENANT_TABLES = (
+    "opening_windows",
+    "opening_window_admissions",
+    "opening_window_seals",
     "receivable_source_claims",
     "opening_receivable_bases",
     "opening_historical_discharge_claims",
@@ -2394,6 +2529,9 @@ TENANT_TABLES = (
 )
 
 PLATFORM_TABLES = (
+    "platform_opening_windows",
+    "platform_opening_window_admissions",
+    "platform_opening_window_seals",
     "platform_receivable_source_claims",
     "platform_opening_receivable_bases",
     "platform_opening_historical_discharge_claims",
@@ -2426,6 +2564,12 @@ PLATFORM_TABLES = (
 )
 
 __all__ = [
+    "OpeningWindow",
+    "PlatformOpeningWindow",
+    "OpeningWindowAdmission",
+    "PlatformOpeningWindowAdmission",
+    "OpeningWindowSeal",
+    "PlatformOpeningWindowSeal",
     "OpeningImportReceipt",
     "PlatformOpeningImportReceipt",
     "OpeningCashLot",

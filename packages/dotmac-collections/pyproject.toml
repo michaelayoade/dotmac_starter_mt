@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-collections"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac dual-plane collections policy and case owner"
 authors = ["DotMac"]
 readme = "README.md"

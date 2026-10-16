@@ -222,15 +222,15 @@ def test_module_imports_no_assembly_connector_network_or_provider_code() -> None
         ("from google.ads import Client\n", "forbidden import root 'google'"),
         ("import requests\n", "forbidden import root 'requests'"),
         (
-            "def route(source_system):\n" "    return source_system == 'acme_ads'\n",
+            "def route(source_system):\n    return source_system == 'acme_ads'\n",
             "provider-specific source discriminator",
         ),
         (
-            "def endpoint():\n" "    return 'https://ads.example.test/v1'\n",
+            "def endpoint():\n    return 'https://ads.example.test/v1'\n",
             "embedded network endpoint",
         ),
         (
-            "def provider():\n" "    return 'linkedin'\n",
+            "def provider():\n    return 'linkedin'\n",
             "provider literal 'linkedin'",
         ),
     ),
@@ -373,7 +373,7 @@ def test_clean_wheel_installs_registers_and_carries_its_lineage(
         check=False,
     )
     assert probe.returncode == 0, probe.stderr
-    assert probe.stdout.strip() == "0.1.0a1 mod_mediaobs"
+    assert probe.stdout.strip() == "0.2.0a1 mod_mediaobs"
 
 
 def test_dossier_keeps_adoption_paused_and_attribution_outside() -> None:

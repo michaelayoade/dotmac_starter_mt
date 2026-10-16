@@ -1,0 +1,3 @@
+def continuity(
+    edges: list[tuple[str, str, str]], starts: list[str], targets: list[str]
+) -> tuple[list[str], list[str]]: ...

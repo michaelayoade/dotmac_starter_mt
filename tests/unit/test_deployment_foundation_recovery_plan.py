@@ -761,6 +761,10 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "lane3_handoff_protocol.py": 1,
     "lane3_runner_capability.py": 1,
     "palette_debt_baseline.py": 1,
+    # NativePackageSource.v1 is owned by the published-source drift tooling.
+    # It hashes labeled Git objects for comparison; it writes no Foundation
+    # lease, release, attestation or package-owned store record.
+    "published_source_drift.py": 1,
     "release_artifact_verification.py": 1,
     # The ReleaseAuthority.v1 canonical digest document; owned by
     # release_authority.py, stored nowhere but as the ledger's digest.
