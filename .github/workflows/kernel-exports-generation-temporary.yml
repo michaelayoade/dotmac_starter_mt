@@ -1,0 +1,59 @@
+name: Generate pending Kernel export catalogue
+
+on:
+  pull_request:
+    paths:
+      - packages/dotmac-kernel/**
+      - .github/workflows/kernel-exports-generation-temporary.yml
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Derive canonical bytes without importing Kernel runtime
+        run: |
+          python3 -I -B - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          source = Path("packages/dotmac-kernel/src/dotmac_kernel").resolve()
+          spec = importlib.util.spec_from_file_location(
+              "kernel_public_exports_generator", source / "public_exports.py"
+          )
+          if spec is None or spec.loader is None:
+              raise SystemExit("catalogue generator unavailable")
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          raw = module.derive_public_exports(source)
+          output = Path(os.environ["RUNNER_TEMP"]) / "kernel-exports-generation"
+          output.mkdir()
+          (output / "public_exports.json").write_bytes(raw)
+          receipt = {
+              "source_revision": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], text=True, timeout=10
+              ).strip(),
+              "sha256": hashlib.sha256(raw).hexdigest(),
+          }
+          (output / "receipt.json").write_text(json.dumps(receipt) + "\n")
+          print(json.dumps(receipt))
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: kernel-exports-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/kernel-exports-generation/
+          if-no-files-found: error
+          retention-days: 1
