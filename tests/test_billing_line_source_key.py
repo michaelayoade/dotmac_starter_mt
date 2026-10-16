@@ -95,6 +95,15 @@ def _financial_rows(connection, planes):
         tables.extend(billing.TENANT_TABLES)
     if ModulePlane.PLATFORM in planes:
         tables.extend(billing.PLATFORM_TABLES)
+    # Tables created after bi_0010 exist at neither endpoint of this canary.
+    tables = [
+        table
+        for table in tables
+        if connection.scalar(
+            text("SELECT to_regclass(:table)"), {"table": f"mod_billing.{table}"}
+        )
+        is not None
+    ]
     return {
         table: tuple(
             connection.scalars(

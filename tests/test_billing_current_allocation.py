@@ -42,6 +42,7 @@ def _setup(scratch, plane):
             command=billing._settlement_command(
                 account.id, scope=scope, source_key=str(uuid4())
             ),
+            accepted_confirmation_evidence=frozenset({"provider_settled"}),
         )
         command = AllocationCommand(
             settlement.id, invoice.id, billing._money("60"), billing.NOW, str(uuid4())

@@ -108,6 +108,16 @@ def _principal(scratch, plane):
             text(f'GRANT USAGE ON SCHEMA public, mod_billing TO "{role}"')
         )
         for name in tables:
+            # Historical-revision canaries run this fixture before later
+            # migrations create every current-model table.
+            if (
+                connection.scalar(
+                    text("SELECT to_regclass(:table)"),
+                    {"table": f"mod_billing.{name}"},
+                )
+                is None
+            ):
+                continue
             privileges = (
                 "SELECT, INSERT"
                 if name.removeprefix("platform_") in writes
