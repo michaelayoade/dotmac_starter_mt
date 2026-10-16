@@ -1,4 +1,4 @@
-"""Read-only Billing queries over persisted immutable evidence."""
+"""Read-only Billing queries over persisted evidence and current identities."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
+from dotmac_kernel.money import Currency, MoneyError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,8 @@ from dotmac_billing import models
 from dotmac_billing._document_facts import _decode, decode_invoice_document_fact
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
+    BillingAccountObservationV1,
+    GetBillingAccountObservationV1,
     GetInvoiceDocumentFactV1,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
@@ -24,6 +27,65 @@ from dotmac_billing.contracts import (
     WithholdingDischargeEffectV1,
 )
 from dotmac_billing.errors import BillingRuleViolation
+
+
+def get_billing_account_observation(
+    db: Session, *, scope: Scope, request: GetBillingAccountObservationV1
+) -> BillingAccountObservationV1:
+    """Observe this statement's persisted account identity without ORM state.
+
+    No lock or cached admission token is supplied. The caller owns the
+    transaction and must re-observe after mutable link changes or deletion.
+    """
+    if not isinstance(request, GetBillingAccountObservationV1):
+        raise BillingRuleViolation(
+            "account_observation_request_invalid", "unsupported account query request"
+        )
+    # Validate even a request assembled without the dataclass constructor.
+    GetBillingAccountObservationV1(request.scope, request.account_id)
+    if not isinstance(scope, TenantScope | PlatformScope) or request.scope != scope:
+        raise BillingRuleViolation(
+            "scope_mismatch", "account observation request must match the routed scope"
+        )
+    table = (
+        models.BillingAccount.__table__
+        if isinstance(scope, TenantScope)
+        else models.PlatformBillingAccount.__table__
+    )
+    statement = select(table).where(table.c.id == request.account_id)
+    if isinstance(scope, TenantScope):
+        statement = statement.where(table.c.tenant_id == scope.tenant_id)
+    with db.no_autoflush:
+        row = db.execute(statement).mappings().one_or_none()
+    if row is None:
+        raise BillingRuleViolation(
+            "account_observation_not_found", "billing account was not found"
+        )
+    try:
+        code, minor_units, external_ref = (
+            row["currency"],
+            row["minor_units"],
+            row["external_account_ref"],
+        )
+        if (
+            row["id"] != request.account_id
+            or (isinstance(scope, TenantScope) and row["tenant_id"] != scope.tenant_id)
+            or not isinstance(external_ref, str)
+            or not external_ref.strip()
+            or len(external_ref) > 255
+            or not isinstance(code, str)
+            or not re.fullmatch(r"[A-Z]{3}", code)
+            or type(minor_units) is not int
+            or not 0 <= minor_units <= 6
+        ):
+            raise ValueError("invalid persisted account identity")
+        return BillingAccountObservationV1(
+            scope, row["id"], external_ref, Currency(code, minor_units)
+        )
+    except (ValueError, TypeError, KeyError, MoneyError) as exc:
+        raise BillingRuleViolation(
+            "account_observation_corrupt", "stored billing account identity is invalid"
+        ) from exc
 
 
 def get_invoice_document_fact(
@@ -106,6 +168,7 @@ def get_invoice_document_fact(
 
 
 __all__ = [
+    "get_billing_account_observation",
     "get_receivable_position_v2",
     "get_non_cash_credit_grant",
     "get_non_cash_credit_effect",
