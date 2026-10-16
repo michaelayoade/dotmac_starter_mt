@@ -26,13 +26,21 @@ def _lock(*, downgrade: bool = False) -> dict[str, str]:
         name: connection.execute(sa.text(f"SHOW {name}")).scalar_one()
         for name in ("lock_timeout", "statement_timeout", "row_security")
     }
-    op.execute("SET LOCAL lock_timeout = '5s'")
-    op.execute("SET LOCAL statement_timeout = '60s'")
     if downgrade:
         # FORCE RLS must never hide funding rows from the downgrade decision.
         # A role unable to bypass RLS fails rather than reporting false absence.
-        op.execute("SET LOCAL row_security = off")
-    op.execute("LOCK TABLE mod_payments.payment_intents IN ACCESS EXCLUSIVE MODE")
+        op.execute("""
+            SET LOCAL lock_timeout = '5s';
+            SET LOCAL statement_timeout = '60s';
+            SET LOCAL row_security = off;
+            LOCK TABLE mod_payments.payment_intents IN ACCESS EXCLUSIVE MODE;
+        """)
+    else:
+        op.execute("""
+            SET LOCAL lock_timeout = '5s';
+            SET LOCAL statement_timeout = '60s';
+            LOCK TABLE mod_payments.payment_intents IN ACCESS EXCLUSIVE MODE;
+        """)
     return settings
 
 
