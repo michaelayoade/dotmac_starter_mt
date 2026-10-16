@@ -147,6 +147,11 @@
       "reason": "PROPOSED, UNPUBLISHED SOURCE CANDIDATE. Retains the original engine verification context while preserving legacy receipt origin as unknown; performs no backfill, changes no existing wire contract, and makes no cash-qualification claim. This declaration is not publication or adoption evidence. Remove only after the exact candidate has its authorized release verification and immutable receipt. NOT to be repaired by editing the version: this successor remains unpublished until its separately authorized release is verified and immutably recorded.",
       "state": "declared-unpublished"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a105+dev",
+      "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-numbering": {
       "declared": "0.1.0a3",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a3 proposes a new modern-provenance candidate over the accepted source, including typed tenant/platform construction and strict idempotency-result validation since the published a2 source; it is not identical to the retained a2 artifact. Public API and Kernel floor >=0.1.0a66 remain unchanged. Hold through the Kernel a105 release and until root review plus Michael's new-source/release authorization; integrate the accepted record on main before any new build/release. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due. The legacy a2 tag/evidence are not rewritten. Remove this row only with the verified a3 publication record.",

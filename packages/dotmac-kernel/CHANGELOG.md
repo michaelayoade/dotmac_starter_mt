@@ -6,6 +6,24 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a106 — Release inventory
+
+This inventories the proposed request-evidence successor to verified
+`0.1.0a105`. It allocates no version and proves no publication or product
+adoption; protected release authorization and independently verified artifacts
+remain required.
+
+### Added
+
+- Optional typed `RequestEvidenceConfigurationV1` in the product assembly
+  selects Kernel's request-evidence context instead of the legacy request
+  metadata writer. Non-writing observation remains available, and omission
+  preserves the existing composition.
+- Authenticated platform attribution is bound on the ASGI request task after
+  authentication completes, so downstream request evidence does not rely on
+  threadpool context changes propagating back to its caller. Attribution is
+  evidence of authentication, not a grant of authorization or tenant scope.
+
 ## 0.1.0a105 — Release inventory
 
 This section inventories the source proposed for the next numeric alpha after

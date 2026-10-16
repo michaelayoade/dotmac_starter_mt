@@ -32,6 +32,7 @@ from dotmac_kernel.planes import (
     ModulePlaneSelection,
     validate_module_plane_selections,
 )
+from dotmac_kernel.request_evidence import TrustedProxyPolicy
 from dotmac_kernel.session_runtime import DatabaseRuntime
 from dotmac_kernel.web_surfaces import (
     AuthenticationProfileBinding,
@@ -76,6 +77,21 @@ class ProductSecurityPolicy:
                 raise ValueError(
                     f"{field_name} must be representable as an HTTP header value"
                 ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class RequestEvidenceConfigurationV1:
+    """Opt into Kernel request evidence; ERP remains the first product adopter.
+
+    This selects composition only. It proves neither installed-artifact
+    admission nor product adoption and declares no authorization or tenant scope.
+    """
+
+    trusted_proxies: TrustedProxyPolicy = field(default_factory=TrustedProxyPolicy)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.trusted_proxies, TrustedProxyPolicy):
+            raise TypeError("trusted_proxies must be a TrustedProxyPolicy")
 
 
 @dataclass(frozen=True)
@@ -225,6 +241,11 @@ class ProductAssemblySpec:
     # configuration checks; sync and async callables are both accepted, and an
     # exception fails startup rather than producing a partially initialized app.
     startup_hooks: Sequence[StartupHook] = ()
+    # None preserves legacy observability. A typed value selects the evidence
+    # context INSTEAD of that writer, retaining non-writing observation.
+    request_evidence: RequestEvidenceConfigurationV1 | None = field(
+        default=None, kw_only=True
+    )
     # Product-owned browser policy defaults, consumed by the one kernel-owned
     # security-header middleware writer.
     security_policy: ProductSecurityPolicy = field(
@@ -271,6 +292,12 @@ class ProductAssemblySpec:
     assembly_migrations: Path | None = None
 
     def __post_init__(self) -> None:
+        if self.request_evidence is not None and not isinstance(
+            self.request_evidence, RequestEvidenceConfigurationV1
+        ):
+            raise TypeError(
+                "request_evidence must be RequestEvidenceConfigurationV1 or None"
+            )
         object.__setattr__(self, "modules", tuple(self.modules))
         object.__setattr__(self, "role_definitions", tuple(self.role_definitions))
         object.__setattr__(self, "role_grant_profiles", tuple(self.role_grant_profiles))
@@ -306,6 +333,7 @@ __all__ = [
     "ModulePlaneSelection",
     "ProductAssemblySpec",
     "ProductSecurityPolicy",
+    "RequestEvidenceConfigurationV1",
     "StartupCheck",
     "StartupHook",
 ]
