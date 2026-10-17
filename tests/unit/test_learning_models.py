@@ -1,9 +1,12 @@
 """Source-preserving learning contracts; metadata only, no database runtime."""
 
+from pathlib import Path
+
 import pytest
 from dotmac_kernel.models import Party, PartyPerson, Tenant
 from dotmac_kernel.modules import ModuleRegistry
 from dotmac_kernel.namespaces import module_schema
+from dotmac_learning import migrations, versions_dir
 from dotmac_learning.manifest import module
 from dotmac_learning.models import (
     SCHEMA,
@@ -17,7 +20,10 @@ from dotmac_learning.models import (
     Score,
     Submission,
 )
-from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, UniqueConstraint
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.schema import CreateTable
 
 
 def test_learning_registration_uses_the_shipped_allocation_and_exact_tables():
@@ -256,3 +262,36 @@ def test_json_payload_defaults_are_independent_per_record():
         second = column.default.arg(None)
         assert first == second == empty
         assert first is not second
+
+
+@pytest.mark.parametrize(
+    ("model", "column_name"),
+    [(Submission, "answers"), (Score, "per_item"), (LearningEvent, "detail")],
+)
+def test_json_payloads_compile_on_sqlite_and_retain_postgresql_jsonb(
+    model, column_name
+):
+    column = model.__table__.c[column_name]
+    postgres = postgresql.dialect()
+    sqlite_dialect = sqlite.dialect()
+    assert isinstance(column.type, JSONB)
+    assert isinstance(column.type.dialect_impl(postgres), JSONB)
+    sqlite_type = column.type.dialect_impl(sqlite_dialect)
+    assert isinstance(sqlite_type, JSON)
+    assert not isinstance(sqlite_type, JSONB)
+    assert column.type.compile(dialect=postgres) == "JSONB"
+    assert column.type.compile(dialect=sqlite_dialect) == "JSON"
+    assert " @> " in str(column.contains({}).compile(dialect=postgres))
+    assert " ? " in str(column.has_key("key").compile(dialect=postgres))
+
+
+@pytest.mark.parametrize("model", TENANT_MODELS)
+def test_learning_table_ddl_compiles_for_shared_sqlite_metadata(model):
+    ddl = str(CreateTable(model.__table__).compile(dialect=sqlite.dialect()))
+    assert f"CREATE TABLE {SCHEMA}.{model.__tablename__}" in ddl
+
+
+def test_root_migration_locator_reexports_the_canonical_callable():
+    assert versions_dir is migrations.versions_dir
+    assert versions_dir() == Path(migrations.__file__).resolve().parent / "versions"
+    assert (versions_dir() / "lr_0001_learning.py").is_file()

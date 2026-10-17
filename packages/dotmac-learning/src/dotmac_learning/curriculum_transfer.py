@@ -19,7 +19,7 @@ from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.elements import BindParameter, ColumnElement
 from sqlalchemy.sql.selectable import TableClause
 
 from . import transfer as _v1
@@ -399,9 +399,10 @@ def _read_rows(
     projection: list[ColumnElement[object]] = []
     for spec in contract.columns:
         stored = contract.clause.c[spec.name]
-        expression: ColumnElement[object]
+        expression: ColumnElement[object] | ColumnElement[str]
         if spec.pg_type == "jsonb":
-            expression = sql_cast(stored, Text)
+            json_text: ColumnElement[str] = sql_cast(stored, Text)
+            expression = json_text
         elif spec.pg_type == "timestamp with time zone":
             expression = func.pg_catalog.encode(
                 func.pg_catalog.timestamptz_send(stored), "hex"
@@ -484,9 +485,10 @@ def _verify(
         projection: list[ColumnElement[object]] = []
         for spec in contract.columns:
             value = relation.c[spec.name]
-            observed: ColumnElement[object]
+            observed: ColumnElement[object] | ColumnElement[str]
             if spec.pg_type == "jsonb":
-                observed = sql_cast(value, Text)
+                json_text: ColumnElement[str] = sql_cast(value, Text)
+                observed = json_text
             elif spec.pg_type == "timestamp with time zone":
                 observed = func.pg_catalog.encode(
                     func.pg_catalog.timestamptz_send(value), "hex"
@@ -581,7 +583,7 @@ def import_snapshot_v2(
     for contract in _TABLES:
         bindings: dict[str, ColumnElement[object]] = {}
         for spec in contract.columns:
-            bound = bindparam(spec.name)
+            bound: BindParameter[object] = bindparam(spec.name)
             # Inner bind is NullType: JSONB receives raw canonical PostgreSQL
             # text, without SQLAlchemy serializing that string as JSON again.
             bindings[spec.name] = cast(

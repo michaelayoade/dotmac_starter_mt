@@ -8,8 +8,6 @@ reuse the existing engine. Attempt admission retains its existing seam until its
 designated port. Importing this surface creates no engine.
 """
 
-from pathlib import Path
-
 from dotmac_learning.assessment_contracts import GradingQuestion
 from dotmac_learning.audience import (
     classify_from_roster,
@@ -111,6 +109,7 @@ from dotmac_learning.exam_engine import (
 )
 from dotmac_learning.grading import grade_submission
 from dotmac_learning.manifest import module
+from dotmac_learning.migrations import versions_dir
 from dotmac_learning.models import (
     ASSESSMENT_MODES,
     EVENT_KINDS,
@@ -297,11 +296,6 @@ from dotmac_learning.transfer_contracts import (
 )
 
 __version__ = "0.1.0a1"
-
-
-def versions_dir() -> Path:
-    """Return the installed directory containing the ``lr`` revisions."""
-    return Path(__file__).resolve().parent / "migrations" / "versions"
 
 
 __all__ = [

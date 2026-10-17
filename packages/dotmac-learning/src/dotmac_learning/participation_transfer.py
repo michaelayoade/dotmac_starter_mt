@@ -19,7 +19,7 @@ from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.elements import BindParameter, ColumnElement
 from sqlalchemy.sql.selectable import TableClause
 
 from . import curriculum_transfer as _v2
@@ -568,7 +568,7 @@ def import_snapshot_v3(
     for contract in _TABLES:
         bindings: dict[str, ColumnElement[object]] = {}
         for spec in contract.columns:
-            bound = bindparam(spec.name)
+            bound: BindParameter[object] = bindparam(spec.name)
             bindings[spec.name] = cast(
                 ColumnElement[object],
                 sql_cast(bound, DOUBLE_PRECISION)

@@ -197,3 +197,21 @@ def test_source_types_lengths_and_defaults():
         first, second = column.default.arg(None), column.default.arg(None)
         assert first == second == []
         assert first is not second
+
+
+def test_question_json_uses_native_postgres_and_compiles_for_sqlite():
+    from sqlalchemy import JSON
+    from sqlalchemy.dialects import postgresql, sqlite
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.schema import CreateTable
+
+    for name in ("options", "correct"):
+        column_type = Question.__table__.c[name].type
+        assert isinstance(column_type, JSONB)
+        assert isinstance(column_type.dialect_impl(postgresql.dialect()), JSONB)
+        assert isinstance(column_type.dialect_impl(sqlite.dialect()), JSON)
+        assert column_type.compile(dialect=postgresql.dialect()) == "JSONB"
+        assert column_type.compile(dialect=sqlite.dialect()) == "JSON"
+    ddl = str(CreateTable(Question.__table__).compile(dialect=sqlite.dialect()))
+    assert "options JSON" in ddl
+    assert "correct JSON" in ddl

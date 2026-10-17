@@ -28,7 +28,7 @@ from sqlalchemy.engine import (
     RootTransaction,
 )
 from sqlalchemy.sql import Executable
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.elements import BindParameter, ColumnElement
 from sqlalchemy.sql.selectable import TableClause
 
 from .transfer_contracts import (
@@ -432,9 +432,10 @@ def _timestamp_from_bits(
 
 def _export_column(table: _Table, column: _Column) -> ColumnElement[object]:
     value = table.clause.c[column.name]
-    expression: ColumnElement[object]
+    expression: ColumnElement[object] | ColumnElement[str]
     if column.pg_type == "jsonb":
-        expression = sql_cast(value, Text)
+        json_text: ColumnElement[str] = sql_cast(value, Text)
+        expression = json_text
     elif column.pg_type == "double precision":
         expression = func.pg_catalog.encode(func.pg_catalog.float8send(value), "hex")
     elif column.pg_type == "timestamp with time zone":
@@ -518,9 +519,10 @@ def _verify(
         projection: list[ColumnElement[object]] = []
         for column in table.columns:
             stored = relation.c[column.name]
-            observed: ColumnElement[object]
+            observed: ColumnElement[object] | ColumnElement[str]
             if column.pg_type == "jsonb":
-                observed = sql_cast(stored, Text)
+                json_text: ColumnElement[str] = sql_cast(stored, Text)
+                observed = json_text
             elif column.pg_type == "double precision":
                 observed = func.pg_catalog.encode(
                     func.pg_catalog.float8send(stored), "hex"
@@ -627,7 +629,7 @@ def import_snapshot(
     for table in _TABLES:
         bindings: dict[str, ColumnElement[object]] = {}
         for column in table.columns:
-            bound_value = bindparam(column.name)
+            bound_value: BindParameter[object] = bindparam(column.name)
             binding: ColumnElement[object]
             if column.pg_type == "jsonb":
                 binding = sql_cast(bound_value, JSONB)
