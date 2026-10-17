@@ -1699,6 +1699,30 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payments ──
+    "dotmac-payments-v0.1.0a3": (
+        "dotmac-payments",
+        "ec3c0398ad93912afc0a9dd4fa82098cc812d6dd",
+        {
+            "pm_0001_payment_intents.py": (
+                "d3f253970bfb6ef1e98289bff1dc2853bf4964a995d406a92529527d3bdb55db"
+            ),
+            "pm_0002_money_precision.py": (
+                "6c16863cc542178b5b1ac17a5d431c8fbbc4e270dcd6d190d7d6c39652848ae8"
+            ),
+            "pm_0003_confirmation_immutable.py": (
+                "fc15f0e306afee6fc9b02970b0a3c4b2e9bb45d1fac9aa23095c699ac7b4bc41"
+            ),
+            "pm_0004_purchase_funding.py": (
+                "99700c868f5f09636429ebe2f46714439439ee48ea4dc3280163b64dbceccd72"
+            ),
+            "pm_0005_merchant_context.py": (
+                "34a48d78eb9edfee5e7063ef68825be6235f43be6eeb0156f6f1218d7c54b3c0"
+            ),
+            "pm_0006_cash_qualification.py": (
+                "c98f777ac89e3c8ef0b7a1f6b64c953248fb50352a364fbb0184c69c8d1f9e9c"
+            ),
+        },
+    ),
     "dotmac-payments-v0.1.0a2": (
         "dotmac-payments",
         "4fc0295da94ce62919966baaf1dd909f9af5dcbe",
@@ -7483,13 +7507,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "ao_0003_ack_attribution.py",
         }
     ),
-    "dotmac-payments": frozenset(
-        {
-            "pm_0004_purchase_funding.py",
-            "pm_0005_merchant_context.py",
-            "pm_0006_cash_qualification.py",
-        }
-    ),
+    "dotmac-payments": frozenset(),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the
     # protected release tags it and its digest is recorded above.
@@ -7528,7 +7546,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-inbox": frozenset(
         {"ib_0002_supplied_identity.py", "ib_0003_transport_refs.py"}
     ),
-    "dotmac-kernel": frozenset(),
+    "dotmac-kernel": frozenset({"20261017_0029_audit_history_shape.py"}),
     "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
