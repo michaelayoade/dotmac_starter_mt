@@ -122,7 +122,7 @@ class AuditEvent(Base):
         String(SOURCE_APPLICATION_MAX_LENGTH), index=True
     )
     action: Mapped[str] = mapped_column(String(120), nullable=False)
-    entity_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(160), nullable=False)
     entity_id: Mapped[str | None] = mapped_column(String(120))
     # Request forensics. All nullable: a scheduled job, a reconciler or an
     # internal transition has no HTTP interaction at all, and `status_code`
@@ -147,11 +147,11 @@ class AuditEvent(Base):
         index=True,
         server_default=func.now(),
     )
-    #: Persistence time — when the row was written. Server-assigned, never
-    #: supplied by a caller.
-    created_at: Mapped[datetime] = mapped_column(
+    #: Persistence time — server-assigned for ordinary writes. Historical rows
+    #: may retain NULL when their original persistence time is unknowable.
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        nullable=False,
+        nullable=True,
         server_default=func.now(),
     )
 
