@@ -53,7 +53,10 @@ builder with original receipt context and a fingerprint of the full v2 document.
 The public origin query reads persisted receipt scalars without autoflushing
 caller changes. Existing v1 and messaging documents retain their fingerprints.
 The actual Integrator publisher and Sub destination parser/descriptor have not
-adopted v2, and a19 remains unpublished. An
+adopted v2. Integration a19 was published and verified from
+`650c7827fa6ee62dddc63e2a4d383d5cbb0f8d4f` by run `38990201120`; this
+does not prove consumer adoption. The later shared-authentication source is
+unpublished `0.1.0a19+dev`. An
 assembly still needs independently accepted finite namespace mappings and
 provider proof before using any receipt as financial evidence.
 
