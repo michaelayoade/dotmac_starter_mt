@@ -765,6 +765,10 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # It hashes labeled Git objects for comparison; it writes no Foundation
     # lease, release, attestation or package-owned store record.
     "published_source_drift.py": 1,
+    # LockGenerationManifest is owned by the Python lock proposal producer.
+    # It binds unqualified lock/source bytes in a hosted workflow artifact;
+    # it writes no Foundation plan, lease, release or package-owned store.
+    "python_lock_bootstrap.py": 1,
     "release_artifact_verification.py": 1,
     # The ReleaseAuthority.v1 canonical digest document; owned by
     # release_authority.py, stored nowhere but as the ledger's digest.

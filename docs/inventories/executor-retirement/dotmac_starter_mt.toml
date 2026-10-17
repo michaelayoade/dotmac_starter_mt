@@ -18,7 +18,7 @@
 
 schema = "ExecutorInventory.v1"
 product = "dotmac_starter_mt"
-revision = "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff"
+revision = "4568b79048b266af370a84ca0da96fcd573a0ec0"
 
 # The fleet DEPLOYMENT targets a Starter entrypoint must never reach. Declared
 # HERE rather than inferred, because this is what makes
@@ -693,3 +693,13 @@ trigger = "the CI test job"
 credential = "none"
 disposition = "not_an_executor"
 premise = "carries no reactivation directive at all; nothing survives a reboot"
+
+# Source-bound dependency-lock proposal generation, with no host execution.
+[[entrypoint]]
+name = "workflow:python-lock-bootstrap"
+family = "workflow"
+path = ".github/workflows/python-lock-bootstrap.yml"
+trigger = "same-repository pull_request changes to the reviewed proposal, producer, workflow or producer tests"
+credential = "GITHUB_TOKEN (contents: read)"
+disposition = "not_an_executor"
+premise = "generates an unqualified Poetry lock and source-bound manifest as hosted artifacts; commands no deployment, publication or product cutover verb"
