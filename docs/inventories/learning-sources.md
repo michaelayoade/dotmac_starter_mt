@@ -44,6 +44,21 @@ qualification, not learning-package publication or Academy module adoption.
 The dossier records this accepted-source revalidation while preserving the
 initial audit pins.
 
+## Academy ERP checkpoint adoption hold
+
+Academy PR #178 proposes relocating existing `erp_synced_at` ACK facts to
+product-owned checkpoint storage; it does not complete the Integrator handoff.
+At immutable head `8651a35106fddb4805eab86bc3060eb0140d4ec3` (tree
+`dff816fddb17a1415a080bf67ed79e93aa5336c8`), hosted tests
+`39018325295/job117354902999` passed 1,418 tests with two skipped. Required
+standards `39018325232/job117356706534` failed: two `sync_checkpoint` sources
+exceed the accepted baseline of zero. This is an unresolved adoption policy
+hold, not an incomplete initial source audit. No choice has been made between a
+narrow human-accepted amendment and completing the existing Integrator handoff
+first. Preserve ACK facts losslessly and separately from module completion;
+claim neither checkpoint relocation nor Integrator cutover until the choice and
+qualified handoff are complete.
+
 The reviewed draft dossier is [learning-extraction-dossier.toml](learning-extraction-dossier.toml).
 It deliberately lives outside `packages/` until allocation is merged. Move it
 to `packages/dotmac-learning/EXTRACTION.toml` with implementation, retaining
@@ -189,10 +204,15 @@ and [assembly bindings](https://github.com/michaelayoade/dotmac_starter_mt/blob/
 Certificate rendering, consent, delivery and ERP transport remain Academy
 adapters consuming typed domain facts in the caller transaction. Preserve
 required result/certificate atomicity and optional-adapter savepoint isolation.
-`CourseCompletion.erp_synced_at` is delivery checkpoint state: adoption must
-preserve its values in an explicitly Academy-owned checkpoint keyed by the
-completion identity, or an evidenced existing checkpoint owner. ERP delivery
-must stop updating module-owned completion rows. Do not introduce another
+`CourseCompletion.erp_synced_at` is an existing delivery ACK fact, separate from
+module completion. Preserve every value losslessly and separately from module
+completion facts. Its transitional handoff and policy path remain unresolved at the
+adoption gate; accepted Integrator transport ownership remains in force: the proposed Academy checkpoint relocation is held pending an
+explicit policy choice between a narrow human-accepted amendment and completing
+the existing Integrator handoff first. Do not represent either path as selected,
+claim Integrator cutover or writer retirement, or let module completion mutate
+or erase ACK history. The initial source audit remains complete; this is an
+adoption gate, not a new source-audit prerequisite. Do not introduce another
 delivery or outbox engine.
 
 Hosted proof must cover real RLS/constraints/roles, first creation, mixed
@@ -217,7 +237,7 @@ revalidated against the merged source tree; they remain local until adoption.
 | Completion | Audited `services/completion.py:recompute_completion`; PR #177 adds `services/completion_aggregate.py:ensure_locked_completion` and the direct lab-grade recompute call | Port the qualified aggregate writer. Assessment and lab grade are both recompute callers in the accepted source. No additional worker reconciliation hook was found. |
 | Certificates | `services/certificates.py:issue_certificate`, called by completion and certificate download | Delegate issuance; retain PDF rendering and product response adapters. |
 | Learning events | `services/learning_events.py:record` / `emit` | Port the sole row writer and its deduplication/query contract. Assessment, attempts, labs, certificates, catalogue and learning routes must delegate. |
-| ERP delivery checkpoint | `services/erp_sync.py:push_completion` writes `erp_synced_at`; `sync_pending` and CLI `_erp_training_sync` select pending delivery | Preserve existing checkpoint values in the Academy-owned delivery owner; stop mutation of the learning completion row. |
+| ERP delivery checkpoint | `services/erp_sync.py:push_completion` writes `erp_synced_at`; `sync_pending` and CLI `_erp_training_sync` select pending delivery | Preserve every existing ACK fact losslessly and separately from module completion. The transitional handoff and policy path are unresolved at adoption; accepted Integrator transport ownership remains in force; do not claim checkpoint relocation, Integrator cutover or writer retirement before the policy choice and qualified handoff. |
 
 `scripts/seed_academy_demo.py` also creates course/activity rows. It is a demo
 adapter and must consume the selected module commands after adoption. Historical
@@ -267,8 +287,14 @@ completions, certificates and events in dependency order using the same caller
 transaction. Refuse unexplained destination contents or invalid source mappings.
 Preserve IDs, timestamps, attempt numbers, score source/reasons, serials, JSON
 and deduplication facts. Import performs no grading, recomputation, event
-emission, certificate reissuance, delivery or commit. Transfer the ERP checkpoint
-through its Academy owner in that same controlled operation.
+emission, certificate reissuance, delivery or commit. Preserve existing ERP ACK
+facts losslessly and separately from imported module completion facts. The transitional
+checkpoint/delivery handoff remains unresolved at this adoption gate; accepted
+Integrator transport ownership remains in force: Academy PR178
+is held pending an explicit policy choice between a narrow human-accepted
+amendment and completing the existing Integrator handoff first. No path is
+selected by this dossier; do not claim checkpoint relocation, Integrator cutover
+or writer retirement until policy resolution and the matching qualified handoff.
 
 Verify tenant-partitioned key sets and complete canonical row contents, target
 constraints/RLS/grants and every incoming reference; counts alone are weak
@@ -325,8 +351,11 @@ behavior. They are not silently changed as part of extraction.
 ## Namespace, lineage and Kernel prerequisites
 
 Starter allocation PR #873 reserves `learning` / `mod_learning` / `lr` /
-branch `learning`, at `8fe888f687a02f5d20cafb279704cd7ad0a8575d`. It contains
-no learning source or migrations. Allocation must be merged into the source
+branch `learning`, initially at `8fe888f687a02f5d20cafb279704cd7ad0a8575d`.
+The current head `3281d35671a6d4af204f3b32d09d60b7c1b64779` has all 46 hosted
+checks green, but remains unmerged while Billing record PR #884 keeps the
+Starter release freeze open. It contains no learning source or migrations.
+Allocation must be merged into the source
 branch's merge base before package source is introduced, per AGENTS rule 14.
 The current development marker is `0.1.0a105+dev`; neither it nor allocation
 is a published Kernel floor.
