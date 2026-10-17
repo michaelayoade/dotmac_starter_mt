@@ -1,0 +1,33 @@
+name: Foundation immutable legacy fixture capture
+on:
+  push:
+    branches: [test/foundation-legacy-goldens-20261017]
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+      - run: python -m venv .venv
+      - run: poetry install
+      - name: Prepare exact clean prechange source
+        run: git worktree add --detach "$RUNNER_TEMP/foundation-legacy-baseline" 1750e2776d5f2374892761763067723ff27595f5
+      - name: Capture historical bytes
+        run: |
+          poetry run python tests/fixtures/foundation_live_instance/generate_legacy_goldens.py \
+            --baseline-checkout "$RUNNER_TEMP/foundation-legacy-baseline" \
+            --output-dir "$RUNNER_TEMP/foundation-legacy-goldens"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: foundation-legacy-goldens-1750e277
+          path: ${{ runner.temp }}/foundation-legacy-goldens
+          if-no-files-found: error
+          retention-days: 30
