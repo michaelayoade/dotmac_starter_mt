@@ -90,7 +90,8 @@ def record(
     now = payload.occurred_at or datetime.now(UTC)
     if payload.kind in _ONCE_PER_LOCAL_DAY:
         # Already required above: retain a concrete zone at this typed seam.
-        assert local_day_zone is not None
+        if local_day_zone is None:
+            raise AssertionError
         dupe = (
             select(LearningEvent.id)
             .where(LearningEvent.tenant_id == payload.tenant_id)
