@@ -430,8 +430,12 @@ def test_generated_lock_cannot_claim_hashes_for_tool_modified_source(
 PURE_SOURCE = PACKAGE + "src/dotmac_learning_bank_rules/"
 EXISTING_V2 = {
     "pyproject.toml": ROOT,
-    "packages/dotmac-fulfillment/pyproject.toml": '[tool.poetry]\nname="dotmac-fulfillment"\n',
-    "packages/dotmac-template-studio/pyproject.toml": '[tool.poetry]\nname="dotmac-template-studio"\n',
+    "packages/dotmac-fulfillment/pyproject.toml": (
+        '[tool.poetry]\nname="dotmac-fulfillment"\n'
+    ),
+    "packages/dotmac-template-studio/pyproject.toml": (
+        '[tool.poetry]\nname="dotmac-template-studio"\n'
+    ),
 }
 LEARNING_V2 = """[tool.poetry]
 name = "dotmac-learning"
