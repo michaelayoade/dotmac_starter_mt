@@ -18,6 +18,8 @@ from dotmac_kernel.prerequisites import (
     KERNEL_PREREQUISITES,
     MODULE_DATABASE_ROLES_V1,
     PARTY_PERSON_CATALOG_V1,
+    PLATFORM_AUDIT_LOG_V1,
+    TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     DuplicateBindingError,
     DuplicatePrerequisiteError,
@@ -83,6 +85,7 @@ def test_the_kernel_ships_exactly_the_effects_modules_need() -> None:
         "idempotency_ledger.v1",
         "outbox_relay.v1",
         "platform_audit_log.v1",
+        "tenant_audit_log.v1",
         "party_person_catalog.v1",
     }
 
@@ -102,6 +105,49 @@ def test_every_shipped_prerequisite_has_a_verifier() -> None:
         f"shipped prerequisite(s) {missing} have no verifier — a module can "
         "declare them and nothing can prove them against a database"
     )
+
+
+def test_tenant_audit_is_a_registered_effect_separate_from_platform_audit() -> None:
+    """A tenant writer must not be certified by the platform-only effect."""
+    assert TENANT_AUDIT_LOG_V1.name == "tenant_audit_log.v1"
+    assert prerequisite(TENANT_AUDIT_LOG_V1.name) is TENANT_AUDIT_LOG_V1
+    assert TENANT_AUDIT_LOG_V1.name != PLATFORM_AUDIT_LOG_V1.name
+    install_prerequisite_bindings(
+        [PrerequisiteBinding(PLATFORM_AUDIT_LOG_V1.name, KERNEL_ROOT, "kernel")]
+    )
+    with pytest.raises(UnboundPrerequisiteError):
+        resolve_depends_on((TENANT_AUDIT_LOG_V1.name,))
+
+
+def test_tenant_audit_dispatch_runs_its_public_proof_and_propagates_refusal(
+    monkeypatch,
+) -> None:
+    """Publishing a name without invoking its proof must not pass installation."""
+    from dotmac_kernel.migrations import verify
+
+    name = TENANT_AUDIT_LOG_V1.name
+    assert verify.registered_verifiers()[name] is verify.verify_tenant_audit_log
+    install_prerequisite_bindings([PrerequisiteBinding(name, KERNEL_ROOT, "kernel")])
+    bind = object()
+    seen: list[object] = []
+
+    def refuse(observed: object) -> None:
+        seen.append(observed)
+        raise verify.PrerequisiteNotSatisfiedError("tenant audit provider refused")
+
+    monkeypatch.setitem(verify._VERIFIERS, name, refuse)
+    with pytest.raises(
+        verify.PrerequisiteNotSatisfiedError, match="tenant audit provider refused"
+    ):
+        verify.require_prerequisites(bind, (name,))  # type: ignore[arg-type]
+    assert seen == [bind]
+
+    # Sensitivity: deleting the mapping cannot silently skip the requirement.
+    monkeypatch.delitem(verify._VERIFIERS, name)
+    with pytest.raises(
+        verify.PrerequisiteVerifierMissingError, match="register_verifier"
+    ):
+        verify.require_prerequisites(bind, (name,))  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -469,6 +515,7 @@ def test_the_kernel_lineage_declares_what_it_supplies() -> None:
         TENANT_SCOPE_CATALOG_V1.name,
         MODULE_DATABASE_ROLES_V1.name,
         PARTY_PERSON_CATALOG_V1.name,
+        TENANT_AUDIT_LOG_V1.name,
     }
 
 

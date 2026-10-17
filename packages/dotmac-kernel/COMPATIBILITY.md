@@ -196,8 +196,8 @@ Two rules travel with it:
 | `dotmac_kernel.migrations.configuration` | `select_migration_database_url`, `set_alembic_database_url` — pure held-material selection with explicit fallback permission and percent escaping only at the Alembic ConfigParser write boundary |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE`, `DEFAULT_PLATFORM_ROLE`, `TABLE_PRIVILEGES` (the post-migration live-catalog contract, both planes — see the same section) |
-| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_party_person_catalog`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
-| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `PARTY_PERSON_CATALOG_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_party_person_catalog`, `verify_tenant_audit_log`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `PARTY_PERSON_CATALOG_V1`, `TENANT_AUDIT_LOG_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
@@ -490,6 +490,20 @@ root's branch label, which is also what makes an `alembic_version` row
 explainable (`GateReport.attribution`).
 
 ### Logical migration prerequisites (`dotmac_kernel.prerequisites`, `dotmac_kernel.migrations.verify`)
+
+`TENANT_AUDIT_LOG_V1` names the existing tenant audit storage contract, separately
+from platform audit. Its verifier checks the current 18 columns, historical
+nullability, defaults, keys/indexes, forced tenant RLS and effective append-only
+online privileges. The reference assembly binds it to `0029_audit_history_shape`;
+provider stamps alone are insufficient. The verifier accepts the canonical Kernel
+0001 tenant helper body and scalar-UUID, PL/pgSQL, STABLE, SECURITY INVOKER,
+no-function-local-configuration posture. Alternate helper implementations need
+separate provider qualification; marker words alone cannot establish isolation.
+Verification reads catalogs without changing caller tenant settings or owning
+transaction outcomes. The writer's action registry and explicit
+trusted actor/source admission remain separate runtime contracts. This source
+addition introduces no audit DDL. Existing consumers convert only after a
+sufficient Kernel is published and installed qualification proves their floors.
 
 A module lineage that needs another lineage's *effects* declares those effects,
 not a revision. ADR-0006 D1 originally said cross-lineage ordering used
