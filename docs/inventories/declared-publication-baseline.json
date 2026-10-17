@@ -139,7 +139,7 @@
     },
     "dotmac-kernel": {
       "declared": "0.1.0a105+dev",
-      "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
+      "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record. This development source also reserves learning / mod_learning / lr / branch learning for the Academy-sourced learning module; the reservation installs no module and transfers no data or writer authority.",
       "state": "declared-unpublished"
     },
     "dotmac-platform-health": {

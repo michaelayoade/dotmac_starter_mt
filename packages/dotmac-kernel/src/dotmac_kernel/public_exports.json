@@ -942,6 +942,7 @@
         "InvalidRevisionIdError",
         "InvalidSchemaError",
         "KERNEL_MIGRATION_OWNER",
+        "LEARNING_MIGRATION_OWNER",
         "LedgerDigestError",
         "MAX_IDENTIFIER_LENGTH",
         "MAX_MIGRATION_PREFIX_LENGTH",

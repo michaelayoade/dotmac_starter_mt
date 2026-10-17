@@ -1345,6 +1345,16 @@ RESPONSE_OBLIGATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("sla"),
 )
 
+# Academy is the qualifying source and first adopter of the reusable learning
+# domain. Reserve its physical identity before any module source is introduced;
+# allocation alone transfers no learning data or writer authority.
+LEARNING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="learning",
+    prefix="lr",
+    branch_label="learning",
+    db_schema=module_schema("learning"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1429,6 +1439,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     SERVICE_CHANGES_MIGRATION_OWNER,
     OPERATIONAL_ESCALATIONS_MIGRATION_OWNER,
     RESPONSE_OBLIGATIONS_MIGRATION_OWNER,
+    LEARNING_MIGRATION_OWNER,
 )
 
 
@@ -1571,7 +1582,7 @@ def migration_owner_ledger_digest(
 #: advertise a plain SHA-256 over some unstated serialization and invite a
 #: consumer to recompute the wrong thing.
 MIGRATION_OWNER_LEDGER_DIGEST: Final[str] = (
-    "cv1:905204e2457a5aefd0ec9a941c489646b99c8a30b74a17ace36e73c0b0709686"
+    "cv1:17254ecd87ce99af4d2a6a13ab4ead9b8d462f6af33b61e82fb7658f45b46c15"
 )
 
 
@@ -1974,6 +1985,7 @@ __all__ = [
     "SERVICE_CHANGES_MIGRATION_OWNER",
     "OPERATIONAL_ESCALATIONS_MIGRATION_OWNER",
     "RESPONSE_OBLIGATIONS_MIGRATION_OWNER",
+    "LEARNING_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
