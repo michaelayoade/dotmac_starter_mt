@@ -13,6 +13,7 @@ from dotmac_kernel.models import Base as KernelBase
 from dotmac_kernel.models import Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import schema_table_args
 from sqlalchemy import (
+    JSON,
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
@@ -112,8 +113,12 @@ class Question(KernelBase, TimestampMixin):
     type: Mapped[str] = mapped_column(
         String(12), nullable=False
     )  # single|multi|truefalse
-    options: Mapped[list[object]] = mapped_column(JSONB, nullable=False, default=list)
-    correct: Mapped[list[object]] = mapped_column(JSONB, nullable=False, default=list)
+    options: Mapped[list[object]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list
+    )
+    correct: Mapped[list[object]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list
+    )
     rubric_category: Mapped[str] = mapped_column(
         String(12), nullable=False
     )  # recall|application|analysis

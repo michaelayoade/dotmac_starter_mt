@@ -30,7 +30,7 @@ from .result_contracts import (
     TransactionChanged,
 )
 
-_JSON = TypeAdapter(JsonValue)
+_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 _ANSWERS = TypeAdapter(dict[str, JsonValue])
 
 
