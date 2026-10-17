@@ -1,8 +1,9 @@
 # Live deployment credential assignment: bounded source inventory
 
-Status: source inventory and proposed follow-up only. No producer is implemented
-or qualified by this document. An application response, configured reference or
-signed self-report does not establish independent live assignment.
+Status: source inventory with the startup-assignment source contract adopted on
+2026-10-17. No producer is implemented or qualified by this document. An
+application response, configured reference or signed self-report does not
+establish independent live assignment.
 
 The candidate scope is deployment-bound health for Sub, ERP and Academy, their
 Integrator transport and existing Foundation/Control composition. This is not
@@ -61,6 +62,14 @@ consumed dispatch and immutable enrollment. PH consumes only the eligible
 opaque enrollment projection. Until the producer and custody join are concrete
 and qualified, PH deployment-bound admission stays unavailable.
 
-This inventory permits review of that bounded proposal; it does not adopt its
-trust delegation, authorize implementation of an accepting producer, or claim
-any runtime/deploy/health/rollback/restore acceptance gate has passed.
+## Source contract decision — 2026-10-17
+
+Michael chose immutable startup assignment: reuse Foundation's live-instance
+inspection and the existing custody provider to bind the exact installation,
+config revision and immutable credential version to that same runtime instance
+at process start. This settles the previously open acceptance meaning;
+dynamically loaded credential proof is outside this contract.
+
+The adoption permits bounded source implementation under the existing owners.
+It does not qualify an accepting producer, install trust, enable production
+admission or claim any runtime/deploy/health/rollback/restore gate has passed.
