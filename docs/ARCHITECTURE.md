@@ -2486,6 +2486,37 @@ source-of-truth for the modules phase 2b introduced. "ST" = `dotmac_starter`
 | `dotmac_kernel/web_deps.py` | `require_web_auth`, `WebAuthRedirect`, `safe_next_url`, `is_secure_request` | ST (`app/web/deps.py`), routed through this app's `authenticate_request` shared seam (native adaptation — ST had no bearer/cookie seam to share) |
 | `dotmac_kernel/identity.py` | `normalize_email`, `person_display_name` — the single-owner Party-invariant helpers | native (closes the SOT gap tracked from 2a-T6/T7; no upstream port — see "Known dual-writer: Parties" below) |
 
+### Learning source candidate (2026-10-17)
+
+`packages/dotmac-learning/` declares unpublished `0.1.0a1`, with typed source
+under `src/dotmac_learning/`, the `lr` migration lineage in `mod_learning`,
+and its product-first audit in `EXTRACTION.toml`. The first slice contains seven
+of the full 27-table extraction scope. `references`, `results`, `projections`,
+`completion`, `certificates` and `events` separate reference persistence,
+result evidence, best-result queries, progress, issuance and learning evidence.
+`result_contracts`, `progress_contracts`, `event_contracts` and
+`transfer_contracts` define typed boundaries; `transfer` uses SQLAlchemy Core
+for historical storage export, import and verification.
+
+The editable in-tree Kernel dependency is for source qualification; it is not
+a published minimum or a release artifact. This candidate remains uncomposed,
+unreleased and without adopted consumers. Hosted installed qualification and a
+proven published Kernel floor containing its namespace allocation remain gates.
+Academy retains grading/exam/attempt-policy decisions, authoring decisions,
+authorization, lab execution, presentation and integration adapters. The caller
+owns the root transaction, commit and rollback; the module mutates and flushes.
+An optional event failure is isolated in its own savepoint.
+
+Historical transfer accepts an existing PostgreSQL Connection and caller-owned
+transaction. `export_snapshot` reads the complete current declared tenant extent;
+`import_snapshot` requires an empty seven-table destination;
+`verify_snapshot` compares keys and fields. Typed storage rows preserve history
+independently of new domain-command validation. These are uncommitted storage
+observations: transferred storage proves neither authority nor full cutover.
+The assembly still owns tenant selection, catalog/lineage acceptance, incoming
+reference closure, writer fences, worker grants, ACK handoff and reverse transfer
+including accepted new facts. Full behavior and limits are in the package README.
+
 ## Model provenance table
 
 Every model class in `app/` (ORM `Base` subclasses — `grep -rn "class .*Base"
@@ -2636,6 +2667,13 @@ made concrete — every model has exactly one declared owner.
 | `ProviderCashQualification` | `mod_payments.provider_cash_qualifications` | `dotmac-payments` optional module | Proposed a3 preserves immutable physical provider cash identity and original evidence under a mandatory installed evidence authority. Economic identity excludes local IDs and retrieval/configuration provenance. Original verification and provider payment clocks remain separate; exact historical replay is distinct from fresh transaction-scoped admission for new financial use. Product intent/account mapping and Billing postings remain outside. The production evidence adapter, publication and runtime acceptance are still outstanding. |
 | `ServiceChangeRequest` / `ServiceChangeCheckpoint` | `mod_servicechanges.service_change_requests`, `mod_servicechanges.service_change_checkpoints` | `dotmac-service-changes` optional module | Product-first from Sub's `SubscriptionChangeRequest`: the durable plan-change/relocation/vacation request and typed append-only evidence that each crossed owner reached a named point. Sub's per-collaborator nullable FK columns become rows; execution advances one declared step at a time. |
 | `EscalationPolicy` / `EscalationPolicyVersion` / `EscalationInstance` | `mod_escalations.escalation_policies`, `mod_escalations.escalation_policy_versions`, `mod_escalations.escalation_instances` | `dotmac-operational-escalations` optional module | Product-first from Sub: policy identity, IMMUTABLE versions with exactly one ACTIVE per policy (partial unique index, not writer-only), and instances bound to the exact version they were raised under. Delivery is deliberately absent — Messaging/Integrator owns it and Durable Timers owns scheduling. |
+| `Course` | `mod_learning.courses` | `dotmac-learning` source candidate | Academy `app/models/course.py`, initial audit `a99a395e066db4eea3ec1d73219ab5dd006c1d1d`; effective accepted revalidation `0968881fc40ad86b3abfea2fc40044dd2dbf47c9` in `EXTRACTION.toml`. Reference persistence only; authoring decisions remain Academy-owned. |
+| `Activity` | `mod_learning.activities` | `dotmac-learning` source candidate | Academy `app/models/assessment.py` at the same initial/effective pins; tenant-safe course references and assessment/lab activity storage. |
+| `Submission` | `mod_learning.submissions` | `dotmac-learning` source candidate | Academy `app/models/assessment.py` at the same initial/effective pins; result evidence and attempt-number allocation, with Academy grading and admission policy retained. |
+| `Score` | `mod_learning.scores` | `dotmac-learning` source candidate | Academy `app/models/assessment.py` at the same initial/effective pins; append/override evidence and source best-result ordering. |
+| `CourseCompletion` | `mod_learning.course_completions` | `dotmac-learning` source candidate | Academy `app/models/completion.py` at the same initial/effective pins; course progress/completion including labs, excluding ERP ACK facts. |
+| `Certificate` | `mod_learning.certificates` | `dotmac-learning` source candidate | Academy `app/models/certificate.py` at the same initial/effective pins; idempotent issuance records, with presentation/PDF delivery retained by the product. |
+| `LearningEvent` | `mod_learning.learning_events` | `dotmac-learning` source candidate | Academy `app/models/learning_event.py` at the same initial/effective pins; learning evidence with genuine tenant-scoped person references. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -2652,6 +2690,11 @@ write:
 | Resource | Owning write path(s) |
 |---|---|
 | Proposed Python dependency-lock artifacts | `scripts.python_lock_bootstrap` validates the closed metadata proposal and committed base/input hashes, then runs the pinned Poetry tool in a temporary hosted checkout. `.github/workflows/python-lock-bootstrap.yml` is its same-repository PR caller. The resulting lock and hash manifest are unqualified build observations; the reviewed dependency change and matching lock enter one source commit. The producer changes no committed metadata, validates no repaired lock as qualification, and owns no package publication, release floor, application composition or product writer. |
+| Learning course/activity reference persistence (source candidate) | `dotmac_learning.references.create_course`, `update_course`, `create_activity`, `update_activity`; `get_course` and `get_activity` are reads. `dotmac_learning.models` supplies the seven storage models, not a second command owner. Academy retains authoring decisions. |
+| Learning result evidence and best-result projections (source candidate) | `dotmac_learning.results.record_mcq_result`, `record_lab_result`, `override_score` mutate in the caller transaction; `dotmac_learning.projections.best_scores_for`, `best_scores_for_person`, `best_scores_by_course_for_person` are reads. Grading, exam selection and trusted typed admission-policy decisions remain with Academy. |
+| Learning course completion and certificate issuance (source candidate) | `dotmac_learning.completion.recompute_completion` and `dotmac_learning.certificates.issue_certificate`; the caller owns the root transaction and required failures propagate. Completion regression retains any already-issued certificate. |
+| Learning events (source candidate) | `dotmac_learning.events.record` and optional `emit`; `last_activity_at`, `weekly_buckets`, `active_person_ids`, `kind_counts` read projections. The product supplies the day timezone; optional emission uses a savepoint, not a second root transaction authority. |
+| Learning historical seven-table storage transfer (source candidate) | `dotmac_learning.transfer.export_snapshot`, `verify_snapshot`, `import_snapshot` use typed SQLAlchemy Core storage contracts in an existing caller-owned PostgreSQL Connection/transaction. Only import writes; none starts or completes a root transaction. Caller owns authorization, full extent, fences, reference closure and reversal. Storage equality is no authority/cutover proof. |
 | Tenants | `app.features.tenants.service.provision_tenant` (platform-only, control-plane security Task 2 — one transaction creating tenant + owner party/person/credential + `admin` role grant + two audit events; no update/delete service yet) |
 | Platform admins | `scripts/create_platform_admin.py::upsert_admin` (CLI-only, platform/migration DB credentials — the same trust boundary as migrations; deliberately NO HTTP write path, see ADR-0004) |
 | Platform sessions | `dotmac_kernel.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |
