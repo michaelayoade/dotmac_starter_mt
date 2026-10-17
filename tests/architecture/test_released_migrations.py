@@ -655,6 +655,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # was not -- and `dotmac_erp` pins a2 AND composes this lineage, so one
     # revision id named two file contents in a database this repository cannot
     # inspect. The file is restored to these bytes in the same change.
+    "dotmac-numbering-v0.1.0a3": (
+        "dotmac-numbering",
+        "62ecb6b0e198ba08bef9a096037194a9dfca4da0",
+        {
+            "nu_0001_numbering.py": (
+                "9c3079774b0db615ea5d4c6ca121a9ed43688236bbc5f0a0166a2906513da561"
+            ),
+        },
+    ),
     "dotmac-numbering-v0.1.0a2": (
         "dotmac-numbering",
         "4c282228b53405442effc4159f5db9d50446d335",
