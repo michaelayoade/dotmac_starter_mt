@@ -352,9 +352,10 @@ behavior. They are not silently changed as part of extraction.
 
 Starter allocation PR #873 reserves `learning` / `mod_learning` / `lr` /
 branch `learning`, initially at `8fe888f687a02f5d20cafb279704cd7ad0a8575d`.
-The current head `3281d35671a6d4af204f3b32d09d60b7c1b64779` has all 46 hosted
-checks green, but remains unmerged while Billing record PR #884 keeps the
-Starter release freeze open. It contains no learning source or migrations.
+The pre-refresh head `3281d35671a6d4af204f3b32d09d60b7c1b64779` passed all 46
+hosted checks. Billing release-record PR #884 is accepted; require fresh
+head/base qualification after record integration and resulting main CI before
+merging the allocation. It contains no learning source or migrations.
 Allocation must be merged into the source
 branch's merge base before package source is introduced, per AGENTS rule 14.
 The current development marker is `0.1.0a105+dev`; neither it nor allocation
