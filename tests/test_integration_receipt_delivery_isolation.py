@@ -195,7 +195,7 @@ def _frozen_statement_fixture(conn, request):
            event_type, payload_digest, payload_json, state, delivery_snapshot_json)
         VALUES (:id, :installation, :binding, :event, 'received', :digest,
                 '{}'::jsonb, 'verified',
-                '{"schema_version":1,"state":"unstarted"}'::jsonb)
+                '{"schema_version": 1,"state":"unstarted"}'::jsonb)
     """),
         {
             "id": receipt_id,
@@ -296,7 +296,7 @@ def test_the_real_claim_derives_source_from_its_installation_not_the_payload(
                 "delivery_snapshot_json) VALUES ("
                 ":id, :installation, :binding, 'settlement-event-1', "
                 "'conformance.echo.v1', :digest, CAST(:payload AS jsonb), "
-                '\'verified\', \'{"schema_version":1,"state":"unstarted"}\'::jsonb)'
+                '\'verified\', \'{"schema_version": 1,"state":"unstarted"}\'::jsonb)'
             ),
             {
                 "id": receipt_id,

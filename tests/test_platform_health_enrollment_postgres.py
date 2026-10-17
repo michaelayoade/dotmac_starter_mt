@@ -209,6 +209,19 @@ def test_immutable_evidence_sql_and_platform_only_acl(migrated):
             with pytest.raises(DBAPIError):
                 with conn.begin_nested():
                     conn.execute(text(statement))
+    # The narrow id UPDATE privilege exists only for PostgreSQL FK KEY SHARE.
+    # Even a no-op id write must hit the immutable trigger for both service roles.
+    for role in ("app_admin", "platform_api"):
+        for statement in (
+            "UPDATE mod_health.health_grants SET id=id",
+            "UPDATE mod_health.health_grant_components SET id=id",
+            "UPDATE mod_health.health_eligibility_assessments SET id=id",
+        ):
+            with migrated.begin() as conn:
+                conn.execute(text(f"SET LOCAL ROLE {role}"))
+                with pytest.raises(DBAPIError, match="health evidence is immutable"):
+                    with conn.begin_nested():
+                        conn.execute(text(statement))
     with migrated.begin() as conn:
         conn.execute(text("SET LOCAL ROLE app_user"))
         with pytest.raises(DBAPIError):

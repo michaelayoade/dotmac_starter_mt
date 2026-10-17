@@ -54,7 +54,8 @@ class Authority:
 
     def enrollment(self, enrollment_ref):
         self.require_ready()
-        assert enrollment_ref == self.projection.enrollment_ref
+        if enrollment_ref != self.projection.enrollment_ref:
+            raise HealthAdmissionError("enrollment identity changed")
         return self.projection
 
     def health_eligibility(self, enrollment_ref):

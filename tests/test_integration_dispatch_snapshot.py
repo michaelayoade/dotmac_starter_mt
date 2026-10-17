@@ -264,7 +264,7 @@ def test_concurrent_real_claims_freeze_once_and_stale_worker_cannot_settle(dispa
         ("provider_event_id", "'changed'"),
         ("event_type", "'changed'"),
         ("payload_digest", "repeat('b',64)"),
-        ("payload_json", "'{\"value\":2}'::jsonb"),
+        ("payload_json", "'{\"value\": 2}'::jsonb"),
     ],
 )
 def test_direct_sql_frozen_identity_tamper_is_rejected(dispatch, column, expression):

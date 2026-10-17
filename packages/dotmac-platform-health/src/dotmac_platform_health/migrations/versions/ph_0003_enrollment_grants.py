@@ -157,6 +157,18 @@ def upgrade() -> None:
         op.execute(
             f"CREATE TRIGGER retained_evidence BEFORE TRUNCATE ON mod_health.{table} FOR EACH STATEMENT EXECUTE FUNCTION mod_health.reject_evidence_mutation();"
         )
+    # PostgreSQL's referential-integrity KEY SHARE check needs a lockable
+    # parent column, including when app_admin owns the child table. Limit this
+    # privilege to the immutable primary key; the unconditional mutation trigger
+    # above rejects even no-op updates. Payload and lifecycle columns stay denied.
+    for table in (
+        "health_grants",
+        "health_grant_components",
+        "health_eligibility_assessments",
+    ):
+        op.execute(
+            f"GRANT UPDATE (id) ON mod_health.{table} TO platform_api, app_admin;"
+        )
     op.execute("""
         CREATE FUNCTION mod_health.check_observation_binding() RETURNS trigger
         LANGUAGE plpgsql AS $$

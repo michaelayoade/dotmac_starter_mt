@@ -1186,9 +1186,13 @@ class ReceiptClaims:
                         f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 # nosec B608 -- module-owned schema; values bound
                         "state = 'reconciliation_required', leased_until = NULL, "
                         "next_attempt_at = NULL, product_acceptance = 'indeterminate', "
-                        "error_code = :code, error_detail = :code WHERE id = :id"
+                        "error_code = :code, error_detail = :detail WHERE id = :id"
                     ),
-                    {"id": receipt_id, "code": refusal.error_code},
+                    {
+                        "id": receipt_id,
+                        "code": refusal.error_code,
+                        "detail": refusal.error_code,
+                    },
                 )
                 session.commit()
                 raise
