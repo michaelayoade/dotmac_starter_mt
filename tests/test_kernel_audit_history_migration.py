@@ -16,14 +16,18 @@ import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from tests import test_migration_split_rehearsals as split_rehearsals
 from tests.conftest import TEST_HOST_APPLICATION
 from tests.test_migration_split_rehearsals import (
     _downgrade,
     _kernel_only_locations,
     _upgrade,
     _versions,
-    scratch_db,  # noqa: F401 -- reuse the isolated app_admin database fixture
 )
+
+# Re-export the real fixture through a used module alias. Test parameters can
+# request it without shadowing an unused fixture import (Ruff F811).
+scratch_db = split_rehearsals.scratch_db
 
 PREVIOUS = "0028_machine_attribution"
 CURRENT = "0029_audit_history_shape"
@@ -40,9 +44,11 @@ def _retreat(url: str) -> None:
 
 
 def _rows(conn):
-    return conn.execute(
-        sa.text("SELECT * FROM public.audit_events ORDER BY id")
-    ).mappings().all()
+    return (
+        conn.execute(sa.text("SELECT * FROM public.audit_events ORDER BY id"))
+        .mappings()
+        .all()
+    )
 
 
 def _shape(conn):
@@ -136,17 +142,25 @@ def test_upgrade_preserves_rows_security_and_historical_unknowns(scratch_db: str
                 values = _seed(
                     conn, entity_type="e" * width, created_at=None, occurred_at=None
                 )
-                stored = conn.execute(
-                    sa.text("SELECT * FROM public.audit_events WHERE id=:id"),
-                    {"id": values["id"]},
-                ).mappings().one()
+                stored = (
+                    conn.execute(
+                        sa.text("SELECT * FROM public.audit_events WHERE id=:id"),
+                        {"id": values["id"]},
+                    )
+                    .mappings()
+                    .one()
+                )
                 assert dict(stored) == values
             # Known historical persistence/domain instants remain distinct.
             values = _seed(conn, entity_type="e" * 160)
-            stored = conn.execute(
-                sa.text("SELECT * FROM public.audit_events WHERE id=:id"),
-                {"id": values["id"]},
-            ).mappings().one()
+            stored = (
+                conn.execute(
+                    sa.text("SELECT * FROM public.audit_events WHERE id=:id"),
+                    {"id": values["id"]},
+                )
+                .mappings()
+                .one()
+            )
             assert dict(stored) == values
             table = sa.Table(
                 "audit_events", sa.MetaData(), schema="public", autoload_with=conn
