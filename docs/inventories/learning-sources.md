@@ -60,9 +60,9 @@ claim neither checkpoint relocation nor Integrator cutover until the choice and
 qualified handoff are complete.
 
 The reviewed draft dossier is [learning-extraction-dossier.toml](learning-extraction-dossier.toml).
-It deliberately lives outside `packages/` until allocation is merged. Move it
-to `packages/dotmac-learning/EXTRACTION.toml` with implementation, retaining
-these initial audit coordinates and adding accepted-source revalidation.
+The allocation is now merged. Move this reviewed dossier to
+`packages/dotmac-learning/EXTRACTION.toml` with implementation, retaining
+these initial audit coordinates and accepted-source revalidation.
 The [immutable Kernel entry proposal](../superpowers/specs/2026-10-16-immutable-kernel-lineage-adoption.md)
 is source-only design for a prerequisite; it is not an accepted executor,
 target selection, custody approval or passed adoption gate.
@@ -348,18 +348,36 @@ Other observed gaps—manual grading's missing `work_graded` event, highest-scor
 correction semantics and dashboard resume selection—are separately recorded
 behavior. They are not silently changed as part of extraction.
 
+## Accepted attempt-policy reader preparation
+
+Academy PR #179 merged at `0968881fc40ad86b3abfea2fc40044dd2dbf47c9` after
+pull-request CI, push CI and engineering standards passed. Resulting main CI
+`39025292845` and standards `39025292856` both succeeded. The main suite reports
+1,414 passed and two skipped; lint and type checks passed. Its merge tree is the
+exact reviewed two-file source tree.
+
+The narrow `entitlement_with_grants` entry accepts activity terms and a bound
+grant reader; existing `for_learner(db, ...)` consumes it while retaining the
+exact supplied Session and tenant/person/activity IDs. The grant query and
+entitlement arithmetic are unchanged. This prepares reuse of the existing
+policy, not a second policy engine. It does not qualify a future module adapter,
+transaction containment, grant visibility or competing-attempt behavior; those
+still require architecture and hosted PostgreSQL proof. No learning package or
+runtime identity adoption is asserted.
+
 ## Namespace, lineage and Kernel prerequisites
 
-Starter allocation PR #873 reserves `learning` / `mod_learning` / `lr` /
-branch `learning`, initially at `8fe888f687a02f5d20cafb279704cd7ad0a8575d`.
-The pre-refresh head `3281d35671a6d4af204f3b32d09d60b7c1b64779` passed all 46
-hosted checks. Billing release-record PR #884 is accepted; require fresh
-head/base qualification after record integration and resulting main CI before
-merging the allocation. It contains no learning source or migrations.
-Allocation must be merged into the source
-branch's merge base before package source is introduced, per AGENTS rule 14.
-The current development marker is `0.1.0a105+dev`; neither it nor allocation
-is a published Kernel floor.
+Starter allocation PR #873 merged at
+`379017e2ff64a602244f2a8f37424f6ec68f6559`, reserving `learning` /
+`mod_learning` / `lr` / branch `learning`. Reviewed head
+`2413692e828746c12205920969fa1afe6ac65898` passed all 46 checks and all four
+workflows against accepted record main `653a57d432512ba1da083a7bc3de7c6287091d2d`.
+The merge tree is the exact reviewed allocation tree. Its resulting main
+qualification is pending; it contains no learning source or migrations.
+Billing release-record main is fully green and its source-merge hold is closed.
+Allocation must remain in the source branch's merge base before package source
+is introduced, per AGENTS rule 14. The development marker is `0.1.0a105+dev`;
+neither it nor the allocation is a published Kernel floor.
 
 The new namespace must ship in an authorized, verified Kernel release before
 learning can declare a pinnable floor. Floor qualification must register the
