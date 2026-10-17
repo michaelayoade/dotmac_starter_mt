@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.architecture.foundation_executor_ast import resolve_execution_body
+
 ROOT = Path(__file__).resolve().parents[2]
 UNIT = ROOT / "tests" / "unit"
 SOURCE = (
@@ -162,41 +164,7 @@ def test_pre_effect_consumption_is_owned_by_the_fixed_v3_provider() -> None:
         node.name: node for node in executor.body if isinstance(node, ast.FunctionDef)
     }
     for name in ("run", "rollback"):
-        calls = {
-            node.func.attr: node.lineno
-            for node in ast.walk(methods[name])
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"_verify_host_source", "_require_execution_plan"}
-        }
-        assert calls["_verify_host_source"] < calls["_require_execution_plan"]
-        if name == "rollback":
-            _assert_historical_rollback_is_readonly(methods)
-            continue
-        statements = methods[name].body
-        consumption_at = next(
-            index
-            for index, statement in enumerate(statements)
-            if isinstance(statement, ast.Assign)
-            and isinstance(statement.value, ast.Call)
-            and isinstance(statement.value.func, ast.Attribute)
-            and statement.value.func.attr == "_require_execution_plan"
-        )
-        effect_at = next(
-            index
-            for index in range(consumption_at + 1, len(statements))
-            if isinstance(statements[index], ast.Expr)
-            and isinstance(statements[index].value, ast.Call)
-            and isinstance(statements[index].value.func, ast.Attribute)
-            and statements[index].value.func.attr == "_annotate"
-        )
-        bridge = statements[consumption_at + 1 : effect_at]
-        assert bridge
-        assert all(
-            isinstance(statement, ast.Assign)
-            and isinstance(statement.value, ast.Name | ast.Constant)
-            for statement in bridge
-        ), "only non-failing assignments may follow consumption before effects"
+        _assert_entry_consumption_before_effects(executor, methods, name)
     pre_effect = methods["_require_execution_plan"]
     assert any(
         isinstance(node, ast.Call)
@@ -204,6 +172,76 @@ def test_pre_effect_consumption_is_owned_by_the_fixed_v3_provider() -> None:
         and node.func.id == "require_committed_consumption_v3"
         for node in ast.walk(pre_effect)
     )
+
+
+def _assert_entry_consumption_before_effects(
+    executor: ast.ClassDef, methods: dict[str, ast.FunctionDef], name: str
+) -> None:
+    body = resolve_execution_body(executor, name)
+    calls = {
+        node.func.attr: node.lineno
+        for node in ast.walk(body)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"_verify_host_source", "_require_execution_plan"}
+    }
+    assert set(calls) == {"_verify_host_source", "_require_execution_plan"}
+    assert calls["_verify_host_source"] < calls["_require_execution_plan"]
+    if name == "rollback":
+        _assert_historical_rollback_is_readonly(methods)
+        return
+    statements = body.body
+    consumptions = [
+        index
+        for index, statement in enumerate(statements)
+        if isinstance(statement, ast.Assign)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Attribute)
+        and statement.value.func.attr == "_require_execution_plan"
+    ]
+    assert len(consumptions) == 1, "one mandatory direct consumption is required"
+    consumption_at = consumptions[0]
+    consumption = statements[consumption_at]
+    assert isinstance(consumption, ast.Assign)
+    assert ast.dump(consumption.value) == ast.dump(
+        ast.parse('self._require_execution_plan("deploy")', mode="eval").body
+    ), "deploy consumption must use the exact self owner call with no kwargs"
+    effects = [
+        index
+        for index, statement in enumerate(statements)
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Attribute)
+        and statement.value.func.attr == "_annotate"
+    ]
+    assert effects and min(effects) > consumption_at
+    effect_at = min(effects)
+    forbidden = {
+        "_annotate",
+        "_run_steps",
+        "_bootstrap_principals",
+        "_reconcile_exposure",
+        "_collect_startup_observations",
+        "_persist_evidence",
+    }
+    for statement in statements[:consumption_at]:
+        assert not any(
+            isinstance(node, ast.Return) for node in ast.walk(statement)
+        ), "a normal return cannot bypass mandatory consumption"
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                assert node.func.attr not in forbidden
+                assert not any(
+                    isinstance(part, ast.Attribute) and part.attr == "_effects"
+                    for part in ast.walk(node.func)
+                ), "host effects cannot precede consumption"
+    bridge = statements[consumption_at + 1 : effect_at]
+    assert bridge
+    assert all(
+        isinstance(statement, ast.Assign)
+        and isinstance(statement.value, ast.Name | ast.Constant)
+        for statement in bridge
+    ), "only non-failing assignments may follow consumption before effects"
 
 
 def _assert_historical_rollback_is_readonly(
@@ -316,3 +354,77 @@ def test_historical_rollback_readonly_check_rejects_effect_and_consume_mutants(
         rollback.body.insert(-1, ast.parse(planted).body[0])
     with pytest.raises(AssertionError):
         _assert_historical_rollback_is_readonly(methods)
+
+
+@pytest.mark.parametrize(
+    "mutant",
+    [
+        "inner_guard",
+        "conditional_guard",
+        "consume",
+        "conditional_consume",
+        "consume_false",
+        "wrong_receiver",
+        "early_effect",
+        "unguarded_return",
+        "bridge_call",
+        "wrong_forwarding",
+    ],
+)
+def test_resolved_run_body_retains_mandatory_source_and_consumption_guards(
+    mutant: str,
+) -> None:
+    tree = ast.parse((SOURCE / "engine" / "run.py").read_text(encoding="utf-8"))
+    executor = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "Executor"
+    )
+    methods = {
+        node.name: node for node in executor.body if isinstance(node, ast.FunctionDef)
+    }
+    _assert_entry_consumption_before_effects(executor, methods, "run")
+    body = resolve_execution_body(executor, "run")
+    consumption_at = next(
+        index
+        for index, node in enumerate(body.body)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr == "_require_execution_plan"
+    )
+    if mutant == "inner_guard":
+        body.body.pop(1)
+    elif mutant == "conditional_guard":
+        body.body[1] = ast.parse("if allowed: self._verify_host_source()").body[0]
+    elif mutant == "consume":
+        body.body.pop(consumption_at)
+    elif mutant == "conditional_consume":
+        check = body.body[consumption_at]
+        body.body[consumption_at] = ast.If(
+            test=ast.Name(id="allowed", ctx=ast.Load()), body=[check], orelse=[]
+        )
+    elif mutant == "consume_false":
+        body.body[consumption_at].value.keywords.append(
+            ast.keyword(arg="consume", value=ast.Constant(value=False))
+        )
+    elif mutant == "wrong_receiver":
+        body.body[consumption_at].value.func.value = ast.Name(
+            id="other_owner", ctx=ast.Load()
+        )
+    elif mutant == "early_effect":
+        body.body.insert(
+            consumption_at, ast.parse("self._effects.switch(plan)").body[0]
+        )
+    elif mutant == "unguarded_return":
+        body.body.insert(consumption_at, ast.parse("if bypass: return plan").body[0])
+    elif mutant == "bridge_call":
+        body.body[consumption_at + 1] = ast.parse(
+            "outcome.execution_plan_digest = self._effects.switch(plan)"
+        ).body[0]
+    else:
+        methods["run"].body[-1].body[0].value.keywords[0].value = ast.Name(
+            id="other_lock", ctx=ast.Load()
+        )
+    with pytest.raises(AssertionError):
+        _assert_entry_consumption_before_effects(executor, methods, "run")
