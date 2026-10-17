@@ -1326,7 +1326,7 @@ class ComposeHostEffects:
                 target_handle,
                 target_directory,
                 target_name,
-                target,
+                target_text,
             ) in files:
                 reopened, _, _, reopened_identity = self._startup_file(source, stack)
                 if (
@@ -1335,7 +1335,7 @@ class ComposeHostEffects:
                 ):
                     raise LiveInstanceRefusal("instance_changed")
                 target_reopened, _, _, target_reopened_identity = self._startup_file(
-                    target.lstrip("/"),
+                    target_text.lstrip("/"),
                     stack,
                     namespace_root=self._startup_proc_root
                     / str(initial["pid"])
