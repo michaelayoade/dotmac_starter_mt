@@ -70,7 +70,8 @@ def _course(db: Session, tenant_id: UUID, course_id: UUID) -> Course:
 
 def _course_fact(db: Session, row: Course) -> CourseFact:
     result = get_course(db, tenant_id=row.tenant_id, course_id=row.id)
-    assert result is not None
+    if result is None:
+        raise AssertionError
     return result
 
 
