@@ -8,6 +8,7 @@ from dotmac_platform_health.admission import (
     EnrollmentProjection,
     HealthAdmission,
     HealthAdmissionError,
+    HealthEligibilityAssessment,
 )
 from dotmac_platform_health.contracts import (
     DEPLOYMENT_HEALTH_EVIDENCE_SCHEMA,
@@ -78,6 +79,7 @@ __all__ = [
     "EnrollmentProjection",
     "HealthAdmission",
     "HealthAdmissionError",
+    "HealthEligibilityAssessment",
     "__version__",
     "DEPLOYMENT_HEALTH_EVIDENCE_SCHEMA",
     "ComponentEvidence",

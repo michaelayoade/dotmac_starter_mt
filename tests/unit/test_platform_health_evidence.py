@@ -84,6 +84,7 @@ def _enroll(db: Session, codes: tuple[str, ...], at: datetime):
         AuthenticatedHealthSource,
         EnrollmentProjection,
         HealthAdmission,
+        HealthEligibilityAssessment,
     )
 
     projection = EnrollmentProjection(
@@ -112,6 +113,21 @@ def _enroll(db: Session, codes: tuple[str, ...], at: datetime):
         def enrollment(self, ref):
             assert ref == projection.enrollment_ref
             return projection
+
+        def health_eligibility(self, ref):
+            return HealthEligibilityAssessment(
+                "assessment:test",
+                ref,
+                projection.identity_fingerprint,
+                at - timedelta(hours=1),
+                at - timedelta(hours=1),
+                at + timedelta(hours=1),
+                "eligible",
+                "runtime:current",
+                "runtime:authority",
+                "credential:current",
+                "credential:authority",
+            )
 
     admission = HealthAdmission(TestAuthority())
     grant = admission.create_grant(db, enrollment_ref=projection.enrollment_ref, at=at)

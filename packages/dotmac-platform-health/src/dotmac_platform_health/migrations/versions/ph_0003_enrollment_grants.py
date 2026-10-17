@@ -61,6 +61,24 @@ def upgrade() -> None:
         sa.UniqueConstraint("grant_id", name="uq_health_grant_closures_grant"),
         schema=_SCHEMA,
     )
+    op.create_table(
+        "health_eligibility_assessments",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("grant_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("assessment_ref", sa.String(200), nullable=False),
+        sa.Column("assessment", postgresql.JSONB(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["grant_id"], ["mod_health.health_grants.id"], ondelete="RESTRICT"
+        ),
+        sa.UniqueConstraint("assessment_ref", name="uq_health_assessment_ref"),
+        sa.UniqueConstraint("id", "grant_id", name="uq_health_assessment_grant"),
+        schema=_SCHEMA,
+    )
+    op.add_column(
+        "health_observations",
+        sa.Column("assessment_id", postgresql.UUID(as_uuid=True), nullable=True),
+        schema=_SCHEMA,
+    )
     # No default or UPDATE: historical observations remain unbound forever.
     op.add_column(
         "health_observations",
@@ -87,7 +105,32 @@ def upgrade() -> None:
         referent_schema=_SCHEMA,
         ondelete="RESTRICT",
     )
-    for table in ("health_grants", "health_grant_components", "health_grant_closures"):
+    op.create_foreign_key(
+        "fk_health_observations_assessment_grant",
+        "health_observations",
+        "health_eligibility_assessments",
+        ["assessment_id", "grant_id"],
+        ["id", "grant_id"],
+        source_schema=_SCHEMA,
+        referent_schema=_SCHEMA,
+        ondelete="RESTRICT",
+    )
+    op.create_foreign_key(
+        "fk_health_observations_assessment",
+        "health_observations",
+        "health_eligibility_assessments",
+        ["assessment_id"],
+        ["id"],
+        source_schema=_SCHEMA,
+        referent_schema=_SCHEMA,
+        ondelete="RESTRICT",
+    )
+    for table in (
+        "health_grants",
+        "health_grant_components",
+        "health_grant_closures",
+        "health_eligibility_assessments",
+    ):
         op.execute(f"GRANT SELECT, INSERT ON mod_health.{table} TO platform_api;")
         op.execute(f"GRANT SELECT, INSERT ON mod_health.{table} TO app_admin;")
         op.execute(
@@ -102,6 +145,7 @@ def upgrade() -> None:
     """)
     for table in (
         "health_grants",
+        "health_eligibility_assessments",
         "health_grant_components",
         "health_grant_closures",
         "health_observations",
@@ -123,7 +167,13 @@ def upgrade() -> None:
           IF NEW.grant_id IS NULL AND reserved IS NOT NULL THEN
             RAISE EXCEPTION 'component is reserved to authenticated enrollment';
           END IF;
+          IF (NEW.grant_id IS NULL) IS DISTINCT FROM (NEW.assessment_id IS NULL) THEN
+            RAISE EXCEPTION 'exact assessment lineage required for bound observations';
+          END IF;
           IF NEW.grant_id IS NOT NULL THEN
+            IF EXISTS (SELECT 1 FROM mod_health.health_grant_closures WHERE grant_id = NEW.grant_id) THEN
+              RAISE EXCEPTION 'grant is closed';
+            END IF;
             SELECT projection->>'source_ref' INTO bound_source FROM mod_health.health_grants WHERE id = NEW.grant_id;
             IF reserved IS DISTINCT FROM NEW.grant_id OR bound_source IS DISTINCT FROM NEW.source_ref THEN
               RAISE EXCEPTION 'observation grant binding mismatch';
@@ -164,7 +214,8 @@ def downgrade() -> None:
     op.execute("""
         LOCK TABLE mod_health.health_components,
           mod_health.health_grants, mod_health.health_grant_components,
-          mod_health.health_grant_closures, mod_health.health_observations,
+          mod_health.health_grant_closures, mod_health.health_eligibility_assessments,
+          mod_health.health_observations,
           mod_health.health_projections IN ACCESS EXCLUSIVE MODE;
     """)
     # Retained provenance cannot be silently erased, including populated legacy
@@ -181,6 +232,14 @@ def downgrade() -> None:
     op.execute("DROP TRIGGER immutable_evidence ON mod_health.health_observations;")
     op.execute("DROP TRIGGER retained_evidence ON mod_health.health_observations;")
     op.execute("DROP TRIGGER reserved_component_code ON mod_health.health_components;")
+    for constraint in (
+        "fk_health_observations_assessment",
+        "fk_health_observations_assessment_grant",
+    ):
+        op.drop_constraint(
+            constraint, "health_observations", schema=_SCHEMA, type_="foreignkey"
+        )
+    op.drop_column("health_observations", "assessment_id", schema=_SCHEMA)
     op.drop_constraint(
         "fk_health_observations_membership",
         "health_observations",
@@ -194,7 +253,12 @@ def downgrade() -> None:
         type_="foreignkey",
     )
     op.drop_column("health_observations", "grant_id", schema=_SCHEMA)
-    for table in ("health_grant_closures", "health_grant_components", "health_grants"):
+    for table in (
+        "health_eligibility_assessments",
+        "health_grant_closures",
+        "health_grant_components",
+        "health_grants",
+    ):
         op.drop_table(table, schema=_SCHEMA)
     for function in (
         "protect_reserved_component_code",

@@ -101,11 +101,72 @@ class EnrollmentProjection:
         document["eligible_until"] = self.eligible_until.isoformat()
         return document
 
+    def identity_document(self) -> dict[str, object]:
+        """Permanent identity retains every baseline evidence reference."""
+        return {
+            key: value
+            for key, value in self.document().items()
+            if key not in {"eligible_from", "eligible_until", "standing"}
+        }
+
+    @property
+    def identity_fingerprint(self) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                self.identity_document(), sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+
     @property
     def fingerprint(self) -> str:
         return hashlib.sha256(
             json.dumps(self.document(), sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class HealthEligibilityAssessment:
+    """Current authority result, never inferred from an execution token or cache.
+
+    Validity and evidence are supplied by the injected owner, with no PH TTL.
+    Baseline provenance belongs to EnrollmentProjection; these references prove
+    current runtime/credential eligibility of that unchanged identity.
+    """
+
+    assessment_ref: str
+    enrollment_ref: str
+    identity_fingerprint: str
+    assessed_at: datetime
+    valid_from: datetime
+    valid_until: datetime
+    standing: str
+    runtime_evidence_ref: str
+    runtime_authority_ref: str
+    credential_evidence_ref: str
+    credential_authority_ref: str
+
+    def __post_init__(self) -> None:
+        for name, value in asdict(self).items():
+            if name not in {"assessed_at", "valid_from", "valid_until"}:
+                _text(value)
+        if len(self.identity_fingerprint) != 64 or any(
+            c not in "0123456789abcdef" for c in self.identity_fingerprint
+        ):
+            raise HealthAdmissionError("assessment requires an identity digest")
+        if (
+            any(
+                t.utcoffset() is None
+                for t in (self.assessed_at, self.valid_from, self.valid_until)
+            )
+            or not self.valid_from <= self.assessed_at < self.valid_until
+        ):
+            raise HealthAdmissionError("bounded aware assessment interval required")
+
+    def document(self) -> dict[str, object]:
+        document = asdict(self)
+        for key in ("assessed_at", "valid_from", "valid_until"):
+            document[key] = getattr(self, key).isoformat()
+        return document
 
 
 class EnrollmentAuthority(Protocol):
@@ -121,6 +182,15 @@ class EnrollmentAuthority(Protocol):
 
     def enrollment(self, enrollment_ref: str) -> EnrollmentProjection: ...
 
+    def health_eligibility(self, enrollment_ref: str) -> HealthEligibilityAssessment:
+        """Authenticate current health standing, refusing revocation or outage.
+
+        A former eligible snapshot is not a current authority response. Execution
+        token expiry alone does not revoke unchanged runtime health eligibility;
+        this method conveys no execution or token reconsumption permission.
+        """
+        ...
+
 
 class HealthAdmission:
     """Startup-injected enrollment authority. Services remain flush-only."""
@@ -128,6 +198,10 @@ class HealthAdmission:
     def __init__(self, authority: EnrollmentAuthority | None) -> None:
         if authority is None:
             raise HealthAdmissionError("an enrollment authority is required at startup")
+        if not callable(getattr(authority, "health_eligibility", None)):
+            raise HealthAdmissionError(
+                "a current health eligibility authority is required"
+            )
         authority.require_ready()
         self._authority = authority
 
@@ -141,9 +215,30 @@ class HealthAdmission:
             or projection.enrollment_ref != enrollment_ref
         ):
             raise HealthAdmissionError("authority returned contradictory enrollment")
-        if not projection.eligible_from <= at < projection.eligible_until:
-            raise HealthAdmissionError("enrollment is not currently eligible")
         return projection
+
+    def assessment(
+        self, projection: EnrollmentProjection, *, at: datetime
+    ) -> HealthEligibilityAssessment:
+        if at.utcoffset() is None:
+            raise HealthAdmissionError("authority evaluation time must be aware")
+        self._authority.require_ready()
+        assessment = self._authority.health_eligibility(projection.enrollment_ref)
+        if (
+            not isinstance(assessment, HealthEligibilityAssessment)
+            or assessment.enrollment_ref != projection.enrollment_ref
+            or assessment.identity_fingerprint != projection.identity_fingerprint
+        ):
+            raise HealthAdmissionError("authority returned contradictory assessment")
+        if (
+            assessment.standing != "eligible"
+            or not assessment.valid_from
+            <= assessment.assessed_at
+            <= at
+            < assessment.valid_until
+        ):
+            raise HealthAdmissionError("health assessment is not currently eligible")
+        return assessment
 
     def create_grant(
         self, db: Session, *, enrollment_ref: str, at: datetime

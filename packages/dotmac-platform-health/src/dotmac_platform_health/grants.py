@@ -23,6 +23,7 @@ from dotmac_platform_health.contracts import (
 )
 from dotmac_platform_health.models import (
     HealthComponent,
+    HealthEligibilitySnapshot,
     HealthGrant,
     HealthGrantClosure,
     HealthGrantComponent,
@@ -41,19 +42,21 @@ def reservation(db: Session, component_id: UUID) -> HealthGrantComponent | None:
     )
 
 
-def require_grant(
+def require_grant_assessment(
     db: Session, admission: HealthAdmission | None, grant_id: UUID, at: datetime
-) -> HealthGrant:
+) -> tuple[HealthGrant, HealthEligibilitySnapshot]:
     if admission is None:
         raise HealthAdmissionError("reserved component requires enrollment authority")
     grant = db.get(HealthGrant, grant_id)
     if grant is None:
         raise HealthAdmissionError("grant not found")
     current = admission.current(grant.enrollment_ref, at=at)
-    if (
-        current.fingerprint != grant.projection_fingerprint
-        or current.document() != grant.projection
-    ):
+    initial_identity = {
+        key: value
+        for key, value in grant.projection.items()
+        if key not in {"eligible_from", "eligible_until", "standing"}
+    }
+    if current.identity_document() != initial_identity:
         raise HealthAdmissionError("immutable enrollment projection changed")
     members = db.scalars(
         select(HealthComponent.code)
@@ -72,7 +75,50 @@ def require_grant(
         is not None
     ):
         raise HealthAdmissionError("grant is closed")
-    return grant
+    assessment = admission.assessment(current, at=at)
+    snapshot = db.scalar(
+        select(HealthEligibilitySnapshot).where(
+            HealthEligibilitySnapshot.assessment_ref == assessment.assessment_ref
+        )
+    )
+    if snapshot is not None:
+        if (
+            snapshot.grant_id != grant.id
+            or snapshot.assessment != assessment.document()
+        ):
+            raise HealthAdmissionError(
+                "assessment reference reused with different content"
+            )
+    else:
+        snapshot = HealthEligibilitySnapshot(
+            grant_id=grant.id,
+            assessment_ref=assessment.assessment_ref,
+            assessment=assessment.document(),
+        )
+        try:
+            with conflict_savepoint(db):
+                db.add(snapshot)
+                db.flush()
+        except IntegrityError as exc:
+            snapshot = db.scalar(
+                select(HealthEligibilitySnapshot).where(
+                    HealthEligibilitySnapshot.assessment_ref
+                    == assessment.assessment_ref
+                )
+            )
+            if (
+                snapshot is None
+                or snapshot.grant_id != grant.id
+                or snapshot.assessment != assessment.document()
+            ):
+                raise HealthAdmissionError("assessment reference conflict") from exc
+    return grant, snapshot
+
+
+def require_grant(
+    db: Session, admission: HealthAdmission | None, grant_id: UUID, at: datetime
+) -> HealthGrant:
+    return require_grant_assessment(db, admission, grant_id, at)[0]
 
 
 def require_signing_roster(
@@ -108,6 +154,7 @@ def create_grant(
     db: Session, admission: HealthAdmission, *, enrollment_ref: str, at: datetime
 ) -> HealthGrant:
     projection = admission.current(enrollment_ref, at=at)
+    admission.assessment(projection, at=at)
     # Shared lock with legacy and authenticated writers. Ordered roster locking
     # prevents deadlocks between overlapping, contradictory enrollment rosters.
     components = db.scalars(
@@ -151,13 +198,19 @@ def create_grant(
         )
         if (
             existing is None
-            or existing.projection_fingerprint != projection.fingerprint
+            or {
+                key: value
+                for key, value in existing.projection.items()
+                if key not in {"eligible_from", "eligible_until", "standing"}
+            }
+            != projection.identity_document()
         ):
             raise HealthAdmissionError(
                 "permanent enrollment or installation conflict"
             ) from exc
         require_grant(db, admission, existing.id, at)
         return existing
+    require_grant(db, admission, grant.id, at)
     return grant
 
 
@@ -247,7 +300,9 @@ def record_authenticated_observation(
                 "observation key reused with different content or grant"
             )
         return ObservationReceipt(existing, replayed=True)
-    require_grant(db, admission, grant.id, at)
+    _, assessment = require_grant_assessment(db, admission, grant.id, at)
     if not component.active:
         raise HealthAdmissionError("active component not found")
-    return _record_observation(db, command, grant_id=grant.id)
+    return _record_observation(
+        db, command, grant_id=grant.id, assessment_id=assessment.id
+    )

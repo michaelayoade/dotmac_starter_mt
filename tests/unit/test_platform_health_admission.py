@@ -12,6 +12,7 @@ from dotmac_platform_health.admission import (
     EnrollmentProjection,
     HealthAdmission,
     HealthAdmissionError,
+    HealthEligibilityAssessment,
 )
 from dotmac_platform_health.models import PLATFORM_MODELS, HealthProjection
 from dotmac_platform_health.service import (
@@ -45,6 +46,7 @@ class Authority:
     def __init__(self, projection):
         self.projection = projection
         self.available = True
+        self.assessment_override = None
 
     def require_ready(self):
         if not self.available:
@@ -54,6 +56,25 @@ class Authority:
         self.require_ready()
         assert enrollment_ref == self.projection.enrollment_ref
         return self.projection
+
+    def health_eligibility(self, enrollment_ref):
+        self.require_ready()
+        if self.assessment_override is not None:
+            return self.assessment_override
+        p = self.projection
+        return HealthEligibilityAssessment(
+            "assessment:" + p.fingerprint,
+            enrollment_ref,
+            p.identity_fingerprint,
+            p.eligible_from,
+            p.eligible_from,
+            p.eligible_until,
+            "eligible",
+            "current-runtime:1",
+            "current-runtime-owner:1",
+            "current-credential:1",
+            "current-credential-owner:1",
+        )
 
 
 @pytest.fixture
@@ -401,3 +422,274 @@ def test_legacy_cannot_replay_a_bound_receipt_by_matching_all_command_fields(db,
         record_observation(db, command)
     assert (projection.id, projection.observation_id, projection.state) == before
     assert bound.observation.grant_id == grant.id
+
+
+def test_health_renewal_keeps_initial_admission_and_links_exact_assessment(db, setup):
+    from dotmac_platform_health.models import HealthEligibilitySnapshot
+    from dotmac_platform_health.service import build_health_evidence
+
+    admission, authority, grant, source, command = setup
+    original_document, original_fingerprint = (
+        dict(grant.projection),
+        grant.projection_fingerprint,
+    )
+    first = admission.record(
+        db, grant_id=grant.id, source=source, command=command, at=AT
+    )
+    old_assessment_id = first.observation.assessment_id
+    renewed_at = AT + timedelta(hours=2)
+    authority.assessment_override = HealthEligibilityAssessment(
+        "assessment:renewed",
+        grant.enrollment_ref,
+        authority.projection.identity_fingerprint,
+        renewed_at,
+        renewed_at,
+        renewed_at + timedelta(seconds=20),
+        "eligible",
+        "current-runtime:2",
+        "current-runtime-owner:2",
+        "current-credential:2",
+        "current-credential-owner:2",
+    )
+    # Original execution/admission interval has expired; unchanged runtime health
+    # has independent fresh owner evidence. No token is executed or reconsumed.
+    renewed = admission.create_grant(
+        db, enrollment_ref=grant.enrollment_ref, at=renewed_at
+    )
+    receipt = admission.record(
+        db,
+        grant_id=grant.id,
+        source=source,
+        command=replace(
+            command,
+            observation_key="renewed",
+            observed_at=renewed_at,
+            received_at=renewed_at,
+        ),
+        at=renewed_at,
+    )
+    assert renewed.id == grant.id
+    assert grant.projection == original_document
+    assert grant.projection_fingerprint == original_fingerprint
+    assert receipt.observation.assessment_id != old_assessment_id
+    snapshot = db.get(HealthEligibilitySnapshot, receipt.observation.assessment_id)
+    assert snapshot.assessment == authority.assessment_override.document()
+    evidence = build_health_evidence(
+        db,
+        requested_components=[command.component_code],
+        evaluated_at=renewed_at,
+        admission=admission,
+    )
+    assert evidence.valid_until == renewed_at + timedelta(seconds=20)
+    assert (
+        admission.record(
+            db, grant_id=grant.id, source=source, command=command, at=renewed_at
+        ).observation.id
+        == first.observation.id
+    )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "enrollment_ref",
+        "installation_ref",
+        "configuration_ref",
+        "candidate_ref",
+        "source_ref",
+        "account_ref",
+        "transport_ref",
+        "credential_ref",
+        "component_codes",
+        "runtime_evidence_ref",
+        "runtime_authority_ref",
+        "credential_evidence_ref",
+        "credential_authority_ref",
+    ],
+)
+def test_every_immutable_identity_field_conflicts(db, setup, field):
+    admission, authority, grant, source, command = setup
+    value = ("other-component",) if field == "component_codes" else "changed"
+    authority.projection = replace(authority.projection, **{field: value})
+    with pytest.raises(HealthAdmissionError):
+        admission.record(db, grant_id=grant.id, source=source, command=command, at=AT)
+
+
+@pytest.mark.parametrize("standing", ["revoked", "ineligible", "closed"])
+def test_noneligible_assessment_refuses_fresh_health(db, setup, standing):
+    admission, authority, grant, source, command = setup
+    authority.assessment_override = replace(
+        authority.health_eligibility(grant.enrollment_ref), standing=standing
+    )
+    with pytest.raises(HealthAdmissionError, match="currently eligible"):
+        admission.record(db, grant_id=grant.id, source=source, command=command, at=AT)
+
+
+def test_expired_assessment_and_closed_grant_cannot_use_cached_snapshot(db, setup):
+    admission, authority, grant, source, command = setup
+    authority.assessment_override = authority.health_eligibility(grant.enrollment_ref)
+    with pytest.raises(HealthAdmissionError, match="currently eligible"):
+        admission.record(
+            db,
+            grant_id=grant.id,
+            source=source,
+            command=command,
+            at=AT + timedelta(hours=1),
+        )
+    admission.close_grant(db, grant_id=grant.id, closed_at=AT, reason="closed")
+    with pytest.raises(HealthAdmissionError, match="closed"):
+        admission.record(db, grant_id=grant.id, source=source, command=command, at=AT)
+
+
+def test_assessment_reference_cannot_rewrite_provenance(db, setup):
+    admission, authority, grant, source, command = setup
+    authority.assessment_override = replace(
+        authority.health_eligibility(grant.enrollment_ref),
+        runtime_evidence_ref="replacement",
+    )
+    with pytest.raises(HealthAdmissionError, match="reference reused"):
+        admission.record(db, grant_id=grant.id, source=source, command=command, at=AT)
+
+
+def test_renewed_projection_dates_do_not_rewrite_permanent_identity(db, setup):
+    admission, authority, grant, source, command = setup
+    original = dict(grant.projection), grant.projection_fingerprint
+    authority.projection = replace(
+        authority.projection,
+        eligible_from=AT - timedelta(seconds=1),
+        eligible_until=AT + timedelta(hours=2),
+    )
+    receipt = admission.record(
+        db, grant_id=grant.id, source=source, command=command, at=AT
+    )
+    assert receipt.observation.assessment_id is not None
+    assert (grant.projection, grant.projection_fingerprint) == original
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "assessment_ref",
+        "runtime_evidence_ref",
+        "runtime_authority_ref",
+        "credential_evidence_ref",
+        "credential_authority_ref",
+    ],
+)
+def test_assessment_requires_durable_current_provenance(db, setup, field):
+    _, authority, grant, _, _ = setup
+    with pytest.raises(HealthAdmissionError):
+        replace(authority.health_eligibility(grant.enrollment_ref), **{field: ""})
+
+
+def test_projection_only_authority_is_not_an_accepting_fallback():
+    class ProjectionOnly:
+        def require_ready(self):
+            pass
+
+    with pytest.raises(HealthAdmissionError, match="current health eligibility"):
+        HealthAdmission(ProjectionOnly())
+
+
+def test_renewed_assessment_keeps_still_fresh_observation_without_new_receipt(
+    db, setup
+):
+    from dotmac_platform_health.models import (
+        HealthEligibilitySnapshot,
+        HealthObservation,
+    )
+    from dotmac_platform_health.service import build_health_evidence
+
+    admission, authority, grant, source, command = setup
+    authority.assessment_override = replace(
+        authority.health_eligibility(grant.enrollment_ref),
+        assessment_ref="assessment:short-admission",
+        valid_until=AT + timedelta(seconds=20),
+    )
+    receipt = admission.record(
+        db, grant_id=grant.id, source=source, command=command, at=AT
+    )
+    original_assessment_id = receipt.observation.assessment_id
+    original_fingerprint = receipt.observation.request_fingerprint
+    original_snapshot = dict(
+        db.get(HealthEligibilitySnapshot, original_assessment_id).assessment
+    )
+    renewed_at = AT + timedelta(seconds=30)
+    authority.assessment_override = replace(
+        authority.assessment_override,
+        assessment_ref="assessment:current-renewal",
+        assessed_at=renewed_at,
+        valid_from=renewed_at,
+        valid_until=AT + timedelta(seconds=50),
+        runtime_evidence_ref="runtime:renewed-current",
+        credential_evidence_ref="credential:renewed-current",
+    )
+    evidence = build_health_evidence(
+        db,
+        requested_components=[command.component_code],
+        evaluated_at=renewed_at,
+        admission=admission,
+    )
+    assert evidence.components[0].observation_id == receipt.observation.id
+    assert evidence.components[0].freshness == "fresh"
+    assert evidence.valid_until == AT + timedelta(seconds=50)
+    assert evidence.valid_until > renewed_at
+    assert len(db.scalars(select(HealthObservation)).all()) == 1
+    assert receipt.observation.assessment_id == original_assessment_id
+    assert receipt.observation.request_fingerprint == original_fingerprint
+    assert (
+        db.get(HealthEligibilitySnapshot, original_assessment_id).assessment
+        == original_snapshot
+    )
+
+
+def test_first_grant_uses_fresh_health_assessment_after_admission_interval_expired(db):
+    projection = EnrollmentProjection(
+        "enrollment:first",
+        "installation:first",
+        "config:first",
+        "candidate:first",
+        "source:first",
+        "account:first",
+        "transport:first",
+        "credential:first",
+        ("first-api",),
+        "baseline-runtime:first",
+        "baseline-runtime-owner:first",
+        "baseline-credential:first",
+        "baseline-credential-owner:first",
+        AT,
+        AT + timedelta(hours=1),
+        "eligible",
+    )
+    authority = Authority(projection)
+    current_at = AT + timedelta(hours=2)
+    authority.assessment_override = HealthEligibilityAssessment(
+        "assessment:first-current",
+        projection.enrollment_ref,
+        projection.identity_fingerprint,
+        current_at,
+        current_at,
+        current_at + timedelta(seconds=30),
+        "eligible",
+        "runtime:first-current",
+        "runtime:first-owner",
+        "credential:first-current",
+        "credential:first-owner",
+    )
+    admission = HealthAdmission(authority)
+    register_component(db, code="first-api", display_name="API", freshness_seconds=60)
+    grant = admission.create_grant(
+        db, enrollment_ref=projection.enrollment_ref, at=current_at
+    )
+    assert grant.projection == projection.document()
+    assert grant.projection_fingerprint == projection.fingerprint
+    assert projection.eligible_until < current_at
+    from dotmac_platform_health.models import HealthEligibilitySnapshot
+
+    snapshot = db.scalar(
+        select(HealthEligibilitySnapshot).where(
+            HealthEligibilitySnapshot.grant_id == grant.id
+        )
+    )
+    assert snapshot.assessment == authority.assessment_override.document()

@@ -11,6 +11,7 @@ from dotmac_platform_health import (
     EnrollmentProjection,
     HealthAdmission,
     HealthAdmissionError,
+    HealthEligibilityAssessment,
     HealthObservationInput,
     HealthState,
     record_observation,
@@ -51,6 +52,22 @@ class TestAuthority:
             AT,
             AT + timedelta(hours=1),
             "eligible",
+        )
+
+    def health_eligibility(self, ref):
+        projection = self.enrollment(ref)
+        return HealthEligibilityAssessment(
+            "assessment:1",
+            ref,
+            projection.identity_fingerprint,
+            AT,
+            AT,
+            AT + timedelta(hours=1),
+            "eligible",
+            "runtime:current",
+            "runtime:authority",
+            "credential:current",
+            "credential:authority",
         )
 
 
@@ -181,6 +198,10 @@ def test_immutable_evidence_sql_and_platform_only_acl(migrated):
         "DELETE FROM mod_health.health_grant_components",
         "UPDATE mod_health.health_grant_closures SET reason='rewritten'",
         "UPDATE mod_health.health_observations SET grant_id=NULL",
+        "UPDATE mod_health.health_eligibility_assessments "
+        "SET assessment_ref='replacement'",
+        "DELETE FROM mod_health.health_eligibility_assessments",
+        "TRUNCATE mod_health.health_eligibility_assessments CASCADE",
         "DELETE FROM mod_health.health_observations",
         "TRUNCATE mod_health.health_observations",
     ):

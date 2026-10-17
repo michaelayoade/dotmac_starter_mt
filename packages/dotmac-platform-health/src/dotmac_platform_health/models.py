@@ -52,12 +52,25 @@ class HealthObservation(Base):
             name="fk_health_observations_membership",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["assessment_id", "grant_id"],
+            [
+                f"{SCHEMA}.health_eligibility_assessments.id",
+                f"{SCHEMA}.health_eligibility_assessments.grant_id",
+            ],
+            name="fk_health_observations_assessment_grant",
+            ondelete="RESTRICT",
+        ),
         schema_table_args(SCHEMA),
     )
 
     id: Mapped[UUID] = uuid_pk()
     grant_id: Mapped[UUID | None] = mapped_column(
         ForeignKey(f"{SCHEMA}.health_grants.id", ondelete="RESTRICT"), nullable=True
+    )
+    assessment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(f"{SCHEMA}.health_eligibility_assessments.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     component_id: Mapped[UUID] = mapped_column(
         ForeignKey(f"{SCHEMA}.health_components.id", ondelete="RESTRICT"),
@@ -125,6 +138,23 @@ class HealthGrant(Base):
     projection: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
 
 
+class HealthEligibilitySnapshot(Base):
+    """Append-only exact result from the required current authority."""
+
+    __tablename__ = "health_eligibility_assessments"
+    __table_args__ = (
+        UniqueConstraint("assessment_ref", name="uq_health_assessment_ref"),
+        UniqueConstraint("id", "grant_id", name="uq_health_assessment_grant"),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    grant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.health_grants.id", ondelete="RESTRICT"), nullable=False
+    )
+    assessment_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    assessment: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+
 class HealthGrantComponent(Base):
     __tablename__ = "health_grant_components"
     __table_args__ = (
@@ -167,11 +197,13 @@ PLATFORM_MODELS = (
     HealthGrant,
     HealthGrantComponent,
     HealthGrantClosure,
+    HealthEligibilitySnapshot,
 )
 PLATFORM_TABLES = tuple(model.__tablename__ for model in PLATFORM_MODELS)
 
 __all__ = [
     "HealthComponent",
+    "HealthEligibilitySnapshot",
     "HealthGrant",
     "HealthGrantComponent",
     "HealthGrantClosure",

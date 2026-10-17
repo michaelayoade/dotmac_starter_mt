@@ -31,11 +31,13 @@ from dotmac_platform_health.evidence import (
 )
 from dotmac_platform_health.grants import (
     require_grant,
+    require_grant_assessment,
     require_signing_roster,
     reservation,
 )
 from dotmac_platform_health.models import (
     HealthComponent,
+    HealthEligibilitySnapshot,
     HealthObservation,
     HealthProjection,
 )
@@ -110,7 +112,11 @@ def record_observation(
 
 
 def _record_observation(
-    db: Session, command: HealthObservationInput, *, grant_id: UUID | None = None
+    db: Session,
+    command: HealthObservationInput,
+    *,
+    grant_id: UUID | None = None,
+    assessment_id: UUID | None = None,
 ) -> ObservationReceipt:
     validate_health_observation(command)
     component = db.scalar(
@@ -139,6 +145,7 @@ def _record_observation(
         raise HealthError("active component not found")
     row = HealthObservation(
         grant_id=grant_id,
+        assessment_id=assessment_id,
         component_id=component.id,
         source_ref=command.source_ref,
         observation_key=command.observation_key,
@@ -425,6 +432,22 @@ def build_health_evidence(
         deadline = _instant(observation.observed_at) + timedelta(
             seconds=freshness_seconds
         )
+        if observation.grant_id is not None:
+            _, current_assessment = require_grant_assessment(
+                db, admission, observation.grant_id, evaluated_at
+            )
+            accepted_assessment = db.get(
+                HealthEligibilitySnapshot, observation.assessment_id
+            )
+            if accepted_assessment is None:
+                raise HealthAdmissionError("observation assessment provenance missing")
+            # Historical admission remains audit provenance. Renewable current
+            # eligibility bounds this evidence, independently of that old expiry.
+            deadlines.append(
+                datetime.fromisoformat(
+                    str(current_assessment.assessment["valid_until"])
+                )
+            )
         deadlines.append(deadline)
         components.append(
             ComponentEvidence(

@@ -44,3 +44,27 @@ roster. Existing callers of signing must supply this boundary explicitly.
 `DeploymentHealthEvidence.v1`, canonical serialization and frozen observation
 fingerprints/timestamps remain unchanged. Populated downgrade is refused;
 rollback disables exposure and retains immutable evidence.
+
+Renewable health eligibility is separate from permanent enrollment identity.
+`EnrollmentProjection.identity_document()` excludes only `eligible_from`,
+`eligible_until` and `standing`; all installation, configuration, candidate,
+source/account/transport/credential, roster and baseline evidence/authority
+references stay immutable. The complete initial projection and its original
+fingerprint remain retained without rewriting. The required injected authority
+now also supplies `HealthEligibilityAssessment` through `health_eligibility`:
+a durable assessment reference, enrollment and identity digest, assessed time,
+bounded owner-provided validity, standing, and current runtime/credential
+evidence and authority references. There is no default producer or PH TTL.
+
+`ph_0003` retains exact assessments append-only and links each newly accepted
+bound observation to its assessment and grant. Fresh operations always consult
+the authority; an old snapshot never bypasses closure, revocation, expiry or an
+outage. Exact authenticated historical receipt replay retains its existing
+semantics. Evidence validity is bounded by the current assessment and immutable
+observation freshness deadline. The original admission assessment remains audit
+provenance; its past expiry does not cap renewed evidence. Its v1 schema and
+canonical encoding remain unchanged. Execution-token expiry does not itself end
+an unchanged runtime's health eligibility when the health authority supplies
+fresh evidence; this supplies no execution or token reconsumption permission.
+Released `ph_0001` and `ph_0002` remain unchanged. This source draft is not a
+qualified producer or release authorization.

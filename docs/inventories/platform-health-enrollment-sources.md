@@ -17,10 +17,11 @@ proof is claimed. Releases remain paused.
 
 | Concept | Owner | Durable evidence |
 | --- | --- | --- |
-| Immutable public Control enrollment projection | Independent Control publisher; PH consumes an injected authority | Opaque candidate/configuration/runtime/credential evidence references, eligible standing and bounded aware eligibility interval. PH holds no accepting production verifier. |
+| Immutable public Control enrollment projection | Independent Control publisher; PH consumes an injected authority | Complete original candidate/configuration/runtime/credential projection and fingerprint retained. Permanent identity excludes only `eligible_from`, `eligible_until` and `standing`; all baseline evidence references stay immutable. PH holds no accepting production verifier. |
 | Authenticated health source | Existing transport authentication owner; PH consumes an immutable result | Installation, source, account, transport, credential generation and configuration bindings; caller payloads cannot supply enrollment projections. |
 | Permanent installation grant and component reservation | PH `grants.py`, `models.py`, `ph_0003_enrollment_grants` | One immutable installation/enrollment per grant; globally unique component membership, retained even after closure; append-only closure. |
-| Observation provenance and deployment selection | PH `service.py`, nullable observation `grant_id` | Historical rows remain NULL; exact grant and original fingerprint replay precedes current standing/closure/activity checks. Reserved selection excludes unbound evidence, and signed evidence requires one exact active permanent roster. |
+| Current health eligibility assessment | Injected independent Control authority; PH `HealthEligibilitySnapshot`, `ph_0003` | Required durable assessment reference, identity digest, assessed time, owner-bounded validity, standing and current runtime/credential evidence and authority references. Append-only snapshots; no accepting producer or PH TTL. |
+| Observation provenance and deployment selection | PH `service.py`, nullable observation `grant_id` and `assessment_id` | Historical rows remain NULL; exact grant and original fingerprint replay precedes current standing/closure/activity checks. Reserved selection excludes unbound evidence, and signed evidence requires one exact active permanent roster. |
 
 Grant creation, legacy writes and authenticated writes serialize on the same
 ordered component rows. Database uniqueness and Kernel conflict savepoints keep
@@ -52,3 +53,5 @@ Hosted tests have been authored for bindings, closure/replay, unbound contaminat
 authority outage, exact signing roster, migrated PostgreSQL races, SQL immutability,
 ACLs, old NULL provenance and downgrade refusal. Local verification is limited to
 stdlib AST/TOML and pinned Ruff 0.6.9 static checks; no test success is claimed.
+
+Fresh observations and health evidence consult current authority and retained closure; cached assessments cannot bypass either. New observations link the exact admission assessment. Evidence expiry is capped by current assessment expiry and immutable observation freshness; the historical admission assessment remains audit provenance without imposing its old expiry on renewed evidence. Original execution-token expiry is independent of renewed unchanged-runtime health and conveys no execution or reconsumption permission.
