@@ -31,6 +31,17 @@ METADATA_PATHS = frozenset({"pyproject.toml", PACKAGE_PATH + "pyproject.toml"})
 REQUIRED_SOURCES = frozenset(
     {SOURCE_PATH + "__init__.py", SOURCE_PATH + "py.typed", PACKAGE_PATH + "README.md"}
 )
+PURE_SOURCE_PATH = PACKAGE_PATH + "src/dotmac_learning_bank_rules/"
+METADATA_PATHS_V2 = METADATA_PATHS | frozenset(
+    {
+        "packages/dotmac-fulfillment/pyproject.toml",
+        "packages/dotmac-template-studio/pyproject.toml",
+    }
+)
+EXISTING_METADATA_V2 = METADATA_PATHS_V2 - {PACKAGE_PATH + "pyproject.toml"}
+REQUIRED_SOURCES_V2 = REQUIRED_SOURCES | frozenset(
+    {PURE_SOURCE_PATH + "__init__.py", PURE_SOURCE_PATH + "py.typed"}
+)
 _HEX40 = re.compile(r"[0-9a-f]{40}")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2}(?:[A-Za-z0-9.-]+)?")
@@ -55,7 +66,7 @@ class ProposedFile:
 
 @dataclass(frozen=True, slots=True, repr=False)
 class Proposal:
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     base_sha: str
     package: Literal["dotmac-learning"]
     files: tuple[ProposedFile, ...]
@@ -86,7 +97,7 @@ class ProposedFileHash:
 
 @dataclass(frozen=True, slots=True)
 class LockGenerationManifest:
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     purpose: Literal["generated_unqualified_lock"]
     package: Literal["dotmac-learning"]
     base_sha: str
@@ -155,7 +166,7 @@ def _file(value: object) -> ProposedFile:
 
 
 def parse_proposal(raw: bytes) -> Proposal:
-    """Parse only the closed reviewed two-metadata-file and learning-source schema."""
+    """Parse closed schema 1 or the four-metadata, two-namespace schema 2."""
     try:
         decoded: object = json.loads(raw, object_pairs_hook=_pairs)
     except (ValueError, UnicodeDecodeError):
@@ -166,7 +177,8 @@ def parse_proposal(raw: bytes) -> Proposal:
             {"schema_version", "base_sha", "package", "files", "package_sources"}
         ),
     )
-    if type(item["schema_version"]) is not int or item["schema_version"] != 1:
+    schema = item["schema_version"]
+    if type(schema) is not int or schema not in {1, 2}:
         raise BootstrapError("unsupported proposal schema")
     base = item["base_sha"]
     if not isinstance(base, str) or not _HEX40.fullmatch(base):
@@ -187,24 +199,91 @@ def parse_proposal(raw: bytes) -> Proposal:
         for parent in PurePosixPath(path).parents
     ):
         raise BootstrapError("proposed file paths overlap")
-    if {file.path for file in files} != METADATA_PATHS:
-        raise BootstrapError("exactly the two reviewed metadata targets are required")
+    metadata_paths = METADATA_PATHS if schema == 1 else METADATA_PATHS_V2
+    existing = {"pyproject.toml"} if schema == 1 else EXISTING_METADATA_V2
+    if {file.path for file in files} != metadata_paths:
+        raise BootstrapError("exact reviewed metadata targets are required")
     for file in files + package_sources:
-        if (file.path == "pyproject.toml") != (file.before_sha256 is not None):
-            raise BootstrapError(
-                "only the existing root metadata requires a prior digest"
-            )
+        if (file.path in existing) != (file.before_sha256 is not None):
+            raise BootstrapError("existing metadata alone requires a prior digest")
     source_paths = {file.path for file in package_sources}
-    if not REQUIRED_SOURCES <= source_paths:
+    required = REQUIRED_SOURCES if schema == 1 else REQUIRED_SOURCES_V2
+    if not required <= source_paths:
         raise BootstrapError(
-            "reviewed package initializer, typing marker and README required"
+            "reviewed initializers, typing markers and README required"
         )
+    prefixes = (SOURCE_PATH,) if schema == 1 else (SOURCE_PATH, PURE_SOURCE_PATH)
     if any(
-        not (path.startswith(SOURCE_PATH) or path == PACKAGE_PATH + "README.md")
+        not (path.startswith(prefixes) or path == PACKAGE_PATH + "README.md")
         for path in source_paths
     ):
         raise BootstrapError("source path outside the closed learning extent")
-    return Proposal(1, base, "dotmac-learning", files, package_sources)
+    if schema == 2:
+        _validate_schema2_metadata(files)
+    return Proposal(
+        cast(Literal[1, 2], schema), base, "dotmac-learning", files, package_sources
+    )
+
+
+def _validate_schema2_metadata(files: tuple[ProposedFile, ...]) -> None:
+    """Bind Poetry package ownership to the same two reviewed source namespaces."""
+    names = {
+        PACKAGE_PATH + "pyproject.toml": "dotmac-learning",
+        "packages/dotmac-fulfillment/pyproject.toml": "dotmac-fulfillment",
+        "packages/dotmac-template-studio/pyproject.toml": "dotmac-template-studio",
+    }
+    try:
+        metadata = {
+            file.path: tomllib.loads(file.content)["tool"]["poetry"]
+            for file in files
+            if file.path in names
+        }
+        if any(metadata[path]["name"] != name for path, name in names.items()):
+            raise BootstrapError("package metadata name mismatch")
+        learning = metadata[PACKAGE_PATH + "pyproject.toml"]
+        expected = [
+            {"include": "dotmac_learning", "from": "src"},
+            {"include": "dotmac_learning_bank_rules", "from": "src"},
+        ]
+        packages = learning["packages"]
+        if (
+            not isinstance(packages, list)
+            or len(packages) != 2
+            or any(package not in packages for package in expected)
+            or learning["readme"] != "README.md"
+        ):
+            raise BootstrapError(
+                "exact same-wheel Learning packages and README required"
+            )
+        includes = learning.get("include", [])
+        if not isinstance(includes, list):
+            raise BootstrapError("invalid Learning resource ownership")
+        markers = set()
+        for entry in includes:
+            if not isinstance(entry, dict) or set(entry) != {"path", "format"}:
+                raise BootstrapError("invalid Learning resource ownership")
+            path = _relative_path(entry["path"])
+            if not path.startswith(
+                ("src/dotmac_learning/", "src/dotmac_learning_bank_rules/")
+            ):
+                raise BootstrapError("Learning resource outside reviewed namespaces")
+            if entry["format"] != ["sdist", "wheel"]:
+                raise BootstrapError(
+                    "Learning resources require both distribution formats"
+                )
+            markers.add(path)
+        if (
+            not {
+                "src/dotmac_learning/py.typed",
+                "src/dotmac_learning_bank_rules/py.typed",
+            }
+            <= markers
+        ):
+            raise BootstrapError("both Learning typing markers require wheel inclusion")
+    except (KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, BootstrapError):
+            raise
+        raise BootstrapError("invalid schema 2 package metadata") from None
 
 
 def _no_symlinks(root: Path, relative: str) -> Path:
@@ -328,15 +407,18 @@ def validate_checkout(
         raise BootstrapError("checkout parent identities unavailable")
     root = next(file for file in proposal.files if file.path == "pyproject.toml")
     original = _read(repo, "pyproject.toml")
-    if any(
-        _digest(content) != root.before_sha256
-        for content in (
-            original,
-            _git(repo, ("show", "HEAD:pyproject.toml")),
-            _git(repo, ("show", proposal.base_sha + ":pyproject.toml")),
-        )
-    ):
-        raise BootstrapError("base, committed and working root metadata must agree")
+    for file in proposal.files:
+        if file.before_sha256 is None:
+            continue
+        if any(
+            _digest(content) != file.before_sha256
+            for content in (
+                _read(repo, file.path),
+                _git(repo, ("show", "HEAD:" + file.path)),
+                _git(repo, ("show", proposal.base_sha + ":" + file.path)),
+            )
+        ):
+            raise BootstrapError("base, committed and working metadata must agree")
     for file in proposal.files + proposal.package_sources:
         target = _no_symlinks(repo, file.path)
         if file.before_sha256 is None and target.exists():
@@ -346,7 +428,9 @@ def validate_checkout(
         raise BootstrapError("proposal cannot change the pinned Poetry toolchain")
     try:
         package_file = next(
-            file for file in proposal.files if file.path != "pyproject.toml"
+            file
+            for file in proposal.files
+            if file.path == PACKAGE_PATH + "pyproject.toml"
         )
         package_name = tomllib.loads(package_file.content)["tool"]["poetry"]["name"]
     except (KeyError, TypeError, ValueError):
@@ -419,7 +503,7 @@ def produce_lock(
             if _digest(_read(transient, file.path)) != file.sha256:
                 raise BootstrapError("lock generation changed proposed source bytes")
     manifest = LockGenerationManifest(
-        1,
+        proposal.schema_version,
         "generated_unqualified_lock",
         "dotmac-learning",
         proposal.base_sha,

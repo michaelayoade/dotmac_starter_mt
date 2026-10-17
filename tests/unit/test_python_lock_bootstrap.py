@@ -425,3 +425,240 @@ def test_generated_lock_cannot_claim_hashes_for_tool_modified_source(
         producer.produce_lock(repo, proposal_path, output)
     assert not output.exists()
     assert (repo / "pyproject.toml").read_text() == ROOT
+
+
+PURE_SOURCE = PACKAGE + "src/dotmac_learning_bank_rules/"
+EXISTING_V2 = {
+    "pyproject.toml": ROOT,
+    "packages/dotmac-fulfillment/pyproject.toml": '[tool.poetry]\nname="dotmac-fulfillment"\n',
+    "packages/dotmac-template-studio/pyproject.toml": '[tool.poetry]\nname="dotmac-template-studio"\n',
+}
+LEARNING_V2 = """[tool.poetry]
+name = "dotmac-learning"
+readme = "README.md"
+packages = [
+    {include = "dotmac_learning", from = "src"},
+    {include = "dotmac_learning_bank_rules", from = "src"},
+]
+include = [
+    {path = "src/dotmac_learning/py.typed", format = ["sdist", "wheel"]},
+    {path = "src/dotmac_learning_bank_rules/py.typed", format = ["sdist", "wheel"]},
+]
+"""
+
+
+def _document_v2():
+    document = _document()
+    document["schema_version"] = 2
+    document["files"] = [
+        _file(
+            path,
+            content + "# reviewed amendment\n",
+            hashlib.sha256(content.encode()).hexdigest(),
+        )
+        for path, content in EXISTING_V2.items()
+    ] + [_file(PACKAGE + "pyproject.toml", LEARNING_V2)]
+    document["package_sources"].extend(
+        [
+            _file(PURE_SOURCE + "__init__.py", '"""Pure sibling."""\n'),
+            _file(PURE_SOURCE + "py.typed", ""),
+        ]
+    )
+    return document
+
+
+def test_schema2_accepts_exact_four_metadata_and_same_wheel_namespaces():
+    proposal = _proposal(_document_v2())
+    assert proposal.schema_version == 2
+    assert {file.path for file in proposal.files} == producer.METADATA_PATHS_V2
+    assert producer.REQUIRED_SOURCES_V2 <= {
+        file.path for file in proposal.package_sources
+    }
+    assert _proposal().schema_version == 1
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "extent",
+        "missing_metadata",
+        "missing_pure_init",
+        "missing_pure_marker",
+        "missing_readme",
+        "duplicate",
+        "before_absent",
+        "new_before",
+        "source_before",
+        "wrong_packages",
+        "missing_marker_include",
+        "foreign_include",
+        "wrong_name",
+    ],
+)
+def test_schema2_closed_extent_and_ownership_refusals(mutation):
+    document = _document_v2()
+    if mutation == "extent":
+        document["package_sources"].append(
+            _file("packages/dotmac-learning/src/other/x.py", "x")
+        )
+    elif mutation == "missing_metadata":
+        document["files"].pop(1)
+    elif mutation.startswith("missing_") and mutation != "missing_marker_include":
+        path = {
+            "missing_pure_init": PURE_SOURCE + "__init__.py",
+            "missing_pure_marker": PURE_SOURCE + "py.typed",
+            "missing_readme": PACKAGE + "README.md",
+        }[mutation]
+        document["package_sources"] = [
+            item for item in document["package_sources"] if item["path"] != path
+        ]
+    elif mutation == "duplicate":
+        document["files"].append(document["files"][1])
+    elif mutation == "before_absent":
+        document["files"][1]["before_sha256"] = None
+    elif mutation == "new_before":
+        document["files"][-1]["before_sha256"] = "0" * 64
+    elif mutation == "source_before":
+        document["package_sources"][-1]["before_sha256"] = "0" * 64
+    else:
+        content = LEARNING_V2
+        if mutation == "wrong_packages":
+            content = content.replace(
+                'include = "dotmac_learning_bank_rules"', 'include = "foreign"'
+            )
+        elif mutation == "missing_marker_include":
+            content = content.replace(
+                "src/dotmac_learning_bank_rules/py.typed",
+                "src/dotmac_learning_bank_rules/other",
+            )
+        elif mutation == "foreign_include":
+            content = content.replace(
+                "src/dotmac_learning_bank_rules/py.typed", "../foreign/py.typed"
+            )
+        else:
+            content = content.replace('name = "dotmac-learning"', 'name = "foreign"')
+        document["files"][-1] = _file(PACKAGE + "pyproject.toml", content)
+    with pytest.raises(producer.BootstrapError):
+        _proposal(document)
+
+
+@pytest.fixture
+def checkout_v2(checkout, monkeypatch):
+    repo, context = checkout
+    prior_git = producer._git
+    for path, content in EXISTING_V2.items():
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+
+    def git(root, arguments):
+        if arguments[0] == "show":
+            revision, path = arguments[1].split(":", 1)
+            if revision in {"HEAD", BASE} and path in EXISTING_V2:
+                return EXISTING_V2[path].encode()
+        result = prior_git(root, arguments)
+        if arguments == ("ls-files", "-z", "--cached"):
+            result += (
+                b"\0".join(
+                    path.encode() for path in EXISTING_V2 if path != "pyproject.toml"
+                )
+                + b"\0"
+            )
+        return result
+
+    monkeypatch.setattr(producer, "_git", git)
+    return repo, context
+
+
+@pytest.mark.parametrize("path", list(EXISTING_V2))
+@pytest.mark.parametrize("layer", ["working", "HEAD", "base", "before"])
+def test_schema2_binds_every_existing_metadata_before_commands(
+    checkout_v2, monkeypatch, path, layer
+):
+    repo, context = checkout_v2
+    document = _document_v2()
+    prior_git = producer._git
+    if layer == "working":
+        (repo / path).write_text(EXISTING_V2[path] + "# drift\n")
+    elif layer == "before":
+        next(item for item in document["files"] if item["path"] == path)[
+            "before_sha256"
+        ] = "0" * 64
+    else:
+        revision = "HEAD" if layer == "HEAD" else BASE
+
+        def git(root, arguments):
+            if arguments == ("show", revision + ":" + path):
+                return b"committed drift"
+            return prior_git(root, arguments)
+
+        monkeypatch.setattr(producer, "_git", git)
+    monkeypatch.setattr(
+        producer,
+        "_command",
+        lambda *args, **kwargs: pytest.fail("producer command before binding"),
+    )
+    with pytest.raises(producer.BootstrapError):
+        producer.validate_checkout(repo, _proposal(document), context)
+
+
+@pytest.mark.parametrize(
+    "target", [PACKAGE + "pyproject.toml", PURE_SOURCE + "__init__.py"]
+)
+def test_schema2_existing_new_target_is_refused(checkout_v2, target):
+    repo, context = checkout_v2
+    path = repo / target
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("existing new target")
+    with pytest.raises(producer.BootstrapError):
+        producer.validate_checkout(repo, _proposal(_document_v2()), context)
+
+
+@pytest.mark.parametrize("mutate", [None, *EXISTING_V2])
+def test_schema2_receipt_binds_all_sources_and_metadata_and_refuses_tool_mutation(
+    checkout_v2, tmp_path, monkeypatch, mutate
+):
+    repo, _ = checkout_v2
+    document = _document_v2()
+    raw = json.dumps(document).encode()
+    proposal_path = repo / "proposal.json"
+    proposal_path.write_bytes(raw)
+    calls = []
+
+    def command(arguments, cwd, *, capture_stdout):
+        calls.append(arguments)
+        if arguments == ("poetry", "--version"):
+            return b"Poetry (version 2.4.1)"
+        assert arguments == ("poetry", "lock", "--no-interaction")
+        assert cwd != repo and capture_stdout is False
+        for item in document["files"] + document["package_sources"]:
+            assert (cwd / item["path"]).read_bytes() == item["content"].encode()
+        if mutate:
+            (cwd / mutate).write_text("tool mutation")
+        (cwd / "poetry.lock").write_text(LOCK + "# schema2 fixture\n")
+        return b""
+
+    monkeypatch.setattr(producer, "_command", command)
+    output = tmp_path / "artifact"
+    if mutate:
+        with pytest.raises(producer.BootstrapError):
+            producer.produce_lock(repo, proposal_path, output)
+        assert not output.exists()
+    else:
+        manifest = producer.produce_lock(repo, proposal_path, output)
+        assert manifest.schema_version == 2
+        assert (
+            manifest.original_lock_sha256 == hashlib.sha256(LOCK.encode()).hexdigest()
+        )
+        assert manifest.input_sha256 == hashlib.sha256(raw).hexdigest()
+        assert {
+            (item.path, item.before_sha256, item.sha256)
+            for item in manifest.proposed_files
+        } == {
+            (item["path"], item["before_sha256"], item["sha256"])
+            for item in document["files"] + document["package_sources"]
+        }
+    assert calls == [("poetry", "--version"), ("poetry", "lock", "--no-interaction")]
+    for path, content in EXISTING_V2.items():
+        assert (repo / path).read_text() == content
+    assert not (repo / PACKAGE).exists()
