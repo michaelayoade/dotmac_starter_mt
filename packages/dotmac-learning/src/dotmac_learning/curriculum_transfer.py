@@ -73,8 +73,8 @@ _TABLES = (
     _CurriculumTable(
         "chapters",
         ChapterRowV2,
-        _v1._IDENTITY
-        + (
+        (
+            *_v1._IDENTITY,
             _C("course_id", "uuid"),
             _C("number", "integer"),
             _C("title", "character varying(200)"),
@@ -83,26 +83,26 @@ _TABLES = (
             _C("body_md", "text"),
             _C("source_hash", "character varying(64)"),
             _C("order_index", "integer"),
-        )
-        + _v1._TIMESTAMPS,
+            *_v1._TIMESTAMPS,
+        ),
     ),
     _CurriculumTable(
         "question_banks",
         QuestionBankRowV2,
-        _v1._IDENTITY
-        + (
+        (
+            *_v1._IDENTITY,
             _C("course_id", "uuid"),
             _C("chapter_number", "integer", True),
             _C("kind", "character varying(10)"),
             _C("version", "integer"),
-        )
-        + _v1._TIMESTAMPS,
+            *_v1._TIMESTAMPS,
+        ),
     ),
     _CurriculumTable(
         "questions",
         QuestionRowV2,
-        _v1._IDENTITY
-        + (
+        (
+            *_v1._IDENTITY,
             _C("bank_id", "uuid"),
             _C("ext_id", "character varying(60)"),
             _C("stem", "text"),
@@ -113,52 +113,52 @@ _TABLES = (
             _C("category", "character varying(40)", True),
             _C("explanation", "text"),
             _C("weight", "integer"),
-        )
-        + _v1._TIMESTAMPS,
+            *_v1._TIMESTAMPS,
+        ),
     ),
     _CurriculumTable(
         "chapter_reads",
         ChapterReadRowV2,
-        _v1._IDENTITY
-        + (
+        (
+            *_v1._IDENTITY,
             _C("person_id", "uuid"),
             _C("chapter_id", "uuid"),
-        )
-        + _v1._TIMESTAMPS,
+            *_v1._TIMESTAMPS,
+        ),
     ),
     _CurriculumTable(
         "subtopic_reads",
         SubtopicReadRowV2,
-        _v1._IDENTITY
-        + (
+        (
+            *_v1._IDENTITY,
             _C("person_id", "uuid"),
             _C("chapter_id", "uuid"),
             _C("subtopic_slug", "character varying(64)"),
-        )
-        + _v1._TIMESTAMPS,
+            *_v1._TIMESTAMPS,
+        ),
     ),
     _CurriculumTable(
         "chapter_bookmarks",
         ChapterBookmarkRowV2,
-        _v1._IDENTITY
-        + (
+        (
+            *_v1._IDENTITY,
             _C("person_id", "uuid"),
             _C("course_id", "uuid"),
             _C("chapter_id", "uuid"),
-        )
-        + _v1._TIMESTAMPS,
+            *_v1._TIMESTAMPS,
+        ),
     ),
     _CurriculumTable(
         "chapter_notes",
         ChapterNoteRowV2,
-        _v1._IDENTITY
-        + (
+        (
+            *_v1._IDENTITY,
             _C("person_id", "uuid"),
             _C("course_id", "uuid"),
             _C("chapter_id", "uuid"),
             _C("body", "text"),
-        )
-        + _v1._TIMESTAMPS,
+            *_v1._TIMESTAMPS,
+        ),
     ),
 )
 _RELATIONS = {
