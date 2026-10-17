@@ -8,13 +8,17 @@ here.
 
 ## 0.1.0a106 — Release inventory
 
-This inventories the proposed request-evidence successor to verified
-`0.1.0a105`. It allocates no version and proves no publication or product
+This inventories the proposed request-evidence and audit-history successor to
+verified `0.1.0a105`. It allocates no version and proves no publication or product
 adoption; protected release authorization and independently verified artifacts
 remain required.
 
 ### Added
 
+- Reserve `learning` / `mod_learning` / `lr` / branch `learning` for the
+  Academy-sourced reusable learning domain before its module source is added.
+  This reservation installs no module, moves no data and transfers no writer
+  authority; the published a105 release remains unchanged.
 - Shared migration configuration helpers select explicitly supplied owner
   material, refuse blank values, and allow only an explicitly supplied fallback.
   The Alembic configuration writer preserves percent-encoded URLs without
@@ -29,6 +33,16 @@ remain required.
   authentication completes, so downstream request evidence does not rely on
   threadpool context changes propagating back to its caller. Attribution is
   evidence of authentication, not a grant of authorization or tenant scope.
+
+### Fixed
+
+- Tenant audit history can preserve an unknown persistence timestamp and an
+  `entity_type` up to 160 characters. Additive revision `0029_audit_history_shape`
+  widens the existing storage without rewriting any row or published migration.
+  Ordinary audit writes retain their server-assigned persistence time and
+  attribution/action validation. This is a destination contract prerequisite;
+  no historical import, product adoption or operational handoff is asserted.
+  Downgrade refuses rows that the predecessor cannot represent.
 
 ## 0.1.0a105 — Release inventory
 

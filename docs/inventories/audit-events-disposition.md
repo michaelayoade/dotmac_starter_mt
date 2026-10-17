@@ -507,3 +507,41 @@ Whether anything **outside** the application reads `ip_address`/`user_agent` —
 exports, SIEM, incident-response queries. A database cannot report its own
 external consumers. Those columns therefore stay through expansion regardless of
 the population rates above.
+
+
+## 2026-10-17 amendment: lossless Kernel audit destination
+
+The Academy learning extraction depends on the existing identity and Sub
+reference-lineage programme. A source review confirms that Sub revision 526
+preserves unknown historical `created_at` as NULL and uses `entity_type`
+length 160, while the currently published Kernel destination requires a
+persistence timestamp and permits only 120 characters. The settled historical
+semantics above remain in force: neither occurrence time nor migration time
+can substitute for an unknown persistence time.
+
+The source successor adds `0029_audit_history_shape` after the unchanged
+`0028_machine_attribution`. It changes only tenant `public.audit_events`:
+`created_at` becomes nullable with its existing server default retained, and
+`entity_type` widens to 160. Existing values, grants, RLS and the polymorphic
+actor/Party-enrichment distinction remain intact. The existing Kernel
+`AuditEvent` remains the owner. Platform audit is a separate contract.
+Ordinary `write_audit_event` accepts no persistence-time override and retains
+its declaration, actor and application checks.
+
+This amendment is a destination-shape correction, not a historical importer,
+writer switch, completed lineage rehearsal or adoption. A genuine historical
+transfer must use explicit SQL NULL rather than ORM default substitution and
+preserve all accepted actor, attribution, timestamp and metadata/detail facts.
+The Sub-side participant belongs to the existing `observability.audit_log`
+owner and must be consumed by the real handoff command; an unused generic
+import API is not introduced in this stage. That participant, the remaining
+binding-aware credential contract, unchanged-chain execution, populated parity,
+actual-role isolation and rollback proof remain required before adoption.
+
+Downgrade refuses a NULL persistence timestamp or entity name longer than 120
+rather than rewriting, truncating or deleting evidence. Hosted PostgreSQL
+qualification must execute the actual Kernel chain, preserve predecessor rows,
+prove unknown and known historical timestamps, ordinary server-timestamped
+writes and tenant isolation, and exercise both refusal and eligible downgrade.
+This source amendment claims no publication, deployed population, target or
+custody approval.

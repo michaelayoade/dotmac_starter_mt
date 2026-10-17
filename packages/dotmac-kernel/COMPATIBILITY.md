@@ -382,6 +382,7 @@ retired prefix is never reused.
 | Module | Schema | Prefix | Branch label |
 |---|---|---|---|
 | `template_studio` | `mod_tstudio` | `ts` | `template_studio` |
+| `learning` | `mod_learning` | `lr` | `learning` |
 | `ticketing` | `mod_tkt` | `tk` | `ticketing` |
 | `release_catalog` | `mod_rel` | `rl` | `release_catalog` |
 | `entitlement_allocation` | `mod_ealloc` | `ea` | `entitlement_allocation` |
@@ -1437,3 +1438,28 @@ where practical, a `DeprecationWarning`) with a stated replacement.
 **Private surface:** carries no guarantee at any version. Reaching into a
 private name or module is unsupported and the governance test blocks the
 reference assembly from doing so.
+
+## Tenant audit history storage — 2026-10-17
+
+The proposed successor to published `0.1.0a105` includes additive revision
+`0029_audit_history_shape`. `AuditEvent.created_at` becomes `datetime | None`
+and the tenant table permits SQL NULL for genuinely unknown historical
+persistence time. `entity_type` widens from 120 to 160 characters. Existing
+row values, defaults, tenant RLS and grants are preserved; platform audit
+storage is a separate contract and is unchanged.
+
+`write_audit_event` still supplies no caller-controlled persistence timestamp:
+new events receive the server default and retain existing action and actor
+validation. A future owner-controlled historical handoff must insert explicit
+SQL NULL where the source is unknown; assigning Python `None` to an ORM
+object with a server default can select that default instead. Do not substitute
+occurrence time or migration time for historical persistence time.
+
+Consumers reading imported historical records must handle nullable persistence
+time. The reference assembly's retention-bounded audit page/count continue to
+exclude records without a known persistence time; no new historical browsing
+or import API is introduced here. The eventual adopter must qualify its own
+reader and transfer contract before switching writers. Downgrade refuses
+unknown timestamps or entity names longer than 120 rather than inventing,
+truncating or deleting evidence. This source inventory establishes neither
+publication nor identity/lineage adoption.

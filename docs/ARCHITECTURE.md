@@ -2651,6 +2651,7 @@ write:
 
 | Resource | Owning write path(s) |
 |---|---|
+| Proposed Python dependency-lock artifacts | `scripts.python_lock_bootstrap` validates the closed metadata proposal and committed base/input hashes, then runs the pinned Poetry tool in a temporary hosted checkout. `.github/workflows/python-lock-bootstrap.yml` is its same-repository PR caller. The resulting lock and hash manifest are unqualified build observations; the reviewed dependency change and matching lock enter one source commit. The producer changes no committed metadata, validates no repaired lock as qualification, and owns no package publication, release floor, application composition or product writer. |
 | Tenants | `app.features.tenants.service.provision_tenant` (platform-only, control-plane security Task 2 — one transaction creating tenant + owner party/person/credential + `admin` role grant + two audit events; no update/delete service yet) |
 | Platform admins | `scripts/create_platform_admin.py::upsert_admin` (CLI-only, platform/migration DB credentials — the same trust boundary as migrations; deliberately NO HTTP write path, see ADR-0004) |
 | Platform sessions | `dotmac_kernel.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |

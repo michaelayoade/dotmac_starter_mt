@@ -32,7 +32,7 @@ from sqlalchemy.exc import DBAPIError
 #: revision had to edit all eight. Every use meant 'the kernel head' — the
 #: surrounding comments say so — and none was a historical pin, which is what
 #: makes collapsing them safe rather than merely tidier.
-KERNEL_HEAD = "0028_machine_attribution"
+KERNEL_HEAD = "0029_audit_history_shape"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
     REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
