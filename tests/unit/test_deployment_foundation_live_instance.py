@@ -464,6 +464,14 @@ class ExecutionEffects:
         self.events.append("postflight")
         return CommandResult(1 if self.postflight_fails else 0)
 
+    # Runtime protocol checks use static attributes on supported Python 3.12+.
+    # Keep the real observer calls explicit rather than relying on __getattr__.
+    def preflight_live_instance(self, *, custody):
+        return self.provider.preflight_live_instance(custody=custody)
+
+    def recheck_live_instance(self, measurement, *, custody):
+        return self.provider.recheck_live_instance(measurement, custody=custody)
+
     def observe_live_instance(self, **kwargs):
         self.events.append("observe:" + kwargs["role"])
         return self.provider.observe_live_instance(**kwargs)
@@ -1163,3 +1171,25 @@ def test_immutable_prechange_v1_v4_canonical_render_plan_and_evidence_goldens():
             )
             == (directory / "evidence-v2.json").read_bytes()
         )
+
+
+def test_executor_preflight_discards_provider_exception_context(tmp_path, monkeypatch):
+    spec, _, _, executor, effects, _, events = executor_fixture(tmp_path)
+    executor._startup_token = object()
+    executor._startup_lock = held_lock(spec.product)
+
+    reached = []
+
+    def unavailable(*, custody):
+        reached.append(True)
+        raise RuntimeError("PRIVATE_PROVIDER_DIAGNOSTIC")
+
+    monkeypatch.setattr(effects.provider, "preflight_live_instance", unavailable)
+    with pytest.raises(LiveInstanceRefusal) as error:
+        executor._preflight_startup_observation()
+    assert reached == [True]
+    assert error.value.reason == "unavailable"
+    assert "PRIVATE_PROVIDER_DIAGNOSTIC" not in str(error.value)
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert "consume" not in events

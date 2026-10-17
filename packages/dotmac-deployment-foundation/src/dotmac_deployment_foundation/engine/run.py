@@ -1306,9 +1306,11 @@ class Executor:
             declaration.require_profile(self._spec)
             self._effects.preflight_live_instance(custody=self._startup_custody)
             return
-        except Exception:  # noqa: S110 -- discard untrusted diagnostics
-            pass
-        raise LiveInstanceRefusal("unavailable")
+        except Exception:
+            refusal = LiveInstanceRefusal("unavailable")
+        # Raise outside the handler so untrusted diagnostics are not retained
+        # in the refusal's exception context.
+        raise refusal
 
     def _require_startup_continuation(self) -> _ConsumedStartupContinuation:
         witness = self._startup_continuation
