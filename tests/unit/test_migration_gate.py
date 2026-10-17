@@ -154,9 +154,10 @@ def test_the_real_repo_composes() -> None:
     # 32 -> 33 in a68: `0026_platform_audit_log` on the kernel lineage.
     # 33 -> 34 in a90: `0027_machine_credential` on the kernel lineage.
     # 34 -> 35 (unreleased): `0028_machine_attribution` on the kernel lineage.
+    # 35 -> 36 (unreleased): `0029_audit_history_shape` on the kernel lineage.
     # The "deliberately" is the point — this number is not maintenance overhead,
     # it is the reason a migration cannot be added without somebody noticing.
-    assert len(report.revisions) == 35
+    assert len(report.revisions) == 36
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 
