@@ -354,6 +354,134 @@ def test_map_frame_state_panel_meets_text_contrast(intent: str, state: str) -> N
         ), f"map-frame {state} text contrast is {ratio:.2f}:1 in {mode} mode"
 
 
+def test_metric_card_is_clickable_only_when_the_host_supplies_a_route() -> None:
+    linked = _render(
+        dotmac_ui.METRIC_CARD,
+        label="Customers",
+        value="12,481",
+        primary_detail="946 active",
+        secondary_detail="10+ this month",
+        href="/admin/customers",
+        tone="positive",
+    )
+    assert linked.lstrip().startswith('<a class="dmui-metric-card')
+    assert 'href="/admin/customers"' in linked
+    assert "dmui-metric-card--link" in linked
+    assert "946 active" in linked
+    assert "10+ this month" in linked
+
+    static = _render(dotmac_ui.METRIC_CARD, label="Alarms", value="11")
+    assert static.lstrip().startswith('<article class="dmui-metric-card')
+    assert "dmui-metric-card--static" in static
+    assert "href=" not in static
+
+
+def test_metric_card_fails_an_unknown_tone_closed() -> None:
+    rendered = _render(dotmac_ui.METRIC_CARD, tone="urgent-customer")
+
+    assert "dmui-metric-card--neutral" in rendered
+    assert "urgent-customer" not in rendered
+
+
+def test_notice_banner_exposes_an_accessible_dismiss_hook() -> None:
+    rendered = _render(
+        dotmac_ui.NOTICE_BANNER,
+        title="What's new",
+        message="Customer metrics have been refreshed.",
+        dismiss_label="Dismiss what's new",
+    )
+
+    assert "data-dmui-dismissible" in rendered
+    assert "data-dmui-dismiss" in rendered
+    assert 'aria-label="Dismiss what&#39;s new"' in rendered
+    assert "Customer metrics have been refreshed." in rendered
+
+
+def test_ticket_chart_has_distinct_status_colours_and_a_service_team_select() -> None:
+    series = (
+        {
+            "label": "Breached SLA",
+            "tone": "negative",
+            "path": "M44 180 L590 50",
+        },
+        {
+            "label": "Near SLA",
+            "tone": "warning",
+            "path": "M44 190 L590 70",
+        },
+        {
+            "label": "Newly created",
+            "tone": "info",
+            "path": "M44 200 L590 90",
+        },
+    )
+    rendered = _render(
+        dotmac_ui.DASHBOARD_LINE_CHART,
+        title="Tickets Performance",
+        description="SLA health by service team",
+        series=series,
+        range_label="17 Sep – 16 Oct",
+        filter_label="Service team",
+        filter_name="service_team",
+        filter_options=(
+            {"value": "all", "label": "All teams", "selected": True},
+            {"value": "support", "label": "Support"},
+        ),
+    )
+
+    assert 'name="service_team"' in rendered
+    assert "data-dmui-chart-filter" in rendered
+    assert "dmui-line-chart__series--negative" in rendered
+    assert "dmui-line-chart__series--warning" in rendered
+    assert "dmui-line-chart__series--info" in rendered
+    assert "Breached SLA" in rendered
+    assert "Near SLA" in rendered
+    assert "Newly created" in rendered
+    assert "Within SLA" not in rendered
+    assert "customer" not in rendered.lower()
+
+
+@pytest.mark.parametrize(
+    "intent", ["neutral", "positive", "info", "warning", "negative"]
+)
+def test_chart_series_meet_non_text_contrast(intent: str) -> None:
+    for mode in ("light", "dark"):
+        ratio = token_contrast(
+            f"status-{intent}-foreground", "surface-secondary", mode
+        )
+        assert ratio >= NON_TEXT_CONTRAST_MINIMUM, (
+            f"chart {intent} series contrast is {ratio:.2f}:1 in {mode} mode"
+        )
+
+
+def test_notification_toast_has_accessible_eight_second_hook() -> None:
+    rendered = _render(
+        dotmac_ui.NOTIFICATION_TOAST,
+        title="You were mentioned",
+        message="A service team mentioned you on ticket #1842.",
+        action_label="Open ticket",
+        action_url="/admin/tickets/1842",
+    )
+
+    assert 'role="status"' in rendered
+    assert 'aria-live="polite"' in rendered
+    assert 'aria-atomic="true"' in rendered
+    assert 'data-dmui-auto-dismiss-ms="8000"' in rendered
+    assert 'href="/admin/tickets/1842"' in rendered
+    assert "data-dmui-dismiss" in rendered
+
+
+def test_dashboard_panel_span_is_host_controlled_and_fails_closed() -> None:
+    full = _render(dotmac_ui.DASHBOARD_PANEL, title="Important activity", span="full")
+    invalid = _render(
+        dotmac_ui.DASHBOARD_PANEL, title="Important activity", span="wide"
+    )
+
+    assert "dmui-dashboard-panel--full" in full
+    assert "dmui-dashboard-panel--half" in invalid
+    assert "wide" not in invalid
+
+
 @pytest.mark.slow
 def test_the_templates_are_present_in_the_built_wheel(tmp_path: Path) -> None:
     """Package data that is not packaged is a source-checkout-only feature.

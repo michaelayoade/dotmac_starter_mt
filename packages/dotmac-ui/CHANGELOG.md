@@ -7,6 +7,38 @@ separate axis from the package version. Pre-1.0 (`0.x`, incl. this alpha) the
 surface is still settling — a `0.MINOR` bump may carry breaking changes, each
 called out here.
 
+## 0.1.0a9 — 2026-10-17
+
+`UI_CONTRACT_VERSION` stays **1**. This additive release publishes the
+presentation-only dashboard primitives authorized for the Starter admin UI;
+queries, permissions, routing, chart-path calculation and notification timing
+remain host-owned.
+
+### Added
+
+- Responsive `dashboard_grid` and `dashboard_panel` macros. A host can render
+  Performance Trend only when its permission check passes, switch Important
+  activity between full and half width, and let the remaining panels reflow
+  without a dead grid cell.
+- `metric_card`, with linked and static semantics, light/dark token styling,
+  five status tones and separate primary/secondary detail lines. The macro
+  accepts already-calculated values, so customer, online-device, collections,
+  overdue and alarms rules stay in the consuming product.
+- `notice_banner`, the amber, accessible, dismissible "What's new" surface.
+- `dashboard_line_chart`, a host-data-driven SVG chart with a native service
+  team select and visibly distinct neutral, positive, info, warning and
+  negative series. It supplies no customer or ticket policy and invents no
+  "within SLA" series.
+- `notification_toast`, a responsive lower-right polite live region with
+  dismiss and `data-dmui-auto-dismiss-ms` hooks. Its default is 8,000 ms; the
+  host owns the tiny runtime that honors the hook.
+
+### Evidence
+
+- Michael's review on `dotmac_sub` PR #3662 directed the dashboard redesign to
+  the Starter `dotmac-ui` package and supplied the preserved-product notes.
+  The new extraction slice is therefore `audit-complete`, not reuse-proven.
+
 ## 0.1.0a8 — 2026-08-30
 
 `UI_CONTRACT_VERSION` stays **1**; the component library grows by one

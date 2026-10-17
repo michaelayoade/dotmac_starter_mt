@@ -60,7 +60,7 @@ deprecation cycle**.
 | `dotmac_ui.theme` | `bootstrap_script`, `set_theme_script`, `THEME_STORAGE_KEY`, `THEME_VALUES`, `DEFAULT_THEME` (pre-paint theme selection; returns source, not a `<script>` tag, so the host owns the CSP nonce) |
 | `dotmac_ui.assets` | `static_dir`, `stylesheet_path`, `stylesheet_url`, `manifest_path`, `asset_manifest`, `asset_digest`, `STYLESHEET_RELPATH`, `MANIFEST_RELPATH`, `ASSET_NAMESPACE`, `DIGEST_LENGTH` |
 | `dotmac_ui.a11y` | `ACCESSIBILITY_TARGET`, `TEXT_CONTRAST_MINIMUM`, `NON_TEXT_CONTRAST_MINIMUM`, `ContrastRequirement`, `ContrastFailure`, `CONTRAST_REQUIREMENTS`, `check_contrast`, `token_contrast`, `contrast_ratio`, `relative_luminance` |
-| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `COMPONENTS`, `EMPTY_STATE`, `MAP_FRAME`, `component_classes` |
+| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `COMPONENTS`, `EMPTY_STATE`, `MAP_FRAME`, `DASHBOARD_GRID`, `DASHBOARD_PANEL`, `METRIC_CARD`, `NOTICE_BANNER`, `DASHBOARD_LINE_CHART`, `NOTIFICATION_TOAST`, `component_classes` |
 
 The whole of that surface is also re-exported at the top level, and there is no
 DB-touching subset to keep out of it: `import dotmac_ui` has no side effect
@@ -318,6 +318,12 @@ with none of the kernel's globals or filters installed.
 |---|---|---|---|
 | `dotmac_ui/components/empty_state.html` | `empty_state` | `title`, `message`, `action_label`, `action_url` | `dmui-empty-state`, `dmui-empty-state__visual`, `dmui-empty-state__icon`, `dmui-empty-state__title`, `dmui-empty-state__message`, `dmui-empty-state__action`, `dmui-empty-state__action-icon` |
 | `dotmac_ui/components/map_frame.html` | `map_frame` | `canvas_id`, `label`, `state`, `status_title`, `status_message` | `dmui-map-frame`, `dmui-map-frame--ready`, `dmui-map-frame--loading`, `dmui-map-frame--empty`, `dmui-map-frame--error`, `dmui-map-frame__canvas`, `dmui-map-frame__state`, `dmui-map-frame__state-panel`, `dmui-map-frame__state-indicator`, `dmui-map-frame__state-title`, `dmui-map-frame__state-message`, `dmui-map-frame__live` |
+| `dotmac_ui/components/dashboard_grid.html` | `dashboard_grid` | `label` | `dmui-dashboard-grid` |
+| `dotmac_ui/components/dashboard_panel.html` | `dashboard_panel` | `title`, `description`, `action_label`, `action_url`, `span` | `dmui-dashboard-panel` and its published `--half`, `--full`, header, heading, title, description, action and body classes |
+| `dotmac_ui/components/metric_card.html` | `metric_card` | `label`, `value`, `primary_detail`, `secondary_detail`, `href`, `tone` | `dmui-metric-card`, its link/static and five tone modifiers, and its heading, label, value and detail classes |
+| `dotmac_ui/components/notice_banner.html` | `notice_banner` | `title`, `message`, `dismiss_label` | `dmui-notice-banner` and its content, indicator, title, message and dismiss classes |
+| `dotmac_ui/components/dashboard_line_chart.html` | `dashboard_line_chart` | `title`, `description`, `series`, `range_label`, `filter_label`, `filter_name`, `filter_options` | `dmui-line-chart`, its heading/filter/legend/figure classes, and the neutral/positive/info/warning/negative swatch and series modifiers |
+| `dotmac_ui/components/notification_toast.html` | `notification_toast` | `title`, `message`, `action_label`, `action_url`, `dismiss_label`, `auto_dismiss_ms` | `dmui-notification-toast` and its content, title, message, actions, action and dismiss classes |
 
 `empty_state` renders the "nothing to show here" panel for a list, table body or
 card. In a table the **caller** owns the row and the `colspan`; the component
@@ -355,6 +361,24 @@ policy by overriding `--dmui-map-frame-min-block-size` in its surface scope.
 The source audit and adoption gate are
 `docs/inventories/map-ui-sources.md`; this contract is audit-complete and has no
 product adopter yet.
+
+The dashboard primitives are likewise presentation contracts, not a dashboard
+service. `dashboard_grid` collapses from two columns to one below the package's
+medium layout threshold; a full-span panel occupies the whole desktop row.
+This lets an authorized host omit a permission-gated Performance Trend panel,
+render Tickets Performance and Important activity as half-span siblings, and
+avoid an empty grid cell. The package never tests a role name or permission.
+
+`metric_card` is an anchor only when the host supplies `href`; otherwise it is
+a static article. It does not calculate customers, sessions, online devices,
+collections, receivables or alarms. `dashboard_line_chart` receives
+host-calculated SVG path data and uses semantic tone classes for distinct
+series; its optional filter is a native select so keyboard and assistive
+technology behavior do not depend on JavaScript. `notice_banner` and
+`notification_toast` publish `data-dmui-dismiss` hooks. The toast additionally
+publishes `data-dmui-auto-dismiss-ms` (default `8000`) and a polite atomic live
+region, but the host owns the runtime and source event. No polling, mentions,
+ticket lookup or timer is embedded in this dependency-free package.
 
 ## Accessibility contract
 

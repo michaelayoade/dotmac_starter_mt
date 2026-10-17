@@ -1,0 +1,11 @@
+{# Amber announcement surface. The host wires the stable dismiss data hook. #}
+{% macro notice_banner(title="What's new", message="", dismiss_label="Dismiss announcement") -%}
+<aside class="dmui-notice-banner" data-dmui-dismissible>
+  <div class="dmui-notice-banner__content">
+    <span class="dmui-notice-banner__indicator" aria-hidden="true"></span>
+    <strong class="dmui-notice-banner__title">{{ title }}</strong>
+    {% if message %}<span class="dmui-notice-banner__message">{{ message }}</span>{% endif %}
+  </div>
+  <button class="dmui-notice-banner__dismiss" type="button" aria-label="{{ dismiss_label }}" data-dmui-dismiss>&times;</button>
+</aside>
+{%- endmacro %}

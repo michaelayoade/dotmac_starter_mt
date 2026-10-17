@@ -69,6 +69,36 @@ coordinates, layers, endpoints, polling and domain behavior. The package owns
 only the frame and generic view-state presentation. This unreleased contract is
 audit-complete but intentionally has no product adopter yet.
 
+Dashboard surfaces use the same host-owned behavior boundary:
+
+```jinja
+{% from "dotmac_ui/components/metric_card.html" import metric_card %}
+{% from "dotmac_ui/components/dashboard_line_chart.html" import dashboard_line_chart %}
+
+{{ metric_card(
+    label="Customers",
+    value=customer_total,
+    primary_detail=active_customer_label,
+    secondary_detail=new_customer_label,
+    href="/admin/customers",
+    tone="positive",
+) }}
+
+{{ dashboard_line_chart(
+    title="Tickets Performance",
+    description="SLA health by service team",
+    series=ticket_series,
+    range_label=date_range,
+    filter_label="Service team",
+    filter_name="service_team",
+    filter_options=service_team_options,
+) }}
+```
+
+The host calculates every value and SVG path, applies permissions, handles
+filters and dismissal, and decides which routes are allowed. The package owns
+responsive, light/dark adaptive presentation and stable enhancement hooks only.
+
 **There is no build step for consumers.** No Tailwind, no PostCSS, no bundler,
 no npm, and no requirement to match a Tailwind major — ERP's v3.4 and the
 starter's v4 consume the identical file. See COMPATIBILITY.md § "The
