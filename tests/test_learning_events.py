@@ -4,32 +4,44 @@ No metadata DDL or provider stamping: reuse the catalog fixture's real lineages.
 These tests are written for Git-hosted CI and are not local runtime evidence.
 """
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import (
+    UTC,
+    datetime,
+    timedelta,
+    timezone,
+)
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session
-
 from dotmac_learning import events
 from dotmac_learning.event_contracts import EventWrite
 from dotmac_learning.models import (
+    EVENT_KINDS,
     KIND_ACTIVITY_STARTED,
     KIND_CERTIFICATE_EARNED,
     KIND_CHAPTER_COMPLETED,
     KIND_CHAPTER_VIEWED,
     KIND_COURSE_VIEWED,
-    EVENT_KINDS,
     LearningEvent,
 )
+from sqlalchemy import (
+    create_engine,
+    func,
+    select,
+    text,
+)
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
+
+from tests import test_learning_catalog as learning_catalog
 from tests.test_learning_catalog import (
     _course,
     _person,
     _scope,
     _tenant,
-    learning_database as learning_database,
 )
+
+learning_database = learning_catalog.learning_database
 
 
 @pytest.fixture

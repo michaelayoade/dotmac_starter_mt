@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-
 from dotmac_learning.models import TENANT_MODELS
 from dotmac_learning.transfer_contracts import (
     ActivityRowV1,
@@ -144,9 +143,8 @@ def test_transfer_uses_closed_core_relations_and_no_formatted_sql_text():
     import re
     from pathlib import Path
 
-    from sqlalchemy.sql.elements import ColumnElement
-
     from dotmac_learning import transfer
+    from sqlalchemy.sql.elements import ColumnElement
 
     for contract, model in zip(transfer._TABLES, TENANT_MODELS, strict=True):
         relation = contract.clause
@@ -160,7 +158,8 @@ def test_transfer_uses_closed_core_relations_and_no_formatted_sql_text():
 
     def formatted_sql_nodes(source):
         findings = []
-        for node in ast.walk(ast.parse(source)):
+        tree = ast.parse(source) if isinstance(source, str) else source
+        for node in ast.walk(tree):
             if isinstance(node, ast.JoinedStr):
                 literal = "".join(
                     part.value
@@ -179,7 +178,20 @@ def test_transfer_uses_closed_core_relations_and_no_formatted_sql_text():
     assert not formatted_sql_nodes(actual_source)
     # Sensitivity: the same checker sees a formatted identifier regression,
     # and ignores the module-owned diagnostic text that remains admissible.
-    assert formatted_sql_nodes(
-        actual_source + '\nstatement = f"SELECT * FROM {name}"\n'
+    planted_tree = ast.parse(actual_source)
+    planted_tree.body.append(
+        ast.Assign(
+            targets=[ast.Name(id="statement", ctx=ast.Store())],
+            value=ast.JoinedStr(
+                values=[
+                    ast.Constant(value="SELECT * FROM "),
+                    ast.FormattedValue(
+                        value=ast.Name(id="name", ctx=ast.Load()),
+                        conversion=-1,
+                    ),
+                ]
+            ),
+        )
     )
+    assert formatted_sql_nodes(planted_tree)
     assert not formatted_sql_nodes('message = f"canonical storage: {name}"')

@@ -10,10 +10,6 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import DDL, create_engine, event, func, select, text
-from sqlalchemy.engine import make_url
-from sqlalchemy.exc import DBAPIError
-
 from dotmac_learning.models import TENANT_MODELS
 from dotmac_learning.transfer import export_snapshot, import_snapshot, verify_snapshot
 from dotmac_learning.transfer_contracts import (
@@ -34,13 +30,19 @@ from dotmac_learning.transfer_contracts import (
     UnsupportedFloatRepresentation,
     UnsupportedTimestampRepresentation,
 )
+from sqlalchemy import DDL, create_engine, event, func, select, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
+
+from tests import test_learning_catalog as learning_catalog
 from tests.test_forms_workflow_isolation import _superuser_url, _url_for
 from tests.test_learning_catalog import (
     _person,
     _scope,
     _tenant,
-    learning_database as learning_database,
 )
+
+learning_database = learning_catalog.learning_database
 
 TABLES = (
     "courses",

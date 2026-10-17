@@ -12,7 +12,15 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from dotmac_kernel.models import Party, PartyPerson
+from dotmac_learning.models import TENANT_MODELS
+from sqlalchemy import (
+    create_engine,
+    func,
+    inspect,
+    select,
+    text,
+)
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 
@@ -25,6 +33,7 @@ KERNEL_VERSIONS = (
 LEARNING_VERSIONS = (
     REPO_ROOT / "packages/dotmac-learning/src/dotmac_learning/migrations/versions"
 )
+_TABLE_RELATIONS = {model.__table__.name: model.__table__ for model in TENANT_MODELS}
 TABLES = (
     "courses",
     "activities",
@@ -91,7 +100,8 @@ def learning_database(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[str, st
 def _tenant(conn: Connection, tenant: uuid.UUID) -> None:
     conn.execute(
         text(
-            "INSERT INTO public.tenants (id, slug, name) VALUES (:id, :slug, 'Learning')"
+            "INSERT INTO public.tenants (id, slug, name) VALUES (:id, :slug, "
+            "'Learning')"
         ),
         {"id": tenant, "slug": tenant.hex},
     )
@@ -195,14 +205,16 @@ def test_restricted_actor_isolation_and_cross_tenant_references(
             conn.execute(
                 text(
                     "INSERT INTO mod_learning.activities "
-                    "(id, tenant_id, course_id, title) VALUES (:id, :tenant, :course, 'Activity')"
+                    "(id, tenant_id, course_id, title) VALUES (:id, :tenant, "
+                    ":course, 'Activity')"
                 ),
                 {"id": activity, "tenant": tenant_a, "course": course_a},
             )
             submission_a = uuid.uuid4()
             conn.execute(
                 text(
-                    "INSERT INTO mod_learning.submissions (id, tenant_id, activity_id, person_id) "
+                    "INSERT INTO mod_learning.submissions (id, tenant_id, "
+                    "activity_id, person_id) "
                     "VALUES (:id, :tenant, :activity, :person)"
                 ),
                 {
@@ -214,14 +226,16 @@ def test_restricted_actor_isolation_and_cross_tenant_references(
             )
             conn.execute(
                 text(
-                    "INSERT INTO mod_learning.scores (id, tenant_id, submission_id, score, max_score, fraction, passed) "
+                    "INSERT INTO mod_learning.scores (id, tenant_id, submission_id, "
+                    "score, max_score, fraction, passed) "
                     "VALUES (:id, :tenant, :submission, 1, 1, 1, true)"
                 ),
                 {"id": uuid.uuid4(), "tenant": tenant_a, "submission": submission_a},
             )
             conn.execute(
                 text(
-                    "INSERT INTO mod_learning.course_completions (id, tenant_id, person_id, course_id) "
+                    "INSERT INTO mod_learning.course_completions (id, tenant_id, "
+                    "person_id, course_id) "
                     "VALUES (:id, :tenant, :person, :course)"
                 ),
                 {
@@ -233,7 +247,8 @@ def test_restricted_actor_isolation_and_cross_tenant_references(
             )
             conn.execute(
                 text(
-                    "INSERT INTO mod_learning.certificates (id, tenant_id, person_id, course_id, serial, issued_at) "
+                    "INSERT INTO mod_learning.certificates (id, tenant_id, "
+                    "person_id, course_id, serial, issued_at) "
                     "VALUES (:id, :tenant, :person, :course, 'CERT-A', now())"
                 ),
                 {
@@ -246,17 +261,24 @@ def test_restricted_actor_isolation_and_cross_tenant_references(
             _event(conn, tenant_a, person_a)
             for table in TABLES:
                 assert (
-                    conn.scalar(text(f"SELECT count(*) FROM mod_learning.{table}")) == 1
+                    conn.scalar(
+                        select(func.count()).select_from(_TABLE_RELATIONS[table])
+                    )
+                    == 1
                 )
         with app.begin() as conn:
             _scope(conn, tenant_b)
             for table in TABLES:
                 assert (
-                    conn.scalar(text(f"SELECT count(*) FROM mod_learning.{table}")) == 0
+                    conn.scalar(
+                        select(func.count()).select_from(_TABLE_RELATIONS[table])
+                    )
+                    == 0
                 )
             _refused(
                 conn,
-                "INSERT INTO mod_learning.submissions (id, tenant_id, activity_id, person_id) "
+                "INSERT INTO mod_learning.submissions (id, tenant_id, activity_id, "
+                "person_id) "
                 "VALUES (:id, :tenant, :activity, :person)",
                 {
                     "id": uuid.uuid4(),
@@ -268,7 +290,8 @@ def test_restricted_actor_isolation_and_cross_tenant_references(
             )
             _refused(
                 conn,
-                "INSERT INTO mod_learning.course_completions (id, tenant_id, course_id, person_id) "
+                "INSERT INTO mod_learning.course_completions (id, tenant_id, "
+                "course_id, person_id) "
                 "VALUES (:id, :tenant, :course, :person)",
                 {
                     "id": uuid.uuid4(),
@@ -280,14 +303,16 @@ def test_restricted_actor_isolation_and_cross_tenant_references(
             )
             _refused(
                 conn,
-                "INSERT INTO mod_learning.scores (id, tenant_id, submission_id, score, max_score, fraction, passed) "
+                "INSERT INTO mod_learning.scores (id, tenant_id, submission_id, "
+                "score, max_score, fraction, passed) "
                 "VALUES (:id, :tenant, :submission, 1, 1, 1, true)",
                 {"id": uuid.uuid4(), "tenant": tenant_b, "submission": submission_a},
                 "23503",
             )
             _refused(
                 conn,
-                "INSERT INTO mod_learning.certificates (id, tenant_id, person_id, course_id, serial, issued_at) "
+                "INSERT INTO mod_learning.certificates (id, tenant_id, person_id, "
+                "course_id, serial, issued_at) "
                 "VALUES (:id, :tenant, :person, :course, 'CROSS', now())",
                 {
                     "id": uuid.uuid4(),
@@ -300,14 +325,16 @@ def test_restricted_actor_isolation_and_cross_tenant_references(
             _refused(
                 conn,
                 "INSERT INTO mod_learning.learning_events "
-                "(id, tenant_id, person_id, kind, occurred_at) VALUES (:id, :tenant, :person, 'view', now())",
+                "(id, tenant_id, person_id, kind, occurred_at) VALUES (:id, :tenant, "
+                ":person, 'view', now())",
                 {"id": uuid.uuid4(), "tenant": tenant_b, "person": person_a},
                 "23503",
             )
             assert (
                 conn.execute(
                     text(
-                        "UPDATE mod_learning.courses SET title='cross' WHERE id=:id RETURNING id"
+                        "UPDATE mod_learning.courses SET title='cross' WHERE id=:id "
+                        "RETURNING id"
                     ),
                     {"id": course_a},
                 ).all()
@@ -316,14 +343,18 @@ def test_restricted_actor_isolation_and_cross_tenant_references(
             _refused(
                 conn,
                 "INSERT INTO mod_learning.courses "
-                "(id, tenant_id, slug, title, discipline, source_ref) VALUES (:id, :tenant, 'bad', 'Bad', 'x', 'x')",
+                "(id, tenant_id, slug, title, discipline, source_ref) VALUES (:id, "
+                ":tenant, 'bad', 'Bad', 'x', 'x')",
                 {"id": uuid.uuid4(), "tenant": tenant_a},
                 "42501",
             )
         with app.begin() as conn:
             for table in TABLES:
                 assert (
-                    conn.scalar(text(f"SELECT count(*) FROM mod_learning.{table}")) == 0
+                    conn.scalar(
+                        select(func.count()).select_from(_TABLE_RELATIONS[table])
+                    )
+                    == 0
                 )
     finally:
         app.dispose()
@@ -352,7 +383,8 @@ def test_events_require_real_person_subtype_and_are_append_only(
                     _event(conn, tenant, bad_person)
                 assert getattr(caught.value.orig, "sqlstate", None) == "23503"
             for sql in (
-                "UPDATE mod_learning.learning_events SET kind = 'changed' WHERE id = :id",
+                "UPDATE mod_learning.learning_events SET kind = 'changed' WHERE id = "
+                ":id",
                 "DELETE FROM mod_learning.learning_events WHERE id = :id",
             ):
                 _refused(conn, sql, {"id": event}, "42501")
@@ -361,7 +393,8 @@ def test_events_require_real_person_subtype_and_are_append_only(
             with pytest.raises(DBAPIError) as caught, conn.begin_nested():
                 _event(conn, tenant, person, kind="chapter_completed", subject=subject)
             assert getattr(caught.value.orig, "sqlstate", None) == "23505"
-            # Views are intentionally repeatable; nullable subjects retain PostgreSQL NULL semantics.
+            # Views are intentionally repeatable; nullable subjects retain
+            # PostgreSQL NULL semantics.
             _event(conn, tenant, person, subject=subject)
             _event(conn, tenant, person, subject=subject)
             _event(conn, tenant, person, kind="chapter_completed")
@@ -386,10 +419,15 @@ def test_both_real_identity_delete_paths_cascade_events(
             _scope(conn, tenant)
             _event(conn, tenant, person)
         with admin.begin() as conn:
-            column = "party_id" if delete_first == "party_persons" else "id"
+            relation, key = {
+                "party_persons": (
+                    PartyPerson.__table__,
+                    PartyPerson.__table__.c.party_id,
+                ),
+                "parties": (Party.__table__, Party.__table__.c.id),
+            }[delete_first]
             conn.execute(
-                text(f"DELETE FROM public.{delete_first} WHERE {column} = :id"),
-                {"id": person},
+                relation.delete().where(key == person),
             )
             assert (
                 conn.scalar(text("SELECT count(*) FROM mod_learning.learning_events"))
@@ -505,7 +543,8 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
                 for role in ("app_user", "platform_api"):
                     assert conn.scalar(
                         text(
-                            "SELECT has_schema_privilege(CAST(:role AS text), 'mod_learning', 'USAGE')"
+                            "SELECT has_schema_privilege(CAST(:role AS text), "
+                            "'mod_learning', 'USAGE')"
                         ),
                         {"role": role},
                     )
@@ -612,20 +651,23 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
             activity, submission = uuid.uuid4(), uuid.uuid4()
             conn.execute(
                 text(
-                    "INSERT INTO mod_learning.activities (id, tenant_id, course_id, title) "
+                    "INSERT INTO mod_learning.activities (id, tenant_id, course_id, "
+                    "title) "
                     "VALUES (:id, :tenant, :course, 'Activity')"
                 ),
                 {"id": activity, "tenant": tenant, "course": course},
             )
             assert conn.execute(
                 text(
-                    "SELECT type, pass_threshold, max_attempts, grading, weight, question_count, assessment_mode "
+                    "SELECT type, pass_threshold, max_attempts, grading, weight, "
+                    "question_count, assessment_mode "
                     "FROM mod_learning.activities"
                 )
             ).one() == ("mcq_test", 0.0, None, "auto", 1.0, None, "graded")
             conn.execute(
                 text(
-                    "INSERT INTO mod_learning.submissions (id, tenant_id, activity_id, person_id) "
+                    "INSERT INTO mod_learning.submissions (id, tenant_id, "
+                    "activity_id, person_id) "
                     "VALUES (:id, :tenant, :activity, :person)"
                 ),
                 {
@@ -640,7 +682,8 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
             ).one() == ({}, 1)
             conn.execute(
                 text(
-                    "INSERT INTO mod_learning.scores (id, tenant_id, submission_id, score, max_score, fraction, passed) "
+                    "INSERT INTO mod_learning.scores (id, tenant_id, submission_id, "
+                    "score, max_score, fraction, passed) "
                     "VALUES (:id, :tenant, :submission, 1, 1, 1, true)"
                 ),
                 {"id": uuid.uuid4(), "tenant": tenant, "submission": submission},
@@ -652,7 +695,8 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
             ).one() == ([], "auto", None)
             conn.execute(
                 text(
-                    "INSERT INTO mod_learning.course_completions (id, tenant_id, person_id, course_id) "
+                    "INSERT INTO mod_learning.course_completions (id, tenant_id, "
+                    "person_id, course_id) "
                     "VALUES (:id, :tenant, :person, :course)"
                 ),
                 {
@@ -664,7 +708,8 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
             )
             assert conn.execute(
                 text(
-                    "SELECT status, pct, completed_at FROM mod_learning.course_completions"
+                    "SELECT status, pct, completed_at FROM "
+                    "mod_learning.course_completions"
                 )
             ).one() == ("in_progress", 0.0, None)
             _refused(
@@ -672,7 +717,8 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
             )
             _refused(
                 conn,
-                "INSERT INTO mod_learning.submissions (id, tenant_id, activity_id, person_id) "
+                "INSERT INTO mod_learning.submissions (id, tenant_id, activity_id, "
+                "person_id) "
                 "VALUES (:id, :tenant, :activity, :person)",
                 {
                     "id": uuid.uuid4(),
@@ -696,9 +742,10 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
 
 
 def test_missing_real_identity_catalog_is_refused_before_ddl(learning_database) -> None:
+    from dotmac_kernel.migrations.verify import PrerequisiteNotSatisfiedError
+
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
-    from dotmac_kernel.migrations.verify import PrerequisiteNotSatisfiedError
 
     revision = importlib.import_module(
         "dotmac_learning.migrations.versions.lr_0001_learning"

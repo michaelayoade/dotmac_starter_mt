@@ -84,9 +84,9 @@ def _validate_nested_kernel_provider(
     """
     assert _normalise_name(name) == "dotmac-kernel", "only in-tree Kernel is supported"
     unsupported = set(requirement) - {"path", "develop", "extras", "markers"}
-    assert not unsupported, (
-        f"nested Kernel uses unnormalised keys {sorted(unsupported)}"
-    )
+    assert (
+        not unsupported
+    ), f"nested Kernel uses unnormalised keys {sorted(unsupported)}"
     assert requirement.get("develop") is True, "nested Kernel must be editable"
     if "extras" in requirement:
         extras = requirement["extras"]
@@ -94,15 +94,15 @@ def _validate_nested_kernel_provider(
             isinstance(extra, str) and extra for extra in extras
         ), "nested Kernel extras must be a list of names"
     if "markers" in requirement:
-        assert isinstance(requirement["markers"], str), (
-            "nested Kernel marker must be text"
-        )
+        assert isinstance(
+            requirement["markers"], str
+        ), "nested Kernel marker must be text"
 
     root = repo_root.resolve()
     consumer = consumer_dir.resolve()
-    assert consumer.is_dir() and consumer.is_relative_to(root), (
-        "consumer must be in-tree"
-    )
+    assert consumer.is_dir() and consumer.is_relative_to(
+        root
+    ), "consumer must be in-tree"
     expected = (root / "packages" / "dotmac-kernel").resolve()
     assert expected.is_relative_to(root), "Kernel provider must be in-tree"
     nested_provider = _relative_directory(
@@ -133,9 +133,9 @@ def _validate_nested_kernel_provider(
     ), "provider distribution is not Kernel"
     version = provider_poetry.get("version")
     assert isinstance(version, str) and version, "provider version must be explicit"
-    assert locked_provider.get("name") == "dotmac-kernel", (
-        "locked provider name drifted"
-    )
+    assert (
+        locked_provider.get("name") == "dotmac-kernel"
+    ), "locked provider name drifted"
     assert locked_provider.get("version") == version, "locked provider version drifted"
     assert locked_provider.get("develop") is True, "locked provider must be editable"
     source = _table(locked_provider.get("source"), "locked provider source")
@@ -155,12 +155,12 @@ def _normalise_nested_kernel_dependency(
     locked_packages: Mapping[str, dict] | None,
 ) -> dict[str, object]:
     """Admit the observed Poetry path shape only after provider validation."""
-    assert repo_root is not None and consumer_dir is not None, (
-        "nested path dependency requires repository and consumer context"
-    )
-    assert locked_packages is not None, (
-        "nested path dependency requires locked providers"
-    )
+    assert (
+        repo_root is not None and consumer_dir is not None
+    ), "nested path dependency requires repository and consumer context"
+    assert (
+        locked_packages is not None
+    ), "nested path dependency requires locked providers"
     provider = _table(locked_packages.get("dotmac-kernel"), "locked Kernel provider")
     _validate_nested_kernel_provider(
         repo_root, consumer_dir, name, requirement, provider
@@ -235,9 +235,9 @@ def _locked_runtime_dependencies(
 ) -> dict[str, object]:
     result: dict[str, object] = {}
     for name, constraint in package.get("dependencies", {}).items():
-        assert _normalise_name(name) not in result, (
-            f"duplicate locked dependency {name}"
-        )
+        assert (
+            _normalise_name(name) not in result
+        ), f"duplicate locked dependency {name}"
         if isinstance(constraint, dict) and (
             "path" in constraint or "develop" in constraint
         ):
@@ -504,7 +504,10 @@ def test_nested_kernel_provider_rejects_provider_metadata_drift(
     [
         'dotmac-kernel = {path = "packages/elsewhere", develop = true}',
         'dotmac-kernel = {path = "packages/dotmac-kernel", develop = false}',
-        'dotmac-kernel = {path = "packages/dotmac-kernel", develop = true, unknown = true}',
+        (
+            'dotmac-kernel = {path = "packages/dotmac-kernel", '
+            "develop = true, unknown = true}"
+        ),
         'dotmac-kernel = ">=0.1.0a1"',
         'other-kernel = {path = "packages/dotmac-kernel", develop = true}',
     ],

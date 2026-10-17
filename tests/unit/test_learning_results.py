@@ -4,7 +4,6 @@ from dataclasses import FrozenInstanceError
 from uuid import uuid4
 
 import pytest
-
 from dotmac_learning.result_contracts import AdmissionObservation, GradedResult
 
 

@@ -16,8 +16,10 @@ from typing import cast
 from uuid import UUID
 
 from dotmac_kernel.namespaces import module_schema
-from sqlalchemy import Text, bindparam, column, func, select, table, text
+from sqlalchemy import Text, bindparam, func, select, text
 from sqlalchemy import cast as sql_cast
+from sqlalchemy import column as sql_column
+from sqlalchemy import table as sql_table
 from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION, JSONB
 from sqlalchemy.engine import (
     Connection,
@@ -90,8 +92,8 @@ _TABLES = (
     _Table(
         "courses",
         CourseRowV1,
-        _IDENTITY
-        + (
+        (
+            *_IDENTITY,
             _Column("slug", "character varying(63)"),
             _Column("title", "character varying(200)"),
             _Column("discipline", "character varying(40)"),
@@ -99,14 +101,14 @@ _TABLES = (
             _Column("version", "integer"),
             _Column("status", "character varying(20)"),
             _Column("listed", "boolean"),
-        )
-        + _TIMESTAMPS,
+            *_TIMESTAMPS,
+        ),
     ),
     _Table(
         "activities",
         ActivityRowV1,
-        _IDENTITY
-        + (
+        (
+            *_IDENTITY,
             _Column("course_id", "uuid"),
             _Column("chapter_number", "integer", True),
             _Column("type", "character varying(16)"),
@@ -118,26 +120,26 @@ _TABLES = (
             _Column("grading", "character varying(10)"),
             _Column("weight", "double precision"),
             _Column("question_count", "integer", True),
-        )
-        + _TIMESTAMPS,
+            *_TIMESTAMPS,
+        ),
     ),
     _Table(
         "submissions",
         SubmissionRowV1,
-        _IDENTITY
-        + (
+        (
+            *_IDENTITY,
             _Column("activity_id", "uuid"),
             _Column("person_id", "uuid"),
             _Column("answers", "jsonb"),
             _Column("attempt_no", "integer"),
-        )
-        + _TIMESTAMPS,
+            *_TIMESTAMPS,
+        ),
     ),
     _Table(
         "scores",
         ScoreRowV1,
-        _IDENTITY
-        + (
+        (
+            *_IDENTITY,
             _Column("submission_id", "uuid"),
             _Column("score", "double precision"),
             _Column("max_score", "double precision"),
@@ -146,47 +148,47 @@ _TABLES = (
             _Column("per_item", "jsonb"),
             _Column("source", "character varying(10)"),
             _Column("override_reason", "text", True),
-        )
-        + _TIMESTAMPS,
+            *_TIMESTAMPS,
+        ),
     ),
     _Table(
         "course_completions",
         CourseCompletionRowV1,
-        _IDENTITY
-        + (
+        (
+            *_IDENTITY,
             _Column("person_id", "uuid"),
             _Column("course_id", "uuid"),
             _Column("status", "character varying(20)"),
             _Column("pct", "double precision"),
             _Column("completed_at", "timestamp with time zone", True),
-        )
-        + _TIMESTAMPS,
+            *_TIMESTAMPS,
+        ),
     ),
     _Table(
         "certificates",
         CertificateRowV1,
-        _IDENTITY
-        + (
+        (
+            *_IDENTITY,
             _Column("person_id", "uuid"),
             _Column("course_id", "uuid"),
             _Column("serial", "character varying(32)"),
             _Column("issued_at", "timestamp with time zone"),
-        )
-        + _TIMESTAMPS,
+            *_TIMESTAMPS,
+        ),
     ),
     _Table(
         "learning_events",
         LearningEventRowV1,
-        _IDENTITY
-        + (
+        (
+            *_IDENTITY,
             _Column("person_id", "uuid"),
             _Column("course_id", "uuid", True),
             _Column("kind", "character varying(30)"),
             _Column("subject_id", "uuid", True),
             _Column("detail", "jsonb"),
             _Column("occurred_at", "timestamp with time zone"),
-        )
-        + _TIMESTAMPS,
+            *_TIMESTAMPS,
+        ),
     ),
 )
 
@@ -196,14 +198,14 @@ _TABLES = (
 # keep JSONB strings out of SQLAlchemy's Python JSON serializer. JSONB/float
 # INSERT expressions cast the bound value explicitly, as preflight does.
 _RELATIONS = {
-    contract.name: table(
+    contract.name: sql_table(
         contract.name,
-        *(column(spec.name) for spec in contract.columns),
+        *(sql_column(spec.name) for spec in contract.columns),
         schema=_SCHEMA,
     )
     for contract in _TABLES
 }
-_TENANTS = table("tenants", column("id"), schema="public")
+_TENANTS = sql_table("tenants", sql_column("id"), schema="public")
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,7 +284,7 @@ def _qualify(scope: _Scope, tenant_ids: tuple[UUID, ...]) -> None:
         raise TransferConnectionError(
             "current_user must have its own SUPERUSER or BYPASSRLS attribute"
         )
-    for qualified in ("public.tenants",) + tuple(table.qualified for table in _TABLES):
+    for qualified in ("public.tenants", *(table.qualified for table in _TABLES)):
         visible = scope.execute(
             "SELECT pg_catalog.has_table_privilege(current_user, :relation, 'SELECT') "
             "AND NOT pg_catalog.row_security_active(CAST(:relation AS regclass))",

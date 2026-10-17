@@ -6,10 +6,6 @@ from threading import Barrier, Event
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session
-
 from dotmac_learning.certificates import CertificateNotEligible, issue_certificate
 from dotmac_learning.completion import recompute_completion
 from dotmac_learning.models import (
@@ -22,17 +18,28 @@ from dotmac_learning.models import (
 )
 from dotmac_learning.progress_contracts import CertificateCommand, CompletionCommand
 from dotmac_learning.projections import (
+    best_scores_by_course_for_person,
     best_scores_for,
     best_scores_for_person,
-    best_scores_by_course_for_person,
 )
+from sqlalchemy import (
+    create_engine,
+    func,
+    select,
+    text,
+)
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
+
+from tests import test_learning_catalog as learning_catalog
 from tests.test_learning_catalog import (
-    learning_database as learning_database,
-    _tenant,
-    _person,
     _course,
+    _person,
     _scope,
+    _tenant,
 )
+
+learning_database = learning_catalog.learning_database
 
 
 @pytest.fixture
@@ -175,7 +182,7 @@ def test_best_result_query_ties_and_bulk_parity(progress_case):
         first = _score(db, tenant, person, a, fraction=1 / 3, at=at)
         tied = _score(db, tenant, person, a, attempt=2, fraction=1 / 3, at=at)
         assert first.id != tied.id
-        kwargs = dict(tenant_id=tenant, person_id=person)
+        kwargs = {"tenant_id": tenant, "person_id": person}
         assert best_scores_for(db, course_id=course, **kwargs)[a.id].id == first.id
         higher = _score(
             db, tenant, person, a, attempt=3, fraction=0.6, passed=False, at=at
@@ -426,7 +433,8 @@ def test_projection_preserves_unconstrained_historical_json(
         score = _score(db, tenant, person, a)
         db.execute(
             text(
-                "UPDATE mod_learning.scores SET per_item=CAST(:value AS jsonb) WHERE id=:id"
+                "UPDATE mod_learning.scores SET per_item=CAST(:value AS jsonb) WHERE "
+                "id=:id"
             ),
             {"value": historical_json, "id": score.id},
         )
