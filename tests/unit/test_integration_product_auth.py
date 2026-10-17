@@ -162,14 +162,24 @@ def test_callers_are_captured_once_but_held_keys_are_looked_up_each_time() -> No
     )
 
 
-@pytest.mark.parametrize("presented,held", [("non-ascii-é", KEY), (KEY, "held-é")])
-def test_compare_digest_non_ascii_type_error_is_preserved(
+@pytest.mark.parametrize(
+    "presented,held",
+    [("non-ascii-é", KEY), (KEY, "held-é"), ("held-é", "held-é")],
+)
+def test_non_ascii_material_is_an_opaque_refusal_not_a_type_error(
     presented: str,
     held: str,
 ) -> None:
+    """PORT-DELTA: the Integrator source propagates compare_digest's TypeError
+    for non-ASCII strings, surfacing as a 500 at its HTTP boundary. The Starter
+    contract departs before first publication: product keys are ASCII tokens,
+    so non-ASCII presented or held material is simply not a key and receives
+    the one opaque refusal. Adopters align to the contract; no boundary
+    encoding or status mapping is owed by the assembly for this class.
+    """
     authenticator = ProductAuthenticator((Caller(),), secret_lookup=lambda _: held)
 
-    with pytest.raises(TypeError):
+    with pytest.raises(ProductAuthenticationFailed, match="authentication failed"):
         authenticator.authenticate(presented, required_scope=SCOPE)
 
 

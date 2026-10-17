@@ -386,9 +386,14 @@ Authentication captures callers once, looks up every caller on each attempt,
 compares held material with `secrets.compare_digest`, and selects the last
 matching caller before checking exact required-scope membership. It returns a
 fresh frozen principal with frozenset grants. Missing matches and missing scopes
-retain the opaque `product authentication failed` refusal; lookup and comparison
-exceptions retain their existing propagation, including non-ASCII comparison
-`TypeError`. Empty held strings retain exact-comparison behavior.
+retain the opaque `product authentication failed` refusal; lookup exceptions
+retain their existing propagation. Empty held strings retain exact-comparison
+behavior. PORT-DELTA (pre-publication): the Integrator source propagates
+`compare_digest`'s non-ASCII `TypeError` to a 500 at its HTTP boundary; this
+contract instead declares product keys ASCII tokens, so non-ASCII presented
+or held material receives the same opaque refusal and never reaches the
+comparison. Adopters align to the ASCII contract; no boundary encoding or
+status mapping is owed for this class.
 
 The assembly retains caller validation, Kernel lookup defaults, held-material
 loading and refresh, HTTP headers and status mapping, and submitted-binding

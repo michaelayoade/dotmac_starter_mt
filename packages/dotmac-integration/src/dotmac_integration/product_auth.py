@@ -54,10 +54,21 @@ class ProductAuthenticator:
         self._lookup = secret_lookup
 
     def authenticate(self, presented: str, *, required_scope: str) -> ProductPrincipal:
+        # Starter contract: product keys are ASCII tokens. Non-ASCII presented
+        # or held material is simply not a key and receives the one opaque
+        # refusal; it never reaches compare_digest, whose str form raises
+        # TypeError for non-ASCII input (the Integrator source propagates that
+        # TypeError to a 500 at its HTTP boundary - a recorded PORT-DELTA).
+        if not presented.isascii():
+            raise ProductAuthenticationFailed("product authentication failed")
         matched: ProductCaller | None = None
         for caller in self._callers:
             held = self._lookup(caller.api_key_ref)
-            if held is not None and secrets.compare_digest(presented, held):
+            if (
+                held is not None
+                and held.isascii()
+                and secrets.compare_digest(presented, held)
+            ):
                 matched = caller
         if matched is None or required_scope not in matched.scopes:
             raise ProductAuthenticationFailed("product authentication failed")
