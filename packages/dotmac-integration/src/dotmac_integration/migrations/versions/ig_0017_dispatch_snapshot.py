@@ -37,7 +37,7 @@ def upgrade() -> None:
                jsonb_typeof(value->'schema_version') IS DISTINCT FROM 'number' OR
                value->>'schema_version' IS DISTINCT FROM '1' THEN RETURN false; END IF;
             IF value->>'state' = 'unstarted' THEN
-                RETURN value = '{"schema_version":1,"state":"unstarted"}'::jsonb;
+                RETURN value = '{"schema_version": 1,"state":"unstarted"}'::jsonb;
             END IF;
             IF value->>'state' IS DISTINCT FROM 'frozen' OR
                (SELECT array_agg(key ORDER BY key) FROM jsonb_object_keys(value) key)
@@ -179,7 +179,7 @@ def upgrade() -> None:
         BEGIN
             IF TG_OP = 'INSERT' THEN
                 IF NEW.delivery_snapshot_json IS NOT NULL AND
-                   NEW.delivery_snapshot_json IS DISTINCT FROM '{"schema_version":1,"state":"unstarted"}'::jsonb THEN
+                   NEW.delivery_snapshot_json IS DISTINCT FROM '{"schema_version": 1,"state":"unstarted"}'::jsonb THEN
                     RAISE EXCEPTION 'new dispatch must be explicitly unstarted';
                 END IF;
                 RETURN NEW;

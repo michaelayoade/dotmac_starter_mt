@@ -151,6 +151,10 @@ def test_published_v1_v2_golden_document_and_fingerprint_remain_unchanged(versio
             key: value for key, value in expected.items() if key != "schema_version"
         }
         material["application"] = "sub"
+        # Published v1 freezes to MappingProxyType, which canonical_digest's
+        # default=str encodes as text. Preserve that historical retry identity;
+        # changing it to a JSON object requires a separate governed transition.
+        material["observation"] = "{'text': 'hello', 'from': '+2348000000000'}"
     expected_fingerprint = hashlib.sha256(
         json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -177,3 +181,14 @@ def test_snapshot_free_custom_store_keeps_its_structural_compatibility_seam():
     assert report.claimed
     assert not report.preparation_refused
     assert store.events == ["claim", "deliver", "settle"]
+
+
+def test_published_v1_legacy_fingerprint_retries_without_reidentifying_receipt():
+    from dotmac_integration.receipt_delivery import build_product_request
+
+    from tests.unit.test_integration_receipt_delivery import _claim
+
+    # Retained fingerprint from the published v1 frozen-mapping encoding.
+    fingerprint = "31da8d052f137fb33313dc9365cfc868c85bdcf71f160912e28ea0f8a7383375"
+    claim = _claim(stored_fingerprint=fingerprint)
+    assert build_product_request(claim).request_fingerprint == fingerprint
