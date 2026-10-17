@@ -14,6 +14,8 @@ source_revisions = [
   "dotmac_sub:13afd67e43ec946e5e25564628806ce4ddd7441c",
   "dotmac_starter_mt:2e0c04ce61c50c95472fb26ad1867d5099edb832",
 ]
+# Accepted source correction; initial source_revisions remain immutable.
+revalidation_revisions = ["dotmac_academy_app:61f69194d6591c6a2d13472a5e38c3a5ecf34454"]
 source_paths = [
   "dotmac_academy_app:app/models/course.py",
   "dotmac_academy_app:app/models/assessment.py",
@@ -60,13 +62,13 @@ inventory_evidence = ["docs/inventories/learning-sources.md"]
 first_cutover = "Academy alone is first adopter. Qualify the complete activity-result to best-result/course progress/completion/certificate vertical, including its seven-table storage dependency closure and final-lab consequence. All selected domain writes delegate typed commands; course/activity authoring decisions retain their current owner until ported. Preserve ERP sync checkpoint values in an explicitly Academy-owned checkpoint and retire direct ERP updates to module completion rows. Then extend the same owner through full curriculum, durable reading/annotations, enrolment/access, assessment using the existing exam engine and attempt policy, learning delivery and learner support until Academy's displaced local learning implementations are retired. A second consumer is not required and none is claimed."
 shadow_and_drift = "Read-only comparison of exact results, best-result ordering, progress, completion timestamps/regression, certificate identity, learning events, enrolment/access refusals and migrated references on fresh and populated PostgreSQL fixtures. Preserve RLS/grants and stable IDs. Stop request/background writers for one qualified table/lineage transfer and writer switch; no dual writes. Verify rollback before and after new writes with preserved records and event state."
 local_copy_retirement = "Remove Academy's displaced domain model/service implementations and direct learning writers as each released-package cutover is proved; preserve only thin authorized adapters and explicit product boundaries. ERP's pre-existing nonauthoritative LMS retirement remains its separately tracked ADR0004 obligation, not a new module consumer or an authority transfer."
-next_action = "2026-10-17: allocation PR873 and Academy source correction PR177 remain candidates under hosted qualification, not merged/adopted releases. Merge the isolated namespace allocation before learning src is written. Qualify and merge the final-lab/aggregate-lock/least-privilege and mixed-admission-lock correction before porting that vertical; add a revalidation coordinate while retaining the initial source pins. Publish a separately authorized Kernel containing the allocation before naming a pinnable module floor. Establish current Sub-first lineage and Academy UI05/identity prerequisite evidence; reuse their existing owners. Then implement, qualify, release and adopt each coherent slice of the full scoped learning module and retire local writers."
+next_action = "2026-10-17: Academy source correction PR177 is merged at61f69194d6591c6a2d13472a5e38c3a5ecf34454 with hosted PR/push CI and resulting main CI and engineering standards green; initial source pins are retained and accepted-source revalidation is recorded. This qualifies the source correction, not a released or adopted learning module. Allocation PR873 remains under qualification; merge its isolated namespace allocation before learning src is written. Publish a separately authorized Kernel containing the allocation before naming a pinnable module floor. Establish current Sub-first lineage and Academy UI05/identity prerequisite evidence; reuse their existing owners. Then implement, qualify, release and adopt each coherent slice of the full scoped learning module and retire local writers."
 
 [[product_writers]]
 product = "dotmac_academy_app"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "a99a395e066db4eea3ec1d73219ab5dd006c1d1d"
+revision = "61f69194d6591c6a2d13472a5e38c3a5ecf34454"
 evidence_paths = ["app/models/assessment.py", "app/services/assessment.py", "app/services/lab_lifecycle.py", "app/services/completion.py", "app/services/certificates.py", "app/services/entitlements.py"]
 
 [[product_writers]]

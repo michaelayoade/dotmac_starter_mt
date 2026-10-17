@@ -29,16 +29,20 @@ operational facts to ERP or make several deployments co-own an aggregate.
 Academy is a sufficient first consumer; a future adopter will prove additional
 reuse rather than authorize the initial extraction.
 
-## Candidate correction checkpoints
+## Accepted source correction checkpoint
 
 The immutable audit coordinates above remain the initial evidence. Academy
-PR #177 at `80ebd67c04f36d45abc247d0b2118abc48ddba15` is an unmerged source
-correction candidate: final-lab completion, aggregate/certificate locking,
-worker least privilege, admission locks compatible with real People foreign
-keys, and lab queue partial-index inference under generic prepared plans.
-Its hosted qualification is pending. Record the accepted protected merge and
-revalidate the relevant source before porting; a candidate is not source
-acceptance or adoption evidence.
+PR #177 merged at `61f69194d6591c6a2d13472a5e38c3a5ecf34454`, retaining the
+reviewed `b07e89455ea4ec691e99f01a2fe6fb47dab58357` tree. Hosted PR and push
+CI passed; PR job `117333097511` reports 1,394 passed and 2 skipped. Resulting
+main CI `39012406153` and engineering standards `39012406191` both succeeded.
+The accepted correction includes final-lab completion, aggregate/certificate
+locking, worker least privilege, admission locks compatible with real People
+foreign keys, and lab queue partial-index inference under generic prepared plans.
+The optional-consequence SQL-failure regressions also passed. This is source
+qualification, not learning-package publication or Academy module adoption.
+The dossier records this accepted-source revalidation while preserving the
+initial audit pins.
 
 The reviewed draft dossier is [learning-extraction-dossier.toml](learning-extraction-dossier.toml).
 It deliberately lives outside `packages/` until allocation is merged. Move it
@@ -180,15 +184,16 @@ writers are retired.
 
 Source searches cover production Python under `app/`, scripts and migrations;
 tests are characterization evidence separately. They establish source closure,
-not deployed populations. The writer list distinguishes the pinned audit from
-PR #177's unmerged additions. Revalidate against the accepted source-fix merge.
+not deployed populations. The writer list distinguishes the initial pinned audit from
+PR #177's accepted additions at `61f69194`. The corrected writer paths are
+revalidated against the merged source tree; they remain local until adoption.
 
-| Selected state | Audited writer / proposed source-fix addition | Required disposition |
+| Selected state | Audited writer / accepted source-fix addition | Required disposition |
 |---|---|---|
 | Courses | `services/authoring.py:create_course`, `services/content_import.py:import_manual` through instructor/CLI callers | Delegate typed course persistence; retain existing authoring decisions until their port. |
 | Activities | `cli.py:_load_banks`, `services/lab_content.py:import_labs` | Delegate typed activity persistence, preserving bank and lab references. |
 | Submissions and scores | `services/assessment.py:submit_activity`, `override_score`; `services/lab_lifecycle.py:grade` through the leased worker | Delegate result commands; preserve automatic/manual/lab distinctions and caller transactions. |
-| Completion | Audited `services/completion.py:recompute_completion`; PR #177 proposes `services/completion_aggregate.py:ensure_locked_completion` and the direct lab-grade recompute call | Qualify the source correction before porting its aggregate writer. Assessment is an audited recompute caller; lab grade becomes one only after the correction. No additional worker reconciliation hook was found. |
+| Completion | Audited `services/completion.py:recompute_completion`; PR #177 adds `services/completion_aggregate.py:ensure_locked_completion` and the direct lab-grade recompute call | Port the qualified aggregate writer. Assessment and lab grade are both recompute callers in the accepted source. No additional worker reconciliation hook was found. |
 | Certificates | `services/certificates.py:issue_certificate`, called by completion and certificate download | Delegate issuance; retain PDF rendering and product response adapters. |
 | Learning events | `services/learning_events.py:record` / `emit` | Port the sole row writer and its deduplication/query contract. Assessment, attempts, labs, certificates, catalogue and learning routes must delegate. |
 | ERP delivery checkpoint | `services/erp_sync.py:push_completion` writes `erp_synced_at`; `sync_pending` and CLI `_erp_training_sync` select pending delivery | Preserve existing checkpoint values in the Academy-owned delivery owner; stop mutation of the learning completion row. |
@@ -198,7 +203,7 @@ adapter and must consume the selected module commands after adoption. Historical
 remediation in migration `0041_review_remediation.py` updates submissions, and
 `0042_course_listed.py` backfills courses. Preserve released migration bytes;
 fresh installation still executes the actual history before the explicit
-successor handoff. Worker grants in 0056 and candidate 0061 must be reconciled
+successor handoff. Worker grants in 0056 and accepted 0061 must be reconciled
 against the selected final schema and exact column privileges.
 
 Inbound composite course references exist in `chapters`, `course_offerings`,
@@ -276,16 +281,16 @@ and polling reads the score. No searched caller or settlement hook recomputes
 completion. This contradicts ADR 0004's lab requirement and must be corrected
 explicitly before porting the vertical.
 
-Academy PR #177 proposes that correction at
-`80ebd67c04f36d45abc247d0b2118abc48ddba15`. It is a source candidate, not a
-merged or qualified extraction reference. Its proposed aggregate lock uses the
+Academy PR #177 supplies that correction at accepted merge
+`61f69194d6591c6a2d13472a5e38c3a5ecf34454`, qualified by hosted PR/push CI
+and resulting main CI. Its aggregate lock uses the
 unique tenant/learner/course completion row, including concurrent creation,
 instead of granting the lab worker identity-update permission. Migration 0061
 adds only the necessary course reads, completion inserts/state-column updates
 and certificate insertion. Existing notification/event/email intent grants are
 retained. Required certificate persistence shares lab settlement's transaction;
 optional notification/email errors use savepoints. Actual-role PostgreSQL,
-concurrency, retry, tenant and rollback tests are authored and await hosted CI.
+concurrency, retry, tenant and rollback tests passed hosted qualification.
 Both submission and attempt-close admission locks use `FOR NO KEY UPDATE`,
 retaining admission exclusion while permitting certificate event/notification
 People FK checks. Real crossed-lock tests cover direct submission and attempt
@@ -330,7 +335,8 @@ attestation.
 
 Academy still has no completed Party/facet cutover. The existing identity
 programme, PR #122, has an accepted strategy with design-only implementation
-state. Its current candidate is `bacfb16471a380568c94879d321d7146442c46b2`:
+state. Its current candidate is `32b9634edcf3ba2180510d6a9edf32a824548439`,
+refreshed against the accepted `61f69194`/0061 source and still under qualification:
 the refreshed identity ADR is 0009, preserving the current lab-worker ADR 0008.
 It records 28 human references (11 physical, 17 logical), including nullable
 `lab_operations.requested_by`; `claimed_by` remains a worker fencing string.
