@@ -14,8 +14,9 @@ source_revisions = [
   "dotmac_sub:13afd67e43ec946e5e25564628806ce4ddd7441c",
   "dotmac_starter_mt:2e0c04ce61c50c95472fb26ad1867d5099edb832",
 ]
-# Accepted source correction; initial source_revisions remain immutable.
-revalidation_revisions = ["dotmac_academy_app:61f69194d6591c6a2d13472a5e38c3a5ecf34454", "dotmac_academy_app:0968881fc40ad86b3abfea2fc40044dd2dbf47c9"]
+# Effective accepted Academy audit; initial source_revisions remain immutable.
+# PR177 correction at 61f69194d6591c6a2d13472a5e38c3a5ecf34454 is retained in next_action.
+revalidation_revisions = ["dotmac_academy_app:0968881fc40ad86b3abfea2fc40044dd2dbf47c9"]
 source_paths = [
   "dotmac_academy_app:app/models/course.py",
   "dotmac_academy_app:app/models/assessment.py",
@@ -68,7 +69,7 @@ next_action = "2026-10-17: Academy source correction PR177 is merged at 61f69194
 product = "dotmac_academy_app"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "61f69194d6591c6a2d13472a5e38c3a5ecf34454"
+revision = "0968881fc40ad86b3abfea2fc40044dd2dbf47c9"
 evidence_paths = ["app/models/assessment.py", "app/services/assessment.py", "app/services/lab_lifecycle.py", "app/services/completion.py", "app/services/certificates.py", "app/services/entitlements.py"]
 
 [[product_writers]]
@@ -84,3 +85,4 @@ writer_state = "no_writer"
 retirement_required = false
 revision = "13afd67e43ec946e5e25564628806ce4ddd7441c"
 evidence_paths = ["app/models", "app/services", "tests"]
+
