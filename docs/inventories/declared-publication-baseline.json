@@ -138,7 +138,7 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a105+dev",
+      "declared": "0.1.0a106",
       "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record. This development source also reserves learning / mod_learning / lr / branch learning for the Academy-sourced learning module; the reservation installs no module and transfers no data or writer authority. The source also adds tenant audit-history destination revision 0029: nullable unknown historical persistence times and 160-character entity names, while ordinary event writes retain server timestamps. This is not a historical import or identity adoption. This development source also declares tenant_audit_log.v1 and verifies the existing audit catalog and append-only online privileges, bound to 0029. No consumer floor or audit writer changes here; Learning, Fulfillment and Template Studio conversion awaits a sufficient verified Kernel publication.",
       "state": "declared-unpublished"
     },
