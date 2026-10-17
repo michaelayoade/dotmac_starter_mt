@@ -238,13 +238,14 @@ def test_immutable_evidence_sql_and_platform_only_acl(migrated):
                         with conn.begin_nested():
                             conn.execute(text(statement))
                     transaction.rollback()
+        with migration_owner.begin() as conn:
+            conn.execute(text("SET LOCAL ROLE app_user"))
+            assert conn.scalar(text("SELECT current_user")) == "app_user"
+            with pytest.raises(DBAPIError):
+                with conn.begin_nested():
+                    conn.execute(text("SELECT * FROM mod_health.health_grants"))
     finally:
         migration_owner.dispose()
-    with migrated.begin() as conn:
-        conn.execute(text("SET LOCAL ROLE app_user"))
-        with pytest.raises(DBAPIError):
-            with conn.begin_nested():
-                conn.execute(text("SELECT * FROM mod_health.health_grants"))
 
 
 def test_upgrade_preserves_old_null_and_refuses_populated_downgrade(monkeypatch):
