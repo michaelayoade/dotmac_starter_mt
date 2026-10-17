@@ -200,21 +200,18 @@ MAPPED: Final[tuple[Facility, ...]] = (
 #: holding: it is how the next caller becomes a visible diff.
 FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
     "audit:write_audit_event": (
-        "TENANT AUDIT — no published consumer. The persisted-runtime-dependency "
-        "inventory found its module callers are `dotmac-template-studio` and "
-        "`dotmac-fulfillment`, and NEITHER is published: template-studio has no "
-        "tag in any version and sits in no release lane, and fulfillment is "
-        "deliberately unallowlisted until its first participant adapter exists. "
-        "So there is still nothing in the field to protect and no evidence yet "
-        "for what a prerequisite would have to verify. Frozen so the first "
-        "PUBLISHED consumer is a visible diff rather than a discovery.\n\n"
-        "Fulfillment joined 2026-08-22 with its source landing. It was added "
-        "deliberately, not to silence the ratchet: it writes repair evidence "
-        "through this facility BECAUSE audit has one tenant owner, so the "
-        "alternative was a module-local audit table — a parallel writer, and a "
-        "worse defect than the debt recorded here. The two convert together "
-        "when the prerequisite is built; whichever is published first is what "
-        "forces it.",
+        "TENANT AUDIT — existing published consumer debt. Fulfillment a1 and "
+        "Template Studio a5 already call the Kernel tenant writer; their "
+        "published floors predate tenant_audit_log.v1. The new Kernel-owned "
+        "effect and live catalog proof are prepared in source and must complete "
+        "Kernel publication and installed-registry verification first.\n\n"
+        "Keep this exact caller set frozen during that release sequence. Then "
+        "convert both consumers together with Learning's prepared assessment "
+        "slice: require the effect, add verification-only lineage successors, "
+        "declare the proven published Kernel floor and qualify installed "
+        "artifacts. Move this facility to MAPPED with public-root-export "
+        "detection and sensitivity coverage in that conversion. No new caller "
+        "is admitted here, and this record does not claim consumer closure.",
         frozenset(
             {
                 "dotmac-fulfillment/src/dotmac_fulfillment/service.py",

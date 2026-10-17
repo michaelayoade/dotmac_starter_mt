@@ -91,6 +91,7 @@ from dotmac_kernel.planes import (
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     PARTY_PERSON_CATALOG_V1,
+    TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     validate_prerequisites,
 )
@@ -402,6 +403,7 @@ KERNEL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
         TENANT_SCOPE_CATALOG_V1.name,
         MODULE_DATABASE_ROLES_V1.name,
         PARTY_PERSON_CATALOG_V1.name,
+        TENANT_AUDIT_LOG_V1.name,
     ),
 )
 
@@ -1582,7 +1584,7 @@ def migration_owner_ledger_digest(
 #: advertise a plain SHA-256 over some unstated serialization and invite a
 #: consumer to recompute the wrong thing.
 MIGRATION_OWNER_LEDGER_DIGEST: Final[str] = (
-    "cv1:17254ecd87ce99af4d2a6a13ab4ead9b8d462f6af33b61e82fb7658f45b46c15"
+    "cv1:e5f874b1a0ee526067a5dc3f1273d8bbe4ff51f133cb5b8ee282bf3c6e11fc67"
 )
 
 

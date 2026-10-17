@@ -842,6 +842,7 @@
         "verify_outbox_relay",
         "verify_party_person_catalog",
         "verify_platform_audit_log",
+        "verify_tenant_audit_log",
         "verify_tenant_scope_catalog"
       ],
       "status": "declared"
@@ -1098,6 +1099,7 @@
         "PrerequisiteBinding",
         "PrerequisiteError",
         "PrerequisiteSpec",
+        "TENANT_AUDIT_LOG_V1",
         "TENANT_SCOPE_CATALOG_V1",
         "UnboundPrerequisiteError",
         "UnknownPrerequisiteError",

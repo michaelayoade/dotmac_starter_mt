@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from typing import Any, Final, NoReturn
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Connection
 
 from dotmac_kernel.migrations.catalog import DEFAULT_APP_ROLE
@@ -50,6 +51,7 @@ from dotmac_kernel.prerequisites import (
     OUTBOX_RELAY_V1,
     PARTY_PERSON_CATALOG_V1,
     PLATFORM_AUDIT_LOG_V1,
+    TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     binding_for,
     prerequisite,
@@ -871,6 +873,292 @@ def verify_platform_audit_log(bind: Connection) -> None:
             )
 
 
+# ── tenant_audit_log.v1 ─────────────────────────────────────────────────────
+
+_TENANT_AUDIT_COLUMNS: Final[dict[str, _ColumnContract]] = {
+    "id": (sa.Uuid, False, None, None, False),
+    "tenant_id": (sa.Uuid, False, None, None, False),
+    "actor_type": (sa.String, True, 32, None, False),
+    "actor_id": (sa.String, True, 120, None, False),
+    "actor_label": (sa.String, True, 160, None, False),
+    "actor_party_id": (sa.Uuid, True, None, None, False),
+    "source_application": (sa.String, True, 64, None, False),
+    "action": (sa.String, False, 120, None, False),
+    "entity_type": (sa.String, False, 160, None, False),
+    "entity_id": (sa.String, True, 120, None, False),
+    "request_id": (sa.String, True, 120, None, False),
+    "status_code": (sa.Integer, True, None, None, False),
+    "is_success": (sa.Boolean, True, None, None, False),
+    "ip_address": (sa.String, True, 64, None, False),
+    "user_agent": (sa.String, True, 255, None, False),
+    "details": (JSONB, False, None, None, True),
+    "occurred_at": (sa.DateTime, True, None, True, True),
+    "created_at": (sa.DateTime, True, None, True, True),
+}
+_TENANT_AUDIT_INDEXED: Final[tuple[str, ...]] = (
+    "tenant_id",
+    "actor_type",
+    "actor_id",
+    "actor_label",
+    "actor_party_id",
+    "source_application",
+    "request_id",
+    "occurred_at",
+)
+
+
+# Identity of the sole Kernel provider's 0001 body, not a semantic-marker test.
+# Strip indentation at line boundaries only: quoted literal contents and SQL
+# comments must never be collapsed or erased into an apparently safe body.
+# Equivalent alternative providers require their own separately reviewed proof.
+_TENANT_AUDIT_FUNCTION_BODY: Final[tuple[str, ...]] = (
+    "BEGIN",
+    "RETURN NULLIF(current_setting('app.current_tenant', true), '')::uuid;",
+    "EXCEPTION",
+    "WHEN invalid_text_representation THEN",
+    "RETURN NULL;",
+    "END;",
+)
+
+
+def _tenant_audit_function_body_matches(body: str) -> bool:
+    return (
+        tuple(line.strip() for line in body.strip().splitlines())
+        == _TENANT_AUDIT_FUNCTION_BODY
+    )
+
+
+def verify_tenant_audit_log(bind: Connection) -> None:
+    """Prove the existing tenant writer's storage and effective append rights.
+
+    Effective privilege observations include PUBLIC and inherited privileges.
+    Full role reachability/SET ROLE closure remains the deployment owner's
+    responsibility; these observations do not certify that separate boundary.
+    """
+    name = TENANT_AUDIT_LOG_V1.name
+    table = "audit_events"
+    qualified = f"{HOST_SCHEMA}.{table}"
+    if bind.dialect.name != "postgresql":
+        _fail(name, "tenant audit isolation requires PostgreSQL catalogue evidence")
+    inspector = sa.inspect(bind)
+    if not inspector.has_table(table, schema=HOST_SCHEMA):
+        _fail(name, f"{qualified} does not exist")
+    _assert_columns(bind, name, table, _TENANT_AUDIT_COLUMNS)
+    columns = {
+        column["name"]: column
+        for column in inspector.get_columns(table, schema=HOST_SCHEMA)
+    }
+    for column_name, column in columns.items():
+        default = "".join(str(column.get("default") or "").split()).lower()
+        if column_name == "details":
+            if default != "'{}'::jsonb":
+                _fail(name, f"{qualified}.details must default to an empty JSON object")
+        elif column_name in {"occurred_at", "created_at"}:
+            if default not in {"now()", "current_timestamp", "transaction_timestamp()"}:
+                _fail(
+                    name,
+                    f"{qualified}.{column_name} must default to the current transaction timestamp",
+                )
+        elif column.get("default") is not None:
+            _fail(name, f"{qualified}.{column_name} must have no server default")
+    if tuple(
+        inspector.get_pk_constraint(table, schema=HOST_SCHEMA).get(
+            "constrained_columns"
+        )
+        or ()
+    ) != ("id",):
+        _fail(name, f"{qualified} needs a primary key on ('id',)")
+    foreign_keys = inspector.get_foreign_keys(table, schema=HOST_SCHEMA)
+    tenant_fks = [
+        fk
+        for fk in foreign_keys
+        if fk.get("constrained_columns") == ["tenant_id"]
+        and fk.get("referred_schema") == HOST_SCHEMA
+        and fk.get("referred_table") == "tenants"
+        and fk.get("referred_columns") == ["id"]
+        and str((fk.get("options") or {}).get("ondelete", "")).upper() == "CASCADE"
+    ]
+    if len(tenant_fks) != 1:
+        _fail(
+            name,
+            f"{qualified} needs tenant_id foreign key to public.tenants.id ON DELETE CASCADE exactly once",
+        )
+    if any(
+        set(fk.get("constrained_columns") or ())
+        & {"actor_type", "actor_id", "actor_party_id", "actor_label"}
+        for fk in foreign_keys
+    ):
+        _fail(name, f"{qualified} must have no actor foreign key")
+    # The accepted provider has no checks: accepting one would permit closing
+    # the action/entity vocabulary or refusing historical unknown attribution.
+    if inspector.get_check_constraints(table, schema=HOST_SCHEMA):
+        _fail(
+            name,
+            f"{qualified} must not constrain the open audit vocabulary or historical rows",
+        )
+    indexes = inspector.get_indexes(table, schema=HOST_SCHEMA)
+    for column_name in _TENANT_AUDIT_INDEXED:
+        if not any(
+            tuple(index.get("column_names") or ()) == (column_name,)
+            and not bool(index.get("unique"))
+            and (index.get("dialect_options") or {}).get("postgresql_where") is None
+            for index in indexes
+        ):
+            _fail(
+                name,
+                f"{qualified} needs a non-unique, non-partial index on {(column_name,)!r}",
+            )
+    enabled, forced = bind.execute(
+        sa.text(
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_catalog.pg_class "
+            "WHERE oid = CAST(:table AS regclass)"
+        ),
+        {"table": qualified},
+    ).one()
+    if not enabled or not forced:
+        _fail(name, f"{qualified} must have row-level security ENABLEd and FORCEd")
+    # Catalogue-only proof: executing this helper or setting its GUC here would
+    # mutate caller state or borrow an outcome from a hostile function body.
+    helper = bind.execute(
+        sa.text(
+            "SELECT p.prosrc, l.lanname, p.prorettype = 'pg_catalog.uuid'::pg_catalog.regtype, "
+            "p.proretset, p.prokind, p.provolatile, p.prosecdef, p.proconfig, p.oid "
+            "FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_language l ON l.oid = p.prolang "
+            "WHERE p.oid = pg_catalog.to_regprocedure(:signature)"
+        ),
+        {"signature": f"{HOST_SCHEMA}.app_current_tenant_id()"},
+    ).one_or_none()
+    if (
+        helper is None
+        or not _tenant_audit_function_body_matches(helper[0])
+        or helper[1] != "plpgsql"
+        or not helper[2]
+        or helper[3]
+        or helper[4] != "f"
+        or helper[5] != "s"
+        or helper[6]
+        or helper[7] is not None
+    ):
+        _fail(
+            name,
+            "public.app_current_tenant_id() must use the accepted Kernel body "
+            "as a scalar UUID, plpgsql, STABLE, SECURITY INVOKER function "
+            "without function-local settings; equivalent alternative providers "
+            "require a separately reviewed proof",
+        )
+    policies = bind.execute(
+        sa.text(
+            "SELECT permissive, roles, cmd, qual, with_check FROM pg_catalog.pg_policies "
+            "WHERE schemaname = :schema AND tablename = :table"
+        ),
+        {"schema": HOST_SCHEMA, "table": table},
+    ).all()
+    if len(policies) != 1:
+        _fail(name, f"{qualified} needs exactly one tenant-equality policy")
+    permissive, roles, command, using, check = policies[0]
+    expressions = {
+        "tenant_id=app_current_tenant_id",
+        "tenant_id=public.app_current_tenant_id",
+    }
+    normalized = [
+        "".join(str(expression or "").lower().split()).replace("(", "").replace(")", "")
+        for expression in (using, check)
+    ]
+    if (
+        permissive != "PERMISSIVE"
+        or set(roles) != {"public"}
+        or command != "ALL"
+        or any(expression not in expressions for expression in normalized)
+    ):
+        _fail(
+            name,
+            f"{qualified} needs the tenant-equality policy FOR ALL TO PUBLIC with matching USING and WITH CHECK",
+        )
+    # pg_policies deparses according to the caller's search_path. An alternate
+    # visible schema's same-name helper can print identically to the public one;
+    # prove the policy's actual function dependency, not its displayed spelling.
+    function_dependencies = set(
+        bind.execute(
+            sa.text(
+                "SELECT d.refobjid FROM pg_catalog.pg_depend d "
+                "JOIN pg_catalog.pg_policy p ON p.oid = d.objid "
+                "WHERE d.classid = 'pg_catalog.pg_policy'::pg_catalog.regclass "
+                "AND d.refclassid = 'pg_catalog.pg_proc'::pg_catalog.regclass "
+                "AND p.polrelid = CAST(:table AS regclass)"
+            ),
+            {"table": qualified},
+        ).scalars()
+    )
+    if function_dependencies != {helper[8]}:
+        _fail(
+            name,
+            f"{qualified} policy must depend on the validated public tenant helper "
+            "and no other function",
+        )
+    # Builtin objects can be pinned and therefore omitted from pg_depend.
+    # Empty operator dependencies are canonical; any recorded dependency must
+    # identify the real pg_catalog UUID equality operator, never a visible
+    # same-spelling user operator that could implement an always-true predicate.
+    uuid_equality_oid = bind.execute(
+        sa.text(
+            "SELECT o.oid FROM pg_catalog.pg_operator o "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace "
+            "WHERE n.nspname = 'pg_catalog' AND o.oprname = '=' "
+            "AND o.oprleft = 'pg_catalog.uuid'::pg_catalog.regtype "
+            "AND o.oprright = 'pg_catalog.uuid'::pg_catalog.regtype"
+        )
+    ).scalar_one()
+    operator_dependencies = set(
+        bind.execute(
+            sa.text(
+                "SELECT d.refobjid FROM pg_catalog.pg_depend d "
+                "JOIN pg_catalog.pg_policy p ON p.oid = d.objid "
+                "WHERE d.classid = 'pg_catalog.pg_policy'::pg_catalog.regclass "
+                "AND d.refclassid = 'pg_catalog.pg_operator'::pg_catalog.regclass "
+                "AND p.polrelid = CAST(:table AS regclass)"
+            ),
+            {"table": qualified},
+        ).scalars()
+    )
+    if not operator_dependencies <= {uuid_equality_oid}:
+        _fail(
+            name,
+            f"{qualified} policy must use the pg_catalog UUID equality operator",
+        )
+    for role in (DEFAULT_APP_ROLE, "platform_api"):
+        posture = bind.execute(
+            sa.text(
+                "SELECT rolsuper, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = :role"
+            ),
+            {"role": role},
+        ).one_or_none()
+        if posture is None or any(posture):
+            _fail(name, f"{role} must be NOSUPERUSER NOBYPASSRLS")
+        usage, execute = bind.execute(
+            sa.text(
+                "SELECT has_schema_privilege(CAST(:role AS name), 'public', 'USAGE'), "
+                "has_function_privilege(CAST(:role AS name), "
+                "'public.app_current_tenant_id()', 'EXECUTE')"
+            ),
+            {"role": role},
+        ).one()
+        if not usage or not execute:
+            _fail(name, f"{role} needs schema USAGE and tenant-function EXECUTE")
+        for privilege in ("SELECT", "INSERT"):
+            if not _has_table_privilege(bind, role, qualified, privilege):
+                _fail(name, f"{role} needs table-level {privilege} on {qualified}")
+        for privilege in ("UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+            if _has_table_privilege(bind, role, qualified, privilege):
+                _fail(name, f"{role} must not hold {privilege} on {qualified}")
+            if privilege in {"UPDATE", "REFERENCES"} and _has_column_privilege(
+                bind, role, qualified, privilege
+            ):
+                _fail(
+                    name,
+                    f"{role} must not hold column-level {privilege} on {qualified}",
+                )
+
+
 # ── outbox_relay.v1 ─────────────────────────────────────────────────────────
 
 # The relay's row shape, in the form the inspector reports it. Like the ledger
@@ -1282,6 +1570,7 @@ _VERIFIERS: dict[str, Verifier] = {
     IDEMPOTENCY_LEDGER_V1.name: verify_idempotency_ledger,
     OUTBOX_RELAY_V1.name: verify_outbox_relay,
     PLATFORM_AUDIT_LOG_V1.name: verify_platform_audit_log,
+    TENANT_AUDIT_LOG_V1.name: verify_tenant_audit_log,
     PARTY_PERSON_CATALOG_V1.name: verify_party_person_catalog,
 }
 
@@ -1373,4 +1662,5 @@ __all__ = [
     "verify_platform_audit_log",
     "verify_party_person_catalog",
     "verify_tenant_scope_catalog",
+    "verify_tenant_audit_log",
 ]

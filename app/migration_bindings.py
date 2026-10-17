@@ -29,6 +29,7 @@ from dotmac_kernel.prerequisites import (
     OUTBOX_RELAY_V1,
     PARTY_PERSON_CATALOG_V1,
     PLATFORM_AUDIT_LOG_V1,
+    TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     PrerequisiteBinding,
 )
@@ -91,6 +92,13 @@ ASSEMBLY_PREREQUISITE_BINDINGS: Final[tuple[PrerequisiteBinding, ...]] = (
     PrerequisiteBinding(
         prerequisite=PLATFORM_AUDIT_LOG_V1.name,
         provider_revision="0026_platform_audit_log",
+        provider_owner="kernel",
+    ),
+    # Current tenant-audit history width and nullable historical persistence time
+    # arrive in 0029. A stamp or the original table alone is insufficient.
+    PrerequisiteBinding(
+        prerequisite=TENANT_AUDIT_LOG_V1.name,
+        provider_revision="0029_audit_history_shape",
         provider_owner="kernel",
     ),
 )
