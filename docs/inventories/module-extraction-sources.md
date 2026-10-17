@@ -59,6 +59,42 @@ shared package, or maintaining two implementations.
 |---|---|---|---|
 | `dotmac-people` | **Audit complete; a1 released and uncomposed** | ERP is the only qualifying source for the narrow employment-directory contract. Kernel Party remains the identity owner; ERP Person, credentials, payroll, attendance, finance and integration fields do not port. The six-table `mod_people` plane, Party prerequisite, forced-RLS canaries, temporal primary-overlap enforcement and ERP parity behavior now live in `packages/dotmac-people`; no authority has moved. Full evidence in [`people-directory-sources.md`](people-directory-sources.md). | Compose exact kernel a71 and dotmac-people a1 in clean Backoffice and implement the narrow ERP projection/backfill/shadow contract. ERP's 131 FK declarations require a rebuildable compatibility projection after the sealed writer cutover; its projection ratchet remains separate from the lifecycle-writer ratchet. Backoffice composition alone moves no authority. |
 
+## Learning source candidate (2026-10-17)
+
+| Candidate | Evidence status | Product-first reading | Next gate |
+|---|---|---|---|
+| `dotmac-learning` | **Audit-complete source candidate; unpublished `0.1.0a1`; uncomposed; zero adopted contract consumers** | Academy is the qualifying source and sole candidate first adopter. The initial seven-table slice covers courses, activities, submissions, scores, course completions, certificates and learning events; it does not complete the full 27-table extraction. Initial Academy source pin `a99a395e066db4eea3ec1d73219ab5dd006c1d1d` is retained, with accepted revalidation at `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`. ERP is a legacy writer with its separate nonauthoritative LMS retirement obligation; Sub has no matching writer. Exact source paths, retained tests and boundaries are in `packages/dotmac-learning/EXTRACTION.toml`; the package README describes the prepared typed commands and historical storage-transfer contracts. | Qualify the exact committed in-tree source and lock in hosted CI, then establish the sufficient published Kernel floor, isolated installed-package qualification, Academy reference/identity and policy gates, one fenced writer switch and lossless reversal. No released pin, adoption or retirement is claimed. |
+
+The in-tree editable Kernel path is a source-qualification mechanism, not a
+published dependency floor. A hosted lock-producer result alone is not package
+qualification. Keep release enrollment separate until a real published Kernel
+contains the namespace allocation and its minimum is proved sufficient and
+necessary, including a negative control exercising registry/namespace allocation
+rather than merely importing the module. Installed CI must use genuine Kernel
+tenant/person fixtures and verify the complete result-to-progress/completion/
+certificate vertical, including final-lab consequences.
+
+Academy retains authoring, exam-engine/grading/attempt-policy decisions, lab
+execution, authorization, presentation and integration adapters until each
+corresponding port is qualified. Runtime cutover still requires the actual
+identity/UI05 evidence, not the accepted identity design alone. Preserve all
+existing ERP ACK facts losslessly and separately from learning completion facts;
+the unresolved checkpoint policy and qualified Integrator handoff remain
+adoption gates. Storage transfer does not resolve that policy or relocate ACK
+ownership.
+
+Complete the full 27-table scope through curriculum, durable reading and
+annotations, enrolment/access, assessment policy using the existing exam engine
+and attempt policy, learning delivery and learner support. Qualify incoming
+reference closure, full tenant extent, fresh/populated catalog and RLS/grants,
+request/background writer fences and a single writer switch without dual writes.
+Prove reverse transfer both before and after new writes, preserving accepted new
+facts, IDs, event state and ACK evidence. Retire Academy's displaced local domain
+models/services and direct writers only after each coherent released slice is
+adopted; retain thin authorized product adapters. The full extraction, release,
+installed adoption and retirement goal remains incomplete. A second consumer is
+not required by this learning scope and none is claimed.
+
 ## ERP / Backoffice / general publication-prep cohort
 
 These packages are audit-complete implementations, not authorized releases.

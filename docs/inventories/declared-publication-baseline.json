@@ -142,6 +142,11 @@
       "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record. This development source also reserves learning / mod_learning / lr / branch learning for the Academy-sourced learning module; the reservation installs no module and transfers no data or writer authority. The source also adds tenant audit-history destination revision 0029: nullable unknown historical persistence times and 160-character entity names, while ordinary event writes retain server timestamps. This is not a historical import or identity adoption.",
       "state": "declared-unpublished"
     },
+    "dotmac-learning": {
+      "declared": "0.1.0a1",
+      "reason": "SOURCE CANDIDATE, NEVER PUBLISHED. The first seven-table learning slice is prepared from Academy source under its product-first audit; the full 27-table extraction remains incomplete. The editable in-tree Kernel dependency and hosted lock support source qualification only, not a released artifact or a proven published Kernel floor. Keep this package uncomposed and outside release enrollment until hosted source/installed qualification, a sufficient published Kernel allocation floor, and isolated artifact/install-back evidence pass. Academy is the sole candidate first adopter; identity/UI05, ACK-policy and Integrator handoff, reference closure, writer fencing, lossless reversal including accepted new facts, and displaced-writer retirement remain separate adoption gates. Remove this row only with the oracle-backed record of an authorized exact publication; no consumer or authority transfer is asserted.",
+      "state": "never-published"
+    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",

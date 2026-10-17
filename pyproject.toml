@@ -67,6 +67,9 @@ dotmac-support-access = { path = "packages/dotmac-support-access", develop = tru
 # `dotmac_workflow_runtime`, and a contract naming a package that is not on the
 # path fails the build instead of checking it.
 dotmac-forms = { path = "packages/dotmac-forms", develop = true }
+# Initial learning source qualification; the reference assembly stays uncomposed.
+# Publication requires replacing its in-tree Kernel dependency with a proven floor.
+dotmac-learning = { path = "packages/dotmac-learning", develop = true }
 dotmac-workflow-runtime = { path = "packages/dotmac-workflow-runtime", develop = true }
 # Brand profile DATA (ADR-0057 § 2). Genuinely dual-plane, and the one module
 # in the vendor programme that a tenant data plane legitimately installs —
@@ -375,6 +378,7 @@ module = [
     "dotmac_sales.*",
     "dotmac_document_rendering.*",
     "dotmac_forms.*",
+    "dotmac_learning.*",
     "dotmac_workflow_runtime.*",
     "dotmac_fulfillment.*",
     "dotmac_release_catalog.*",
@@ -520,6 +524,7 @@ root_packages = [
     "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_forms",
+    "dotmac_learning",
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
 ]
@@ -674,6 +679,7 @@ source_modules = [
     "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_forms",
+    "dotmac_learning",
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
 ]
@@ -802,6 +808,7 @@ modules = [
     "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_forms",
+    "dotmac_learning",
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
 ]
@@ -914,6 +921,7 @@ forbidden_modules = [
     "dotmac_work_orders",
     "dotmac_document_rendering",
     "dotmac_forms",
+    "dotmac_learning",
     "dotmac_workflow_runtime",
     "dotmac_remote_access",
     "dotmac_compliance_reporting",

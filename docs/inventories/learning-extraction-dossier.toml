@@ -1,0 +1,88 @@
+# Reviewed source-inventory draft. Allocation PR873 is merged; move this into
+# packages/dotmac-learning with implementation. No module adoption is asserted.
+schema_version = 1
+package = "dotmac-learning"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Learning result evidence, best-result and course progress, completion, certificate issuance and learning events; course/activity reference persistence"
+contract = "Initial seven-table slice: courses, activities, submissions, scores, course_completions, certificates and learning_events. Own typed reference persistence, result append and attempt-number allocation, best-result projection, completion including labs, idempotent certificate records and learning evidence within the caller transaction. Preserve tenant/person referential semantics through genuine Kernel Party/PartyPerson prerequisites. Existing Academy exam_engine, grading and attempt_policy remain decision owners until their designated port; curriculum authoring supplies typed persistence commands. Chapter/subtopic reading, participation/access, assessment policy, delivery facts and learner support are subsequent slices of the full extraction goal, not initial release capabilities. Kernel owns tenancy, identity and authorization. Admissions owns applicant intake; labs own execution; Academy retains presentation, branding, configuration and product integration adapters. Preserve its existing ERP ACK and transport evidence while the transitional policy path is resolved; accepted Integrator transport ownership is not superseded by this dossier. No cross-application database access or provider execution."
+source_repositories = ["dotmac_academy_app", "dotmac_erp", "dotmac_sub", "dotmac_starter_mt"]
+source_revisions = [
+  "dotmac_academy_app:a99a395e066db4eea3ec1d73219ab5dd006c1d1d",
+  "dotmac_erp:537f0ccba846c1ea3304805ed17a4d3b9711596b",
+  "dotmac_sub:13afd67e43ec946e5e25564628806ce4ddd7441c",
+  "dotmac_starter_mt:2e0c04ce61c50c95472fb26ad1867d5099edb832",
+]
+# Effective accepted Academy audit; initial source_revisions remain immutable.
+# PR177 correction at 61f69194d6591c6a2d13472a5e38c3a5ecf34454 is retained in next_action.
+revalidation_revisions = ["dotmac_academy_app:0968881fc40ad86b3abfea2fc40044dd2dbf47c9"]
+source_paths = [
+  "dotmac_academy_app:app/models/course.py",
+  "dotmac_academy_app:app/models/assessment.py",
+  "dotmac_academy_app:app/models/attempt.py",
+  "dotmac_academy_app:app/models/cohort.py",
+  "dotmac_academy_app:app/models/track.py",
+  "dotmac_academy_app:app/models/offering.py",
+  "dotmac_academy_app:app/models/prerequisite.py",
+  "dotmac_academy_app:app/models/reading.py",
+  "dotmac_academy_app:app/models/completion.py",
+  "dotmac_academy_app:app/models/certificate.py",
+  "dotmac_academy_app:app/models/learning_event.py",
+  "dotmac_academy_app:app/services/assessment.py",
+  "dotmac_academy_app:app/services/exam_engine.py",
+  "dotmac_academy_app:app/services/attempt_policy.py",
+  "dotmac_academy_app:app/services/reading_progress.py",
+  "dotmac_academy_app:app/services/completion.py",
+  "dotmac_academy_app:app/services/certificates.py",
+  "dotmac_academy_app:app/services/entitlements.py",
+  "dotmac_academy_app:app/services/authoring.py",
+  "dotmac_academy_app:app/services/lab_lifecycle.py",
+  "dotmac_academy_app:app/services/lab_operations.py",
+  "dotmac_erp:app/models/people/training/learning_assessment.py",
+  "dotmac_erp:app/services/people/training/learning_assessment.py",
+  "dotmac_erp:app/services/dotmac_academy/training_sync.py",
+]
+preserved_tests = [
+  "dotmac_academy_app:tests/services/test_assessment_service.py",
+  "dotmac_academy_app:tests/services/test_manual_grading.py",
+  "dotmac_academy_app:tests/services/test_completion.py",
+  "dotmac_academy_app:tests/services/test_certificates.py",
+  "dotmac_academy_app:tests/services/test_learning_events.py",
+  "dotmac_academy_app:tests/services/test_reading_progress.py",
+  "dotmac_academy_app:tests/services/test_lab_lifecycle.py",
+  "dotmac_academy_app:tests/services/test_lab_operations_worker.py",
+  "dotmac_academy_app:tests/services/test_lab_worker_privileges.py",
+  "dotmac_academy_app:tests/web/test_labs_web.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_academy_app"]
+adoption_evidence = []
+composition_boundary = "One tenant-scoped namespace and lineage, independent of Academy app imports and sibling modules. Preserve learner UUID meaning and tenant-safe references; never copy identity tables or weaken references to make composition compile. Existing kernel prerequisites are bound by the assembly, not to product revision IDs inside module migrations. Typed result and delivery/event seams retain admissions, labs, identity, presentation and ERP ownership. No Party facade or private Kernel API workaround."
+inventory_evidence = ["docs/inventories/learning-sources.md"]
+first_cutover = "Academy alone is first adopter. Qualify the complete activity-result to best-result/course progress/completion/certificate vertical, including its seven-table storage dependency closure and final-lab consequence. All selected domain writes delegate typed commands; course/activity authoring decisions retain their current owner until ported. Preserve every existing ERP ACK fact losslessly and separately from module completion facts; the transitional delivery handoff and policy path remain unresolved at the adoption gate; the accepted Integrator transport ownership remains in force. Do not claim checkpoint relocation, Integrator cutover or writer retirement until the policy hold is resolved and the corresponding handoff is qualified. Then extend the same owner through full curriculum, durable reading/annotations, enrolment/access, assessment using the existing exam engine and attempt policy, learning delivery and learner support until Academy's displaced local learning implementations are retired. A second consumer is not required and none is claimed."
+shadow_and_drift = "Read-only comparison of exact results, best-result ordering, progress, completion timestamps/regression, certificate identity, learning events, enrolment/access refusals and migrated references on fresh and populated PostgreSQL fixtures. Preserve RLS/grants and stable IDs. Stop request/background writers for one qualified table/lineage transfer and writer switch; no dual writes. Verify rollback before and after new writes with preserved records and event state."
+local_copy_retirement = "Remove Academy's displaced domain model/service implementations and direct learning writers as each released-package cutover is proved; preserve only thin authorized adapters and explicit product boundaries. ERP's pre-existing nonauthoritative LMS retirement remains its separately tracked ADR0004 obligation, not a new module consumer or an authority transfer."
+next_action = "2026-10-17: Academy source correction PR177 is merged at 61f69194d6591c6a2d13472a5e38c3a5ecf34454 with hosted PR/push CI and resulting main CI and engineering standards green; initial source pins are retained and accepted-source revalidation is recorded. This qualifies the source correction, not a released or adopted learning module. Allocation PR873 merged at Starter 379017e2ff64a602244f2a8f37424f6ec68f6559 after all 46 current-head checks passed. Its resulting main CI is pending; the allocation contains no learning package source. Billing release-record main 653a57d432512ba1da083a7bc3de7c6287091d2d is fully qualified and its source-merge hold is closed. Establish a published Kernel floor containing the allocation before claiming a pinnable qualified package dependency. Academy attempt-policy reader prerequisite PR179 merged at 0968881fc40ad86b3abfea2fc40044dd2dbf47c9; PR/push and resulting main CI and standards passed, with 1,414 tests passed and two skipped on main. The existing query/arithmetic and compatibility caller are preserved; this does not qualify the future module adapter or its transaction/lock behavior. Published Kernel 0.1.0a105 already provides the genuine PartyPerson/catalog contracts; no additional identity API is indicated for fresh package qualification. After allocation and the truthful namespace floor are established, implement and qualify the package with genuine Kernel tenant/person fixtures while the existing Sub-first lineage and Academy UI05/identity programme continue. Require that identity evidence before Academy runtime cutover. Academy PR178 at immutable head 8651a35106fddb4805eab86bc3060eb0140d4ec3 has 1,418 tests passed and two skipped, while required standards run 39018325232/job117356706534 failed because two sync_checkpoint sources exceed baseline zero. This is an unresolved adoption policy hold, not an incomplete initial source audit. Preserve every existing ACK fact losslessly and separately from module completion facts; neither the narrow baseline amendment nor Integrator-handoff-first path has been chosen. Do not claim Integrator cutover, checkpoint relocation or writer retirement before the selected policy path and qualified handoff. Release and adopt each coherent slice of the full scoped learning module and retire local writers."
+
+[[product_writers]]
+product = "dotmac_academy_app"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0968881fc40ad86b3abfea2fc40044dd2dbf47c9"
+evidence_paths = ["app/models/assessment.py", "app/services/assessment.py", "app/services/lab_lifecycle.py", "app/services/completion.py", "app/services/certificates.py", "app/services/entitlements.py"]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "537f0ccba846c1ea3304805ed17a4d3b9711596b"
+evidence_paths = ["app/models/people/training/learning_assessment.py", "app/services/people/training/learning_assessment.py", "app/services/dotmac_academy/training_sync.py"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "no_writer"
+retirement_required = false
+revision = "13afd67e43ec946e5e25564628806ce4ddd7441c"
+evidence_paths = ["app/models", "app/services", "tests"]
+

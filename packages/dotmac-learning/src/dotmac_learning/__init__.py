@@ -1,0 +1,211 @@
+"""Typed learning commands and facts in the caller's transaction.
+
+The first slice owns results, progress, certificates, reference persistence
+and learning events. Products retain authorization, grading, admission policy,
+lab execution and presentation. Importing this surface creates no engine.
+"""
+
+from pathlib import Path
+
+from dotmac_learning.certificates import CertificateNotEligible, issue_certificate
+from dotmac_learning.completion import recompute_completion
+from dotmac_learning.event_contracts import (
+    EventEmission,
+    EventFact,
+    EventWrite,
+    WeekBucket,
+)
+from dotmac_learning.events import (
+    active_person_ids,
+    emit,
+    kind_counts,
+    last_activity_at,
+    record,
+    weekly_buckets,
+)
+from dotmac_learning.manifest import module
+from dotmac_learning.models import (
+    ASSESSMENT_MODES,
+    EVENT_KINDS,
+    KIND_ACTIVITY_STARTED,
+    KIND_CERTIFICATE_EARNED,
+    KIND_CHAPTER_COMPLETED,
+    KIND_CHAPTER_VIEWED,
+    KIND_COURSE_VIEWED,
+    KIND_LAB_CHECK_FAILED,
+    KIND_LAB_CHECK_PASSED,
+    KIND_LAB_LAUNCHED,
+    KIND_SESSION_ATTENDED,
+    KIND_SUBMISSION_MADE,
+    KIND_WORK_GRADED,
+)
+from dotmac_learning.progress_contracts import (
+    CertificateCommand,
+    CertificateFact,
+    CertificateIssue,
+    CompletionCommand,
+    CompletionFact,
+    CompletionResult,
+    ScoreFact,
+)
+from dotmac_learning.projections import (
+    best_scores_by_course_for_person,
+    best_scores_for,
+    best_scores_for_person,
+)
+from dotmac_learning.references import (
+    ActivityFact,
+    ActivityWrite,
+    CourseFact,
+    CourseWrite,
+    ReferenceNotFound,
+    create_activity,
+    create_course,
+    get_activity,
+    get_course,
+    update_activity,
+    update_course,
+)
+from dotmac_learning.result_contracts import (
+    AdmissionContention,
+    AdmissionDecision,
+    AdmissionObservation,
+    AdmissionRefused,
+    AttemptAdmissionPolicy,
+    GradedResult,
+    LabResultCommand,
+    MCQResultCommand,
+    OverrideScoreCommand,
+    ResultBadRequest,
+    ResultWrite,
+    SubmissionFact,
+    TransactionChanged,
+)
+from dotmac_learning.results import (
+    override_score,
+    record_lab_result,
+    record_mcq_result,
+)
+from dotmac_learning.transfer import export_snapshot, import_snapshot, verify_snapshot
+from dotmac_learning.transfer_contracts import (
+    ActivityRowV1,
+    CertificateRowV1,
+    CourseCompletionRowV1,
+    CourseRowV1,
+    DestinationNotEmpty,
+    Float8Bits,
+    ImportObservation,
+    JsonbText,
+    LearningEventRowV1,
+    LearningSnapshotV1,
+    RowCountObservation,
+    RowMismatch,
+    ScoreRowV1,
+    SnapshotMismatch,
+    SnapshotValidationError,
+    SubmissionRowV1,
+    TransferConnectionError,
+    UnsupportedFloatRepresentation,
+    UnsupportedTimestampRepresentation,
+    VerificationObservation,
+)
+
+__version__ = "0.1.0a1"
+
+
+def versions_dir() -> Path:
+    """Return the installed directory containing the ``lr`` revisions."""
+    return Path(__file__).resolve().parent / "migrations" / "versions"
+
+
+__all__ = [
+    "ASSESSMENT_MODES",
+    "EVENT_KINDS",
+    "KIND_ACTIVITY_STARTED",
+    "KIND_CERTIFICATE_EARNED",
+    "KIND_CHAPTER_COMPLETED",
+    "KIND_CHAPTER_VIEWED",
+    "KIND_COURSE_VIEWED",
+    "KIND_LAB_CHECK_FAILED",
+    "KIND_LAB_CHECK_PASSED",
+    "KIND_LAB_LAUNCHED",
+    "KIND_SESSION_ATTENDED",
+    "KIND_SUBMISSION_MADE",
+    "KIND_WORK_GRADED",
+    "ActivityFact",
+    "ActivityRowV1",
+    "ActivityWrite",
+    "AdmissionContention",
+    "AdmissionDecision",
+    "AdmissionObservation",
+    "AdmissionRefused",
+    "AttemptAdmissionPolicy",
+    "CertificateCommand",
+    "CertificateFact",
+    "CertificateIssue",
+    "CertificateNotEligible",
+    "CertificateRowV1",
+    "CompletionCommand",
+    "CompletionFact",
+    "CompletionResult",
+    "CourseCompletionRowV1",
+    "CourseFact",
+    "CourseRowV1",
+    "CourseWrite",
+    "DestinationNotEmpty",
+    "EventEmission",
+    "EventFact",
+    "EventWrite",
+    "Float8Bits",
+    "GradedResult",
+    "ImportObservation",
+    "JsonbText",
+    "LabResultCommand",
+    "LearningEventRowV1",
+    "LearningSnapshotV1",
+    "MCQResultCommand",
+    "OverrideScoreCommand",
+    "ReferenceNotFound",
+    "ResultBadRequest",
+    "ResultWrite",
+    "RowCountObservation",
+    "RowMismatch",
+    "ScoreFact",
+    "ScoreRowV1",
+    "SnapshotMismatch",
+    "SnapshotValidationError",
+    "SubmissionFact",
+    "SubmissionRowV1",
+    "TransactionChanged",
+    "TransferConnectionError",
+    "UnsupportedFloatRepresentation",
+    "UnsupportedTimestampRepresentation",
+    "VerificationObservation",
+    "WeekBucket",
+    "__version__",
+    "active_person_ids",
+    "best_scores_by_course_for_person",
+    "best_scores_for",
+    "best_scores_for_person",
+    "create_activity",
+    "create_course",
+    "emit",
+    "export_snapshot",
+    "get_activity",
+    "get_course",
+    "import_snapshot",
+    "issue_certificate",
+    "kind_counts",
+    "last_activity_at",
+    "module",
+    "override_score",
+    "recompute_completion",
+    "record",
+    "record_lab_result",
+    "record_mcq_result",
+    "update_activity",
+    "update_course",
+    "versions_dir",
+    "verify_snapshot",
+    "weekly_buckets",
+]
