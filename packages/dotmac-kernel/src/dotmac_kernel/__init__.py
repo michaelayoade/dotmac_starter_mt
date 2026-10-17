@@ -45,7 +45,11 @@ from dotmac_kernel.api_documentation import (
     classify_environment,
     environment_api_documentation_policy,
 )
-from dotmac_kernel.assembly import ProductAssemblySpec, ProductSecurityPolicy
+from dotmac_kernel.assembly import (
+    ProductAssemblySpec,
+    ProductSecurityPolicy,
+    RequestEvidenceConfigurationV1,
+)
 from dotmac_kernel.audit import (
     ACTOR_TYPES,
     AuditEvent,
@@ -361,7 +365,7 @@ from dotmac_kernel.web_surfaces import (
     surface_path,
 )
 
-__version__ = "0.1.0a105"
+__version__ = "0.1.0a105+dev"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -423,6 +427,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.middleware.tenant",
         "dotmac_kernel.migrations",
         "dotmac_kernel.migrations.catalog",
+        "dotmac_kernel.migrations.configuration",
         "dotmac_kernel.migrations.gate",
         # Public because an ASSEMBLY must declare its prerequisite bindings and
         # a MODULE migration must verify them — both are consumer-facing halves
@@ -529,6 +534,7 @@ __all__ = [
     "verify_product_database_catalog",
     # assembly composition
     "ProductAssemblySpec",
+    "RequestEvidenceConfigurationV1",
     # API-documentation exposure: declared per assembly, never inherited
     "ApiDocumentationPolicy",
     "ApiDocumentationPolicyError",

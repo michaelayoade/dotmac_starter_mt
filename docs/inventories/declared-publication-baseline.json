@@ -144,7 +144,12 @@
     },
     "dotmac-integration": {
       "declared": "0.1.0a19",
-      "reason": "PROPOSED, UNPUBLISHED SOURCE CANDIDATE. Retains the original engine verification context while preserving legacy receipt origin as unknown; performs no backfill, changes no existing wire contract, and makes no cash-qualification claim. This declaration is not publication or adoption evidence. Remove only after the exact candidate has its authorized release verification and immutable receipt. NOT to be repaired by editing the version: this successor remains unpublished until its separately authorized release is verified and immutably recorded.",
+      "reason": "PROPOSED, UNPUBLISHED SOURCE CANDIDATE. Retains the original engine verification context while preserving legacy receipt origin as unknown; performs no backfill, changes no existing wire contract, and makes no cash-qualification claim. This declaration is not publication or adoption evidence. Remove only after the exact candidate has its authorized release verification and immutable receipt. NOT to be repaired by editing the version: this successor remains unpublished until its separately authorized release is verified and immutably recorded. The integration branch also includes additive shared held-key product authentication extracted from Integrator; it changes neither the connector SPI nor Kernel floor and remains unavailable to consumers until verified publication.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a105+dev",
+      "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
       "state": "declared-unpublished"
     },
     "dotmac-numbering": {
