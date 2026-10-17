@@ -382,6 +382,7 @@ retired prefix is never reused.
 | Module | Schema | Prefix | Branch label |
 |---|---|---|---|
 | `template_studio` | `mod_tstudio` | `ts` | `template_studio` |
+| `learning` | `mod_learning` | `lr` | `learning` |
 | `ticketing` | `mod_tkt` | `tk` | `ticketing` |
 | `release_catalog` | `mod_rel` | `rl` | `release_catalog` |
 | `entitlement_allocation` | `mod_ealloc` | `ea` | `entitlement_allocation` |

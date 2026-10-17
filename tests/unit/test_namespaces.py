@@ -357,6 +357,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "service_changes",
         "operational_escalations",
         "response_obligations",
+        # Academy's learning core is reserved before implementation/cutover.
+        "learning",
         # The two Cloud service-lifecycle owners (ADR-0030 amendment
         # 2026-08-23). `domains` takes `dn`, NOT the `do` its candidate tree
         # carried: `documents` holds `do` permanently and an allocation is
@@ -387,6 +389,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
             "service_changes",
             "operational_escalations",
             "response_obligations",
+            "learning",
             "domains",
             "hosting",
         )
@@ -410,6 +413,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "service_changes": ("mod_servicechanges", "sch", "service_changes"),
         "operational_escalations": ("mod_escalations", "oe", "operational_escalations"),
         "response_obligations": ("mod_sla", "ro", "response_obligations"),
+        "learning": ("mod_learning", "lr", "learning"),
         "domains": ("mod_domains", "dn", "domains"),
         "hosting": ("mod_hosting", "hs", "hosting"),
     }
