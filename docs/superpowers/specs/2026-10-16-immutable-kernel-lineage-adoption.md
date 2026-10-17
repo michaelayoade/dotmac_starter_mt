@@ -122,6 +122,48 @@ execution of the installed artifact can establish actual transactional behavior.
 | Existing credential projection stages against the current mapped table | Reuse its validation/ownership through a reviewed import participant. The current committing public command cannot be nested inside this handoff. |
 | Product database catalogue assumes Starter's assembly-head spelling, while Sub has numeric history | Extend the existing truthful host-lineage composition contract or compose a genuine adoption lineage with provenance. Never relabel the source head. |
 
+### Credential source revalidation (2026-10-17)
+
+This remains a proposed design, not an implemented or rehearsed destination.
+The Sub source checkpoint `e119f08f720779fcb9c46797f568f140bad88168`
+exposes the existing flush-only `stage_credential_party_binding` participant.
+Reuse that owner; do not nest its committing command or create a second
+projection authority. Preserve current OIDC atomic ceremony/session staging
+and the established principal → credential → Party → binding → session lock
+order. Older two-transaction and binding-first proposals are superseded.
+
+Installed binding configuration and credential context can remain Sub-owned
+extensions of canonical identity. Kernel password credential cardinality does
+not establish a one-credential-per-Party restriction. Preserve local password
+credential IDs and hashes exactly; keep username, principal context, binding
+provenance, version, reset-required state, counters, lockout and original
+nullable timestamps in an explicitly owned context with a single writer.
+Preserve MFA and recovery relationships through their existing owners.
+Non-local providers require explicit reviewed dispositions: `sso` alone supplies
+no issuer, and RADIUS facts must not become a fabricated password or issuer.
+An actual external identity adoption records its actual actor, time and reason;
+it cannot impersonate an unknown historical binding ceremony.
+
+A redundant Kernel `UNIQUE (tenant_id, party_id, id)` on password credentials
+is a possible exact composite-FK target if the extension design is selected.
+It is not uniqueness on tenant/Party and is not yet implemented or a published
+floor. A new provider registry, binding-aware password API, standing epoch or
+session revocation policy is not required merely to retain historical values.
+
+Extension construction must account for relation identity: before canonical
+entry, `public.user_credentials` is Sub's legacy relation. A foreign key created
+against it follows that relation into escrow; matching table names after Kernel
+creation do not retarget the foreign key. Select and rehearse creation/rebinding
+against the actual canonical relation after unchanged-chain execution and Party
+import, with genuine future migration composition and reverse recovery. This
+ordering remains unresolved; a normal pre-entry migration cannot claim it has
+already established the canonical target.
+
+Runtime writer cutover must preserve credential-version admission, reset and
+representation-only rehash behavior across hash and context rows in one owner
+transaction, with consistent locking. Exact copy/replay checks alone do not
+prove this. Import success does not activate runtime or retire the legacy writer.
+
 Kernel's catalogue describes tables and columns. Separate evidence must establish
 FKs, policies, grants, functions and dependency transfer; schema presence is not
 that evidence. Preserve Sub's existing transaction authority and canonical
