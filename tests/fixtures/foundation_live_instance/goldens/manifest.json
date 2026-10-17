@@ -1,0 +1,126 @@
+{
+  "baseline_commit": "1750e2776d5f2374892761763067723ff27595f5",
+  "files": [
+    {
+      "bytes": 1687,
+      "path": "v1/descriptor.toml",
+      "sha256": "703801d3fd6cf17459d88d5b01d348166cc6886ad2cadd3a095e16eff85dbf56"
+    },
+    {
+      "bytes": 4782,
+      "path": "v1/canonical.json",
+      "sha256": "7bdb51f2359ded23383b3463b7eec9410c2ce5af43ac9584b062575fb5fdf035"
+    },
+    {
+      "bytes": 5524,
+      "path": "v1/compose.yml",
+      "sha256": "e09711afedcc7cf6696b0421875efdbfad147558b37a5058b5d1101e01178510"
+    },
+    {
+      "bytes": 2762,
+      "path": "v1/execution-plan.json",
+      "sha256": "f508effc72c98831e73c8100156e3ed6a5cd7374ac9579acf1e70337db6627a9"
+    },
+    {
+      "bytes": 859,
+      "path": "v1/evidence-v1.json",
+      "sha256": "c4138cb556ed36cd96ca65ca5e818ee909a857d7967aaeb53bcc19f8a23a3f8b"
+    },
+    {
+      "bytes": 927,
+      "path": "v1/evidence-v2.json",
+      "sha256": "c29369bedb21b48afd703a4c593a4d4d0312e30e51135600bd022e03a3b3de8a"
+    },
+    {
+      "bytes": 6960,
+      "path": "v2/descriptor.toml",
+      "sha256": "1d4267ac82e004830aaf6edb43367ae0d489336bda6819d911184e0cd288b7b9"
+    },
+    {
+      "bytes": 4114,
+      "path": "v2/canonical.json",
+      "sha256": "5eef8508062c04b5db5f9506f4482de303028b89d18e325f79f4fb45194b05c3"
+    },
+    {
+      "bytes": 5396,
+      "path": "v2/compose.yml",
+      "sha256": "9ffa9f25c50a3e56cf4b577576d6509ef91d9287dfc5be43c0c50213f67b0b2b"
+    },
+    {
+      "bytes": 2611,
+      "path": "v2/execution-plan.json",
+      "sha256": "575e72299731c2017fa5f034e3dc8cb7e560b3d17eca0b631e47c8cae4758513"
+    },
+    {
+      "bytes": 883,
+      "path": "v2/evidence-v1.json",
+      "sha256": "2f9212a28c4b04538d6a7fd7cb49707d7cf7ec9d0391dd6f7cbfd4b195b34fda"
+    },
+    {
+      "bytes": 951,
+      "path": "v2/evidence-v2.json",
+      "sha256": "ec3552561dea2eecd299d9b40f56688f93ce477a0bf458730f4a1e88876b3eb4"
+    },
+    {
+      "bytes": 5863,
+      "path": "v3/descriptor.toml",
+      "sha256": "6187e51cc37f15686ce9e7a11defc9ee56278374a062eac648996a65d67da6c3"
+    },
+    {
+      "bytes": 8761,
+      "path": "v3/canonical.json",
+      "sha256": "2bc2ef18d828d6efe55b9d0a23ea514e70f895d676131311c2592962016b033d"
+    },
+    {
+      "bytes": 9147,
+      "path": "v3/compose.yml",
+      "sha256": "1e01df7f7bf39378a9f5664ff4128662041ff759ce9fe03cc98a9412ff913af7"
+    },
+    {
+      "bytes": 3011,
+      "path": "v3/execution-plan.json",
+      "sha256": "ca818637186431ab6b7548540d895e582231219abf60d2bbdca853c2f3e4241e"
+    },
+    {
+      "bytes": 869,
+      "path": "v3/evidence-v1.json",
+      "sha256": "62b4c9f4bf45af2d36cd2a1758ac1eb7a0abcf52613f358b7ec5afa741d0efc6"
+    },
+    {
+      "bytes": 937,
+      "path": "v3/evidence-v2.json",
+      "sha256": "e24c12290eacf69ed5f6bccd1be6fec18e6e31c848a50da654c31d6edeff8417"
+    },
+    {
+      "bytes": 6439,
+      "path": "v4/descriptor.toml",
+      "sha256": "446d8905f89e2fe36429ec2b68d77948220aefb7cb32033226d876a89345befc"
+    },
+    {
+      "bytes": 9273,
+      "path": "v4/canonical.json",
+      "sha256": "29a92d7fa3aa2ca55e3aae42b88f6a4af384594d54d51c38880f22c417b083bc"
+    },
+    {
+      "bytes": 9147,
+      "path": "v4/compose.yml",
+      "sha256": "3be7fdcbe57db0b0815183225643728e56b14aa6b7d793e9c697e2349b1f89d3"
+    },
+    {
+      "bytes": 3113,
+      "path": "v4/execution-plan.json",
+      "sha256": "436462c9c3eb15f6164be45f8279bcb528f3d59f13c7772899ac6e99ce36bab5"
+    },
+    {
+      "bytes": 869,
+      "path": "v4/evidence-v1.json",
+      "sha256": "81604593834f50441f9541af257e7539d39837629518cf61934ae0b70a4c2580"
+    },
+    {
+      "bytes": 937,
+      "path": "v4/evidence-v2.json",
+      "sha256": "d89ee3eaf6f13d77b62d33ae5c9dfe2daa6ed543fba99809c860eda5e066904e"
+    }
+  ],
+  "schema": "FoundationLegacyGoldenFixtures.v1"
+}

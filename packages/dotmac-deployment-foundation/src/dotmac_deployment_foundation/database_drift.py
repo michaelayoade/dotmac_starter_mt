@@ -36,6 +36,7 @@ from .spec import (
     SCHEMA_V2,
     SCHEMA_V3,
     SCHEMA_V4,
+    SCHEMA_V5,
     DatabaseContract,
     ProductDeploymentSpec,
 )
@@ -682,6 +683,7 @@ def compare_database_contract(
             SCHEMA_V2,
             SCHEMA_V3,
             SCHEMA_V4,
+            SCHEMA_V5,
         )
         if descriptor_binds_catalogs and catalog_binding.catalogs != contract.catalogs:
             raise PreconditionFailed(

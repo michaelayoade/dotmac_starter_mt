@@ -152,3 +152,79 @@ What has NOT run is the disposable-host rehearsal
 handoff and a real rollback. Because this package executes migrations, backup,
 handoff and rollback, that rehearsal gates the FIRST PUBLICATION, not merely
 production adoption. See `docs/inventories/deployment-foundation-rehearsal.md`.
+
+## Source-only immutable startup observations
+
+`ProductDeploymentSpec.v5` adds required `startup_config` references. Versions
+v1–v4 reject that section and keep their canonical projection. V5 inherits v4
+candidate material probes separately; those probes remain candidate readiness.
+
+```toml
+[startup_config]
+schema = "StartupConfig.v1"
+complete = true
+binding = "process_start"
+
+[[startup_config.roles]]
+role = "web"
+environment_names = ["APP_MODE"]
+material_names = ["INTEGRATION_CREDENTIAL"]
+
+[[startup_config.roles.mounts]]
+mount_index = 0
+classification = "nonsecret_file"
+```
+
+Each sorted role declaration covers exactly the existing environment/material
+names and every placement mount by index. It repeats no values. The first
+profile requires exactly one replica per declared role, literal nonsecret
+environment values, no role volumes, and read-only repository regular-file or
+`host_material` custody mounts. Named/data volumes and overlapping targets on
+observed roles refuse. Repository paths are confined and walked without
+following symlinks. `custody_file` references go to custody; Foundation does
+not resolve their material paths or read their bytes.
+
+An embedder explicitly installs `startup_assignment_custody` on `Executor`.
+There is no accepting default or new public postexecution authorization path.
+V5 checks the provider and custody capability before dispatch consumption.
+Only the actual successful consuming deploy path mints a private continuation,
+which remains tied to that Executor/run and original held deployment lock.
+After steps, stability, product postflight and exposure reconciliation, the
+Executor collects every role and rechecks the pinned instances and authority
+before publishing `DeploymentOutcome.live_instance_observations`. Any startup
+failure returns a bounded `VERIFY_ROLES` failure with `FAILED` standing and
+preserves the mutation record; no partial observations publish. Cleanup only
+releases observation handles and clears the continuation; the caller releases
+the deployment lock. Historical deployment-evidence serialization is unchanged.
+
+The observer selects one full container ID once, then inspects that ID only.
+Docker emits narrow structural facts and environment slot/comparison outcomes;
+actual environment values and material-value hashes never enter evidence.
+The approved exact image reference is checked independently of alias order.
+Actual readonly repository mounts and files must match the approved paths and
+digests; descriptor-approved environment digests are emitted only after equality.
+
+`StartupAssignmentCustody.confirm_startup_assignment` must independently attest
+assignment **at process start**, its immutability since then, and the exact
+instance/start/material/custody-reference roster. For custody mounts this also
+requires independently inspecting their actual source/target assignment and
+readonly regular-file profile for the pinned instance. Current files alone do
+not prove historical assignment. Foundation checks bounded immutable
+installation/config/credential identities and roster equality; Control later
+compares those identities with its immutable enrollment and committed dispatch.
+A well-formed identity returned by custody is not proof that it matches Control's
+expected installation or credential version. These DTOs are not authenticated
+or signed attestations. No production custody provider or accepting enrollment
+join is qualified by this source change. Releases and operational changes remain
+paused.
+
+The Compose observer additionally requires a Linux Docker host and permission
+to read `/proc/<pinned container PID>/root` from the controller process. It walks
+only declared literal nonsecret targets inside that namespace with nofollow
+components, compares source/target file identities and approved bytes, and
+rechecks the same full container ID/PID/start/restart. This detects stale bind
+inodes after host pathname replacement. It executes no command inside the
+container. Rootless, remote-daemon, inaccessible namespace, symlinked target,
+and other unsupported layouts refuse. `startup_proc_root` is fixed host-provider
+composition (the `/proc` default; explicit synthetic roots are for tests), not
+request material or a configurable observation target.
