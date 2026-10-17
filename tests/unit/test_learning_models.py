@@ -59,6 +59,13 @@ def test_learning_registration_uses_the_shipped_allocation_and_exact_tables():
             "subtopic_reads",
             "chapter_bookmarks",
             "chapter_notes",
+            "cohorts",
+            "enrollments",
+            "tracks",
+            "track_courses",
+            "cohort_tracks",
+            "course_offerings",
+            "course_prerequisites",
         }
     )
     assert registry.namespaces().declared_tables("mod_learning") == frozenset(

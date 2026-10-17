@@ -1,11 +1,20 @@
 """Typed learning commands and facts in the caller's transaction.
 
-Learning owns results, progress, certificates, curriculum, reading and events.
+Learning owns results, progress, certificates, curriculum, reading, events,
+enrolment, audience classification, tracks and course access.
 Products retain authorization, file and presentation adapters, lab execution
-and admissions integration. Grading and attempt decisions retain the existing
-seam until their designated port. Importing this surface creates no engine.
+and admissions integration. Pure selection, option ordering, validity and grading
+reuse the existing engine. Attempt admission retains its existing seam until its
+designated port. Importing this surface creates no engine.
 """
 
+from dotmac_learning.assessment_contracts import GradingQuestion
+from dotmac_learning.audience import (
+    classify_from_roster,
+    counts_by_audience,
+    staff_person_ids,
+    unclassified,
+)
 from dotmac_learning.certificates import CertificateNotEligible, issue_certificate
 from dotmac_learning.completion import recompute_completion
 from dotmac_learning.curriculum import (
@@ -55,6 +64,18 @@ from dotmac_learning.curriculum_transfer_contracts import (
     SubtopicReadRowV2,
     VerificationObservationV2,
 )
+from dotmac_learning.entitlements import (
+    CourseAccessDenied,
+    CourseAccessState,
+    accessible_course_ids,
+    course_access_states,
+    open_course_ids,
+    person_can_access_course,
+    require_course_access,
+    require_course_open,
+    unmet_prerequisites,
+    visible_course_ids,
+)
 from dotmac_learning.event_contracts import (
     EventEmission,
     EventFact,
@@ -69,6 +90,24 @@ from dotmac_learning.events import (
     record,
     weekly_buckets,
 )
+from dotmac_learning.exam_engine import (
+    Question as ExamQuestion,
+)
+from dotmac_learning.exam_engine import (
+    SelectionPolicy,
+    chance_baseline,
+    check_validity,
+    duration_floor,
+    near_chance_floor,
+    present_options,
+)
+from dotmac_learning.exam_engine import (
+    Sitter as ExamSitter,
+)
+from dotmac_learning.exam_engine import (
+    select as select_questions,
+)
+from dotmac_learning.grading import grade_submission
 from dotmac_learning.manifest import module
 from dotmac_learning.migrations import versions_dir
 from dotmac_learning.models import (
@@ -85,6 +124,43 @@ from dotmac_learning.models import (
     KIND_SESSION_ATTENDED,
     KIND_SUBMISSION_MADE,
     KIND_WORK_GRADED,
+)
+from dotmac_learning.participation_contracts import (
+    ActivateEnrollmentCommand,
+    ActivationResult,
+    AssignFacilitatorCommand,
+    AudienceCounts,
+    BulkEnrollCommand,
+    BulkEnrollResult,
+    ClassificationCounts,
+    ClassifyRosterCommand,
+    EnrollmentFact,
+    FacilitatorEligibility,
+    ParticipationBadRequest,
+    ParticipationForbidden,
+    ParticipationNotFound,
+    RosterAuthority,
+    RosterStateCommand,
+    UnclassifiedPerson,
+)
+from dotmac_learning.participation_transfer import (
+    export_snapshot_v3,
+    import_snapshot_v3,
+    verify_snapshot_v3,
+)
+from dotmac_learning.participation_transfer_contracts import (
+    CohortRowV3,
+    CohortTrackRowV3,
+    CourseOfferingRowV3,
+    CoursePrerequisiteRowV3,
+    EnrollmentRowV3,
+    ImportObservationV3,
+    LearningSnapshotV3,
+    ParticipationStorageRowV3,
+    SnapshotClosureErrorV3,
+    TrackCourseRowV3,
+    TrackRowV3,
+    VerificationObservationV3,
 )
 from dotmac_learning.progress_contracts import (
     CertificateCommand,
@@ -170,6 +246,31 @@ from dotmac_learning.results import (
     record_lab_result,
     record_mcq_result,
 )
+from dotmac_learning.roster import (
+    activate_enrollment,
+    assign_facilitator,
+    bulk_enroll,
+    set_roster_state,
+)
+from dotmac_learning.tracks import (
+    AddTrackCoursesCommand,
+    CohortTrackFact,
+    CohortTrackItem,
+    CreateTrackCommand,
+    ReorderTrackCoursesCommand,
+    TrackFact,
+    add_courses_to_cohort_track,
+    assign_enrollment_track,
+    clear_enrollment_track,
+    cohort_track_or_404,
+    create_cohort_track,
+    default_track_for_cohort,
+    ensure_default_track_for_cohort,
+    ensure_track_offerings,
+    list_cohort_tracks,
+    reorder_track_courses,
+    tracks_for_cohorts,
+)
 from dotmac_learning.transfer import export_snapshot, import_snapshot, verify_snapshot
 from dotmac_learning.transfer_contracts import (
     ActivityRowV1,
@@ -198,6 +299,72 @@ __version__ = "0.1.0a1"
 
 
 __all__ = [
+    "export_snapshot_v3",
+    "import_snapshot_v3",
+    "verify_snapshot_v3",
+    "CohortRowV3",
+    "EnrollmentRowV3",
+    "TrackRowV3",
+    "TrackCourseRowV3",
+    "CohortTrackRowV3",
+    "CourseOfferingRowV3",
+    "CoursePrerequisiteRowV3",
+    "ParticipationStorageRowV3",
+    "LearningSnapshotV3",
+    "SnapshotClosureErrorV3",
+    "VerificationObservationV3",
+    "ImportObservationV3",
+    "ActivateEnrollmentCommand",
+    "ActivationResult",
+    "AssignFacilitatorCommand",
+    "AudienceCounts",
+    "BulkEnrollCommand",
+    "BulkEnrollResult",
+    "ClassificationCounts",
+    "ClassifyRosterCommand",
+    "EnrollmentFact",
+    "FacilitatorEligibility",
+    "ParticipationBadRequest",
+    "ParticipationForbidden",
+    "ParticipationNotFound",
+    "RosterAuthority",
+    "RosterStateCommand",
+    "UnclassifiedPerson",
+    "activate_enrollment",
+    "assign_facilitator",
+    "bulk_enroll",
+    "set_roster_state",
+    "classify_from_roster",
+    "counts_by_audience",
+    "staff_person_ids",
+    "unclassified",
+    "CreateTrackCommand",
+    "AddTrackCoursesCommand",
+    "ReorderTrackCoursesCommand",
+    "TrackFact",
+    "CohortTrackFact",
+    "CohortTrackItem",
+    "list_cohort_tracks",
+    "tracks_for_cohorts",
+    "create_cohort_track",
+    "add_courses_to_cohort_track",
+    "reorder_track_courses",
+    "cohort_track_or_404",
+    "ensure_track_offerings",
+    "assign_enrollment_track",
+    "clear_enrollment_track",
+    "default_track_for_cohort",
+    "ensure_default_track_for_cohort",
+    "CourseAccessDenied",
+    "CourseAccessState",
+    "visible_course_ids",
+    "course_access_states",
+    "accessible_course_ids",
+    "person_can_access_course",
+    "require_course_access",
+    "open_course_ids",
+    "unmet_prerequisites",
+    "require_course_open",
     "ASSESSMENT_MODES",
     "EVENT_KINDS",
     "KIND_ACTIVITY_STARTED",
@@ -351,4 +518,15 @@ __all__ = [
     "export_snapshot_v2",
     "import_snapshot_v2",
     "verify_snapshot_v2",
+    "ExamQuestion",
+    "ExamSitter",
+    "GradingQuestion",
+    "SelectionPolicy",
+    "chance_baseline",
+    "check_validity",
+    "duration_floor",
+    "grade_submission",
+    "near_chance_floor",
+    "present_options",
+    "select_questions",
 ]

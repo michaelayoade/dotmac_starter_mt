@@ -2490,8 +2490,8 @@ source-of-truth for the modules phase 2b introduced. "ST" = `dotmac_starter`
 
 `packages/dotmac-learning/` declares unpublished `0.1.0a1`, with typed source
 under `src/dotmac_learning/`, the `lr` migration lineage in `mod_learning`,
-and its product-first audit in `EXTRACTION.toml`. Prepared source contains fourteen
-of the full 27-table extraction scope, across `lr_0001` and `lr_0002`. `references`, `results`, `projections`,
+and its product-first audit in `EXTRACTION.toml`. Prepared source contains twenty-one
+of the full 27-table extraction scope, across `lr_0001`, `lr_0002` and `lr_0003`. `references`, `results`, `projections`,
 `completion`, `certificates` and `events` separate reference persistence,
 result evidence, best-result queries, progress, issuance and learning evidence.
 `result_contracts`, `progress_contracts`, `event_contracts` and
@@ -2503,8 +2503,8 @@ a published minimum or a release artifact. This candidate remains uncomposed,
 unreleased and without adopted consumers. Hosted installed qualification and a
 proven published Kernel floor containing its namespace allocation remain gates.
 The curriculum owner adds create/upsert/delete/manual-import and bank-replacement
-commands; reading owns chapter/subtopic progress, bookmarks and notes. Academy
-retains grading/exam/attempt-policy decisions until their designated port,
+commands; reading owns chapter/subtopic progress, bookmarks and notes. The prepared `exam_engine` and `grading` port reuses Academy's existing pure algorithms;
+Academy retains attempt-policy decisions until their designated port,
 authorization, content discovery/decoding/rendering, lab execution, presentation
 and integration adapters. The caller
 owns the root transaction, commit and rollback; the module mutates and flushes.
@@ -2524,6 +2524,15 @@ actual FK closure checked before insertion. V1 remains the seven-table API. V2
 requires effective Kernel Party/PartyPerson ID-column reads for real event-subject
 preflight; it neither grants privileges nor invents stronger SIMPLE references.
 Full behavior and limits are in the package README.
+
+Participation source adds roster activation/state/facilitator assignment, tracks,
+explicit roster audience classification and entitlement/window/prerequisite queries.
+Trusted product authorization supplies scoped authority/eligibility facts. Fresh
+Enrollment dual Party/profile references are an explicit identity translation, not
+legacy Academy identity adoption. V3 covers all twenty-one tables and 194 fields;
+V1/V2 retain their scoped contracts. All source is unpublished and requires hosted
+qualification. Remaining direct cohort creation/facilitator-removal and other
+product domain writers/reads must still be extracted before assembly retirement.
 
 ## Model provenance table
 
@@ -2689,6 +2698,13 @@ made concrete — every model has exactly one declared owner.
 | `SubtopicRead` | `mod_learning.subtopic_reads` | `dotmac-learning` source candidate | Academy `app/models/reading.py` at accepted revalidation `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; append-only subtopic facts with SELECT/INSERT-only application grants. |
 | `ChapterBookmark` | `mod_learning.chapter_bookmarks` | `dotmac-learning` source candidate | Academy `app/models/bookmark.py` at accepted revalidation `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; learner bookmarks with separate SIMPLE course/chapter FKs. |
 | `ChapterNote` | `mod_learning.chapter_notes` | `dotmac-learning` source candidate | Academy `app/models/bookmark.py` at accepted revalidation `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; learner notes preserving original course assignment on update. |
+| `Cohort` | `mod_learning.cohorts` | `dotmac-learning` source candidate | Academy participation source and full migrations at accepted `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; `lr_0003` preserves actual storage constraints. Enrollment identity references are explicitly translated to genuine Kernel Party/profile; legacy mapping remains a cutover gate. |
+| `Enrollment` | `mod_learning.enrollments` | `dotmac-learning` source candidate | Academy participation source and full migrations at accepted `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; `lr_0003` preserves actual storage constraints. Enrollment identity references are explicitly translated to genuine Kernel Party/profile; legacy mapping remains a cutover gate. |
+| `Track` | `mod_learning.tracks` | `dotmac-learning` source candidate | Academy participation source and full migrations at accepted `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; `lr_0003` preserves actual storage constraints. Enrollment identity references are explicitly translated to genuine Kernel Party/profile; legacy mapping remains a cutover gate. |
+| `TrackCourse` | `mod_learning.track_courses` | `dotmac-learning` source candidate | Academy participation source and full migrations at accepted `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; `lr_0003` preserves actual storage constraints. Enrollment identity references are explicitly translated to genuine Kernel Party/profile; legacy mapping remains a cutover gate. |
+| `CohortTrack` | `mod_learning.cohort_tracks` | `dotmac-learning` source candidate | Academy participation source and full migrations at accepted `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; `lr_0003` preserves actual storage constraints. Enrollment identity references are explicitly translated to genuine Kernel Party/profile; legacy mapping remains a cutover gate. |
+| `CourseOffering` | `mod_learning.course_offerings` | `dotmac-learning` source candidate | Academy participation source and full migrations at accepted `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; `lr_0003` preserves actual storage constraints. Enrollment identity references are explicitly translated to genuine Kernel Party/profile; legacy mapping remains a cutover gate. |
+| `CoursePrerequisite` | `mod_learning.course_prerequisites` | `dotmac-learning` source candidate | Academy participation source and full migrations at accepted `0968881fc40ad86b3abfea2fc40044dd2dbf47c9`; `lr_0003` preserves actual storage constraints. Enrollment identity references are explicitly translated to genuine Kernel Party/profile; legacy mapping remains a cutover gate. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -2706,13 +2722,17 @@ write:
 |---|---|
 | Proposed Python dependency-lock artifacts | `scripts.python_lock_bootstrap` validates the closed metadata proposal and committed base/input hashes, then runs the pinned Poetry tool in a temporary hosted checkout. `.github/workflows/python-lock-bootstrap.yml` is its same-repository PR caller. The resulting lock and hash manifest are unqualified build observations; the reviewed dependency change and matching lock enter one source commit. The producer changes no committed metadata, validates no repaired lock as qualification, and owns no package publication, release floor, application composition or product writer. |
 | Learning course/activity reference persistence (source candidate) | `dotmac_learning.references.create_course`, `update_course`, `create_activity`, `update_activity`; `get_course` and `get_activity` are reads. `dotmac_learning.models` supplies the seven storage models, not a second command owner. Curriculum decisions have their owner below; Academy retains file/rendering adapters. |
-| Learning result evidence and best-result projections (source candidate) | `dotmac_learning.results.record_mcq_result`, `record_lab_result`, `override_score` mutate in the caller transaction; `dotmac_learning.projections.best_scores_for`, `best_scores_for_person`, `best_scores_by_course_for_person` are reads. Grading, exam selection and trusted typed admission-policy decisions remain with Academy. |
+| Learning result evidence and best-result projections (source candidate) | `dotmac_learning.results.record_mcq_result`, `record_lab_result`, `override_score` mutate in the caller transaction; `dotmac_learning.projections.best_scores_for`, `best_scores_for_person`, `best_scores_by_course_for_person` are reads. Pure grading and exam selection use the source-preserving owners below; trusted typed attempt-admission policy remains with Academy until its designated port. |
 | Learning course completion and certificate issuance (source candidate) | `dotmac_learning.completion.recompute_completion` and `dotmac_learning.certificates.issue_certificate`; the caller owns the root transaction and required failures propagate. Completion regression retains any already-issued certificate. |
 | Learning events (source candidate) | `dotmac_learning.events.record` and optional `emit`; `last_activity_at`, `weekly_buckets`, `active_person_ids`, `kind_counts` read projections. The product supplies the day timezone; optional emission uses a savepoint, not a second root transaction authority. |
 | Learning historical seven-table storage transfer (source candidate) | `dotmac_learning.transfer.export_snapshot`, `verify_snapshot`, `import_snapshot` use typed SQLAlchemy Core storage contracts in an existing caller-owned PostgreSQL Connection/transaction. Only import writes; none starts or completes a root transaction. Caller owns authorization, full extent, fences, reference closure and reversal. Storage equality is no authority/cutover proof. |
 | Learning curriculum lifecycle and bank rules (source candidate) | `dotmac_learning.curriculum` owns create/upsert/delete/manual-import and bank replacement; `bank_validation` owns pure source rules. Product file/YAML/figure discovery and rendering remain adapters. |
 | Learning reading and annotations (source candidate) | `dotmac_learning.reading` owns chapter/subtopic progress, bookmarks, notes and projections through caller-owned transactions. Products bind trusted visibility and heading inputs. |
 | Learning fourteen-table storage transfer (source candidate) | `dotmac_learning.curriculum_transfer.export_snapshot_v2`, `import_snapshot_v2`, `verify_snapshot_v2` preserve all 135 fields and actual FK closure before insertion, in an existing caller Connection. V1 remains unchanged; neither version proves product cutover or reverse assembly compatibility. |
+| Learning enrolment and explicit audience classification (source candidate) | `dotmac_learning.roster` owns activation, bulk enrolment, state and facilitator assignment; `audience` classifies only from an explicit roster. `participation_contracts` supplies typed commands/facts and trusted scoped product authority. No credential, role-provisioning or ERP employment authority. |
+| Learning tracks and course access (source candidate) | `dotmac_learning.tracks` owns source ordering, enabled offerings and enrolment track assignment; `entitlements` owns course visibility/access, prerequisites and windows. Source status-filter asymmetries and caller flush/error boundaries remain. |
+| Learning existing pure assessment engine (source candidate) | `dotmac_learning.exam_engine` and `grading` reuse Academy selection, deterministic option presentation, validity and grading. Admissions, time/persistence and attempt policy retain their designated owners. |
+| Learning twenty-one-table storage transfer (source candidate) | `dotmac_learning.participation_transfer.export_snapshot_v3`, `import_snapshot_v3`, `verify_snapshot_v3` cover all 194 persisted fields/current keys, including nullable threshold float8 bits. Full21 preflight precedes V2 inserts; V1/V2 retain their scopes. Product ACK/reference/grant/fence and compatible reverse-assembly proof remain required. |
 | Tenants | `app.features.tenants.service.provision_tenant` (platform-only, control-plane security Task 2 — one transaction creating tenant + owner party/person/credential + `admin` role grant + two audit events; no update/delete service yet) |
 | Platform admins | `scripts/create_platform_admin.py::upsert_admin` (CLI-only, platform/migration DB credentials — the same trust boundary as migrations; deliberately NO HTTP write path, see ADR-0004) |
 | Platform sessions | `dotmac_kernel.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |

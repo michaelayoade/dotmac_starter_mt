@@ -26,13 +26,14 @@ from sqlalchemy.exc import DBAPIError
 
 from tests import test_learning_catalog as learning_catalog_fixtures
 from tests.test_learning_catalog import (
-    TABLES as FIRST_TABLES,
-)
-from tests.test_learning_catalog import (
+    ALL_TABLES,
     _course,
     _refused,
     _scope,
     _tenant,
+)
+from tests.test_learning_catalog import (
+    TABLES as FIRST_TABLES,
 )
 
 learning_database = learning_catalog_fixtures.learning_database
@@ -218,8 +219,8 @@ def test_curriculum_real_catalog_matches_immutable_source(learning_database):
         with engine.connect() as conn:
             inspector = inspect(conn)
             assert set(inspector.get_table_names(schema="mod_learning")) == set(
-                FIRST_TABLES
-            ) | set(TABLES)
+                ALL_TABLES
+            )
             for table in TABLES:
                 assert not inspector.has_table(table, schema="public")
                 fks = inspector.get_foreign_keys(table, schema="mod_learning")
@@ -571,8 +572,8 @@ def test_curriculum_missing_provider_is_refused_before_ddl(learning_database):
                     with pytest.raises(PrerequisiteNotSatisfiedError):
                         revision.upgrade()
                 assert set(inspect(conn).get_table_names(schema="mod_learning")) == set(
-                    FIRST_TABLES
-                ) | set(TABLES)
+                    ALL_TABLES
+                )
             finally:
                 transaction.rollback()
     finally:

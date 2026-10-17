@@ -4,8 +4,10 @@ Starter owns this reusable learning domain. The initial slice covers activity
 results, best-result projections, course progress, completion, certificate
 issuance and learning events, including course/activity reference persistence.
 A further source slice adds curriculum lifecycle, question-bank validation and
-replacement, chapter/subtopic reading and learner annotations. Enrolment/access,
-assessment, delivery and support remain subsequent slices of the full
+replacement, chapter/subtopic reading and learner annotations. The participation
+slice adds enrolment/audience, tracks and course access, alongside the existing
+pure exam-engine/grader port. Attempt policy/persistence, delivery and support
+remain subsequent slices of the full
 27-table extraction. Academy is the intended first adopter.
 
 This is prepared source, pending hosted qualification and publication. Academy
@@ -15,9 +17,9 @@ ownership, migration and retirement gates.
 The package uses the caller's SQLAlchemy Session and transaction. Commands flush;
 the application boundary commits or rolls back. Compose its `module` manifest
 and `versions_dir()` lineage, bind the three declared Kernel prerequisites, and
-use genuine Kernel tenant, Party and PartyPerson records. The prepared manifest owns fourteen
+use genuine Kernel tenant, Party and PartyPerson records. The prepared manifest owns twenty-one
 tables in `mod_learning` and the independent `learning` Alembic branch, beginning
-at `lr_0001_learning` and continuing with `lr_0002_curriculum_reading`. It creates no runtime engine or session.
+at `lr_0001_learning` and continuing with `lr_0002_curriculum_reading` and `lr_0003_participation`. It creates no runtime engine or session.
 
 The main command paths are `record_mcq_result`, `record_lab_result`,
 `override_score`, `recompute_completion` and `issue_certificate`. Typed reference
@@ -37,7 +39,8 @@ product adapters. Reading commands preserve tenant/person-scoped bookmarks and
 notes, append-only subtopic progress and source heading behavior. All mutators
 require an existing caller transaction.
 
-Academy retains grading, exam selection, attempt-policy decisions, authorization,
+The pure exam engine and grader reuse Academy's source algorithms.
+Academy retains attempt-policy decisions until their port, authorization,
 lab execution/operation authority and external-provider adapters. The MCQ path
 invokes a trusted typed admission policy with immutable observations under the
 learner lock, then allocates the attempt in the same transaction. The policy
@@ -91,3 +94,22 @@ source semantics; logical references and plain person UUIDs gain no invented FK.
 Question weights remain integers; only actual float columns use float8 bits.
 V2 observations remain uncommitted storage evidence, with the same assembly
 cutover and current-fact reversal obligations described above.
+
+`LearningSnapshotV3` and its export/import/verify APIs cover the full twenty-one
+tables and 194 persisted fields. All21 emptiness, representation and actual FK
+preflight finishes before V2 inserts. Enrollment retains genuine tenant-scoped
+Party plus PartyPerson references; nullable track uses actual MATCH SIMPLE
+semantics, and entrance-bank UUID remains logical. Nullable cohort thresholds
+use exact float8 bits; nullable windows retain exact timestamps. Independent
+readback covers every field and current key, including deletions and extra rows.
+These uncommitted package-store observations do not qualify Academy reversal.
+
+Roster commands require trusted product authorization facts scoped to the tenant
+and, for instructor eligibility, the person. The product must resolve these from
+its Kernel authorization owner, never request payloads. Audience classification
+uses an explicit roster, retaining reference bytes and unmatched classifications.
+Track ordering, status-filter asymmetries, visibility versus access and inclusive
+window/extension rules preserve source behavior. No retry, atomic-refusal or
+concurrent-idempotency guarantee is added; callers roll back propagated failures.
+Remaining direct Academy learning writers and domain reads, including cohort
+creation/facilitator removal, must still be ported before thin-assembly retirement.

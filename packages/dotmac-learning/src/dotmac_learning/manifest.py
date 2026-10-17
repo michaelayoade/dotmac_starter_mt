@@ -1,4 +1,4 @@
-"""Tenant-only declaration for learning results, curriculum and reading."""
+"""Tenant-only declaration for learning results, curriculum and participation."""
 
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.prerequisites import (
@@ -9,6 +9,7 @@ from dotmac_kernel.prerequisites import (
 
 from dotmac_learning.curriculum_models import CURRICULUM_TABLES
 from dotmac_learning.models import TENANT_TABLES
+from dotmac_learning.participation_models import PARTICIPATION_TABLES
 
 module = ModuleManifest(
     code="learning",
@@ -17,7 +18,7 @@ module = ModuleManifest(
     short_code="learning",
     migration_prefix="lr",
     migration_branch="learning",
-    tables=(*TENANT_TABLES, *CURRICULUM_TABLES),
+    tables=(*TENANT_TABLES, *CURRICULUM_TABLES, *PARTICIPATION_TABLES),
     platform_tables=(),
     requires=(
         TENANT_SCOPE_CATALOG_V1.name,
