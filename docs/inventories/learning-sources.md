@@ -165,6 +165,27 @@ Do not silently drop the constraint, invent a learner table or retain Academy's
 identity fork. Genuine Kernel person fixtures qualify package construction;
 they cannot establish Academy's identity migration or adoption.
 
+Published Kernel `0.1.0a105`, at
+`2f5abe9101c9aef48f23977cad81a3e499672287`, already exports the genuine
+`Party`/`PartyPerson` models, `PARTY_PERSON_CATALOG_V1`, its verifier and the
+provider declarations. `PartyPerson.party_id` is its primary key and cascading
+Party foreign key; the subtype has no tenant column. Tenant/person references
+must preserve both the tenant-safe Party relationship and the genuine subtype
+relationship. The catalog verifier establishes the declared structure, RLS and
+selectability; it does not prove a row-level iff relationship between Party type
+and subtype presence. Fixtures must create real person Parties and subtypes.
+
+The reference assembly binds `tenant_scope_catalog.v1` and
+`module_database_roles.v1` to Kernel `0001_initial_tenant_schema`, and
+`party_person_catalog.v1` to `0003_party_identity`. Learning declares these
+logical effects; each consuming assembly supplies the provider revisions.
+Learning migrations must never hardcode those foreign revisions. This audit
+indicates no extra identity API prerequisite for fresh package qualification;
+the allocated learning namespace still needs a published Kernel floor.
+See the published [prerequisite declarations](https://github.com/michaelayoade/dotmac_starter_mt/blob/2f5abe9101c9aef48f23977cad81a3e499672287/packages/dotmac-kernel/src/dotmac_kernel/prerequisites.py),
+[catalog verifier](https://github.com/michaelayoade/dotmac_starter_mt/blob/2f5abe9101c9aef48f23977cad81a3e499672287/packages/dotmac-kernel/src/dotmac_kernel/migrations/verify.py),
+and [assembly bindings](https://github.com/michaelayoade/dotmac_starter_mt/blob/2f5abe9101c9aef48f23977cad81a3e499672287/app/migration_bindings.py).
+
 Certificate rendering, consent, delivery and ERP transport remain Academy
 adapters consuming typed domain facts in the caller transaction. Preserve
 required result/certificate atomicity and optional-adapter savepoint isolation.
@@ -335,9 +356,12 @@ attestation.
 
 Academy still has no completed Party/facet cutover. The existing identity
 programme, PR #122, has an accepted strategy with design-only implementation
-state. Its current candidate is `32b9634edcf3ba2180510d6a9edf32a824548439`,
-refreshed against the accepted `61f69194`/0061 source and still under qualification:
-the refreshed identity ADR is 0009, preserving the current lab-worker ADR 0008.
+state. It merged at `6bd3efb025751b0dc5a6999d541aabbcd711818e` after
+qualification of head `32b9634edcf3ba2180510d6a9edf32a824548439`, refreshed
+against the accepted `61f69194`/0061 source. Resulting main CI `39013673550`
+and engineering standards `39013673678` both succeeded. This accepts the design
+and inventory, not runtime identity cutover. The identity ADR is 0009,
+preserving the current lab-worker ADR 0008.
 It records 28 human references (11 physical, 17 logical), including nullable
 `lab_operations.requested_by`; `claimed_by` remains a worker fencing string.
 The complete unchanged Kernel lineage and genuine independent history must
