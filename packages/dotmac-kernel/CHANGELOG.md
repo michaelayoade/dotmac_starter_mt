@@ -15,6 +15,12 @@ remain required.
 
 ### Added
 
+- Public `TENANT_AUDIT_LOG_V1` (`tenant_audit_log.v1`) and
+  `verify_tenant_audit_log` describe and inspect the existing tenant audit
+  history, forced tenant RLS and effective append-only online privileges. Starter
+  binds the effect to `0029_audit_history_shape`; no audit DDL or writer changes
+  are introduced. Consumer conversion awaits a sufficient published Kernel and
+  installed qualification; existing frozen callers remain unchanged.
 - Reserve `learning` / `mod_learning` / `lr` / branch `learning` for the
   Academy-sourced reusable learning domain before its module source is added.
   This reservation installs no module, moves no data and transfers no writer

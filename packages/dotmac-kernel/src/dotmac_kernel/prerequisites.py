@@ -285,9 +285,9 @@ OUTBOX_RELAY_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
 )
 
 #: The append-only platform audit trail used by installable control-plane
-#: modules.  The tenant audit table is deliberately NOT part of this effect:
-#: it has no published module consumer and collides with independently-owned
-#: ERP/Sub tables, while the two entrypoints are genuinely separable.
+#: modules. The tenant audit table is a separate effect: Fulfillment and
+#: Template Studio already consume its public writer, and Academy Learning
+#: requires it too. The two entrypoints remain independently bindable.
 PLATFORM_AUDIT_LOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     name="platform_audit_log.v1",
     summary=(
@@ -299,6 +299,39 @@ PLATFORM_AUDIT_LOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
         "table-level SELECT and INSERT only. Supplies the append-only online "
         "write path used by dotmac_kernel.audit.write_platform_audit_event; "
         "it does not define any module's audit-action vocabulary."
+    ),
+)
+
+
+#: The existing tenant audit trail written by `write_audit_event`. Adopters
+#: supply this Kernel-owned shape through an explicit provider binding; an
+#: independently owned product audit table is not an equivalent provider.
+TENANT_AUDIT_LOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
+    name="tenant_audit_log.v1",
+    summary=(
+        "public.audit_events with the existing 18-column tenant audit contract: "
+        "non-null UUID id primary key and tenant_id referencing "
+        "public.tenants.id ON DELETE CASCADE; nullable actor_type VARCHAR(32), "
+        "actor_id VARCHAR(120), actor_label VARCHAR(160), actor_party_id UUID "
+        "with no actor foreign key, and source_application VARCHAR(64); "
+        "non-null action VARCHAR(120) and entity_type VARCHAR(160), both open "
+        "vocabularies; nullable entity_id and request_id VARCHAR(120), "
+        "status_code INTEGER, is_success BOOLEAN, ip_address VARCHAR(64), "
+        "user_agent VARCHAR(255); non-null details JSONB defaulted to an empty "
+        "object; nullable occurred_at and created_at timezone-aware timestamps "
+        "with transaction-time defaults. Nonunique, nonpartial indexes on "
+        "tenant_id, actor_type, actor_id, actor_label, actor_party_id, "
+        "source_application, request_id and occurred_at. Historical unknown "
+        "attribution and timestamps remain nullable. ENABLE and FORCE row-level "
+        "security with applicable tenant-equality USING and WITH CHECK policies "
+        "against public.app_current_tenant_id(), with no permissive bypass. "
+        "app_user and platform_api are NOSUPERUSER and NOBYPASSRLS, have schema "
+        "USAGE and tenant-function EXECUTE, and effective SELECT/INSERT only: "
+        "no UPDATE, DELETE, TRUNCATE, REFERENCES or TRIGGER privilege through "
+        "table, column, PUBLIC or inherited grants. Deployment owns complete "
+        "role-reachability and SET ROLE closure. Supplies the append-only online "
+        "write path used by dotmac_kernel.audit.write_audit_event, independently "
+        "of platform_audit_log.v1; it does not define audit-action vocabulary."
     ),
 )
 
@@ -327,6 +360,7 @@ KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     IDEMPOTENCY_LEDGER_V1,
     OUTBOX_RELAY_V1,
     PLATFORM_AUDIT_LOG_V1,
+    TENANT_AUDIT_LOG_V1,
     PARTY_PERSON_CATALOG_V1,
 )
 
@@ -617,6 +651,7 @@ __all__ = [
     "OUTBOX_RELAY_V1",
     "PARTY_PERSON_CATALOG_V1",
     "PLATFORM_AUDIT_LOG_V1",
+    "TENANT_AUDIT_LOG_V1",
     "TENANT_SCOPE_CATALOG_V1",
     "DuplicateBindingError",
     "DuplicatePrerequisiteError",
