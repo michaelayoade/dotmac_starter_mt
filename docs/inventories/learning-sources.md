@@ -69,6 +69,51 @@ target selection, custody approval or passed adoption gate.
 
 ## Learning source and proposed module scope
 
+### Prepared curriculum and reading source (2026-10-17)
+
+Accepted Academy revalidation remains
+`0968881fc40ad86b3abfea2fc40044dd2dbf47c9`. Its complete 62-file migration
+inventory and the course, assessment, reading and bookmark models were checked
+for the next seven tables: chapters, question_banks, questions, chapter_reads,
+subtopic_reads, chapter_bookmarks and chapter_notes. This extends prepared
+module source to fourteen tables; it does not establish publication or adoption.
+The initial audit coordinates and the historical counts below are retained.
+
+`lr_0002_curriculum_reading` follows `lr_0001_learning` in the same module
+lineage. Chapter reads and subtopic reads have SIMPLE chapter-ID foreign keys;
+bookmarks and notes have separate SIMPLE course/chapter foreign keys. There is
+no invented tenant/chapter uniqueness, composite read FK or person FK. Chapter
+and question ownership preserve their actual composite tenant/course and
+tenant/bank references. Bank course/chapter fields remain logical references.
+Question weights are integers. Subtopic application grants remain SELECT and
+INSERT only; all seven tables retain FORCE RLS and tenant policies.
+
+The reusable curriculum owner ports `authoring.py`, manual-import lifecycle,
+`bank_loader.py` replacement behavior and pure `bank_lint.py` rules. Every
+authoring chapter save advances course version, including identical saves;
+manual import advances it only on source metadata/hash changes and retains
+missing chapters. Source hashes use the decoded `read_text` content encoded as
+UTF-8, plus sorted figure fingerprints/bytes or the missing marker. Product
+adapters still own files, YAML, figure discovery, HTML rendering/sanitization and
+title prefixes. The reading owner ports `reading_progress.py` and `bookmarks.py`,
+including source heading slug behavior, append-only subtopic facts, annotation
+ordering and the original course assignment on note updates. Actual trusted
+visibility and stored-heading adapters still require Academy adoption proof.
+
+The original seven-table snapshot API remains unchanged. New V2 transfer covers
+all fourteen tables and 135 persisted fields, qualifies all storage and actual
+FK closure before insertion, and independently reads the full current selected
+extent. Genuine Kernel event-subject preflight requires effective SELECT on
+`public.parties(id, tenant_id)` and `public.party_persons(party_id)`; it grants no
+privileges. A compatible Academy reverse assembly, incoming-reference rebinding,
+lab-worker grants, identity adoption, ACK policy and writer fencing remain
+cutover obligations. The additional applicant-to-question-bank FK in migration
+0052 stays an Academy admissions assembly binding, outside fresh module DDL.
+
+All prepared source remains subject to hosted qualification and immutable
+distribution version binding. This continuation allocates no successor version
+and authorizes no reissue of a released artifact.
+
 The inspected Academy tree has 47 mapped tables in 31 model files and 61
 migration files. The following groups identify the reusable learning domain;
 the package's eventual manifest and migration inventory must enumerate the
