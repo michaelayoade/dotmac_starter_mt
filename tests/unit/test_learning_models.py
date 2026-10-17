@@ -2,7 +2,9 @@
 
 import pytest
 from dotmac_kernel.models import Party, PartyPerson, Tenant
+from dotmac_kernel.modules import ModuleRegistry
 from dotmac_kernel.namespaces import module_schema
+from dotmac_learning.manifest import module
 from dotmac_learning.models import (
     SCHEMA,
     TENANT_MODELS,
@@ -16,6 +18,40 @@ from dotmac_learning.models import (
     Submission,
 )
 from sqlalchemy import CheckConstraint, UniqueConstraint
+
+
+def test_learning_registration_uses_the_shipped_allocation_and_exact_tables():
+    """Check current-tree composition only; this does not prove a published floor.
+
+    A published floor needs a separate isolated installed positive canary and,
+    after actual Kernel publication, a previous published
+    UnallocatedNamespaceError negative canary.
+    """
+    registry = ModuleRegistry((module,))
+    owner = registry.namespaces().get("learning")
+    assert owner is not None
+    assert (owner.owner, owner.db_schema, owner.prefix, owner.branch_label) == (
+        "learning",
+        "mod_learning",
+        "lr",
+        "learning",
+    )
+    assert registry.get("learning") is module
+    assert frozenset(module.tables) == frozenset(
+        {
+            "courses",
+            "activities",
+            "submissions",
+            "scores",
+            "course_completions",
+            "certificates",
+            "learning_events",
+        }
+    )
+    assert registry.namespaces().declared_tables("mod_learning") == frozenset(
+        module.tables
+    )
+    assert registry.namespaces().declared_platform_tables("mod_learning") == frozenset()
 
 
 def unique_keys(model):
