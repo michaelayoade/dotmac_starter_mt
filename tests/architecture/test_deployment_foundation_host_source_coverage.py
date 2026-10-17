@@ -13,6 +13,12 @@ entry point that copies `run`'s shape (accepts `lock=`) but forgets to call
 exactly the gap `test_deployment_foundation_single_executor.py` was written
 against for the authorization seam. This is the same guard, one seam over.
 
+The V5 witness-lifetime wrapper is resolved only after an exact closed AST proof:
+both returns forward the same plan and lock, and no unreviewed call, effect,
+return or branch enters the wrapper. The real private method must itself prove
+the lock then call the source guard directly. A helper name alone grants no
+exemption, and arbitrary transitive helper chains are never followed.
+
 ## Why the plants are synthetic
 
 Per `test_deployment_foundation_single_executor.py`'s own stated reason: a
@@ -26,6 +32,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
+from tests.architecture.foundation_executor_ast import resolve_execution_body
+
 REPO = Path(__file__).resolve().parents[2]
 RUN_PY = (
     REPO
@@ -38,7 +48,7 @@ RUN_PY = (
 #: `test_deployment_foundation_lock_capability.py`'s docstring.
 _LOCK_MARKER = "lock"
 
-#: What every mutating entry point must call, directly, in its own body.
+#: Mandatory direct guard, after proving the lock, in the resolved execution body.
 _PREREQUISITE = "_verify_host_source"
 
 
@@ -74,15 +84,12 @@ def _mutating_entry_points(class_node: ast.ClassDef) -> list[ast.FunctionDef]:
     return points
 
 
-def _calls_prerequisite(
-    func_node: ast.FunctionDef, *, name: str = _PREREQUISITE
-) -> bool:
-    return any(
-        isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Attribute)
-        and call.func.attr == name
-        for call in ast.walk(func_node)
-    )
+def _calls_prerequisite(executor: ast.ClassDef, func_node: ast.FunctionDef) -> bool:
+    try:
+        resolve_execution_body(executor, func_node.name)
+    except AssertionError:
+        return False
+    return True
 
 
 # ── the named proof ──────────────────────────────────────────────────────
@@ -105,7 +112,7 @@ def test_every_mutating_entry_point_calls_the_host_source_prerequisite() -> None
         "recording here rather than silently shrinking the population"
     )
 
-    missing = [p.name for p in points if not _calls_prerequisite(p)]
+    missing = [p.name for p in points if not _calls_prerequisite(executor, p)]
     assert missing == [], (
         f"{missing} accepts a proven lock (so it mutates a host) but never "
         f"calls {_PREREQUISITE}. That is exactly the hole Boundary 4's "
@@ -141,7 +148,7 @@ def test_the_coverage_guard_names_a_planted_omission() -> None:
         "rollback",
     }, "the plant does not exhibit the shape being detected"
 
-    missing = [p.name for p in points if not _calls_prerequisite(p)]
+    missing = [p.name for p in points if not _calls_prerequisite(executor, p)]
     assert missing == ["run"], (
         f"expected exactly ['run'] to be named as missing the prerequisite, "
         f"got {missing}. The guard must name the OFFENDING method, not merely "
@@ -182,7 +189,7 @@ def test_the_coverage_guard_stays_silent_on_a_read_only_near_miss() -> None:
     )
     assert names == {"run"}
 
-    missing = [p.name for p in points if not _calls_prerequisite(p)]
+    missing = [p.name for p in points if not _calls_prerequisite(executor, p)]
     assert missing == [], (
         "the near-miss plant's only real entry point DOES call the "
         "prerequisite; the guard must stay silent here"
@@ -200,3 +207,98 @@ def test_the_real_executor_class_is_actually_found() -> None:
         isinstance(node, ast.FunctionDef) and node.name == "_verify_host_source"
         for node in executor.body
     ), "Executor no longer defines _verify_host_source at all"
+
+
+# The wrapper population is closed by control flow, not by a private method name.
+_WRAPPED_EXECUTOR = """
+class Executor:
+    def run(self, plan, *, lock):
+        if self._spec.descriptor_schema != SCHEMA_V5:
+            return self._run_consuming(plan, lock=lock)
+        if self._startup_token is not None:
+            raise LiveInstanceRefusal("unsupported")
+        self._startup_token = object()
+        self._startup_lock = lock
+        try:
+            return self._run_consuming(plan, lock=lock)
+        finally:
+            self._startup_continuation = None
+            self._startup_token = None
+            self._startup_lock = None
+
+    def _run_consuming(self, plan, *, lock):
+        self._lock_path = lock.require_held(product=self._spec.product)
+        self._verify_host_source()
+        return plan
+
+    def rollback(self, plan, *, lock):
+        self._lock_path = lock.require_held(product=self._spec.product)
+        self._verify_host_source()
+        raise PreconditionFailed()
+"""
+
+
+def test_reviewed_wrapper_resolves_one_actual_guarded_body() -> None:
+    executor = _executor_class(ast.parse(_WRAPPED_EXECUTOR))
+    assert {method.name for method in _mutating_entry_points(executor)} == {
+        "run",
+        "rollback",
+    }
+    assert resolve_execution_body(executor, "run").name == "_run_consuming"
+    assert resolve_execution_body(executor, "rollback").name == "rollback"
+
+
+@pytest.mark.parametrize(
+    "mutant",
+    [
+        "inner_guard",
+        "wrong_body",
+        "wrong_lock",
+        "wrong_plan",
+        "early_effect",
+        "unguarded_return",
+        "conditional_bypass",
+        "conditional_guard",
+        "missing_body",
+        "body_without_lock",
+        "decorated_body",
+        "shadowed_body",
+    ],
+)
+def test_wrapper_proof_refuses_bypass_and_forwarding_mutants(mutant: str) -> None:
+    executor = _executor_class(ast.parse(_WRAPPED_EXECUTOR))
+    assert resolve_execution_body(executor, "run").name == "_run_consuming"
+    methods = {
+        node.name: node for node in executor.body if isinstance(node, ast.FunctionDef)
+    }
+    run, body = methods["run"], methods["_run_consuming"]
+    if mutant == "inner_guard":
+        body.body.pop(1)
+    elif mutant == "wrong_body":
+        run.body[0].body[0].value.func.attr = "_unguarded"
+    elif mutant == "wrong_lock":
+        run.body[-1].body[0].value.keywords[0].value = ast.Name(
+            id="other_lock", ctx=ast.Load()
+        )
+    elif mutant == "wrong_plan":
+        run.body[0].body[0].value.args[0] = ast.Name(id="other_plan", ctx=ast.Load())
+    elif mutant == "early_effect":
+        run.body.insert(0, ast.parse("self._effects.switch(plan)").body[0])
+    elif mutant == "unguarded_return":
+        run.body[0].body[0].value = ast.Constant(value=None)
+    elif mutant == "conditional_bypass":
+        run.body.insert(0, ast.parse("if bypass: return plan").body[0])
+    elif mutant == "conditional_guard":
+        body.body[1] = ast.parse("if allowed: self._verify_host_source()").body[0]
+    elif mutant == "missing_body":
+        executor.body.remove(body)
+    elif mutant == "body_without_lock":
+        body.args.kwonlyargs = []
+        body.args.kw_defaults = []
+    elif mutant == "decorated_body":
+        body.decorator_list = [ast.Name(id="unguarded", ctx=ast.Load())]
+    else:
+        executor.body.append(ast.parse("_run_consuming = unguarded").body[0])
+    with pytest.raises(AssertionError):
+        resolve_execution_body(executor, "run")
+    assert not _calls_prerequisite(executor, run)

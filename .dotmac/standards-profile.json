@@ -293,6 +293,22 @@
         {
           "path": "scripts/rehearsal/product.toml",
           "reason": "A disposable Lane 2 rehearsal fixture whose values are @@PLACEHOLDER@@ tokens substituted at run time. It is a test input, not a deployable, and it deliberately shares the product.toml name so that the rehearsal exercises the real schema."
+        },
+        {
+          "path": "tests/fixtures/foundation_live_instance/goldens/v1/compose.yml",
+          "reason": "Immutable v1 compatibility output captured from prechange commit 1750e2776d5f2374892761763067723ff27595f5 in hosted run 39019458297, artifact 12096505840. This is a byte-comparison oracle for the Foundation regression tests, not an operator deployment input; its original bytes and per-file digest are retained in the fixture manifest."
+        },
+        {
+          "path": "tests/fixtures/foundation_live_instance/goldens/v2/compose.yml",
+          "reason": "Immutable v2 compatibility output captured from prechange commit 1750e2776d5f2374892761763067723ff27595f5 in hosted run 39019458297, artifact 12096505840. This is a byte-comparison oracle for the Foundation regression tests, not an operator deployment input; its original bytes and per-file digest are retained in the fixture manifest."
+        },
+        {
+          "path": "tests/fixtures/foundation_live_instance/goldens/v3/compose.yml",
+          "reason": "Immutable v3 compatibility output captured from prechange commit 1750e2776d5f2374892761763067723ff27595f5 in hosted run 39019458297, artifact 12096505840. This is a byte-comparison oracle for the Foundation regression tests, not an operator deployment input; its original bytes and per-file digest are retained in the fixture manifest."
+        },
+        {
+          "path": "tests/fixtures/foundation_live_instance/goldens/v4/compose.yml",
+          "reason": "Immutable v4 compatibility output captured from prechange commit 1750e2776d5f2374892761763067723ff27595f5 in hosted run 39019458297, artifact 12096505840. This is a byte-comparison oracle for the Foundation regression tests, not an operator deployment input; its original bytes and per-file digest are retained in the fixture manifest."
         }
       ]
     }

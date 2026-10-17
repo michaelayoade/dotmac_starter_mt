@@ -537,6 +537,8 @@ def replay_receipt(
         )
     previous_state, previous_attempts = receipt.state, receipt.attempt_count
 
+    # Preserve delivery_snapshot_json and every frozen identity field. Resetting
+    # the retry budget neither unfreezes a dispatch nor proves legacy history fresh.
     receipt.state = "verified"
     receipt.attempt_count = 0
     receipt.error_code = None

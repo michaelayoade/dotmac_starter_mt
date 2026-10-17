@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..live_instance import LiveInstanceObservationEffects
 from .lock import (
     DeploymentLockHeld,
     LockUnavailableError,
@@ -39,6 +40,7 @@ __all__ = [
     "Effects",
     "Executor",
     "LockUnavailableError",
+    "LiveInstanceObservationEffects",
     "Phase",
     "RoleObservation",
     "Step",

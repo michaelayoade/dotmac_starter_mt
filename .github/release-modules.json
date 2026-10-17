@@ -1834,7 +1834,8 @@
           "dotmac_integration/migrations/versions/ig_0013_delivery_result.py",
           "dotmac_integration/migrations/versions/ig_0014_polling_evidence.py",
           "dotmac_integration/migrations/versions/ig_0015_descriptor_contract.py",
-          "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py"
+          "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py",
+          "dotmac_integration/migrations/versions/ig_0017_dispatch_snapshot.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -2477,7 +2478,7 @@
       "package_dir": "packages/dotmac-platform-health",
       "import_name": "dotmac_platform_health",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a88",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_health",
       "tag_prefix": "dotmac-platform-health-v",
       "wheel_contents": {
@@ -2487,7 +2488,8 @@
           "dotmac_platform_health/migrations/__init__.py",
           "dotmac_platform_health/migrations/versions/ph_0001_platform_health.py",
           "dotmac_platform_health/evidence.py",
-          "dotmac_platform_health/migrations/versions/ph_0002_observation_freshness_snapshot.py"
+          "dotmac_platform_health/migrations/versions/ph_0002_observation_freshness_snapshot.py",
+          "dotmac_platform_health/migrations/versions/ph_0003_enrollment_grants.py"
         ],
         "forbidden_prefixes": [
           "app/",

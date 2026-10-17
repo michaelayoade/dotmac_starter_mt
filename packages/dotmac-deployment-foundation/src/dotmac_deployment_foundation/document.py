@@ -77,7 +77,14 @@ from typing import Any, Final
 
 from . import ingress
 from .errors import SpecError
-from .spec import SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, ProductDeploymentSpec
+from .spec import (
+    SCHEMA_V1,
+    SCHEMA_V2,
+    SCHEMA_V3,
+    SCHEMA_V4,
+    SCHEMA_V5,
+    ProductDeploymentSpec,
+)
 from .version import VERSION
 
 __all__ = [
@@ -167,6 +174,10 @@ def _normalize(value: Any, *, descriptor_schema: str = SCHEMA_V1) -> Any:
             and not (
                 field.metadata.get("descriptor_since") == SCHEMA_V4
                 and descriptor_schema in (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3)
+            )
+            and not (
+                field.metadata.get("descriptor_since") == SCHEMA_V5
+                and descriptor_schema in (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
             )
         }
     if isinstance(value, list | tuple):

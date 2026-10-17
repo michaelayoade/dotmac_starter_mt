@@ -7459,7 +7459,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ap_0003` records approved-decision withdrawals; still editable until
     # `dotmac-approvals` 0.1.0a7 is tagged.
     "dotmac-approvals": frozenset(),
-    "dotmac-integration": frozenset(),
+    "dotmac-integration": frozenset({"ig_0017_dispatch_snapshot.py"}),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),
@@ -7467,7 +7467,12 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ph_0002` snapshots each observation's freshness policy at acceptance,
     # so a later policy change cannot reclassify an unchanged observation.
     # Still editable: `dotmac-platform-health` has no released tag carrying it.
-    "dotmac-platform-health": frozenset({"ph_0002_observation_freshness_snapshot.py"}),
+    "dotmac-platform-health": frozenset(
+        {
+            "ph_0002_observation_freshness_snapshot.py",
+            "ph_0003_enrollment_grants.py",
+        }
+    ),
     "dotmac-support-access": frozenset(),
     "dotmac-remote-access": frozenset(),
     "dotmac-compliance-reporting": frozenset(),

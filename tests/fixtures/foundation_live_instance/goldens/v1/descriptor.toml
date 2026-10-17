@@ -1,0 +1,75 @@
+
+schema = "ProductDeploymentSpec.v1"
+product = "example"
+environment = "test"
+
+[assembly]
+manifest_path = "deploy/product-manifest.json"
+manifest_digest = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+
+[image]
+reference = "ghcr.io/example/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+source_revision = "cccccccccccccccccccccccccccccccccccccccc"
+
+[runtime_materials]
+names = ["DATABASE_URL", "REDIS_URL"]
+
+[[roles]]
+code = "app"
+command = ["uvicorn", "app.main:app"]
+replicas = 1
+materials = ["DATABASE_URL", "REDIS_URL"]
+[roles.resources]
+cpus = "1.0"
+memory = "1g"
+[roles.health.live]
+path = "/health/live"
+port = 8000
+[roles.health.ready]
+path = "/health/ready"
+port = 8000
+
+[[roles]]
+code = "worker"
+command = ["celery", "-A", "app", "worker"]
+replicas = 1
+depends_on = ["app"]
+materials = ["DATABASE_URL", "REDIS_URL"]
+[roles.resources]
+cpus = "1.0"
+memory = "1g"
+[roles.health.live]
+path = "/health/live"
+port = 8001
+[roles.worker]
+kind = "celery"
+ping_command = ["celery", "-A", "app", "inspect", "ping"]
+heartbeat_max_age_seconds = 120
+
+[migration]
+command = ["alembic", "upgrade", "heads"]
+heads_command = ["alembic", "current"]
+owner_material = "MIGRATION_DATABASE_URL"
+expected_heads = ["a003", "k012"]
+compatibility = "online"
+
+[backup]
+[[backup.datasets]]
+code = "primary"
+kind = "postgres"
+material = "BACKUP_DATABASE_URL"
+retention_days = 14
+
+[ingress]
+host = "example.dotmac.io"
+exposure = "public"
+address_family = "dual_stack"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.example/why"
+[[ingress.routes]]
+path = "/"
+role = "app"
+port = 8000
+
+[rollout]
+stability_window_seconds = 60
