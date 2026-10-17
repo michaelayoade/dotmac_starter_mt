@@ -62,7 +62,10 @@ from dotmac_integration import (
     CapabilityRegistry,
     SchemaGrace,
 )
+from dotmac_integration.destination_binding import DestinationBinding, LocalScope
 from dotmac_integration.receipt_delivery import (
+    DeliverySnapshot,
+    ProductObservationSource,
     ReceiptClaims,
     claim_statement,
     settle_statement,
@@ -93,6 +96,7 @@ REQUIRED_COLUMNS: frozenset[str] = frozenset(
         "next_attempt_at",
         # replay vs conflict, mirroring the kernel's own fingerprint column
         "delivery_fingerprint",
+        "delivery_snapshot_json",
         # the key the PRODUCT deduplicates on, recorded so a reconciler can ask
         # the product about the same delivery this engine attempted
         "delivery_idempotency_key",
@@ -131,6 +135,11 @@ def _settle_params(receipt_id: uuid.UUID, **overrides: object) -> dict[str, obje
         "idempotency_key": None,
         "correlation_id": None,
         "backoff": None,
+        "leased_until": None,
+        "application": None,
+        "contract_version": None,
+        "revision_id": None,
+        "snapshot": "null",
     }
     params.update(overrides)
     return params
@@ -173,6 +182,71 @@ def _receipt(  # type: ignore[no-untyped-def]
         },
     )
     return receipt_id
+
+
+def _frozen_statement_fixture(conn, request):
+    """SQL lease canaries start with an explicit new receipt and frozen identity."""
+    installation_id, binding_id = _installation_and_binding(conn, request)
+    receipt_id, revision_id = uuid.uuid4(), uuid.uuid4()
+    conn.execute(
+        text("""
+        INSERT INTO mod_intg.inbox_receipts
+          (id, installation_id, capability_binding_id, provider_event_id,
+           event_type, payload_digest, payload_json, state, delivery_snapshot_json)
+        VALUES (:id, :installation, :binding, :event, 'received', :digest,
+                '{}'::jsonb, 'verified',
+                '{"schema_version":1,"state":"unstarted"}'::jsonb)
+    """),
+        {
+            "id": receipt_id,
+            "installation": installation_id,
+            "binding": binding_id,
+            "event": uuid.uuid4().hex,
+            "digest": "a" * 64,
+        },
+    )
+    claim = conn.execute(CLAIM_SQL, {"id": receipt_id}).one()
+    snapshot = DeliverySnapshot(
+        source=ProductObservationSource(installation_id, "fake"),
+        capability=CapabilityContract(
+            capability_id="conformance.echo.v1",
+            owner=CapabilityOwner("sub", "snapshot"),
+            summary="Synthetic snapshot",
+            observation_schema={"type": "object"},
+        ),
+        destination=DestinationBinding(
+            binding_id,
+            "conformance.echo.v1",
+            "sub",
+            LocalScope("inbox", "lease-test"),
+            1,
+            revision_id,
+        ),
+    ).document()
+    params = _settle_params(
+        receipt_id,
+        fingerprint="f" * 64,
+        idempotency_key="test-key",
+        correlation_id=str(receipt_id),
+        leased_until=claim.leased_until,
+        application="sub",
+        contract_version=1,
+        revision_id=revision_id,
+        snapshot=json.dumps(snapshot),
+    )
+    conn.execute(
+        text("""
+        UPDATE mod_intg.inbox_receipts
+        SET delivery_snapshot_json=CAST(:snapshot AS jsonb),
+          delivery_fingerprint=:fingerprint, delivery_idempotency_key=:idempotency_key,
+          correlation_id=:correlation_id, destination_application=:application,
+          destination_contract_version=:contract_version,
+          destination_revision_id=:revision_id
+        WHERE id=:id
+    """),
+        params,
+    )
+    return receipt_id, params
 
 
 def test_claim_returns_the_receipts_provider_identity(
@@ -218,10 +292,11 @@ def test_the_real_claim_derives_source_from_its_installation_not_the_payload(
             text(
                 "INSERT INTO mod_intg.inbox_receipts ("
                 "id, installation_id, capability_binding_id, provider_event_id, "
-                "event_type, payload_digest, payload_json, state) VALUES ("
+                "event_type, payload_digest, payload_json, state, "
+                "delivery_snapshot_json) VALUES ("
                 ":id, :installation, :binding, 'settlement-event-1', "
                 "'conformance.echo.v1', :digest, CAST(:payload AS jsonb), "
-                "'verified')"
+                '\'verified\', \'{"schema_version":1,"state":"unstarted"}\'::jsonb)'
             ),
             {
                 "id": receipt_id,
@@ -645,7 +720,7 @@ def test_a_worker_whose_lease_expired_cannot_settle(
     admin_url, _ = migrated_scratch
     engine = create_engine(admin_url)
     with engine.begin() as conn:
-        receipt_id = _receipt(conn, request, state="processing", attempt_count=1)
+        receipt_id, identity = _frozen_statement_fixture(conn, request)
         conn.execute(
             text(
                 "UPDATE mod_intg.inbox_receipts "
@@ -655,13 +730,7 @@ def test_a_worker_whose_lease_expired_cannot_settle(
         )
         settled = conn.execute(
             SETTLE_SQL,
-            _settle_params(
-                receipt_id,
-                state="processed",
-                acceptance="accepted",
-                product_ref="msg_1",
-                attempt=1,
-            ),
+            identity | {"product_ref": "msg_1"},
         ).rowcount
         assert settled == 0, "an expired lease settled an attempt it no longer held"
 
@@ -687,9 +756,8 @@ def test_the_settlement_race_after_a_takeover_has_exactly_one_winner(
     admin_url, _ = migrated_scratch
     setup = create_engine(admin_url)
     with setup.begin() as conn:
-        receipt_id = _receipt(conn, request)
-        # Worker A claims.
-        assert conn.execute(CLAIM_SQL, {"id": receipt_id}).rowcount == 1
+        receipt_id, identity = _frozen_statement_fixture(conn, request)
+        # Worker A's frozen identity and first lease are already durable.
         # A's lease expires while it is calling the product.
         conn.execute(
             text(
@@ -699,31 +767,24 @@ def test_the_settlement_race_after_a_takeover_has_exactly_one_winner(
             {"id": receipt_id},
         )
         # Worker B takes over: attempt 2, fresh lease.
-        assert conn.execute(CLAIM_SQL, {"id": receipt_id}).rowcount == 1
+        takeover = conn.execute(CLAIM_SQL, {"id": receipt_id}).one()
     setup.dispose()
 
     late, holder = create_engine(admin_url), create_engine(admin_url)
     with late.begin() as a:
         stale = a.execute(
             SETTLE_SQL,
-            _settle_params(
-                receipt_id,
-                state="dead_letter",
-                acceptance="rejected",
-                product_ref=None,
-                attempt=1,
-            ),
+            identity | {"state": "dead_letter", "acceptance": "rejected"},
         ).rowcount
     with holder.begin() as b:
         won = b.execute(
             SETTLE_SQL,
-            _settle_params(
-                receipt_id,
-                state="processed",
-                acceptance="accepted",
-                product_ref="msg_1",
-                attempt=2,
-            ),
+            identity
+            | {
+                "product_ref": "msg_1",
+                "attempt": 2,
+                "leased_until": takeover.leased_until,
+            },
         ).rowcount
     late.dispose()
     holder.dispose()

@@ -416,7 +416,9 @@ from dotmac_integration.receipt_delivery import (
     PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION,
     PRODUCT_OBSERVATION_SCHEMA_VERSION,
     DeliveryError,
+    DeliveryPreparationRefused,
     DeliveryReport,
+    DeliverySnapshot,
     FingerprintConflict,
     # `LostClaim` is deliberately absent: it is ONE class, imported above via
     # `dispatch`, and re-importing it here would be a redefinition of the same
@@ -678,6 +680,8 @@ __all__ = [
     "resolve_destination",
     # ── Receipt-to-product delivery ─────────────────────────────────────────
     "DeliveryError",
+    "DeliveryPreparationRefused",
+    "DeliverySnapshot",
     "DeliveryReport",
     "FingerprintConflict",
     "ProductAcceptance",

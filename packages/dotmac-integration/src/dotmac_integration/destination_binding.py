@@ -134,6 +134,8 @@ __all__ = [
     "capability_bindings_for",
     "corroborate",
     "destination_client",
+    "destination_binding_document",
+    "destination_binding_from_document",
     "install_destination_profiles",
     "product_port_descriptor_digest",
     "reconcile_product_port_descriptor",
@@ -249,6 +251,140 @@ class DestinationBinding:
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"{self.application}/{self.scope} @{self.capability_id}"
+
+
+def destination_binding_document(binding: DestinationBinding) -> dict[str, object]:
+    """Persist complete routing facts, never client endpoints or credentials."""
+    port = binding.product_port
+    descriptor = None
+    if port is not None:
+        descriptor = _descriptor_document(port)
+        descriptor["destination_binding_id"] = str(port.destination_binding_id)
+        descriptor["descriptor_digest"] = port.descriptor_digest
+    return {
+        "capability_binding_id": str(binding.capability_binding_id),
+        "capability_id": binding.capability_id,
+        "application": binding.application,
+        "scope": {"kind": binding.scope.kind, "ref": binding.scope.ref},
+        "contract_version": binding.contract_version,
+        "destination_revision_id": str(binding.destination_revision_id),
+        "product_port": descriptor,
+    }
+
+
+def destination_binding_from_document(document: object) -> DestinationBinding:
+    """Strict inverse of the snapshot writer; no historical-row fallback."""
+
+    def fields(value: object, names: set[str]) -> dict[str, object]:
+        if not isinstance(value, dict) or set(value) != names:
+            raise DestinationBindingError("invalid destination snapshot fields")
+        return value
+
+    def string(value: object) -> str:
+        if not isinstance(value, str) or not value or value.strip() != value:
+            raise DestinationBindingError("invalid destination snapshot string")
+        return value
+
+    def integer(value: object) -> int:
+        if type(value) is not int or value < 1:
+            raise DestinationBindingError("invalid destination snapshot version")
+        return value
+
+    def scope(value: object) -> LocalScope:
+        data = fields(value, {"kind", "ref"})
+        return LocalScope(string(data["kind"]), string(data["ref"]))
+
+    data = fields(
+        document,
+        {
+            "capability_binding_id",
+            "capability_id",
+            "application",
+            "scope",
+            "contract_version",
+            "destination_revision_id",
+            "product_port",
+        },
+    )
+    port = None
+    raw_port = data["product_port"]
+    if raw_port is not None:
+        if not isinstance(raw_port, dict):
+            raise DestinationBindingError("invalid descriptor snapshot")
+        names = {
+            "schema_version",
+            "application",
+            "owner_module",
+            "capability_id",
+            "capability_summary",
+            "contract_version",
+            "destination_binding_id",
+            "delivery_path",
+            "mirror_path",
+            "destination_scope",
+            "activation_state",
+            "source_revision",
+            "descriptor_digest",
+        }
+        if raw_port.get("schema_version") == "dotmac.io/product-port-descriptor/v3":
+            names |= {"wire_schema_version", "capability_contract"}
+        raw = fields(raw_port, names)
+        application = string(raw["application"])
+        owner_module = string(raw["owner_module"])
+        capability_id = string(raw["capability_id"])
+        summary = string(raw["capability_summary"])
+        contract = None
+        wire = None
+        if "capability_contract" in names:
+            wire = string(raw["wire_schema_version"])
+            raw_contract = raw["capability_contract"]
+            if not isinstance(raw_contract, Mapping):
+                raise DestinationBindingError("invalid capability contract snapshot")
+            contract = capability_contract_from_document(
+                raw_contract,
+                capability_id=capability_id,
+                application=application,
+                owner_module=owner_module,
+                summary=summary,
+            )
+        port = ProductPortDescriptorSnapshot(
+            schema_version=string(raw["schema_version"]),
+            application=application,
+            owner_module=owner_module,
+            capability_id=capability_id,
+            capability_summary=summary,
+            contract_version=integer(raw["contract_version"]),
+            destination_binding_id=UUID(string(raw["destination_binding_id"])),
+            delivery_path=string(raw["delivery_path"]),
+            mirror_path=string(raw["mirror_path"]),
+            destination_scope=scope(raw["destination_scope"]),
+            activation_state=string(raw["activation_state"]),
+            source_revision=string(raw["source_revision"]),
+            descriptor_digest=string(raw["descriptor_digest"]),
+            wire_schema_version=wire,
+            capability_contract=contract,
+        )
+        _require_valid_descriptor(port)
+    binding = DestinationBinding(
+        capability_binding_id=UUID(string(data["capability_binding_id"])),
+        capability_id=string(data["capability_id"]),
+        application=string(data["application"]),
+        scope=scope(data["scope"]),
+        contract_version=integer(data["contract_version"]),
+        destination_revision_id=UUID(string(data["destination_revision_id"])),
+        product_port=port,
+    )
+    if port is not None and (
+        port.application != binding.application
+        or port.capability_id != binding.capability_id
+        or port.contract_version != binding.contract_version
+        or port.destination_scope != binding.scope
+    ):
+        raise DestinationBindingError("descriptor differs from destination snapshot")
+    # Reject noncanonical UUIDs and nested coercions, including bool-as-int.
+    if destination_binding_document(binding) != document:
+        raise DestinationBindingError("noncanonical destination snapshot")
+    return binding
 
 
 _DESCRIPTOR_SCHEMAS = frozenset(

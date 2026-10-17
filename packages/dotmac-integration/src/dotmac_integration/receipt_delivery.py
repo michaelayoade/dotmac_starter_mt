@@ -32,8 +32,9 @@ this engine needs are additions to it.
 
 ## Three phases, in this order, and the order is the design
 
-1. **Claim** — one transaction. A conditional UPDATE leases the receipt and
-   resolves the TRUSTED destination from durable state. Ends. Commits.
+1. **Claim** — one transaction. A conditional UPDATE leases the receipt. The
+   first dispatch freezes trusted routing and request identity; retries use that
+   frozen contract and corroborate current authority. Ends. Commits.
 2. **Call** — the product is contacted with **no session held**. A network call
    inside a transaction holds a row lock for the duration of someone else's
    outage: one slow product and the connection pool is gone, having done no
@@ -67,7 +68,7 @@ exists for the case a connector knows the key will *not* protect it.
 ## The destination is resolved, never proposed
 
 Every field the product is addressed by comes from :class:`TrustedDestination`,
-which the claim phase resolves from an immutable config revision. No payload,
+which the first claim resolves and freezes from trusted durable state. No payload,
 no header map and no provider-supplied name reaches that decision — see
 :func:`build_product_request`, whose signature is the property: it accepts a
 claim, and there is no parameter through which provider metadata could name an
@@ -86,6 +87,7 @@ ADR-0014 points to rather than a competitor to it.
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
@@ -95,8 +97,20 @@ from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
-from dotmac_integration.capability_registry import CapabilityRegistry
-from dotmac_integration.destination_binding import resolve_destination
+from dotmac_integration.capability_registry import (
+    CapabilityContract,
+    CapabilityRegistry,
+    CapabilityRegistryError,
+)
+from dotmac_integration.destination_binding import (
+    DestinationBinding,
+    DestinationBindingError,
+    capability_contract_document,
+    capability_contract_from_document,
+    destination_binding_document,
+    destination_binding_from_document,
+    resolve_destination,
+)
 from dotmac_integration.execution import (
     LostClaim,
     ReceiptVerificationOrigin,
@@ -113,6 +127,8 @@ from dotmac_integration.retry import Outcome, OutcomeStatus, next_state
 
 __all__ = [
     "DeliveryError",
+    "DeliveryPreparationRefused",
+    "DeliverySnapshot",
     "DeliveryReport",
     "FingerprintConflict",
     "LostClaim",
@@ -149,6 +165,14 @@ __all__ = [
 
 class DeliveryError(RuntimeError):
     """A receipt cannot be delivered the way the caller asked."""
+
+
+class DeliveryPreparationRefused(DeliveryError):
+    """A durable refusal before dispatch, carrying only a privacy-safe code."""
+
+    def __init__(self, error_code: str) -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
 
 
 class FingerprintConflict(DeliveryError):
@@ -283,6 +307,114 @@ class ProductObservationSource:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class DeliverySnapshot:
+    """The request's immutable routing contract, without a second payload copy."""
+
+    source: ProductObservationSource
+    destination: DestinationBinding
+    capability: CapabilityContract
+
+    def document(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "state": "frozen",
+            "source": {
+                "installation_id": str(self.source.installation_id),
+                "connector_key": self.source.connector_key,
+            },
+            "destination": destination_binding_document(self.destination),
+            "capability": {
+                "capability_id": self.capability.capability_id,
+                "application": self.capability.owner.application,
+                "owner_module": self.capability.owner.module,
+                "summary": self.capability.summary,
+                "contract": capability_contract_document(self.capability),
+            },
+        }
+
+    @classmethod
+    def from_document(cls, value: object) -> DeliverySnapshot:
+        try:
+            if (
+                not isinstance(value, dict)
+                or set(value)
+                != {"schema_version", "state", "source", "destination", "capability"}
+                or type(value["schema_version"]) is not int
+                or value["schema_version"] != 1
+                or value["state"] != "frozen"
+            ):
+                raise ValueError("invalid dispatch snapshot")
+            source = value["source"]
+            if not isinstance(source, dict) or set(source) != {
+                "installation_id",
+                "connector_key",
+            }:
+                raise ValueError("invalid dispatch source")
+            if not isinstance(source["installation_id"], str) or not isinstance(
+                source["connector_key"], str
+            ):
+                raise ValueError("invalid dispatch source types")
+            raw_capability = value["capability"]
+            if not isinstance(raw_capability, dict) or set(raw_capability) != {
+                "capability_id",
+                "application",
+                "owner_module",
+                "summary",
+                "contract",
+            }:
+                raise ValueError("invalid dispatch capability")
+            for key in ("capability_id", "application", "owner_module", "summary"):
+                item = raw_capability[key]
+                if not isinstance(item, str) or not item or item.strip() != item:
+                    raise ValueError("invalid dispatch capability field")
+            contract = raw_capability["contract"]
+            if not isinstance(contract, Mapping):
+                raise ValueError("invalid dispatch capability contract")
+            capability = capability_contract_from_document(
+                contract,
+                capability_id=raw_capability["capability_id"],
+                application=raw_capability["application"],
+                owner_module=raw_capability["owner_module"],
+                summary=raw_capability["summary"],
+            )
+            result = cls(
+                capability=capability,
+                source=ProductObservationSource(
+                    UUID(source["installation_id"]), source["connector_key"]
+                ),
+                destination=destination_binding_from_document(value["destination"]),
+            )
+            if result.document() != value:
+                raise ValueError("noncanonical dispatch snapshot")
+            destination = result.destination
+            port = destination.product_port
+            if (
+                capability.capability_id != destination.capability_id
+                or capability.contract_version != destination.contract_version
+                or capability.owner.application != destination.application
+                or (
+                    port is not None
+                    and (
+                        port.owner_module != capability.owner.module
+                        or port.capability_summary != capability.summary
+                        or (
+                            port.capability_contract is not None
+                            and capability_contract_document(port.capability_contract)
+                            != capability_contract_document(capability)
+                        )
+                    )
+                )
+            ):
+                raise ValueError("dispatch capability differs from destination")
+            return result
+        except (ValueError, TypeError, KeyError, AttributeError, DeliveryError) as exc:
+            raise DeliveryPreparationRefused("dispatch_snapshot_unavailable") from exc
+
+
+_UNSTARTED_SNAPSHOT = {"schema_version": 1, "state": "unstarted"}
+
+
 def resolve_product_observation_source(
     session: Any, *, capability_binding_id: UUID
 ) -> ProductObservationSource:
@@ -412,10 +544,11 @@ class ReceiptClaim:
     event_type: str
     observation: Mapping[str, object]
     correlation_id: str
-    #: The fingerprint recorded by an EARLIER attempt, when there was one.
-    #: `None` on a first attempt. Compared, never overwritten.
+    #: The durable fingerprint. ReceiptClaims returns it even on first dispatch.
+    #: Optional for structural claim-store implementations; compared, never overwritten.
     stored_fingerprint: str | None = None
     origin_evidence: ReceiptOriginEvidence | None = None
+    delivery_snapshot: DeliverySnapshot | None = None
 
     def __post_init__(self) -> None:
         if self.attempt < 1:
@@ -424,6 +557,33 @@ class ReceiptClaim:
                 "increments the counter, so a held claim is always at least 1"
             )
         object.__setattr__(self, "observation", _frozen(self.observation))
+
+
+def _require_snapshot_consistency(
+    claim: ReceiptClaim, *, require_snapshot: bool = False
+) -> None:
+    """Compare all actual routing/source facts, beyond published wire identity.
+
+    Snapshot-free structural stores retain their existing contract; they do not
+    inherit ReceiptClaims' hardened persistence guarantee. The real store always
+    requires a snapshot, and every snapshot-bearing custom claim is checked.
+    """
+    if claim.delivery_snapshot is None and not require_snapshot:
+        return
+    try:
+        if not isinstance(claim.delivery_snapshot, DeliverySnapshot):
+            raise ValueError("missing typed dispatch snapshot")
+        snapshot = DeliverySnapshot.from_document(claim.delivery_snapshot.document())
+        if (
+            not isinstance(claim.destination, DestinationBinding)
+            or claim.source != snapshot.source
+            or claim.destination != snapshot.destination
+            or destination_binding_document(claim.destination)
+            != destination_binding_document(snapshot.destination)
+        ):
+            raise ValueError("claim differs from frozen dispatch contract")
+    except (DeliveryError, ValueError, TypeError, AttributeError, KeyError) as exc:
+        raise DeliveryPreparationRefused("dispatch_identity_conflict") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -552,6 +712,8 @@ class DeliveryReport:
     #: Why nothing was claimed — another worker holds it, it is not due, or it
     #: is already finished. A caller sweeping a queue needs this to be a value.
     unclaimed_reason: str | None = None
+    #: A preparation refusal is distinct from a held/not-due receipt.
+    preparation_refused: bool = False
 
 
 # ── Pure derivations ────────────────────────────────────────────────────────
@@ -889,7 +1051,9 @@ def claim_statement(
         f"AND (leased_until IS NULL OR leased_until < {clock}) "
         f"AND (next_attempt_at IS NULL OR next_attempt_at <= {clock}) "
         "RETURNING attempt_count, leased_until, provider_event_id, event_type, "
-        "payload_json, correlation_id, delivery_fingerprint, capability_binding_id"
+        "payload_json, correlation_id, delivery_fingerprint, capability_binding_id, "
+        "installation_id, delivery_snapshot_json, delivery_idempotency_key, "
+        "destination_application, destination_contract_version, destination_revision_id"
     )
 
 
@@ -907,13 +1071,19 @@ def settle_statement() -> Any:
         "leased_until = NULL, processed_at = now(), "
         "product_acceptance = :acceptance, product_ref = :product_ref, "
         "error_code = :error_code, error_detail = :error_detail, "
-        "delivery_fingerprint = :fingerprint, "
-        "delivery_idempotency_key = :idempotency_key, "
-        "correlation_id = :correlation_id, "
         "next_attempt_at = CASE WHEN CAST(:backoff AS integer) IS NULL "
         "  THEN NULL ELSE now() + make_interval(secs => :backoff) END "
         "WHERE id = :id AND state = 'processing' AND attempt_count = :attempt "
-        "AND leased_until IS NOT NULL AND leased_until >= now()"
+        "AND leased_until IS NOT NULL AND leased_until = :leased_until "
+        "AND leased_until >= now() "
+        "AND delivery_snapshot_json->>'state' = 'frozen' "
+        "AND delivery_fingerprint = :fingerprint "
+        "AND delivery_idempotency_key = :idempotency_key "
+        "AND correlation_id = :correlation_id "
+        "AND destination_application = :application "
+        "AND destination_contract_version = :contract_version "
+        "AND destination_revision_id = :revision_id "
+        "AND delivery_snapshot_json = CAST(:snapshot AS jsonb)"
     )
 
 
@@ -956,10 +1126,10 @@ class ReceiptClaims:
         zero rows and gets `None`. There is no window between the check and the
         write because there is no separate check.
 
-        The destination is resolved in this same transaction, from durable
-        state, and stamped onto the receipt as provenance. Resolving it later
-        would mean the route could change between the claim and the call;
-        stamping it here is what makes "where did THIS one go?" answerable.
+        The first dispatch freezes the selected contract and request identity
+        in this transaction. A retry reconstructs that contract from the receipt
+        and corroborates live authority without choosing a replacement route.
+        No dispatchable result leaves before that transaction commits.
         """
         clock = "now()" if now is None else "CAST(:now AS timestamptz)"
         claim_sql = claim_statement(lease_seconds=self._lease_seconds, clock=clock)
@@ -980,59 +1150,155 @@ class ReceiptClaims:
 
             from sqlalchemy import text
 
-            destination = resolve_destination(
+            try:
+                claim = self._prepare(session, receipt_id=receipt_id, row=row)
+                _require_snapshot_consistency(claim, require_snapshot=True)
+                request = build_product_request(claim)
+                if claim.delivery_snapshot is None:
+                    raise DeliveryPreparationRefused("dispatch_snapshot_unavailable")
+                snapshot = claim.delivery_snapshot.document()
+                session.execute(
+                    text(
+                        f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 # nosec B608 -- module-owned schema; values bound
+                        "delivery_snapshot_json = CAST(:snapshot AS jsonb), "
+                        "delivery_fingerprint = :fingerprint, "
+                        "delivery_idempotency_key = :idempotency_key, "
+                        "correlation_id = :correlation_id, "
+                        "destination_application = :application, "
+                        "destination_contract_version = :contract_version, "
+                        "destination_revision_id = :revision_id WHERE id = :id "
+                        "AND delivery_snapshot_json->>'state' = 'unstarted'"
+                    ),
+                    {
+                        "id": receipt_id,
+                        "snapshot": json.dumps(snapshot),
+                        "fingerprint": request.request_fingerprint,
+                        "idempotency_key": request.idempotency_key,
+                        "correlation_id": request.correlation_id,
+                        "application": claim.destination.application,
+                        "contract_version": claim.destination.contract_version,
+                        "revision_id": claim.destination.destination_revision_id,
+                    },
+                )
+            except DeliveryPreparationRefused as refusal:
+                session.execute(
+                    text(
+                        f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 # nosec B608 -- module-owned schema; values bound
+                        "state = 'reconciliation_required', leased_until = NULL, "
+                        "next_attempt_at = NULL, product_acceptance = 'indeterminate', "
+                        "error_code = :code, error_detail = :code WHERE id = :id"
+                    ),
+                    {"id": receipt_id, "code": refusal.error_code},
+                )
+                session.commit()
+                raise
+            session.commit()
+        return dataclass_replace(claim, stored_fingerprint=request.request_fingerprint)
+
+    def _prepare(self, session: Any, *, receipt_id: UUID, row: Any) -> ReceiptClaim:
+        """Freeze once; corroborate live authority without selecting a retry route."""
+        from sqlalchemy import select
+
+        value = row.delivery_snapshot_json
+        unstarted = (
+            isinstance(value, dict)
+            and value == _UNSTARTED_SNAPSHOT
+            and type(value.get("schema_version")) is int
+        )
+        snapshot = None if unstarted else DeliverySnapshot.from_document(value)
+        if unstarted and any(
+            item is not None
+            for item in (
+                row.delivery_fingerprint,
+                row.delivery_idempotency_key,
+                row.destination_application,
+                row.destination_contract_version,
+                row.destination_revision_id,
+            )
+        ):
+            raise DeliveryPreparationRefused("dispatch_snapshot_unavailable")
+        try:
+            live_destination = resolve_destination(
                 session,
                 capability_binding_id=row.capability_binding_id,
                 registry=self._registry,
             )
-            source = resolve_product_observation_source(
-                session, capability_binding_id=row.capability_binding_id
+            live_capability = self._registry.get(live_destination.capability_id)
+            live_source = resolve_product_observation_source(
+                session,
+                capability_binding_id=row.capability_binding_id,
             )
-            origin_evidence = resolve_receipt_origin_evidence(
-                session, receipt_id=receipt_id
-            )
-            if (
-                origin_evidence is not None
-                and _wire_schema_version(destination)
-                == PRODUCT_OBSERVATION_ORIGIN_SCHEMA_VERSION
-            ):
-                original = origin_evidence.verification_origin
-                source = ProductObservationSource(
-                    installation_id=original.installation_id,
-                    connector_key=original.connector_key,
+            authority = session.execute(
+                select(CapabilityBinding.state, ConnectorInstallation.state)
+                .join(
+                    ConnectorInstallation,
+                    ConnectorInstallation.id == CapabilityBinding.installation_id,
                 )
-            session.execute(
-                text(
-                    f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 # nosec B608 -- every interpolated fragment is a module-owned literal (schema name, state names, an int lease); all VALUES are bound
-                    "destination_application = :application, "
-                    "destination_contract_version = :contract_version, "
-                    "destination_revision_id = :revision_id "
-                    "WHERE id = :id"
-                ),
-                {
-                    "id": receipt_id,
-                    "application": destination.application,
-                    "contract_version": destination.contract_version,
-                    "revision_id": destination.destination_revision_id,
-                },
+                .where(CapabilityBinding.id == row.capability_binding_id)
+            ).one_or_none()
+            if (
+                authority is None
+                or tuple(authority) != ("enabled", "enabled")
+                or live_source.installation_id != row.installation_id
+                or (
+                    live_destination.product_port is not None
+                    and live_destination.product_port.activation_state != "enabled"
+                )
+            ):
+                raise DeliveryPreparationRefused("dispatch_authority_changed")
+        except (DestinationBindingError, DeliveryError, CapabilityRegistryError) as exc:
+            raise DeliveryPreparationRefused("dispatch_authority_changed") from exc
+        if snapshot is None:
+            snapshot = DeliverySnapshot.from_document(
+                DeliverySnapshot(
+                    source=live_source,
+                    destination=live_destination,
+                    capability=live_capability,
+                ).document()
             )
-            session.commit()
+        elif (
+            snapshot.source != live_source
+            or snapshot.capability != live_capability
+            or snapshot.document()["destination"]
+            != destination_binding_document(live_destination)
+        ):
+            raise DeliveryPreparationRefused("dispatch_authority_changed")
+        from dotmac_integration.retention import is_redacted
 
-        return ReceiptClaim(
+        if not isinstance(row.payload_json, dict) or is_redacted(row):
+            # Retention clears the sole payload; never reconstruct it from a snapshot.
+            raise DeliveryPreparationRefused("dispatch_payload_unavailable")
+        origin = resolve_receipt_origin_evidence(session, receipt_id=receipt_id)
+        claim = ReceiptClaim(
             receipt_id=receipt_id,
             attempt=row.attempt_count,
             leased_until=row.leased_until,
-            destination=destination,
-            source=source,
+            destination=snapshot.destination,
+            source=snapshot.source,
             provider_event_id=row.provider_event_id,
             event_type=row.event_type,
-            observation=row.payload_json or {},
-            # A receipt with no correlation id of its own is still traceable by
-            # the identity it definitely has.
+            observation=row.payload_json,
             correlation_id=row.correlation_id or str(receipt_id),
             stored_fingerprint=row.delivery_fingerprint,
-            origin_evidence=origin_evidence,
+            origin_evidence=origin,
+            delivery_snapshot=snapshot,
         )
+        try:
+            _require_snapshot_consistency(claim, require_snapshot=True)
+            request = build_product_request(claim)
+        except DeliveryError as exc:
+            raise DeliveryPreparationRefused("dispatch_identity_conflict") from exc
+        if not unstarted and (
+            row.delivery_fingerprint != request.request_fingerprint
+            or row.delivery_idempotency_key != request.idempotency_key
+            or row.correlation_id != request.correlation_id
+            or row.destination_application != snapshot.destination.application
+            or row.destination_contract_version != snapshot.destination.contract_version
+            or row.destination_revision_id
+            != snapshot.destination.destination_revision_id
+        ):
+            raise DeliveryPreparationRefused("dispatch_identity_conflict")
+        return claim
 
     def settle(self, claim: ReceiptClaim, outcome: ProductOutcome) -> bool:
         """Phase 3. `False` when this worker was superseded.
@@ -1043,10 +1309,15 @@ class ReceiptClaims:
         so. Recording its outcome anyway would overwrite the result of whichever
         worker legitimately took over.
 
-        The fingerprint and idempotency key are written here rather than at
-        claim time on purpose: they describe the request that was actually
-        sent, and at claim time it has not been built yet.
+        Frozen request identity is only compared here. Settlement cannot
+        establish or alter routing, fingerprint, key, or correlation.
         """
+        if claim.delivery_snapshot is None:
+            return False
+        try:
+            _require_snapshot_consistency(claim, require_snapshot=True)
+        except DeliveryPreparationRefused:
+            return False
         request = build_product_request(claim)
         state = _receipt_state_for(outcome, attempt=claim.attempt)
         backoff = outcome.retry_after_seconds if state == "retryable" else None
@@ -1058,6 +1329,11 @@ class ReceiptClaims:
                 {
                     "id": claim.receipt_id,
                     "attempt": claim.attempt,
+                    "leased_until": claim.leased_until,
+                    "application": claim.destination.application,
+                    "contract_version": claim.destination.contract_version,
+                    "revision_id": claim.destination.destination_revision_id,
+                    "snapshot": json.dumps(claim.delivery_snapshot.document()),
                     "state": state,
                     "acceptance": outcome.acceptance.value,
                     "product_ref": outcome.product_ref,
@@ -1098,7 +1374,21 @@ def deliver_receipt(
         identity. Raised BEFORE the product is contacted, so a conflicting
         replay never reaches the network.
     """
-    claim = store.claim(receipt_id=receipt_id, now=now)
+    try:
+        claim = store.claim(receipt_id=receipt_id, now=now)
+        if claim is not None:
+            _require_snapshot_consistency(claim)
+    except DeliveryPreparationRefused as refusal:
+        return DeliveryReport(
+            receipt_id=receipt_id,
+            claimed=False,
+            preparation_refused=True,
+            outcome=ProductOutcome(
+                acceptance=ProductAcceptance.INDETERMINATE,
+                error_code=refusal.error_code,
+                error_detail=refusal.error_code,
+            ),
+        )
     if claim is None:
         return DeliveryReport(
             receipt_id=receipt_id,

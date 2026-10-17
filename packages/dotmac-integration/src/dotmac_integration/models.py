@@ -547,6 +547,10 @@ class InboxReceipt(Base):
             "OR verification_config_digest ~ '^[0-9a-f]{64}$'",
             name="ck_inbox_receipts_origin_config_digest",
         ).ddl_if(dialect="postgresql"),
+        CheckConstraint(
+            "mod_intg.valid_dispatch_snapshot(delivery_snapshot_json) IS TRUE",
+            name="ck_inbox_receipts_dispatch_snapshot",
+        ).ddl_if(dialect="postgresql"),
         Index("ix_inbox_receipts_state_received", "state", "received_at"),
         # The claim predicate's index. A sweeper scanning for due, unleased
         # receipts is the hottest read on this table once delivery is running.
@@ -630,6 +634,10 @@ class InboxReceipt(Base):
     #: Over the request this engine built. Replay vs conflict: the same
     #: identity carrying a DIFFERENT request is a conflict, and this is what
     #: makes that detectable rather than assumed.
+    #: Null is unknown legacy history, never evidence of an unstarted dispatch.
+    delivery_snapshot_json: Mapped[dict[str, object] | None] = mapped_column(
+        _JSON, nullable=True
+    )
     delivery_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     #: The key the PRODUCT deduplicates on, recorded so a reconciler can ask the
     #: product about the same delivery this engine attempted. Without it,
