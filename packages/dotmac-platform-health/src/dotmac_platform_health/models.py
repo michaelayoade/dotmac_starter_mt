@@ -12,6 +12,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
@@ -42,10 +43,22 @@ class HealthObservation(Base):
         UniqueConstraint(
             "source_ref", "observation_key", name="uq_health_observations_source_key"
         ),
+        ForeignKeyConstraint(
+            ["grant_id", "component_id"],
+            [
+                f"{SCHEMA}.health_grant_components.grant_id",
+                f"{SCHEMA}.health_grant_components.component_id",
+            ],
+            name="fk_health_observations_membership",
+            ondelete="RESTRICT",
+        ),
         schema_table_args(SCHEMA),
     )
 
     id: Mapped[UUID] = uuid_pk()
+    grant_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(f"{SCHEMA}.health_grants.id", ondelete="RESTRICT"), nullable=True
+    )
     component_id: Mapped[UUID] = mapped_column(
         ForeignKey(f"{SCHEMA}.health_components.id", ondelete="RESTRICT"),
         nullable=False,
@@ -97,11 +110,71 @@ class HealthProjection(Base, TimestampMixin):
     )
 
 
-PLATFORM_MODELS = (HealthComponent, HealthObservation, HealthProjection)
+class HealthGrant(Base):
+    __tablename__ = "health_grants"
+    __table_args__ = (
+        UniqueConstraint("enrollment_ref", name="uq_health_grants_enrollment"),
+        UniqueConstraint("installation_ref", name="uq_health_grants_installation"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    enrollment_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    installation_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    projection_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    projection: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+
+class HealthGrantComponent(Base):
+    __tablename__ = "health_grant_components"
+    __table_args__ = (
+        UniqueConstraint("component_id", name="uq_health_grant_components_permanent"),
+        UniqueConstraint(
+            "grant_id", "component_id", name="uq_health_grant_components_pair"
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    grant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.health_grants.id", ondelete="RESTRICT"), nullable=False
+    )
+    component_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.health_components.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+
+class HealthGrantClosure(Base):
+    __tablename__ = "health_grant_closures"
+    __table_args__ = (
+        UniqueConstraint("grant_id", name="uq_health_grant_closures_grant"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    grant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.health_grants.id", ondelete="RESTRICT"), nullable=False
+    )
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(200), nullable=False)
+
+
+PLATFORM_MODELS = (
+    HealthComponent,
+    HealthObservation,
+    HealthProjection,
+    HealthGrant,
+    HealthGrantComponent,
+    HealthGrantClosure,
+)
 PLATFORM_TABLES = tuple(model.__tablename__ for model in PLATFORM_MODELS)
 
 __all__ = [
     "HealthComponent",
+    "HealthGrant",
+    "HealthGrantComponent",
+    "HealthGrantClosure",
     "HealthObservation",
     "HealthProjection",
     "PLATFORM_MODELS",

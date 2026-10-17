@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_platform_health.admission import HealthAdmission, HealthAdmissionError
 from dotmac_platform_health.contracts import (
     ComponentEvidence,
     DeploymentHealthEvidence,
@@ -25,6 +28,11 @@ from dotmac_platform_health.evidence import (
     HealthEvidenceSigner,
     SignedHealthEvidence,
     canonical_health_evidence_bytes,
+)
+from dotmac_platform_health.grants import (
+    require_grant,
+    require_signing_roster,
+    reservation,
 )
 from dotmac_platform_health.models import (
     HealthComponent,
@@ -98,12 +106,19 @@ def register_component(
 def record_observation(
     db: Session, command: HealthObservationInput
 ) -> ObservationReceipt:
+    return _record_observation(db, command)
+
+
+def _record_observation(
+    db: Session, command: HealthObservationInput, *, grant_id: UUID | None = None
+) -> ObservationReceipt:
     validate_health_observation(command)
     component = db.scalar(
-        select(HealthComponent).where(
+        select(HealthComponent)
+        .where(
             HealthComponent.code == command.component_code,
-            HealthComponent.active.is_(True),
         )
+        .with_for_update()
     )
     if component is None:
         raise HealthError("active component not found")
@@ -115,10 +130,15 @@ def record_observation(
         )
     )
     if existing is not None:
-        if existing.request_fingerprint != digest:
+        if existing.request_fingerprint != digest or existing.grant_id != grant_id:
             raise HealthConflict("observation key reused with different content")
         return ObservationReceipt(existing, replayed=True)
+    if grant_id is None and reservation(db, component.id) is not None:
+        raise HealthAdmissionError("component is reserved to authenticated enrollment")
+    if not component.active:
+        raise HealthError("active component not found")
     row = HealthObservation(
+        grant_id=grant_id,
         component_id=component.id,
         source_ref=command.source_ref,
         observation_key=command.observation_key,
@@ -136,8 +156,24 @@ def record_observation(
         labels=dict(command.labels),
     )
     freshness_seconds = component.freshness_seconds
-    db.add(row)
-    db.flush()
+    try:
+        with conflict_savepoint(db):
+            db.add(row)
+            db.flush()
+    except IntegrityError as exc:
+        existing = db.scalar(
+            select(HealthObservation).where(
+                HealthObservation.source_ref == command.source_ref,
+                HealthObservation.observation_key == command.observation_key,
+            )
+        )
+        if existing is None:
+            raise
+        if existing.request_fingerprint != digest or existing.grant_id != grant_id:
+            raise HealthConflict(
+                "observation key reused with different content or grant"
+            ) from exc
+        return ObservationReceipt(existing, replayed=True)
     projection = db.scalar(
         select(HealthProjection).where(HealthProjection.component_id == component.id)
     )
@@ -150,7 +186,15 @@ def record_observation(
             freshness_deadline=row.observed_at + timedelta(seconds=freshness_seconds),
         )
         db.add(projection)
-    elif (_instant(row.observed_at), _instant(row.received_at), str(row.id)) > (
+    elif (
+        grant_id is not None
+        and db.scalar(
+            select(HealthObservation.grant_id).where(
+                HealthObservation.id == projection.observation_id
+            )
+        )
+        != grant_id
+    ) or (_instant(row.observed_at), _instant(row.received_at), str(row.id)) > (
         _instant(projection.observed_at),
         _instant(_projection_received(db, projection)),
         str(projection.observation_id),
@@ -185,32 +229,49 @@ def _require_freshness_provenance(observation: HealthObservation) -> int:
     return freshness_seconds
 
 
-def _latest_observation(db: Session, component_id: UUID) -> HealthObservation | None:
+def _latest_observation(
+    db: Session,
+    component_id: UUID,
+    *,
+    admission: HealthAdmission | None = None,
+    at: datetime | None = None,
+) -> HealthObservation | None:
+    membership = reservation(db, component_id)
+    statement = select(HealthObservation).where(
+        HealthObservation.component_id == component_id
+    )
+    if membership is not None:
+        if at is None:
+            raise HealthAdmissionError("authority evaluation time required")
+        require_grant(db, admission, membership.grant_id, at)
+        statement = statement.where(HealthObservation.grant_id == membership.grant_id)
     return db.scalars(
-        select(HealthObservation)
-        .where(HealthObservation.component_id == component_id)
-        .order_by(
+        statement.order_by(
             HealthObservation.observed_at.desc(),
             HealthObservation.received_at.desc(),
             HealthObservation.id.desc(),
-        )
-        .limit(1)
+        ).limit(1)
     ).first()
 
 
-def rebuild_projections(db: Session, *, rebuilt_at: datetime) -> None:
+def rebuild_projections(
+    db: Session, *, rebuilt_at: datetime, admission: HealthAdmission | None = None
+) -> None:
     _aware(rebuilt_at, "rebuilt_at")
     components = db.scalars(
         select(HealthComponent)
         .where(HealthComponent.active.is_(True))
         .order_by(HealthComponent.code)
+        .with_for_update()
     ).all()
     latest_by_component: list[tuple[HealthComponent, HealthObservation | None]] = []
     for component in components:
         latest_by_component.append(
             (
                 component,
-                _latest_observation(db, component.id),
+                _latest_observation(
+                    db, component.id, admission=admission, at=rebuilt_at
+                ),
             )
         )
     for _, latest in latest_by_component:
@@ -244,7 +305,9 @@ def rebuild_projections(db: Session, *, rebuilt_at: datetime) -> None:
     db.flush()
 
 
-def summarize_health(db: Session, *, as_of: datetime) -> tuple[HealthSummary, ...]:
+def summarize_health(
+    db: Session, *, as_of: datetime, admission: HealthAdmission | None = None
+) -> tuple[HealthSummary, ...]:
     _aware(as_of, "as_of")
     rows = db.execute(
         select(HealthComponent, HealthProjection, HealthObservation)
@@ -257,6 +320,25 @@ def summarize_health(db: Session, *, as_of: datetime) -> tuple[HealthSummary, ..
         .where(HealthComponent.active.is_(True))
         .order_by(HealthComponent.code)
     ).all()
+    # Reserved summaries bypass the rebuildable global projection entirely.
+    corrected = []
+    for component, projection, observation in rows:
+        if reservation(db, component.id) is not None:
+            observation = _latest_observation(
+                db, component.id, admission=admission, at=as_of
+            )
+            projection = (
+                None
+                if observation is None
+                else HealthProjection(
+                    observation_id=observation.id,
+                    observed_at=observation.observed_at,
+                    state=observation.state,
+                    freshness_deadline=_instant(observation.observed_at)
+                    + timedelta(seconds=_require_freshness_provenance(observation)),
+                )
+            )
+        corrected.append((component, projection, observation))
     return tuple(
         HealthSummary(
             component.code,
@@ -281,12 +363,16 @@ def summarize_health(db: Session, *, as_of: datetime) -> tuple[HealthSummary, ..
             if observation and observation.freshness_seconds is not None
             else None,
         )
-        for component, projection, observation in rows
+        for component, projection, observation in corrected
     )
 
 
 def build_health_evidence(
-    db: Session, *, requested_components: Sequence[str], evaluated_at: datetime
+    db: Session,
+    *,
+    requested_components: Sequence[str],
+    evaluated_at: datetime,
+    admission: HealthAdmission | None = None,
 ) -> DeploymentHealthEvidence:
     """Derive the canonical, UNSIGNED health-evidence document for a roster.
 
@@ -318,14 +404,16 @@ def build_health_evidence(
     deadlines: list[datetime] = []
     for code in codes:
         match = found.get(code)
-        if match is None:
+        if match is None or reservation(db, match.id) is None or not match.active:
             components.append(
                 ComponentEvidence(
                     code, None, None, HealthState.UNKNOWN.value, "missing"
                 )
             )
             continue
-        observation = _latest_observation(db, match.id)
+        observation = _latest_observation(
+            db, match.id, admission=admission, at=evaluated_at
+        )
         if observation is None:
             components.append(
                 ComponentEvidence(
@@ -366,12 +454,17 @@ def produce_signed_health_evidence(
     requested_components: Sequence[str],
     evaluated_at: datetime,
     signer: HealthEvidenceSigner | None,
+    admission: HealthAdmission | None = None,
 ) -> SignedHealthEvidence:
     """Build and sign evidence only from authoritative durable state."""
     if signer is None:
         raise HealthEvidenceError("a HealthEvidenceSigner must be supplied")
+    require_signing_roster(db, admission, requested_components, evaluated_at)
     evidence = build_health_evidence(
-        db, requested_components=requested_components, evaluated_at=evaluated_at
+        db,
+        requested_components=requested_components,
+        evaluated_at=evaluated_at,
+        admission=admission,
     )
     canonical_bytes = canonical_health_evidence_bytes(evidence)
     signature = signer.sign_health_evidence(evidence, canonical_bytes)

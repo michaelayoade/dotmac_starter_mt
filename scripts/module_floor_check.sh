@@ -70,7 +70,7 @@ FLOOR_PYTHON="${FLOOR_PYTHON:-python3}"
 # field names modules BEYOND the manifest that consume the declared floor --
 # see the fourth refusal family in `probe` below. Omit it and the probe is
 # manifest-only, exactly as before.
-MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service packages/dotmac-billing:dotmac_billing:dotmac_billing.service}"
+MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service packages/dotmac-billing:dotmac_billing:dotmac_billing.service packages/dotmac-platform-health:dotmac_platform_health:dotmac_platform_health.service,dotmac_platform_health.grants}"
 
 # Overrides for a one-off investigation. Left unset in CI: a hand-set pair is
 # a claim about a module that the module itself can contradict, which is the

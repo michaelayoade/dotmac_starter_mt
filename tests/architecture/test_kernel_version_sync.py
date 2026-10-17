@@ -106,7 +106,6 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # CAPABILITY_RAISED_FLOORS.
     "dotmac-collections": "0.1.0a89",
     "dotmac-forms": "0.1.0a88",
-    "dotmac-platform-health": "0.1.0a88",
     "dotmac-support-access": "0.1.0a88",
     "dotmac-ai-operations": "0.1.0a88",
     "dotmac-compliance-reporting": "0.1.0a88",
@@ -189,6 +188,9 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # Health enrollment writers consume the engine-free savepoint surface
+    # first published in a98; mod_health was allocated in a88.
+    "dotmac-platform-health": ("0.1.0a98", "0.1.0a88"),
     # Opening-window refusal recovery observes Kernel's exact-root rollback
     # latch. transactions.py existed in a98, but published a98-a104 export
     # only conflict_savepoint; the latch requires a105. a89 allocated Billing.
