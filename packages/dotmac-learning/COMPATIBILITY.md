@@ -29,3 +29,12 @@ failure recovery, lossless transfer and post-new-facts reversal, then execute th
 released artifact installed in Academy. Source review and unexecuted canaries
 are not compatibility acceptance. Later slices of the full learning extraction
 remain required after the initial seven-table release.
+
+The prepared participation extension continues the same lineage at `lr_0003`.
+V3 is a full21/194-field storage protocol; V1 and V2 remain seven/fourteen-table
+compatibility APIs. Fresh Enrollment dual Party/profile references translate the
+legacy People constraint explicitly; stable Academy identity mapping is unproved.
+Trusted authority facts are supplied by product authorization and are not signed
+credentials. Existing exam selection/grading are ported without algorithm changes;
+attempt policy and remaining direct product learning writers still require their
+designated extraction. Source static review is not hosted acceptance.

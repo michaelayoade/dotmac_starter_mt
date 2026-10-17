@@ -2,9 +2,12 @@
 
 import dotmac_learning as learning
 from dotmac_learning import (
+    assessment_contracts,
     curriculum,
     curriculum_transfer,
     curriculum_transfer_contracts,
+    exam_engine,
+    grading,
     reading,
     references,
     transfer,
@@ -193,3 +196,147 @@ def test_v1_and_v2_transfer_surfaces_remain_distinct_and_bound_to_their_owners()
         learning.LearningSnapshotV2 is curriculum_transfer_contracts.LearningSnapshotV2
     )
     assert learning.LearningSnapshotV2 is not learning.LearningSnapshotV1
+
+
+def test_existing_exam_and_grading_engine_have_one_public_owner():
+    assert learning.ExamQuestion is exam_engine.Question
+    assert learning.ExamSitter is exam_engine.Sitter
+    assert learning.SelectionPolicy is exam_engine.SelectionPolicy
+    assert learning.GradingQuestion is assessment_contracts.GradingQuestion
+    assert learning.select_questions is exam_engine.select
+    assert learning.present_options is exam_engine.present_options
+    assert learning.chance_baseline is exam_engine.chance_baseline
+    assert learning.near_chance_floor is exam_engine.near_chance_floor
+    assert learning.duration_floor is exam_engine.duration_floor
+    assert learning.check_validity is exam_engine.check_validity
+    assert learning.grade_submission is grading.grade_submission
+    assert grading.GradedResult is learning.GradedResult
+
+
+def test_participation_commands_and_access_keep_their_public_owner():
+    from dotmac_learning import (
+        audience,
+        entitlements,
+        participation_contracts,
+        roster,
+        tracks,
+    )
+
+    owners = (
+        (
+            participation_contracts,
+            (
+                "ActivateEnrollmentCommand",
+                "ActivationResult",
+                "AssignFacilitatorCommand",
+                "AudienceCounts",
+                "BulkEnrollCommand",
+                "BulkEnrollResult",
+                "ClassificationCounts",
+                "ClassifyRosterCommand",
+                "EnrollmentFact",
+                "FacilitatorEligibility",
+                "ParticipationBadRequest",
+                "ParticipationForbidden",
+                "ParticipationNotFound",
+                "RosterAuthority",
+                "RosterStateCommand",
+                "UnclassifiedPerson",
+            ),
+        ),
+        (
+            roster,
+            (
+                "activate_enrollment",
+                "assign_facilitator",
+                "bulk_enroll",
+                "set_roster_state",
+            ),
+        ),
+        (
+            audience,
+            (
+                "classify_from_roster",
+                "counts_by_audience",
+                "staff_person_ids",
+                "unclassified",
+            ),
+        ),
+        (
+            tracks,
+            (
+                "CreateTrackCommand",
+                "AddTrackCoursesCommand",
+                "ReorderTrackCoursesCommand",
+                "TrackFact",
+                "CohortTrackFact",
+                "CohortTrackItem",
+                "list_cohort_tracks",
+                "tracks_for_cohorts",
+                "create_cohort_track",
+                "add_courses_to_cohort_track",
+                "reorder_track_courses",
+                "cohort_track_or_404",
+                "ensure_track_offerings",
+                "assign_enrollment_track",
+                "clear_enrollment_track",
+                "default_track_for_cohort",
+                "ensure_default_track_for_cohort",
+            ),
+        ),
+        (
+            entitlements,
+            (
+                "CourseAccessDenied",
+                "CourseAccessState",
+                "visible_course_ids",
+                "course_access_states",
+                "accessible_course_ids",
+                "person_can_access_course",
+                "require_course_access",
+                "open_course_ids",
+                "unmet_prerequisites",
+                "require_course_open",
+            ),
+        ),
+    )
+    for owner, names in owners:
+        for name in names:
+            assert name in learning.__all__
+            assert getattr(learning, name) is getattr(owner, name)
+
+
+def test_twenty_one_table_v3_transfer_keeps_its_public_owner():
+    from dotmac_learning import participation_transfer, participation_transfer_contracts
+
+    owners = (
+        (
+            participation_transfer,
+            (
+                "export_snapshot_v3",
+                "import_snapshot_v3",
+                "verify_snapshot_v3",
+            ),
+        ),
+        (
+            participation_transfer_contracts,
+            (
+                "CohortRowV3",
+                "EnrollmentRowV3",
+                "TrackRowV3",
+                "TrackCourseRowV3",
+                "CohortTrackRowV3",
+                "CourseOfferingRowV3",
+                "CoursePrerequisiteRowV3",
+                "ParticipationStorageRowV3",
+                "LearningSnapshotV3",
+                "SnapshotClosureErrorV3",
+                "VerificationObservationV3",
+                "ImportObservationV3",
+            ),
+        ),
+    )
+    for owner, names in owners:
+        for name in names:
+            assert name in learning.__all__
+            assert getattr(learning, name) is getattr(owner, name)

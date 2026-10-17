@@ -339,3 +339,26 @@ delta. Partial or failed checks do not authorize merge.
 **Status:** historical; closed when the CI-first policy replaced the former
 expectation. The ordinary hosted-CI merge gate remains open until the exact
 head/base result is green and the independent delta re-review is complete.
+
+## 2026-10-17 — deterministic learning option order preserves the existing engine
+
+**Control:** Ruff S311 flags standard-library random generators that would be
+unsuitable for credentials or secrets.
+
+**Scope and reason.** The single `random.Random` call in
+`dotmac_learning.exam_engine.present_options` retains Academy's accepted
+per-sitter option presentation algorithm. Its seed is the existing SHA256 rank
+of sitter ID and question ID. Replacing it changes recorded option order and
+breaks the source-preserving extraction. The call carries one documented
+`# noqa: S311`; no file or global rule is disabled.
+
+**Boundary and cost.** This generator only shuffles option text. It generates
+no credentials, secrets or authorization grants. Its determinism is intentional;
+this record makes no unpredictability claim. Grading compares submitted option
+text, and admissions, timing, access and persistence retain their declared
+owners. Existing source characterizations pin the draw and presentation order.
+
+**Status:** bounded noncryptographic use retained in prepared source. Pinned
+static checks pass; hosted qualification, release and Academy adoption remain
+pending. Any change to the recorded option-order semantics requires a separate
+behavioral review and compatible version transition.

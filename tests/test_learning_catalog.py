@@ -52,6 +52,13 @@ ALL_TABLES = (
     "subtopic_reads",
     "chapter_bookmarks",
     "chapter_notes",
+    "cohorts",
+    "enrollments",
+    "tracks",
+    "track_courses",
+    "cohort_tracks",
+    "course_offerings",
+    "course_prerequisites",
 )
 
 

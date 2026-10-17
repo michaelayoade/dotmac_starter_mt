@@ -15,9 +15,17 @@
 - Add an additive public surface preserving V1 names and bindings, plus V2
   fourteen-table transfer with 135 persisted fields and pre-insert FK closure.
 
-The first result slice has completed independent source review. Curriculum and
-reading storage/commands are reviewed; V2 permission canaries and public
-integration are under review. The first slice has matching hosted-generated
-metadata/lock; future integrated source is not yet published or qualified.
-Hosted qualification, lossless Academy cutover and reversal, publication and
-Academy adoption remain incomplete. No release artifact or deployment is claimed.
+The result and curriculum/reading source, V2 permission canaries and their public
+integration have completed independent source review. The first slice has
+matching hosted-generated metadata/lock, and the source PRs await hosted
+qualification. The prepared twenty-one-table source still requires its reviewed
+integration and hosted qualification. Registry publication, installed-package
+execution, lossless Academy cutover/reversal and adoption remain incomplete.
+No release artifact or deployment is claimed.
+
+- Prepare participation storage in `lr_0003`, source-preserving roster/audience,
+  tracks/access commands and full21/194-field V3 CURRENT transfer. Preserve
+  V1/V2 scoped protocols and explicit fresh Enrollment identity translation.
+- Port the existing pure exam engine/grader and their characterizations; the
+  deterministic option shuffle retains its narrowly documented nonsecret RNG.
+  All changes remain unpublished source pending hosted/installed qualification.
