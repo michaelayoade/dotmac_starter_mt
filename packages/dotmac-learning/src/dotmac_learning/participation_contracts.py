@@ -42,6 +42,7 @@ class FacilitatorEligibility:
     tenant_id: UUID
     person_id: UUID
     has_instructor_role: bool
+    account_is_active: bool
 
 
 class ParticipationCommand(BaseModel):

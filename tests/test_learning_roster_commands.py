@@ -239,14 +239,18 @@ def test_facilitator_admin_first_profile_active_and_eligibility_binding(
                 db,
                 command,
                 authority=RosterAuthority(tenant, False),
-                eligibility=FacilitatorEligibility(tenant, root_only, True),
+                eligibility=FacilitatorEligibility(
+                    tenant, root_only, True, account_is_active=True
+                ),
             )
         with pytest.raises(ParticipationNotFound, match="person not found for tenant"):
             roster.assign_facilitator(
                 db,
                 command,
                 authority=RosterAuthority(tenant, True),
-                eligibility=FacilitatorEligibility(tenant, root_only, True),
+                eligibility=FacilitatorEligibility(
+                    tenant, root_only, True, account_is_active=True
+                ),
             )
         command = AssignFacilitatorCommand(
             tenant_id=tenant, cohort_id=cohort, person_id=people[0]
@@ -256,20 +260,26 @@ def test_facilitator_admin_first_profile_active_and_eligibility_binding(
                 db,
                 command,
                 authority=RosterAuthority(tenant, True),
-                eligibility=FacilitatorEligibility(other, outsider, True),
+                eligibility=FacilitatorEligibility(
+                    other, outsider, True, account_is_active=True
+                ),
             )
         with pytest.raises(ParticipationBadRequest, match="instructor role"):
             roster.assign_facilitator(
                 db,
                 command,
                 authority=RosterAuthority(tenant, True),
-                eligibility=FacilitatorEligibility(tenant, people[0], False),
+                eligibility=FacilitatorEligibility(
+                    tenant, people[0], False, account_is_active=True
+                ),
             )
         fact = roster.assign_facilitator(
             db,
             command,
             authority=RosterAuthority(tenant, True),
-            eligibility=FacilitatorEligibility(tenant, people[0], True),
+            eligibility=FacilitatorEligibility(
+                tenant, people[0], True, account_is_active=True
+            ),
         )
         assert (fact.role_in_cohort, fact.status, fact.track_id) == (
             "instructor",
@@ -344,7 +354,9 @@ def test_bulk_already_active_nonstudent_can_reassign_track_and_facilitator_clear
                 tenant_id=tenant, cohort_id=cohort, person_id=people[0]
             ),
             authority=RosterAuthority(tenant, True),
-            eligibility=FacilitatorEligibility(tenant, people[0], True),
+            eligibility=FacilitatorEligibility(
+                tenant, people[0], True, account_is_active=True
+            ),
         )
         assert fact.id == row.id
         assert (fact.status, fact.role_in_cohort, fact.track_id) == (
@@ -353,9 +365,7 @@ def test_bulk_already_active_nonstudent_can_reassign_track_and_facilitator_clear
             None,
         )
         db.execute(
-            Party.__table__.update()
-            .where(Party.id == people[1])
-            .values(is_active=False)
+            Party.__table__.update().where(Party.id == people[1]).values(is_active=True)
         )
         with pytest.raises(ParticipationBadRequest, match="active user"):
             roster.assign_facilitator(
@@ -364,7 +374,9 @@ def test_bulk_already_active_nonstudent_can_reassign_track_and_facilitator_clear
                     tenant_id=tenant, cohort_id=cohort, person_id=people[1]
                 ),
                 authority=RosterAuthority(tenant, True),
-                eligibility=FacilitatorEligibility(tenant, people[1], True),
+                eligibility=FacilitatorEligibility(
+                    tenant, people[1], True, account_is_active=False
+                ),
             )
 
 
@@ -400,3 +412,84 @@ def test_activation_loaded_helper_does_not_flush_and_id_wrapper_autoflushes(
             assert calls == [db]
         finally:
             event.remove(db, "before_flush", flushed)
+
+
+@pytest.mark.parametrize(
+    "identity_active,account_active", [(True, False), (False, True)]
+)
+def test_facilitator_account_availability_independent_of_identity(
+    roster_database,
+    identity_active,
+    account_active,
+):
+    _, app, tenant, _, cohort, people, _, _ = roster_database
+    with scoped(app, tenant) as db:
+        db.get(Party, people[0]).is_active = identity_active
+        db.flush()
+        command = AssignFacilitatorCommand(
+            tenant_id=tenant, cohort_id=cohort, person_id=people[0]
+        )
+        eligibility = FacilitatorEligibility(
+            tenant, people[0], account_active, account_is_active=account_active
+        )
+        if account_active:
+            fact = roster.assign_facilitator(
+                db,
+                command,
+                authority=RosterAuthority(tenant, True),
+                eligibility=eligibility,
+            )
+            assert fact.person_id == people[0] and fact.role_in_cohort == "instructor"
+        else:
+            with pytest.raises(ParticipationBadRequest, match="active user"):
+                roster.assign_facilitator(
+                    db,
+                    command,
+                    authority=RosterAuthority(tenant, True),
+                    eligibility=eligibility,
+                )
+
+
+@pytest.mark.parametrize("wrong_scope", ["tenant", "person"])
+def test_facilitator_observation_scope_rejected_before_sql(
+    roster_database, wrong_scope
+):
+    from sqlalchemy import event
+
+    _, app, tenant, other, cohort, people, _, _ = roster_database
+    with scoped(app, tenant) as db:
+        seen = []
+
+        def observe(*args):
+            seen.append(args)
+
+        event.listen(db.bind, "before_cursor_execute", observe)
+        try:
+            with pytest.raises(
+                ParticipationForbidden, match="eligibility does not cover"
+            ):
+                roster.assign_facilitator(
+                    db,
+                    AssignFacilitatorCommand(
+                        tenant_id=tenant, cohort_id=cohort, person_id=people[0]
+                    ),
+                    authority=RosterAuthority(tenant, True),
+                    eligibility=FacilitatorEligibility(
+                        other if wrong_scope == "tenant" else tenant,
+                        people[1] if wrong_scope == "person" else people[0],
+                        False,
+                        account_is_active=False,
+                    ),
+                )
+            assert seen == []
+        finally:
+            event.remove(db.bind, "before_cursor_execute", observe)
+
+
+def test_facilitator_account_observation_is_required_without_default():
+    from dataclasses import MISSING, fields
+
+    observed = {field.name: field for field in fields(FacilitatorEligibility)}
+    assert observed["account_is_active"].default is MISSING
+    with pytest.raises(TypeError):
+        FacilitatorEligibility(uuid4(), uuid4(), True)

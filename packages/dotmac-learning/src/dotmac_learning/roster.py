@@ -114,6 +114,13 @@ def assign_facilitator(
     _authority(command.tenant_id, authority)
     if not authority.actor_is_admin:
         raise ParticipationBadRequest("only an admin can assign a cohort facilitator")
+    if (eligibility.tenant_id, eligibility.person_id) != (
+        command.tenant_id,
+        command.person_id,
+    ):
+        raise ParticipationForbidden(
+            "facilitator eligibility does not cover person and tenant"
+        )
     _cohort(db, command.tenant_id, command.cohort_id)
     person = db.scalars(
         select(Party)
@@ -122,15 +129,8 @@ def assign_facilitator(
     ).first()
     if person is None:
         raise ParticipationNotFound("person not found for tenant")
-    if not person.is_active:
+    if not eligibility.account_is_active:
         raise ParticipationBadRequest("facilitator must be an active user")
-    if (eligibility.tenant_id, eligibility.person_id) != (
-        command.tenant_id,
-        command.person_id,
-    ):
-        raise ParticipationForbidden(
-            "facilitator eligibility does not cover person and tenant"
-        )
     if not eligibility.has_instructor_role:
         raise ParticipationBadRequest("facilitator must have the instructor role")
     row = _enrollment(db, command.tenant_id, command.cohort_id, command.person_id)
