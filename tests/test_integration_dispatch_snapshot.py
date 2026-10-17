@@ -30,6 +30,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tests.test_integration_isolation import (  # noqa: F401
     _installed_capability_registry,
+    _superuser_url,
+    _url_for,
     migrated_scratch,
 )
 from tests.unit.test_integration_ingress import (  # noqa: F401
@@ -437,16 +439,25 @@ def test_populated_downgrade_cannot_erase_dispatch_identity(
 def test_platform_role_and_before_trigger_cannot_tamper_with_frozen_identity(dispatch):
     engine, store, receipt_id, *_ = dispatch
     store.claim(receipt_id=receipt_id)
-    with pytest.raises(DBAPIError, match="dispatch identity is immutable"):
-        with engine.begin() as conn:
-            conn.execute(text("SET LOCAL ROLE platform_api"))
-            conn.execute(
-                text(
-                    "UPDATE mod_intg.inbox_receipts SET correlation_id='tampered' "
-                    "WHERE id=:id"
-                ),
-                {"id": receipt_id},
-            )
+    # app_admin cannot assume platform_api. Use the migration owner against the
+    # same scratch database, then switch to the actual platform role locally.
+    database = engine.url.database
+    assert database is not None
+    migration_owner = create_engine(_url_for(_superuser_url(), database))
+    try:
+        with pytest.raises(DBAPIError, match="dispatch identity is immutable"):
+            with migration_owner.begin() as conn:
+                conn.execute(text("SET LOCAL ROLE platform_api"))
+                assert conn.scalar(text("SELECT current_user")) == "platform_api"
+                conn.execute(
+                    text(
+                        "UPDATE mod_intg.inbox_receipts SET correlation_id='tampered' "
+                        "WHERE id=:id"
+                    ),
+                    {"id": receipt_id},
+                )
+    finally:
+        migration_owner.dispose()
     # The final AFTER guard sees the completed row, even when an earlier trigger
     # changes identity during an otherwise ordinary outcome update.
     with pytest.raises(DBAPIError, match="dispatch identity is immutable"):

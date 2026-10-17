@@ -1,5 +1,6 @@
 """Hosted, migrated PostgreSQL admission races, ACLs and retention canaries."""
 
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
@@ -19,6 +20,7 @@ from dotmac_platform_health import (
 )
 from dotmac_platform_health.models import HealthGrant, HealthObservation
 from sqlalchemy import create_engine, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -211,17 +213,33 @@ def test_immutable_evidence_sql_and_platform_only_acl(migrated):
                     conn.execute(text(statement))
     # The narrow id UPDATE privilege exists only for PostgreSQL FK KEY SHARE.
     # Even a no-op id write must hit the immutable trigger for both service roles.
-    for role in ("app_admin", "platform_api"):
-        for statement in (
-            "UPDATE mod_health.health_grants SET id=id",
-            "UPDATE mod_health.health_grant_components SET id=id",
-            "UPDATE mod_health.health_eligibility_assessments SET id=id",
-        ):
-            with migrated.begin() as conn:
-                conn.execute(text(f"SET LOCAL ROLE {role}"))
-                with pytest.raises(DBAPIError, match="health evidence is immutable"):
-                    with conn.begin_nested():
-                        conn.execute(text(statement))
+    # app_admin cannot assume platform_api. Preserve the configured migration
+    # owner's connection details and replace only its scratch database target.
+    owner_url = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv(
+        "TEST_DATABASE_URL"
+    )
+    assert owner_url is not None  # The migrated fixture requires this source.
+    database = migrated.url.database
+    assert database is not None
+    migration_owner = create_engine(make_url(owner_url).set(database=database))
+    try:
+        for role in ("app_admin", "platform_api"):
+            for statement in (
+                "UPDATE mod_health.health_grants SET id=id",
+                "UPDATE mod_health.health_grant_components SET id=id",
+                "UPDATE mod_health.health_eligibility_assessments SET id=id",
+            ):
+                with migration_owner.connect() as conn, conn.begin() as transaction:
+                    conn.execute(text(f"SET LOCAL ROLE {role}"))
+                    assert conn.scalar(text("SELECT current_user")) == role
+                    with pytest.raises(
+                        DBAPIError, match="health evidence is immutable"
+                    ):
+                        with conn.begin_nested():
+                            conn.execute(text(statement))
+                    transaction.rollback()
+    finally:
+        migration_owner.dispose()
     with migrated.begin() as conn:
         conn.execute(text("SET LOCAL ROLE app_user"))
         with pytest.raises(DBAPIError):

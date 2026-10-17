@@ -1190,15 +1190,15 @@ class ComposeHostEffects:
             raise LiveInstanceRefusal("mismatch")
         if len({mount["target"] for mount in actual_mounts}) != len(actual_mounts):
             raise LiveInstanceRefusal("mismatch")
-        targets = []
-        for mount in actual_mounts:
+        targets: list[PurePosixPath] = []
+        for actual_mount in actual_mounts:
             if (
-                mount["type"] != "bind"
-                or mount["rw"] is not False
-                or type(mount["target"]) is not str
+                actual_mount["type"] != "bind"
+                or actual_mount["rw"] is not False
+                or type(actual_mount["target"]) is not str
             ):
                 raise LiveInstanceRefusal("mismatch")
-            target = PurePosixPath(mount["target"])
+            target = PurePosixPath(actual_mount["target"])
             if (
                 not target.is_absolute()
                 or ".." in target.parts

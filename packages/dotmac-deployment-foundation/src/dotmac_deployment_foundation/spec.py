@@ -2739,7 +2739,7 @@ class StartupConfig:
                 raise SpecError(
                     "startup mount indexes must cover every placement mount in order"
                 )
-            targets = []
+            targets: list[PurePosixPath] = []
             for reference, mount in zip(declaration.mounts, mounts, strict=True):
                 if not mount.read_only or mount.kind not in (
                     "repository",
