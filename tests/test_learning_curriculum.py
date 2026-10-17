@@ -3,36 +3,38 @@
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, event, select, text
-from sqlalchemy.orm import Session
-
 from dotmac_learning.curriculum import (
     CurriculumConflict,
     CurriculumNotFound,
     create_course,
-    upsert_chapter,
     delete_chapter,
+    doc_from_db,
     import_manual,
     load_bank,
-    doc_from_db,
     public_catalog,
+    upsert_chapter,
 )
 from dotmac_learning.curriculum_contracts import (
-    CourseCreate,
-    ChapterWrite,
-    ManualImport,
-    ImportedChapter,
     BankDocument,
     BankQuestion,
+    ChapterWrite,
+    CourseCreate,
+    ImportedChapter,
+    ManualImport,
 )
+from dotmac_learning.curriculum_models import Chapter, Question
 from dotmac_learning.models import Course
 from dotmac_learning.result_contracts import TransactionChanged
-from dotmac_learning.curriculum_models import Chapter, Question
+from sqlalchemy import create_engine, event, select, text
+from sqlalchemy.orm import Session
+
+from tests import test_learning_catalog as learning_catalog_fixtures
 from tests.test_learning_catalog import (
-    learning_database as learning_database,
-    _tenant,
     _scope,
+    _tenant,
 )
+
+learning_database = learning_catalog_fixtures.learning_database
 
 
 @pytest.fixture

@@ -7,9 +7,7 @@ from time import monotonic, sleep
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.orm import Session
-
+from dotmac_kernel.models import Party, PartyPerson
 from dotmac_learning import events, results
 from dotmac_learning.models import Activity, Score, Submission
 from dotmac_learning.projections import best_scores_for
@@ -35,12 +33,18 @@ from dotmac_learning.result_contracts import (
     ResultBadRequest,
     TransactionChanged,
 )
-from tests.test_learning_catalog import (
-    _person,
-    _scope,
-    _tenant,
-    learning_database as learning_database,
+from sqlalchemy import (
+    create_engine,
+    func,
+    select,
+    text,
 )
+from sqlalchemy.orm import Session
+
+from tests import test_learning_catalog as learning_catalog
+from tests.test_learning_catalog import _person, _scope, _tenant
+
+learning_database = learning_catalog.learning_database
 
 
 class Policy:
@@ -351,9 +355,11 @@ def test_identity_delete_contention_requires_caller_rollback(
 ):
     admin, app, tenant, person, *_ = result_database
     with admin.connect() as deleting, deleting.begin():
-        deleting.execute(
-            text(f"DELETE FROM public.{table} WHERE {column}=:id"), {"id": person}
-        )
+        relation = {
+            "party_persons": PartyPerson.__table__,
+            "parties": Party.__table__,
+        }[table]
+        deleting.execute(relation.delete().where(relation.c[column] == person))
         # Root deletion blocks admission. Bound that wait to keep the test finite.
         with pytest.raises(Exception) as caught:
             with scoped(app, tenant) as db:

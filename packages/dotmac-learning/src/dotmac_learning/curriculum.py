@@ -31,8 +31,10 @@ from .models import Course
 from .references import (
     CourseFact,
     CourseWrite,
-    create_course as create_reference_course,
     get_course,
+)
+from .references import (
+    create_course as create_reference_course,
 )
 from .results import _transaction, _unchanged
 

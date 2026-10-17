@@ -4,16 +4,15 @@ import hashlib
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
-
 from dotmac_learning.curriculum import chapter_source_hash, lint_bank
 from dotmac_learning.curriculum_contracts import (
     BankDocument,
     BankQuestion,
+    ChapterSource,
     CourseCreate,
     FigureSource,
-    ChapterSource,
 )
+from pydantic import ValidationError
 
 
 def test_hash_uses_raw_utf8_and_sorted_referenced_figure_bytes_or_missing():

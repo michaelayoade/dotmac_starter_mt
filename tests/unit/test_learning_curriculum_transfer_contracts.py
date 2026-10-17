@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-
 from dotmac_learning.curriculum_models import CURRICULUM_MODELS
 from dotmac_learning.curriculum_transfer_contracts import (
     ChapterBookmarkRowV2,
@@ -24,6 +23,7 @@ from dotmac_learning.transfer_contracts import (
     LearningSnapshotV1,
     SnapshotValidationError,
 )
+
 from tests.unit.test_learning_transfer_contracts import ROW_TYPES as FIRST_ROW_TYPES
 
 ROW_TYPES = (
@@ -80,9 +80,10 @@ def test_all_135_persisted_columns_are_mandatory_in_v2():
 
 
 def test_v2_does_not_redefine_the_seven_table_v1_protocol():
-    assert set(field.name for field in fields(LearningSnapshotV1)) == set(
-        TABLES[:7]
-    ) | {"version", "tenant_ids"}
+    assert {field.name for field in fields(LearningSnapshotV1)} == set(TABLES[:7]) | {
+        "version",
+        "tenant_ids",
+    }
     assert empty_snapshot(uuid4()).version == 2
     for version in (1, True, 3):
         with pytest.raises(SnapshotValidationError):

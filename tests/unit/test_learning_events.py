@@ -1,15 +1,19 @@
 """Typed event commands and optional-failure reporting (hosted CI only)."""
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import (
+    UTC,
+    datetime,
+    timedelta,
+    timezone,
+)
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
-
 from dotmac_learning.event_contracts import EventWrite
 from dotmac_learning.events import _local_day_start_utc, emit, record
 from dotmac_learning.models import KIND_ACTIVITY_STARTED, KIND_COURSE_VIEWED
+from pydantic import ValidationError
 
 
 def test_event_write_preserves_json_nulls_and_rejects_non_json_detail() -> None:

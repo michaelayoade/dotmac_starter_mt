@@ -59,7 +59,8 @@ def _policy_violations(doc: BankDoc) -> list[str]:
             # A pool at or above the bank size draws every question every time,
             # which is the behaviour the author was trying to move away from.
             out.append(
-                f"policy: pool {pool} exceeds the {len(doc.questions)} questions in the bank — nothing is held back"
+                f"policy: pool {pool} exceeds the {len(doc.questions)} questions "
+                "in the bank — nothing is held back"
             )
 
     attempts = policy.get("max_attempts")
@@ -72,13 +73,15 @@ def _policy_violations(doc: BankDoc) -> list[str]:
             out.append(f"policy: pass_threshold must be a number, got {threshold!r}")
         elif not 0.0 <= float(threshold) <= 1.0:
             out.append(
-                f"policy: pass_threshold is a fraction between 0 and 1, got {threshold!r}"
+                "policy: pass_threshold is a fraction between 0 and 1, "
+                f"got {threshold!r}"
             )
 
     mode = policy.get("mode")
     if mode is not None and mode not in _ASSESSMENT_MODES:
         out.append(
-            f"policy: mode must be one of {', '.join(sorted(_ASSESSMENT_MODES))}, got {mode!r}"
+            f"policy: mode must be one of {', '.join(sorted(_ASSESSMENT_MODES))}, "
+            f"got {mode!r}"
         )
 
     return out

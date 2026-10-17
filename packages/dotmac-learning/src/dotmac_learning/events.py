@@ -9,15 +9,21 @@ the source's SELECT race; product timezone selection belongs to the adapter.
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import UTC, datetime, time, timedelta, tzinfo
+from datetime import (
+    UTC,
+    datetime,
+    time,
+    timedelta,
+    tzinfo,
+)
 from uuid import UUID
 
+from dotmac_kernel.models import Party, PartyType
 from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from dotmac_kernel.models import Party, PartyType
 from dotmac_learning.event_contracts import (
     EventEmission,
     EventFact,

@@ -11,16 +11,31 @@ import importlib
 import uuid
 
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from dotmac_learning.curriculum_models import CURRICULUM_MODELS
+from sqlalchemy import (
+    bindparam,
+    column,
+    create_engine,
+    func,
+    inspect,
+    select,
+    table,
+    text,
+)
+from sqlalchemy.exc import DBAPIError
 
+from tests import test_learning_catalog as learning_catalog_fixtures
 from tests.test_learning_catalog import (
     TABLES as FIRST_TABLES,
+)
+from tests.test_learning_catalog import (
     _course,
     _refused,
     _scope,
     _tenant,
-    learning_database as learning_database,
 )
+
+learning_database = learning_catalog_fixtures.learning_database
 
 TABLES = (
     "chapters",
@@ -31,6 +46,16 @@ TABLES = (
     "chapter_bookmarks",
     "chapter_notes",
 )
+# Closed source-owned relations without ORM client defaults: database defaults
+# remain under test, and callers cannot supply arbitrary relation identifiers.
+RELATIONS = {
+    model.__tablename__: table(
+        model.__tablename__,
+        *(column(name) for name in model.__table__.c.keys()),
+        schema="mod_learning",
+    )
+    for model in CURRICULUM_MODELS
+}
 FK_ORACLE = {
     "chapters": {
         (("tenant_id", "course_id"), "mod_learning", "courses", ("tenant_id", "id"))
@@ -131,11 +156,9 @@ def _chapter(conn, tenant, course, number=1):
     chapter = uuid.uuid4()
     conn.execute(
         text(
-            (
-                "INSERT INTO mod_learning.chapters (id, tenant_id, "
-                "course_id, number, title) VALUES (:id, :tenant, "
-                ":course, :number, 'Chapter')"
-            )
+            "INSERT INTO mod_learning.chapters (id, tenant_id, "
+            "course_id, number, title) VALUES (:id, :tenant, "
+            ":course, :number, 'Chapter')"
         ),
         {"id": chapter, "tenant": tenant, "course": course, "number": number},
     )
@@ -146,11 +169,9 @@ def _bank(conn, tenant, course):
     bank = uuid.uuid4()
     conn.execute(
         text(
-            (
-                "INSERT INTO mod_learning.question_banks (id, "
-                "tenant_id, course_id, kind) VALUES (:id, :tenant, "
-                ":course, 'chapter')"
-            )
+            "INSERT INTO mod_learning.question_banks (id, "
+            "tenant_id, course_id, kind) VALUES (:id, :tenant, "
+            ":course, 'chapter')"
         ),
         {"id": bank, "tenant": tenant, "course": course},
     )
@@ -161,27 +182,34 @@ def _question(conn, tenant, bank, ext="Q1"):
     question = uuid.uuid4()
     conn.execute(
         text(
-            (
-                "INSERT INTO mod_learning.questions (id, tenant_id, "
-                "bank_id, ext_id, stem, type, rubric_category) VALUES "
-                "(:id, :tenant, :bank, :ext, 'Why?', 'single', 'recall')"
-            )
+            "INSERT INTO mod_learning.questions (id, tenant_id, "
+            "bank_id, ext_id, stem, type, rubric_category) VALUES "
+            "(:id, :tenant, :bank, :ext, 'Why?', 'single', 'recall')"
         ),
         {"id": question, "tenant": tenant, "bank": bank, "ext": ext},
     )
     return question
 
 
-def _observation_sql(table):
-    extra = ", course_id" if table in ("chapter_bookmarks", "chapter_notes") else ""
-    value = ", :course" if extra else ""
-    if table == "subtopic_reads":
-        extra, value = ", subtopic_slug", ", 'heading'"
-    return (
-        f"INSERT INTO mod_learning.{table} "
-        f"(id, tenant_id, person_id, chapter_id{extra}) "
-        f"VALUES (:id, :tenant, :person, :chapter{value})"
-    )
+def _observation_insert(table_name):
+    relation = RELATIONS[table_name]
+    values = {
+        "id": bindparam("id"),
+        "tenant_id": bindparam("tenant"),
+        "person_id": bindparam("person"),
+        "chapter_id": bindparam("chapter"),
+    }
+    if table_name in ("chapter_bookmarks", "chapter_notes"):
+        values["course_id"] = bindparam("course")
+    if table_name == "subtopic_reads":
+        values["subtopic_slug"] = "heading"
+    return relation.insert().values(**values)
+
+
+def _statement_refused(conn, statement, params, state):
+    with pytest.raises(DBAPIError) as caught, conn.begin_nested():
+        conn.execute(statement, params)
+    assert getattr(caught.value.orig, "sqlstate", None) == state
 
 
 def test_curriculum_real_catalog_matches_immutable_source(learning_database):
@@ -218,14 +246,14 @@ def test_curriculum_real_catalog_matches_immutable_source(learning_database):
                 } == {(f"ix_{table}_{c}", (c,)) for c in INDEX_ORACLE[table]}
                 columns = conn.execute(
                     text(
-                        (
-                            "SELECT a.attname, format_type(a.atttypid, "
-                            "a.atttypmod), NOT a.attnotnull, pg_get_expr(d.adbin, "
-                            "d.adrelid) FROM pg_attribute a LEFT JOIN pg_attrdef d "
-                            "ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE "
-                            "a.attrelid=CAST(:table AS regclass) AND a.attnum>0 AND "
-                            "NOT a.attisdropped"
-                        )
+                        "SELECT a.attname, pg_catalog.format_type(a.atttypid, "
+                        "a.atttypmod), NOT a.attnotnull, "
+                        "pg_catalog.pg_get_expr(d.adbin, "
+                        "d.adrelid) FROM pg_catalog.pg_attribute a "
+                        "LEFT JOIN pg_catalog.pg_attrdef d "
+                        "ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE "
+                        "a.attrelid=CAST(:table AS regclass) AND a.attnum>0 AND "
+                        "NOT a.attisdropped"
                     ),
                     {"table": f"mod_learning.{table}"},
                 ).all()
@@ -241,20 +269,17 @@ def test_curriculum_real_catalog_matches_immutable_source(learning_database):
                 } == expected
                 assert conn.execute(
                     text(
-                        (
-                            "SELECT relrowsecurity, relforcerowsecurity FROM "
-                            "pg_class WHERE oid=CAST(:table AS regclass)"
-                        )
+                        "SELECT relrowsecurity, relforcerowsecurity FROM "
+                        "pg_catalog.pg_class WHERE oid=CAST(:table AS regclass)"
                     ),
                     {"table": f"mod_learning.{table}"},
                 ).one() == (True, True)
                 policy = conn.execute(
                     text(
-                        (
-                            "SELECT policyname, roles, cmd, qual, with_check FROM "
-                            "pg_policies WHERE schemaname='mod_learning' AND "
-                            "tablename=:table"
-                        )
+                        "SELECT policyname, roles, cmd, qual, with_check FROM "
+                        "pg_catalog.pg_policies "
+                        "WHERE schemaname='mod_learning' AND "
+                        "tablename=:table"
                     ),
                     {"table": table},
                 ).one()
@@ -279,7 +304,7 @@ def test_curriculum_real_catalog_matches_immutable_source(learning_database):
                         assert (
                             conn.scalar(
                                 text(
-                                    "SELECT has_table_privilege"
+                                    "SELECT pg_catalog.has_table_privilege"
                                     "(:role, :table, :privilege)"
                                 ),
                                 {
@@ -314,7 +339,7 @@ def test_curriculum_two_tenant_rows_and_source_reference_semantics(learning_data
             _question(conn, a, bank)
             for table in TABLES[3:]:
                 conn.execute(
-                    text(_observation_sql(table)),
+                    _observation_insert(table),
                     {
                         "id": uuid.uuid4(),
                         "tenant": a,
@@ -325,13 +350,13 @@ def test_curriculum_two_tenant_rows_and_source_reference_semantics(learning_data
                 )
             for table in TABLES:
                 assert (
-                    conn.scalar(text(f"SELECT count(*) FROM mod_learning.{table}")) == 1
+                    conn.scalar(select(func.count()).select_from(RELATIONS[table])) == 1
                 )
         with app.begin() as conn:
             _scope(conn, b)
             for table in TABLES:
                 assert (
-                    conn.scalar(text(f"SELECT count(*) FROM mod_learning.{table}")) == 0
+                    conn.scalar(select(func.count()).select_from(RELATIONS[table])) == 0
                 )
             _refused(
                 conn,
@@ -363,22 +388,22 @@ def test_curriculum_two_tenant_rows_and_source_reference_semantics(learning_data
                     "chapter": chapter,
                     "course": course,
                 }
-                conn.execute(text(_observation_sql(table)), params)
-                _refused(
+                conn.execute(_observation_insert(table), params)
+                _statement_refused(
                     conn,
-                    _observation_sql(table),
+                    _observation_insert(table),
                     params | {"id": uuid.uuid4()},
                     "23505",
                 )
-                _refused(
+                _statement_refused(
                     conn,
-                    _observation_sql(table),
+                    _observation_insert(table),
                     params | {"id": uuid.uuid4(), "chapter": uuid.uuid4()},
                     "23503",
                 )
-                _refused(
+                _statement_refused(
                     conn,
-                    _observation_sql(table),
+                    _observation_insert(table),
                     params | {"id": uuid.uuid4(), "tenant": a},
                     "42501",
                 )
@@ -386,10 +411,10 @@ def test_curriculum_two_tenant_rows_and_source_reference_semantics(learning_data
                 if table != "subtopic_reads":
                     assert (
                         conn.execute(
-                            text(
-                                f"DELETE FROM mod_learning.{table} "
-                                "WHERE tenant_id=:tenant RETURNING id"
-                            ),
+                            RELATIONS[table]
+                            .delete()
+                            .where(RELATIONS[table].c.tenant_id == bindparam("tenant"))
+                            .returning(RELATIONS[table].c.id),
                             {"tenant": a},
                         ).all()
                         == []
@@ -397,7 +422,7 @@ def test_curriculum_two_tenant_rows_and_source_reference_semantics(learning_data
         with app.begin() as conn:
             for table in TABLES:
                 assert (
-                    conn.scalar(text(f"SELECT count(*) FROM mod_learning.{table}")) == 0
+                    conn.scalar(select(func.count()).select_from(RELATIONS[table])) == 0
                 )
             _refused(
                 conn,
@@ -431,10 +456,8 @@ def test_defaults_json_shape_uniqueness_cascades_and_subtopic_grants(learning_da
             question = _question(conn, tenant, bank)
             assert conn.execute(
                 text(
-                    (
-                        "SELECT part, body_html, body_md, source_hash, "
-                        "order_index FROM mod_learning.chapters"
-                    )
+                    "SELECT part, body_html, body_md, source_hash, "
+                    "order_index FROM mod_learning.chapters"
                 )
             ).one() == ("", "", "", "", 0)
             assert conn.execute(
@@ -442,20 +465,16 @@ def test_defaults_json_shape_uniqueness_cascades_and_subtopic_grants(learning_da
             ).one() == (None, 1)
             assert conn.execute(
                 text(
-                    (
-                        "SELECT options, correct, category, explanation, weight "
-                        "FROM mod_learning.questions"
-                    )
+                    "SELECT options, correct, category, explanation, weight "
+                    "FROM mod_learning.questions"
                 )
             ).one() == ([], [], None, "", 1)
             # Preserve heterogeneous historical JSONB lists, without DB shape CHECKs.
             conn.execute(
                 text(
-                    (
-                        "UPDATE mod_learning.questions SET "
-                        'options=\'[{"id":"A","text":"yes"},"legacy"]\'::jsonb, '
-                        "correct='[\"A\",1]'::jsonb WHERE id=:id"
-                    )
+                    "UPDATE mod_learning.questions SET "
+                    'options=\'[{"id":"A","text":"yes"},"legacy"]\'::jsonb, '
+                    "correct='[\"A\",1]'::jsonb WHERE id=:id"
                 ),
                 {"id": question},
             )
@@ -484,7 +503,7 @@ def test_defaults_json_shape_uniqueness_cascades_and_subtopic_grants(learning_da
             )
             for table in TABLES[3:]:
                 conn.execute(
-                    text(_observation_sql(table)),
+                    _observation_insert(table),
                     {
                         "id": uuid.uuid4(),
                         "tenant": tenant,
@@ -503,7 +522,7 @@ def test_defaults_json_shape_uniqueness_cascades_and_subtopic_grants(learning_da
                 _refused(conn, sql, {}, "42501")
             for table in ("chapter_reads", "chapter_bookmarks", "chapter_notes"):
                 conn.execute(
-                    text(f"UPDATE mod_learning.{table} SET person_id=:person"),
+                    RELATIONS[table].update().values(person_id=bindparam("person")),
                     {"person": uuid.uuid4()},
                 )
             conn.execute(
@@ -511,7 +530,7 @@ def test_defaults_json_shape_uniqueness_cascades_and_subtopic_grants(learning_da
             )
             for table in TABLES[3:]:
                 assert (
-                    conn.scalar(text(f"SELECT count(*) FROM mod_learning.{table}")) == 0
+                    conn.scalar(select(func.count()).select_from(RELATIONS[table])) == 0
                 )
             # Banks have no course FK, and are not cascaded by course deletion.
             conn.execute(
@@ -532,9 +551,10 @@ def test_defaults_json_shape_uniqueness_cascades_and_subtopic_grants(learning_da
 
 
 def test_curriculum_missing_provider_is_refused_before_ddl(learning_database):
+    from dotmac_kernel.migrations.verify import PrerequisiteNotSatisfiedError
+
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
-    from dotmac_kernel.migrations.verify import PrerequisiteNotSatisfiedError
 
     revision = importlib.import_module(
         "dotmac_learning.migrations.versions.lr_0002_curriculum_reading"

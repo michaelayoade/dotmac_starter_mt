@@ -7,10 +7,6 @@ The shared fixture upgrades learning@head, including lr_0002.
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session
-
 from dotmac_learning import reading
 from dotmac_learning.curriculum_models import (
     Chapter,
@@ -27,13 +23,19 @@ from dotmac_learning.reading_contracts import (
     SubtopicReadCommand,
 )
 from dotmac_learning.result_contracts import TransactionChanged
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
+
+from tests import test_learning_catalog as learning_catalog_fixtures
 from tests.test_learning_catalog import (
     _course,
     _person,
     _scope,
     _tenant,
-    learning_database as learning_database,
 )
+
+learning_database = learning_catalog_fixtures.learning_database
 
 
 @pytest.fixture
@@ -139,7 +141,8 @@ def test_cross_tenant_queries_and_actual_simple_reference_scope(reading_database
     with admin.connect() as conn, conn.begin():
         conn.execute(
             text(
-                "INSERT INTO mod_learning.chapter_reads (tenant_id, person_id, chapter_id) "
+                "INSERT INTO mod_learning.chapter_reads "
+                "(tenant_id, person_id, chapter_id) "
                 "VALUES (:tenant, :person, :chapter)"
             ),
             {"tenant": tenant, "person": uuid4(), "chapter": foreign_chapter},
@@ -149,7 +152,8 @@ def test_cross_tenant_queries_and_actual_simple_reference_scope(reading_database
         assert (
             conn.scalar(
                 text(
-                    "SELECT count(*) FROM mod_learning.chapter_reads WHERE chapter_id=:id"
+                    "SELECT count(*) FROM mod_learning.chapter_reads "
+                    "WHERE chapter_id=:id"
                 ),
                 {"id": foreign_chapter},
             )

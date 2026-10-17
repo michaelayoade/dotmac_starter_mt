@@ -14,7 +14,6 @@ from dotmac_learning.curriculum import (
     CurriculumConflict,
     CurriculumNotFound,
     chapter_source_hash,
-    create_course as create_draft_course,
     delete_chapter,
     doc_from_db,
     import_manual,
@@ -22,6 +21,9 @@ from dotmac_learning.curriculum import (
     load_bank,
     public_catalog,
     upsert_chapter,
+)
+from dotmac_learning.curriculum import (
+    create_course as create_draft_course,
 )
 from dotmac_learning.curriculum_contracts import (
     BankDocument,
@@ -105,13 +107,19 @@ from dotmac_learning.reading import (
     completed_chapter_ids,
     completed_slugs,
     completed_slugs_by_chapter,
-    get_state as annotation_state,
-    list_for_person as list_annotations,
-    mark_complete as mark_subtopic_complete,
     save_note,
     slugify_heading,
     toggle_bookmark,
     toggle_chapter_read,
+)
+from dotmac_learning.reading import (
+    get_state as annotation_state,
+)
+from dotmac_learning.reading import (
+    list_for_person as list_annotations,
+)
+from dotmac_learning.reading import (
+    mark_complete as mark_subtopic_complete,
 )
 from dotmac_learning.reading_contracts import (
     AnnotatedChapter,

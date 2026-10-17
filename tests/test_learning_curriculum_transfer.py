@@ -10,12 +10,6 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import DDL, bindparam, create_engine, event, func, select, text
-from sqlalchemy import cast as sql_cast
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.sql.dml import Insert
-
 from dotmac_learning.curriculum_models import CURRICULUM_MODELS
 from dotmac_learning.curriculum_transfer import (
     export_snapshot_v2,
@@ -45,19 +39,30 @@ from dotmac_learning.transfer_contracts import (
     UnsupportedFloatRepresentation,
     UnsupportedTimestampRepresentation,
 )
+from sqlalchemy import DDL, bindparam, create_engine, event, func, select, text
+from sqlalchemy import cast as sql_cast
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.sql.dml import Insert
+
+from tests import test_learning_catalog as learning_catalog_fixtures
+from tests import test_learning_transfer as learning_transfer_fixtures
 from tests.test_learning_catalog import (
     _person,
     _scope,
     _tenant,
-    learning_database as learning_database,
 )
 from tests.test_learning_transfer import (
     NOW,
     ONE,
     ZERO,
-    _snapshot as first_snapshot,
-    transfer_database as transfer_database,
 )
+from tests.test_learning_transfer import (
+    _snapshot as first_snapshot,
+)
+
+learning_database = learning_catalog_fixtures.learning_database
+transfer_database = learning_transfer_fixtures.transfer_database
 
 NEW_TABLES = (
     "chapters",
@@ -76,7 +81,8 @@ TABLES = (
     "course_completions",
     "certificates",
     "learning_events",
-) + NEW_TABLES
+    *NEW_TABLES,
+)
 RELATIONS = {
     model.__tablename__: model.__table__ for model in TENANT_MODELS + CURRICULUM_MODELS
 }

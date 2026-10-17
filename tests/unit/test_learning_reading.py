@@ -4,11 +4,10 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
-
 from dotmac_learning.reading import chapter_subtopics, mark_complete, slugify_heading
 from dotmac_learning.reading_contracts import Heading, SubtopicReadCommand
 from dotmac_learning.result_contracts import TransactionChanged
+from pydantic import ValidationError
 
 
 def test_heading_slug_policy_preserves_unicode_and_source_suffix_overflow():

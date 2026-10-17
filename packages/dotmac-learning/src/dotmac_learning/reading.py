@@ -49,7 +49,6 @@ from .reading_contracts import (
 # helper, not a Kernel private API or a new transaction authority.
 from .results import _transaction
 
-
 _GROUPED_INTRO_HEADINGS = {"why-this-matters", "catch-up-sidebar"}
 
 
