@@ -43,6 +43,16 @@ TABLES = (
     "certificates",
     "learning_events",
 )
+ALL_TABLES = (
+    *TABLES,
+    "chapters",
+    "question_banks",
+    "questions",
+    "chapter_reads",
+    "subtopic_reads",
+    "chapter_bookmarks",
+    "chapter_notes",
+)
 
 
 @pytest.fixture
@@ -454,7 +464,9 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
     try:
         with admin.connect() as conn:
             inspector = inspect(conn)
-            assert set(inspector.get_table_names(schema="mod_learning")) == set(TABLES)
+            assert set(inspector.get_table_names(schema="mod_learning")) == set(
+                ALL_TABLES
+            )
             assert not inspector.has_table("courses", schema="public")
             for table in TABLES:
                 columns = {
@@ -765,7 +777,7 @@ def test_missing_real_identity_catalog_is_refused_before_ddl(learning_database) 
                     ):
                         revision.upgrade()
                 assert set(inspect(conn).get_table_names(schema="mod_learning")) == set(
-                    TABLES
+                    ALL_TABLES
                 )
             finally:
                 transaction.rollback()

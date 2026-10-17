@@ -1,4 +1,4 @@
-"""Tenant-only declaration for the first canonical learning slice."""
+"""Tenant-only declaration for learning results, curriculum and reading."""
 
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.prerequisites import (
@@ -7,6 +7,7 @@ from dotmac_kernel.prerequisites import (
     TENANT_SCOPE_CATALOG_V1,
 )
 
+from dotmac_learning.curriculum_models import CURRICULUM_TABLES
 from dotmac_learning.models import TENANT_TABLES
 
 module = ModuleManifest(
@@ -16,7 +17,7 @@ module = ModuleManifest(
     short_code="learning",
     migration_prefix="lr",
     migration_branch="learning",
-    tables=TENANT_TABLES,
+    tables=(*TENANT_TABLES, *CURRICULUM_TABLES),
     platform_tables=(),
     requires=(
         TENANT_SCOPE_CATALOG_V1.name,

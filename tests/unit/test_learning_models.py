@@ -52,6 +52,13 @@ def test_learning_registration_uses_the_shipped_allocation_and_exact_tables():
             "course_completions",
             "certificates",
             "learning_events",
+            "chapters",
+            "question_banks",
+            "questions",
+            "chapter_reads",
+            "subtopic_reads",
+            "chapter_bookmarks",
+            "chapter_notes",
         }
     )
     assert registry.namespaces().declared_tables("mod_learning") == frozenset(
