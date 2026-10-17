@@ -101,7 +101,7 @@ def test_closed_proposal_rejects_each_independent_bad_input(mutation):
 @pytest.mark.parametrize(
     "path",
     [
-        "/tmp/escape.py",
+        "/absolute/escape.py",
         "../escape.py",
         SOURCE + "../escape.py",
         SOURCE + ".git/config",
