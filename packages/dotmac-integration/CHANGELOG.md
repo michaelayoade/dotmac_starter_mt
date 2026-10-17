@@ -1,6 +1,6 @@
 # Changelog — dotmac-integration
 
-## Unreleased — held-key product-query authentication
+## 0.1.0a19+dev — unpublished held-key product-query authentication
 
 - Extract Integrator's authenticator from
   `ff6796aaa0d063b2d30327748e64627f0bccb394`,
@@ -16,20 +16,13 @@
 
 ## Release state — read this before pinning
 
-**Eighteen versions have been released. Pin `0.1.0a18`.** The a18 publication
-is recorded by release verification records 116–135, including its exact tag
-and receipt. a17 was published, installed back from the private index,
-registered and tagged from exact revision
-`2cab76b442e6cc6c8ed81a409d943ba250351c3d` by release run `33043793199`, whose
-build, publish and verify jobs all succeeded. a16's is `32929018760`, from exact
-revision `dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e`. Released migration
-digests remain recorded in `tests/architecture/test_released_migrations.py`'s
-`RELEASED_TAGS`.
-
-`0.1.0a18` is the latest published version. `0.1.0a16` adds domain-owned
-payload contracts and durably stores a validated normalized result in
-`ig_0013`, and adds durable polling attempt/failure/backoff evidence with a
-bounded keyset selection in `ig_0014`.
+**Published adopter baseline: `0.1.0a19`.** Release run `38990201120`,
+attempt 1, published and verified source
+`650c7827fa6ee62dddc63e2a4d383d5cbb0f8d4f`; annotated tag object
+`432067629f3c8a1d0902382578c4b561c33deee2` binds those bytes. That wheel
+contains receipt-origin metadata, not the later shared authentication API.
+Current `0.1.0a19+dev` is unpublished. Its authentication addition requires a
+fresh numeric release, installed-byte verification and accepted release record.
 
 `0.1.0a17` is RELEASED — tagged `dotmac-integration-v0.1.0a17` on 2026-08-27,
 peeling to `2cab76b442e6cc6c8ed81a409d943ba250351c3d`. It adds authenticated
@@ -101,26 +94,15 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 2026-10-16 correction — a18 released; a19 proposed
+## 0.1.0a19 — RELEASED 2026-10-17
 
-The dated a18 entry below records the source state when it was prepared. The
-subsequent a18 release is verified by module-release-verifications 116–135;
-its exact released migration digests remain frozen. The current source proposes
-`0.1.0a19` for receipt-origin metadata that preserves legacy unknown origin.
-It performs no backfill, changes no existing wire contract, and makes no
-cash-qualification claim. a19 remains unpublished and must not be exact-pinned.
+- Preserves receipt origin as unknown for legacy records without backfill.
+- Changes no existing wire contract and makes no cash-qualification claim.
+- The a18 migration files remain unchanged; the verified a19 migration
+  digests, including `ig_0016_receipt_origin.py`, are now immutable.
+- Shared held-key authentication landed later and is excluded from this release.
 
-## 0.1.0a19 — unreleased
-
-- Adds the shared held-key product-query authentication API described above; no consumer adoption is claimed.
-
-- Preserves receipt origin as unknown for legacy records; it does not backfill
-  historical rows.
-- Adds no change to an existing wire contract and makes no cash-qualification
-  claim.
-- The a18 released migration files and digests remain unchanged.
-
-## 0.1.0a18 — unreleased
+## 0.1.0a18 — historical preparation notes (subsequently released)
 
 Verified publication run `37612462253` binds this release to
 `a7dc7a41d11c37a1b93d8e307e80731ce3275f11`. Its additions include:
@@ -157,7 +139,7 @@ Verified publication run `37612462253` binds this release to
   private Compose service alias, while continuing to reject URLs, paths,
   wildcards, IP literals, the reserved `localhost` name and trailing root dots.
 
-Still unreleased. See `docs/inventories/declared-publication-baseline.json`
+The following historical preparation status is superseded by the verified release state above. See `docs/inventories/declared-publication-baseline.json`
 for the recorded declared-unpublished state.
 
 ## 0.1.0a17 — 2026-08-27 — RELEASED

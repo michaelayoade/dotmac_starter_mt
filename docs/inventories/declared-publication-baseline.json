@@ -143,13 +143,13 @@
       "state": "declared-unpublished"
     },
     "dotmac-integration": {
-      "declared": "0.1.0a19",
-      "reason": "PROPOSED, UNPUBLISHED SOURCE CANDIDATE. Retains the original engine verification context while preserving legacy receipt origin as unknown; performs no backfill, changes no existing wire contract, and makes no cash-qualification claim. This declaration is not publication or adoption evidence. Remove only after the exact candidate has its authorized release verification and immutable receipt. NOT to be repaired by editing the version: this successor remains unpublished until its separately authorized release is verified and immutably recorded. The integration branch also includes additive shared held-key product authentication extracted from Integrator; it changes neither the connector SPI nor Kernel floor and remains unavailable to consumers until verified publication.",
+      "declared": "0.1.0a19+dev",
+      "reason": "UNPUBLISHED DEVELOPMENT LINE after verified a19 from 650c7827fa6ee62dddc63e2a4d383d5cbb0f8d4f. Current source includes additive shared held-key authentication absent from the published a19 wheel. NOT to be repaired by editing the version back to a19 or republishing that consumed identity. A fresh numeric successor, build-once publication, installed-byte verification and accepted release record are required before this API can be consumed. Existing a19 bytes, tag and migration digests remain immutable.",
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
       "declared": "0.1.0a105+dev",
-      "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
+      "reason": "Unpublished request-evidence composition successor to verified 0.1.0a105. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record. This development source also reserves learning / mod_learning / lr / branch learning for the Academy-sourced learning module; the reservation installs no module and transfers no data or writer authority.",
       "state": "declared-unpublished"
     },
     "dotmac-numbering": {

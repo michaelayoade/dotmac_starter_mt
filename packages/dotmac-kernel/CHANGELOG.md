@@ -15,6 +15,10 @@ remain required.
 
 ### Added
 
+- Reserve `learning` / `mod_learning` / `lr` / branch `learning` for the
+  Academy-sourced reusable learning domain before its module source is added.
+  This reservation installs no module, moves no data and transfers no writer
+  authority; the published a105 release remains unchanged.
 - Shared migration configuration helpers select explicitly supplied owner
   material, refuse blank values, and allow only an explicitly supplied fallback.
   The Alembic configuration writer preserves percent-encoded URLs without

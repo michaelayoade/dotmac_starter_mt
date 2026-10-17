@@ -12,8 +12,8 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a18`; `0.1.0a19` is proposed and
-unpublished.** Releases a2–a4 implement SPI 1.1;
+**Released: `0.1.0a1` through `0.1.0a19`; current `0.1.0a19+dev`
+shared-authentication source is unpublished.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
 which is the authority on what has and has not shipped. a8 adds indexed,
@@ -42,10 +42,11 @@ authoring either contract.
 **Released `0.1.0a18`:** it adds SPI 1.5's provider-neutral
 plan/apply/observe/cancel contract and SPI 1.6's bounded synchronous REQUEST
 contract. Its exact release and receipt are recorded in
-module-release-verifications 116–135. The proposed, unpublished `0.1.0a19`
-adds receipt-origin metadata that preserves legacy unknown origin without
-backfill, changes no existing wire contract, and makes no cash-qualification
-claim. Do not exact-pin a19.
+module-release-verifications 116–135. Released `0.1.0a19`, verified by run
+`38990201120` from `650c7827fa6ee62dddc63e2a4d383d5cbb0f8d4f`, adds
+receipt-origin metadata without legacy backfill, existing-wire changes or a
+cash-qualification claim. That wheel excludes the later shared authentication
+API; do not exact-pin unpublished `0.1.0a19+dev`.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to
