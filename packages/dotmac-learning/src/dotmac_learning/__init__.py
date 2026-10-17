@@ -5,8 +5,6 @@ and learning events. Products retain authorization, grading, admission policy,
 lab execution and presentation. Importing this surface creates no engine.
 """
 
-from pathlib import Path
-
 from dotmac_learning.certificates import CertificateNotEligible, issue_certificate
 from dotmac_learning.completion import recompute_completion
 from dotmac_learning.event_contracts import (
@@ -24,6 +22,7 @@ from dotmac_learning.events import (
     weekly_buckets,
 )
 from dotmac_learning.manifest import module
+from dotmac_learning.migrations import versions_dir
 from dotmac_learning.models import (
     ASSESSMENT_MODES,
     EVENT_KINDS,
@@ -111,11 +110,6 @@ from dotmac_learning.transfer_contracts import (
 )
 
 __version__ = "0.1.0a1"
-
-
-def versions_dir() -> Path:
-    """Return the installed directory containing the ``lr`` revisions."""
-    return Path(__file__).resolve().parent / "migrations" / "versions"
 
 
 __all__ = [

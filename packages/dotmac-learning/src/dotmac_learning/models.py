@@ -14,6 +14,7 @@ from dotmac_kernel.models import Base as KernelBase
 from dotmac_kernel.models import Party, PartyPerson, Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Float,
@@ -159,7 +160,7 @@ class Submission(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True), nullable=False, index=True
     )
     answers: Mapped[dict[str, object]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict
     )
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
@@ -185,7 +186,7 @@ class Score(KernelBase, TimestampMixin):
     fraction: Mapped[float] = mapped_column(Float, nullable=False)
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     per_item: Mapped[list[dict[str, object]]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list
     )
     source: Mapped[str] = mapped_column(String(10), nullable=False, default="auto")
     override_reason: Mapped[str | None] = mapped_column(Text)
@@ -326,7 +327,7 @@ class LearningEvent(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True), nullable=True
     )
     detail: Mapped[dict[str, object]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict
     )
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

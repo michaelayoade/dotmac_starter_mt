@@ -41,7 +41,7 @@ from dotmac_learning.models import (
 
 _ONCE_PER_SUBJECT = (KIND_CHAPTER_COMPLETED, KIND_CERTIFICATE_EARNED)
 _ONCE_PER_LOCAL_DAY = (KIND_COURSE_VIEWED, KIND_CHAPTER_VIEWED)
-_DETAIL = TypeAdapter(JsonValue)
+_DETAIL: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def _local_day_start_utc(now: datetime, zone: tzinfo) -> datetime:
