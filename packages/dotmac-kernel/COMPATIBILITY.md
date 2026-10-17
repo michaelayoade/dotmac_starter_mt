@@ -193,6 +193,7 @@ Two rules travel with it:
 | `dotmac_kernel.middleware.security_headers` | `SecurityHeadersMiddleware`, `compose_content_security_policy` |
 | `dotmac_kernel.middleware.tenant` | `TenantResolverMiddleware` |
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
+| `dotmac_kernel.migrations.configuration` | `select_migration_database_url`, `set_alembic_database_url` — pure held-material selection with explicit fallback permission and percent escaping only at the Alembic ConfigParser write boundary |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE`, `DEFAULT_PLATFORM_ROLE`, `TABLE_PRIVILEGES` (the post-migration live-catalog contract, both planes — see the same section) |
 | `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_party_person_catalog`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
@@ -322,6 +323,20 @@ later program steps, and the same directive requires CI to fail when "a
 declaration has no consumer" — each field lands with the registry code that
 derives behavior from it, as `permissions` and `audit_actions` did in step 3
 (below).
+
+### Migration database configuration (`dotmac_kernel.migrations.configuration`)
+
+An assembly loads its own migration URL and may explicitly supply a fallback
+URL to `select_migration_database_url`. A present nonblank migration URL wins
+unchanged; a supplied blank value raises `ValueError` even when a fallback is
+available. Only `None` permits a supplied nonblank fallback; absent or blank
+fallback material also raises. Refusals never quote URL material.
+`set_alembic_database_url(config, database_url=selected_url)` escapes percent
+signs at `set_main_option`; Alembic reads the original URL back for online and
+offline use. This module imports no settings or ORM and constructs no database
+runtime. It does not authorize the selected database role or choose a product's
+fallback policy. Products retain their database planes, prerequisites, engine,
+session and runtime transaction owners.
 
 ### Database namespaces and migration lineage (`dotmac_kernel.namespaces`, `dotmac_kernel.migrations.gate`, `dotmac_kernel.migrations.catalog`)
 

@@ -6,13 +6,33 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Unreleased
+## 0.1.0a106 — Release inventory
+
+This inventories the proposed request-evidence successor to verified
+`0.1.0a105`. It allocates no version and proves no publication or product
+adoption; protected release authorization and independently verified artifacts
+remain required.
+
+### Added
 
 - Reserve `learning` / `mod_learning` / `lr` / branch `learning` for the
   Academy-sourced reusable learning domain before its module source is added.
   This reservation installs no module, moves no data and transfers no writer
-  authority. The source returns to `0.1.0a105+dev`; the published a105 release
-  remains unchanged, and a future numeric release needs its own authorization.
+  authority; the published a105 release remains unchanged.
+- Shared migration configuration helpers select explicitly supplied owner
+  material, refuse blank values, and allow only an explicitly supplied fallback.
+  The Alembic configuration writer preserves percent-encoded URLs without
+  importing an engine, session owner or settings inside the helper. The
+  reference migration adapter uses these same helpers; runtime database
+  authority is unchanged.
+- Optional typed `RequestEvidenceConfigurationV1` in the product assembly
+  selects Kernel's request-evidence context instead of the legacy request
+  metadata writer. Non-writing observation remains available, and omission
+  preserves the existing composition.
+- Authenticated platform attribution is bound on the ASGI request task after
+  authentication completes, so downstream request evidence does not rely on
+  threadpool context changes propagating back to its caller. Attribution is
+  evidence of authentication, not a grant of authorization or tenant scope.
 
 ## 0.1.0a105 — Release inventory
 

@@ -25,6 +25,10 @@ from dotmac_kernel import (
 from dotmac_kernel.messaging import (
     models as messaging_models,  # noqa: F401  (register OutboxEvent/PlatformOutboxEvent)
 )
+from dotmac_kernel.migrations.configuration import (
+    select_migration_database_url,
+    set_alembic_database_url,
+)
 from dotmac_kernel.models import (  # registers Tenant/Party/Role/PartyRole/AuthSession/UserCredential
     Base,
 )
@@ -40,6 +44,13 @@ from app.features.custom_fields import (
 from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
 
 config = context.config
+set_alembic_database_url(
+    config,
+    database_url=select_migration_database_url(
+        migration_database_url=os.getenv("MIGRATION_DATABASE_URL"),
+        fallback_database_url=os.getenv("DATABASE_URL"),
+    ),
+)
 
 # Installed BEFORE the revision map is built: a composed module lineage resolves
 # its `depends_on` from these bindings at script-load time, so an assembly that
@@ -56,13 +67,9 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def get_url() -> str:
-    return os.getenv("MIGRATION_DATABASE_URL") or os.getenv("DATABASE_URL") or ""
-
-
 def run_migrations_offline() -> None:
     context.configure(
-        url=get_url(),
+        url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -73,7 +80,6 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = get_url()
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",

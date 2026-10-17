@@ -58,6 +58,7 @@
         "ModulePlaneSelection",
         "ProductAssemblySpec",
         "ProductSecurityPolicy",
+        "RequestEvidenceConfigurationV1",
         "StartupCheck",
         "StartupHook"
       ],
@@ -750,7 +751,8 @@
     "dotmac_kernel.middleware.observability": {
       "classification": "supported",
       "exports": [
-        "ObservabilityMiddleware"
+        "ObservabilityMiddleware",
+        "RequestEvidenceObserverMiddleware"
       ],
       "status": "declared"
     },
@@ -801,6 +803,14 @@
         "audited_schemas",
         "catalog_queries",
         "fetch_snapshot"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.migrations.configuration": {
+      "classification": "supported",
+      "exports": [
+        "select_migration_database_url",
+        "set_alembic_database_url"
       ],
       "status": "declared"
     },
@@ -1810,6 +1820,7 @@
     "ProductManifestSnapshot",
     "ProductSecurityPolicy",
     "ProfileValidationReport",
+    "RequestEvidenceConfigurationV1",
     "ResolvedExternalIdentity",
     "Role",
     "RoleDefinition",
@@ -1976,6 +1987,7 @@
     "dotmac_kernel.middleware.tenant",
     "dotmac_kernel.migrations",
     "dotmac_kernel.migrations.catalog",
+    "dotmac_kernel.migrations.configuration",
     "dotmac_kernel.migrations.gate",
     "dotmac_kernel.migrations.verify",
     "dotmac_kernel.models",
