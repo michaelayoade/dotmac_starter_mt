@@ -695,7 +695,7 @@ _REVIEW_LEARNING = (
     "files = []\ndevelop = true\n\n[package.dependencies]\n"
     'alembic = ">=1.13"\ndotmac-kernel = ">=0.1.0a106"\n'
     'pydantic = "^2.9"\nsqlalchemy = "^2.0"\n\n[package.source]\n'
-    'type = "directory"\nurl = "packages/dotmac-learning"\n\n\n'
+    'type = "directory"\nurl = "packages/dotmac-learning"\n\n'
 )
 
 
@@ -1178,5 +1178,26 @@ def test_review_unknown_refusal_details_stay_generic(
     with pytest.raises(producer.BootstrapError) as caught:
         producer._review_artifact(repo)
     assert str(caught.value) == "lock review refused"
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+
+
+def test_review_rejects_extra_learning_separator_with_matching_receipt(
+    review_case, capsys
+):
+    repo, output, _, _ = review_case
+    path = output / "poetry.lock"
+    generated = path.read_bytes()
+    learning = _REVIEW_LEARNING.encode("ascii")
+    assert generated.count(learning) == 1
+    generated = generated.replace(learning, learning + b"\n")
+    path.write_bytes(generated)
+    receipt_path = output / "manifest.json"
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt["lock_sha256"] = hashlib.sha256(generated).hexdigest()
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_artifact(repo)
+    assert str(caught.value) == "lock review non-whitelisted churn refused"
     captured = capsys.readouterr()
     assert captured.out == captured.err == ""

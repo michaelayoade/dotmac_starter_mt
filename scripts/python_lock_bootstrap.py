@@ -652,7 +652,7 @@ def _review_learning_record(proposal: Proposal) -> bytes:
         'sqlalchemy = "^2.0"\n\n'
         "[package.source]\n"
         'type = "directory"\n'
-        'url = "packages/dotmac-learning"\n\n\n'
+        'url = "packages/dotmac-learning"\n\n'
     ).encode("ascii")
 
 
