@@ -830,14 +830,14 @@ _REVIEW_PYPDF_INACTIVE_CORE = (
 _REVIEW_PYPDF_EXTRAS = (
     "[package.extras]\n"
     'crypto = ["cryptography (>3.0)"]\n'
-    'cryptodome = ["pycryptodome"]\n'
+    'cryptodome = ["PyCryptodome"]\n'
     'dev = ["flit", "pip-tools", "pre-commit", "pytest-cov", '
     '"pytest-socket", "pytest-timeout", "pytest-xdist", "wheel"]\n'
-    'docs = ["myst-parser", "sphinx", "sphinx-rtd-theme"]\n'
+    'docs = ["myst_parser", "sphinx", "sphinx_rtd_theme"]\n'
     'fonts = ["fonttools"]\n'
-    'full = ["arabic-reshaper", "cryptography (>3.0)", "fonttools", '
-    '"pillow (>=8.0.0)", "python-bidi"]\n'
-    'image = ["pillow (>=8.0.0)"]\n'
+    'full = ["Pillow (>=8.0.0)", "arabic-reshaper", '
+    '"cryptography (>3.0)", "fonttools", "python-bidi"]\n'
+    'image = ["Pillow (>=8.0.0)"]\n'
     'rtl-text = ["arabic-reshaper", "python-bidi"]\n'
     "\n"
 )

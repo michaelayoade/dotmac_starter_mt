@@ -714,14 +714,14 @@ _REVIEW_PYPDF_CORE = (
 _REVIEW_PYPDF_EXTRAS = (
     "[package.extras]\n"
     'crypto = ["cryptography (>3.0)"]\n'
-    'cryptodome = ["pycryptodome"]\n'
+    'cryptodome = ["PyCryptodome"]\n'
     'dev = ["flit", "pip-tools", "pre-commit", "pytest-cov", '
     '"pytest-socket", "pytest-timeout", "pytest-xdist", "wheel"]\n'
-    'docs = ["myst-parser", "sphinx", "sphinx-rtd-theme"]\n'
+    'docs = ["myst_parser", "sphinx", "sphinx_rtd_theme"]\n'
     'fonts = ["fonttools"]\n'
-    'full = ["arabic-reshaper", "cryptography (>3.0)", "fonttools", '
-    '"pillow (>=8.0.0)", "python-bidi"]\n'
-    'image = ["pillow (>=8.0.0)"]\n'
+    'full = ["Pillow (>=8.0.0)", "arabic-reshaper", '
+    '"cryptography (>3.0)", "fonttools", "python-bidi"]\n'
+    'image = ["Pillow (>=8.0.0)"]\n'
     'rtl-text = ["arabic-reshaper", "python-bidi"]\n'
     "\n"
 )
@@ -1593,6 +1593,12 @@ def test_review_revalidates_mutated_mismatch_before_pending_assignment(
         "unknown_extra",
         "missing_extra",
         "member_constraint",
+        "normalized_cryptodome",
+        "normalized_docs_parser",
+        "normalized_docs_theme",
+        "normalized_full_image",
+        "normalized_image",
+        "normalized_full_order",
         "comment",
         "url",
     ],
@@ -1620,10 +1626,30 @@ def test_review_pypdf_nonwhitelisted_changes_refuse_with_self_consistent_receipt
         replacement = replacement.replace(
             "cryptography (>3.0)", "cryptography (>4.0)", 1
         )
+    elif mutation == "normalized_cryptodome":
+        replacement = replacement.replace("PyCryptodome", "pycryptodome")
+    elif mutation == "normalized_docs_parser":
+        replacement = replacement.replace("myst_parser", "myst-parser")
+    elif mutation == "normalized_docs_theme":
+        replacement = replacement.replace("sphinx_rtd_theme", "sphinx-rtd-theme")
+    elif mutation == "normalized_full_image":
+        replacement = replacement.replace("Pillow (>=8.0.0)", "pillow (>=8.0.0)", 1)
+    elif mutation == "normalized_image":
+        replacement = replacement.replace(
+            'image = ["Pillow (>=8.0.0)"]', 'image = ["pillow (>=8.0.0)"]'
+        )
+    elif mutation == "normalized_full_order":
+        replacement = replacement.replace(
+            'full = ["Pillow (>=8.0.0)", "arabic-reshaper", '
+            '"cryptography (>3.0)", "fonttools", "python-bidi"]',
+            'full = ["arabic-reshaper", "cryptography (>3.0)", "fonttools", '
+            '"Pillow (>=8.0.0)", "python-bidi"]',
+        )
     elif mutation == "comment":
         replacement += "# " + _REVIEW_SENTINEL + "\n"
     else:
         replacement += '[package.source]\nurl = "https://' + _REVIEW_SENTINEL + '"\n'
+    assert replacement != _REVIEW_PYPDF_REFRESHED
     path = output / "poetry.lock"
     generated = path.read_text()
     assert generated.count(_REVIEW_PYPDF_REFRESHED) == 1
