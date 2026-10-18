@@ -114,7 +114,9 @@ class Activity(KernelBase, TimestampMixin):
     type: Mapped[str] = mapped_column(String(16), nullable=False)
     bank_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     title: Mapped[str] = mapped_column(String(200), nullable=False)
-    pass_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    pass_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default="0.0"
+    )
     # Assessment policy (Slice 4). Null = unlimited attempts.
     max_attempts: Mapped[int | None] = mapped_column(Integer)
     # Assessment mode bundles the scoring + answer-reveal policy by purpose:
@@ -122,7 +124,9 @@ class Activity(KernelBase, TimestampMixin):
     #   graded   — best-of, answers withheld until pass or attempts exhausted
     #   exam     — best-of, score only (never reveal per-question feedback)
     # Scoring is best-of (highest attempt) in every mode; pass is sticky.
-    assessment_mode: Mapped[str] = mapped_column(String(10), nullable=False)
+    assessment_mode: Mapped[str] = mapped_column(
+        String(10), nullable=False, server_default="graded"
+    )
     # "auto" grades on submit; "manual" leaves submissions for instructor grading.
     grading: Mapped[str] = mapped_column(String(10), nullable=False)
     # Weighted gradebook (lms-gaps F9): per-activity weight in the course grade.

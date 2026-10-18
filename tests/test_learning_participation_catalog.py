@@ -30,6 +30,7 @@ from tests.test_learning_catalog import (
     LEARNING_VERSIONS,
     REPO_ROOT,
     _course,
+    _foreign_keys,
     _person,
     _refused,
     _scope,
@@ -532,34 +533,14 @@ def test_actual_migrated_catalog_source_contract_and_identity_translation(
                 },
             }
             for table, edges in source_edges.items():
-                actual = inspector.get_foreign_keys(table, schema="mod_learning")
-                assert {
-                    (
-                        tuple(fk["constrained_columns"]),
-                        fk["referred_schema"],
-                        fk["referred_table"],
-                        tuple(fk["referred_columns"]),
-                        fk["options"].get("ondelete"),
-                    )
-                    for fk in actual
-                } == {
+                assert _foreign_keys(conn, table) == {
                     (("tenant_id",), "public", "tenants", ("id",), "CASCADE"),
                     *(
                         (local, "mod_learning", target, remote, "CASCADE")
                         for local, target, remote in edges
                     ),
                 }
-            fks = inspector.get_foreign_keys("enrollments", schema="mod_learning")
-            assert {
-                (
-                    tuple(fk["constrained_columns"]),
-                    fk["referred_schema"],
-                    fk["referred_table"],
-                    tuple(fk["referred_columns"]),
-                    fk["options"].get("ondelete"),
-                )
-                for fk in fks
-            } == {
+            assert _foreign_keys(conn, "enrollments") == {
                 (("tenant_id",), "public", "tenants", ("id",), "CASCADE"),
                 (
                     ("tenant_id", "cohort_id"),
@@ -597,8 +578,7 @@ def test_actual_migrated_catalog_source_contract_and_identity_translation(
                 },
             ).one() == ("a", "a", "s")
             assert not any(
-                "entrance_bank_id" in fk["constrained_columns"]
-                for fk in inspector.get_foreign_keys("cohorts", schema="mod_learning")
+                "entrance_bank_id" in fk[0] for fk in _foreign_keys(conn, "cohorts")
             )
     finally:
         engine.dispose()

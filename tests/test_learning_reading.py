@@ -139,13 +139,19 @@ def test_cross_tenant_queries_and_actual_simple_reference_scope(reading_database
                 ),
             )
     with admin.connect() as conn, conn.begin():
+        # Raw SQL supplies the UUID allocated by uuid_pk() on ORM inserts.
         conn.execute(
             text(
                 "INSERT INTO mod_learning.chapter_reads "
-                "(tenant_id, person_id, chapter_id) "
-                "VALUES (:tenant, :person, :chapter)"
+                "(id, tenant_id, person_id, chapter_id) "
+                "VALUES (:id, :tenant, :person, :chapter)"
             ),
-            {"tenant": tenant, "person": uuid4(), "chapter": foreign_chapter},
+            {
+                "id": uuid4(),
+                "tenant": tenant,
+                "person": uuid4(),
+                "chapter": foreign_chapter,
+            },
         )
         # Plain UUID learner and cross-tenant chapter are SOURCE-accepted by
         # the actual simple FK, not evidence of composite containment.

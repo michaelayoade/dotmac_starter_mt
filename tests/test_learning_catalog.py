@@ -120,6 +120,50 @@ def learning_database(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[str, st
         server.dispose()
 
 
+def _foreign_keys(
+    conn: Connection, table: str, *, schema: str = "mod_learning"
+) -> set[tuple[tuple[str, ...], str, str, tuple[str, ...], str | None]]:
+    """Read FK identities from OIDs, independent of search_path visibility."""
+    rows = conn.execute(
+        text(
+            "SELECT dst_ns.nspname AS target_schema, dst.relname AS target_table, "
+            "ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY "
+            "AS ordered_key(attnum, ord) JOIN pg_catalog.pg_attribute a "
+            "ON a.attrelid = c.conrelid AND a.attnum = ordered_key.attnum "
+            "ORDER BY ordered_key.ord) AS source_columns, "
+            "ARRAY(SELECT a.attname FROM unnest(c.confkey) WITH ORDINALITY "
+            "AS ordered_key(attnum, ord) JOIN pg_catalog.pg_attribute a "
+            "ON a.attrelid = c.confrelid AND a.attnum = ordered_key.attnum "
+            "ORDER BY ordered_key.ord) AS target_columns, c.confdeltype "
+            "FROM pg_catalog.pg_constraint c "
+            "JOIN pg_catalog.pg_class src ON src.oid = c.conrelid "
+            "JOIN pg_catalog.pg_namespace src_ns ON src_ns.oid = src.relnamespace "
+            "JOIN pg_catalog.pg_class dst ON dst.oid = c.confrelid "
+            "JOIN pg_catalog.pg_namespace dst_ns ON dst_ns.oid = dst.relnamespace "
+            "WHERE c.contype = 'f' AND src_ns.nspname = :schema "
+            "AND src.relname = :table"
+        ),
+        {"schema": schema, "table": table},
+    ).all()
+    delete_actions = {
+        "a": None,
+        "r": "RESTRICT",
+        "c": "CASCADE",
+        "n": "SET NULL",
+        "d": "SET DEFAULT",
+    }
+    return {
+        (
+            tuple(row.source_columns),
+            row.target_schema,
+            row.target_table,
+            tuple(row.target_columns),
+            delete_actions[row.confdeltype],
+        )
+        for row in rows
+    }
+
+
 def _tenant(conn: Connection, tenant: uuid.UUID) -> None:
     conn.execute(
         text(
@@ -601,19 +645,7 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
                                 else ("SELECT", "INSERT", "UPDATE", "DELETE")
                             )
                         )
-            event_fks = inspector.get_foreign_keys(
-                "learning_events", schema="mod_learning"
-            )
-            targets = {
-                (
-                    tuple(fk["constrained_columns"]),
-                    fk["referred_schema"],
-                    fk["referred_table"],
-                    tuple(fk["referred_columns"]),
-                    fk["options"].get("ondelete"),
-                )
-                for fk in event_fks
-            }
+            targets = _foreign_keys(conn, "learning_events")
             assert (
                 ("tenant_id", "person_id"),
                 "public",
@@ -636,8 +668,7 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
                 ("learning_events", {"course_id", "subject_id"}),
             ):
                 assert not any(
-                    plain_refs.intersection(fk["constrained_columns"])
-                    for fk in inspector.get_foreign_keys(table, schema="mod_learning")
+                    plain_refs.intersection(fk[0]) for fk in _foreign_keys(conn, table)
                 )
             completion_columns = {
                 c["name"]
@@ -814,5 +845,39 @@ def test_downgrade_removes_only_learning_canonical_storage(learning_database) ->
             assert inspector.has_table("tenants", schema="public")
             assert inspector.has_table("parties", schema="public")
             assert inspector.has_table("party_persons", schema="public")
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("search_path", ["public", "fk_namespace_probe, public"])
+def test_foreign_key_catalog_rejects_wrong_target_namespace(
+    learning_database, search_path
+):
+    engine = create_engine(learning_database[0])
+    try:
+        with engine.connect() as conn, conn.begin() as transaction:
+            # Same relation/column names cannot conceal a different target OID.
+            conn.execute(text("CREATE SCHEMA fk_namespace_probe"))
+            conn.execute(
+                text("CREATE TABLE fk_namespace_probe.tenants (id uuid PRIMARY KEY)")
+            )
+            conn.execute(
+                text(
+                    "CREATE TABLE fk_namespace_probe.source (tenant_id uuid "
+                    "REFERENCES fk_namespace_probe.tenants(id) ON DELETE CASCADE)"
+                )
+            )
+            expected = {(("tenant_id",), "public", "tenants", ("id",), "CASCADE")}
+            conn.execute(
+                text("SELECT set_config('search_path', :path, true)"),
+                {"path": search_path},
+            )
+            actual = _foreign_keys(conn, "source", schema="fk_namespace_probe")
+            assert actual == {
+                (("tenant_id",), "fk_namespace_probe", "tenants", ("id",), "CASCADE")
+            }
+            with pytest.raises(AssertionError):
+                assert actual == expected
+            transaction.rollback()
     finally:
         engine.dispose()

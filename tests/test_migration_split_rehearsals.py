@@ -441,7 +441,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     assert heads == {
         KERNEL_HEAD,
         "a004_backfill_capability_grants",
-        "ts_0002_notify_identity",
+        "ts_0003_tenant_audit",
         "tk_0001_tickets",
     }, f"unexpected head set: {heads}"
 
@@ -458,7 +458,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     ticketing_head = script.get_revision("ticketing@head")
     assert kernel_head.revision == KERNEL_HEAD
     assert assembly_head.revision == "a004_backfill_capability_grants"
-    assert module_head.revision == "ts_0002_notify_identity"
+    assert module_head.revision == "ts_0003_tenant_audit"
     assert ticketing_head.revision == "tk_0001_tickets"
 
 

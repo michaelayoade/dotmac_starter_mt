@@ -5,7 +5,7 @@ import pytest
 from dotmac_learning.curriculum_models import Chapter
 from dotmac_learning.models import Course
 from sqlalchemy import event, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from tests import test_learning_curriculum as curriculum_fixtures
@@ -69,10 +69,14 @@ def test_cross_tenant_same_slug_isolated_and_foreign_command_refused(curriculum_
             == 1
         )
         root = db.get_transaction()
-        with pytest.raises(IntegrityError), db.begin_nested():
+        # PostgreSQL reports an RLS WITH CHECK refusal as 42501.
+        with pytest.raises(ProgrammingError) as refused, db.begin_nested():
             learning.import_manual_chapters(
                 db, _header(other, slug="forbidden"), chapters=()
             )
+        assert refused.value.orig.sqlstate == "42501"
+        assert db.scalar(select(Course).where(Course.slug == "forbidden")) is None
+        assert learning.get_course(db, tenant_id=tenant, course_id=own.id).id == own.id
         assert db.get_transaction() is root and root.is_active
 
 

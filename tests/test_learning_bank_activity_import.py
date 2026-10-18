@@ -20,7 +20,7 @@ from dotmac_learning.curriculum_contracts import (
 from dotmac_learning.curriculum_models import Question, QuestionBank
 from dotmac_learning.models import Activity, Course
 from sqlalchemy import delete, event, select, text
-from sqlalchemy.exc import IntegrityError, StatementError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from tests import test_learning_curriculum as curriculum_fixtures
@@ -510,22 +510,33 @@ def test_raw_non_json_reaches_final_flush_serialization_failure_and_rollback(
             )
             assert command.doc is doc
             flushes = []
+            statements = []
 
             def flushed(session, context):
                 flushes.append(session)
 
+            def executing(conn, cursor, statement, parameters, context, executemany):
+                statements.append(statement.lower())
+
             event.listen(db, "after_flush", flushed)
+            event.listen(engine, "before_cursor_execute", executing)
             try:
-                with pytest.raises(StatementError) as caught:
+                # psycopg serializes JSONB during cursor execution, so its
+                # json.dumps TypeError reaches the caller without a SQLAlchemy
+                # StatementError wrapper. The source loader's question flush
+                # still fails before the Activity lookup or staging.
+                with pytest.raises(TypeError, match="not JSON serializable"):
                     import_bank_with_activity(db, command)
             finally:
+                event.remove(engine, "before_cursor_execute", executing)
                 event.remove(db, "after_flush", flushed)
-            assert isinstance(caught.value.orig, TypeError)
-            assert caught.value.statement is not None
-            assert (
-                f"insert into {Question.__table__.fullname}"
-                in caught.value.statement.lower()
+            assert any(
+                statement.lstrip().startswith(
+                    f"insert into {Question.__table__.fullname}"
+                )
+                for statement in statements
             )
+            assert not any("activities" in statement for statement in statements)
             assert flushes == [db]  # bank creation succeeded; question flush failed
             assert not db.is_active
             assert not any(isinstance(row, Activity) for row in db.new)

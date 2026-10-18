@@ -18,6 +18,7 @@ from dotmac_learning.models import (
 )
 from dotmac_learning.participation_models import Cohort, CourseOffering, Enrollment
 from sqlalchemy import delete, event, func, select, text
+from sqlalchemy.exc import ProgrammingError
 
 from tests import test_learning_results as result_tests
 from tests.test_learning_catalog import _person, _scope
@@ -65,7 +66,9 @@ def add_score(db, tenant, person, activity, *, fraction=0, attempt=1, when=NOW):
 
 
 @pytest.fixture
-def report_database(result_database):
+def report_database(result_database, request):
+    event_case = getattr(request, "param", "active")
+    assert event_case in {"active", "historical-person", "never-active-second"}
     admin, app, tenant, person, course, activity, other, *_ = result_database
     with admin.begin() as conn:
         second, dropped = _person(conn, tenant), _person(conn, tenant)
@@ -137,11 +140,16 @@ def report_database(result_database):
         )
         add_score(db, tenant, person, activity, fraction=0)
         add_score(db, tenant, person, activities[1], fraction=1)
+        person_when = (
+            SINCE - timedelta(seconds=1) if event_case == "historical-person" else NOW
+        )
         for kind in ("activity_started", "submission_made", "work_graded"):
-            add_event(db, tenant, person, kind=kind)
+            add_event(db, tenant, person, when=person_when, kind=kind)
         add_event(db, tenant, person, when=SINCE - timedelta(microseconds=1))
-        for _ in range(2):
-            add_event(db, tenant, second)
+        # Events are append-only for app_user: seed the desired history directly.
+        if event_case == "active":
+            for _ in range(2):
+                add_event(db, tenant, second)
         for _ in range(10):
             add_event(db, tenant, dropped)
         for index in range(10):
@@ -283,17 +291,12 @@ def test_all_projections_positive_before_evil_a_parameters_under_b_non_bypass(
             )
 
 
+@pytest.mark.parametrize("report_database", ["historical-person"], indirect=True)
 def test_engagement_distinct_students_ever_vs_window_and_no_identity_activity_filter(
     report_database,
 ):
     f = report_database
     with scoped(f["app"], f["tenant"]) as db:
-        db.execute(delete(LearningEvent).where(LearningEvent.person_id == f["second"]))
-        db.execute(
-            LearningEvent.__table__.update()
-            .where(LearningEvent.person_id == f["person"])
-            .values(occurred_at=SINCE - timedelta(seconds=1))
-        )
         fact = reads.engagement_snapshot(db, tenant_id=f["tenant"], since=SINCE)
         assert (
             fact.enrollees,
@@ -542,10 +545,10 @@ def test_attention_aggregate_before_limit_and_queue_global_one_query_autoflush(
         assert attention.top[0].cohort_name == "Caller autoflush"
 
 
+@pytest.mark.parametrize("report_database", ["never-active-second"], indirect=True)
 def test_roster_never_active_nulls_and_python_half_even_rounding(report_database):
     f = report_database
     with scoped(f["app"], f["tenant"]) as db:
-        db.execute(delete(LearningEvent).where(LearningEvent.person_id == f["second"]))
         for activity, fraction in zip(f["activities"][:2], (0.20, 0.21), strict=True):
             db.execute(
                 Score.__table__.update()
@@ -578,3 +581,28 @@ def test_configured_report_caps_keep_full_attention_counts(report_database):
         assert attention.open_total == 10
         assert sum(row.count for row in attention.by_reason) == 10
         assert db.get_transaction() is root
+
+
+@pytest.mark.parametrize("mutation", ["delete", "update"])
+def test_report_event_history_remains_append_only_for_app_user(
+    report_database, mutation
+):
+    f = report_database
+    with scoped(f["app"], f["tenant"]) as db:
+        root = db.get_transaction()
+        predicate = LearningEvent.person_id == f["second"]
+        statement = (
+            delete(LearningEvent).where(predicate)
+            if mutation == "delete"
+            else LearningEvent.__table__.update()
+            .where(predicate)
+            .values(occurred_at=SINCE)
+        )
+        with pytest.raises(ProgrammingError) as refused, db.begin_nested():
+            db.execute(statement)
+        assert refused.value.orig.sqlstate == "42501"
+        assert db.get_transaction() is root and root.is_active
+        assert (
+            db.scalar(select(func.count()).select_from(LearningEvent).where(predicate))
+            == 2
+        )

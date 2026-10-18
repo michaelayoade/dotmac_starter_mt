@@ -25,7 +25,16 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import DBAPIError
 
 from tests import test_learning_catalog as learning_catalog
-from tests.test_learning_catalog import _course, _scope, _tenant
+from tests.test_learning_catalog import (
+    ALL_TABLES,
+    KERNEL_VERSIONS,
+    LEARNING_VERSIONS,
+    REPO_ROOT,
+    _course,
+    _foreign_keys,
+    _scope,
+    _tenant,
+)
 from tests.test_learning_participation_catalog import (
     BASE_TABLES,
 )
@@ -120,12 +129,19 @@ def _reject(conn, statement, state):
 def test_prior_three_learning_migrations_and_assessment_only_downgrade(
     learning_database,
 ):
+    from alembic import command
+    from alembic.config import Config
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
     revision = importlib.import_module(
         "dotmac_learning.migrations.versions.lr_0004_assessment"
     )
+    # Retire descendants through real Alembic before isolating lr_0004.
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("version_locations", f"{KERNEL_VERSIONS} {LEARNING_VERSIONS}")
+    command.downgrade(cfg, "lr_0004_assessment")
     engine = create_engine(learning_database[0])
     try:
         with engine.connect() as conn, conn.begin() as transaction:
@@ -440,9 +456,8 @@ def test_actual_catalog_fields_indexes_foreign_keys_security_and_grants(
     try:
         with engine.connect() as conn:
             inspector = inspect(conn)
-            assert (
-                set(inspector.get_table_names(schema="mod_learning"))
-                == PREVIOUS_TABLES | TABLES
+            assert set(inspector.get_table_names(schema="mod_learning")) == set(
+                ALL_TABLES
             )
             for table in TABLES:
                 assert not inspector.has_table(table, schema="public")
@@ -491,16 +506,7 @@ def test_actual_catalog_fields_indexes_foreign_keys_security_and_grants(
                         columns["extra_attempts"]["default"].split("::")[0].strip("'")
                         == "1"
                     )
-                assert {
-                    (
-                        tuple(fk["constrained_columns"]),
-                        fk["referred_schema"],
-                        fk["referred_table"],
-                        tuple(fk["referred_columns"]),
-                        fk["options"].get("ondelete"),
-                    )
-                    for fk in inspector.get_foreign_keys(table, schema="mod_learning")
-                } == {
+                assert _foreign_keys(conn, table) == {
                     (("tenant_id",), "public", "tenants", ("id",), "CASCADE"),
                     (
                         ("tenant_id", "activity_id"),
@@ -570,12 +576,19 @@ def test_kernel_prerequisite_refusal_before_any_assessment_ddl(
 ):
     from dotmac_kernel.migrations.verify import PrerequisiteNotSatisfiedError
 
+    from alembic import command
+    from alembic.config import Config
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
     revision = importlib.import_module(
         "dotmac_learning.migrations.versions.lr_0004_assessment"
     )
+    # Retire descendants through real Alembic before isolating lr_0004.
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("version_locations", f"{KERNEL_VERSIONS} {LEARNING_VERSIONS}")
+    command.downgrade(cfg, "lr_0004_assessment")
     engine = create_engine(learning_database[0])
     try:
         with engine.connect() as conn, conn.begin() as transaction:

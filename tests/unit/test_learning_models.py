@@ -270,6 +270,9 @@ def test_nullable_policy_fields_and_source_defaults_keep_their_meaning():
     ):
         for name in names:
             assert model.__table__.c[name].default is None
+    # Mirror immutable database defaults for legacy NULL-on-insert staging only.
+    assert Activity.__table__.c.pass_threshold.server_default.arg == "0.0"
+    assert Activity.__table__.c.assessment_mode.server_default.arg == "graded"
 
 
 def test_json_payload_defaults_are_independent_per_record():

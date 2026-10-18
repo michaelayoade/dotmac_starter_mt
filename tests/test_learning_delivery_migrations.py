@@ -14,6 +14,7 @@ from tests.test_learning_catalog import (
     KERNEL_VERSIONS,
     LEARNING_VERSIONS,
     REPO_ROOT,
+    _foreign_keys,
     _refused,
     _scope,
 )
@@ -466,17 +467,9 @@ def test_exact_catalog_columns_indexes_foreign_keys_and_policy(learning_database
                         assert "status" in partial and "'open'" in partial
                     else:
                         assert not index["unique"] and partial is None
-                fks = catalog.get_foreign_keys(table, schema="mod_learning")
-                assert all(fk["options"].get("ondelete") == "CASCADE" for fk in fks)
-                shapes = {
-                    (
-                        tuple(fk["constrained_columns"]),
-                        fk["referred_schema"],
-                        fk["referred_table"],
-                        tuple(fk["referred_columns"]),
-                    )
-                    for fk in fks
-                }
+                fks = _foreign_keys(conn, table)
+                assert all(fk[4] == "CASCADE" for fk in fks)
+                shapes = {fk[:4] for fk in fks}
                 expected_fks = {(("tenant_id",), "public", "tenants", ("id",))}
                 for column, parent in {
                     "offering_activities": (

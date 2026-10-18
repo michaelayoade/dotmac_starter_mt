@@ -28,6 +28,7 @@ from tests import test_learning_catalog as learning_catalog_fixtures
 from tests.test_learning_catalog import (
     ALL_TABLES,
     _course,
+    _foreign_keys,
     _refused,
     _scope,
     _tenant,
@@ -223,17 +224,11 @@ def test_curriculum_real_catalog_matches_immutable_source(learning_database):
             )
             for table in TABLES:
                 assert not inspector.has_table(table, schema="public")
-                fks = inspector.get_foreign_keys(table, schema="mod_learning")
-                assert {
-                    (
-                        tuple(fk["constrained_columns"]),
-                        fk["referred_schema"],
-                        fk["referred_table"],
-                        tuple(fk["referred_columns"]),
-                    )
-                    for fk in fks
-                } == FK_ORACLE[table] | {(("tenant_id",), "public", "tenants", ("id",))}
-                assert all(fk["options"]["ondelete"] == "CASCADE" for fk in fks)
+                fks = _foreign_keys(conn, table)
+                assert {fk[:4] for fk in fks} == FK_ORACLE[table] | {
+                    (("tenant_id",), "public", "tenants", ("id",))
+                }
+                assert all(fk[4] == "CASCADE" for fk in fks)
                 assert {
                     tuple(u["column_names"])
                     for u in inspector.get_unique_constraints(
