@@ -473,6 +473,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-deployment-control"
         / "src/dotmac_deployment_control/migrations/versions"
     ),
+    "dotmac-learning": (
+        REPO_ROOT
+        / "packages/dotmac-learning"
+        / "src/dotmac_learning/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -556,6 +561,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-work-orders": "wo_*.py",
     "dotmac-ticketing": "tk_*.py",
     "dotmac-deployment-control": "dc_*.py",
+    "dotmac-learning": "lr_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -636,6 +642,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-work-orders": "dotmac-work-orders-v",
     "dotmac-ticketing": "dotmac-ticketing-v",
     "dotmac-deployment-control": "dotmac-deployment-control-v",
+    "dotmac-learning": "dotmac-learning-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1582,6 +1589,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # a2's root is the published atomic catalogue. a3 adds fi_0002 rather than
     # changing this digest, so an existing a2 installation and a fresh a3
     # installation converge through an ordinary Alembic upgrade.
+    "dotmac-files-v0.1.0a6": (
+        "dotmac-files",
+        "19accb23ee10b16048088b3beb7e374d16ab31b4",
+        {
+            "fi_0001_stored_files.py": (
+                "58976eab44ccfaaa77af255c52f92ef333e650e89ee3f6808211820b3c3b4fd0"
+            ),
+            "fi_0002_selectable_planes.py": (
+                "9cdaf0da282402777d6c2e694c60d29f8078a0d48c64211e9a6a67dc1ac05581"
+            ),
+        },
+    ),
     "dotmac-files-v0.1.0a5": (
         "dotmac-files",
         "895ce0e482cc00a04690838ea5f12e73e5f00a97",
@@ -7503,6 +7522,31 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-learning ──
+    "dotmac-learning-v0.1.0a1": (
+        "dotmac-learning",
+        "f674acc9e3235ac1b82bc10c37ba021191730a5b",
+        {
+            "lr_0001_learning.py": (
+                "b40ad7cb692f386ef03faf0d093b46e5684b5bf6e6d282a9808672cb7e1a561d"
+            ),
+            "lr_0002_curriculum_reading.py": (
+                "98ddf64623110fead8893d3fdef3c6f06fb3959b5e6a7728d5117bfb74a02ac2"
+            ),
+            "lr_0003_participation.py": (
+                "0093a5d4c26e11be769ccc42cc859f667662c20abd269249da59d3ab91d92267"
+            ),
+            "lr_0004_assessment.py": (
+                "935fb0d36466d2f3df56101580b5ad12b5f5c1c85700dc405abd60c08840cb47"
+            ),
+            "lr_0005_tenant_audit.py": (
+                "75accabeeae531a40882cbffa2a5b8b7da95d884f07bcda950143f8bf3dfd4d7"
+            ),
+            "lr_0006_delivery_support.py": (
+                "742ee17b76d33f431b5928ca9617802e1014784d786395db8b092b8190541448"
+            ),
+        },
+    ),
 }
 
 
@@ -7717,6 +7761,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-work-orders": frozenset(),
     "dotmac-ticketing": frozenset(),
     "dotmac-deployment-control": frozenset(),
+    "dotmac-learning": frozenset(),
 }
 
 
