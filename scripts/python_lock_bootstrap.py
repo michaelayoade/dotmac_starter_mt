@@ -943,7 +943,13 @@ def _review_operations(
             "replacement": replacement_hash.decode("ascii"),
         }
     )
-    operations.sort(key=lambda operation: cast(int, operation["offset"]))
+    # Insert before replacing the record at the same original byte boundary.
+    operations.sort(
+        key=lambda operation: (
+            cast(int, operation["offset"]),
+            cast(int, operation["old_length"]),
+        )
+    )
     reconstructed = bytearray()
     cursor = 0
     for operation in operations:

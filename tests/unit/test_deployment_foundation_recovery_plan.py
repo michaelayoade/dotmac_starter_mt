@@ -768,7 +768,13 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # LockGenerationManifest is owned by the Python lock proposal producer.
     # It binds unqualified lock/source bytes in a hosted workflow artifact;
     # it writes no Foundation plan, lease, release or package-owned store.
-    "python_lock_bootstrap.py": 1,
+    # Lock-bootstrap-owned JSON, never a Foundation lease/store writer: one
+    # generated-unqualified LockGenerationManifest receipt in produce_lock;
+    # two in-memory value encodings in _review_value_differs; one bounded
+    # negative mask in _review_diagnostic_json; and _review_artifact's independent
+    # receipt reconstruction plus bounded UNQUALIFIED review packet. The review
+    # path compares/emits evidence and never writes a Foundation store record.
+    "python_lock_bootstrap.py": 6,
     "release_artifact_verification.py": 1,
     # The ReleaseAuthority.v1 canonical digest document; owned by
     # release_authority.py, stored nowhere but as the ledger's digest.
