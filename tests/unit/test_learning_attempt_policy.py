@@ -201,7 +201,7 @@ def test_commands_are_frozen_extra_forbid_and_audit_context_is_separate():
     scope = {"tenant_id": uuid4(), "person_id": uuid4(), "activity_id": uuid4()}
     for model, fields in (
         (CloseAttemptCommand, {}),
-        (GrantExtraAttemptCommand, {"reason": "power cut"}),
+        (GrantExtraAttemptCommand, {"reason": "power cut", "extra_attempts": 1}),
         (OpenAttemptCommand, {"all_ext_ids": ["q"], "count": 1}),
     ):
         payload = model(**scope, **fields)

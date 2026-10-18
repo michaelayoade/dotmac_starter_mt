@@ -286,12 +286,14 @@ from dotmac_learning.reading_contracts import (
     SubtopicReadCommand,
 )
 from dotmac_learning.references import (
+    ActivityCreate,
     ActivityFact,
     ActivityWrite,
     CourseFact,
     CourseWrite,
     ReferenceNotFound,
     create_activity,
+    create_activity_identity,
     create_course,
     get_activity,
     get_course,
@@ -454,6 +456,7 @@ from dotmac_learning.delivery_contracts import (
     SetDeliveryModeCommand,
     UpdateSessionCommand,
 )
+from dotmac_learning.delivery_models import SESSION_TYPES
 from dotmac_learning.delivery_transfer import (
     export_snapshot_v5,
     import_snapshot_v5,
@@ -577,6 +580,7 @@ from dotmac_learning.references import (
     CoursePatch,
     patch_activity,
     patch_course,
+    stage_activity_patch,
 )
 from dotmac_learning.reminder_contracts import (
     OpeningOffering,
@@ -826,6 +830,7 @@ __all__ = [
     "KIND_SESSION_ATTENDED",
     "KIND_SUBMISSION_MADE",
     "KIND_WORK_GRADED",
+    "ActivityCreate",
     "ActivityFact",
     "ActivityRowV1",
     "ActivityWrite",
@@ -882,6 +887,7 @@ __all__ = [
     "best_scores_for",
     "best_scores_for_person",
     "create_activity",
+    "create_activity_identity",
     "create_course",
     "emit",
     "export_snapshot",
@@ -1003,6 +1009,7 @@ __all__ = [
     "CancelSessionCommand",
     "CohortDeliveryFact",
     "ClassSessionFact",
+    "SESSION_TYPES",
     "SessionChange",
     "SessionUpdate",
     "PersonSession",
@@ -1200,6 +1207,7 @@ __all__ = [
     "ActivityPatch",
     "patch_course",
     "patch_activity",
+    "stage_activity_patch",
     "ImportBankWithActivityCommand",
     "BankActivityImportResult",
     "BankActivityTerms",

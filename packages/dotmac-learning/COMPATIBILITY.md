@@ -250,3 +250,42 @@ Real migrated PostgreSQL ordering, staging, caller outcome, RLS, duplicate-numbe
 transaction, tuple compatibility and statement-trace canaries are authored only.
 Hosted execution and installed Academy qualification remain required; this source
 change adds no migration, metadata, dependency, lock or release identity.
+
+
+### Lab Activity identity and staging ports
+
+`ActivityCreate` mirrors the mutable, plain-coercing `ActivityWrite` contract
+without a caller-supplied `id`. Type, threshold, assessment mode, grading and
+weight are required; only nullable fields have absence defaults. Explicit legacy
+zero, signed, out-of-range and nonfinite float values are not tightened here.
+`create_activity_identity(db, payload)` adds through the Activity owner and
+flushes the entire caller Session once. The mapped UUID INSERT default generates
+the identity; only `row.id` is read after flush. It returns the UUID, without
+projecting an ActivityFact or introducing a transaction/savepoint/commit.
+
+`stage_activity_patch(db, ActivityPatch(...))` performs one ordinary tenant/id
+full-row SELECT with existing caller autoflush behavior. A missing or RLS-hidden
+row returns `False`; a present row receives only provided fields and returns
+`True`. There is no ending flush, refresh, populate-existing or fact projection.
+Existing create/update/patch ports retain their returns, missing-row errors,
+assignment order and flush behavior. Bank import shares private raw add/assignment
+helpers while retaining its query, raw policy, order and flush/error boundaries.
+Historical snapshot imports remain unchanged.
+
+Academy's lab importer owns parsing, render/hash, raw Template limits and
+versioning. Explicit YAML threshold values still pass through `float` before the
+Template query; null and malformed values fail there. Only an absent YAML key
+requests `learning_lab_pass_threshold` from product Settings. New Activity rows
+also receive Settings assessment mode/grading/weight. Strict Settings reads are
+lazy and cached per import call, with no-autoflush confined to that new read.
+Unavailable or malformed configuration intentionally introduces a new failure
+dependency for missing thresholds and new rows. It is not included in source
+hashes, and changed/unchanged explicit-threshold imports need no Settings read.
+The fixed `lab` type remains the action contract. Final caller Session flush,
+including empty directories, and product Template identities remain unchanged.
+
+These are source-only canaries. The migrated restricted-role PostgreSQL tests
+are written, not executed locally. Academy's retained legacy admin fixture and
+public-boundary observations do not qualify installed canonical Activity to
+product LabTemplate/Kernel identity assembly. That end-to-end qualification
+remains a release/adoption gate.

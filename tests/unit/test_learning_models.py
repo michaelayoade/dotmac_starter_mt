@@ -256,23 +256,20 @@ def test_nullable_policy_fields_and_source_defaults_keep_their_meaning():
     assert Score.__table__.c.override_reason.nullable
     assert not Certificate.__table__.c.issued_at.nullable
     for model, expected in (
-        (Course, {"version": 1, "status": "published", "listed": False}),
-        (
-            Activity,
-            {
-                "type": "mcq_test",
-                "pass_threshold": 0.0,
-                "assessment_mode": "graded",
-                "grading": "auto",
-                "weight": 1.0,
-            },
-        ),
+        (Course, {"version": 1}),
         (Submission, {"attempt_no": 1}),
         (Score, {"source": "auto"}),
         (CourseCompletion, {"status": "in_progress", "pct": 0.0}),
     ):
         for name, value in expected.items():
             assert model.__table__.c[name].default.arg == value
+    # New writes require explicit policy; historical migration defaults remain.
+    for model, names in (
+        (Course, ("status", "listed")),
+        (Activity, ("type", "pass_threshold", "assessment_mode", "grading", "weight")),
+    ):
+        for name in names:
+            assert model.__table__.c[name].default is None
 
 
 def test_json_payload_defaults_are_independent_per_record():

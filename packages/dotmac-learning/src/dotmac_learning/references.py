@@ -6,6 +6,7 @@ curriculum existence/authorization decision is invented by these commands.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -33,6 +34,24 @@ class CourseWrite(BaseModel):
 class ActivityWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: UUID
+    tenant_id: UUID
+    course_id: UUID
+    title: str
+    chapter_number: int | None = None
+    type: str
+    bank_id: UUID | None = None
+    pass_threshold: float
+    max_attempts: int | None = None
+    assessment_mode: str
+    grading: str
+    weight: float
+    question_count: int | None = None
+
+
+class ActivityCreate(BaseModel):
+    """Mutable plain-coercing create fields; the mapped INSERT assigns the ID."""
+
+    model_config = ConfigDict(extra="forbid")
     tenant_id: UUID
     course_id: UUID
     title: str
@@ -181,9 +200,44 @@ def update_course(db: Session, payload: CourseWrite) -> CourseFact:
     return _course_fact(row)
 
 
-def create_activity(db: Session, payload: ActivityWrite) -> ActivityFact:
-    row = Activity(**payload.model_dump())
+def _add_activity(db: Session, values: dict[str, object]) -> Activity:
+    """Add raw owner fields without coercion or a flush."""
+    row = Activity(**values)
     db.add(row)
+    return row
+
+
+def _assign_activity(row: Activity, values: Iterable[tuple[str, object]]) -> None:
+    """Preserve caller field order and raw values."""
+    for name, value in values:
+        setattr(row, name, value)
+
+
+def create_activity_identity(db: Session, payload: ActivityCreate) -> UUID:
+    """Flush the entire caller Session; read only the INSERT-generated identity."""
+    row = _add_activity(db, payload.model_dump())
+    db.flush()
+    return row.id
+
+
+def stage_activity_patch(db: Session, payload: ActivityPatch) -> bool:
+    """Stage supplied fields, tolerate missing rows, and avoid fact projection."""
+    row = db.scalar(
+        select(Activity).where(
+            Activity.tenant_id == payload.tenant_id, Activity.id == payload.id
+        )
+    )
+    if row is None:
+        return False
+    _assign_activity(
+        row,
+        payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True).items(),
+    )
+    return True
+
+
+def create_activity(db: Session, payload: ActivityWrite) -> ActivityFact:
+    row = _add_activity(db, payload.model_dump())
     db.flush()
     return _activity_fact(row)
 
@@ -196,8 +250,7 @@ def update_activity(db: Session, payload: ActivityWrite) -> ActivityFact:
     )
     if row is None:
         raise ReferenceNotFound("activity not found for tenant")
-    for name, value in payload.model_dump(exclude={"id", "tenant_id"}).items():
-        setattr(row, name, value)
+    _assign_activity(row, payload.model_dump(exclude={"id", "tenant_id"}).items())
     db.flush()
     return _activity_fact(row)
 
@@ -227,8 +280,8 @@ def patch_activity(db: Session, payload: ActivityPatch) -> ActivityFact:
     )
     if row is None:
         raise ReferenceNotFound("activity not found for tenant")
-    for name, value in payload.model_dump(
-        exclude={"id", "tenant_id"}, exclude_unset=True
-    ).items():
-        setattr(row, name, value)
+    _assign_activity(
+        row,
+        payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True).items(),
+    )
     return _activity_fact(row)

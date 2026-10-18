@@ -43,8 +43,8 @@ class BankActivityTerms:
             or value <= 0
         ):
             raise ValueError("new_activity_weight must be a finite positive number")
-        for value in (self.new_activity_assessment_mode, self.new_activity_grading):
-            if not isinstance(value, str) or not value:
+        for text in (self.new_activity_assessment_mode, self.new_activity_grading):
+            if not isinstance(text, str) or not text:
                 raise ValueError(
                     "new activity mode and grading must be nonempty strings"
                 )

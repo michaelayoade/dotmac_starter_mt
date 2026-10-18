@@ -16,6 +16,7 @@ from .bank_activity_contracts import (
 )
 from .curriculum import load_bank
 from .models import Activity, Course
+from .references import _add_activity, _assign_activity
 
 
 def import_bank_with_activity(
@@ -58,22 +59,25 @@ def import_bank_with_activity(
     ).first()
     created = activity is None
     if activity is None:
-        activity = Activity(
-            tenant_id=command.tenant_id,
-            course_id=course.id,
-            chapter_number=doc.chapter,
-            type="mcq_test",
-            bank_id=bank.id,
-            title=title,
-            pass_threshold=pass_threshold,
-            assessment_mode=command.terms.new_activity_assessment_mode,
-            grading=command.terms.new_activity_grading,
-            weight=command.terms.new_activity_weight,
+        activity = _add_activity(
+            db,
+            {
+                "tenant_id": command.tenant_id,
+                "course_id": course.id,
+                "chapter_number": doc.chapter,
+                "type": "mcq_test",
+                "bank_id": bank.id,
+                "title": title,
+                "pass_threshold": pass_threshold,
+                "assessment_mode": command.terms.new_activity_assessment_mode,
+                "grading": command.terms.new_activity_grading,
+                "weight": command.terms.new_activity_weight,
+            },
         )
-        db.add(activity)
     else:
-        for column, value in (("title", title), ("pass_threshold", pass_threshold)):
-            setattr(activity, column, value)
+        _assign_activity(
+            activity, (("title", title), ("pass_threshold", pass_threshold))
+        )
 
     applied_policy: list[tuple[str, object]] = []
     for key, column in (
@@ -82,7 +86,7 @@ def import_bank_with_activity(
         ("mode", "assessment_mode"),
     ):
         if key in doc.policy:
-            setattr(activity, column, doc.policy[key])
+            _assign_activity(activity, ((column, doc.policy[key]),))
             applied_policy.append((key, doc.policy[key]))
 
     return BankActivityImportResult(
