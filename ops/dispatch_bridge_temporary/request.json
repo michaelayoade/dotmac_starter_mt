@@ -1,0 +1,9 @@
+{
+  "mode": "preflight",
+  "module": "dotmac-learning",
+  "version": "0.1.0a1",
+  "expected_main_sha": null,
+  "checks": [],
+  "workflow_runs": [],
+  "qualified_skipped_contexts": []
+}
