@@ -77,7 +77,8 @@ def test_version_mismatch_is_rejected():
 
 
 @pytest.mark.parametrize(
-    "change", ["tables", "owner", "platform", "registration", "catalog", "namespace"]
+    "change",
+    ["tables", "owner", "platform", "registration", "catalog", "namespace", "copy"],
 )
 def test_registry_evidence_sensitivity(change):
     module = SimpleNamespace(
@@ -96,7 +97,7 @@ def test_registry_evidence_sensitivity(change):
         declared_tables=lambda schema: frozenset(module.tables),
         declared_platform_tables=lambda schema: frozenset(),
     )
-    registry = SimpleNamespace(get=lambda code: module, namespaces=namespaces)
+    registry = SimpleNamespace(get=lambda code: module, namespaces=lambda: namespaces)
     if change == "tables":
         module.tables = ()
     elif change == "owner":
@@ -106,11 +107,37 @@ def test_registry_evidence_sensitivity(change):
     elif change == "catalog":
         namespaces.declared_tables = lambda schema: frozenset({"stray"})
     elif change == "namespace":
-        registry.namespaces = object()
+        registry.namespaces = lambda: object()
+    elif change == "copy":
+        registry.get = lambda code: SimpleNamespace(**vars(module))
     else:
         registry.get = lambda code: None
     with pytest.raises(ValueError):
         probe.check_registration(module, registry, SimpleNamespace)
+
+
+def test_registry_evidence_uses_public_kernel_namespace_method():
+    from dotmac_kernel.modules import ModuleManifest, ModuleRegistry
+    from dotmac_kernel.namespaces import NamespaceRegistry
+
+    module = ModuleManifest(
+        code="learning",
+        version="0.1.0a1",
+        core=False,
+        short_code="learning",
+        migration_prefix="lr",
+        migration_branch="learning",
+        tables=tuple(sorted(probe.LEARNING_TABLES)),
+    )
+    registry = ModuleRegistry((module,))
+    assert probe.check_registration(module, registry, NamespaceRegistry) == {
+        "owner": "learning",
+        "schema": "mod_learning",
+        "prefix": "lr",
+        "branch": "learning",
+        "tables": sorted(probe.LEARNING_TABLES),
+        "platform_tables": [],
+    }
 
 
 def test_noisy_or_broad_status_cannot_pass():

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import UUID
 
 from dotmac_kernel.models import Party, PartyPerson
@@ -192,8 +192,8 @@ def bank_questions(
             ext_id=q.ext_id,
             stem=q.stem,
             type=q.type,
-            options=deepcopy(q.options),
-            correct=deepcopy(q.correct),
+            options=cast(JsonValue, deepcopy(q.options)),
+            correct=cast(JsonValue, deepcopy(q.correct)),
             rubric_category=q.rubric_category,
             category=q.category,
             explanation=q.explanation,

@@ -12,6 +12,7 @@ from dotmac_kernel.models import Party, PartyPerson
 from pydantic import JsonValue
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import UnaryExpression
 
 from . import attempt_policy
 from . import events as learning_events
@@ -74,7 +75,7 @@ _OVERDUE_HIGH_COUNT = 3
 _SEVERITY_RANK = {"high": 3, "medium": 2, "low": 1}
 
 
-def severity_order():
+def severity_order() -> UnaryExpression[int]:
     """Descending severity ordering for ``SuccessQueueEntry`` queries — the one
     place the text-vs-rank mapping lives, shared by the queue view and the CSV."""
     return case(_SEVERITY_RANK, value=SuccessQueueEntry.severity, else_=0).desc()
@@ -173,7 +174,7 @@ def _rule_overdue(
         "overdue_count": len(overdue),
         "oldest_due_at": oldest.isoformat(),
         "days_late": days_late,
-        "titles": [r.activity.title for r in overdue][:5],
+        "titles": cast(JsonValue, [r.activity.title for r in overdue][:5]),
     }
     action = (
         "Agree a catch-up plan for the overdue work; consider a deadline extension."

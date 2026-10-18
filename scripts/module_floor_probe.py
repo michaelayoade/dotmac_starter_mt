@@ -149,7 +149,7 @@ def audit_refusal(exc):
 
 
 def check_registration(module, registry, namespace_type):
-    namespaces = registry.namespaces
+    namespaces = registry.namespaces()
     if (
         not isinstance(namespaces, namespace_type)
         or registry.get(module.code) is not module

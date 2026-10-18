@@ -19,6 +19,11 @@ from datetime import (
 from uuid import UUID
 
 from dotmac_kernel.models import Party, PartyType
+from pydantic import JsonValue, TypeAdapter
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
+
 from dotmac_learning.event_contracts import (
     EventEmission,
     EventFact,
@@ -33,10 +38,6 @@ from dotmac_learning.models import (
     KIND_COURSE_VIEWED,
     LearningEvent,
 )
-from pydantic import JsonValue, TypeAdapter
-from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session
 
 _ONCE_PER_SUBJECT = (KIND_CHAPTER_COMPLETED, KIND_CERTIFICATE_EARNED)
 _ONCE_PER_LOCAL_DAY = (KIND_COURSE_VIEWED, KIND_CHAPTER_VIEWED)

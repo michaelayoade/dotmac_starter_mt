@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, cast
 from uuid import UUID
 
+from pydantic import JsonValue
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, SessionTransaction
 
@@ -405,8 +406,8 @@ def doc_from_db(
                 id=q.ext_id,
                 stem=q.stem,
                 type=q.type,
-                options=q.options,
-                correct=q.correct,
+                options=cast(JsonValue, q.options),
+                correct=cast(JsonValue, q.correct),
                 rubric_category=q.rubric_category,
                 category=q.category,
                 explanation=q.explanation,

@@ -7,6 +7,7 @@ from dotmac_kernel.prerequisites import (
     TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
+
 from dotmac_learning.attempt_models import ATTEMPT_TABLES
 from dotmac_learning.curriculum_models import CURRICULUM_TABLES
 from dotmac_learning.delivery_models import DELIVERY_TABLES

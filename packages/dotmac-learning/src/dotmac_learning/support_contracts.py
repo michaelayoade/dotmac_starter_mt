@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, TypeAlias
 from uuid import UUID
 
 from .curriculum_contracts import ChapterFact
@@ -24,7 +24,7 @@ class LegacyCohortOverview:
     rows: tuple[LegacyCohortStudent, ...]
 
 
-type CourseRiskReason = Literal["overdue", "behind"]
+CourseRiskReason: TypeAlias = Literal["overdue", "behind"]  # noqa: UP040 - Python 3.11 floor
 
 
 @dataclass(frozen=True, slots=True)

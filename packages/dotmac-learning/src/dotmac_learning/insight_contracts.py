@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, TypeAlias
 from uuid import UUID
 
 from .event_contracts import WeekBucket
@@ -28,8 +28,8 @@ class DisciplineStrengths:
     all: tuple[DisciplineScore, ...]
 
 
-type BlockerReason = Literal["overdue", "attempts_exhausted"]
-type Recommendation = (
+BlockerReason: TypeAlias = Literal["overdue", "attempts_exhausted"]  # noqa: UP040 - Python 3.11 floor
+Recommendation: TypeAlias = (  # noqa: UP040 - Python 3.11 floor
     BlockerReason
     | Literal["start_first_chapter", "resume_after_week", "continue_unfinished"]
 )

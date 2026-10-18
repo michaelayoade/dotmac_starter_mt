@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from dotmac_learning.account_contracts import ActiveAccountPopulation
+from dotmac_kernel.models import Party
+from dotmac_learning.account_contracts import ActiveAccountSelection
 from dotmac_learning.instructor_contracts import (
     InstructorAuthority,
 )
@@ -14,6 +15,7 @@ from dotmac_learning.instructor_reads import (
     _require_accounts,
     _require_authority,
 )
+from sqlalchemy import select
 
 NOW = datetime(2026, 10, 17, tzinfo=UTC)
 
@@ -32,9 +34,11 @@ def test_progress_missing_completions_count_zero_and_exact_risk_boundary():
 
 def test_account_and_admin_observations_are_frozen_and_scope_bound():
     tenant, person = uuid4(), uuid4()
-    accounts = ActiveAccountPopulation(tenant, frozenset({person}))
+    relation = select(Party.id).where(Party.tenant_id == tenant, Party.id == person)
+    accounts = ActiveAccountSelection(tenant, relation)
     authority = InstructorAuthority(tenant, person, True)
     _require_accounts(tenant, accounts)
+    assert accounts.active_person_ids is relation
     _require_authority(tenant, person, authority)
     with pytest.raises(ValueError):
         _require_accounts(uuid4(), accounts)
@@ -42,3 +46,5 @@ def test_account_and_admin_observations_are_frozen_and_scope_bound():
         _require_authority(tenant, uuid4(), authority)
     with pytest.raises(FrozenInstanceError):
         authority.actor_is_admin = False
+    with pytest.raises(FrozenInstanceError):
+        accounts.tenant_id = uuid4()

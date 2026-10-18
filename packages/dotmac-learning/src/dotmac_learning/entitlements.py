@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import Row, or_, select
@@ -52,7 +53,7 @@ def _course_lock_reason(title: str | None, fallback: str) -> str:
 def _entitled_course_rows(
     db: Session, *, tenant_id: UUID, person_id: UUID
 ) -> Sequence[Row[tuple[UUID, UUID | None, int | None, str]]]:
-    return db.execute(
+    rows = db.execute(
         select(
             CourseOffering.course_id,
             Enrollment.track_id,
@@ -84,6 +85,8 @@ def _entitled_course_rows(
         .where(or_(Enrollment.track_id.is_(None), TrackCourse.id.isnot(None)))
         .order_by(Enrollment.track_id, TrackCourse.order_index, Course.title)
     ).all()
+    # The outer join can produce a NULL order index despite its column type.
+    return cast(Sequence[Row[tuple[UUID, UUID | None, int | None, str]]], rows)
 
 
 def visible_course_ids(db: Session, *, tenant_id: UUID, person_id: UUID) -> set[UUID]:
@@ -176,7 +179,7 @@ def course_access_states(
             .where(Course.tenant_id == tenant_id)
             .where(Course.id.in_(missing_title_ids))
         ).all()
-        course_titles.update(dict(missing_title_rows))
+        course_titles.update({row[0]: row[1] for row in missing_title_rows})
     for course_id, requires_course_id in prereq_rows:
         if requires_course_id in completed:
             continue

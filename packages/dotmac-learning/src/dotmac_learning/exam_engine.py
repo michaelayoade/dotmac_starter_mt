@@ -170,8 +170,8 @@ def present_options(sitter: Sitter, question: Question) -> list[str]:
     """
     opts = list(getattr(question, "options", None) or [])
     # Deterministic per-sitter option presentation; never generates credentials
-    # or secrets.
-    rng = random.Random(_rank(sitter, "", question.ext_id))  # noqa: S311
+    # or secrets. Bandit B311 is inapplicable to reproducible presentation.
+    rng = random.Random(_rank(sitter, "", question.ext_id))  # noqa: S311  # nosec B311
     rng.shuffle(opts)
     return opts
 
