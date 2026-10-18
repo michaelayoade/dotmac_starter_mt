@@ -116,6 +116,7 @@ on:
           - dotmac-web-analytics
           - dotmac-work-orders
           - dotmac-workflow-runtime
+          - dotmac-learning
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

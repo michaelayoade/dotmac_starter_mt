@@ -132,6 +132,11 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a5 remains published and tagged as dotmac-files-v0.1.0a5. 0.1.0a6 adds Word (.doc/.docx), plain-text and generic-zip content-signature detection to prepare_upload so ERP finance/support attachment families can cut over without rejecting previously accepted uploads; that changes importable source, so a bare 0.1.0a5 would name two surfaces. Remove this row only with the oracle-backed record of an authorized exact 0.1.0a6 publication; allocation authorizes no tag, adoption or production change.",
       "state": "declared-unpublished"
     },
+    "dotmac-fulfillment": {
+      "declared": "0.1.0a2",
+      "reason": "UNPUBLISHED TENANT-AUDIT SUCCESSOR. Version 0.1.0a2 adds the DDL-free fu_0002_tenant_audit.py prerequisite successor and raises the declared Kernel floor to >=0.1.0a106 for tenant audit storage. Published 0.1.0a1 and its migration bytes remain unchanged. Hosted source and installed floor qualification, authorized artifact publication and exact tag verification remain pending. Remove this row only with the verified 0.1.0a2 publication record; source preparation does not activate adopters.",
+      "state": "declared-unpublished"
+    },
     "dotmac-inbox": {
       "declared": "0.1.0a2+dev",
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a2 IS published and tagged (dotmac-inbox-v0.1.0a2). This Inbox capability slice adds explicit snooze-until-reply, late transport-observation correlation, opaque product-supplied thread/message identities and the unreleased ib_0002 migration, so continuing to declare bare 0.1.0a2 would make one released version name two contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only by separately ALLOCATING the next public version at release time; never remove the marker merely to quiet a gate.",
@@ -141,6 +146,11 @@
       "declared": "0.1.0a5",
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
+    },
+    "dotmac-learning": {
+      "declared": "0.1.0a1",
+      "reason": "INITIAL LEARNING EXTRACTION, NOT YET PUBLISHED. Version 0.1.0a1 introduces the reusable Learning package and its pure bank-rules sibling with the published Kernel >=0.1.0a106 tenant-audit prerequisite. Hosted source, installed floor, artifact and release qualification remain pending; no Learning tag or installable release is claimed. Remove this row only when the exact authorized initial publication is verified and tagged; Academy adoption remains a separate gate.",
+      "state": "never-published"
     },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
@@ -160,6 +170,11 @@
     "dotmac-tax": {
       "declared": "0.1.0a6",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adopter baseline. Candidate a6 includes a5 immutable rule supersession, sealed rule/band membership, bounded policy history and advisory preview; a6 adds caller-transaction exact catalog/rule authoring without internal savepoint completion, reusing Tax validation and replay comparators. The Sub owner must roll back and retry whole commands on unique insert contention. Sub policy UI requires a verified published successor and real owner/permission binding; no unpublished pin, financial writer or production authority is activated. Remove only through the exact authorized release record.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-template-studio": {
+      "declared": "0.2.0a6",
+      "reason": "UNPUBLISHED TENANT-AUDIT SUCCESSOR. Version 0.2.0a6 adds the DDL-free ts_0003_tenant_audit.py prerequisite successor and raises the declared Kernel floor to >=0.1.0a106 for tenant audit storage. Published 0.2.0a5 and its migration bytes remain unchanged. Hosted source and installed floor qualification, authorized artifact publication and exact tag verification remain pending. Remove this row only with the verified 0.2.0a6 publication record; source preparation does not activate adopters.",
       "state": "declared-unpublished"
     },
     "dotmac-usage": {

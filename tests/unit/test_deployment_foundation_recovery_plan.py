@@ -782,6 +782,11 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # The SmokeDependencyWheels.v1 manifest verify-wheel emits; owned by
     # release_module.py, carried only as a workflow artifact.
     "release_module.py": 1,
+    # Installed floor-probe evidence: module_floor_probe.py owns the field
+    # contract for installed origins, allocation and exact API refusal. Its
+    # stdout is retained as a floor workflow artifact; it writes no Foundation
+    # plan or store, including when the old Kernel lacks the required API.
+    "module_floor_probe.py": 1,
     # Two documents, neither a Foundation store record: the distribution
     # publication record, and the `ModuleReleaseTagEvidence.v1` annotated-tag
     # message (`render_module_release_tag_evidence`), whose single owner is

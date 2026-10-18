@@ -23,11 +23,12 @@
 # ## Why the kernel is BUILT FROM A TAG rather than downloaded
 #
 # The published wheels live on a private index this job has no credentials for.
-# Building from the release tag needs none, and is stronger anyway: it proves
-# the claim against the exact source that was tagged.
+# Building from the release tag needs none. It proves installed tagged-source
+# compatibility, NOT byte identity with a registry wheel. Actual registry wheel
+# verification and retained artifact comparison remain separate release evidence.
 #
 # This is NOT air-gapped and must not be described as such. The script fetches
-# the kernel release tags when the checkout lacks them — CI checkouts are
+# the complete kernel release tag namespace on every invocation — CI checkouts are
 # shallow and carry none — and pip resolves each module's runtime dependencies.
 # It runs offline ONLY where both the tags and those wheels are already cached.
 # An operator who read "air-gapped" would discover the difference at the least
@@ -68,9 +69,11 @@ FLOOR_PYTHON="${FLOOR_PYTHON:-python3}"
 # Entries are "package_dir:import_name" or
 # "package_dir:import_name:extra.module[,extra.module...]". The optional third
 # field names modules BEYOND the manifest that consume the declared floor --
-# see the fourth refusal family in `probe` below. Omit it and the probe is
-# manifest-only, exactly as before.
-MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service packages/dotmac-billing:dotmac_billing:dotmac_billing.service}"
+# see the fourth refusal family documented below. Omit it and the probe is
+# manifest-only, exactly as before. A fourth field selects the closed mode
+# manifest|registry|tenant-audit. Learning requires actual default registration;
+# Fulfillment and Template Studio require tenant-audit API evidence only.
+MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service packages/dotmac-billing:dotmac_billing:dotmac_billing.service packages/dotmac-learning:dotmac_learning::registry packages/dotmac-fulfillment:dotmac_fulfillment::tenant-audit packages/dotmac-template-studio:dotmac_template_studio::tenant-audit}"
 
 # Overrides for a one-off investigation. Left unset in CI: a hand-set pair is
 # a claim about a module that the module itself can contradict, which is the
@@ -80,21 +83,27 @@ BELOW_TAG="${BELOW_TAG:-}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workdir="$(mktemp -d)"
+# Retained artifact evidence survives cleanup; callers may choose a CI artifact path.
+evidence_dir="${MODULE_FLOOR_EVIDENCE_DIR:-$(mktemp -d)}"
+mkdir -p "${evidence_dir}"
+evidence_dir="$(cd "${evidence_dir}" && pwd)"
+probe_source="${repo_root}/scripts/module_floor_probe.py"
 cleanup() {
-  git -C "${repo_root}" worktree remove --force "${workdir}/floor" 2>/dev/null || true
-  git -C "${repo_root}" worktree remove --force "${workdir}/below" 2>/dev/null || true
+  for tree in "${workdir}"/kernel-*; do
+    git -C "${repo_root}" worktree remove --force "${tree}" 2>/dev/null || true
+  done
   rm -rf "${workdir}"
 }
 trap cleanup EXIT
 
-# A shallow CI checkout has no tags at all, and the derivation below reads the
-# published set — so the tag namespace IS the input here, unlike the two-tag
-# fetch this replaced.
-if [[ -z "$(git -C "${repo_root}" tag -l 'dotmac-kernel-v*')" ]]; then
-  echo "==> Fetching dotmac-kernel release tags"
-  git -C "${repo_root}" fetch --quiet --depth=1 origin \
-    'refs/tags/dotmac-kernel-v*:refs/tags/dotmac-kernel-v*'
-fi
+# Always refresh the authoritative namespace. A nonempty partial local tag set
+# must never manufacture the wrong immediately previous published release.
+echo "==> Fetching complete dotmac-kernel release tag namespace"
+git -C "${repo_root}" fetch --quiet --force --prune --prune-tags origin \
+  'refs/tags/dotmac-kernel-v*:refs/tags/dotmac-kernel-v*'
+git -C "${repo_root}" for-each-ref \
+  --format='%(refname:short) %(objectname) %(*objectname)' \
+  'refs/tags/dotmac-kernel-v*' > "${evidence_dir}/kernel-tags.txt"
 
 # The previous PUBLISHED kernel release below a given version — the negative
 # control. Derived from the tag set rather than written down, because "the one
@@ -114,27 +123,36 @@ previous_published() {
     | tail -1
 }
 
-declare -A WHEEL_CACHE=()
-
+# File existence is authoritative across command-substitution subshells.
 build_kernel_wheel() {
-  local version="$1" tag="dotmac-kernel-v$1" name
-  name="$(echo "${version}" | tr '.' '_')"
-  if [[ -n "${WHEEL_CACHE[${version}]:-}" ]]; then
-    echo "${WHEEL_CACHE[${version}]}"
-    return
-  fi
-  if ! git -C "${repo_root}" rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+  local version="$1" tag="dotmac-kernel-v$1" cached tree wheel commit
+  cached="${evidence_dir}/kernel-${version}.wheel-path"
+  if ! commit="$(git -C "${repo_root}" rev-parse --verify "refs/tags/${tag}^{commit}")"; then
     echo "!! no ${tag} — a floor naming an unpublished version is unresolvable" >&2
     return 1
   fi
-  git -C "${repo_root}" worktree add --quiet --detach "${workdir}/${name}" "${tag}"
-  (cd "${workdir}/${name}/packages/dotmac-kernel" \
-    && poetry build -f wheel -o "${workdir}/dist-${name}" >/dev/null)
-  WHEEL_CACHE[${version}]="$(ls "${workdir}/dist-${name}"/*.whl)"
-  echo "${WHEEL_CACHE[${version}]}"
+  if [[ -f "${cached}" ]]; then
+    [[ "$(cat "${evidence_dir}/kernel-${version}.commit")" == "${commit}" ]] || return 1
+    wheel="$(cat "${cached}")"
+    [[ -f "${wheel}" ]] || return 1
+    echo "${wheel}"
+    return
+  fi
+  tree="${workdir}/kernel-${version}"
+  git -C "${repo_root}" worktree add --quiet --detach "${tree}" "${commit}" || return
+  (cd "${tree}/packages/dotmac-kernel" && poetry build -f wheel \
+    -o "${evidence_dir}/kernel-${version}" >/dev/null) || return
+  local wheels=("${evidence_dir}/kernel-${version}"/*.whl)
+  [[ "${#wheels[@]}" -eq 1 && -f "${wheels[0]}" ]] || return 1
+  wheel="${wheels[0]}"
+  printf '%s\n' "${wheel}" > "${cached}"
+  printf '%s\n' "${commit}" > "${evidence_dir}/kernel-${version}.commit"
+  git -C "${repo_root}" worktree remove --force "${tree}" || return
+  echo "${wheel}"
 }
 
-# Import the manifest and report OK / how it refused. Narrow on purpose: only
+# The installed helper imports the manifest and records OK / how it refused.
+# Narrow on purpose: only
 # the failures that MEAN "this kernel cannot load this manifest" count, and
 # everything else reads as a broken probe rather than a pass.
 #
@@ -175,112 +193,50 @@ build_kernel_wheel() {
 # read as a refusal under BOTH kernels and manufacture a floor nothing proved.
 # Presence is therefore checked with `find_spec` before the import is attempted,
 # and absence is reported as BROKEN.
+# These existing manifest-mode controls live in module_floor_probe.py.
+# Unexpected exceptions and missing declared consumers fail the probe; they
+# cannot qualify as a refusal. Billing additionally requires the exact missing
+# conflict_savepoint_requires_rollback export in validate_evidence.
+# Registry and tenant-audit modes accept only the exact missing tenant-audit API.
 probe() {
-  local wheel="$1" package_dir="$2" import_name="$3" venv="$4" extra="${5:-}"
+  local wheel="$1" module_wheel="$2" import_name="$3" venv="$4" extra="$5"
+  local mode="$6" kernel_version="$7" module_version="$8" distribution="$9"
+  local commit="${10}" output="${11}" expected="${12}"
   "${FLOOR_PYTHON}" -m venv "${venv}" || return
   "${venv}/bin/pip" install --quiet --upgrade pip || return
   "${venv}/bin/pip" install --quiet "${wheel}" || return
-  "${venv}/bin/pip" install --quiet --no-deps "${repo_root}/${package_dir}" || return
-  # Only the kernel requirement is intentionally violated by the below-floor
-  # control. Install every other runtime requirement FROM THE BUILT METADATA,
-  # preserving extras and markers rather than translating Poetry constraints.
-  # Billing's public linking helpers import its declared Alembic dependency;
-  # installing SQLAlchemy alone left those imports broken under BOTH kernels.
-  "${venv}/bin/python" - "${repo_root}/${package_dir}/pyproject.toml" "${venv}" <<'PY' || return
-import re
-import sys
-import tomllib
-from importlib.metadata import distribution, version
-from pathlib import Path
-
-project = tomllib.loads(Path(sys.argv[1]).read_text())
-requirements = distribution(project["tool"]["poetry"]["name"]).requires or []
-runtime = []
-for requirement in requirements:
-    match = re.match(r"[A-Za-z0-9_.-]+", requirement)
-    if match is None:
-        raise ValueError(f"Malformed runtime requirement: {requirement}")
-    name = re.sub(r"[-_.]+", "-", match.group()).lower()
-    if name != "dotmac-kernel":
-        runtime.append(requirement)
-venv = Path(sys.argv[2])
-(venv / "module-runtime.txt").write_text("\n".join(runtime) + "\n")
-# A transitive dependency must not replace the exact tagged kernel under test.
-(venv / "kernel-constraint.txt").write_text(
-    f"dotmac-kernel=={version('dotmac-kernel')}\n"
-)
-PY
+  # The SAME module wheel is installed twice. Only its kernel requirement is
+  # bypassed for the negative control; non-kernel metadata is unchanged.
+  # Preserve built-metadata extras and markers (including Billing Alembic).
+  # A transitive dependency must not replace the exact tagged Kernel under test.
+  "${venv}/bin/python" -I "${probe_source}" dependencies \
+    "${module_wheel}" "${kernel_version}" "${venv}" || return
   "${venv}/bin/pip" install --quiet \
     --constraint "${venv}/kernel-constraint.txt" \
     --requirement "${venv}/module-runtime.txt" || return
-  "${venv}/bin/python" - "$import_name" "$extra" <<'PY'
-import importlib
-import sys
-
-name = sys.argv[1]
-extra = [part for part in sys.argv[2].split(",") if part]
-refusals: tuple[type[BaseException], ...] = (TypeError, ImportError, AttributeError)
-try:
-    from dotmac_kernel.prerequisites import PrerequisiteError
-except ImportError:
-    # Kernels older than the prerequisite contract (pre-a56) have no such
-    # class, and on those the manifest import fails as ImportError anyway.
-    pass
-else:
-    refusals += (PrerequisiteError,)
-
-try:
-    module = importlib.import_module(f"{name}.manifest")
-except refusals as exc:
-    print(f"REFUSED {type(exc).__name__}: {exc}")
-except Exception as exc:  # noqa: BLE001 - reported, never swallowed
-    print(f"UNEXPECTED {type(exc).__name__}: {exc}")
-else:
-    import dotmac_kernel
-    import importlib.util
-
-    outcome = f"OK kernel {dotmac_kernel.__version__} manifest {module.module.version}"
-    for consumer in extra:
-        # Presence first: a declared module that is not in the package at all
-        # means the DECLARATION is wrong, and must never read as a refusal.
-        # `find_spec` imports the PARENT package to locate a submodule, so it
-        # can refuse for the very reason under test; that is classified here
-        # exactly as the import below would be, and only a None spec is BROKEN.
-        try:
-            located = importlib.util.find_spec(consumer) is not None
-        except refusals as exc:
-            outcome = f"REFUSED {type(exc).__name__}: {exc}"
-            break
-        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
-            outcome = f"UNEXPECTED {type(exc).__name__}: {exc}"
-            break
-        if not located:
-            outcome = f"BROKEN declared consumer {consumer} is not in this package"
-            break
-        try:
-            importlib.import_module(consumer)
-        except refusals as exc:
-            outcome = f"REFUSED {type(exc).__name__}: {exc}"
-            break
-        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
-            outcome = f"UNEXPECTED {type(exc).__name__}: {exc}"
-            break
-    print(outcome)
-PY
+  if [[ "${expected}" == OK ]]; then
+    "${venv}/bin/pip" install --quiet --constraint "${venv}/kernel-constraint.txt" "${module_wheel}" || return
+  else
+    "${venv}/bin/pip" install --quiet --no-deps "${module_wheel}" || return
+  fi
+  "${venv}/bin/python" -I "${probe_source}" run \
+    --name "${import_name}" --extra "${extra}" --mode "${mode}" \
+    --kernel-version "${kernel_version}" --module-version "${module_version}" \
+    --distribution "${distribution}" --module-wheel "${module_wheel}" \
+    --kernel-wheel "${wheel}" --commit "${commit}" --checkout "${repo_root}" \
+    > "${output}" || return
+  cat "${output}"
 }
 
 status=0
+entry_count=0
 for entry in ${MODULES}; do
-  # Three fields, the third optional. `${entry##*:}` would return the CONSUMER
-  # list as the import name the moment a third field exists, so the entry is
-  # split positionally rather than by "everything after the last colon".
-  IFS=':' read -r package_dir import_name extra_consumers <<<"${entry}"
-  extra_consumers="${extra_consumers:-}"
-  if [[ -z "${package_dir}" || -z "${import_name}" ]]; then
-    echo "!! malformed MODULES entry ${entry@Q} — want package_dir:import_name[:consumer,...]" >&2
-    status=1
-    continue
-  fi
+  entry_count=$((entry_count + 1))
+  parsed="$("${FLOOR_PYTHON}" -I "${probe_source}" entry "${entry}")" || {
+    status=1; continue;
+  }
+  IFS=$'\t' read -r package_dir import_name extra_consumers mode <<<"${parsed}"
+  [[ "${extra_consumers}" != - ]] || extra_consumers=""
   declared="$(
     "${FLOOR_PYTHON}" - "${repo_root}/${package_dir}/pyproject.toml" <<'PY'
 import sys, tomllib
@@ -326,35 +282,66 @@ PY
     below_version="0.1.0a${below_serial}"
   fi
 
+  actual_previous="$(previous_published "${floor_version}")"
+  if [[ -z "${actual_previous}" || "${below_version}" != "0.1.0a${actual_previous}" ]]; then
+    echo "!! below tag must be the immediately previous published Kernel" >&2
+    status=1; continue
+  fi
+  # Exactly one module build per entry, retained for both isolated environments.
+  module_dist="${evidence_dir}/module-${import_name}"
+  mkdir -p "${module_dist}"
+  (cd "${repo_root}/${package_dir}" && poetry build -f wheel -o "${module_dist}" >/dev/null) || {
+    status=1; continue;
+  }
+  module_wheels=("${module_dist}"/*.whl)
+  if [[ "${#module_wheels[@]}" -ne 1 || ! -f "${module_wheels[0]}" ]]; then
+    status=1; continue
+  fi
+  module_wheel="${module_wheels[0]}"
+  wheel_info="$("${FLOOR_PYTHON}" -I "${probe_source}" wheel-info "${module_wheel}")" || {
+    status=1; continue;
+  }
+  read -r distribution module_version <<<"${wheel_info}"
+
   floor_wheel="$(build_kernel_wheel "${floor_version}")" || { status=1; continue; }
   below_wheel="$(build_kernel_wheel "${below_version}")" || { status=1; continue; }
   echo "    floor ${floor_version} (${floor_wheel##*/})"
   echo "    below ${below_version} (${below_wheel##*/}) — previous PUBLISHED release"
 
-  echo "    at the floor (${floor_version}) — must IMPORT"
-  result="$(probe "${floor_wheel}" "${package_dir}" "${import_name}" "${workdir}/venv-floor-${import_name}" "${extra_consumers}")"
-  echo "    ${result}"
-  if [[ "${result}" != OK* ]]; then
-    echo "!! the declared floor cannot load the manifest — the floor is wrong" >&2
-    status=1
-  fi
+  floor_commit="$(cat "${evidence_dir}/kernel-${floor_version}.commit")"
+  below_commit="$(cat "${evidence_dir}/kernel-${below_version}.commit")"
+  for side in floor below; do
+    if [[ "${side}" == floor ]]; then
+      selected_wheel="${floor_wheel}"; selected_version="${floor_version}"
+      selected_commit="${floor_commit}"; expected=OK
+    else
+      selected_wheel="${below_wheel}"; selected_version="${below_version}"
+      selected_commit="${below_commit}"; expected=REFUSED
+    fi
+    output="${evidence_dir}/${import_name}-${side}.json"
+    if ! probe "${selected_wheel}" "${module_wheel}" "${import_name}" \
+      "${workdir}/venv-${side}-${import_name}" "${extra_consumers}" "${mode}" \
+      "${selected_version}" "${module_version}" "${distribution}" "${selected_commit}" "${output}" "${expected}"; then
+      echo "!! ${side} installed probe failed" >&2
+      status=1; continue
+    fi
+    if ! "${FLOOR_PYTHON}" -I "${probe_source}" validate --file "${output}" \
+      --expected "${expected}" --mode "${mode}" --name "${import_name}" \
+      --kernel-version "${selected_version}" --module-version "${module_version}" \
+      --module-wheel "${module_wheel}" --kernel-wheel "${selected_wheel}" \
+      --commit "${selected_commit}"; then
+      echo "!! ${side} evidence does not establish the declared floor" >&2
+      status=1
+    fi
+  done
 
-  echo "    below the floor (${below_version}) — must FAIL"
-  result="$(probe "${below_wheel}" "${package_dir}" "${import_name}" "${workdir}/venv-below-${import_name}" "${extra_consumers}")"
-  echo "    ${result}"
-  if [[ "${result}" != REFUSED* ]]; then
-    echo "!! the previous published kernel loaded this manifest, so the floor" >&2
-    echo "   is higher than it needs to be — or this probe proves nothing." >&2
-    status=1
-  elif [[ "${import_name}" == dotmac_billing && \
-    "${result}" != "REFUSED ImportError: cannot import name 'conflict_savepoint_requires_rollback' from 'dotmac_kernel.transactions'"* ]]; then
-    # Billing's service consumes this exact a105 export. An unrelated import
-    # failure (for example missing Alembic) cannot establish its kernel floor.
-    echo "!! Billing must refuse because Kernel lacks conflict_savepoint_requires_rollback" >&2
-    status=1
-  fi
 done
 
+if [[ "${entry_count}" -eq 0 ]]; then
+  echo "!! no module entries under proof" >&2
+  status=1
+fi
+echo "==> Retained tagged-source artifacts/evidence: ${evidence_dir}"
 echo
 if [[ "${status}" -eq 0 ]]; then
   echo "==> Module floor check passed (sufficient AND necessary)"

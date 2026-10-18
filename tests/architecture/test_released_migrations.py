@@ -7658,7 +7658,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-subscriptions": frozenset(),
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
-    "dotmac-fulfillment": frozenset(),
+    "dotmac-fulfillment": frozenset({"fu_0002_tenant_audit.py"}),
     "dotmac-tax": frozenset({"tx_0004_rule_supersession.py"}),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
@@ -7668,7 +7668,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-sales": frozenset(),
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
-    "dotmac-template-studio": frozenset(),
+    "dotmac-template-studio": frozenset({"ts_0003_tenant_audit.py"}),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(

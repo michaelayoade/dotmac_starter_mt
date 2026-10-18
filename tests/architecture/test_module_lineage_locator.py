@@ -59,7 +59,9 @@ that convergence the rule, so the fifth does not invent a fifth spelling.
 ## Discovery, not enumeration
 
 The module set comes from the filesystem — every ``packages/*`` distribution
-whose import root contains ``migrations/versions/``. Shipping a lineage is what
+whose authoritative root contains ``migrations/versions/``. A multi-root wheel
+must declare that root through the release contract and prove no helper owns
+competing state. Shipping a lineage is what
 creates the obligation, so a new module is enrolled the day its lineage lands,
 with nothing to remember. A hand-written list would go stale exactly when a new
 module is added, which is the moment it matters.
@@ -80,6 +82,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 from pathlib import Path
 from types import ModuleType
 
@@ -146,31 +149,147 @@ def _is_installable_module(root: Path) -> bool:
 
 
 class AmbiguousImportRootError(AssertionError):
-    """A distribution's `src/` does not contain exactly one package root."""
+    """A distribution has no unambiguous authoritative lineage root."""
 
 
-def _import_root(distribution: Path) -> Path:
-    """The single package directory under `src/`.
+def _import_root(
+    distribution: Path,
+    declarations: Path = PROJECT_ROOT / ".github" / "release-modules.json",
+) -> Path:
+    """Resolve one root by convention or an explicit release-owner declaration.
 
-    RAISES on zero or several roots rather than returning None. Returning None
-    read as "not applicable" and silently removed the distribution from the
-    sweep — so the guard's coverage shrank exactly where the layout was unusual,
-    which is where a locator is most likely to be wrong. Ambiguity is an error
-    to be fixed (here or in the package), never a quiet exclusion.
-
-    A distribution with no `src/` at all is a different shape, not an ambiguous
-    one, and is excluded before this is called.
+    Several packages may share a wheel, but exactly one may own its stateful
+    manifest and lineage. The release contract already names that public import
+    root and manifest attribute; it is authority only when the source agrees.
+    Undeclared or conflicting roots fail collection, never shrink coverage.
+    Single-root distributions keep the existing convention, including hosts
+    without a ModuleManifest. No-src layouts are excluded by the caller.
     """
     src = distribution / "src"
     roots = [path for path in sorted(src.iterdir()) if (path / "__init__.py").is_file()]
-    if len(roots) != 1:
+    if len(roots) == 1:
+        return roots[0]
+    if not roots:
         raise AmbiguousImportRootError(
             f"{distribution.name}: expected exactly one package root under src/, "
-            f"found {[path.name for path in roots]} — this guard cannot say "
-            "which one owns the lineage, and skipping the distribution would "
-            "hide it from every check in this file"
+            "found none"
         )
-    return roots[0]
+    try:
+        document = json.loads(
+            declarations.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_declaration_keys,
+        )
+        entries = document["modules"]
+        matches = [
+            row
+            for row in entries.values()
+            if row.get("package_dir") == f"packages/{distribution.name}"
+        ]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise AmbiguousImportRootError(
+            f"{distribution.name}: unreadable root declarations: {exc}"
+        ) from exc
+    if len(matches) != 1:
+        raise AmbiguousImportRootError(
+            f"{distribution.name}: expected exactly one package root declaration, "
+            f"found {len(matches)} for {[path.name for path in roots]}"
+        )
+    entry = matches[0]
+    name, attribute = entry.get("import_name"), entry.get("manifest_attr")
+    if not (
+        isinstance(name, str)
+        and name.isidentifier()
+        and isinstance(attribute, str)
+        and attribute.isidentifier()
+    ):
+        raise AmbiguousImportRootError(
+            f"{distribution.name}: root and manifest attribute must be identifiers"
+        )
+    root = src / name
+    if root not in roots or root.is_symlink():
+        raise AmbiguousImportRootError(
+            f"{distribution.name}: declared import root {name!r} is not a package root"
+        )
+    manifest = root / "manifest.py"
+    tree = (
+        ast.parse(manifest.read_text(encoding="utf-8")) if manifest.is_file() else None
+    )
+    claims = (
+        [
+            node.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == attribute
+                for target in node.targets
+            )
+            and _is_manifest_call(node.value)
+        ]
+        if tree is not None
+        else []
+    )
+    if len(claims) != 1 or not _ships_a_lineage(root):
+        raise AmbiguousImportRootError(
+            f"{distribution.name}: declared root lacks its literal manifest or lineage"
+        )
+    # Inspect every source subtree, including directories without __init__.py:
+    # an undeclared lineage must not vanish just because its marker is missing.
+    for path in src.rglob("*.py"):
+        if path.is_relative_to(root):
+            calls = [
+                node
+                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                if _is_manifest_call(node)
+            ]
+            if calls and (path != manifest or len(calls) != 1):
+                raise AmbiguousImportRootError(
+                    f"{distribution.name}: competing manifest at {path}"
+                )
+            if (
+                path.parent.name == "versions"
+                and path.parent.parent.name == "migrations"
+            ):
+                if (
+                    path.name != "__init__.py"
+                    and path.parent != root / "migrations" / "versions"
+                ):
+                    raise AmbiguousImportRootError(
+                        f"{distribution.name}: competing lineage at {path}"
+                    )
+            continue
+        if (
+            path.parent.name == "versions"
+            and path.parent.parent.name == "migrations"
+            and path.name != "__init__.py"
+        ) or any(
+            _is_manifest_call(node)
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        ):
+            raise AmbiguousImportRootError(
+                f"{distribution.name}: competing manifest or lineage at {path}"
+            )
+    return root
+
+
+def _is_manifest_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and (
+            node.func.id
+            if isinstance(node.func, ast.Name)
+            else getattr(node.func, "attr", "")
+        )
+        == "ModuleManifest"
+    )
+
+
+def _unique_declaration_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate declaration key {key!r}")
+        result[key] = value
+    return result
 
 
 def _has_src_layout(distribution: Path) -> bool:
@@ -411,6 +530,141 @@ def test_the_locator_returns_the_directory_that_holds_the_revisions(
 
 
 # ── Sensitivity, in both directions ──────────────────────────────────────────
+
+
+def _write_multi_root_distribution(tmp_path: Path) -> tuple[Path, Path]:
+    """A declared stateful owner and a pure helper in the same distribution."""
+    distribution = tmp_path / "packages" / "dotmac-example"
+    for name in ("owner", "helper"):
+        root = distribution / "src" / name
+        root.mkdir(parents=True)
+        (root / "__init__.py").write_text("", encoding="utf-8")
+    owner = distribution / "src" / "owner"
+    (owner / "manifest.py").write_text(
+        "module = ModuleManifest(short_code='example', migration_prefix='ex')\n",
+        encoding="utf-8",
+    )
+    versions = owner / "migrations" / "versions"
+    versions.mkdir(parents=True)
+    (versions / "ex_0001_example.py").write_text(
+        "revision = 'ex_0001_example'\n", encoding="utf-8"
+    )
+    declaration = tmp_path / ".github" / "release-modules.json"
+    declaration.parent.mkdir()
+    _write_root_declarations(
+        declaration,
+        [
+            {
+                "package_dir": "packages/dotmac-example",
+                "import_name": "owner",
+                "manifest_attr": "module",
+            }
+        ],
+    )
+    return distribution, declaration
+
+
+def _write_root_declarations(path: Path, entries: list[dict[str, str]]) -> None:
+    path.write_text(
+        json.dumps({"modules": {f"module-{i}": row for i, row in enumerate(entries)}}),
+        encoding="utf-8",
+    )
+
+
+def test_explicit_authoritative_root_keeps_same_wheel_helpers(tmp_path: Path) -> None:
+    distribution, declaration = _write_multi_root_distribution(tmp_path)
+    assert _import_root(distribution, declaration) == distribution / "src" / "owner"
+    assert _ships_a_lineage(_import_root(distribution, declaration))
+    assert not _ships_a_lineage(distribution / "src" / "helper")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "missing",
+        "duplicate",
+        "wrong-root",
+        "helper-root",
+        "unsafe-root",
+        "wrong-attribute",
+        "missing-manifest",
+        "missing-lineage",
+    ],
+)
+def test_multi_root_declaration_near_misses_refuse(tmp_path: Path, change: str) -> None:
+    """Sensitivity: each isolated violation must refuse the positive fixture."""
+    distribution, declaration = _write_multi_root_distribution(tmp_path)
+    assert _import_root(distribution, declaration).name == "owner"
+    entry = {
+        "package_dir": "packages/dotmac-example",
+        "import_name": "owner",
+        "manifest_attr": "module",
+    }
+    entries = [entry]
+    if change == "missing":
+        entries = []
+    elif change == "duplicate":
+        entries = [entry, dict(entry)]
+    elif change == "wrong-root":
+        entry["import_name"] = "missing"
+    elif change == "helper-root":
+        entry["import_name"] = "helper"
+    elif change == "unsafe-root":
+        entry["import_name"] = "../owner"
+    elif change == "missing-manifest":
+        (distribution / "src" / "owner" / "manifest.py").unlink()
+    elif change == "missing-lineage":
+        (
+            distribution
+            / "src"
+            / "owner"
+            / "migrations"
+            / "versions"
+            / "ex_0001_example.py"
+        ).unlink()
+    else:
+        entry["manifest_attr"] = "missing"
+    _write_root_declarations(declaration, entries)
+    with pytest.raises(AmbiguousImportRootError):
+        _import_root(distribution, declaration)
+
+
+def test_duplicate_json_declaration_keys_refuse(tmp_path: Path) -> None:
+    distribution, declaration = _write_multi_root_distribution(tmp_path)
+    assert _import_root(distribution, declaration).name == "owner"
+    declaration.write_text('{"modules": {}, "modules": {}}', encoding="utf-8")
+    with pytest.raises(AmbiguousImportRootError, match="duplicate declaration key"):
+        _import_root(distribution, declaration)
+
+
+@pytest.mark.parametrize(
+    "conflict",
+    ["manifest", "owner-manifest", "lineage", "owner-lineage", "unmarked-lineage"],
+)
+def test_a_declared_root_cannot_hide_competing_state(
+    tmp_path: Path, conflict: str
+) -> None:
+    distribution, declaration = _write_multi_root_distribution(tmp_path)
+    assert _import_root(distribution, declaration).name == "owner"
+    helper = distribution / "src" / "helper"
+    if conflict in {"owner-manifest", "owner-lineage"}:
+        helper = distribution / "src" / "owner" / "nested"
+        helper.mkdir()
+    if conflict in {"manifest", "owner-manifest"}:
+        (helper / "state.py").write_text(
+            "second = ModuleManifest(short_code='other', migration_prefix='ot')\n",
+            encoding="utf-8",
+        )
+    else:
+        if conflict == "unmarked-lineage":
+            helper = distribution / "src" / "unmarked"
+        versions = helper / "migrations" / "versions"
+        versions.mkdir(parents=True)
+        (versions / "ot_0001_other.py").write_text(
+            "revision = 'ot_0001_other'\n", encoding="utf-8"
+        )
+    with pytest.raises(AmbiguousImportRootError):
+        _import_root(distribution, declaration)
 
 
 def _write_locator(directory: Path, body: str) -> Path:

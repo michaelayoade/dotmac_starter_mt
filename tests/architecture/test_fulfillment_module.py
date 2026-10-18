@@ -175,7 +175,13 @@ def test_root_revision_declares_and_verifies_its_prerequisites() -> None:
         and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id == "REQUIRES"
     )
-    assert requires == module.requires
+    # Published root bytes retain the prerequisites they originally verified.
+    assert requires == (
+        "tenant_scope_catalog.v1",
+        "module_database_roles.v1",
+        "idempotency_ledger.v1",
+    )
+    assert module.requires == (*requires, "tenant_audit_log.v1")
     source = MIGRATION.read_text(encoding="utf-8")
     assert "depends_on = resolve_depends_on(REQUIRES)" in source
     assert "require_prerequisites(op.get_bind(), REQUIRES)" in source

@@ -1185,7 +1185,7 @@ url = "packages/dotmac-forms"
 
 [[package]]
 name = "dotmac-fulfillment"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac tenant-scoped fulfillment saga, participant attempt, outcome, compensation, and convergence ownership"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1194,7 +1194,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a89"
+dotmac-kernel = ">=0.1.0a106"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -1354,6 +1354,25 @@ testing = ["httpx (>=0.27,<0.28)"]
 [package.source]
 type = "directory"
 url = "packages/dotmac-kernel"
+
+[[package]]
+name = "dotmac-learning"
+version = "0.1.0a1"
+description = "Reusable tenant learning results, progress, completion and certificates"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a106"
+pydantic = "^2.9"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-learning"
 
 [[package]]
 name = "dotmac-licensing"
@@ -2090,7 +2109,7 @@ url = "packages/dotmac-tax"
 
 [[package]]
 name = "dotmac-template-studio"
-version = "0.2.0a5"
+version = "0.2.0a6"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2099,7 +2118,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a97"
+dotmac-kernel = ">=0.1.0a106"
 fastapi = ">=0.111,<0.116"
 pydantic = ">=2.7.4,<3.0"
 sqlalchemy = "^2.0"
@@ -3513,8 +3532,15 @@ files = [
     {file = "pypdf-6.19.0.tar.gz", hash = "sha256:bbc43aca292369ccc6cbc8a921991ecf2538a3587ab5a116eff06c321d647155"},
 ]
 
-[package.dependencies]
-typing-extensions = {version = ">=4.0", markers = "python_version < \"3.11\""}
+[package.extras]
+crypto = ["cryptography (>3.0)"]
+cryptodome = ["PyCryptodome"]
+dev = ["flit", "pip-tools", "pre-commit", "pytest-cov", "pytest-socket", "pytest-timeout", "pytest-xdist", "wheel"]
+docs = ["myst_parser", "sphinx", "sphinx_rtd_theme"]
+fonts = ["fonttools"]
+full = ["Pillow (>=8.0.0)", "arabic-reshaper", "cryptography (>3.0)", "fonttools", "python-bidi"]
+image = ["Pillow (>=8.0.0)"]
+rtl-text = ["arabic-reshaper", "python-bidi"]
 
 [[package]]
 name = "pytest"
@@ -4427,4 +4453,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "3c247eb4835121dfb777357c8a37cc1506a69fdb2235292067f64617b490fb14"
+content-hash = "bb06f9b7bf2ec67d2b69804c9d07e6734ffd2bea1f99dd566177ba451d7a8b88"

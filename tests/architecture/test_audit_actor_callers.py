@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_ROOTS = (
     PROJECT_ROOT / "app",
@@ -30,6 +32,7 @@ PRODUCTION_ROOTS = (
 #: larger actor set is a reviewed diff in this file.
 ACCEPTED_ACTOR_TYPES: dict[str, frozenset[str]] = {
     "RepairActor": frozenset({"api_key", "service", "user"}),
+    "AttemptAuditContext": frozenset({"api_key", "service", "system", "user"}),
 }
 
 
@@ -124,8 +127,9 @@ def _actor_problem(
     ):
         if _validated_actor_read(actor_type, scope) is None:
             return "actor_type must be an auditable literal at each shipped call site"
-        # A closed-vocabulary actor still has to identify the principal: every
-        # value it can carry is non-system, so `actor_id` is never optional.
+        # A closed-vocabulary actor may carry a non-system principal, so the
+        # writer call must always supply actor_id. Kernel validates the value
+        # against the actual actor kind; a system context may carry None.
         return (
             None
             if actor_id is not None
@@ -141,7 +145,10 @@ def _actor_problem(
 
 def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     calls = _writer_calls()
-    assert len(calls) == 21, "the ratchet must change when the caller set changes"
+    # Five Learning callers: announcement creation, attempt grant, schedule
+    # execution, and the two success-queue actions. Their frozen context earns
+    # its closed vocabulary through the same construction proof as RepairActor.
+    assert len(calls) == 26, "the ratchet must change when the caller set changes"
 
     problems = [
         f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}: {problem}"
@@ -417,13 +424,24 @@ def test_a_registered_actor_still_needs_an_explicit_identifier() -> None:
     )
 
 
-def test_the_accepted_shape_passes() -> None:
+@pytest.mark.parametrize("actor_class", sorted(ACCEPTED_ACTOR_TYPES))
+def test_the_accepted_shape_passes(actor_class: str) -> None:
     """The positive case, so the four refusals above are not vacuous."""
     call, scope = _one_call(
-        "def f(db, actor: RepairActor, actor_id):\n"
+        f"def f(db, actor: {actor_class}, actor_id):\n"
         "    write_audit_event(db, actor_type=actor.actor_type, actor_id=actor_id)\n"
     )
     assert _actor_problem(call, scope) is None
+
+
+def test_attempt_audit_context_still_requires_the_actor_id_keyword() -> None:
+    call, scope = _one_call(
+        "def f(db, actor: AttemptAuditContext):\n"
+        "    write_audit_event(db, actor_type=actor.actor_type)\n"
+    )
+    assert _actor_problem(call, scope) == (
+        "every non-system actor needs an explicit actor_id"
+    )
 
 
 def test_a_widened_vocabulary_fails_the_registry_not_the_call_site() -> None:

@@ -182,6 +182,11 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "platform peer of relay.record_failure",
     ),
     Facility(
+        "audit:write_audit_event",
+        "tenant_audit_log.v1",
+        "writes the append-only public.audit_events tenant trail",
+    ),
+    Facility(
         "audit:write_platform_audit_event",
         "platform_audit_log.v1",
         "writes the append-only public.platform_audit_events trail",
@@ -199,27 +204,6 @@ MAPPED: Final[tuple[Facility, ...]] = (
 #: An empty set means "no module calls this today", which is a claim worth
 #: holding: it is how the next caller becomes a visible diff.
 FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
-    "audit:write_audit_event": (
-        "TENANT AUDIT — existing published consumer debt. Fulfillment a1 and "
-        "Template Studio a5 already call the Kernel tenant writer; their "
-        "published floors predate tenant_audit_log.v1. The new Kernel-owned "
-        "effect and live catalog proof are prepared in source and must complete "
-        "Kernel publication and installed-registry verification first.\n\n"
-        "Keep this exact caller set frozen during that release sequence. Then "
-        "convert both consumers together with Learning's prepared assessment "
-        "slice: require the effect, add verification-only lineage successors, "
-        "declare the proven published Kernel floor and qualify installed "
-        "artifacts. Move this facility to MAPPED with public-root-export "
-        "detection and sensitivity coverage in that conversion. No new caller "
-        "is admitted here, and this record does not claim consumer closure.",
-        frozenset(
-            {
-                "dotmac-fulfillment/src/dotmac_fulfillment/service.py",
-                "dotmac-template-studio/src/dotmac_template_studio/router.py",
-                "dotmac-template-studio/src/dotmac_template_studio/web.py",
-            }
-        ),
-    ),
     "settings_resolver:resolve_value": (
         "SETTINGS — ruled NOT a prerequisite (Michael, 2026-08-16). "
         "`domain_settings` is one table serving both scopes through a nullable "

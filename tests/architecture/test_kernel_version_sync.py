@@ -100,6 +100,10 @@ def test_the_version_is_a_pep440_release_prerelease_or_development_marker() -> N
 # exact-replay writes adopted a98's public engine-free transaction surface;
 # their allocations remain recorded there.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
+    # Published a106 first ships LEARNING_MIGRATION_OWNER and the tenant-audit
+    # prerequisite consumed by its manifest; a105 ships neither. Allocation
+    # and highest capability coincide, so this is the allocation-backed rule.
+    "dotmac-learning": "0.1.0a106",
     # The commerce cohort: kernel a89 added BILLING/COLLECTIONS/ORDERS/
     # SUBSCRIPTIONS to MIGRATION_OWNER_LEDGER. Collections consumes nothing
     # newer; Billing and Subscriptions consume later capabilities recorded in
@@ -225,7 +229,9 @@ CAPABILITY_RAISED_FLOORS = {
     # and participant-decided compensation contract, all of which arrive in a89
     # -- a kernel below that cannot satisfy the participant port the module is
     # written against.
-    "dotmac-fulfillment": ("0.1.0a89", "0.1.0a87"),
+    # The tenant-audit prerequisite adopted by the successor first ships in
+    # published a106; a87 remains the namespace allocation coordinate.
+    "dotmac-fulfillment": ("0.1.0a106", "0.1.0a87"),
     # Immutable tag inspection is the evidence here: a71's changelog described
     # the campaign allocation early, but CAMPAIGNS_MIGRATION_OWNER first exists
     # in published tag a72. a73 is the operative floor because Sub-first
@@ -247,7 +253,9 @@ CAPABILITY_RAISED_FLOORS = {
     # in `SUPPORTED_MODULE_CONTRACT_VERSIONS`, so it refuses the manifest at
     # import. Per this table's rule the floor is the highest capability the
     # module actually consumes, while a13 stays as the allocation evidence.
-    "dotmac-template-studio": ("0.1.0a97", "0.1.0a13"),
+    # The tenant-audit prerequisite raises the highest consumed capability
+    # again to published a106; a13 still records the namespace allocation.
+    "dotmac-template-studio": ("0.1.0a106", "0.1.0a13"),
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
     # prerequisite contract raises it again. The floor is always the highest
     # capability the module actually consumes, not the first one that moved it.
