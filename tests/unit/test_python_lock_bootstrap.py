@@ -738,7 +738,7 @@ _REVIEW_LEARNING = (
     'completion and certificates"\n'
     'optional = false\npython-versions = ">=3.11,<3.14"\ngroups = ["main"]\n'
     "files = []\ndevelop = true\n\n[package.dependencies]\n"
-    'alembic = ">=1.13"\ndotmac-kernel = ">=0.1.0a106"\n'
+    'dotmac-kernel = ">=0.1.0a106"\n'
     'pydantic = "^2.9"\nsqlalchemy = "^2.0"\n\n[package.source]\n'
     'type = "directory"\nurl = "packages/dotmac-learning"\n\n'
 )
@@ -754,7 +754,7 @@ def _review_document():
         'completion and certificates"\n'
         + '[tool.poetry.dependencies]\npython = ">=3.11,<3.14"\n'
         + 'dotmac-kernel = ">=0.1.0a106"\nsqlalchemy = "^2.0"\n'
-        + 'pydantic = "^2.9"\nalembic = ">=1.13"\n',
+        + 'pydantic = "^2.9"\n',
     )
     for name, version in (
         ("dotmac-fulfillment", "0.1.0a2"),

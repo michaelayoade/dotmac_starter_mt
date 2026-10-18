@@ -529,7 +529,7 @@ def produce_lock(
 # This inspection is deliberately bound to one reviewed proposal and public base.
 # It is not a general lock-diff printer or a release qualification mechanism.
 _REVIEW_PROPOSAL_SHA256 = (
-    "442af427f4a42a00fb9ecff1f64e0ab92e5de270ba5707cfa666bfa5bf42302e"
+    "aa574b83918b91b55ed9f52749f6cc68ffe5ecd85ae7564e499073b4035fe585"
 )
 _REVIEW_BASE_SHA256 = "bd5e3219f0d6398a9669c8d7b015c74e83eb52390b909fbb0a567765f3bf6194"
 _REVIEW_BEGIN = "BEGIN_UNQUALIFIED_LOCK_REVIEW"
@@ -786,7 +786,6 @@ def _review_learning_record(proposal: Proposal) -> bytes:
         "dotmac-kernel": ">=0.1.0a106",
         "sqlalchemy": "^2.0",
         "pydantic": "^2.9",
-        "alembic": ">=1.13",
     }
     if (
         any(metadata.get(key) != value for key, value in expected.items())
@@ -806,7 +805,6 @@ def _review_learning_record(proposal: Proposal) -> bytes:
         "files = []\n"
         "develop = true\n\n"
         "[package.dependencies]\n"
-        'alembic = ">=1.13"\n'
         'dotmac-kernel = ">=0.1.0a106"\n'
         'pydantic = "^2.9"\n'
         'sqlalchemy = "^2.0"\n\n'
