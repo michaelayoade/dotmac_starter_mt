@@ -43,8 +43,14 @@ _SPOOL_MEMORY_LIMIT = 1_048_576
 _MEDIA_BY_EXTENSION = {
     ".pdf": "application/pdf",
     ".csv": "text/csv",
+    ".txt": "text/plain",
+    ".doc": "application/msword",
+    ".docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ),
     ".xls": "application/vnd.ms-excel",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -75,16 +81,74 @@ def _looks_like_csv(payload: bytes) -> bool:
     return True
 
 
-def _is_xlsx(content: IO[bytes]) -> bool:
+def _zip_member_names(content: IO[bytes]) -> set[str] | None:
     try:
         content.seek(0)
         with zipfile.ZipFile(content) as archive:
-            names = set(archive.namelist())
+            return set(archive.namelist())
     except (OSError, zipfile.BadZipFile):
-        return False
+        return None
     finally:
         content.seek(0)
-    return "[Content_Types].xml" in names and "xl/workbook.xml" in names
+
+
+def _is_xlsx(content: IO[bytes]) -> bool:
+    names = _zip_member_names(content)
+    return (
+        names is not None
+        and "[Content_Types].xml" in names
+        and "xl/workbook.xml" in names
+    )
+
+
+def _is_docx(content: IO[bytes]) -> bool:
+    names = _zip_member_names(content)
+    return (
+        names is not None
+        and "[Content_Types].xml" in names
+        and "word/document.xml" in names
+    )
+
+
+_WORD_STREAM = "WordDocument".encode("utf-16-le")
+_WORKBOOK_STREAMS = (
+    "Workbook".encode("utf-16-le"),
+    "Book".encode("utf-16-le"),
+)
+
+
+def _ole_media_type(content: IO[bytes]) -> str:
+    """Classify an OLE compound file by its directory stream names.
+
+    Legacy Word and Excel share the OLE container; the distinguishing
+    evidence is the UTF-16LE stream name in the directory sectors
+    (``WordDocument`` vs ``Workbook``/``Book``), which may sit beyond
+    the signature sample, so the spool is scanned in chunks. Anything
+    else keeps the historical Excel classification.
+    """
+    content.seek(0)
+    tail = b""
+    try:
+        while chunk := content.read(65_536):
+            window = tail + chunk
+            if _WORD_STREAM in window or b"worddocument" in window.lower():
+                return "application/msword"
+            if any(name in window for name in _WORKBOOK_STREAMS) or (
+                b"workbook" in window.lower()
+            ):
+                return "application/vnd.ms-excel"
+            tail = window[-64:]
+    finally:
+        content.seek(0)
+    return "application/vnd.ms-excel"
+
+
+def _looks_like_plain_text(payload: bytes) -> bool:
+    try:
+        sample = payload[:8192].decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return False
+    return all(char.isprintable() or char in "\t\r\n\f\v" for char in sample)
 
 
 def _detect_media_type(content: IO[bytes]) -> str:
@@ -102,11 +166,21 @@ def _detect_media_type(content: IO[bytes]) -> str:
     if len(sample) >= 12 and sample.startswith(b"RIFF") and sample[8:12] == b"WEBP":
         return "image/webp"
     if sample.startswith(bytes.fromhex("D0CF11E0A1B11AE1")):
-        return "application/vnd.ms-excel"
-    if sample.startswith(b"PK\x03\x04") and _is_xlsx(content):
-        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        return _ole_media_type(content)
+    if sample.startswith(b"PK\x03\x04"):
+        if _is_xlsx(content):
+            return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if _is_docx(content):
+            return (
+                "application/vnd.openxmlformats-officedocument"
+                ".wordprocessingml.document"
+            )
+        if _zip_member_names(content) is not None:
+            return "application/zip"
     if _looks_like_csv(sample):
         return "text/csv"
+    if _looks_like_plain_text(sample):
+        return "text/plain"
     raise UnsafeFile("file content has no supported signature")
 
 
