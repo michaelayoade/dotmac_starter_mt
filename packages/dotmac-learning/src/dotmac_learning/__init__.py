@@ -562,6 +562,7 @@ from dotmac_learning.participation_contracts import (
     EnsureAdmissionEnrollmentCommand,
     EnsureInvitationEnrollmentCommand,
     InvitationEnrollmentResult,
+    InvitationEnrollmentRolePolicy,
 )
 from dotmac_learning.prerequisite_commands import reconcile_prerequisites
 from dotmac_learning.prerequisite_contracts import (
@@ -1190,6 +1191,7 @@ __all__ = [
     "reconcile_prerequisites",
     "EnsureInvitationEnrollmentCommand",
     "InvitationEnrollmentResult",
+    "InvitationEnrollmentRolePolicy",
     "ensure_invitation_enrollment",
     "CoursePatch",
     "ActivityPatch",

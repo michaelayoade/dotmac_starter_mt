@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -156,6 +156,14 @@ class EnsureAdmissionEnrollmentCommand(ParticipationCommand):
     cohort_id: UUID
     person_id: UUID
     track_id: UUID | None
+
+
+class InvitationEnrollmentRolePolicy(Protocol):
+    """Installed product policy maps opaque global roles to Learning roles."""
+
+    def member_role(self, global_role: str) -> Literal["student", "instructor"]:
+        """Resolve the role using the product's composable policy settings."""
+        ...
 
 
 class EnsureInvitationEnrollmentCommand(ParticipationCommand):

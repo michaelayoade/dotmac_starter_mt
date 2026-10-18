@@ -27,6 +27,7 @@ from .participation_contracts import (
     EnsureInvitationEnrollmentCommand,
     FacilitatorEligibility,
     InvitationEnrollmentResult,
+    InvitationEnrollmentRolePolicy,
     ParticipationBadRequest,
     ParticipationForbidden,
     ParticipationNotFound,
@@ -337,20 +338,22 @@ def ensure_invitation_enrollment(
     command: EnsureInvitationEnrollmentCommand,
     *,
     authority: RosterAuthority,
+    role_policy: InvitationEnrollmentRolePolicy,
 ) -> InvitationEnrollmentResult:
     """Apply Academy's invitation assignment in the caller's transaction.
 
     The trusted product already resolved cohort, person, optional track and
-    courses. Existing instructors are never demoted; other role changes precede
+    courses. The installed policy supplies the member role. Existing instructors
+    are never demoted; other role changes precede
     the canonical activation gate, so a refusal can leave a pending role change.
     The caller must roll back failures. Source queries retain caller autoflush;
     only the existing track owner explicitly flushes, when a track is supplied.
     """
     boundary = _transaction(db)
     _authority(command.tenant_id, authority)
-    member_role = (
-        "instructor" if command.global_role in {"instructor", "admin"} else "student"
-    )
+    member_role = role_policy.member_role(command.global_role)
+    if not isinstance(member_role, str) or member_role not in ("student", "instructor"):
+        raise ParticipationBadRequest("invalid invitation enrollment role")
     row = _enrollment(db, command.tenant_id, command.cohort_id, command.person_id)
     preserved_instructor_role = False
     activation = None

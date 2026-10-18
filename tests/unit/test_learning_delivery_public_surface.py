@@ -263,6 +263,11 @@ PUBLIC_OWNERS = (
         "participation_contracts",
         "InvitationEnrollmentResult",
     ),
+    (
+        "InvitationEnrollmentRolePolicy",
+        "participation_contracts",
+        "InvitationEnrollmentRolePolicy",
+    ),
     ("ensure_invitation_enrollment", "roster", "ensure_invitation_enrollment"),
     ("CoursePatch", "references", "CoursePatch"),
     ("ActivityPatch", "references", "ActivityPatch"),
