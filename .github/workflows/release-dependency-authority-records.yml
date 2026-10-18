@@ -1,0 +1,88 @@
+name: Release dependency authority records V6 (unqualified)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/release_module.py
+      - scripts/release_authority.py
+      - .github/bootstrap/release-verifier-requirements-py312.txt
+      - .github/bootstrap/candidate-qualification-requirements-linux-py312.txt
+      - tests/unit/test_module_release_dependency_closure.py
+      - .github/workflows/recover-module-release.yml
+      - .github/workflows/verify-module-composition.yml
+      - .github/release-modules.json
+      - .github/workflows/release-module.yml
+      - .github/workflows/release-dependency-authority-records.yml
+permissions:
+  contents: read
+jobs:
+  derive:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/module-logical-dependency-release-20261018'
+    runs-on: ubuntu-22.04
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+      EXPECTED_BASE: ${{ github.event.pull_request.base.sha }}
+      FROZEN_BASE: 51bdb74246e0fc2de4dfb6db8fd2fe7281da05ae
+      REVIEWED_PRODUCER_BLOB: 583a8f2550d5c180157af342cd1d91ec601ad1f8
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Verify exact candidate and base
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$EXPECTED_BASE" = "$FROZEN_BASE"
+          git merge-base --is-ancestor "$FROZEN_BASE" HEAD
+          test "$(git rev-parse HEAD:scripts/release_authority.py)" = "$REVIEWED_PRODUCER_BLOB"
+          git diff --exit-code "$FROZEN_BASE" HEAD -- docs/inventories/release-authority.json
+      - name: Derive canonical authority with exact reviewed repository producer
+        run: |
+          mkdir -p /tmp/release-dependency-records/preimages /tmp/release-dependency-records/records
+          cp docs/inventories/release-authority.json /tmp/release-dependency-records/preimages/release-authority.json
+          python scripts/release_authority.py write
+          python scripts/release_authority.py check
+          cp docs/inventories/release-authority.json /tmp/release-dependency-records/records/release-authority.json
+      - name: Bind generated record to actual source
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python - <<'PYCODE'
+          import hashlib, json, os, pathlib, subprocess
+          root = pathlib.Path('/tmp/release-dependency-records')
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          assert git('rev-parse', 'HEAD') == os.environ['EXPECTED_HEAD']
+          expected = 'docs/inventories/release-authority.json'
+          changed = git('diff', '--name-only').splitlines()
+          assert changed == [expected], changed
+          rows = {}
+          for name in ('preimages', 'records'):
+              data = (root / name / 'release-authority.json').read_bytes()
+              rows[name] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+          before = json.loads((root / 'preimages/release-authority.json').read_bytes())
+          after = json.loads((root / 'records/release-authority.json').read_bytes())
+          assert after['history'] == before['history'] + [after['active']['digest']]
+          assert after['active']['digest'] not in before['history']
+          packet = {'schema_version': 1, 'kind': 'source_bound_release_authority_derivation',
+                    'admission_authority': False, 'publication_authority': False,
+                    'head': git('rev-parse', 'HEAD'), 'tree': git('rev-parse', 'HEAD^{tree}'),
+                    'parents': git('show', '-s', '--format=%P', 'HEAD').split(),
+                    'expected_base': os.environ['EXPECTED_BASE'], 'run_id': os.environ['RUN_ID'],
+                    'run_attempt': os.environ['RUN_ATTEMPT'],
+                    'reviewed_producer_blob': os.environ['REVIEWED_PRODUCER_BLOB'],
+                    'record_path': expected, 'files': rows}
+          (root / 'packet.json').write_text(json.dumps(packet, sort_keys=True, indent=2) + '\n')
+          PYCODE
+      - name: Retain source-bound generated authority
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-dependency-authority-${{ github.run_id }}
+          path: /tmp/release-dependency-records
+          retention-days: 30
