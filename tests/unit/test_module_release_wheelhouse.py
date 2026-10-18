@@ -56,8 +56,9 @@ def stage(release, tmp_path, root):
         "dotmac-child>=1; sys_platform == 'linux'",
         "dotmac-child>=1; sys_platform == 'never'",
         "dotmac-child @ https://unapproved.invalid/child.whl",
-        "dotmac-child @ https://unapproved.invalid/source.tar.gz; python_version < '0'",
-        "vendor @ https://unapproved.invalid/source.tar.gz; python_version < '0'",
+        "dotmac-child @ https://unapproved.invalid/source.tar.gz ; "
+        "python_version < '0'",
+        "vendor @ https://unapproved.invalid/source.tar.gz ; python_version < '0'",
     ],
 )
 def test_unsupported_edge_refused_before_any_dependency_handoff(
@@ -67,6 +68,22 @@ def test_unsupported_edge_refused_before_any_dependency_handoff(
     requests = []
     monkeypatch.setattr(release, "_download_one", lambda *args: requests.append(args))
     with pytest.raises(release.ReleaseRefused, match="Unsupported") as error:
+        stage(release, tmp_path, root)
+    assert requests == []
+    assert "https://" not in str(error.value)
+
+
+@pytest.mark.parametrize("name", ["dotmac-child", "vendor"])
+def test_malformed_url_marker_refused_before_any_dependency_handoff(
+    release, monkeypatch, tmp_path, name
+):
+    # A URL needs whitespace before its marker delimiter under PEP 508.
+    # Preserve the malformed cases separately from valid unsupported URLs.
+    edge = f"{name} @ https://unapproved.invalid/source.tar.gz; python_version < '0'"
+    root = wheel(tmp_path / "root", "dotmac-root", requires=[edge])
+    requests = []
+    monkeypatch.setattr(release, "_download_one", lambda *args: requests.append(args))
+    with pytest.raises(release.ReleaseRefused, match="malformed") as error:
         stage(release, tmp_path, root)
     assert requests == []
     assert "https://" not in str(error.value)

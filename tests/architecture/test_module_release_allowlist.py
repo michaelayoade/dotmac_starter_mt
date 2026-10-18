@@ -881,9 +881,22 @@ def test_the_release_sequence_matches_the_kernel_workflow() -> None:
     """
     source = _executable(WORKFLOW)
 
+    assert source.count("assert_current_main.sh") == 3, (
+        "main must be asserted before build, before candidate qualification, "
+        "and immediately before publication"
+    )
+    build = source.split("build:", 1)[1].split("publish:", 1)[0]
+    publish = source.split("publish:", 1)[1].split("verify:", 1)[0]
+    assert build.count("assert_current_main.sh") == 1
+    assert build.index("assert_current_main.sh") < build.index("poetry build")
+    assert publish.count("assert_current_main.sh") == 2
     assert (
-        source.count("assert_current_main.sh") == 2
-    ), "main must be asserted at build AND re-asserted before publication"
+        publish.index("assert_current_main.sh")
+        < publish.index("download-artifact")
+        < publish.index("release_module.py qualify-candidate")
+        < publish.rindex("assert_current_main.sh")
+        < publish.index("twine upload")
+    ), "fresh-main checks must bracket candidate qualification before upload"
     assert "environment: registry-release" in source
     assert "download-artifact" in source, "publish must use the built bytes"
     assert "poetry build" in source
