@@ -3440,7 +3440,6 @@
           "dotmac-kernel",
           "sqlalchemy",
           "pydantic",
-          "alembic",
           "python"
         ]
       }

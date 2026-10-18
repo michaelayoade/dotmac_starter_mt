@@ -174,10 +174,9 @@ def test_same_distribution_package_and_pep561_source_declarations():
     # No optional-dependency or alternate-distribution promise is introduced.
     assert poetry["dependencies"] == {
         "python": ">=3.11,<3.14",
-        "dotmac-kernel": {"path": "../dotmac-kernel", "develop": True},
+        "dotmac-kernel": ">=0.1.0a106",
         "sqlalchemy": "^2.0",
         "pydantic": "^2.9",
-        "alembic": ">=1.13",
     }
     assert "extras" not in poetry
 

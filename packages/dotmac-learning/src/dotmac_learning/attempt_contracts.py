@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import NotRequired
+from typing import Final, Literal, NotRequired, get_args
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -53,15 +53,30 @@ class GrantExtraAttemptCommand(AttemptCommand):
     extra_attempts: int = 1
 
 
+# The Kernel owns this closed taxonomy. Derive the runtime guard from the type
+# so the constructor and typed audit callers cannot accept different vocabularies.
+AttemptActorType = Literal["system", "user", "api_key", "service"]
+_ATTEMPT_ACTOR_TYPES: Final[frozenset[str]] = frozenset(get_args(AttemptActorType))
+
+
 @dataclass(frozen=True, slots=True)
 class AttemptAuditContext:
     """Trusted product attribution, never inferred from grant client fields."""
 
     tenant_id: UUID
-    actor_type: str
+    actor_type: AttemptActorType
     source_application: str
     actor_id: str | None = None
     actor_label: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.actor_type not in _ATTEMPT_ACTOR_TYPES:
+            raise ValueError(
+                "attempt audit actor_type must be "
+                + ", ".join(sorted(_ATTEMPT_ACTOR_TYPES))
+            )
+        # Actor IDs remain the canonical Kernel writer's responsibility. Keeping
+        # that validation there preserves the operation's existing error order.
 
 
 @dataclass(frozen=True, slots=True)

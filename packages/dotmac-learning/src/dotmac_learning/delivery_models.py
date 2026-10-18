@@ -84,6 +84,9 @@ class OfferingActivity(KernelBase, TimestampMixin):
             ondelete="CASCADE",
             name="fk_offering_activities_tenant_activity",
         ),
+        Index("ix_offering_activities_tenant_id", "tenant_id"),
+        Index("ix_offering_activities_offering_id", "offering_id"),
+        Index("ix_offering_activities_activity_id", "activity_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -91,14 +94,9 @@ class OfferingActivity(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    offering_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    activity_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    offering_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    activity_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     release_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -116,6 +114,7 @@ class ClassSession(KernelBase, TimestampMixin):
         ),
         Index("ix_class_sessions_cohort_start", "tenant_id", "cohort_id", "starts_at"),
         Index("ix_class_sessions_instructor", "tenant_id", "instructor_person_id"),
+        Index("ix_class_sessions_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -123,7 +122,6 @@ class ClassSession(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     cohort_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     # Optional link to a specific course run; NULL = a cohort-wide session
@@ -181,6 +179,8 @@ class Announcement(KernelBase, TimestampMixin):
             ondelete="CASCADE",
             name="fk_announcements_party_person",
         ),
+        Index("ix_announcements_tenant_id", "tenant_id"),
+        Index("ix_announcements_cohort_id", "cohort_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -188,11 +188,8 @@ class Announcement(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    cohort_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=True, index=True
-    )
+    cohort_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     author_person_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), nullable=False
     )

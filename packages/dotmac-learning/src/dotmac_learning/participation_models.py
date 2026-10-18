@@ -40,6 +40,7 @@ class Cohort(Base, TimestampMixin):
     __tablename__ = "cohorts"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_cohorts_tenant_id_id"),
+        Index("ix_cohorts_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -47,7 +48,6 @@ class Cohort(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     discipline: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -112,6 +112,10 @@ class Enrollment(Base, TimestampMixin):
         # Actual 0049/0050 migrated indexes override the incomplete source ORM.
         Index("ix_enrollments_audience", "tenant_id", "audience"),
         Index("ix_enrollments_access_ends_at", "tenant_id", "access_ends_at"),
+        Index("ix_enrollments_tenant_id", "tenant_id"),
+        Index("ix_enrollments_cohort_id", "cohort_id"),
+        Index("ix_enrollments_person_id", "person_id"),
+        Index("ix_enrollments_track_id", "track_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -119,17 +123,10 @@ class Enrollment(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    cohort_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    track_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=True, index=True
-    )
+    cohort_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    track_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     role_in_cohort: Mapped[str] = mapped_column(
         String(20), nullable=False, default="student", server_default="student"
     )
@@ -150,6 +147,7 @@ class Track(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("tenant_id", "slug", name="uq_tracks_tenant_slug"),
         UniqueConstraint("tenant_id", "id", name="uq_tracks_tenant_id_id"),
+        Index("ix_tracks_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -157,7 +155,6 @@ class Track(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     slug: Mapped[str] = mapped_column(String(80), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -186,6 +183,9 @@ class TrackCourse(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_track_courses_tenant_course",
         ),
+        Index("ix_track_courses_tenant_id", "tenant_id"),
+        Index("ix_track_courses_track_id", "track_id"),
+        Index("ix_track_courses_course_id", "course_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -193,14 +193,9 @@ class TrackCourse(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    track_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    track_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     order_index: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
@@ -227,6 +222,9 @@ class CohortTrack(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_cohort_tracks_tenant_track",
         ),
+        Index("ix_cohort_tracks_tenant_id", "tenant_id"),
+        Index("ix_cohort_tracks_cohort_id", "cohort_id"),
+        Index("ix_cohort_tracks_track_id", "track_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -234,14 +232,9 @@ class CohortTrack(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    cohort_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    track_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    cohort_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    track_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
     )
@@ -276,6 +269,9 @@ class CourseOffering(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_course_offerings_tenant_course",
         ),
+        Index("ix_course_offerings_tenant_id", "tenant_id"),
+        Index("ix_course_offerings_cohort_id", "cohort_id"),
+        Index("ix_course_offerings_course_id", "course_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -283,14 +279,9 @@ class CourseOffering(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    cohort_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    cohort_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
     )
@@ -324,6 +315,9 @@ class CoursePrerequisite(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_course_prerequisites_tenant_requires",
         ),
+        Index("ix_course_prerequisites_tenant_id", "tenant_id"),
+        Index("ix_course_prerequisites_course_id", "course_id"),
+        Index("ix_course_prerequisites_requires_course_id", "requires_course_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -331,13 +325,10 @@ class CoursePrerequisite(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     requires_course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
+        PG_UUID(as_uuid=True), nullable=False
     )
 
 

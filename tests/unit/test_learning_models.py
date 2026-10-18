@@ -7,6 +7,9 @@ from dotmac_kernel.models import Party, PartyPerson, Tenant
 from dotmac_kernel.modules import ModuleRegistry
 from dotmac_kernel.namespaces import module_schema
 from dotmac_learning import migrations, versions_dir
+from dotmac_learning.attempt_models import ATTEMPT_MODELS
+from dotmac_learning.curriculum_models import CURRICULUM_MODELS
+from dotmac_learning.delivery_models import DELIVERY_MODELS
 from dotmac_learning.manifest import module
 from dotmac_learning.models import (
     SCHEMA,
@@ -20,6 +23,7 @@ from dotmac_learning.models import (
     Score,
     Submission,
 )
+from dotmac_learning.participation_models import PARTICIPATION_MODELS
 from sqlalchemy import JSON, CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.dialects.postgresql import JSONB
@@ -113,7 +117,14 @@ def test_first_slice_has_seven_tenant_tables_and_no_product_delivery_state():
         table = model.__table__
         assert table.schema == SCHEMA
         assert not table.c.tenant_id.nullable
-        assert table.c.tenant_id.index
+        tenant_index = next(
+            index
+            for index in table.indexes
+            if index.name == f"ix_{table.name}_tenant_id"
+        )
+        assert tuple(tenant_index.columns) == (table.c.tenant_id,)
+        assert tenant_index.table is table
+        assert not tenant_index.unique
         assert any(
             fk.column is Tenant.__table__.c.id and fk.ondelete == "CASCADE"
             for fk in table.c.tenant_id.foreign_keys
@@ -310,3 +321,205 @@ def test_root_migration_locator_reexports_the_canonical_callable():
     assert versions_dir is migrations.versions_dir
     assert versions_dir() == Path(migrations.__file__).resolve().parent / "versions"
     assert (versions_dir() / "lr_0001_learning.py").is_file()
+
+
+# Physical index contract from lr_0001 through lr_0006; schema relocation
+# preserves these names, including the source queue naming exception.
+MIGRATED_INDEXES = {
+    "courses": {"ix_courses_tenant_id": (("tenant_id",), False, None)},
+    "activities": {
+        "ix_activities_tenant_id": (("tenant_id",), False, None),
+        "ix_activities_course_id": (("course_id",), False, None),
+        "ix_activities_bank_id": (("bank_id",), False, None),
+    },
+    "submissions": {
+        "ix_submissions_tenant_id": (("tenant_id",), False, None),
+        "ix_submissions_activity_id": (("activity_id",), False, None),
+        "ix_submissions_person_id": (("person_id",), False, None),
+    },
+    "scores": {
+        "ix_scores_tenant_id": (("tenant_id",), False, None),
+        "ix_scores_submission_id": (("submission_id",), False, None),
+    },
+    "course_completions": {
+        "ix_course_completions_tenant_id": (("tenant_id",), False, None),
+        "ix_course_completions_person_id": (("person_id",), False, None),
+        "ix_course_completions_course_id": (("course_id",), False, None),
+    },
+    "certificates": {
+        "ix_certificates_tenant_id": (("tenant_id",), False, None),
+        "ix_certificates_person_id": (("person_id",), False, None),
+        "ix_certificates_course_id": (("course_id",), False, None),
+    },
+    "learning_events": {
+        "ix_learning_events_tenant_id": (("tenant_id",), False, None),
+        "ix_learning_events_person_id": (("person_id",), False, None),
+        "ix_learning_events_person_time": (
+            ("tenant_id", "person_id", "occurred_at"),
+            False,
+            None,
+        ),
+        "ix_learning_events_course_kind": (
+            ("tenant_id", "course_id", "kind"),
+            False,
+            None,
+        ),
+        "ix_learning_events_kind_time": (
+            ("tenant_id", "kind", "occurred_at"),
+            False,
+            None,
+        ),
+        "uq_learning_events_once_per_subject": (
+            ("tenant_id", "person_id", "kind", "subject_id"),
+            True,
+            "kind IN " "('chapter_completed', " "'certificate_earned')",
+        ),
+    },
+    "chapters": {
+        "ix_chapters_tenant_id": (("tenant_id",), False, None),
+        "ix_chapters_course_id": (("course_id",), False, None),
+    },
+    "question_banks": {
+        "ix_question_banks_tenant_id": (("tenant_id",), False, None),
+        "ix_question_banks_course_id": (("course_id",), False, None),
+    },
+    "questions": {
+        "ix_questions_tenant_id": (("tenant_id",), False, None),
+        "ix_questions_bank_id": (("bank_id",), False, None),
+    },
+    "chapter_reads": {
+        "ix_chapter_reads_tenant_id": (("tenant_id",), False, None),
+        "ix_chapter_reads_person_id": (("person_id",), False, None),
+        "ix_chapter_reads_chapter_id": (("chapter_id",), False, None),
+    },
+    "subtopic_reads": {
+        "ix_subtopic_reads_tenant_id": (("tenant_id",), False, None),
+        "ix_subtopic_reads_person_id": (("person_id",), False, None),
+        "ix_subtopic_reads_chapter_id": (("chapter_id",), False, None),
+    },
+    "chapter_bookmarks": {
+        "ix_chapter_bookmarks_tenant_id": (("tenant_id",), False, None),
+        "ix_chapter_bookmarks_person_id": (("person_id",), False, None),
+        "ix_chapter_bookmarks_course_id": (("course_id",), False, None),
+        "ix_chapter_bookmarks_chapter_id": (("chapter_id",), False, None),
+    },
+    "chapter_notes": {
+        "ix_chapter_notes_tenant_id": (("tenant_id",), False, None),
+        "ix_chapter_notes_person_id": (("person_id",), False, None),
+        "ix_chapter_notes_course_id": (("course_id",), False, None),
+        "ix_chapter_notes_chapter_id": (("chapter_id",), False, None),
+    },
+    "cohorts": {"ix_cohorts_tenant_id": (("tenant_id",), False, None)},
+    "tracks": {"ix_tracks_tenant_id": (("tenant_id",), False, None)},
+    "cohort_tracks": {
+        "ix_cohort_tracks_tenant_id": (("tenant_id",), False, None),
+        "ix_cohort_tracks_cohort_id": (("cohort_id",), False, None),
+        "ix_cohort_tracks_track_id": (("track_id",), False, None),
+    },
+    "track_courses": {
+        "ix_track_courses_tenant_id": (("tenant_id",), False, None),
+        "ix_track_courses_track_id": (("track_id",), False, None),
+        "ix_track_courses_course_id": (("course_id",), False, None),
+    },
+    "enrollments": {
+        "ix_enrollments_tenant_id": (("tenant_id",), False, None),
+        "ix_enrollments_cohort_id": (("cohort_id",), False, None),
+        "ix_enrollments_person_id": (("person_id",), False, None),
+        "ix_enrollments_track_id": (("track_id",), False, None),
+        "ix_enrollments_audience": (("tenant_id", "audience"), False, None),
+        "ix_enrollments_access_ends_at": (("tenant_id", "access_ends_at"), False, None),
+    },
+    "course_offerings": {
+        "ix_course_offerings_tenant_id": (("tenant_id",), False, None),
+        "ix_course_offerings_cohort_id": (("cohort_id",), False, None),
+        "ix_course_offerings_course_id": (("course_id",), False, None),
+    },
+    "course_prerequisites": {
+        "ix_course_prerequisites_tenant_id": (("tenant_id",), False, None),
+        "ix_course_prerequisites_course_id": (("course_id",), False, None),
+        "ix_course_prerequisites_requires_course_id": (
+            ("requires_course_id",),
+            False,
+            None,
+        ),
+    },
+    "activity_attempts": {
+        "uq_activity_attempts_open": (
+            ("tenant_id", "activity_id", "person_id"),
+            True,
+            "submitted_at IS NULL",
+        ),
+        "ix_activity_attempts_tenant_id": (("tenant_id",), False, None),
+        "ix_activity_attempts_activity_id": (("activity_id",), False, None),
+        "ix_activity_attempts_person_id": (("person_id",), False, None),
+    },
+    "attempt_grants": {
+        "ix_attempt_grants_lookup": (
+            ("tenant_id", "activity_id", "person_id"),
+            False,
+            None,
+        ),
+        "ix_attempt_grants_tenant_id": (("tenant_id",), False, None),
+        "ix_attempt_grants_activity_id": (("activity_id",), False, None),
+        "ix_attempt_grants_person_id": (("person_id",), False, None),
+    },
+    "offering_activities": {
+        "ix_offering_activities_tenant_id": (("tenant_id",), False, None),
+        "ix_offering_activities_offering_id": (("offering_id",), False, None),
+        "ix_offering_activities_activity_id": (("activity_id",), False, None),
+    },
+    "class_sessions": {
+        "ix_class_sessions_tenant_id": (("tenant_id",), False, None),
+        "ix_class_sessions_cohort_start": (
+            ("tenant_id", "cohort_id", "starts_at"),
+            False,
+            None,
+        ),
+        "ix_class_sessions_instructor": (
+            ("tenant_id", "instructor_person_id"),
+            False,
+            None,
+        ),
+    },
+    "announcements": {
+        "ix_announcements_tenant_id": (("tenant_id",), False, None),
+        "ix_announcements_cohort_id": (("cohort_id",), False, None),
+    },
+    "success_queue_entries": {
+        "ix_success_queue_tenant_id": (("tenant_id",), False, None),
+        "ix_success_queue_person_id": (("person_id",), False, None),
+        "ix_success_queue_cohort_id": (("cohort_id",), False, None),
+        "ix_success_queue_status": (("tenant_id", "status", "severity"), False, None),
+        "uq_success_queue_open_person_reason": (
+            ("tenant_id", "person_id", "reason_kind"),
+            True,
+            "status = 'open'",
+        ),
+    },
+}
+
+
+def test_all_learning_indexes_preserve_migrated_names_columns_uniqueness_and_scope():
+    models = (
+        *TENANT_MODELS,
+        *CURRICULUM_MODELS,
+        *PARTICIPATION_MODELS,
+        *ATTEMPT_MODELS,
+        *DELIVERY_MODELS,
+    )
+    assert len(models) == len(MIGRATED_INDEXES) == 27
+    assert {model.__table__.name for model in models} == set(MIGRATED_INDEXES)
+    for model in models:
+        table = model.__table__
+        assert table.schema == "mod_learning"
+        assert all(index.table is table for index in table.indexes)
+        assert {
+            index.name: (
+                tuple(column.name for column in index.columns),
+                index.unique,
+                str(index.dialect_options["postgresql"]["where"])
+                if index.dialect_options["postgresql"]["where"] is not None
+                else None,
+            )
+            for index in table.indexes
+        } == MIGRATED_INDEXES[table.name]

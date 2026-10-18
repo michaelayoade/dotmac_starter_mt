@@ -16,6 +16,7 @@ from sqlalchemy import (
     JSON,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
@@ -40,6 +41,8 @@ class Chapter(KernelBase, TimestampMixin):
             ondelete="CASCADE",
             name="fk_chapters_tenant_course",
         ),
+        Index("ix_chapters_tenant_id", "tenant_id"),
+        Index("ix_chapters_course_id", "course_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -47,11 +50,8 @@ class Chapter(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     part: Mapped[str] = mapped_column(String(20), nullable=False, default="")
@@ -67,6 +67,8 @@ class QuestionBank(KernelBase, TimestampMixin):
     __tablename__ = "question_banks"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_question_banks_tenant_id_id"),
+        Index("ix_question_banks_tenant_id", "tenant_id"),
+        Index("ix_question_banks_course_id", "course_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -74,11 +76,8 @@ class QuestionBank(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     chapter_number: Mapped[int | None] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(10), nullable=False)  # chapter|mid|final
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -96,6 +95,8 @@ class Question(KernelBase, TimestampMixin):
             ondelete="CASCADE",
             name="fk_questions_tenant_bank",
         ),
+        Index("ix_questions_tenant_id", "tenant_id"),
+        Index("ix_questions_bank_id", "bank_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -103,11 +104,8 @@ class Question(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    bank_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    bank_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     ext_id: Mapped[str] = mapped_column(String(60), nullable=False)
     stem: Mapped[str] = mapped_column(Text, nullable=False)
     type: Mapped[str] = mapped_column(
@@ -138,6 +136,9 @@ class ChapterRead(KernelBase, TimestampMixin):
             "chapter_id",
             name="uq_chapter_reads_person_chapter",
         ),
+        Index("ix_chapter_reads_tenant_id", "tenant_id"),
+        Index("ix_chapter_reads_person_id", "person_id"),
+        Index("ix_chapter_reads_chapter_id", "chapter_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -146,16 +147,12 @@ class ChapterRead(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     chapter_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey(f"{SCHEMA}.chapters.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
 
 
@@ -178,6 +175,9 @@ class SubtopicRead(KernelBase, TimestampMixin):
             "subtopic_slug",
             name="uq_subtopic_reads_person_subtopic",
         ),
+        Index("ix_subtopic_reads_tenant_id", "tenant_id"),
+        Index("ix_subtopic_reads_person_id", "person_id"),
+        Index("ix_subtopic_reads_chapter_id", "chapter_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -186,16 +186,12 @@ class SubtopicRead(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     chapter_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey(f"{SCHEMA}.chapters.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     # Matches the 64-char cap in ``learn._slugify_heading``.
     subtopic_slug: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -212,6 +208,10 @@ class ChapterBookmark(KernelBase, TimestampMixin):
             "chapter_id",
             name="uq_chapter_bookmarks_person_chapter",
         ),
+        Index("ix_chapter_bookmarks_tenant_id", "tenant_id"),
+        Index("ix_chapter_bookmarks_person_id", "person_id"),
+        Index("ix_chapter_bookmarks_course_id", "course_id"),
+        Index("ix_chapter_bookmarks_chapter_id", "chapter_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -220,22 +220,17 @@ class ChapterBookmark(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     course_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey(f"{SCHEMA}.courses.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     chapter_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey(f"{SCHEMA}.chapters.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
 
 
@@ -254,6 +249,10 @@ class ChapterNote(KernelBase, TimestampMixin):
             "chapter_id",
             name="uq_chapter_notes_person_chapter",
         ),
+        Index("ix_chapter_notes_tenant_id", "tenant_id"),
+        Index("ix_chapter_notes_person_id", "person_id"),
+        Index("ix_chapter_notes_course_id", "course_id"),
+        Index("ix_chapter_notes_chapter_id", "chapter_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -262,22 +261,17 @@ class ChapterNote(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     course_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey(f"{SCHEMA}.courses.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     chapter_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey(f"{SCHEMA}.chapters.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
 

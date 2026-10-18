@@ -214,3 +214,94 @@ def test_commands_are_frozen_extra_forbid_and_audit_context_is_separate():
     )
     with pytest.raises(FrozenInstanceError):
         authority.actor_type = "user"
+
+
+@pytest.mark.parametrize("actor_type", ["system", "user", "api_key", "service"])
+def test_audit_context_accepts_each_kernel_actor_type_and_preserves_attribution(
+    actor_type,
+):
+    from dataclasses import FrozenInstanceError
+
+    from dotmac_learning.attempt_contracts import AttemptAuditContext
+
+    tenant_id = uuid4()
+    context = AttemptAuditContext(
+        tenant_id=tenant_id,
+        actor_type=actor_type,
+        source_application="academy",
+        actor_id="principal-123",
+        actor_label="Display snapshot",
+    )
+    assert context.tenant_id is tenant_id
+    assert context.actor_type == actor_type
+    assert context.actor_id == "principal-123"
+    assert context.actor_label == "Display snapshot"
+    assert context.source_application == "academy"
+    with pytest.raises(FrozenInstanceError):
+        context.actor_type = "system"
+    with pytest.raises(FrozenInstanceError):
+        context.actor_id = "replacement"
+
+
+def test_audit_context_actor_annotation_matches_public_kernel_vocabulary():
+    from typing import get_args, get_type_hints
+
+    from dotmac_kernel.audit import ACTOR_TYPES
+    from dotmac_learning.attempt_contracts import AttemptAuditContext
+
+    declared_types = frozenset(
+        get_args(get_type_hints(AttemptAuditContext)["actor_type"])
+    )
+    assert declared_types == ACTOR_TYPES == {"system", "user", "api_key", "service"}
+
+
+@pytest.mark.parametrize(
+    "actor_type", ["", "USER", " user", "user ", "anonymous", "tenant_admin", None, 7]
+)
+def test_audit_context_constructor_refuses_unknown_actor_types(actor_type):
+    from dotmac_learning.attempt_contracts import AttemptAuditContext
+
+    with pytest.raises(ValueError, match="attempt audit actor_type must be"):
+        AttemptAuditContext(
+            tenant_id=uuid4(), actor_type=actor_type, source_application="academy"
+        )
+
+
+@pytest.mark.parametrize("actor_type", ["user", "api_key", "service"])
+@pytest.mark.parametrize("actor_id", [None, "", " "])
+def test_audit_context_keeps_non_system_id_validation_at_kernel_writer(
+    actor_type, actor_id
+):
+    from dotmac_kernel.audit import MissingAuditActorError, resolve_audit_actor
+    from dotmac_learning.attempt_contracts import AttemptAuditContext
+
+    context = AttemptAuditContext(
+        tenant_id=uuid4(),
+        actor_type=actor_type,
+        source_application="academy",
+        actor_id=actor_id,
+    )
+    assert context.actor_id == actor_id
+    with pytest.raises(MissingAuditActorError):
+        resolve_audit_actor(
+            actor_type=context.actor_type,
+            actor_id=context.actor_id,
+            actor_party_id=None,
+        )
+
+
+@pytest.mark.parametrize("actor_id", [None, "scheduled-job-123"])
+def test_audit_context_preserves_both_system_identifier_forms(actor_id):
+    from dotmac_kernel.audit import resolve_audit_actor
+    from dotmac_learning.attempt_contracts import AttemptAuditContext
+
+    context = AttemptAuditContext(
+        tenant_id=uuid4(),
+        actor_type="system",
+        source_application="academy",
+        actor_id=actor_id,
+    )
+    assert context.actor_id == actor_id
+    assert resolve_audit_actor(
+        actor_type=context.actor_type, actor_id=context.actor_id, actor_party_id=None
+    ) == ("system", actor_id)

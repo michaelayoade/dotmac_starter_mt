@@ -45,6 +45,9 @@ class ActivityAttempt(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_activity_attempts_tenant_activity",
         ),
+        Index("ix_activity_attempts_tenant_id", "tenant_id"),
+        Index("ix_activity_attempts_activity_id", "activity_id"),
+        Index("ix_activity_attempts_person_id", "person_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -52,14 +55,9 @@ class ActivityAttempt(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    activity_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    activity_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     question_ext_ids: Mapped[list[object]] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"),
         nullable=False,
@@ -87,6 +85,9 @@ class AttemptGrant(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_attempt_grants_tenant_activity",
         ),
+        Index("ix_attempt_grants_tenant_id", "tenant_id"),
+        Index("ix_attempt_grants_activity_id", "activity_id"),
+        Index("ix_attempt_grants_person_id", "person_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -94,14 +95,9 @@ class AttemptGrant(Base, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    activity_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    activity_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     extra_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
     )

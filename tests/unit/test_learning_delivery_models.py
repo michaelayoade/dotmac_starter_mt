@@ -227,10 +227,25 @@ def test_queue_migrated_partial_uniqueness_and_python_defaults():
     assert partial.unique
     assert str(partial.dialect_options["postgresql"]["where"]) == "status = 'open'"
     assert not any(i.unique for i in table.indexes if i is not partial)
-    for dialect in (postgresql.dialect(), sqlite.dialect()):
+    assert str(partial.dialect_options["sqlite"]["where"]) == "status = 'open'"
+    for dialect, index_name, target in (
+        (
+            postgresql.dialect(),
+            "uq_success_queue_open_person_reason",
+            "mod_learning.success_queue_entries",
+        ),
+        (
+            sqlite.dialect(),
+            "mod_learning.uq_success_queue_open_person_reason",
+            "success_queue_entries",
+        ),
+    ):
         ddl = str(CreateIndex(partial).compile(dialect=dialect))
-        assert "UNIQUE INDEX uq_success_queue_open_person_reason" in ddl
-        assert "WHERE status = 'open'" in ddl  # acknowledged history may repeat.
+        # PostgreSQL qualifies the table; SQLite qualifies the index instead.
+        assert ddl == (
+            f"CREATE UNIQUE INDEX {index_name} ON {target} "
+            "(tenant_id, person_id, reason_kind) WHERE status = 'open'"
+        )  # acknowledged history may repeat.
     assert table.c.supporting_facts.default is not None
     assert isinstance(table.c.score_hint.type, Float)
     assert isinstance(table.c.recommended_action.type, Text)

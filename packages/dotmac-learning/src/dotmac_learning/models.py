@@ -42,7 +42,6 @@ def tenant_id_column() -> Mapped[UUID]:
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
 
 
@@ -80,6 +79,7 @@ class Course(KernelBase, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("tenant_id", "slug", name="uq_courses_tenant_slug"),
         UniqueConstraint("tenant_id", "id", name="uq_courses_tenant_id_id"),
+        Index("ix_courses_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -102,16 +102,17 @@ class Activity(KernelBase, TimestampMixin):
     __tablename__ = "activities"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_activities_tenant_id_id"),
+        Index("ix_activities_tenant_id", "tenant_id"),
+        Index("ix_activities_course_id", "course_id"),
+        Index("ix_activities_bank_id", "bank_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = tenant_id_column()
-    course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     chapter_number: Mapped[int | None] = mapped_column(Integer)
     type: Mapped[str] = mapped_column(String(16), nullable=False, default="mcq_test")
-    bank_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
+    bank_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     pass_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     # Assessment policy (Slice 4). Null = unlimited attempts.
@@ -149,16 +150,15 @@ class Submission(KernelBase, TimestampMixin):
             ondelete="CASCADE",
             name="fk_submissions_tenant_activity",
         ),
+        Index("ix_submissions_tenant_id", "tenant_id"),
+        Index("ix_submissions_activity_id", "activity_id"),
+        Index("ix_submissions_person_id", "person_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = tenant_id_column()
-    activity_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    activity_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     answers: Mapped[dict[str, object]] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict
     )
@@ -174,13 +174,13 @@ class Score(KernelBase, TimestampMixin):
             ondelete="CASCADE",
             name="fk_scores_tenant_submission",
         ),
+        Index("ix_scores_tenant_id", "tenant_id"),
+        Index("ix_scores_submission_id", "submission_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = tenant_id_column()
-    submission_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    submission_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     max_score: Mapped[float] = mapped_column(Float, nullable=False)
     fraction: Mapped[float] = mapped_column(Float, nullable=False)
@@ -218,16 +218,15 @@ class CourseCompletion(KernelBase, TimestampMixin):
             ondelete="CASCADE",
             name="fk_course_completions_tenant_course",
         ),
+        Index("ix_course_completions_tenant_id", "tenant_id"),
+        Index("ix_course_completions_person_id", "person_id"),
+        Index("ix_course_completions_course_id", "course_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = tenant_id_column()
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="in_progress"
     )
@@ -259,16 +258,15 @@ class Certificate(KernelBase, TimestampMixin):
             ondelete="CASCADE",
             name="fk_certificates_tenant_course",
         ),
+        Index("ix_certificates_tenant_id", "tenant_id"),
+        Index("ix_certificates_person_id", "person_id"),
+        Index("ix_certificates_course_id", "course_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = tenant_id_column()
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    course_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     serial: Mapped[str] = mapped_column(String(32), nullable=False)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -306,6 +304,8 @@ class LearningEvent(KernelBase, TimestampMixin):
                 "kind IN ('chapter_completed', 'certificate_earned')"
             ),
         ),
+        Index("ix_learning_events_tenant_id", "tenant_id"),
+        Index("ix_learning_events_person_id", "person_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -314,11 +314,8 @@ class LearningEvent(KernelBase, TimestampMixin):
         PG_UUID(as_uuid=True),
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     course_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     kind: Mapped[str] = mapped_column(String(30), nullable=False)
     # The event's primary subject (chapter, activity, submission, session or
