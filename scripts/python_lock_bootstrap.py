@@ -587,6 +587,140 @@ _REVIEW_MISMATCH_REFUSALS = {
 _REVIEW_REFUSALS.update(_REVIEW_MISMATCH_REFUSALS)
 
 
+_REVIEW_BASE_RECORD_COUNT = 175
+_REVIEW_FIELDS = (
+    "dependencies",
+    "description",
+    "develop",
+    "extras",
+    "files",
+    "groups",
+    "markers",
+    "name",
+    "optional",
+    "python-versions",
+    "source",
+    "version",
+)
+_REVIEW_DIAGNOSTIC_BEGIN = "BEGIN_UNQUALIFIED_LOCK_DIAGNOSTIC"
+_REVIEW_DIAGNOSTIC_END = "END_UNQUALIFIED_LOCK_DIAGNOSTIC"
+_REVIEW_DIAGNOSTIC_LIMIT = 8192
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _ReviewMasks:
+    categories: tuple[bool, ...]
+    raw: tuple[bool, ...]
+    semantic: tuple[tuple[bool, ...], ...]
+
+    def __post_init__(self) -> None:
+        _validate_review_masks(self)
+
+
+def _validate_review_masks(masks: _ReviewMasks) -> None:
+    if type(masks) is not _ReviewMasks:
+        raise BootstrapError("lock review refused")
+    for flags, count in (
+        (masks.categories, 7),
+        (masks.raw, _REVIEW_BASE_RECORD_COUNT),
+    ):
+        if (
+            type(flags) is not tuple
+            or len(flags) != count
+            or any(type(flag) is not bool for flag in flags)
+        ):
+            raise BootstrapError("lock review refused")
+    if (
+        type(masks.semantic) is not tuple
+        or len(masks.semantic) != _REVIEW_BASE_RECORD_COUNT
+    ):
+        raise BootstrapError("lock review refused")
+    for row in masks.semantic:
+        if (
+            type(row) is not tuple
+            or len(row) != 13
+            or any(type(flag) is not bool for flag in row)
+        ):
+            raise BootstrapError("lock review refused")
+
+
+class _ReviewMismatch(BootstrapError):
+    def __init__(self, masks: _ReviewMasks) -> None:
+        _validate_review_masks(masks)
+        self.masks = masks
+        labels = ",".join(
+            label
+            for label, flag in zip(
+                _REVIEW_MISMATCH_LABELS, masks.categories, strict=True
+            )
+            if flag
+        )
+        super().__init__("lock review mismatch: " + labels)
+
+
+class _ReviewDiagnosticReady(_ReviewMismatch):
+    """Negative evidence released only after receipt and late checkout checks."""
+
+
+def _review_value_differs(expected: object, generated: object) -> bool:
+    try:
+        return json.dumps(
+            expected, sort_keys=True, separators=(",", ":")
+        ) != json.dumps(generated, sort_keys=True, separators=(",", ":"))
+    except (ValueError, TypeError, OverflowError):
+        # TOML dates and other unsupported values yield one bit, never payload.
+        return True
+
+
+def _review_masks(
+    names: list[str],
+    expected: dict[str, bytes],
+    generated: dict[str, bytes],
+    categories: tuple[bool, ...],
+) -> _ReviewMasks:
+    if len(names) != _REVIEW_BASE_RECORD_COUNT:
+        raise BootstrapError("lock review refused")
+    raw = []
+    semantic = []
+    for name in names:
+        before = tomllib.loads(expected[name].decode("utf-8"))["package"][0]
+        after = tomllib.loads(generated[name].decode("utf-8"))["package"][0]
+        if not set(before) <= set(_REVIEW_FIELDS):
+            raise BootstrapError("lock review refused")
+        raw.append(expected[name] != generated[name])
+        semantic.append(
+            (
+                set(before) != set(after),
+                *(
+                    (key in before) != (key in after)
+                    or (
+                        key in before and _review_value_differs(before[key], after[key])
+                    )
+                    for key in _REVIEW_FIELDS
+                ),
+            )
+        )
+    return _ReviewMasks(categories, tuple(raw), tuple(semantic))
+
+
+def _review_diagnostic_json(masks: _ReviewMasks) -> str:
+    _validate_review_masks(masks)
+    encoded = json.dumps(
+        {
+            "base_sha256": _REVIEW_BASE_SHA256,
+            "categories": [int(flag) for flag in masks.categories],
+            "raw": [int(flag) for flag in masks.raw],
+            "semantic": [[int(flag) for flag in row] for row in masks.semantic],
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if len(encoded) > _REVIEW_DIAGNOSTIC_LIMIT or not encoded.isascii():
+        raise BootstrapError("lock review refused")
+    return encoded
+
+
 def _review_partition(raw: bytes) -> tuple[list[tuple[str, int, int]], int]:
     """Map byte record boundaries independently of the parsed TOML document."""
     if len(raw) > 400000:
@@ -805,25 +939,14 @@ def _review_operations(
                 if name not in special
             ),
             expected[expected_metadata:] != generated[generated_metadata_start:],
-            json.dumps(
+            _review_value_differs(
                 tomllib.loads(expected_spans[learning].decode("utf-8")),
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            != json.dumps(
                 tomllib.loads(generated_spans[learning].decode("utf-8")),
-                sort_keys=True,
-                separators=(",", ":"),
             ),
         )
-        labels = ",".join(
-            label
-            for label, differs in zip(_REVIEW_MISMATCH_LABELS, flags, strict=True)
-            if differs
+        raise _ReviewMismatch(
+            _review_masks(names, expected_spans, generated_spans, flags)
         )
-        if labels:
-            raise BootstrapError("lock review mismatch: " + labels)
-        raise BootstrapError("lock review non-whitelisted churn refused")
     return operations
 
 
@@ -845,7 +968,13 @@ def _review_artifact(repo: Path) -> None:
         base = _read(repo, "poetry.lock")
         generated = _read(repo, OUTPUT_PATH + "/poetry.lock")
         artifact_manifest = _read(repo, OUTPUT_PATH + "/manifest.json")
-        operations = _review_operations(base, generated, proposal)
+        pending = None
+        try:
+            operations = _review_operations(base, generated, proposal)
+        except _ReviewMismatch as error:
+            _validate_review_masks(error.masks)
+            pending = error.masks
+            operations = []
         # Independent reconstruction of the unchanged producer receipt formula.
         receipt = LockGenerationManifest(
             proposal.schema_version,
@@ -873,6 +1002,8 @@ def _review_artifact(repo: Path) -> None:
             or _read(repo, PROPOSAL_PATH) != raw
         ):
             raise BootstrapError("lock review checkout changed")
+        if pending is not None:
+            raise _ReviewDiagnosticReady(pending)
         packet = {
             "purpose": "UNQUALIFIED",
             "schema_version": 1,
@@ -886,6 +1017,8 @@ def _review_artifact(repo: Path) -> None:
         )
         if len(encoded) > _REVIEW_PACKET_LIMIT or not encoded.isascii():
             raise BootstrapError("lock review packet bound refused")
+    except _ReviewDiagnosticReady:
+        raise
     except BootstrapError as error:
         raise BootstrapError(
             _REVIEW_REFUSALS.get(str(error), "lock review refused")
@@ -904,7 +1037,20 @@ def main() -> int:
     repo = Path.cwd().resolve()
     proposal_path = repo / PROPOSAL_PATH
     if arguments.review:
-        _review_artifact(repo)
+        try:
+            _review_artifact(repo)
+        except _ReviewDiagnosticReady as error:
+            encoded = _review_diagnostic_json(error.masks)
+            print(
+                _REVIEW_DIAGNOSTIC_BEGIN
+                + "\n"
+                + encoded
+                + "\n"
+                + _REVIEW_DIAGNOSTIC_END,
+                file=sys.stderr,
+            )
+            print("error: lock review non-whitelisted churn refused", file=sys.stderr)
+            return 1
     elif arguments.validate:
         context = _require_hosted(repo)
         proposal = parse_proposal(_read(repo, PROPOSAL_PATH))

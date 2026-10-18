@@ -787,6 +787,7 @@ def test_review_four_operations_independently_reconstruct_every_generated_byte(
 @pytest.fixture
 def review_case(checkout_v2, monkeypatch):
     repo, context = checkout_v2
+    monkeypatch.setattr(producer, "_REVIEW_BASE_RECORD_COUNT", 4)
     base, generated = _review_locks()
     document = _review_document()
     raw = json.dumps(document).encode()
@@ -1271,3 +1272,251 @@ def test_review_unknown_diagnostic_prefix_does_not_authorize_error_text(
     assert str(caught.value) == "lock review refused"
     captured = capsys.readouterr()
     assert captured.out == captured.err == ""
+
+
+def _write_review_mismatch(output, replacement):
+    path = output / "poetry.lock"
+    generated = path.read_text().replace(_REVIEW_ALPHA, replacement)
+    path.write_text(generated)
+    receipt_path = output / "manifest.json"
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt["lock_sha256"] = hashlib.sha256(generated.encode()).hexdigest()
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+
+
+@pytest.mark.parametrize(
+    "replacement,field_indexes",
+    [
+        (_REVIEW_ALPHA + "# " + _REVIEW_SENTINEL + "\n", ()),
+        (_REVIEW_ALPHA.replace('"1.0.0"', '"2.0.0"'), (12,)),
+        (
+            _REVIEW_ALPHA.replace("version =", 'description = "changed"\nversion ='),
+            (0, 2),
+        ),
+        (
+            _REVIEW_ALPHA.replace(
+                "version =", _REVIEW_SENTINEL + ' = "private"\nversion ='
+            ),
+            (0,),
+        ),
+        (_REVIEW_ALPHA.replace('version = "1.0.0"', "version = 2026-10-18"), (12,)),
+        (_REVIEW_ALPHA.replace('version = "1.0.0"', "version = false"), (12,)),
+    ],
+)
+def test_review_masks_isolate_record_and_public_fields(
+    review_case, replacement, field_indexes, capsys
+):
+    repo, output, _, _ = review_case
+    _write_review_mismatch(output, replacement)
+    with pytest.raises(producer._ReviewDiagnosticReady) as caught:
+        producer._review_artifact(repo)
+    masks = caught.value.masks
+    assert masks.raw == (True, False, False, False)
+    assert (
+        tuple(index for index, bit in enumerate(masks.semantic[0]) if bit)
+        == field_indexes
+    )
+    assert masks.semantic[1:] == ((False,) * 13,) * 3
+    encoded = producer._review_diagnostic_json(masks)
+    assert _REVIEW_SENTINEL not in encoded
+    assert capsys.readouterr() == ("", "")
+
+
+def test_review_masks_multiple_records_and_expected_module_replacements(
+    review_case, capsys
+):
+    repo, output, _, _ = review_case
+    _write_review_mismatch(output, _REVIEW_ALPHA + "# comment\n")
+    path = output / "poetry.lock"
+    path.write_text(
+        path.read_text().replace('version = "0.1.0a2"', 'version = "0.1.0a3"')
+    )
+    receipt_path = output / "manifest.json"
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt["lock_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+    with pytest.raises(producer._ReviewDiagnosticReady) as caught:
+        producer._review_artifact(repo)
+    assert caught.value.masks.raw == (True, True, False, False)
+    assert caught.value.masks.semantic[0] == (False,) * 13
+    assert caught.value.masks.semantic[1] == (False,) * 12 + (True,)
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("before,after", [(False, 0), (True, 1), (None, False)])
+def test_review_semantic_comparison_distinguishes_json_types(before, after):
+    assert producer._review_value_differs(before, after) is True
+
+
+@pytest.mark.parametrize(
+    "invalid", [0, 1, "REJECTED_PRIVATE_SENTINEL", None, [], (False,)]
+)
+def test_review_mask_validation_rejects_malformed_dimensions_and_values(
+    monkeypatch, invalid, capsys
+):
+    monkeypatch.setattr(producer, "_REVIEW_BASE_RECORD_COUNT", 4)
+    good = producer._ReviewMasks((False,) * 7, (False,) * 4, ((False,) * 13,) * 4)
+    cases = [
+        ((False,) * 8, good.raw, good.semantic),
+        (good.categories, (False,) * 5, good.semantic),
+        (good.categories, good.raw, ((False,) * 13,) * 3),
+        (good.categories, good.raw, ((False,) * 14,) * 4),
+        (good.categories, good.raw, ([False] * 13,) * 4),
+        (invalid, good.raw, good.semantic),
+        (good.categories, invalid, good.semantic),
+        (good.categories, good.raw, invalid),
+        (good.categories, good.raw, ((False,) * 12 + (invalid,),) * 4),
+        (good.categories, (False,) * 3 + (invalid,), good.semantic),
+        ((False,) * 6 + (invalid,), good.raw, good.semantic),
+    ]
+    for arguments in cases:
+        with pytest.raises(producer.BootstrapError) as caught:
+            producer._ReviewMasks(*arguments)
+        assert str(caught.value) == "lock review refused"
+    with pytest.raises(producer.BootstrapError):
+        producer._review_diagnostic_json(invalid)
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("late_failure", ["receipt", "checkout", "proposal"])
+def test_review_pending_masks_withheld_until_all_late_checks_pass(
+    review_case, monkeypatch, late_failure, capsys
+):
+    repo, output, proposal_path, _ = review_case
+    _write_review_mismatch(output, _REVIEW_ALPHA + "# comment\n")
+    if late_failure == "receipt":
+        path = output / "manifest.json"
+        path.write_bytes(path.read_bytes() + b" ")
+    else:
+        prior = producer.validate_checkout
+        calls = 0
+
+        def validate(*args):
+            nonlocal calls
+            calls += 1
+            result = prior(*args)
+            if calls == 2:
+                if late_failure == "checkout":
+                    raise producer.BootstrapError(_REVIEW_SENTINEL)
+                proposal_path.write_bytes(proposal_path.read_bytes() + b" ")
+            return result
+
+        monkeypatch.setattr(producer, "validate_checkout", validate)
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_artifact(repo)
+    assert type(caught.value) is producer.BootstrapError
+    assert _REVIEW_SENTINEL not in str(caught.value)
+    assert capsys.readouterr() == ("", "")
+
+
+def test_review_cli_emits_only_bounded_negative_masks_and_fixed_refusal(
+    review_case, monkeypatch, capsys
+):
+    repo, output, _, _ = review_case
+    _write_review_mismatch(output, _REVIEW_ALPHA + "# " + _REVIEW_SENTINEL + "\n")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(producer.sys, "argv", ["python_lock_bootstrap", "--review"])
+    assert producer.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    lines = captured.err.splitlines()
+    assert lines[0] == producer._REVIEW_DIAGNOSTIC_BEGIN
+    assert lines[2:] == [
+        producer._REVIEW_DIAGNOSTIC_END,
+        "error: lock review non-whitelisted churn refused",
+    ]
+    assert producer._REVIEW_BEGIN not in captured.err
+    assert _REVIEW_SENTINEL not in captured.err
+    assert captured.err.isascii()
+    assert len(lines[1]) <= 8192
+    packet = json.loads(lines[1])
+    assert packet["raw"] == [1, 0, 0, 0]
+    assert packet["semantic"] == [[0] * 13] * 4
+    assert packet["categories"] == [0, 0, 0, 0, 1, 0, 0]
+    assert set(packet) == {"base_sha256", "categories", "raw", "semantic"}
+
+
+def test_review_diagnostic_serialization_revalidates_before_any_cli_print(
+    review_case, monkeypatch, capsys
+):
+    repo, _, _, _ = review_case
+    masks = producer._ReviewMasks((False,) * 7, (False,) * 4, ((False,) * 13,) * 4)
+    ready = producer._ReviewDiagnosticReady(masks)
+    ready.masks = _REVIEW_SENTINEL
+
+    def refuse(*args):
+        raise ready
+
+    monkeypatch.setattr(producer, "_review_artifact", refuse)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(producer.sys, "argv", ["python_lock_bootstrap", "--review"])
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer.main()
+    assert str(caught.value) == "lock review refused"
+    assert capsys.readouterr() == ("", "")
+
+
+def test_review_operation_mismatch_is_typed_and_silent_before_receipt_checks(
+    review_case, capsys
+):
+    base, generated = _review_locks()
+    generated = generated.replace(
+        _REVIEW_ALPHA.encode(), (_REVIEW_ALPHA + "# comment\n").encode()
+    )
+    with pytest.raises(producer._ReviewMismatch) as caught:
+        producer._review_operations(base, generated, _proposal(_review_document()))
+    assert type(caught.value) is producer._ReviewMismatch
+    assert caught.value.masks.raw == (True, False, False, False)
+    assert capsys.readouterr() == ("", "")
+
+
+def test_review_diagnostics_require_fixed_public_base_record_count(
+    review_case, monkeypatch, capsys
+):
+    base, generated = _review_locks()
+    monkeypatch.setattr(producer, "_REVIEW_BASE_RECORD_COUNT", 175)
+    generated = generated.replace(
+        _REVIEW_ALPHA.encode(), (_REVIEW_ALPHA + "# comment\n").encode()
+    )
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_operations(base, generated, _proposal(_review_document()))
+    assert type(caught.value) is producer.BootstrapError
+    assert str(caught.value) == "lock review refused"
+    assert capsys.readouterr() == ("", "")
+
+
+def test_review_cli_withholds_diagnostic_when_serialization_bound_fails(
+    review_case, monkeypatch, capsys
+):
+    repo, output, _, _ = review_case
+    _write_review_mismatch(output, _REVIEW_ALPHA + "# comment\n")
+    monkeypatch.setattr(producer, "_REVIEW_DIAGNOSTIC_LIMIT", 1)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(producer.sys, "argv", ["python_lock_bootstrap", "--review"])
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer.main()
+    assert str(caught.value) == "lock review refused"
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("invalid", [None, False, _REVIEW_SENTINEL, (), (False,) * 4])
+def test_review_revalidates_mutated_mismatch_before_pending_assignment(
+    review_case, monkeypatch, invalid, capsys
+):
+    repo, _, _, _ = review_case
+    masks = producer._ReviewMasks((False,) * 7, (False,) * 4, ((False,) * 13,) * 4)
+    mismatch = producer._ReviewMismatch(masks)
+    mismatch.masks = invalid
+
+    def refuse(*args):
+        raise mismatch
+
+    monkeypatch.setattr(producer, "_review_operations", refuse)
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_artifact(repo)
+    assert type(caught.value) is producer.BootstrapError
+    assert str(caught.value) == "lock review refused"
+    assert _REVIEW_SENTINEL not in str(caught.value)
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+    assert producer._REVIEW_BEGIN not in captured.out + captured.err
