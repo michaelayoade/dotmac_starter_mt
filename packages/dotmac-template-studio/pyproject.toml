@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-template-studio"
-version = "0.2.0a5"
+version = "0.2.0a6"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -29,9 +29,10 @@ python = ">=3.11,<3.14"
 #
 # Floors, not preferences — matched to the kernel's own declared floors so
 # installing this module cannot force a consumer's FastAPI/SQLAlchemy upgrade.
-# `>=0.1.0a97` because the module declares contract-v2 web surfaces and
-# namespaced template package data; an earlier kernel cannot load the manifest.
-dotmac-kernel = ">=0.1.0a97"
+# Contract-v2 surfaces and namespaced templates first required a97.
+# a106 additionally supplies the tenant-audit prerequisite consumed by this release;
+# it is published, independently registry-verified and tagged.
+dotmac-kernel = ">=0.1.0a106"
 fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 pydantic = ">=2.7.4,<3.0"

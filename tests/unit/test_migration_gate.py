@@ -130,9 +130,9 @@ def _messages(report) -> str:
 
 
 def test_the_real_repo_composes() -> None:
-    """The repo's OWN composition — kernel (`0001`…`0020`), assembly
-    (`a001`…`a003`), and the first installed MODULE lineage (`ts_0001`,
-    `ts_0002`) — must pass. The two host lineages are grandfathered (legacy
+    """The repo's OWN composition — kernel (`0001`…`0029`), assembly
+    (`a001`…`a004`), and the installed MODULE lineages (`ts_0001`…`ts_0003`,
+    `tk_0001`) — must pass. The two host lineages are grandfathered (legacy
     revision-id format, tables in `public`); `template_studio` gets the strict
     rules.
 
@@ -155,9 +155,12 @@ def test_the_real_repo_composes() -> None:
     # 33 -> 34 in a90: `0027_machine_credential` on the kernel lineage.
     # 34 -> 35 (unreleased): `0028_machine_attribution` on the kernel lineage.
     # 35 -> 36 (unreleased): `0029_audit_history_shape` on the kernel lineage.
+    # 36 -> 37: `ts_0003_tenant_audit`, the DDL-free tenant-audit prerequisite
+    # assertion on the installed Template Studio lineage. Learning is not
+    # installed in this reference assembly and adds no revision here.
     # The "deliberately" is the point — this number is not maintenance overhead,
     # it is the reason a migration cannot be added without somebody noticing.
-    assert len(report.revisions) == 36
+    assert len(report.revisions) == 37
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 

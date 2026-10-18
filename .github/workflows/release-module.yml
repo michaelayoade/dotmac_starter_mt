@@ -135,6 +135,7 @@ on:
           - dotmac-web-analytics
           - dotmac-work-orders
           - dotmac-workflow-runtime
+          - dotmac-learning
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true

@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "dotmac-learning"
+version = "0.1.0a1"
+description = "Reusable tenant learning results, progress, completion and certificates"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [
+    { include = "dotmac_learning", from = "src" },
+    { include = "dotmac_learning_bank_rules", from = "src" },
+]
+include = [
+    { path = "src/dotmac_learning_bank_rules/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_learning/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_learning/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# Published tenant-audit prerequisite; hosted floor qualification is required.
+dotmac-kernel = ">=0.1.0a106"
+sqlalchemy = "^2.0"
+pydantic = "^2.9"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

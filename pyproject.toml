@@ -210,6 +210,7 @@ dotmac-sales = { path = "packages/dotmac-sales", develop = true }
 # facts. It is installed for verification here, but not composed or releasable.
 dotmac-document-rendering = { path = "packages/dotmac-document-rendering", develop = true }
 dotmac-fulfillment = { path = "packages/dotmac-fulfillment", develop = true }
+dotmac-learning = { path = "packages/dotmac-learning", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -377,6 +378,8 @@ module = [
     "dotmac_forms.*",
     "dotmac_workflow_runtime.*",
     "dotmac_fulfillment.*",
+    "dotmac_learning.*",
+    "dotmac_learning_bank_rules.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -522,6 +525,8 @@ root_packages = [
     "dotmac_forms",
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
+    "dotmac_learning",
+    "dotmac_learning_bank_rules",
 ]
 
 [[tool.importlinter.contracts]]
@@ -676,6 +681,7 @@ source_modules = [
     "dotmac_forms",
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
+    "dotmac_learning",
 ]
 forbidden_modules = ["app"]
 
@@ -804,6 +810,7 @@ modules = [
     "dotmac_forms",
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
+    "dotmac_learning",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -921,6 +928,8 @@ forbidden_modules = [
     "dotmac_fulfillment",
     "dotmac_sales",
     "dotmac_auth_oidc",
+    "dotmac_learning",
+    "dotmac_learning_bank_rules",
 ]
 
 [[tool.importlinter.contracts]]
@@ -946,3 +955,9 @@ modules = [
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[[tool.importlinter.contracts]]
+name = "Learning bank rules must not import runtime owners"
+type = "forbidden"
+source_modules = ["dotmac_learning_bank_rules"]
+forbidden_modules = ["dotmac_kernel", "app", "dotmac_learning"]

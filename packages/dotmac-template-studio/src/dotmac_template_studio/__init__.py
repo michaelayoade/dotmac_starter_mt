@@ -72,7 +72,7 @@ _PKG_DIR = Path(__file__).resolve().parent
 # moved. Pre-1.0 a `0.MINOR` bump is how this package signals that (CHANGELOG).
 # a3 replaces a foreign revision edge with the logical prerequisite contract;
 # a5 adds lossless composition of rendered email parts.
-__version__ = "0.2.0a5"
+__version__ = "0.2.0a6"
 
 
 def migrations_dir() -> Path:

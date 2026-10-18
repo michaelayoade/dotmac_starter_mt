@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-fulfillment"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac tenant-scoped fulfillment saga, participant attempt, outcome, compensation, and convergence ownership"
 authors = ["DotMac"]
 readme = "README.md"
@@ -16,8 +16,9 @@ python = ">=3.11,<3.14"
 # typed provisioning participant, scoped request, asynchronous outcome envelope
 # and participant-decided compensation contract, which land in a89. Take the
 # HIGHEST consumed capability, then the first PUBLISHED release carrying it:
-# a89 is published, registry-verified and tagged, so this floor resolves.
-dotmac-kernel = ">=0.1.0a89"
+# a106 additionally supplies the tenant-audit prerequisite consumed by this release.
+# It is published, independently registry-verified and tagged.
+dotmac-kernel = ">=0.1.0a106"
 sqlalchemy = "^2.0"
 
 [build-system]
