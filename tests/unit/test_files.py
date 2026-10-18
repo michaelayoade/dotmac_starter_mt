@@ -116,6 +116,37 @@ def _xlsx_payload() -> bytes:
     return output.getvalue()
 
 
+def _docx_payload() -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("word/document.xml", "<document />")
+    return output.getvalue()
+
+
+def _zip_payload() -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("readme.txt", "hello")
+    return output.getvalue()
+
+
+def _document_policy() -> FilePolicy:
+    return FilePolicy(
+        max_bytes=1_048_576,
+        allowed_extensions=frozenset({".doc", ".docx", ".txt", ".zip"}),
+        allowed_media_types=frozenset(
+            {
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument"
+                ".wordprocessingml.document",
+                "text/plain",
+                "application/zip",
+            }
+        ),
+    )
+
+
 def _image_policy() -> FilePolicy:
     return FilePolicy(
         max_bytes=1_048_576,
@@ -237,6 +268,51 @@ def test_academy_avatar_formats_are_recognised_by_content_signature(
         chunks=(payload,),
     )
     assert prepared.detected_media_type == media_type
+
+
+@pytest.mark.parametrize(
+    ("name", "media_type", "payload"),
+    [
+        (
+            "letter.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            _docx_payload(),
+        ),
+        (
+            "letter.doc",
+            "application/msword",
+            bytes.fromhex("D0CF11E0A1B11AE1")
+            + b"\x00" * 512
+            + "WordDocument".encode("utf-16-le"),
+        ),
+        ("notes.txt", "text/plain", b"plain meeting notes\nsecond line\n"),
+        ("bundle.zip", "application/zip", _zip_payload()),
+    ],
+)
+def test_document_formats_are_recognised_by_content_signature(
+    name: str, media_type: str, payload: bytes
+) -> None:
+    prepared = prepare_upload(
+        MemoryProvider(),
+        scope=TenantScope(uuid4()),
+        policy=_document_policy(),
+        original_filename=name,
+        declared_media_type=media_type,
+        chunks=(payload,),
+    )
+    assert prepared.detected_media_type == media_type
+
+
+def test_a_docx_declared_as_a_plain_zip_is_rejected() -> None:
+    with pytest.raises(UnsafeFile, match="does not match"):
+        prepare_upload(
+            MemoryProvider(),
+            scope=TenantScope(uuid4()),
+            policy=_document_policy(),
+            original_filename="bundle.zip",
+            declared_media_type="application/zip",
+            chunks=(_docx_payload(),),
+        )
 
 
 def test_upload_stops_at_the_configured_size_limit() -> None:

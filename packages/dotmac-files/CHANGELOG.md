@@ -2,6 +2,14 @@
 
 ## 0.1.0a5 — source candidate
 
+- Recognise Word and plain-text uploads by content signature: legacy
+  ``.doc`` (OLE ``WordDocument`` stream) as ``application/msword``,
+  ``.docx`` (OOXML ``word/document.xml``) as the wordprocessingml type,
+  generic ``.zip`` archives as ``application/zip`` (OOXML payloads are
+  still classified as their document types, never as plain zip), and
+  UTF-8 ``.txt`` as ``text/plain``. Required by ERP finance/support
+  attachment cutovers, whose legacy policies admit these types.
+
 - Add a one-key reviewed-orphan operation that checks the live provider
   identity, authoritative references, exact object presence and object age
   before deleting. It returns a typed outcome for the product's durable run
