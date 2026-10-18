@@ -127,6 +127,11 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Released a1 remains unchanged. Candidate a2 adds separate Billing-shaped V2 rendering with honest recorded provenance, shared Kernel a103 canonical encoding and strict in-memory PDF validation. Hosted acceptance, authorized publication and install-back verification precede product qualification; no Sub pin, official-artifact authority or financial writer activation changes here.",
       "state": "declared-unpublished"
     },
+    "dotmac-files": {
+      "declared": "0.1.0a6",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a5 remains published and tagged as dotmac-files-v0.1.0a5. 0.1.0a6 adds Word (.doc/.docx), plain-text and generic-zip content-signature detection to prepare_upload so ERP finance/support attachment families can cut over without rejecting previously accepted uploads; that changes importable source, so a bare 0.1.0a5 would name two surfaces. Remove this row only with the oracle-backed record of an authorized exact 0.1.0a6 publication; allocation authorizes no tag, adoption or production change.",
+      "state": "declared-unpublished"
+    },
     "dotmac-inbox": {
       "declared": "0.1.0a2+dev",
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a2 IS published and tagged (dotmac-inbox-v0.1.0a2). This Inbox capability slice adds explicit snooze-until-reply, late transport-observation correlation, opaque product-supplied thread/message identities and the unreleased ib_0002 migration, so continuing to declare bare 0.1.0a2 would make one released version name two contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only by separately ALLOCATING the next public version at release time; never remove the marker merely to quiet a gate.",

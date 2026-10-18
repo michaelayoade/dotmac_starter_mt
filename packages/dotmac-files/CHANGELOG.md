@@ -1,6 +1,6 @@
 # Changelog — dotmac-files
 
-## 0.1.0a5+dev — source candidate (next release to allocate)
+## 0.1.0a6 — allocated source candidate, not yet published
 
 - Recognise Word and plain-text uploads by content signature: legacy
   ``.doc`` (OLE ``WordDocument`` stream) as ``application/msword``,
