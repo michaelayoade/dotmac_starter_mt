@@ -535,6 +535,30 @@ _REVIEW_BASE_SHA256 = "bd5e3219f0d6398a9669c8d7b015c74e83eb52390b909fbb0a567765f
 _REVIEW_BEGIN = "BEGIN_UNQUALIFIED_LOCK_REVIEW"
 _REVIEW_END = "END_UNQUALIFIED_LOCK_REVIEW"
 _REVIEW_PACKET_LIMIT = 65536
+_REVIEW_REFUSALS = {
+    "lock review Learning metadata refused": "lock review Learning metadata refused",
+    "lock review base order refused": "lock review base order refused",
+    "lock review boundaries refused": "lock review boundaries refused",
+    "lock review byte bound refused": "lock review byte bound refused",
+    "lock review checkout changed": "lock review checkout changed",
+    "lock review content hash refused": "lock review content hash refused",
+    "lock review context refused": "lock review context refused",
+    "lock review metadata refused": "lock review metadata refused",
+    "lock review module metadata refused": "lock review module metadata refused",
+    "lock review module preimage refused": "lock review module preimage refused",
+    "lock review non-whitelisted churn refused": (
+        "lock review non-whitelisted churn refused"
+    ),
+    "lock review operation refused": "lock review operation refused",
+    "lock review package identities refused": "lock review package identities refused",
+    "lock review package order refused": "lock review package order refused",
+    "lock review packet bound refused": "lock review packet bound refused",
+    "lock review pinned inputs refused": "lock review pinned inputs refused",
+    "lock review proposal refused": "lock review proposal refused",
+    "lock review receipt refused": "lock review receipt refused",
+    "lock review record refused": "lock review record refused",
+    "lock review structure refused": "lock review structure refused",
+}
 
 
 def _review_partition(raw: bytes) -> tuple[list[tuple[str, int, int]], int]:
@@ -794,6 +818,10 @@ def _review_artifact(repo: Path) -> None:
         )
         if len(encoded) > _REVIEW_PACKET_LIMIT or not encoded.isascii():
             raise BootstrapError("lock review packet bound refused")
+    except BootstrapError as error:
+        raise BootstrapError(
+            _REVIEW_REFUSALS.get(str(error), "lock review refused")
+        ) from None
     except (OSError, ValueError, KeyError, TypeError, UnicodeError, StopIteration):
         raise BootstrapError("lock review refused") from None
     print(_REVIEW_BEGIN + "\n" + encoded + "\n" + _REVIEW_END)

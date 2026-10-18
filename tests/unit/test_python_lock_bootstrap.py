@@ -1146,3 +1146,37 @@ def test_review_cannot_accept_schema1_even_with_a_matching_base_pin(monkeypatch)
     )
     with pytest.raises(producer.BootstrapError):
         producer._review_operations(base, generated, _proposal())
+
+
+@pytest.mark.parametrize("message", tuple(producer._REVIEW_REFUSALS))
+def test_review_emits_only_closed_literal_refusal_messages(
+    review_case, monkeypatch, capsys, message
+):
+    repo, _, _, _ = review_case
+
+    def refuse(*arguments):
+        raise producer.BootstrapError(message)
+
+    monkeypatch.setattr(producer, "_review_operations", refuse)
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_artifact(repo)
+    assert str(caught.value) == producer._REVIEW_REFUSALS[message]
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+
+
+@pytest.mark.parametrize("error_type", [producer.BootstrapError, ValueError])
+def test_review_unknown_refusal_details_stay_generic(
+    review_case, monkeypatch, capsys, error_type
+):
+    repo, _, _, _ = review_case
+
+    def refuse(*arguments):
+        raise error_type(_REVIEW_SENTINEL)
+
+    monkeypatch.setattr(producer, "_review_operations", refuse)
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_artifact(repo)
+    assert str(caught.value) == "lock review refused"
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
