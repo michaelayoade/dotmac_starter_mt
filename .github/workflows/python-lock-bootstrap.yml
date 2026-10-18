@@ -34,6 +34,8 @@ jobs:
       - uses: ./.github/actions/setup-poetry
       - name: Generate a lock for a subsequent reviewed source commit
         run: python -m scripts.python_lock_bootstrap
+      - name: Inspect the bounded unqualified lock artifact
+        run: python -m scripts.python_lock_bootstrap --review
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-lock-proposal
