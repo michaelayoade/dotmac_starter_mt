@@ -526,13 +526,290 @@ def produce_lock(
     return manifest
 
 
+# This inspection is deliberately bound to one reviewed proposal and public base.
+# It is not a general lock-diff printer or a release qualification mechanism.
+_REVIEW_PROPOSAL_SHA256 = (
+    "442af427f4a42a00fb9ecff1f64e0ab92e5de270ba5707cfa666bfa5bf42302e"
+)
+_REVIEW_BASE_SHA256 = "bd5e3219f0d6398a9669c8d7b015c74e83eb52390b909fbb0a567765f3bf6194"
+_REVIEW_BEGIN = "BEGIN_UNQUALIFIED_LOCK_REVIEW"
+_REVIEW_END = "END_UNQUALIFIED_LOCK_REVIEW"
+_REVIEW_PACKET_LIMIT = 65536
+
+
+def _review_partition(raw: bytes) -> tuple[list[tuple[str, int, int]], int]:
+    """Map byte record boundaries independently of the parsed TOML document."""
+    if len(raw) > 400000:
+        raise BootstrapError("lock review byte bound refused")
+    document = tomllib.loads(raw.decode("utf-8"))
+    if set(document) != {"package", "metadata"}:
+        raise BootstrapError("lock review structure refused")
+    packages = document["package"]
+    metadata = document["metadata"]
+    if (
+        not isinstance(packages, list)
+        or any(not isinstance(package, dict) for package in packages)
+        or not isinstance(metadata, dict)
+    ):
+        raise BootstrapError("lock review structure refused")
+    if (
+        set(metadata) != {"lock-version", "python-versions", "content-hash"}
+        or metadata["lock-version"] != "2.1"
+        or metadata["python-versions"] != ">=3.12,<3.14"
+        or not isinstance(metadata["content-hash"], str)
+        or not _HEX64.fullmatch(metadata["content-hash"])
+        or _lock_version(raw) != "2.4.1"
+    ):
+        raise BootstrapError("lock review metadata refused")
+    starts = [match.start() for match in re.finditer(rb"^\[\[package\]\]\n", raw, re.M)]
+    metadata_starts = [
+        match.start() for match in re.finditer(rb"^\[metadata\]\n", raw, re.M)
+    ]
+    if len(starts) != len(packages) or len(metadata_starts) != 1 or not starts:
+        raise BootstrapError("lock review boundaries refused")
+    end = metadata_starts[0]
+    if starts[-1] >= end:
+        raise BootstrapError("lock review boundaries refused")
+    records = []
+    names = set()
+    for index, start in enumerate(starts):
+        stop = starts[index + 1] if index + 1 < len(starts) else end
+        record = tomllib.loads(raw[start:stop].decode("utf-8"))
+        if set(record) != {"package"} or record["package"] != [packages[index]]:
+            raise BootstrapError("lock review record refused")
+        name = packages[index].get("name")
+        if not isinstance(name, str) or name in names:
+            raise BootstrapError("lock review package identities refused")
+        names.add(name)
+        records.append((name, start, stop))
+    return records, end
+
+
+def _review_learning_record(proposal: Proposal) -> bytes:
+    file = next(
+        file for file in proposal.files if file.path == PACKAGE_PATH + "pyproject.toml"
+    )
+    metadata = tomllib.loads(file.content)["tool"]["poetry"]
+    expected = {
+        "name": "dotmac-learning",
+        "version": "0.1.0a1",
+        "description": (
+            "Reusable tenant learning results, progress, completion and certificates"
+        ),
+    }
+    dependencies = {
+        "python": ">=3.11,<3.14",
+        "dotmac-kernel": ">=0.1.0a106",
+        "sqlalchemy": "^2.0",
+        "pydantic": "^2.9",
+        "alembic": ">=1.13",
+    }
+    if (
+        any(metadata.get(key) != value for key, value in expected.items())
+        or metadata.get("dependencies") != dependencies
+    ):
+        raise BootstrapError("lock review Learning metadata refused")
+    # Closed Poetry 2.4.1 template. No artifact text supplies replacement bytes.
+    return (
+        "[[package]]\n"
+        'name = "dotmac-learning"\n'
+        'version = "0.1.0a1"\n'
+        'description = "Reusable tenant learning results, progress, '
+        'completion and certificates"\n'
+        "optional = false\n"
+        'python-versions = ">=3.11,<3.14"\n'
+        'groups = ["main"]\n'
+        "files = []\n"
+        "develop = true\n\n"
+        "[package.dependencies]\n"
+        'alembic = ">=1.13"\n'
+        'dotmac-kernel = ">=0.1.0a106"\n'
+        'pydantic = "^2.9"\n'
+        'sqlalchemy = "^2.0"\n\n'
+        "[package.source]\n"
+        'type = "directory"\n'
+        'url = "packages/dotmac-learning"\n\n\n'
+    ).encode("ascii")
+
+
+def _review_operations(
+    base: bytes, generated: bytes, proposal: Proposal
+) -> list[dict[str, object]]:
+    """Reconstruct the entire generated lock from exactly four bounded edits."""
+    if _digest(base) != _REVIEW_BASE_SHA256 or proposal.schema_version != 2:
+        raise BootstrapError("lock review pinned inputs refused")
+    records, metadata_start = _review_partition(base)
+    generated_records, generated_metadata_start = _review_partition(generated)
+    names = [name for name, _, _ in records]
+    if "dotmac-learning" in names or [
+        name for name, _, _ in generated_records
+    ] != sorted([*names, "dotmac-learning"]):
+        raise BootstrapError("lock review package order refused")
+    if names != sorted(names):
+        raise BootstrapError("lock review base order refused")
+    operations = []
+    for name, old_version, new_version, old_floor in (
+        ("dotmac-fulfillment", "0.1.0a1", "0.1.0a2", "0.1.0a89"),
+        ("dotmac-template-studio", "0.2.0a5", "0.2.0a6", "0.1.0a97"),
+    ):
+        metadata_file = next(
+            file
+            for file in proposal.files
+            if file.path == f"packages/{name}/pyproject.toml"
+        )
+        proposed = tomllib.loads(metadata_file.content)["tool"]["poetry"]
+        if (
+            proposed["version"] != new_version
+            or proposed["dependencies"]["dotmac-kernel"] != ">=0.1.0a106"
+        ):
+            raise BootstrapError("lock review module metadata refused")
+        _, start, stop = next(record for record in records if record[0] == name)
+        old = base[start:stop]
+        version_line = f'version = "{old_version}"\n'.encode("ascii")
+        kernel_line = f'dotmac-kernel = ">={old_floor}"\n'.encode("ascii")
+        if old.count(version_line) != 1 or old.count(kernel_line) != 1:
+            raise BootstrapError("lock review module preimage refused")
+        replacement = old.replace(
+            version_line, f'version = "{new_version}"\n'.encode("ascii")
+        ).replace(kernel_line, b'dotmac-kernel = ">=0.1.0a106"\n')
+        operations.append(
+            {
+                "kind": name,
+                "offset": start,
+                "old_length": stop - start,
+                "old_sha256": _digest(old),
+                "replacement": replacement.decode("utf-8"),
+            }
+        )
+    insertion = next(start for name, start, _ in records if name > "dotmac-learning")
+    operations.append(
+        {
+            "kind": "insert-dotmac-learning",
+            "offset": insertion,
+            "old_length": 0,
+            "old_sha256": _digest(b""),
+            "replacement": _review_learning_record(proposal).decode("ascii"),
+        }
+    )
+    pattern = rb'^content-hash = "([0-9a-f]{64})"\n'
+    old_hashes = list(re.finditer(pattern, base[metadata_start:], re.M))
+    new_hashes = list(re.finditer(pattern, generated[generated_metadata_start:], re.M))
+    if len(old_hashes) != 1 or len(new_hashes) != 1:
+        raise BootstrapError("lock review content hash refused")
+    match = old_hashes[0]
+    offset = metadata_start + match.start(1)
+    # Only the checked 64-lowercase-hex hash value is accepted from the artifact.
+    replacement_hash = new_hashes[0].group(1)
+    operations.append(
+        {
+            "kind": "metadata-content-hash",
+            "offset": offset,
+            "old_length": 64,
+            "old_sha256": _digest(base[offset : offset + 64]),
+            "replacement": replacement_hash.decode("ascii"),
+        }
+    )
+    operations.sort(key=lambda operation: cast(int, operation["offset"]))
+    reconstructed = bytearray()
+    cursor = 0
+    for operation in operations:
+        start, length = (
+            cast(int, operation["offset"]),
+            cast(int, operation["old_length"]),
+        )
+        if (
+            start < cursor
+            or _digest(base[start : start + length]) != operation["old_sha256"]
+        ):
+            raise BootstrapError("lock review operation refused")
+        reconstructed.extend(base[cursor:start])
+        reconstructed.extend(cast(str, operation["replacement"]).encode("utf-8"))
+        cursor = start + length
+    reconstructed.extend(base[cursor:])
+    if (
+        bytes(reconstructed) != generated
+        or len(reconstructed) != len(generated)
+        or _digest(reconstructed) != _digest(generated)
+    ):
+        raise BootstrapError("lock review non-whitelisted churn refused")
+    return operations
+
+
+def _review_artifact(repo: Path) -> None:
+    """Emit only a fully checked bounded packet; never generate or write files."""
+    try:
+        context = _require_hosted(repo)
+        raw = _read(repo, PROPOSAL_PATH)
+        if _digest(raw) != _REVIEW_PROPOSAL_SHA256:
+            raise BootstrapError("lock review proposal refused")
+        proposal = parse_proposal(raw)
+        observed = validate_checkout(repo, proposal, context)
+        if (
+            proposal.schema_version != 2
+            or observed.poetry_version != "2.4.1"
+            or PROPOSAL_PATH not in observed.tracked_paths
+        ):
+            raise BootstrapError("lock review context refused")
+        base = _read(repo, "poetry.lock")
+        generated = _read(repo, OUTPUT_PATH + "/poetry.lock")
+        artifact_manifest = _read(repo, OUTPUT_PATH + "/manifest.json")
+        operations = _review_operations(base, generated, proposal)
+        # Independent reconstruction of the unchanged producer receipt formula.
+        receipt = LockGenerationManifest(
+            proposal.schema_version,
+            "generated_unqualified_lock",
+            "dotmac-learning",
+            proposal.base_sha,
+            observed.checkout_sha,
+            observed.parent_shas,
+            _digest(raw),
+            tuple(
+                ProposedFileHash(file.path, file.before_sha256, file.sha256)
+                for file in proposal.files + proposal.package_sources
+            ),
+            observed.poetry_version,
+            observed.original_lock_sha256,
+            _digest(generated),
+        )
+        canonical_receipt = (
+            json.dumps(asdict(receipt), sort_keys=True, indent=2) + "\n"
+        ).encode("utf-8")
+        if artifact_manifest != canonical_receipt:
+            raise BootstrapError("lock review receipt refused")
+        if (
+            validate_checkout(repo, proposal, context) != observed
+            or _read(repo, PROPOSAL_PATH) != raw
+        ):
+            raise BootstrapError("lock review checkout changed")
+        packet = {
+            "purpose": "UNQUALIFIED",
+            "schema_version": 1,
+            "base_lock": {"bytes": len(base), "sha256": _digest(base)},
+            "generated_lock": {"bytes": len(generated), "sha256": _digest(generated)},
+            "receipt": asdict(receipt),
+            "operations": operations,
+        }
+        encoded = json.dumps(
+            packet, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        )
+        if len(encoded) > _REVIEW_PACKET_LIMIT or not encoded.isascii():
+            raise BootstrapError("lock review packet bound refused")
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError, StopIteration):
+        raise BootstrapError("lock review refused") from None
+    print(_REVIEW_BEGIN + "\n" + encoded + "\n" + _REVIEW_END)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--validate", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--validate", action="store_true")
+    modes.add_argument("--review", action="store_true")
     arguments = parser.parse_args()
     repo = Path.cwd().resolve()
     proposal_path = repo / PROPOSAL_PATH
-    if arguments.validate:
+    if arguments.review:
+        _review_artifact(repo)
+    elif arguments.validate:
         context = _require_hosted(repo)
         proposal = parse_proposal(_read(repo, PROPOSAL_PATH))
         validate_checkout(repo, proposal, context)
