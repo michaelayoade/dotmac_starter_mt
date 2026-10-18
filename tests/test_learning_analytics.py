@@ -117,7 +117,18 @@ def test_analysis_best_per_person_strict_fraction_and_actual_rls(result_database
         # Another activity is excluded even for the same person.
         aid = uuid4()
         create_activity(
-            db, ActivityWrite(id=aid, tenant_id=tenant, course_id=course, title="Other")
+            db,
+            ActivityWrite(
+                type="mcq_test",
+                pass_threshold=0.0,
+                assessment_mode="graded",
+                grading="auto",
+                weight=1.0,
+                id=aid,
+                tenant_id=tenant,
+                course_id=course,
+                title="Other",
+            ),
         )
         append(db, tenant, person, aid, 1, 1, [{"id": "excluded", "correct": True}])
         assert (
@@ -137,6 +148,8 @@ def test_analysis_best_per_person_strict_fraction_and_actual_rls(result_database
         create_course(
             db,
             CourseWrite(
+                status="published",
+                listed=False,
                 id=cid,
                 tenant_id=other,
                 slug=cid.hex,
@@ -146,7 +159,18 @@ def test_analysis_best_per_person_strict_fraction_and_actual_rls(result_database
             ),
         )
         create_activity(
-            db, ActivityWrite(id=aid, tenant_id=other, course_id=cid, title="B")
+            db,
+            ActivityWrite(
+                type="mcq_test",
+                pass_threshold=0.0,
+                assessment_mode="graded",
+                grading="auto",
+                weight=1.0,
+                id=aid,
+                tenant_id=other,
+                course_id=cid,
+                title="B",
+            ),
         )
         append(db, other, other_person, aid, 1, 1, [{"id": "own", "correct": True}])
         own = analytics.item_analysis(db, tenant_id=other, activity_id=aid)

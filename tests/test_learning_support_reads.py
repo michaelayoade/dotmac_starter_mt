@@ -41,6 +41,7 @@ def course(db, tenant, title, *, status="published"):
             discipline="test",
             source_ref="test",
             status=status,
+            listed=False,
         ),
     )
     return cid
@@ -164,6 +165,11 @@ def support_data(result_database):
                 tenant_id=tenant,
                 course_id=unrelated,
                 title="Recent unrelated",
+                type="mcq_test",
+                pass_threshold=0.0,
+                weight=1.0,
+                assessment_mode="graded",
+                grading="auto",
             ),
         )
         score(db, tenant, person, other_activity, NOW)
@@ -188,14 +194,19 @@ def test_populated_all_projections_no_account_filter_and_actual_two_tenant_rls(
         )
         root = db.get_transaction()
         dashboard = reads.cohort_overview(
-            db, tenant_id=tenant, cohort_id=cohort, now=NOW
+            db,
+            tenant_id=tenant,
+            cohort_id=cohort,
+            now=NOW,
+            at_risk_pct=0.5,
+            stale_days=14,
         )
         assert len(dashboard.rows) == 1
         row = dashboard.rows[0]
         assert row.person.id == person and row.completion_pct == 0.4
         assert row.last_activity_at == NOW - timedelta(days=15) and row.at_risk
         risks = reads.at_risk_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db, tenant_id=tenant, person_id=person, now=NOW, behind_threshold=0.2
         )
         assert {(r.course_id, r.reason) for r in risks} == {
             (cid, "overdue"),
@@ -207,6 +218,7 @@ def test_populated_all_projections_no_account_filter_and_actual_two_tenant_rls(
             person_id=person,
             q="  nEeDlE  ",
             authority=SearchAuthority(tenant, person, False),
+            limit=20,
         )
         assert learner.term == "nEeDlE" and learner.courses == ()
         assert (
@@ -219,6 +231,7 @@ def test_populated_all_projections_no_account_filter_and_actual_two_tenant_rls(
             person_id=person,
             q="needle",
             authority=SearchAuthority(tenant, person, True),
+            limit=20,
         )
         assert tuple(c.id for c in staff.courses) == (hidden,)
         assert len(staff.chapters) == 2
@@ -233,9 +246,18 @@ def test_populated_all_projections_no_account_filter_and_actual_two_tenant_rls(
             )
         )
         with pytest.raises(ParticipationNotFound):
-            reads.cohort_overview(db, tenant_id=tenant, cohort_id=cohort, now=NOW)
+            reads.cohort_overview(
+                db,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                now=NOW,
+                at_risk_pct=0.5,
+                stale_days=14,
+            )
         assert (
-            reads.at_risk_for_person(db, tenant_id=tenant, person_id=person, now=NOW)
+            reads.at_risk_for_person(
+                db, tenant_id=tenant, person_id=person, now=NOW, behind_threshold=0.2
+            )
             == ()
         )
         evil = reads.search(
@@ -244,6 +266,7 @@ def test_populated_all_projections_no_account_filter_and_actual_two_tenant_rls(
             person_id=person,
             q="needle",
             authority=SearchAuthority(tenant, person, True),
+            limit=20,
         )
         assert evil.courses == evil.chapters == ()
         own = Cohort(tenant_id=other, name="B", discipline="test")
@@ -251,7 +274,14 @@ def test_populated_all_projections_no_account_filter_and_actual_two_tenant_rls(
         db.flush()
         db.add(Enrollment(tenant_id=other, cohort_id=own.id, person_id=other_person))
         assert (
-            reads.cohort_overview(db, tenant_id=other, cohort_id=own.id, now=NOW)
+            reads.cohort_overview(
+                db,
+                tenant_id=other,
+                cohort_id=own.id,
+                now=NOW,
+                at_risk_pct=0.5,
+                stale_days=14,
+            )
             .rows[0]
             .at_risk
         )
@@ -275,7 +305,12 @@ def test_search_single_character_sql_wildcards_independent_caps_and_empty_input(
         sa_event.listen(app, "before_cursor_execute", capture)
         try:
             result = reads.search(
-                db, tenant_id=tenant, person_id=person, q="n", authority=authority
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                q="n",
+                authority=authority,
+                limit=20,
             )
         finally:
             sa_event.remove(app, "before_cursor_execute", capture)
@@ -283,7 +318,7 @@ def test_search_single_character_sql_wildcards_independent_caps_and_empty_input(
         assert all("ORDER BY" not in statement.upper() for statement in statements)
         assert len(result.courses) == len(result.chapters) == 20
         wildcards = reads.search(
-            db, tenant_id=tenant, person_id=person, q="%", authority=authority
+            db, tenant_id=tenant, person_id=person, q="%", authority=authority, limit=20
         )
         assert len(wildcards.courses) == len(wildcards.chapters) == 20
         with monkeypatch.context() as patch:
@@ -294,7 +329,12 @@ def test_search_single_character_sql_wildcards_independent_caps_and_empty_input(
             patch.setattr(db, "execute", no_sql)
             patch.setattr(db, "scalars", no_sql)
             blank = reads.search(
-                db, tenant_id=tenant, person_id=person, q="  ", authority=authority
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                q="  ",
+                authority=authority,
+                limit=20,
             )
             assert blank.courses == blank.chapters == ()
             with pytest.raises(ValueError):
@@ -304,6 +344,7 @@ def test_search_single_character_sql_wildcards_independent_caps_and_empty_input(
                     person_id=person,
                     q="needle",
                     authority=SearchAuthority(uuid4(), person, True),
+                    limit=20,
                 )
 
 
@@ -336,6 +377,7 @@ def test_search_scope_refusal_precedes_real_sql_and_pending_autoflush(
                     person_id=person,
                     q="needle",
                     authority=authority,
+                    limit=20,
                 )
             assert statements == []
             assert pending in db.new
@@ -360,14 +402,22 @@ def test_at_risk_role_status_completed_and_active_offering_asymmetry(support_dat
         )
         assert (
             reads.at_risk_for_person(
-                db, tenant_id=tenant, person_id=instructor, now=NOW
+                db,
+                tenant_id=tenant,
+                person_id=instructor,
+                now=NOW,
+                behind_threshold=0.2,
             )
             == ()
         )
         assert tuple(
             r.course_id
             for r in reads.at_risk_for_person(
-                db, tenant_id=tenant, person_id=waitlisted, now=NOW
+                db,
+                tenant_id=tenant,
+                person_id=waitlisted,
+                now=NOW,
+                behind_threshold=0.2,
             )
         ) == (cid,)
         completion = db.scalar(
@@ -377,7 +427,7 @@ def test_at_risk_role_status_completed_and_active_offering_asymmetry(support_dat
         assert tuple(
             r.course_id
             for r in reads.at_risk_for_person(
-                db, tenant_id=tenant, person_id=person, now=NOW
+                db, tenant_id=tenant, person_id=person, now=NOW, behind_threshold=0.2
             )
         ) == (behind,)
         offering = db.scalar(
@@ -385,6 +435,35 @@ def test_at_risk_role_status_completed_and_active_offering_asymmetry(support_dat
         )
         offering.status = "inactive"
         assert (
-            reads.at_risk_for_person(db, tenant_id=tenant, person_id=person, now=NOW)
+            reads.at_risk_for_person(
+                db, tenant_id=tenant, person_id=person, now=NOW, behind_threshold=0.2
+            )
             == ()
         )
+
+
+def test_configured_search_cap_and_dashboard_thresholds(support_data):
+    fixture, cohort, *_ = support_data
+    _, app, tenant, person, *_ = fixture
+    with scoped(app, tenant) as db:
+        root = db.get_transaction()
+        result = reads.search(
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            q="needle",
+            authority=SearchAuthority(tenant, person, True),
+            limit=1,
+        )
+        assert len(result.courses) <= 1 and len(result.chapters) == 1
+        dashboard = reads.cohort_overview(
+            db,
+            tenant_id=tenant,
+            cohort_id=cohort,
+            now=NOW,
+            at_risk_pct=0.3,
+            stale_days=2,
+        )
+        assert dashboard.rows[0].completion_pct == 0.4
+        assert not dashboard.rows[0].at_risk
+        assert db.get_transaction() is root

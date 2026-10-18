@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from math import floor
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -66,10 +67,6 @@ def _person(party: Party, profile: PartyPerson) -> SuccessPersonFact:
     )
 
 
-# Deterministic severity thresholds (multipliers on the configured base).
-_INACTIVITY_HIGH_FACTOR = 2  # inactive >= 2x threshold days -> high
-_OVERDUE_HIGH_COUNT = 3
-
 # Severity is stored as text but must sort highest-risk first, not alphabetically
 # ("high" < "medium" < "low" as strings would surface medium ahead of high).
 _SEVERITY_RANK = {"high": 3, "medium": 2, "low": 1}
@@ -131,8 +128,9 @@ def _rule_inactivity(
     person_id: UUID,
     enrolled_since: datetime | None,
     now: datetime,
-    threshold_days: int,
+    terms: SuccessTerms,
 ) -> tuple[dict[str, JsonValue], str, str] | None:
+    threshold_days = terms.inactive_days
     last = learning_events.last_activity_at(
         db, tenant_id=tenant_id, person_id=person_id
     )
@@ -142,7 +140,9 @@ def _rule_inactivity(
     days = (now - anchor).days
     if days < threshold_days:
         return None
-    severity = "high" if days >= threshold_days * _INACTIVITY_HIGH_FACTOR else "medium"
+    severity = (
+        "high" if days >= threshold_days * terms.inactivity_high_factor else "medium"
+    )
     facts: dict[str, JsonValue] = {
         "last_activity_at": anchor.isoformat(),
         "days_inactive": days,
@@ -154,7 +154,7 @@ def _rule_inactivity(
 
 
 def _rule_overdue(
-    db: Session, *, tenant_id: UUID, person_id: UUID, now: datetime
+    db: Session, *, tenant_id: UUID, person_id: UUID, now: datetime, terms: SuccessTerms
 ) -> tuple[dict[str, JsonValue], str, str] | None:
     overdue = [
         r
@@ -168,13 +168,18 @@ def _rule_overdue(
     oldest = min(r.due_at for r in overdue)
     days_late = (now - oldest).days
     severity = (
-        "high" if len(overdue) >= _OVERDUE_HIGH_COUNT or days_late > 7 else "medium"
+        "high"
+        if len(overdue) >= terms.overdue_high_count
+        or days_late > terms.overdue_high_days
+        else "medium"
     )
     facts: dict[str, JsonValue] = {
         "overdue_count": len(overdue),
         "oldest_due_at": oldest.isoformat(),
         "days_late": days_late,
-        "titles": cast(JsonValue, [r.activity.title for r in overdue][:5]),
+        "titles": cast(
+            JsonValue, [r.activity.title for r in overdue][: terms.overdue_title_limit]
+        ),
     }
     action = (
         "Agree a catch-up plan for the overdue work; consider a deadline extension."
@@ -185,8 +190,6 @@ def _rule_overdue(
 # Volume gate for the below-passing rule: only fire once enough of the course
 # has actually been graded, so a learner one activity into a ten-activity course
 # is not flagged failing. Missing due work is the overdue rule's job.
-_BELOW_PASSING_MIN_GRADED = 2
-_BELOW_PASSING_MIN_WEIGHT_FRACTION = 0.20
 
 
 def _rule_below_passing(
@@ -195,8 +198,9 @@ def _rule_below_passing(
     tenant_id: UUID,
     person_id: UUID,
     course_ids: list[UUID],
-    min_grade_pct: int,
+    terms: SuccessTerms,
 ) -> tuple[dict[str, JsonValue], str, str] | None:
+    min_grade_pct = terms.min_grade_pct
     worst: dict[str, JsonValue] | None = None
     for course_id in course_ids:
         # Graded-only weighted grade: score the learner on submitted work, not
@@ -204,9 +208,9 @@ def _rule_below_passing(
         g = attempted_grade(
             db, tenant_id=tenant_id, person_id=person_id, course_id=course_id
         )
-        if g.graded_count < _BELOW_PASSING_MIN_GRADED:
+        if g.graded_count < terms.below_passing_min_graded:
             continue
-        if g.graded_weight_fraction < _BELOW_PASSING_MIN_WEIGHT_FRACTION:
+        if g.graded_weight_fraction < terms.below_passing_min_weight_fraction:
             continue
         if g.pct < min_grade_pct and (
             worst is None or g.pct < cast(int, worst["grade_pct"])
@@ -223,7 +227,10 @@ def _rule_below_passing(
     if worst is None:
         return None
     severity = (
-        "high" if cast(int, worst["grade_pct"]) < min_grade_pct // 2 else "medium"
+        "high"
+        if cast(int, worst["grade_pct"])
+        < floor(min_grade_pct * terms.below_passing_high_grade_factor)
+        else "medium"
     )
     action = (
         "Review their weakest activities together; point them at the relevant chapters."
@@ -390,8 +397,6 @@ def sweep(
     boundary = _transaction(db)
     if accounts.tenant_id != tenant_id:
         raise ValueError("account population tenant scope does not match the command")
-    threshold_days = terms.inactive_days
-    min_grade = terms.min_grade_pct
     cert_grace_hours = terms.certificate_grace_hours
 
     counts = {"opened": 0, "refreshed": 0, "auto_resolved": 0}
@@ -429,17 +434,17 @@ def sweep(
                 person_id=person_id,
                 enrolled_since=enrolled_since.get(person_id),
                 now=now,
-                threshold_days=threshold_days,
+                terms=terms,
             ),
             REASON_OVERDUE_WORK: _rule_overdue(
-                db, tenant_id=tenant_id, person_id=person_id, now=now
+                db, tenant_id=tenant_id, person_id=person_id, now=now, terms=terms
             ),
             REASON_BELOW_PASSING: _rule_below_passing(
                 db,
                 tenant_id=tenant_id,
                 person_id=person_id,
                 course_ids=course_ids,
-                min_grade_pct=min_grade,
+                terms=terms,
             ),
             REASON_FAILED_FINAL: _rule_failed_final(
                 db, tenant_id=tenant_id, person_id=person_id, course_ids=course_ids
@@ -610,8 +615,6 @@ def segment_members(
     now = now or datetime.now(UTC)
     if segment not in SEGMENT_KEYS:
         raise SuccessBadRequest(f"unknown segment {segment!r}")
-    threshold_days = terms.inactive_days
-    min_grade = terms.min_grade_pct
 
     people = db.execute(
         select(Party, PartyPerson)
@@ -649,17 +652,19 @@ def segment_members(
                 person_id=person.id,
                 enrolled_since=enrolled_since,
                 now=now,
-                threshold_days=threshold_days,
+                terms=terms,
             )
         elif segment == "overdue_work":
-            hit = _rule_overdue(db, tenant_id=tenant_id, person_id=person.id, now=now)
+            hit = _rule_overdue(
+                db, tenant_id=tenant_id, person_id=person.id, now=now, terms=terms
+            )
         elif segment == "below_passing":
             hit = _rule_below_passing(
                 db,
                 tenant_id=tenant_id,
                 person_id=person.id,
                 course_ids=course_ids,
-                min_grade_pct=min_grade,
+                terms=terms,
             )
         elif segment == "failed_final":
             hit = _rule_failed_final(
@@ -671,7 +676,7 @@ def segment_members(
                 .where(CourseCompletion.tenant_id == tenant_id)
                 .where(CourseCompletion.person_id == person.id)
                 .where(CourseCompletion.course_id.in_(course_ids or [uuid4()]))
-                .where(CourseCompletion.pct >= 0.8)
+                .where(CourseCompletion.pct >= terms.almost_complete_fraction)
                 .where(CourseCompletion.status != "completed")
             ).first()
             hit = ({"pct": comp.pct}, "low", "") if comp is not None else None

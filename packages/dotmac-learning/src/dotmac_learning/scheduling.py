@@ -277,7 +277,7 @@ def get_session_for_person(
 
 
 def join_is_open(
-    session: ClassSessionFact, *, now: datetime, lead_minutes: int = 60
+    session: ClassSessionFact, *, now: datetime, lead_minutes: int
 ) -> bool:
     if not session.join_url or session.status != "scheduled":
         return False

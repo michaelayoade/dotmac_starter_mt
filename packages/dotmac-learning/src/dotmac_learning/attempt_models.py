@@ -99,7 +99,7 @@ class AttemptGrant(Base, TimestampMixin):
     activity_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     extra_attempts: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default="1"
+        Integer, nullable=False, server_default="1"
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     granted_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))

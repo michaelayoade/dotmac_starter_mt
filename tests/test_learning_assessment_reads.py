@@ -23,7 +23,16 @@ def test_grouped_attempt_counts_include_unscored_submissions_and_keep_scope(
     with admin.begin() as conn:
         peer = _person(conn, tenant)
     with scoped(app, tenant) as db:
-        second = Activity(tenant_id=tenant, course_id=course, title="Other", type="lab")
+        second = Activity(
+            assessment_mode="graded",
+            grading="auto",
+            pass_threshold=0.0,
+            weight=1.0,
+            tenant_id=tenant,
+            course_id=course,
+            title="Other",
+            type="lab",
+        )
         db.add(second)
         db.flush()
         db.add_all(

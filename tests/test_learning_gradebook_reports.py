@@ -72,6 +72,10 @@ def test_gradebook_reports_real_app_role_isolation_and_detachment(result_databas
         create_activity(
             db,
             ActivityWrite(
+                type="mcq_test",
+                pass_threshold=0.0,
+                assessment_mode="graded",
+                grading="auto",
                 id=missing,
                 tenant_id=tenant,
                 course_id=course,
@@ -197,6 +201,7 @@ def test_only_active_offerings_and_active_students_without_person_status_filter(
             create_course(
                 db,
                 CourseWrite(
+                    listed=False,
                     id=cid,
                     tenant_id=tenant,
                     slug=cid.hex,
@@ -209,7 +214,15 @@ def test_only_active_offerings_and_active_students_without_person_status_filter(
             create_activity(
                 db,
                 ActivityWrite(
-                    id=aid, tenant_id=tenant, course_id=cid, title="Excluded"
+                    type="mcq_test",
+                    pass_threshold=0.0,
+                    assessment_mode="graded",
+                    grading="auto",
+                    weight=1.0,
+                    id=aid,
+                    tenant_id=tenant,
+                    course_id=cid,
+                    title="Excluded",
                 ),
             )
             if status is not None:
@@ -233,6 +246,8 @@ def test_only_active_offerings_and_active_students_without_person_status_filter(
         create_course(
             db,
             CourseWrite(
+                status="published",
+                listed=False,
                 id=cid,
                 tenant_id=other,
                 slug=cid.hex,
@@ -242,7 +257,18 @@ def test_only_active_offerings_and_active_students_without_person_status_filter(
             ),
         )
         create_activity(
-            db, ActivityWrite(id=aid, tenant_id=other, course_id=cid, title="B")
+            db,
+            ActivityWrite(
+                type="mcq_test",
+                pass_threshold=0.0,
+                assessment_mode="graded",
+                grading="auto",
+                weight=1.0,
+                id=aid,
+                tenant_id=other,
+                course_id=cid,
+                title="B",
+            ),
         )
         own_cohort, _, _ = seed(db, other, other_person, cid, aid)
         assert (

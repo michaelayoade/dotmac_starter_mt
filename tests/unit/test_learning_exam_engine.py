@@ -141,10 +141,19 @@ def test_option_order_is_byte_stable_against_a_recorded_shuffle():
 
 def test_validity_gate_thresholds():
     """Near-chance and too-fast are absence of data, not weak candidates."""
-    assert exam_engine.check_validity(0.90, 900) == (True, None)
-    assert exam_engine.check_validity(0.33, 900)[1] == exam_engine.INVALID_NEAR_CHANCE
-    assert exam_engine.check_validity(0.90, 60)[1] == exam_engine.INVALID_TOO_FAST
-    assert exam_engine.check_validity(0.90, None)[1] == exam_engine.INVALID_TOO_FAST
+    assert exam_engine.check_validity(0.90, 900, terms=VALIDITY_TERMS) == (True, None)
+    assert (
+        exam_engine.check_validity(0.33, 900, terms=VALIDITY_TERMS)[1]
+        == exam_engine.INVALID_NEAR_CHANCE
+    )
+    assert (
+        exam_engine.check_validity(0.90, 60, terms=VALIDITY_TERMS)[1]
+        == exam_engine.INVALID_TOO_FAST
+    )
+    assert (
+        exam_engine.check_validity(0.90, None, terms=VALIDITY_TERMS)[1]
+        == exam_engine.INVALID_TOO_FAST
+    )
 
 
 # --- the engine, used directly -------------------------------------------
@@ -248,35 +257,45 @@ def test_time_floor_tracks_the_paper_size():
     """The bug this fixes: a 60-question paper was still gated at six minutes."""
     from dotmac_learning import exam_engine
 
-    assert exam_engine.duration_floor(_paper(30)) == 360  # unchanged for the old shape
-    assert exam_engine.duration_floor(_paper(60)) == 720  # and now moves with it
+    assert (
+        exam_engine.duration_floor(_paper(30), seconds_per_question=12.0) == 360
+    )  # unchanged for the old shape
+    assert (
+        exam_engine.duration_floor(_paper(60), seconds_per_question=12.0) == 720
+    )  # and now moves with it
 
     # 8 minutes on a 60-question paper is too fast, though it cleared the old gate.
     assert (
-        exam_engine.check_validity(0.9, 480, questions=_paper(60))[1]
+        exam_engine.check_validity(
+            0.9, 480, questions=_paper(60), terms=VALIDITY_TERMS
+        )[1]
         == exam_engine.INVALID_TOO_FAST
     )
-    assert exam_engine.check_validity(0.9, 480, questions=_paper(30)) == (True, None)
+    assert exam_engine.check_validity(
+        0.9, 480, questions=_paper(30), terms=VALIDITY_TERMS
+    ) == (True, None)
 
 
 def test_chance_floor_tracks_the_options_actually_offered():
     """A true/false paper carries a 50% guessing baseline, not 25%."""
     from dotmac_learning import exam_engine
 
-    assert exam_engine.chance_baseline(_paper(10, options_each=4)) == pytest.approx(
-        0.25
-    )
-    assert exam_engine.chance_baseline(_paper(10, options_each=2)) == pytest.approx(
-        0.50
-    )
+    assert exam_engine.chance_baseline(
+        _paper(10, options_each=4), fallback_baseline=(1.0 / 3.0) / 1.33
+    ) == pytest.approx(0.25)
+    assert exam_engine.chance_baseline(
+        _paper(10, options_each=2), fallback_baseline=(1.0 / 3.0) / 1.33
+    ) == pytest.approx(0.50)
 
     # 60% on a true/false paper is near chance; on a four-option paper it is not.
     assert (
-        exam_engine.check_validity(0.60, 900, questions=_paper(10, options_each=2))[1]
+        exam_engine.check_validity(
+            0.60, 900, questions=_paper(10, options_each=2), terms=VALIDITY_TERMS
+        )[1]
         == exam_engine.INVALID_NEAR_CHANCE
     )
     assert exam_engine.check_validity(
-        0.60, 900, questions=_paper(10, options_each=4)
+        0.60, 900, questions=_paper(10, options_each=4), terms=VALIDITY_TERMS
     ) == (True, None)
 
 
@@ -284,17 +303,27 @@ def test_without_a_paper_the_historical_constants_still_apply():
     """Callers that cannot supply the paper must behave exactly as before."""
     from dotmac_learning import exam_engine
 
-    assert exam_engine.check_validity(0.90, 900) == (True, None)
-    assert exam_engine.check_validity(0.33, 900)[1] == exam_engine.INVALID_NEAR_CHANCE
-    assert exam_engine.check_validity(0.90, 300)[1] == exam_engine.INVALID_TOO_FAST
+    assert exam_engine.check_validity(0.90, 900, terms=VALIDITY_TERMS) == (True, None)
+    assert (
+        exam_engine.check_validity(0.33, 900, terms=VALIDITY_TERMS)[1]
+        == exam_engine.INVALID_NEAR_CHANCE
+    )
+    assert (
+        exam_engine.check_validity(0.90, 300, terms=VALIDITY_TERMS)[1]
+        == exam_engine.INVALID_TOO_FAST
+    )
 
 
 def test_validity_precedence_and_epsilon_boundary():
-    assert exam_engine.check_validity(exam_engine.MIN_VALID_FRACTION + 1e-9, None) == (
+    assert exam_engine.check_validity(
+        VALIDITY_TERMS.fallback_score_floor + 1e-9, None, terms=VALIDITY_TERMS
+    ) == (
         False,
         exam_engine.INVALID_NEAR_CHANCE,
     )
-    assert exam_engine.check_validity(0.9, exam_engine.MIN_DURATION_SECONDS) == (
+    assert exam_engine.check_validity(
+        0.9, VALIDITY_TERMS.fallback_duration_seconds, terms=VALIDITY_TERMS
+    ) == (
         True,
         None,
     )
@@ -313,10 +342,18 @@ def test_no_option_paper_uses_historical_score_fallback():
     question = _Q("no-options")
     question.options = []
     assert (
-        exam_engine.chance_baseline([question])
-        == exam_engine.MIN_VALID_FRACTION / exam_engine.NEAR_CHANCE_MARGIN
+        exam_engine.chance_baseline([question], fallback_baseline=(1.0 / 3.0) / 1.33)
+        == VALIDITY_TERMS.fallback_score_floor / VALIDITY_TERMS.near_chance_margin
     )
-    assert exam_engine.check_validity(0.9, 300, questions=[]) == (
+    assert exam_engine.check_validity(0.9, 300, questions=[], terms=VALIDITY_TERMS) == (
         False,
         exam_engine.INVALID_TOO_FAST,
     )
+
+
+VALIDITY_TERMS = exam_engine.ValidityTerms(
+    seconds_per_question=12.0,
+    near_chance_margin=1.33,
+    fallback_score_floor=1.0 / 3.0,
+    fallback_duration_seconds=360.0,
+)

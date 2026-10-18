@@ -170,6 +170,8 @@ def _progress(
     is_current: bool,
     last_at: datetime | None,
     now: datetime,
+    at_risk_pct: float,
+    stale_days: int,
 ) -> tuple[float, bool]:
     pct = (
         sum(pcts.get(cid, 0.0) for cid in course_ids) / len(course_ids)
@@ -178,8 +180,8 @@ def _progress(
     )
     risk = (
         is_current
-        and pct < 0.5
-        and (last_at is None or last_at < now - timedelta(days=14))
+        and pct < at_risk_pct
+        and (last_at is None or last_at < now - timedelta(days=stale_days))
     )
     return pct, risk
 
@@ -191,7 +193,9 @@ def cohort_workspace(
     cohort_id: UUID,
     accounts: ActiveAccountSelection,
     now: datetime | None = None,
-    limit: int = 12,
+    at_risk_pct: float,
+    stale_days: int,
+    limit: int,
     offset: int = 0,
 ) -> InstructorWorkspace:
     _require_accounts(tenant_id, accounts)
@@ -266,6 +270,8 @@ def cohort_workspace(
             current,
             last_by_student.get(party.id),
             now,
+            at_risk_pct,
+            stale_days,
         )
         row = InstructorStudent(
             enrollment_fact(enrollment),

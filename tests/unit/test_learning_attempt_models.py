@@ -88,7 +88,7 @@ def test_source_json_defaults_and_partial_open_uniqueness():
         if i.name == "ix_attempt_grants_lookup"
     )
     assert not lookup.unique
-    assert AttemptGrant.__table__.c.extra_attempts.default.arg == 1
+    assert AttemptGrant.__table__.c.extra_attempts.default is None
     assert str(AttemptGrant.__table__.c.extra_attempts.server_default.arg) == "1"
 
 

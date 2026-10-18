@@ -72,14 +72,18 @@ def grade_submission(
     answers: Mapping[str, JsonValue],
     questions: Sequence[GradingQuestion],
     pass_threshold: float,
+    *,
+    missing_question_weight: int,
 ) -> GradedResult:
+    if type(missing_question_weight) is not int or missing_question_weight <= 0:
+        raise ValueError("missing_question_weight must be a positive integer")
     # Source JSON can be malformed: retain its list/scalar/error semantics.
     # Any is confined to the original algorithm rather than the public contract.
     score = 0.0
     max_score = 0.0
     per_item: list[dict[str, JsonValue]] = []
     for q in cast(Any, questions):
-        w = float(q.get("weight", 1))
+        w = float(q.get("weight", missing_question_weight))
         max_score += w
         chosen = list(cast(Any, answers).get(q["ext_id"], []))
         raw_correct = q.get("correct", [])
@@ -96,7 +100,7 @@ def grade_submission(
                 "correct": ok,
                 "chosen": chosen,
                 "expected": expected,
-                "weight": q.get("weight", 1),
+                "weight": q.get("weight", missing_question_weight),
             }
         )
     fraction = (score / max_score) if max_score else 0.0

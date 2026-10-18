@@ -397,7 +397,12 @@ def submit_mcq_activity(db: Session, payload: SubmitMCQCommand) -> ResultWrite:
     )
     if observation.grading == "manual":
         return ResultWrite(_submission_fact(sub), None, None, tuple(emitted))
-    grade = grade_submission(payload.answers, questions, observation.pass_threshold)
+    grade = grade_submission(
+        payload.answers,
+        questions,
+        observation.pass_threshold,
+        missing_question_weight=payload.missing_question_weight,
+    )
     return _append_score(
         db, payload, sub, grade, observation.activity_id, observation.course_id, emitted
     )

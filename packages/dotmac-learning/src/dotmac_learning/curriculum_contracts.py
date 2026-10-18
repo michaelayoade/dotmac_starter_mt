@@ -20,6 +20,7 @@ class CurriculumInput(BaseModel):
 
 
 class CourseCreate(CurriculumInput):
+    listed: bool = Field(strict=True)
     tenant_id: UUID
     slug: str
     title: str
@@ -70,6 +71,9 @@ class ImportedChapter(CurriculumInput):
 
 
 class ManualImportHeader(CurriculumInput):
+    # Used only when the ordered import creates a new course.
+    new_course_status: str = Field(strict=True, min_length=1)
+    new_course_listed: bool = Field(strict=True)
     tenant_id: UUID
     slug: str
     # Adapter supplies learner-facing display title (product prefix removed).
@@ -94,7 +98,7 @@ class BankQuestion(CurriculumInput):
     category: JsonValue = None
     competency: JsonValue = None
     explanation: str = ""
-    weight: int = 1
+    weight: int
 
 
 class BankDocument(CurriculumInput):

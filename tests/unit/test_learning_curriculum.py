@@ -36,7 +36,12 @@ def test_hash_uses_raw_utf8_and_sorted_referenced_figure_bytes_or_missing():
 def test_contracts_forbid_unrecognized_command_fields():
     with pytest.raises(ValidationError):
         CourseCreate(
-            tenant_id=uuid4(), slug="x", title="X", discipline="x", status="published"
+            tenant_id=uuid4(),
+            slug="x",
+            title="X",
+            discipline="x",
+            status="published",
+            listed=False,
         )
 
 
@@ -56,6 +61,7 @@ def _balanced():
                 ),
                 options=["AAAA", "BBBB", "CCCC", "DDDD"],
                 correct=["AAAA"],
+                weight=1,
             )
             for i in range(10)
         ),

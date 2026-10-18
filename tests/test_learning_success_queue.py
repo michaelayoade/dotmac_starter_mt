@@ -39,7 +39,7 @@ from tests.test_learning_results import scoped
 learning_database = result_tests.learning_database
 result_database = result_tests.result_database
 NOW = datetime(2026, 8, 1, 12, tzinfo=UTC)
-TERMS = SuccessTerms()
+TERMS = SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8)
 
 
 def population(tenant, *people):
@@ -223,7 +223,7 @@ def test_inactivity_threshold_and_never_active_anchor(result_database, days, sev
             person_id=person,
             enrolled_since=NOW - timedelta(days=days),
             now=NOW,
-            threshold_days=7,
+            terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
         )
         if severity is None:
             assert hit is None
@@ -237,7 +237,7 @@ def test_inactivity_threshold_and_never_active_anchor(result_database, days, sev
                 person_id=person,
                 enrolled_since=None,
                 now=NOW,
-                threshold_days=7,
+                terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
             )
             is None
         )
@@ -258,7 +258,7 @@ def test_inactivity_threshold_and_never_active_anchor(result_database, days, sev
                 person_id=person,
                 enrolled_since=NOW - timedelta(days=100),
                 now=NOW,
-                threshold_days=7,
+                terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
             )
             is None
         )
@@ -291,6 +291,11 @@ def test_overdue_strict_time_count_and_day_boundary(
                     course_id=course,
                     title=f"Work {i}",
                     chapter_number=i,
+                    type="mcq_test",
+                    pass_threshold=0.0,
+                    assessment_mode="graded",
+                    grading="auto",
+                    weight=1.0,
                 )
                 db.add(a)
                 db.flush()
@@ -304,13 +309,25 @@ def test_overdue_strict_time_count_and_day_boundary(
                 )
             )
         db.flush()
-        hit = queue._rule_overdue(db, tenant_id=tenant, person_id=person, now=NOW)
+        hit = queue._rule_overdue(
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+        )
         if severity is None:
             assert hit is None
         else:
             assert hit[1] == severity and hit[0]["overdue_count"] == count
             score(db, tenant, person, activity, passed=True, fraction=1)
-            after = queue._rule_overdue(db, tenant_id=tenant, person_id=person, now=NOW)
+            after = queue._rule_overdue(
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+            )
             assert (
                 after is None if count == 1 else after[0]["overdue_count"] == count - 1
             )
@@ -342,6 +359,10 @@ def test_below_passing_volume_weight_and_severity_boundaries(
                 chapter_number=index,
                 title=f"Activity {index}",
                 weight=weight,
+                type="mcq_test",
+                pass_threshold=0.0,
+                assessment_mode="graded",
+                grading="auto",
             )
             db.add(row)
             db.flush()
@@ -353,7 +374,7 @@ def test_below_passing_volume_weight_and_severity_boundaries(
             tenant_id=tenant,
             person_id=person,
             course_ids=[course, course],
-            min_grade_pct=60,
+            terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
         )
         if expected is None:
             assert hit is None
@@ -980,13 +1001,22 @@ def test_below_passing_equal_worst_retains_input_first(result_database):
             slug=uuid4().hex,
             discipline="engineering",
             source_ref="source",
+            status="published",
+            listed=False,
         )
         db.add(alternate)
         db.flush()
         for cid in (course, alternate.id):
             for index in range(2):
                 row = Activity(
-                    tenant_id=tenant, course_id=cid, title=f"Work {index}", weight=1
+                    tenant_id=tenant,
+                    course_id=cid,
+                    title=f"Work {index}",
+                    weight=1,
+                    type="mcq_test",
+                    pass_threshold=0.0,
+                    assessment_mode="graded",
+                    grading="auto",
                 )
                 db.add(row)
                 db.flush()
@@ -997,7 +1027,7 @@ def test_below_passing_equal_worst_retains_input_first(result_database):
             tenant_id=tenant,
             person_id=person,
             course_ids=[alternate.id, course],
-            min_grade_pct=60,
+            terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
         )
         assert hit[0]["course_id"] == str(alternate.id)
 
@@ -1152,3 +1182,76 @@ def test_success_account_population_is_required_keyword_without_default():
         parameter = signature(operation).parameters["accounts"]
         assert parameter.default is Parameter.empty
         assert parameter.kind is Parameter.KEYWORD_ONLY
+
+
+def test_configured_inactivity_sweep_segments_and_audited_delivery_share_terms(
+    result_database,
+):
+    from dataclasses import replace
+
+    _, app, tenant, person, course, _, other, *_ = result_database
+    terms = replace(TERMS, inactive_days=3, inactivity_high_factor=3)
+    with scoped(app, tenant) as db:
+        cohort = seed(db, tenant, person, course, days=8)
+        root = db.get_transaction()
+        result = queue.sweep(
+            db,
+            tenant_id=tenant,
+            terms=terms,
+            accounts=population(tenant, person),
+            now=NOW,
+        )
+        assert result.opened >= 1
+        hits = queue.list_entries(db, tenant_id=tenant)
+        inactivity = next(
+            row.entry for row in hits if row.entry.reason_kind == "inactivity"
+        )
+        assert inactivity.severity == "medium"
+        assert inactivity.supporting_facts["threshold_days"] == 3
+        calls = []
+
+        def delivery(session, recipient, message, action_id):
+            assert session is db and session.get_transaction() is root
+            calls.append((recipient.id, message.subject, action_id))
+
+        sent = queue.message_segment(
+            db,
+            tenant_id=tenant,
+            cohort_id=cohort,
+            segment="inactive",
+            subject="Configured",
+            body="Window",
+            actor_person_id=person,
+            terms=terms,
+            accounts=population(tenant, person),
+            audit_context=context(tenant),
+            delivery=delivery,
+            now=NOW,
+        )
+        assert sent.recipients == 1 and calls == [
+            (person, "Configured", sent.action_id)
+        ]
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(AuditEvent.tenant_id == tenant)
+                .where(AuditEvent.action == "success_queue.message_segment")
+            )
+            == 1
+        )
+        assert db.get_transaction() is root
+    with scoped(app, other) as db:
+        assert (
+            queue.segment_members(
+                db,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                segment="inactive",
+                terms=terms,
+                accounts=population(tenant, person),
+                now=NOW,
+            )
+            == ()
+        )
+        assert queue.list_entries(db, tenant_id=tenant) == ()

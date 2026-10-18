@@ -91,6 +91,8 @@ def result_database(learning_database):
                     title="Course",
                     discipline="engineering",
                     source_ref="source",
+                    status="published",
+                    listed=False,
                 ),
             )
             create_activity(
@@ -102,6 +104,10 @@ def result_database(learning_database):
                     title="Assessment",
                     max_attempts=2,
                     pass_threshold=0.7,
+                    type="mcq_test",
+                    assessment_mode="graded",
+                    grading="auto",
+                    weight=1.0,
                 ),
             )
         yield (
@@ -203,6 +209,8 @@ def test_reference_fields_ids_and_plain_uuid_meanings(result_database):
                     title="x",
                     discipline="x",
                     source_ref="x",
+                    status="published",
+                    listed=False,
                 ),
             )
 
@@ -547,6 +555,8 @@ def test_kernel_autobegin_caller_rollback_owns_results_and_sentinel(result_datab
                 title="Sentinel",
                 discipline="test",
                 source_ref="test",
+                status="published",
+                listed=False,
             ),
         )
         root = db.get_transaction()
@@ -656,6 +666,8 @@ def test_certificate_failure_propagates_through_result_and_caller_savepoint(
                 title="Sentinel",
                 discipline="test",
                 source_ref="test",
+                status="published",
+                listed=False,
             ),
         )
         with pytest.raises(CertificateFailure), db.begin_nested():
@@ -716,7 +728,7 @@ def submit_command(fixture, **changes):
         person_id=person,
         activity_id=activity,
         answers={"q": ["yes"]},
-        **changes,
+        **{"missing_question_weight": 1, **changes},
     )
 
 
@@ -869,7 +881,9 @@ def test_submit_question_subset_and_scalar_correct_use_source_grader(
         questions = questions_for(
             db, tenant_id=tenant, bank_id=bank, only_ext_ids=selected
         )
-        expected = grade_submission(payload.answers, questions, 0.7)
+        expected = grade_submission(
+            payload.answers, questions, 0.7, missing_question_weight=1
+        )
         value = results.submit_mcq_activity(db, payload)
         assert value.score.per_item == expected.per_item
         assert value.score.score == expected.score

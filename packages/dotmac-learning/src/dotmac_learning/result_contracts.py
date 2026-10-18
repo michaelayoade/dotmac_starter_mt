@@ -41,6 +41,7 @@ class SubmitMCQCommand(Command):
     activity_id: UUID
     answers: dict[str, JsonValue] = Field(default_factory=dict)
     only_ext_ids: list[str] | None = None
+    missing_question_weight: int = Field(strict=True, gt=0)
 
 
 class MCQResultCommand(Command):

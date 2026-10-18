@@ -87,6 +87,9 @@ def test_populated_catalog_non_bypass_cross_tenant_isolation(result_database):
             part="A",
         )
         course_activity = Activity(
+            assessment_mode="graded",
+            grading="auto",
+            weight=1.0,
             tenant_id=tenant,
             course_id=course,
             title="Final",
@@ -95,6 +98,8 @@ def test_populated_catalog_non_bypass_cross_tenant_isolation(result_database):
         )
         db.add_all([chapter, empty_chapter, course_activity])
         prerequisite = Course(
+            listed=False,
+            status="published",
             id=uuid4(),
             tenant_id=tenant,
             slug="required",
@@ -209,6 +214,9 @@ def test_structure_first_activity_only_continue_part_order_and_course_level_sort
         original = db.scalar(select(Activity).where(Activity.id == activity))
         original.chapter_number = 7
         extra = Activity(
+            assessment_mode="graded",
+            grading="auto",
+            weight=1.0,
             tenant_id=tenant,
             course_id=course,
             title="Second",
@@ -218,6 +226,9 @@ def test_structure_first_activity_only_continue_part_order_and_course_level_sort
         )
         course_acts = [
             Activity(
+                assessment_mode="graded",
+                grading="auto",
+                weight=1.0,
                 tenant_id=tenant,
                 course_id=course,
                 title=title,

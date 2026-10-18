@@ -7,7 +7,12 @@ from pydantic import ValidationError
 
 def _question(**kwargs):
     return BankQuestion(
-        id="Q", stem="Question", type="numeric", rubric_category="recall", **kwargs
+        id="Q",
+        stem="Question",
+        type="numeric",
+        rubric_category="recall",
+        weight=1,
+        **kwargs,
     )
 
 
@@ -45,9 +50,10 @@ def test_bank_options_preserve_existing_list_and_other_validation():
             type="numeric",
             rubric_category="recall",
             unexpected=True,
+            weight=1,
         )
     with pytest.raises(ValidationError):
-        BankQuestion(id="Q", type="numeric", rubric_category="recall")
+        BankQuestion(id="Q", type="numeric", rubric_category="recall", weight=1)
 
 
 def test_public_linter_accepts_balanced_numeric_and_regex_configuration_objects():
@@ -67,6 +73,7 @@ def test_public_linter_accepts_balanced_numeric_and_regex_configuration_objects(
                 else "analysis",
                 options={"tolerance": 0.5} if i % 2 == 0 else {"regex": True},
                 correct=42 if i % 2 == 0 else ["go+al"],
+                weight=1,
             )
             for i in range(10)
         ),

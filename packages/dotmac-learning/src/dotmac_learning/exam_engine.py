@@ -27,6 +27,7 @@ they are writing against a ``Person`` or an ``Applicant``.
 from __future__ import annotations
 
 import hashlib
+import math
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -34,22 +35,30 @@ from typing import Protocol, TypeVar
 
 from pydantic import JsonValue
 
-# A sitting near the guessing baseline, or faster than anyone could read the
-# paper, is not a weak candidate — it is an ABSENCE OF DATA, and scoring it as
-# a genuine low result pollutes whatever ranking or gradebook consumes it.
-#
-# Both floors are DERIVED from the paper rather than fixed, because both depend
-# on it. The old constants encoded "four options" and "30 questions" in their
-# comments and then stopped tracking either: once the entrance paper size became
-# configurable, a 60-question sitting was still gated at six minutes. A setting
-# would not have fixed that — it would only have added a second value to drift.
-SECONDS_PER_QUESTION = 12.0  # faster than this is not reading the question
-NEAR_CHANCE_MARGIN = 1.33  # the gate sits this far above the paper's own chance
 
-# Fallbacks for callers that cannot supply the paper. They encode the historical
-# assumption — 30 four-option questions — and are what those callers already got.
-MIN_VALID_FRACTION = 1.0 / 3.0
-MIN_DURATION_SECONDS = 6 * 60
+@dataclass(frozen=True, slots=True)
+class ValidityTerms:
+    """Caller-selected validity policy; paper-derived arithmetic stays canonical."""
+
+    seconds_per_question: float
+    near_chance_margin: float
+    fallback_score_floor: float
+    fallback_duration_seconds: float
+
+    def __post_init__(self) -> None:
+        for name in self.__dataclass_fields__:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise TypeError(f"{name} must be a finite number")
+            if not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
+        if self.seconds_per_question < 0 or self.fallback_duration_seconds < 0:
+            raise ValueError("validity durations must be nonnegative")
+        if self.near_chance_margin <= 0:
+            raise ValueError("near_chance_margin must be positive")
+        if not 0 <= self.fallback_score_floor <= 1:
+            raise ValueError("fallback_score_floor must be a fraction")
+
 
 INVALID_NEAR_CHANCE = "near_chance"
 INVALID_TOO_FAST = "too_fast"
@@ -176,47 +185,79 @@ def present_options(sitter: Sitter, question: Question) -> list[str]:
     return opts
 
 
-def chance_baseline(questions: Sequence[Question]) -> float:
+def chance_baseline(
+    questions: Sequence[Question], *, fallback_baseline: float
+) -> float:
     """The score guessing would produce on *this* paper.
 
     Averaged over the questions that actually offer options, so a paper with
     true/false items reports the ~50% it really carries rather than the 25% a
     four-option assumption would claim.
     """
+    if (
+        isinstance(fallback_baseline, bool)
+        or not isinstance(fallback_baseline, int | float)
+        or not math.isfinite(fallback_baseline)
+        or fallback_baseline < 0
+    ):
+        raise ValueError("fallback_baseline must be a finite nonnegative number")
     per_question = []
     for q in questions:
         opts = getattr(q, "options", None)
         if isinstance(opts, list) and len(opts) >= 2:
             per_question.append(1.0 / len(opts))
     if not per_question:
-        return MIN_VALID_FRACTION / NEAR_CHANCE_MARGIN
+        return fallback_baseline
     return sum(per_question) / len(per_question)
 
 
-def near_chance_floor(questions: Sequence[Question]) -> float:
+def near_chance_floor(questions: Sequence[Question], *, terms: ValidityTerms) -> float:
     """Scores at or below this are indistinguishable from guessing."""
-    return chance_baseline(questions) * NEAR_CHANCE_MARGIN
+    return (
+        chance_baseline(
+            questions,
+            fallback_baseline=terms.fallback_score_floor / terms.near_chance_margin,
+        )
+        * terms.near_chance_margin
+    )
 
 
-def duration_floor(questions: Sequence[Question]) -> float:
+def duration_floor(
+    questions: Sequence[Question], *, seconds_per_question: float
+) -> float:
     """The fastest a sitting could plausibly have been read."""
-    return len(questions) * SECONDS_PER_QUESTION
+    if (
+        isinstance(seconds_per_question, bool)
+        or not isinstance(seconds_per_question, int | float)
+        or not math.isfinite(seconds_per_question)
+        or seconds_per_question < 0
+    ):
+        raise ValueError("seconds_per_question must be a finite nonnegative number")
+    return len(questions) * seconds_per_question
 
 
 def check_validity(
     fraction: float,
     duration_seconds: float | None,
     *,
+    terms: ValidityTerms,
     questions: Sequence[Question] | None = None,
 ) -> tuple[bool, str | None]:
     """Is this sitting real signal, or an absence of data?
 
     Pass ``questions`` — the paper actually served — and both floors follow from
-    it. Without them the historical constants apply, which is what every caller
-    got before the floors were derived.
+    it. Without a paper the caller supplies both fallback floors explicitly.
     """
-    score_floor = near_chance_floor(questions) if questions else MIN_VALID_FRACTION
-    time_floor = duration_floor(questions) if questions else MIN_DURATION_SECONDS
+    score_floor = (
+        near_chance_floor(questions, terms=terms)
+        if questions
+        else terms.fallback_score_floor
+    )
+    time_floor = (
+        duration_floor(questions, seconds_per_question=terms.seconds_per_question)
+        if questions
+        else terms.fallback_duration_seconds
+    )
 
     if fraction <= score_floor + 1e-9:
         return False, INVALID_NEAR_CHANCE

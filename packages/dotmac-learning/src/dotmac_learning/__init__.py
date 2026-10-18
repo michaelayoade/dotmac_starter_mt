@@ -162,11 +162,8 @@ from dotmac_learning.events import (
 from dotmac_learning.exam_engine import (
     INVALID_NEAR_CHANCE,
     INVALID_TOO_FAST,
-    MIN_DURATION_SECONDS,
-    MIN_VALID_FRACTION,
-    NEAR_CHANCE_MARGIN,
-    SECONDS_PER_QUESTION,
     SelectionPolicy,
+    ValidityTerms,
     chance_baseline,
     check_validity,
     duration_floor,
@@ -411,6 +408,7 @@ from dotmac_learning.announcements import (
 from dotmac_learning.assessment_reads import has_other_passing_score
 from dotmac_learning.bank_activity_contracts import (
     BankActivityImportResult,
+    BankActivityTerms,
     ImportBankWithActivityCommand,
 )
 from dotmac_learning.bank_activity_import import import_bank_with_activity
@@ -492,13 +490,16 @@ from dotmac_learning.gradebook_contracts import (
 from dotmac_learning.insight_contracts import (
     CohortComparison,
     CohortFunnel,
+    CohortInsightTerms,
     CohortOverview,
     CurrentBlocker,
     DisciplineScore,
     DisciplineStrengths,
     GradeTrend,
+    GradeTrendTerms,
     LabFailures,
     LearnerActivity,
+    LearnerInsightTerms,
 )
 from dotmac_learning.insights import (
     cohort_course_ids,
@@ -675,8 +676,6 @@ from dotmac_learning.support_report_contracts import (
     TopMover,
 )
 from dotmac_learning.support_report_reads import (
-    ATTENTION_LIMIT,
-    TOP_MOVERS_LIMIT,
     activity_window_counts,
     attention_list,
     cohort_roster_progress,
@@ -693,6 +692,7 @@ from dotmac_learning.todo_contracts import (
     DeadlineFact,
     PersonTimeline,
     RecentGradeFact,
+    TodoTerms,
 )
 
 from .bank_validation import BankDoc, balance_targets, propose_balance
@@ -973,6 +973,7 @@ __all__ = [
     "ExamSitter",
     "GradingQuestion",
     "SelectionPolicy",
+    "ValidityTerms",
     "chance_baseline",
     "check_validity",
     "duration_floor",
@@ -1031,6 +1032,7 @@ __all__ = [
     "RecentGradeFact",
     "CourseWindowFact",
     "PersonTimeline",
+    "TodoTerms",
     "deadline_rows",
     "timeline_for_person",
     "AgendaTarget",
@@ -1088,6 +1090,9 @@ __all__ = [
     "SEGMENTS_DEFERRED",
     "ActiveAccountSelection",
     "GradeTrend",
+    "GradeTrendTerms",
+    "LearnerInsightTerms",
+    "CohortInsightTerms",
     "DisciplineScore",
     "DisciplineStrengths",
     "CurrentBlocker",
@@ -1179,8 +1184,6 @@ __all__ = [
     "activity_window_counts",
     "cohort_roster_progress",
     "queue_summary",
-    "TOP_MOVERS_LIMIT",
-    "ATTENTION_LIMIT",
     "ensure_admission_enrollment",
     "EnsureAdmissionEnrollmentCommand",
     "has_other_passing_score",
@@ -1199,14 +1202,11 @@ __all__ = [
     "patch_activity",
     "ImportBankWithActivityCommand",
     "BankActivityImportResult",
+    "BankActivityTerms",
     "import_bank_with_activity",
     "SubmitMCQCommand",
     "submit_mcq_activity",
     "cohort_course_ids",
-    "SECONDS_PER_QUESTION",
-    "NEAR_CHANCE_MARGIN",
-    "MIN_VALID_FRACTION",
-    "MIN_DURATION_SECONDS",
     "INVALID_NEAR_CHANCE",
     "INVALID_TOO_FAST",
     "AuthorChapterCommand",

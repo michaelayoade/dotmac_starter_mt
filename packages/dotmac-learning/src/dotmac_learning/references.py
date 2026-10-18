@@ -26,8 +26,8 @@ class CourseWrite(BaseModel):
     discipline: str
     source_ref: str
     version: int = 1
-    status: str = "published"
-    listed: bool = False
+    status: str
+    listed: bool
 
 
 class ActivityWrite(BaseModel):
@@ -37,13 +37,13 @@ class ActivityWrite(BaseModel):
     course_id: UUID
     title: str
     chapter_number: int | None = None
-    type: str = "mcq_test"
+    type: str
     bank_id: UUID | None = None
-    pass_threshold: float = 0.0
+    pass_threshold: float
     max_attempts: int | None = None
-    assessment_mode: str = "graded"
-    grading: str = "auto"
-    weight: float = 1.0
+    assessment_mode: str
+    grading: str
+    weight: float
     question_count: int | None = None
 
 

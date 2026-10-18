@@ -2,6 +2,7 @@
 
 import dotmac_learning as learning
 import pytest
+from dotmac_learning.bank_activity_contracts import BankActivityTerms
 from dotmac_learning.curriculum_models import Question
 from dotmac_learning.models import Activity
 from sqlalchemy import func, select, text
@@ -65,18 +66,29 @@ def test_numeric_and_regex_options_round_trip_and_drive_existing_grader(
         course = learning.create_draft_course(
             db,
             learning.CourseCreate(
-                tenant_id=tenant, slug=document.course, title="Options", discipline="x"
+                tenant_id=tenant,
+                slug=document.course,
+                title="Options",
+                discipline="x",
+                listed=False,
             ),
         )
         course_id = course.id
         root = db.get_transaction()
         if path == "load_bank":
             bank_id = learning.load_bank(
-                db, tenant_id=tenant, course_id=course_id, doc=document
+                db,
+                tenant_id=tenant,
+                course_id=course_id,
+                doc=document,
+                missing_question_weight=1,
             ).id
         else:
             command = learning.ImportBankWithActivityCommand(
-                tenant_id=tenant, doc=document
+                tenant_id=tenant,
+                doc=document,
+                terms=BANK_ACTIVITY_TERMS,
+                missing_question_weight=1,
             )
             assert [q.options for q in command.doc.questions] == [
                 q.options for q in document.questions
@@ -124,7 +136,9 @@ def test_numeric_and_regex_options_round_trip_and_drive_existing_grader(
             else ["AAAA"]
             for q in grading
         }
-        accepted = learning.grade_submission(answers, grading, 1.0)
+        accepted = learning.grade_submission(
+            answers, grading, 1.0, missing_question_weight=1
+        )
         assert accepted.passed and accepted.fraction == 1.0
         rejected_answers = {
             q["ext_id"]: [43]
@@ -134,7 +148,9 @@ def test_numeric_and_regex_options_round_trip_and_drive_existing_grader(
             else ["DDDD"]
             for q in grading
         }
-        rejected = learning.grade_submission(rejected_answers, grading, 1.0)
+        rejected = learning.grade_submission(
+            rejected_answers, grading, 1.0, missing_question_weight=1
+        )
         assert not rejected.passed and rejected.fraction == 0.0
         activities = db.scalars(
             select(Activity).where(Activity.bank_id == bank_id)
@@ -142,3 +158,12 @@ def test_numeric_and_regex_options_round_trip_and_drive_existing_grader(
         assert len(activities) == (0 if path == "load_bank" else 1)
         if activities:
             assert activities[0].course_id == course_id
+
+
+BANK_ACTIVITY_TERMS = BankActivityTerms(
+    pass_threshold_by_kind={"chapter": 0.0, "mid": 0.60, "final": 0.70},
+    fallback_pass_threshold=0.0,
+    new_activity_assessment_mode="graded",
+    new_activity_grading="auto",
+    new_activity_weight=1.0,
+)

@@ -341,14 +341,17 @@ def test_visibility_allows_any_active_role_and_tenant_wide_unenrolled(
         assert {
             f.id
             for f in announcements.for_person(
-                db, tenant_id=fixture["tenant"], person_id=fixture["instructor"]
+                db,
+                tenant_id=fixture["tenant"],
+                person_id=fixture["instructor"],
+                limit=20,
             )
         } == {wide.id, targeted.id}
         for person in (fixture["unenrolled"], fixture["dropped"], fixture["elsewhere"]):
             assert [
                 f.id
                 for f in announcements.for_person(
-                    db, tenant_id=fixture["tenant"], person_id=person
+                    db, tenant_id=fixture["tenant"], person_id=person, limit=20
                 )
             ] == [wide.id]
 
@@ -374,7 +377,10 @@ def test_nonbypass_tenant_reads_and_delete_are_scoped(announcement_database):
                 "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user"
             )
         ).one() == (False, False)
-        assert announcements.list_for_tenant(db, tenant_id=fixture["other"]) == ()
+        assert (
+            announcements.list_for_tenant(db, tenant_id=fixture["other"], limit=50)
+            == ()
+        )
         announcements.delete(
             db,
             DeleteAnnouncementCommand(
@@ -384,7 +390,10 @@ def test_nonbypass_tenant_reads_and_delete_are_scoped(announcement_database):
         assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
     with scoped(fixture["app"], fixture["other"]) as db:
         assert [
-            f.id for f in announcements.list_for_tenant(db, tenant_id=fixture["other"])
+            f.id
+            for f in announcements.list_for_tenant(
+                db, tenant_id=fixture["other"], limit=50
+            )
         ] == [other.id]
 
 
@@ -443,5 +452,8 @@ def test_order_limit_delete_no_audit_and_nested_caller_continuity(
                 db.scalar(select(func.count()).select_from(AuditEvent)) == audit_count
             )
         assert [
-            f.id for f in announcements.list_for_tenant(db, tenant_id=fixture["tenant"])
+            f.id
+            for f in announcements.list_for_tenant(
+                db, tenant_id=fixture["tenant"], limit=50
+            )
         ] == [second.id]

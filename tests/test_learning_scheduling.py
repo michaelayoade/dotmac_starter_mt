@@ -92,6 +92,7 @@ def create(db, tenant, cohort, **values):
                     "cohort_id": cohort,
                     "title": "  Class  ",
                     "starts_at": NOW,
+                    "session_type": "live_class",
                     "ends_at": NOW + timedelta(hours=1),
                     "join_url": " https://example.test/join ",
                 }

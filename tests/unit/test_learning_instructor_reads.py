@@ -22,14 +22,19 @@ NOW = datetime(2026, 10, 17, tzinfo=UTC)
 
 def test_progress_missing_completions_count_zero_and_exact_risk_boundary():
     a, b = uuid4(), uuid4()
-    assert _progress((a, b), {a: 0.8}, True, None, NOW) == (0.4, True)
-    assert _progress((a, b), {a: 1}, True, None, NOW) == (0.5, False)
-    assert _progress((a, b), {}, True, NOW - timedelta(days=14), NOW) == (0, False)
-    assert _progress((a, b), {}, True, NOW - timedelta(days=14, seconds=1), NOW) == (
+    assert _progress((a, b), {a: 0.8}, True, None, NOW, 0.5, 14) == (0.4, True)
+    assert _progress((a, b), {a: 1}, True, None, NOW, 0.5, 14) == (0.5, False)
+    assert _progress((a, b), {}, True, NOW - timedelta(days=14), NOW, 0.5, 14) == (
+        0,
+        False,
+    )
+    assert _progress(
+        (a, b), {}, True, NOW - timedelta(days=14, seconds=1), NOW, 0.5, 14
+    ) == (
         0,
         True,
     )
-    assert _progress((), {}, False, None, NOW) == (0, False)
+    assert _progress((), {}, False, None, NOW, 0.5, 14) == (0, False)
 
 
 def test_account_and_admin_observations_are_frozen_and_scope_bound():

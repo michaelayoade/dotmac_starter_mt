@@ -50,7 +50,7 @@ class GrantExtraAttemptCommand(AttemptCommand):
     activity_id: UUID
     reason: str
     granted_by: UUID | None = None
-    extra_attempts: int = 1
+    extra_attempts: int
 
 
 # The Kernel owns this closed taxonomy. Derive the runtime guard from the type

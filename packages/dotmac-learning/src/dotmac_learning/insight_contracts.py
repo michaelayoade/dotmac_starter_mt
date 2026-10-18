@@ -2,11 +2,60 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from typing import Literal, TypeAlias
 from uuid import UUID
 
 from .event_contracts import WeekBucket
 from .reports_contracts import ReportCohort
+
+
+def _integer(name: str, value: int, minimum: int = 0) -> None:
+    if type(value) is not int or value < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}")
+
+
+def _fraction(name: str, value: float) -> None:
+    if type(value) not in (int, float) or not isfinite(value) or not 0 <= value <= 1:
+        raise ValueError(f"{name} must be a finite fraction in [0, 1]")
+
+
+@dataclass(frozen=True, slots=True)
+class GradeTrendTerms:
+    sample_limit: int
+    min_samples: int
+    min_delta_fraction: float
+
+    def __post_init__(self) -> None:
+        _integer("sample_limit", self.sample_limit, 2)
+        _integer("min_samples", self.min_samples, 2)
+        if self.sample_limit < self.min_samples:
+            raise ValueError("sample_limit must be >= min_samples")
+        _fraction("min_delta_fraction", self.min_delta_fraction)
+
+
+@dataclass(frozen=True, slots=True)
+class LearnerInsightTerms:
+    chart_weeks: int
+    velocity_weeks: int
+    resume_after_days: int
+    grade_trend: GradeTrendTerms
+
+    def __post_init__(self) -> None:
+        for name in ("chart_weeks", "velocity_weeks", "resume_after_days"):
+            _integer(name, getattr(self, name))
+        if not isinstance(self.grade_trend, GradeTrendTerms):
+            raise ValueError("grade_trend must be GradeTrendTerms")
+
+
+@dataclass(frozen=True, slots=True)
+class CohortInsightTerms:
+    active_window_days: int
+    comparison_prior_weeks: int
+
+    def __post_init__(self) -> None:
+        _integer("active_window_days", self.active_window_days)
+        _integer("comparison_prior_weeks", self.comparison_prior_weeks, 1)
 
 
 @dataclass(frozen=True, slots=True)

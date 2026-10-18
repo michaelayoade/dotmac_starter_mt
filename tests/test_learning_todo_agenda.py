@@ -9,6 +9,7 @@ from dotmac_learning.attempt_models import AttemptGrant
 from dotmac_learning.delivery_models import ClassSession, OfferingActivity
 from dotmac_learning.models import Activity, Score, Submission
 from dotmac_learning.participation_models import Cohort, CourseOffering, Enrollment
+from dotmac_learning.todo_contracts import TodoTerms
 from sqlalchemy import func, select, text
 
 from tests import test_learning_results as result_tests
@@ -90,7 +91,13 @@ def test_non_bypass_wrong_scope_and_detached_deadline(result_database):
         with pytest.raises(FrozenInstanceError):
             rows[0].activity.title = "changed"
         positive = todo.timeline_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            local_zone=UTC,
+            terms=TodoTerms(14, 10, 30, 7, 30),
+            join_lead_minutes=60,
         )
         assert len(positive.next_7) == 1
         assert (
@@ -101,7 +108,12 @@ def test_non_bypass_wrong_scope_and_detached_deadline(result_database):
         )
         assert len(positive.course_windows) == len(positive.joinable) == 1
         assert agenda.upcoming_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            limit=50,
+            join_lead_minutes=60,
         )
     with scoped(app, other) as db:
         assert db.execute(
@@ -114,11 +126,24 @@ def test_non_bypass_wrong_scope_and_detached_deadline(result_database):
         assert db.scalar(select(func.count()).select_from(CourseOffering)) == 0
         assert todo.deadline_rows(db, tenant_id=tenant, person_id=person) == ()
         assert (
-            agenda.upcoming_for_person(db, tenant_id=tenant, person_id=person, now=NOW)
+            agenda.upcoming_for_person(
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                limit=50,
+                join_lead_minutes=60,
+            )
             == ()
         )
         timeline = todo.timeline_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            local_zone=UTC,
+            terms=TodoTerms(14, 10, 30, 7, 30),
+            join_lead_minutes=60,
         )
         assert (
             timeline.overdue
@@ -141,7 +166,13 @@ def test_student_deadlines_any_role_windows_and_exact_buckets(result_database):
         off.starts_at, off.ends_at = NOW, NOW + timedelta(days=30)
         assert todo.deadline_rows(db, tenant_id=tenant, person_id=person) == ()
         timeline = todo.timeline_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            local_zone=UTC,
+            terms=TodoTerms(14, 10, 30, 7, 30),
+            join_lead_minutes=60,
         )
         assert [(w.kind, w.at) for w in timeline.course_windows] == [
             ("closes", off.ends_at)
@@ -159,12 +190,24 @@ def test_student_deadlines_any_role_windows_and_exact_buckets(result_database):
         ):
             pacing.due_at = due
             timeline = todo.timeline_for_person(
-                db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                local_zone=UTC,
+                terms=TodoTerms(14, 10, 30, 7, 30),
+                join_lead_minutes=60,
             )
             assert len(getattr(timeline, bucket)) == 1
         pacing.due_at = NOW + timedelta(days=30, microseconds=1)
         timeline = todo.timeline_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            local_zone=UTC,
+            terms=TodoTerms(14, 10, 30, 7, 30),
+            join_lead_minutes=60,
         )
         assert timeline.next_30 == ()
 
@@ -204,14 +247,24 @@ def test_agenda_other_cohort_offering_and_inactive_session_membership(result_dat
         db.add(session)
         db.flush()
         items = agenda.upcoming_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            limit=50,
+            join_lead_minutes=60,
         )
         assert len([i for i in items if i.kind == "due"]) == 2
         assert any(i.kind == "opens" for i in items)
         assert items[0].session.id == session.id and items[0].joinable
         assert (
             agenda.upcoming_for_person(
-                db, tenant_id=tenant, person_id=person, now=NOW, limit=1
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                limit=1,
+                join_lead_minutes=60,
             )
             == items[:1]
         )
@@ -219,12 +272,23 @@ def test_agenda_other_cohort_offering_and_inactive_session_membership(result_dat
             select(Enrollment).where(Enrollment.person_id == person)
         ).status = "inactive"
         items = agenda.upcoming_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            limit=50,
+            join_lead_minutes=60,
         )
         assert [i.session.id for i in items if i.kind == "session"] == [session.id]
         assert (
             todo.timeline_for_person(
-                db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                local_zone=UTC,
+                terms=TodoTerms(14, 10, 30, 7, 30),
+                join_lead_minutes=60,
             ).sessions
             == ()
         )
@@ -263,7 +327,13 @@ def test_any_passing_score_removes_deadline_and_recent_limit_precedes_feedback(
         db.flush()
         assert todo.deadline_rows(db, tenant_id=tenant, person_id=person) == ()
         timeline = todo.timeline_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            local_zone=UTC,
+            terms=TodoTerms(14, 10, 30, 7, 30),
+            join_lead_minutes=60,
         )
         assert len(timeline.graded) == 10 and timeline.feedback == ()
         # The older revealable practice score must not backfill the recent cap.
@@ -274,6 +344,8 @@ def test_any_passing_score_removes_deadline_and_recent_limit_precedes_feedback(
             type="mcq_test",
             assessment_mode="practice",
             pass_threshold=0.7,
+            weight=1.0,
+            grading="auto",
         )
         db.add(old_activity)
         db.flush()
@@ -301,7 +373,13 @@ def test_any_passing_score_removes_deadline_and_recent_limit_precedes_feedback(
         db.flush()
         assert (
             todo.timeline_for_person(
-                db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                local_zone=UTC,
+                terms=TodoTerms(14, 10, 30, 7, 30),
+                join_lead_minutes=60,
             ).feedback
             == ()
         )
@@ -317,7 +395,13 @@ def test_any_passing_score_removes_deadline_and_recent_limit_precedes_feedback(
             )
         )
         timeline = todo.timeline_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            local_zone=UTC,
+            terms=TodoTerms(14, 10, 30, 7, 30),
+            join_lead_minutes=60,
         )
         assert len(timeline.feedback) == 10
 
@@ -328,30 +412,59 @@ def test_strict_agenda_now_stable_category_ties_and_window_horizon(result_databa
         _, off, pacing = seed(db, tenant, person, course, activity)
         off.starts_at = off.ends_at = pacing.due_at = NOW
         assert (
-            agenda.upcoming_for_person(db, tenant_id=tenant, person_id=person, now=NOW)
+            agenda.upcoming_for_person(
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                limit=50,
+                join_lead_minutes=60,
+            )
             == ()
         )
         edge = NOW + timedelta(days=30)
         off.starts_at = off.ends_at = pacing.due_at = edge
         items = agenda.upcoming_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            limit=50,
+            join_lead_minutes=60,
         )
         assert [item.kind for item in items] == ["opens", "closes", "due"]
         timeline = todo.timeline_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            local_zone=UTC,
+            terms=TodoTerms(14, 10, 30, 7, 30),
+            join_lead_minutes=60,
         )
         assert [w.kind for w in timeline.course_windows] == ["opens", "closes"]
         off.starts_at = off.ends_at = edge + timedelta(microseconds=1)
         assert (
             todo.timeline_for_person(
-                db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                local_zone=UTC,
+                terms=TodoTerms(14, 10, 30, 7, 30),
+                join_lead_minutes=60,
             ).course_windows
             == ()
         )
         assert [
             item.kind
             for item in agenda.upcoming_for_person(
-                db, tenant_id=tenant, person_id=person, now=NOW
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                limit=50,
+                join_lead_minutes=60,
             )
         ] == ["due", "opens", "closes"]
 
@@ -397,9 +510,105 @@ def test_recent_lookback_inclusive_and_read_does_not_require_explicit_begin(
         _scope(db.connection(), tenant)
         root = db.get_transaction()
         timeline = todo.timeline_for_person(
-            db, tenant_id=tenant, person_id=person, now=NOW, local_zone=UTC
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            local_zone=UTC,
+            terms=TodoTerms(14, 10, 30, 7, 30),
+            join_lead_minutes=60,
         )
         assert len(timeline.graded) == 1 and timeline.feedback == timeline.graded
         assert timeline.graded[0].created_at == NOW - timedelta(days=14)
         assert db.get_transaction() is root
         assert not db.new and not db.dirty and not db.deleted
+
+
+def test_configured_timeline_horizons_join_boundary_and_agenda_cap(result_database):
+    _, app, tenant, person, course, activity, other, *_ = result_database
+    terms = TodoTerms(2, 1, 3, 2, 4)
+    with scoped(app, tenant) as db:
+        cohort, offering, pacing = seed(db, tenant, person, course, activity)
+        pacing.due_at = NOW + timedelta(days=3)
+        offering.starts_at = NOW + timedelta(days=3)
+        offering.ends_at = NOW + timedelta(days=4)
+        session = ClassSession(
+            tenant_id=tenant,
+            cohort_id=cohort.id,
+            title="Configured join",
+            starts_at=NOW + timedelta(minutes=4),
+            join_url="https://example.test/join",
+        )
+        db.add(session)
+        db.flush()
+        root = db.get_transaction()
+        timeline = todo.timeline_for_person(
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            local_zone=UTC,
+            now=NOW,
+            terms=terms,
+            join_lead_minutes=4,
+        )
+        assert timeline.next_7 == ()
+        assert len(timeline.next_30) == 1
+        assert [(w.kind, w.at) for w in timeline.course_windows] == [
+            ("opens", offering.starts_at)
+        ]
+        assert timeline.joinable == frozenset({session.id})
+        items = agenda.upcoming_for_person(
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            limit=1,
+            join_lead_minutes=4,
+        )
+        assert (
+            len(items) == 1 and items[0].target.id == session.id and items[0].joinable
+        )
+        session.starts_at += timedelta(microseconds=1)
+        changed = todo.timeline_for_person(
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            local_zone=UTC,
+            now=NOW,
+            terms=terms,
+            join_lead_minutes=4,
+        )
+        assert changed.joinable == frozenset()
+        assert not agenda.upcoming_for_person(
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            limit=1,
+            join_lead_minutes=4,
+        )[0].joinable
+        assert db.get_transaction() is root
+    with scoped(app, other) as db:
+        assert (
+            todo.timeline_for_person(
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                local_zone=UTC,
+                now=NOW,
+                terms=terms,
+                join_lead_minutes=4,
+            ).sessions
+            == ()
+        )
+        assert (
+            agenda.upcoming_for_person(
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                limit=1,
+                join_lead_minutes=4,
+            )
+            == ()
+        )

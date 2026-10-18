@@ -83,7 +83,14 @@ def test_actual_non_bypass_two_tenant_query_and_explicit_scope(result_database):
         other_course = _course(conn, other)
     with scoped(app, other) as db:
         other_activity = Activity(
-            tenant_id=other, course_id=other_course, title="Other", type="lab"
+            assessment_mode="graded",
+            grading="auto",
+            pass_threshold=0.0,
+            weight=1.0,
+            tenant_id=other,
+            course_id=other_course,
+            title="Other",
+            type="lab",
         )
         db.add(other_activity)
         db.flush()

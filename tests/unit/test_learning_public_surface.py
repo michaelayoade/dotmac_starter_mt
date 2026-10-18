@@ -476,12 +476,33 @@ def test_active_offering_course_ids_have_public_insights_owner():
 
 def test_existing_exam_engine_constants_have_one_public_owner():
     for name in (
-        "SECONDS_PER_QUESTION",
-        "NEAR_CHANCE_MARGIN",
-        "MIN_VALID_FRACTION",
-        "MIN_DURATION_SECONDS",
         "INVALID_NEAR_CHANCE",
         "INVALID_TOO_FAST",
     ):
         assert learning.__all__.count(name) == 1
         assert getattr(learning, name) is getattr(exam_engine, name)
+
+
+def test_required_policy_terms_keep_public_owner_identity():
+    from dotmac_learning import (
+        bank_activity_contracts,
+        exam_engine,
+        insight_contracts,
+        todo_contracts,
+    )
+
+    assert learning.TodoTerms is todo_contracts.TodoTerms
+    assert learning.GradeTrendTerms is insight_contracts.GradeTrendTerms
+    assert learning.LearnerInsightTerms is insight_contracts.LearnerInsightTerms
+    assert learning.CohortInsightTerms is insight_contracts.CohortInsightTerms
+    assert learning.ValidityTerms is exam_engine.ValidityTerms
+    assert learning.BankActivityTerms is bank_activity_contracts.BankActivityTerms
+    for name in (
+        "TOP_MOVERS_LIMIT",
+        "ATTENTION_LIMIT",
+        "SECONDS_PER_QUESTION",
+        "NEAR_CHANCE_MARGIN",
+        "MIN_VALID_FRACTION",
+        "MIN_DURATION_SECONDS",
+    ):
+        assert not hasattr(learning, name)

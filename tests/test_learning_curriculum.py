@@ -55,7 +55,13 @@ def curriculum_case(learning_database):
 def _create(db, tenant, slug="new"):
     return create_course(
         db,
-        CourseCreate(tenant_id=tenant, slug=slug, title=slug, discipline="networking"),
+        CourseCreate(
+            tenant_id=tenant,
+            slug=slug,
+            title=slug,
+            discipline="networking",
+            listed=False,
+        ),
     )
 
 
@@ -163,6 +169,8 @@ def test_import_metadata_hash_idempotence_retains_removed_chapters(curriculum_ca
             discipline="networking",
             source_ref="foundation@0.1.0",
             chapters=(chapter,),
+            new_course_status="published",
+            new_course_listed=False,
         )
         first = import_manual(db, command)
         assert (first.version, first.status, first.listed) == (2, "published", False)
@@ -203,11 +211,14 @@ def test_bank_replacement_requested_version_defaults_and_plain_course_reference(
             type="single",
             rubric_category="recall",
             competency="networking",
+            weight=1,
         )
         doc = BankDocument(
             course="logical", chapter=None, kind="final", version=9, questions=(q,)
         )
-        bank = load_bank(db, tenant_id=tenant, course_id=course, doc=doc)
+        bank = load_bank(
+            db, tenant_id=tenant, course_id=course, doc=doc, missing_question_weight=1
+        )
         old_id = db.scalar(select(Question.id).where(Question.bank_id == bank.id))
         next_q = q.model_copy(update={"id": "new", "category": "safety", "weight": 2})
         reloaded = load_bank(
@@ -215,6 +226,7 @@ def test_bank_replacement_requested_version_defaults_and_plain_course_reference(
             tenant_id=tenant,
             course_id=course,
             doc=doc.model_copy(update={"version": 2, "questions": (next_q,)}),
+            missing_question_weight=1,
         )
         assert (reloaded.id, reloaded.version) == (bank.id, 2)
         assert db.scalar(select(Question).where(Question.id == old_id)) is None
@@ -246,6 +258,8 @@ def test_caller_root_rollback_and_pending_host_work_survive_expected_rejections(
                 title="Host",
                 discipline="x",
                 source_ref="host",
+                status="published",
+                listed=False,
             )
             db.add(pending)
             course = _create(db, tenant)
@@ -260,6 +274,7 @@ def test_caller_root_rollback_and_pending_host_work_survive_expected_rejections(
                 tenant_id=tenant,
                 course_id=course.id,
                 doc=BankDocument(course="new", chapter=1, kind="chapter", questions=()),
+                missing_question_weight=1,
             )
             assert bank.id is not None
             db.rollback()  # caller alone owns root outcome
@@ -306,6 +321,8 @@ def _mutation(db, name, tenant, course, chapter):
                 discipline="networking",
                 source_ref="imported",
                 chapters=(),
+                new_course_status="published",
+                new_course_listed=False,
             ),
         )
     if name == "load_bank":
@@ -324,9 +341,11 @@ def _mutation(db, name, tenant, course, chapter):
                         rubric_category="recall",
                         options=["A", "B"],
                         correct=["A"],
+                        weight=1,
                     ),
                 ),
             ),
+            missing_question_weight=1,
         )
     raise AssertionError(name)
 
@@ -395,6 +414,8 @@ def test_mutations_preserve_caller_root_nested_identity_and_pending_work(
             title="Host pending",
             discipline="x",
             source_ref="host",
+            status="published",
+            listed=False,
         )
         db.add(pending)
         for name in MUTATIONS:
@@ -440,10 +461,13 @@ def test_numeric_bank_answer_keeps_json_scalar_kind_through_database(
                     type="numeric",
                     rubric_category="application",
                     correct=answer,
+                    weight=1,
                 ),
             ),
         )
-        bank = load_bank(db, tenant_id=tenant, course_id=uuid4(), doc=doc)
+        bank = load_bank(
+            db, tenant_id=tenant, course_id=uuid4(), doc=doc, missing_question_weight=1
+        )
     with Session(engine) as db, db.begin():
         _scope(db, tenant)
         rebuilt = doc_from_db(

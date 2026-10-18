@@ -152,7 +152,18 @@ def test_same_owner_identity_and_raw_command_values():
     questions = [{"id": "q", "options": [marker], "weight": 1.9}]
     policy = {"pool": marker}
     doc = pure.BankDoc("x", None, "chapter", 1, questions, policy)
-    command = ImportBankWithActivityCommand(tenant_id=uuid4(), doc=doc)
+    command = ImportBankWithActivityCommand(
+        terms=learning.BankActivityTerms(
+            pass_threshold_by_kind={"chapter": 0.0, "mid": 0.6, "final": 0.7},
+            fallback_pass_threshold=0.0,
+            new_activity_assessment_mode="graded",
+            new_activity_grading="auto",
+            new_activity_weight=1.0,
+        ),
+        missing_question_weight=1,
+        tenant_id=uuid4(),
+        doc=doc,
+    )
     assert command.doc is doc
     assert command.doc.questions is questions and command.doc.policy is policy
     assert command.doc.questions[0]["options"][0] is marker

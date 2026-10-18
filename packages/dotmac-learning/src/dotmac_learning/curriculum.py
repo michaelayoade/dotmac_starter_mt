@@ -106,6 +106,7 @@ def create_course(db: Session, command: CourseCreate) -> CourseFact:
             source_ref="in-app",
             version=1,
             status="draft",
+            listed=command.listed,
         ),
     )
     _unchanged(db, boundary)
@@ -240,6 +241,8 @@ def _write_manual(
             discipline=command.discipline,
             source_ref=command.source_ref,
             version=1,
+            status=command.new_course_status,
+            listed=command.new_course_listed,
         )
         db.add(course)
         db.flush()
@@ -325,13 +328,20 @@ def lint_bank(doc: BankDoc | BankDocument) -> list[str]:
 
 
 def load_bank(
-    db: Session, *, tenant_id: UUID, course_id: UUID, doc: BankDoc | BankDocument
+    db: Session,
+    *,
+    tenant_id: UUID,
+    course_id: UUID,
+    doc: BankDoc | BankDocument,
+    missing_question_weight: int,
 ) -> BankFact:
     """Replace questions in source order, preserving raw decoder failure stages.
 
     BankDoc is deliberately unvalidated: defaults, category conversion and weight
     conversion happen per question, after bank creation or replacement deletion.
     """
+    if type(missing_question_weight) is not int or missing_question_weight <= 0:
+        raise ValueError("missing_question_weight must be a positive integer")
     boundary = _transaction(db)
     bank = db.scalars(
         select(QuestionBank).where(
@@ -372,7 +382,7 @@ def load_bank(
                 rubric_category=values["rubric_category"],
                 category=_competency_of(values),
                 explanation=values.get("explanation", ""),
-                weight=int(values.get("weight", 1)),
+                weight=int(values.get("weight", missing_question_weight)),
             )
         )
     db.flush()

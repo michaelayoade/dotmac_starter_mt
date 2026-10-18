@@ -37,6 +37,8 @@ def test_populated_staff_and_learner_windows_exact_source_counts_and_rls(
             create_course(
                 db,
                 CourseWrite(
+                    status="published",
+                    listed=False,
                     id=course,
                     tenant_id=tenant,
                     slug=course.hex,

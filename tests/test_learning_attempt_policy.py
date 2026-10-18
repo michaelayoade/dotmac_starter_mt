@@ -48,7 +48,7 @@ def command(tenant, person, activity, **values):
         person_id=person,
         activity_id=activity,
         reason="  power cut  ",
-        **values,
+        **{"extra_attempts": 1, **values},
     )
 
 
@@ -317,3 +317,41 @@ def test_default_wrapper_propagates_required_completion_failure_for_caller_rollb
     with scoped(app, tenant) as db:
         assert db.scalar(select(func.count()).select_from(Submission)) == 0
         assert db.scalar(select(func.count()).select_from(Score)) == 0
+
+
+def test_plain_required_zero_count_reaches_owner_after_transaction_and_audit_scope(
+    result_database,
+):
+    from dotmac_learning.result_contracts import TransactionChanged
+    from sqlalchemy.orm import Session
+
+    _, app, tenant, person, _, activity, *_ = result_database
+    payload = GrantExtraAttemptCommand(
+        tenant_id=tenant,
+        person_id=person,
+        activity_id=activity,
+        extra_attempts="0",
+        reason="",
+    )
+    assert payload.extra_attempts == 0
+    with Session(bind=app) as db:
+        with pytest.raises(
+            TransactionChanged, match="already active caller root transaction"
+        ):
+            attempt_policy.grant_extra_attempt(
+                db, payload, audit_context=context(uuid4())
+            )
+    with scoped(app, tenant) as db:
+        boundary = db.get_transaction()
+        with pytest.raises(
+            ValueError, match="attempt audit context scope does not match command"
+        ):
+            attempt_policy.grant_extra_attempt(
+                db, payload, audit_context=context(uuid4())
+            )
+        with pytest.raises(ValueError, match="a grant must add at least one attempt"):
+            attempt_policy.grant_extra_attempt(
+                db, payload, audit_context=context(tenant)
+            )
+        assert db.get_transaction() is boundary
+        assert db.scalar(select(func.count()).select_from(AttemptGrant)) == 0

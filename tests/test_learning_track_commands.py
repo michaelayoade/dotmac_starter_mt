@@ -156,7 +156,16 @@ def test_draft_zero_activity_live_warning_and_status_asymmetry(track_case):
         _scope(db, tenant)
         db.get(Course, courses[0]).status = "draft"
         track = _create(db, tenant, cohort, courses[:2])
-        activity = Activity(tenant_id=tenant, course_id=courses[0], title="Quiz")
+        activity = Activity(
+            assessment_mode="graded",
+            grading="auto",
+            pass_threshold=0.0,
+            type="mcq_test",
+            weight=1.0,
+            tenant_id=tenant,
+            course_id=courses[0],
+            title="Quiz",
+        )
         db.add(activity)
         db.flush()
         assert list_cohort_tracks(db, tenant_id=tenant, cohort_id=cohort)[

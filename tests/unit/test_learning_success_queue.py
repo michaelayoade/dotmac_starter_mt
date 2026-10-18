@@ -8,7 +8,7 @@ from dotmac_learning.success_queue import SEGMENT_KEYS
 
 def test_source_queue_shape_and_explicit_unclamped_terms():
     assert len(fields(QueueFact)) == 16
-    assert SuccessTerms(-1, -2, -3).inactive_days == -1
+    assert SuccessTerms(-1, -2, -3, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8).inactive_days == -1
     assert SEGMENT_KEYS == (
         "inactive",
         "overdue_work",

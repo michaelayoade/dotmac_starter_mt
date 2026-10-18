@@ -97,6 +97,7 @@ def instructor_data(result_database):
                     discipline="test",
                     status=status,
                     source_ref="test",
+                    listed=False,
                 ),
             )
         for cid, status in (
@@ -126,7 +127,15 @@ def instructor_data(result_database):
                 create_activity(
                     db,
                     ActivityWrite(
-                        id=aid, tenant_id=tenant, course_id=cid, title="Unrelated"
+                        id=aid,
+                        tenant_id=tenant,
+                        course_id=cid,
+                        title="Unrelated",
+                        type="mcq_test",
+                        pass_threshold=0.0,
+                        weight=1.0,
+                        assessment_mode="graded",
+                        grading="auto",
                     ),
                 )
             sub = Submission(
@@ -195,6 +204,11 @@ def instructor_data(result_database):
                     course_id=disabled,
                     title=title,
                     chapter_number=chapter,
+                    type="mcq_test",
+                    pass_threshold=0.0,
+                    weight=1.0,
+                    assessment_mode="graded",
+                    grading="auto",
                 ),
             )
         db.flush()
@@ -235,13 +249,27 @@ def test_populated_summary_workspace_authoring_results_and_actual_rls(instructor
         assert summary.draft_course_count == 2
         assert len(summary.selectable_courses) == 2
         detail = reads.cohort_workspace(
-            db, tenant_id=tenant, cohort_id=cohort, accounts=accounts, now=NOW, limit=1
+            db,
+            tenant_id=tenant,
+            cohort_id=cohort,
+            accounts=accounts,
+            now=NOW,
+            limit=1,
+            at_risk_pct=0.5,
+            stale_days=14,
         )
         assert detail.student_total == 3 and detail.active_student_count == 1
         assert detail.students[0].person.last_name == "Alpha"
         assert detail.average_progress == 0.4 and detail.at_risk_count == 1
         full = reads.cohort_workspace(
-            db, tenant_id=tenant, cohort_id=cohort, accounts=accounts, now=NOW
+            db,
+            tenant_id=tenant,
+            cohort_id=cohort,
+            accounts=accounts,
+            now=NOW,
+            at_risk_pct=0.5,
+            stale_days=14,
+            limit=12,
         )
         zulu = next(s for s in full.students if s.person.id == person)
         assert zulu.last_activity_at == NOW - timedelta(days=15)
@@ -338,7 +366,14 @@ def test_populated_summary_workspace_authoring_results_and_actual_rls(instructor
         )
         with pytest.raises(ParticipationNotFound):
             reads.cohort_workspace(
-                db, tenant_id=tenant, cohort_id=cohort, accounts=accounts, now=NOW
+                db,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                accounts=accounts,
+                now=NOW,
+                at_risk_pct=0.5,
+                stale_days=14,
+                limit=12,
             )
         assert (
             reads.assigned_course_ids(db, tenant_id=tenant, instructor_id=instructor)
@@ -409,7 +444,13 @@ def test_missing_foreign_population_refused_before_sql_and_assignment_filters(
                 reads.cohorts_summary(db, tenant_id=tenant, accounts=foreign)
             with pytest.raises(ValueError):
                 reads.cohort_workspace(
-                    db, tenant_id=tenant, cohort_id=cohort, accounts=foreign
+                    db,
+                    tenant_id=tenant,
+                    cohort_id=cohort,
+                    accounts=foreign,
+                    at_risk_pct=0.5,
+                    stale_days=14,
+                    limit=12,
                 )
         enrollment = db.scalar(
             select(Enrollment).where(Enrollment.person_id == instructor)
@@ -438,6 +479,9 @@ def test_inactive_identity_with_available_account_stays_current(instructor_data)
             cohort_id=cohort,
             accounts=selection(tenant, person),
             now=NOW,
+            at_risk_pct=0.5,
+            stale_days=14,
+            limit=12,
         )
         assert facts.active_student_count == 1
         assert next(s for s in facts.students if s.person.id == person).at_risk
@@ -455,6 +499,9 @@ def test_active_identity_with_unavailable_account_remains_visible_not_current(
             cohort_id=cohort,
             accounts=selection(tenant),
             now=NOW,
+            at_risk_pct=0.5,
+            stale_days=14,
+            limit=12,
         )
         beta = next(s for s in facts.students if s.person.last_name == "Beta")
         assert (

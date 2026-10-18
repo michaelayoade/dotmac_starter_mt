@@ -186,11 +186,12 @@ def test_source_types_lengths_and_defaults():
             },
         ),
         (QuestionBank, {"version": 1}),
-        (Question, {"explanation": "", "weight": 1}),
+        (Question, {"explanation": ""}),
         (ChapterNote, {"body": ""}),
     ):
         for field, value in expected.items():
             assert model.__table__.c[field].default.arg == value
+    assert Question.__table__.c.weight.default is None
     for field in ("options", "correct"):
         column = Question.__table__.c[field]
         assert column.type.__class__.__name__ == "JSONB"

@@ -126,7 +126,10 @@ def test_bank_questions_all_types_fields_membership_and_valid_non_mcq_shapes(
             q for q in grading_questions if q["type"] in {"numeric", "short_text"}
         ]
         graded = learning.grade_submission(
-            {"numeric": [42.25], "short_text": ["goooal"]}, non_mcq, 1.0
+            {"numeric": [42.25], "short_text": ["goooal"]},
+            non_mcq,
+            1.0,
+            missing_question_weight=1,
         )
         assert graded.passed and graded.fraction == 1.0
     assert {fact.ext_id for fact in facts} == {kind for kind, _, _ in specs}

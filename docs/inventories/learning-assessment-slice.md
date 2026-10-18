@@ -28,8 +28,10 @@ The open-sitting partial unique is `(tenant_id, activity_id, person_id)` where
 legacy duplicate-closing backfill belongs to Academy migration, not fresh storage.
 `person_id` and `granted_by` are logical UUIDs without source foreign keys.
 Do not add identity, role, positivity or status constraints to historical storage.
-Question IDs are JSONB with database default `[]`; grant extra attempts default
-to one. Source timestamps and UUID defaults retain their existing ownership.
+Question IDs are JSONB with database default `[]`; the AttemptGrant storage column
+retains its historical database default `1`. `GrantExtraAttemptCommand` requires
+product-supplied `extra_attempts`. Source timestamps and UUID defaults retain their
+existing ownership.
 
 The prepared storage continuation is `lr_0004_assessment`, down `lr_0003_participation`,
 in the same `mod_learning` namespace and learning lineage. Existing migrations

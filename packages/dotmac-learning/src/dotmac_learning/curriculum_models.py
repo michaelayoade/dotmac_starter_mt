@@ -124,7 +124,7 @@ class Question(KernelBase, TimestampMixin):
     # cognitive rubric_category; the entrance-assessment profile groups by this.
     category: Mapped[str | None] = mapped_column(String(40), nullable=True)
     explanation: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    weight: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class ChapterRead(KernelBase, TimestampMixin):

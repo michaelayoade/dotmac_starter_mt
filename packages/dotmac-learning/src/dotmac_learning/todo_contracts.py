@@ -10,6 +10,17 @@ from .references import ActivityFact
 
 
 @dataclass(frozen=True, slots=True)
+class TodoTerms:
+    """Required product-resolved timeline policy; no owner fallback values."""
+
+    graded_lookback_days: int
+    graded_limit: int
+    window_horizon_days: int
+    near_deadline_days: int
+    far_deadline_days: int
+
+
+@dataclass(frozen=True, slots=True)
 class DeadlineFact:
     due_at: datetime
     activity: ActivityFact
@@ -40,6 +51,8 @@ class CourseWindowFact:
 
 @dataclass(frozen=True, slots=True)
 class PersonTimeline:
+    """next_7/next_30 are historical field aliases; products label supplied terms."""
+
     overdue: tuple[DeadlineFact, ...]
     due_today: tuple[DeadlineFact, ...]
     next_7: tuple[DeadlineFact, ...]

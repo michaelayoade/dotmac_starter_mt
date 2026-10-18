@@ -85,10 +85,12 @@ def test_dictionary_configs_keep_source_chance_and_iteration_semantics():
     numeric = learning.SelectionQuestion(ext_id="numeric", options={"tolerance": 0.5})
     regex = learning.SelectionQuestion(ext_id="text", options={"regex": True})
     listed = learning.SelectionQuestion(ext_id="single", options=["a", "b", "c", "d"])
-    assert learning.chance_baseline([numeric, regex, listed]) == pytest.approx(0.25)
-    assert learning.chance_baseline([numeric, regex]) == pytest.approx(
-        learning.MIN_VALID_FRACTION / learning.NEAR_CHANCE_MARGIN
-    )
+    assert learning.chance_baseline(
+        [numeric, regex, listed], fallback_baseline=(1 / 3) / 1.33
+    ) == pytest.approx(0.25)
+    assert learning.chance_baseline(
+        [numeric, regex], fallback_baseline=(1 / 3) / 1.33
+    ) == pytest.approx((1 / 3) / 1.33)
     sitter = SimpleNamespace(id="candidate")
     assert learning.present_options(sitter, numeric) == ["tolerance"]
     assert learning.present_options(sitter, regex) == ["regex"]
@@ -127,6 +129,7 @@ def test_numeric_tolerance_and_short_text_regex_reach_source_grader_unchanged():
             },
         ],
         pass_threshold=1.0,
+        missing_question_weight=1,
     )
     assert graded.fraction == 1.0 and graded.passed
     assert [q.options for q in questions] == list(configs)

@@ -30,10 +30,8 @@ from .todo_contracts import (
     DeadlineFact,
     PersonTimeline,
     RecentGradeFact,
+    TodoTerms,
 )
-
-GRADED_LOOKBACK_DAYS = 14
-WINDOW_HORIZON_DAYS = 30
 
 
 def _passed_activity_ids(db: Session, *, tenant_id: UUID, person_id: UUID) -> set[UUID]:
@@ -107,9 +105,9 @@ def _local_day_end(now: datetime, local_zone: tzinfo) -> datetime:
 
 
 def _graded_rows(
-    db: Session, *, tenant_id: UUID, person_id: UUID, now: datetime
+    db: Session, *, tenant_id: UUID, person_id: UUID, now: datetime, terms: TodoTerms
 ) -> tuple[RecentGradeFact, ...]:
-    since = now - timedelta(days=GRADED_LOOKBACK_DAYS)
+    since = now - timedelta(days=terms.graded_lookback_days)
     rows = db.execute(
         select(Score, Activity, Course.title, Course.slug)
         .join(
@@ -131,7 +129,7 @@ def _graded_rows(
         .where(Submission.person_id == person_id)
         .where(Score.created_at >= since)
         .order_by(Score.created_at.desc())
-        .limit(10)
+        .limit(terms.graded_limit)
     ).all()
     out: list[RecentGradeFact] = []
     for score, activity, course_title, course_slug in rows:
@@ -156,9 +154,9 @@ def _graded_rows(
 
 
 def _course_windows(
-    db: Session, *, tenant_id: UUID, person_id: UUID, now: datetime
+    db: Session, *, tenant_id: UUID, person_id: UUID, now: datetime, terms: TodoTerms
 ) -> tuple[CourseWindowFact, ...]:
-    horizon = now + timedelta(days=WINDOW_HORIZON_DAYS)
+    horizon = now + timedelta(days=terms.window_horizon_days)
     rows = db.execute(
         select(CourseOffering, Course.title)
         .join(
@@ -192,13 +190,15 @@ def timeline_for_person(
     tenant_id: UUID,
     person_id: UUID,
     local_zone: tzinfo,
+    terms: TodoTerms,
+    join_lead_minutes: int,
     now: datetime | None = None,
 ) -> PersonTimeline:
     """The unified To-Do projection: sectioned deadlines, sessions, grades, windows."""
     now = now or datetime.now(UTC)
     day_end = _local_day_end(now, local_zone)
-    week_end = now + timedelta(days=7)
-    month_end = now + timedelta(days=30)
+    week_end = now + timedelta(days=terms.near_deadline_days)
+    month_end = now + timedelta(days=terms.far_deadline_days)
 
     overdue: list[DeadlineFact] = []
     due_today: list[DeadlineFact] = []
@@ -219,9 +219,13 @@ def timeline_for_person(
         db, tenant_id=tenant_id, person_id=person_id, now=now
     ).upcoming
     joinable = frozenset(
-        entry.session.id for entry in sessions if join_is_open(entry.session, now=now)
+        entry.session.id
+        for entry in sessions
+        if join_is_open(entry.session, now=now, lead_minutes=join_lead_minutes)
     )
-    graded = _graded_rows(db, tenant_id=tenant_id, person_id=person_id, now=now)
+    graded = _graded_rows(
+        db, tenant_id=tenant_id, person_id=person_id, now=now, terms=terms
+    )
 
     return PersonTimeline(
         tuple(overdue),
@@ -232,7 +236,9 @@ def timeline_for_person(
         joinable,
         graded,
         tuple(g for g in graded if g.feedback_available),
-        _course_windows(db, tenant_id=tenant_id, person_id=person_id, now=now),
+        _course_windows(
+            db, tenant_id=tenant_id, person_id=person_id, now=now, terms=terms
+        ),
     )
 
 

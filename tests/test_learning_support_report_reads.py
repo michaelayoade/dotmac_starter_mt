@@ -104,10 +104,21 @@ def report_database(result_database):
                 title=f"Course {index}",
                 discipline="engineering",
                 source_ref="source",
+                status="published",
+                listed=False,
             )
             db.add(c)
             db.flush()
-            a = Activity(tenant_id=tenant, course_id=c.id, title=f"Work {index}")
+            a = Activity(
+                tenant_id=tenant,
+                course_id=c.id,
+                title=f"Work {index}",
+                type="mcq_test",
+                pass_threshold=0.0,
+                weight=1.0,
+                assessment_mode="graded",
+                grading="auto",
+            )
             db.add(a)
             db.flush()
             courses.append(c.id)
@@ -206,7 +217,7 @@ def test_all_projections_positive_before_evil_a_parameters_under_b_non_bypass(
             engagement.ever_active,
             engagement.active_in_window,
         ) == (2, 2, 2)
-        movers = reads.top_movers(db, tenant_id=f["tenant"], since=SINCE)
+        movers = reads.top_movers(db, tenant_id=f["tenant"], since=SINCE, limit=5)
         assert [row.person.id for row in movers] == [f["person"], f["second"]]
         assert movers[0].cohort_name == "Alpha" and movers[0].avg_score == 0.5
         assert movers[1].avg_score is None
@@ -216,7 +227,7 @@ def test_all_projections_positive_before_evil_a_parameters_under_b_non_bypass(
             2,
             1,
         )
-        attention = reads.attention_list(db, tenant_id=f["tenant"])
+        attention = reads.attention_list(db, tenant_id=f["tenant"], limit=8)
         assert attention.open_total == 10 and len(attention.top) == 8
         assert (
             sum(row.count for row in attention.by_reason) == 10
@@ -257,14 +268,14 @@ def test_all_projections_positive_before_evil_a_parameters_under_b_non_bypass(
             reads.engagement_snapshot(db, tenant_id=f["tenant"], since=SINCE).enrollees
             == 0
         )
-        assert reads.top_movers(db, tenant_id=f["tenant"], since=SINCE) == ()
+        assert reads.top_movers(db, tenant_id=f["tenant"], since=SINCE, limit=5) == ()
         counts = reads.activity_window_counts(db, tenant_id=f["tenant"], since=SINCE)
         assert (counts.new_enrollments, counts.submissions, counts.completions) == (
             0,
             0,
             0,
         )
-        assert reads.attention_list(db, tenant_id=f["tenant"]).open_total == 0
+        assert reads.attention_list(db, tenant_id=f["tenant"], limit=8).open_total == 0
         assert reads.queue_summary(db, tenant_id=f["tenant"]) == ()
         with pytest.raises(ValueError, match="^cohort not found$"):
             reads.cohort_roster_progress(
@@ -327,7 +338,7 @@ def test_top_movers_all_window_score_rows_not_best_and_uuid_tie_order(report_dat
         )
         add_event(db, f["tenant"], f["second"])
         db.flush()
-        rows = reads.top_movers(db, tenant_id=f["tenant"], since=SINCE)
+        rows = reads.top_movers(db, tenant_id=f["tenant"], since=SINCE, limit=5)
         assert [row.person.id for row in rows] == sorted([f["person"], f["second"]])
         first = next(row for row in rows if row.person.id == f["person"])
         assert first.avg_score == pytest.approx(2 / 3) and first.submissions == 1
@@ -389,6 +400,8 @@ def test_empty_course_cohort_uuid_sentinel_collision_preserved(report_database):
                 title="UUID collision",
                 discipline="engineering",
                 source_ref="source",
+                status="published",
+                listed=False,
             )
         )
         db.flush()
@@ -552,3 +565,16 @@ def test_roster_never_active_nulls_and_python_half_even_rounding(report_database
         assert person.avg_grade_pct == 20 and person.avg_completion_pct == 62
         assert second.last_activity_at is None and second.days_inactive is None
         assert second.avg_grade_pct == second.avg_completion_pct == 0
+
+
+def test_configured_report_caps_keep_full_attention_counts(report_database):
+    f = report_database
+    with scoped(f["app"], f["tenant"]) as db:
+        root = db.get_transaction()
+        movers = reads.top_movers(db, tenant_id=f["tenant"], since=SINCE, limit=1)
+        assert [r.person.id for r in movers] == [f["person"]]
+        attention = reads.attention_list(db, tenant_id=f["tenant"], limit=2)
+        assert len(attention.top) == 2
+        assert attention.open_total == 10
+        assert sum(row.count for row in attention.by_reason) == 10
+        assert db.get_transaction() is root

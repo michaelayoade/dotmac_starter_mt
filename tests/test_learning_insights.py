@@ -7,6 +7,11 @@ import pytest
 from dotmac_learning import insights
 from dotmac_learning.attempt_models import AttemptGrant
 from dotmac_learning.delivery_models import OfferingActivity
+from dotmac_learning.insight_contracts import (
+    CohortInsightTerms,
+    GradeTrendTerms,
+    LearnerInsightTerms,
+)
 from dotmac_learning.models import (
     Activity,
     Certificate,
@@ -117,6 +122,8 @@ def populated(result_database):
                 title="Second",
                 discipline="second",
                 source_ref="test",
+                status="published",
+                listed=False,
             ),
         )
         db.add(
@@ -131,7 +138,18 @@ def populated(result_database):
             (other_activity, second_course),
         ):
             create_activity(
-                db, ActivityWrite(id=aid, tenant_id=tenant, course_id=cid, title="A")
+                db,
+                ActivityWrite(
+                    id=aid,
+                    tenant_id=tenant,
+                    course_id=cid,
+                    title="A",
+                    type="mcq_test",
+                    pass_threshold=0.0,
+                    assessment_mode="graded",
+                    grading="auto",
+                    weight=1.0,
+                ),
             )
         for i, f in enumerate((0.1, 0.2, 0.4, 0.8)):
             # Same activity may have several Score rows; trend consumes all,
@@ -204,7 +222,11 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
         )
         root = db.get_transaction()
         learner = insights.learner_activity(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            terms=LearnerInsightTerms(8, 4, 7, GradeTrendTerms(10, 4, 0.05)),
         )
         assert learner.blocker.reason == learner.recommendation == "overdue"
         assert learner.days_since_last == 1 and learner.attendance is None
@@ -213,7 +235,11 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
         assert learner.grade_trend.direction == "up"
         assert learner.disciplines.strong == "second"
         overview = insights.cohort_overview(
-            db, tenant_id=tenant, cohort_id=cohort, now=NOW
+            db,
+            tenant_id=tenant,
+            cohort_id=cohort,
+            now=NOW,
+            terms=CohortInsightTerms(7, 4),
         )
         assert (overview.learners, overview.active, overview.inactive) == (1, 1, 0)
         assert (overview.submitted, overview.overdue, overview.not_attempted) == (
@@ -231,7 +257,9 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
         ) == (1, 1, 1, 1, 1)
         assert overview.week_events == 3 and overview.prior_week_avg == 0.2
         assert tuple(f.failed_checks for f in overview.lab_failures) == (1,)
-        comparison = insights.cohorts_comparison(db, tenant_id=tenant, now=NOW)
+        comparison = insights.cohorts_comparison(
+            db, tenant_id=tenant, now=NOW, active_window_days=7
+        )
         assert comparison[0].cohort.id == cohort
         assert comparison[0].completion_pct == 100
         assert db.get_transaction() is root
@@ -244,16 +272,29 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
             )
         )
         evil = insights.learner_activity(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            now=NOW,
+            terms=LearnerInsightTerms(8, 4, 7, GradeTrendTerms(10, 4, 0.05)),
         )
         assert evil.max_week == 0 and evil.grade_trend.points == ()
         assert evil.disciplines.all == () and evil.blocker is None
         hidden = insights.cohort_overview(
-            db, tenant_id=tenant, cohort_id=cohort, now=NOW
+            db,
+            tenant_id=tenant,
+            cohort_id=cohort,
+            now=NOW,
+            terms=CohortInsightTerms(7, 4),
         )
         assert hidden.learners == hidden.submitted == hidden.overdue == 0
         assert hidden.avg_score_pct is None and hidden.lab_failures == ()
-        assert insights.cohorts_comparison(db, tenant_id=tenant, now=NOW) == ()
+        assert (
+            insights.cohorts_comparison(
+                db, tenant_id=tenant, now=NOW, active_window_days=7
+            )
+            == ()
+        )
         own = Cohort(tenant_id=other, name="Own", discipline="B")
         db.add(own)
         db.flush()
@@ -261,12 +302,18 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
         event(db, other, other_person, None, NOW - timedelta(days=1))
         assert (
             insights.cohort_overview(
-                db, tenant_id=other, cohort_id=own.id, now=NOW
+                db,
+                tenant_id=other,
+                cohort_id=own.id,
+                now=NOW,
+                terms=CohortInsightTerms(7, 4),
             ).active
             == 1
         )
         assert (
-            insights.cohorts_comparison(db, tenant_id=other, now=NOW)[0].cohort.id
+            insights.cohorts_comparison(
+                db, tenant_id=other, now=NOW, active_window_days=7
+            )[0].cohort.id
             == own.id
         )
 
@@ -283,7 +330,11 @@ def test_blocker_exact_deadline_and_attempt_grants(populated):
         row.max_attempts = 1
         assert (
             insights.learner_activity(
-                db, tenant_id=tenant, person_id=person, now=NOW
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                terms=LearnerInsightTerms(8, 4, 7, GradeTrendTerms(10, 4, 0.05)),
             ).blocker.reason
             == "attempts_exhausted"
         )
@@ -298,7 +349,11 @@ def test_blocker_exact_deadline_and_attempt_grants(populated):
         )
         assert (
             insights.learner_activity(
-                db, tenant_id=tenant, person_id=person, now=NOW
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                terms=LearnerInsightTerms(8, 4, 7, GradeTrendTerms(10, 4, 0.05)),
             ).blocker
             is None
         )
@@ -314,6 +369,8 @@ def test_blocker_exact_deadline_and_attempt_grants(populated):
                 title="Disabled",
                 discipline="test",
                 source_ref="test",
+                status="published",
+                listed=False,
             ),
         )
         create_activity(
@@ -323,6 +380,11 @@ def test_blocker_exact_deadline_and_attempt_grants(populated):
                 tenant_id=tenant,
                 course_id=disabled_course,
                 title="Disabled",
+                type="mcq_test",
+                pass_threshold=0.0,
+                assessment_mode="graded",
+                grading="auto",
+                weight=1.0,
             ),
         )
         inactive = CourseOffering(
@@ -343,13 +405,21 @@ def test_blocker_exact_deadline_and_attempt_grants(populated):
         )
         assert (
             insights.learner_activity(
-                db, tenant_id=tenant, person_id=person, now=NOW
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                now=NOW,
+                terms=LearnerInsightTerms(8, 4, 7, GradeTrendTerms(10, 4, 0.05)),
             ).blocker
             is None
         )
         assert (
             insights.cohort_overview(
-                db, tenant_id=tenant, cohort_id=cohort, now=NOW
+                db,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                now=NOW,
+                terms=CohortInsightTerms(7, 4),
             ).overdue
             == 1
         )
@@ -381,9 +451,9 @@ def test_trend_latest_ten_and_comparison_all_statuses_stable_name_sort(result_da
                     created_at=NOW - timedelta(days=12 - i),
                 )
             )
-        assert insights._grade_trend(db, tenant, person).points == tuple(
-            range(10, 60, 5)
-        )
+        assert insights._grade_trend(
+            db, tenant, person, terms=GradeTrendTerms(10, 4, 0.05)
+        ).points == tuple(range(10, 60, 5))
         db.add_all(
             [
                 Cohort(
@@ -394,13 +464,52 @@ def test_trend_latest_ten_and_comparison_all_statuses_stable_name_sort(result_da
                 ),
             ]
         )
-        rows = insights.cohorts_comparison(db, tenant_id=tenant, now=NOW)
+        rows = insights.cohorts_comparison(
+            db, tenant_id=tenant, now=NOW, active_window_days=7
+        )
         assert tuple(r.cohort.name for r in rows) == ("alpha", "Zulu")
         assert tuple(r.completion_pct for r in rows) == (0, 0)
         for r in rows:
             ov = insights.cohort_overview(
-                db, tenant_id=tenant, cohort_id=r.cohort.id, now=NOW
+                db,
+                tenant_id=tenant,
+                cohort_id=r.cohort.id,
+                now=NOW,
+                terms=CohortInsightTerms(7, 4),
             )
             assert ov.avg_score_pct is None
             assert ov.lab_failures == ()
             assert ov.funnel.enrolled == ov.funnel.started == ov.funnel.half == 0
+
+
+def test_configured_insight_windows_keep_real_rls_and_transaction(populated):
+    fixture, cohort, _, _ = populated
+    _, app, tenant, person, _, _, other, *_ = fixture
+    learner_terms = LearnerInsightTerms(3, 2, 11, GradeTrendTerms(2, 2, 0.25))
+    cohort_terms = CohortInsightTerms(0, 1)
+    with scoped(app, tenant) as db:
+        root = db.get_transaction()
+        learner = insights.learner_activity(
+            db, tenant_id=tenant, person_id=person, terms=learner_terms, now=NOW
+        )
+        assert len(learner.weekly) == 3
+        assert learner.velocity_per_week == 1.0
+        assert len(learner.grade_trend.points) == 2
+        overview = insights.cohort_overview(
+            db, tenant_id=tenant, cohort_id=cohort, terms=cohort_terms, now=NOW
+        )
+        assert overview.active_window_days == 0 and overview.active == 0
+        # The event at exactly seven days belongs to this week; only the prior
+        # half-open 7..14 day range enters the one-week comparison denominator.
+        assert overview.week_events == 3 and overview.prior_week_avg == 0
+        rows = insights.cohorts_comparison(
+            db, tenant_id=tenant, active_window_days=0, now=NOW
+        )
+        assert rows[0].active == 0
+        assert db.get_transaction() is root
+    with scoped(app, other) as db:
+        hidden = insights.cohort_overview(
+            db, tenant_id=tenant, cohort_id=cohort, terms=cohort_terms, now=NOW
+        )
+        assert hidden.learners == hidden.active == hidden.week_events == 0
+        assert hidden.prior_week_avg == 0

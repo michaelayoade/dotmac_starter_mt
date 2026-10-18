@@ -5,7 +5,10 @@ from uuid import uuid4
 
 import pytest
 from dotmac_learning import BankDoc, BankDocumentHeader, decoded_doc_from_db
-from dotmac_learning.bank_activity_contracts import ImportBankWithActivityCommand
+from dotmac_learning.bank_activity_contracts import (
+    BankActivityTerms,
+    ImportBankWithActivityCommand,
+)
 from dotmac_learning.bank_activity_import import import_bank_with_activity
 from dotmac_learning.curriculum import create_course, lint_bank
 from dotmac_learning.curriculum_contracts import (
@@ -40,6 +43,7 @@ def _doc(*, kind="chapter", chapter=2, policy=None, question="first"):
                 rubric_category="recall",
                 options=["A", "B"],
                 correct=["A"],
+                weight=1,
             ),
         ),
         policy={} if policy is None else policy,
@@ -50,14 +54,24 @@ def _course(db, tenant):
     return create_course(
         db,
         CourseCreate(
-            tenant_id=tenant, slug="bank-course", title="Bank", discipline="x"
+            tenant_id=tenant,
+            slug="bank-course",
+            title="Bank",
+            discipline="x",
+            listed=False,
         ),
     )
 
 
 def _import(db, tenant, doc):
     return import_bank_with_activity(
-        db, ImportBankWithActivityCommand(tenant_id=tenant, doc=doc)
+        db,
+        ImportBankWithActivityCommand(
+            tenant_id=tenant,
+            doc=doc,
+            terms=BANK_ACTIVITY_TERMS,
+            missing_question_weight=1,
+        ),
     )
 
 
@@ -248,6 +262,7 @@ def test_linter_accepted_null_preserves_source_existing_row_constraint_failure(
                     type="truefalse",
                     rubric_category=category,
                     correct=["true"],
+                    weight=1,
                 )
                 for i, category in enumerate(
                     ["recall"] * 2 + ["application"] * 5 + ["analysis"] * 3
@@ -332,7 +347,12 @@ def test_raw_unknown_course_bad_weight_skips_without_dml(curriculum_case):
             doc = _raw_doc()
             doc.questions[0]["weight"] = "bad"
             assert lint_bank(doc) == []
-            command = ImportBankWithActivityCommand(tenant_id=tenant, doc=doc)
+            command = ImportBankWithActivityCommand(
+                tenant_id=tenant,
+                doc=doc,
+                terms=BANK_ACTIVITY_TERMS,
+                missing_question_weight=1,
+            )
             assert command.doc is doc
             assert import_bank_with_activity(db, command) is None
             assert not db.new and db.is_active
@@ -482,7 +502,12 @@ def test_raw_non_json_reaches_final_flush_serialization_failure_and_rollback(
             doc = _raw_doc()
             doc.questions[0][key] = [date(2026, 10, 17)]
             assert lint_bank(doc) == []
-            command = ImportBankWithActivityCommand(tenant_id=tenant, doc=doc)
+            command = ImportBankWithActivityCommand(
+                tenant_id=tenant,
+                doc=doc,
+                terms=BANK_ACTIVITY_TERMS,
+                missing_question_weight=1,
+            )
             assert command.doc is doc
             flushes = []
 
@@ -701,3 +726,99 @@ def test_decoded_reader_stale_header_returns_raw_empty_doc_with_one_query(
             raw.policy,
         ) == ("stale-slug", None, "stale", 37, [], {})
         assert not db.new and not db.dirty
+
+
+BANK_ACTIVITY_TERMS = BankActivityTerms(
+    pass_threshold_by_kind={"chapter": 0.0, "mid": 0.60, "final": 0.70},
+    fallback_pass_threshold=0.0,
+    new_activity_assessment_mode="graded",
+    new_activity_grading="auto",
+    new_activity_weight=1.0,
+)
+
+
+def test_configured_new_activity_terms_and_raw_missing_weight_preserve_update_omission(
+    curriculum_case,
+):
+    engine, (tenant, _) = curriculum_case
+    configured = BankActivityTerms({"chapter": 0.83}, 0.29, "practice", "manual", 4.5)
+    changed = BankActivityTerms({"chapter": 0.41}, 0.11, "exam", "auto", 9.5)
+    doc = BankDoc(
+        "bank-course",
+        2,
+        "chapter",
+        1,
+        [
+            {
+                "id": "q",
+                "stem": "Question",
+                "type": "numeric",
+                "rubric_category": "recall",
+                "options": {"tolerance": 0.5},
+                "correct": 42,
+            },
+            {
+                "id": "explicit",
+                "stem": "Question",
+                "type": "single",
+                "rubric_category": "recall",
+                "options": [True, None],
+                "correct": [True],
+                "weight": 2.9,
+            },
+        ],
+    )
+    with Session(engine) as db, db.begin():
+        _scope(db, tenant)
+        boundary = db.get_transaction()
+        _course(db, tenant)
+        first = import_bank_with_activity(
+            db,
+            ImportBankWithActivityCommand(
+                tenant_id=tenant,
+                doc=doc,
+                terms=configured,
+                missing_question_weight=7,
+            ),
+        )
+        db.flush()
+        activity = db.scalar(select(Activity))
+        assert (
+            activity.pass_threshold,
+            activity.assessment_mode,
+            activity.grading,
+            activity.weight,
+        ) == (0.83, "practice", "manual", 4.5)
+        questions = {q.ext_id: q for q in db.scalars(select(Question)).all()}
+        assert questions["q"].weight == 7 and questions["explicit"].weight == 2
+        assert questions["q"].options == {"tolerance": 0.5}
+        assert questions["explicit"].options == [True, None]
+        assert "weight" not in doc.questions[0]
+        second = import_bank_with_activity(
+            db,
+            ImportBankWithActivityCommand(
+                tenant_id=tenant,
+                doc=doc,
+                terms=changed,
+                missing_question_weight=3,
+            ),
+        )
+        assert first.bank_id == second.bank_id and not second.created
+        assert (
+            activity.pass_threshold,
+            activity.assessment_mode,
+            activity.grading,
+            activity.weight,
+        ) == (0.41, "practice", "manual", 4.5)
+        doc.policy = {"mode": "exam", "pass_threshold": 0.96}
+        import_bank_with_activity(
+            db,
+            ImportBankWithActivityCommand(
+                tenant_id=tenant,
+                doc=doc,
+                terms=changed,
+                missing_question_weight=3,
+            ),
+        )
+        assert (activity.pass_threshold, activity.assessment_mode) == (0.96, "exam")
+        assert db.get_transaction() is boundary

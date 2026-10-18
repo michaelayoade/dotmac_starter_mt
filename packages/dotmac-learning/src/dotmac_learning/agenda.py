@@ -21,7 +21,8 @@ def upcoming_for_person(
     *,
     tenant_id: UUID,
     person_id: UUID,
-    limit: int = 50,
+    limit: int,
+    join_lead_minutes: int,
     now: datetime | None = None,
 ) -> tuple[AgendaItem, ...]:
     """Merged, chronologically-sorted future agenda items for a person.
@@ -151,7 +152,9 @@ def upcoming_for_person(
                     "",
                     AgendaTarget("session", s.id),
                     session,
-                    scheduling.join_is_open(session, now=now),
+                    scheduling.join_is_open(
+                        session, now=now, lead_minutes=join_lead_minutes
+                    ),
                 )
             )
 

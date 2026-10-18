@@ -33,6 +33,8 @@ An exhausted or missing learner therefore retains precedence over a question
 read failure or malformed stored JSON that causes the grader to raise. Grading
 errors propagate after the staged Submission; the caller owns rollback.
 The admitted observation supplies the bank, threshold, grading mode and course.
+The product separately supplies the required `SubmitMCQCommand.missing_question_weight`;
+this policy value is not inferred from the admitted observation.
 Concurrent authoring and grant changes are not newly serialized.
 
 The existing pregraded `MCQResultCommand`, `record_mcq_result` and
@@ -81,8 +83,9 @@ unchanged. Hosted and installed caller qualification are still required.
 empty-list default. In particular, numeric tolerance and short-text regex
 configuration objects survive the existing `load_bank`, `doc_from_db` and
 `ImportBankWithActivityCommand` paths. The existing linter and grader retain
-their source rules, and list options and all other BankQuestion validation
-remain unchanged. This input correction adds no migration or writer change;
+their source rules, and list options retain their existing validation.
+`BankQuestion.weight` is required; `load_bank` also requires the product-selected
+`missing_question_weight` used only when a raw question omits its weight. This input correction adds no migration or writer change;
 hosted PostgreSQL and installed caller qualification remain required.
 
 The source-only `cohort_course_ids(db, *, tenant_id, cohort_id) -> list[UUID]`
@@ -98,10 +101,10 @@ source change claims no hosted qualification, publication or Academy adoption.
 The source-only attempt selection input and exam question protocol now accept
 `JsonValue` options, matching stored questions including numeric tolerance and
 short-text regex dictionaries. Defaults remain `None`; no option normalization
-or engine algorithm changes are introduced. The six existing engine constants
-`SECONDS_PER_QUESTION`, `NEAR_CHANCE_MARGIN`, `MIN_VALID_FRACTION`,
-`MIN_DURATION_SECONDS`, `INVALID_NEAR_CHANCE` and `INVALID_TOO_FAST` are exposed
-through the package public surface with their existing owner and values. Unit
+or engine algorithm changes are introduced. Validity thresholds and duration factors come from required `ValidityTerms`
+supplied by the product to `check_validity`; the engine continues to derive
+paper-specific values from the actual questions. The public reason identifiers
+`INVALID_NEAR_CHANCE` and `INVALID_TOO_FAST` retain their existing owner and values. Unit
 JSON-shape/deep-copy and pure-engine canaries plus hosted PostgreSQL mixed-question
 open/reload/close/retake canaries are authored but unexecuted. This source change
 claims no hosted qualification, publication or Academy adoption.
@@ -126,8 +129,9 @@ unvalidated `BankDoc` and existing `balance_targets`/`propose_balance` owners ar
 public. `lint_bank` accepts that instance directly; normalized `BankDocument`
 conversion remains available. `ImportBankWithActivityCommand` accepts raw instances
 with `InstanceOf`, retaining nested decoder values and identity. The single loader
-loop preserves required-key access, defaults, category conversion, then integer
-weight conversion in original encounter order. It does not preflight or normalize
+loop preserves required-key access, category conversion, then integer
+weight conversion in original encounter order. Missing raw question weights use
+the required product-supplied `missing_question_weight`; other raw defaults remain unchanged. It does not preflight or normalize
 the raw document. Unknown-course skip precedes loading; new-bank flush and existing
 replacement deletion/version changes precede question errors. Python conversion
 errors leave the caller transaction active; non-JSON question values reach database
@@ -207,8 +211,10 @@ Academy qualification remain required before release or adoption.
 
 ## Ordered manual source composition (prepared source)
 
-`ManualImportHeader` retains the five existing course input fields in their
-original order and types. `ManualImport` inherits those fields and retains its
+`ManualImportHeader` requires product-supplied `new_course_status` and
+`new_course_listed` for newly created courses. It retains the five prior course
+input fields in their original order and types. Existing-course imports do not
+reset status or listing from those creation policy values. `ManualImport` inherits those fields and retains its
 original default empty tuple of normalized `ImportedChapter` values. Existing
 `import_manual(db, command)` still uses its final scoped refresh query and returns
 an immutable `CourseFact`.

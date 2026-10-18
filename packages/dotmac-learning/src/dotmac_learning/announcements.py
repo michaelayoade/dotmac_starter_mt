@@ -113,7 +113,7 @@ def for_person(
     *,
     tenant_id: UUID,
     person_id: UUID,
-    limit: int = 20,
+    limit: int,
 ) -> tuple[AnnouncementFact, ...]:
     """Return tenant-wide announcements and those for any active enrollment."""
     enrolled_cohort_ids = list(
@@ -147,7 +147,7 @@ def list_for_tenant(
     db: Session,
     *,
     tenant_id: UUID,
-    limit: int = 50,
+    limit: int,
 ) -> tuple[AnnouncementFact, ...]:
     return tuple(
         _fact(ann)

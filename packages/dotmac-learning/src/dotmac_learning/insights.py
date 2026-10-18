@@ -28,14 +28,18 @@ from .insight_contracts import (
     BlockerReason,
     CohortComparison,
     CohortFunnel,
+    CohortInsightTerms,
     CohortOverview,
     CurrentBlocker,
     DisciplineScore,
     DisciplineStrengths,
     GradeTrend,
+    GradeTrendTerms,
     LabFailures,
     LearnerActivity,
+    LearnerInsightTerms,
     Recommendation,
+    _integer,
 )
 from .models import (
     KIND_CHAPTER_COMPLETED,
@@ -56,15 +60,14 @@ from .references import _activity_fact
 from .reports import _best_for_person
 from .reports_contracts import ReportCohort
 
-ACTIVE_WINDOW_DAYS = 7  # rule: any ledger event in the last 7 days = active
-
-
 # --------------------------------------------------------------------------
 # Learner insights (item 19)
 # --------------------------------------------------------------------------
 
 
-def _grade_trend(db: Session, tenant_id: UUID, person_id: UUID) -> GradeTrend:
+def _grade_trend(
+    db: Session, tenant_id: UUID, person_id: UUID, terms: GradeTrendTerms
+) -> GradeTrend:
     rows = list(
         db.execute(
             select(Score.fraction, Score.created_at)
@@ -76,22 +79,22 @@ def _grade_trend(db: Session, tenant_id: UUID, person_id: UUID) -> GradeTrend:
             .where(Score.tenant_id == tenant_id)
             .where(Submission.person_id == person_id)
             .order_by(Score.created_at.desc())
-            .limit(10)
+            .limit(terms.sample_limit)
         ).all()
     )
     fractions = [float(f) for f, _ in reversed(rows)]
-    return _trend_from(fractions)
+    return _trend_from(fractions, terms)
 
 
-def _trend_from(fractions: Sequence[float]) -> GradeTrend:
+def _trend_from(fractions: Sequence[float], terms: GradeTrendTerms) -> GradeTrend:
     direction: Literal["flat", "up", "down"] = "flat"
-    if len(fractions) >= 4:
+    if len(fractions) >= terms.min_samples:
         half = len(fractions) // 2
         older = sum(fractions[:half]) / half
         newer = sum(fractions[half:]) / (len(fractions) - half)
-        if newer - older > 0.05:
+        if newer - older > terms.min_delta_fraction:
             direction = "up"
-        elif older - newer > 0.05:
+        elif older - newer > terms.min_delta_fraction:
             direction = "down"
     return GradeTrend(tuple(round(100 * f) for f in fractions), direction)
 
@@ -226,18 +229,19 @@ def learner_activity(
     *,
     tenant_id: UUID,
     person_id: UUID,
+    terms: LearnerInsightTerms,
     now: datetime | None = None,
 ) -> LearnerActivity:
     """The 'My learning activity' projection for the progress page."""
     now = now or datetime.now(UTC)
     weekly = learning_events.weekly_buckets(
-        db, tenant_id=tenant_id, person_id=person_id, weeks=8, now=now
+        db, tenant_id=tenant_id, person_id=person_id, weeks=terms.chart_weeks, now=now
     )
     velocity = learning_events.weekly_buckets(
         db,
         tenant_id=tenant_id,
         person_id=person_id,
-        weeks=4,
+        weeks=terms.velocity_weeks,
         kinds=(KIND_CHAPTER_COMPLETED, KIND_WORK_GRADED),
         now=now,
     )
@@ -251,23 +255,27 @@ def learner_activity(
         tuple(weekly),
         max((b.count for b in weekly), default=0),
         round(sum(b.count for b in velocity) / max(len(velocity), 1), 1),
-        _grade_trend(db, tenant_id, person_id),
+        _grade_trend(db, tenant_id, person_id, terms.grade_trend),
         days_since,
         _discipline_strengths(db, tenant_id, person_id),
         None,
         blocker,
-        _recommendation(blocker.reason if blocker is not None else None, days_since),
+        _recommendation(
+            blocker.reason if blocker is not None else None,
+            days_since,
+            terms.resume_after_days,
+        ),
     )
 
 
 def _recommendation(
-    reason: BlockerReason | None, days_since: int | None
+    reason: BlockerReason | None, days_since: int | None, resume_after_days: int
 ) -> Recommendation:
     if reason is not None:
         return reason
     if days_since is None:
         return "start_first_chapter"
-    if days_since >= 7:
+    if days_since >= resume_after_days:
         return "resume_after_week"
     return "continue_unfinished"
 
@@ -325,6 +333,7 @@ def cohort_overview(
     *,
     tenant_id: UUID,
     cohort_id: UUID,
+    terms: CohortInsightTerms,
     now: datetime | None = None,
 ) -> CohortOverview:
     now = now or datetime.now(UTC)
@@ -335,7 +344,7 @@ def cohort_overview(
         db,
         tenant_id=tenant_id,
         person_ids=people,
-        since=now - timedelta(days=ACTIVE_WINDOW_DAYS),
+        since=now - timedelta(days=terms.active_window_days),
     )
 
     total_activities = 0
@@ -463,18 +472,21 @@ def cohort_overview(
                 .select_from(LearningEvent)
                 .where(LearningEvent.tenant_id == tenant_id)
                 .where(LearningEvent.person_id.in_(people))
-                .where(LearningEvent.occurred_at >= now - timedelta(days=35))
+                .where(
+                    LearningEvent.occurred_at
+                    >= now - timedelta(days=7 * (terms.comparison_prior_weeks + 1))
+                )
                 .where(LearningEvent.occurred_at < now - timedelta(days=7))
             )
             or 0
         )
-        prior_avg = prior / 4.0
+        prior_avg = prior / terms.comparison_prior_weeks
 
     return CohortOverview(
         len(people),
         len(active),
         len(people) - len(active),
-        ACTIVE_WINDOW_DAYS,
+        terms.active_window_days,
         submitted,
         overdue,
         not_attempted,
@@ -489,10 +501,15 @@ def cohort_overview(
 
 
 def cohorts_comparison(
-    db: Session, *, tenant_id: UUID, now: datetime | None = None
+    db: Session,
+    *,
+    tenant_id: UUID,
+    active_window_days: int,
+    now: datetime | None = None,
 ) -> tuple[CohortComparison, ...]:
     """One comparison row per cohort for the reports index."""
     now = now or datetime.now(UTC)
+    _integer("active_window_days", active_window_days)
     rows: list[CohortComparison] = []
     for cohort in db.scalars(select(Cohort).where(Cohort.tenant_id == tenant_id)).all():
         people = _cohort_people(db, tenant_id, cohort.id)
@@ -500,7 +517,7 @@ def cohorts_comparison(
             db,
             tenant_id=tenant_id,
             person_ids=people,
-            since=now - timedelta(days=ACTIVE_WINDOW_DAYS),
+            since=now - timedelta(days=active_window_days),
         )
         course_ids = _cohort_course_ids(db, tenant_id, cohort.id)
         completed = 0

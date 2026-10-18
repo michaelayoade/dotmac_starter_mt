@@ -31,7 +31,7 @@ class CreateSessionCommand(DeliveryCommand):
     cohort_id: UUID
     title: str
     starts_at: datetime
-    session_type: str = "live_class"
+    session_type: str
     ends_at: datetime | None = None
     offering_id: UUID | None = None
     instructor_person_id: UUID | None = None

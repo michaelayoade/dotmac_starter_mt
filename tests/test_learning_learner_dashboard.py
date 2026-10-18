@@ -62,6 +62,9 @@ def seed(db, tenant, person, course, activity):
     first = db.scalar(select(Activity).where(Activity.id == activity))
     first.chapter_number = 1
     second = Activity(
+        assessment_mode="graded",
+        grading="auto",
+        weight=1.0,
         tenant_id=tenant,
         course_id=course,
         title="Second",
@@ -71,6 +74,9 @@ def seed(db, tenant, person, course, activity):
         pass_threshold=0.7,
     )
     third = Activity(
+        assessment_mode="graded",
+        grading="auto",
+        weight=1.0,
         tenant_id=tenant,
         course_id=course,
         title="Third",
@@ -295,6 +301,8 @@ def test_card_state_precedence_exact_edges_actions_and_raw_progress_deadline(
         off.starts_at = NOW + timedelta(microseconds=1)
         assert card().state == "upcoming" and card().action is None
         required = Course(
+            listed=False,
+            status="published",
             tenant_id=tenant,
             slug="required",
             title="Required",
@@ -446,6 +454,9 @@ def test_touch_ties_keep_read_then_first_course_and_completed_latest_does_not_fa
         )
         # Course-level submissions have no chapter target and cannot displace a touch.
         course_act = Activity(
+            assessment_mode="graded",
+            grading="auto",
+            weight=1.0,
             tenant_id=tenant,
             course_id=course,
             title="Final",
@@ -471,6 +482,8 @@ def test_touch_ties_keep_read_then_first_course_and_completed_latest_does_not_fa
             == chapters[1].id
         )
         other_course = Course(
+            listed=False,
+            status="published",
             tenant_id=tenant,
             slug="a-first",
             title="A first",

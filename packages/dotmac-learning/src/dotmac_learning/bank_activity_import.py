@@ -31,10 +31,18 @@ def import_bank_with_activity(
     if course is None:
         return None
 
-    bank = load_bank(db, tenant_id=command.tenant_id, course_id=course.id, doc=doc)
+    bank = load_bank(
+        db,
+        tenant_id=command.tenant_id,
+        course_id=course.id,
+        doc=doc,
+        missing_question_weight=command.missing_question_weight,
+    )
     pass_threshold = doc.policy.get(
         "pass_threshold",
-        {"chapter": 0.0, "mid": 0.60, "final": 0.70}.get(doc.kind, 0.0),
+        command.terms.pass_threshold_by_kind.get(
+            doc.kind, command.terms.fallback_pass_threshold
+        ),
     )
     title = (
         f"Chapter {doc.chapter} test"
@@ -58,6 +66,9 @@ def import_bank_with_activity(
             bank_id=bank.id,
             title=title,
             pass_threshold=pass_threshold,
+            assessment_mode=command.terms.new_activity_assessment_mode,
+            grading=command.terms.new_activity_grading,
+            weight=command.terms.new_activity_weight,
         )
         db.add(activity)
     else:

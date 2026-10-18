@@ -227,8 +227,6 @@ PUBLIC_OWNERS = (
     ("activity_window_counts", "support_report_reads", "activity_window_counts"),
     ("cohort_roster_progress", "support_report_reads", "cohort_roster_progress"),
     ("queue_summary", "support_report_reads", "queue_summary"),
-    ("TOP_MOVERS_LIMIT", "support_report_reads", "TOP_MOVERS_LIMIT"),
-    ("ATTENTION_LIMIT", "support_report_reads", "ATTENTION_LIMIT"),
     ("ensure_admission_enrollment", "roster", "ensure_admission_enrollment"),
     (
         "EnsureAdmissionEnrollmentCommand",

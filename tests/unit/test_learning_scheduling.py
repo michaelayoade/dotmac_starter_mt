@@ -43,17 +43,23 @@ def fact(**values):
 )
 def test_join_exact_lead_and_point_session_end(minutes, expected):
     assert (
-        join_is_open(fact(starts_at=NOW + timedelta(minutes=minutes)), now=NOW)
+        join_is_open(
+            fact(starts_at=NOW + timedelta(minutes=minutes)), now=NOW, lead_minutes=60
+        )
         is expected
     )
 
 
 def test_join_in_progress_end_status_link_and_custom_lead():
     session = fact(starts_at=NOW - timedelta(hours=2), ends_at=NOW)
-    assert join_is_open(session, now=NOW)
-    assert not join_is_open(session, now=NOW + timedelta(microseconds=1))
-    assert not join_is_open(replace(session, status="completed"), now=NOW)
-    assert not join_is_open(replace(session, join_url=None), now=NOW)
+    assert join_is_open(session, now=NOW, lead_minutes=60)
+    assert not join_is_open(
+        session, now=NOW + timedelta(microseconds=1), lead_minutes=60
+    )
+    assert not join_is_open(
+        replace(session, status="completed"), now=NOW, lead_minutes=60
+    )
+    assert not join_is_open(replace(session, join_url=None), now=NOW, lead_minutes=60)
     assert not join_is_open(
         fact(starts_at=NOW + timedelta(minutes=5)), now=NOW, lead_minutes=4
     )
@@ -109,6 +115,7 @@ def test_update_payload_preserves_omission_explicit_null_and_free_vocabulary():
         fact().title = "changed"
     with pytest.raises(ValidationError):
         CreateSessionCommand(
+            session_type="live_class",
             tenant_id=uuid4(),
             cohort_id=uuid4(),
             title="Class",

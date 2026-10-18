@@ -28,6 +28,8 @@ def _course(db, tenant, title):
     create_course(
         db,
         CourseWrite(
+            status="published",
+            listed=False,
             id=course,
             tenant_id=tenant,
             slug=course.hex,

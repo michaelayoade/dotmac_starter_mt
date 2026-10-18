@@ -75,6 +75,8 @@ def test_render_once_on_same_session_root_then_write_repeat_and_caller_rollback(
             title="Host",
             discipline="x",
             source_ref="host",
+            status="published",
+            listed=False,
         )
         db.add(pending)
         events = []

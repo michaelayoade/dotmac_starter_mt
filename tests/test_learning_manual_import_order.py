@@ -22,6 +22,8 @@ def _header(tenant, **overrides):
         "title": "Manual",
         "discipline": "x",
         "source_ref": "v1",
+        "new_course_status": "published",
+        "new_course_listed": False,
     }
     values.update(overrides)
     return learning.ManualImportHeader(**values)
@@ -193,7 +195,13 @@ def test_database_failure_precedes_next_source_at_legacy_stage(curriculum_case, 
         trace = []
         # A real NOT NULL violation in a caller object, not a mocked DB exception.
         pending = Course(
-            tenant_id=tenant, slug="dirty", title=None, discipline="x", source_ref="x"
+            tenant_id=tenant,
+            slug="dirty",
+            title=None,
+            discipline="x",
+            source_ref="x",
+            status="published",
+            listed=False,
         )
         if stage == "course-query":
             db.add(pending)
@@ -426,6 +434,8 @@ def test_original_tuple_contract_and_refresh_query_unchanged(curriculum_case):
     engine, (tenant, _) = curriculum_case
     header = _header(tenant)
     assert tuple(header.model_fields) == (
+        "new_course_status",
+        "new_course_listed",
         "tenant_id",
         "slug",
         "title",
@@ -450,3 +460,46 @@ def test_original_tuple_contract_and_refresh_query_unchanged(curriculum_case):
             event.remove(db, "do_orm_execute", observe)
         assert trace == ["course", "chapter", "course"] * 2
         assert first.id == repeat.id and first.version == repeat.version == 2
+
+
+def test_manual_new_course_policy_does_not_reset_existing_course(curriculum_case):
+    from dotmac_learning.curriculum import import_manual_chapters
+    from dotmac_learning.curriculum_contracts import ManualImportHeader
+
+    engine, (tenant, _) = curriculum_case
+    with Session(engine) as db, db.begin():
+        _scope(db, tenant)
+        boundary = db.get_transaction()
+        initial = ManualImportHeader(
+            tenant_id=tenant,
+            slug="policy-course",
+            title="First",
+            discipline="x",
+            source_ref="one",
+            new_course_status="draft",
+            new_course_listed=True,
+        )
+        seen = []
+
+        def chapters():
+            row = db.scalar(select(Course).where(Course.slug == "policy-course"))
+            assert (row.title, row.status, row.listed) == ("First", "draft", True)
+            seen.append(row.id)
+            yield from ()
+
+        created = import_manual_chapters(db, initial, chapters=chapters())
+        assert seen == [created.id]
+        updated = import_manual_chapters(
+            db,
+            initial.model_copy(
+                update={
+                    "title": "Updated",
+                    "new_course_status": "published",
+                    "new_course_listed": False,
+                }
+            ),
+            chapters=iter(()),
+        )
+        assert updated.id == created.id and updated.title == "Updated"
+        assert (updated.status, updated.listed) == ("draft", True)
+        assert db.get_transaction() is boundary

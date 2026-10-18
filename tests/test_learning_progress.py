@@ -62,6 +62,10 @@ def progress_case(learning_database):
 
 def _activity(db, tenant, course, *, kind="mcq_test", chapter=None):
     activity = Activity(
+        assessment_mode="graded",
+        grading="auto",
+        pass_threshold=0.0,
+        weight=1.0,
         tenant_id=tenant,
         course_id=course,
         title="Activity",

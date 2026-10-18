@@ -91,11 +91,11 @@ class Course(KernelBase, TimestampMixin):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # Authoring lifecycle (Slice 5/#8). Draft courses are hidden from learners
     # even when offered+entitled; instructors publish them when ready.
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="published")
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
     # Public-catalog visibility: the one canonical selector for the anonymous
     # catalog projection. Internal material (instructor guide, entrance shells,
     # internal disciplines) stays unlisted regardless of publish status.
-    listed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    listed: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 class Activity(KernelBase, TimestampMixin):
@@ -111,10 +111,10 @@ class Activity(KernelBase, TimestampMixin):
     tenant_id: Mapped[UUID] = tenant_id_column()
     course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     chapter_number: Mapped[int | None] = mapped_column(Integer)
-    type: Mapped[str] = mapped_column(String(16), nullable=False, default="mcq_test")
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
     bank_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     title: Mapped[str] = mapped_column(String(200), nullable=False)
-    pass_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    pass_threshold: Mapped[float] = mapped_column(Float, nullable=False)
     # Assessment policy (Slice 4). Null = unlimited attempts.
     max_attempts: Mapped[int | None] = mapped_column(Integer)
     # Assessment mode bundles the scoring + answer-reveal policy by purpose:
@@ -122,13 +122,11 @@ class Activity(KernelBase, TimestampMixin):
     #   graded   — best-of, answers withheld until pass or attempts exhausted
     #   exam     — best-of, score only (never reveal per-question feedback)
     # Scoring is best-of (highest attempt) in every mode; pass is sticky.
-    assessment_mode: Mapped[str] = mapped_column(
-        String(10), nullable=False, default="graded"
-    )
+    assessment_mode: Mapped[str] = mapped_column(String(10), nullable=False)
     # "auto" grades on submit; "manual" leaves submissions for instructor grading.
-    grading: Mapped[str] = mapped_column(String(10), nullable=False, default="auto")
+    grading: Mapped[str] = mapped_column(String(10), nullable=False)
     # Weighted gradebook (lms-gaps F9): per-activity weight in the course grade.
-    weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    weight: Mapped[float] = mapped_column(Float, nullable=False)
     # Random pool: show this many randomly-drawn questions from the bank (null = all).
     question_count: Mapped[int | None] = mapped_column(Integer)
 

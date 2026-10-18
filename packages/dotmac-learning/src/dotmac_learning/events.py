@@ -187,12 +187,14 @@ def weekly_buckets(
     *,
     tenant_id: UUID,
     person_id: UUID,
-    weeks: int = 8,
+    weeks: int,
     kinds: tuple[str, ...] | None = None,
     now: datetime | None = None,
 ) -> list[WeekBucket]:
     """Source trailing-week date buckets, oldest first (not calendar realignment)."""
     now = now or datetime.now(UTC)
+    if type(weeks) is not int or weeks < 0:
+        raise ValueError("weeks must be a nonnegative integer")
     start = now - timedelta(weeks=weeks)
     q = (
         select(LearningEvent.occurred_at)

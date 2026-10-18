@@ -34,9 +34,6 @@ from .support_contracts import (
     SearchResults,
 )
 
-DEFAULT_BEHIND_THRESHOLD = 0.2
-_CAP = 20
-
 
 def _dashboard_state(
     course_ids: Sequence[UUID],
@@ -62,8 +59,8 @@ def cohort_overview(
     tenant_id: UUID,
     cohort_id: UUID,
     now: datetime | None = None,
-    at_risk_pct: float = 0.5,
-    stale_days: int = 14,
+    at_risk_pct: float,
+    stale_days: int,
 ) -> LegacyCohortOverview:
     """Legacy completion mean and course-scoped score inactivity, not insights."""
     now = now or datetime.now(UTC)
@@ -133,7 +130,7 @@ def at_risk_for_person(
     *,
     tenant_id: UUID,
     person_id: UUID,
-    behind_threshold: float = DEFAULT_BEHIND_THRESHOLD,
+    behind_threshold: float,
     now: datetime | None = None,
 ) -> tuple[AtRiskCourse, ...]:
     now = now or datetime.now(UTC)
@@ -202,7 +199,13 @@ def _search_authority(
 
 
 def search(
-    db: Session, *, tenant_id: UUID, person_id: UUID, q: str, authority: SearchAuthority
+    db: Session,
+    *,
+    tenant_id: UUID,
+    person_id: UUID,
+    q: str,
+    authority: SearchAuthority,
+    limit: int,
 ) -> SearchResults:
     _search_authority(tenant_id, person_id, authority)
     if not q or not q.strip():
@@ -224,7 +227,7 @@ def search(
     )
     if allowed_ids is not None:
         course_q = course_q.where(Course.id.in_(allowed_ids))
-    course_rows = db.scalars(course_q.limit(_CAP)).all()
+    course_rows = db.scalars(course_q.limit(limit)).all()
     chapter_q = (
         select(Chapter, Course.slug)
         .join(
@@ -236,7 +239,7 @@ def search(
     )
     if allowed_ids is not None:
         chapter_q = chapter_q.where(Chapter.course_id.in_(allowed_ids))
-    chapter_rows = db.execute(chapter_q.limit(_CAP)).all()
+    chapter_rows = db.execute(chapter_q.limit(limit)).all()
     return SearchResults(
         term,
         tuple(_course_fact(c) for c in course_rows),

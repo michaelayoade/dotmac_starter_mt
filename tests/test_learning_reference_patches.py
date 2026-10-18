@@ -313,3 +313,39 @@ def test_demo_seed_selected_fields_preserve_existing_unassigned_values(
             lab.weight,
             lab.title,
         ) == (bank, 3, 12, "exam", 1.0, "Original")
+
+
+def test_reference_create_keeps_explicit_zero_weight_and_out_of_range_threshold(
+    reference_database,
+):
+    from dotmac_learning.references import ActivityWrite, create_activity
+
+    app, tenant, _, course, _, _ = reference_database
+    with Session(bind=app) as db, db.begin():
+        _scope(db.connection(), tenant)
+        created = create_activity(
+            db,
+            ActivityWrite(
+                id=uuid4(),
+                tenant_id=tenant,
+                course_id=course,
+                title="Legacy values",
+                type="mcq_test",
+                pass_threshold=1.1,
+                assessment_mode="graded",
+                grading="auto",
+                weight=0,
+            ),
+        )
+        assert created.pass_threshold == 1.1 and created.weight == 0.0
+        updated = patch_activity(
+            db,
+            ActivityPatch(
+                id=created.id,
+                tenant_id=tenant,
+                pass_threshold=1.1,
+                weight=0,
+            ),
+        )
+        assert updated.pass_threshold == created.pass_threshold
+        assert updated.weight == created.weight

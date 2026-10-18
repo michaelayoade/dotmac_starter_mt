@@ -46,9 +46,6 @@ from .support_report_contracts import (
     TopMover,
 )
 
-TOP_MOVERS_LIMIT = 5
-ATTENTION_LIMIT = 8
-
 
 def _student_roster(tenant_id: UUID) -> Select[tuple[UUID]]:
     return (
@@ -81,7 +78,7 @@ def engagement_snapshot(
 
 
 def top_movers(
-    db: Session, *, tenant_id: UUID, since: datetime, limit: int = TOP_MOVERS_LIMIT
+    db: Session, *, tenant_id: UUID, since: datetime, limit: int
 ) -> tuple[TopMover, ...]:
     ranked = db.execute(
         select(
@@ -161,9 +158,7 @@ def top_movers(
     return tuple(out)
 
 
-def attention_list(
-    db: Session, *, tenant_id: UUID, limit: int = ATTENTION_LIMIT
-) -> AttentionSnapshot:
+def attention_list(db: Session, *, tenant_id: UUID, limit: int) -> AttentionSnapshot:
     entries = success_queue.list_entries(db, tenant_id=tenant_id, status=STATUS_OPEN)
     by_reason: dict[str, int] = {}
     never_started = 0
@@ -330,6 +325,4 @@ __all__ = [
     "activity_window_counts",
     "cohort_roster_progress",
     "queue_summary",
-    "TOP_MOVERS_LIMIT",
-    "ATTENTION_LIMIT",
 ]

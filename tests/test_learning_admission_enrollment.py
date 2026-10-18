@@ -44,6 +44,8 @@ def command(tenant, cohort, person, track=None):
 def tracks(db, tenant, cohort):
     ids = []
     course = Course(
+        listed=False,
+        status="published",
         tenant_id=tenant,
         slug=uuid4().hex,
         title="Admission course",

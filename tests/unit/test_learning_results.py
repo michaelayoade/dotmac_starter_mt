@@ -77,6 +77,7 @@ def test_submission_input_preserves_json_values_and_filter_shape():
         activity_id=uuid4(),
         answers=values,
         only_ext_ids=["b", "b", "unknown"],
+        missing_question_weight=1,
     )
     assert payload.answers == values
     assert payload.only_ext_ids == ["b", "b", "unknown"]
@@ -90,4 +91,5 @@ def test_submission_input_preserves_json_values_and_filter_shape():
             person_id=uuid4(),
             activity_id=uuid4(),
             answers={"python": object()},
+            missing_question_weight=1,
         )

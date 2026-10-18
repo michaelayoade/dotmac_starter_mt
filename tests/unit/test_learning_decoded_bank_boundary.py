@@ -13,7 +13,10 @@ from dotmac_learning import (
     lint_bank,
     propose_balance,
 )
-from dotmac_learning.bank_activity_contracts import ImportBankWithActivityCommand
+from dotmac_learning.bank_activity_contracts import (
+    BankActivityTerms,
+    ImportBankWithActivityCommand,
+)
 from dotmac_learning.curriculum_contracts import BankDocument, BankQuestion
 from pydantic import ValidationError
 
@@ -45,16 +48,32 @@ def test_raw_command_preserves_mutable_doc_and_nested_decoder_values():
     doc.questions[0].update(weight=1.9, competency=marker, options=[marker])
     doc.policy["pool"] = marker
     tenant = uuid4()
-    command = ImportBankWithActivityCommand(tenant_id=str(tenant), doc=doc)
+    command = ImportBankWithActivityCommand(
+        tenant_id=str(tenant),
+        doc=doc,
+        terms=BANK_ACTIVITY_TERMS,
+        missing_question_weight=1,
+    )
     assert command.tenant_id == tenant and command.doc is doc
     assert command.doc.questions is doc.questions and command.doc.policy is doc.policy
     assert command.doc.questions[0]["options"][0] is marker
     doc.questions[0]["weight"] = "bad"
     assert command.doc.questions[0]["weight"] == "bad"
     with pytest.raises(ValidationError):
-        ImportBankWithActivityCommand(tenant_id=tenant, doc=doc, unknown=True)
+        ImportBankWithActivityCommand(
+            tenant_id=tenant,
+            doc=doc,
+            unknown=True,
+            terms=BANK_ACTIVITY_TERMS,
+            missing_question_weight=1,
+        )
     with pytest.raises(ValidationError):
-        ImportBankWithActivityCommand(tenant_id="bad", doc=doc)
+        ImportBankWithActivityCommand(
+            tenant_id="bad",
+            doc=doc,
+            terms=BANK_ACTIVITY_TERMS,
+            missing_question_weight=1,
+        )
     # A mapping still takes the existing normalized path; raw acceptance is
     # specifically for the public dataclass instance, not dataclass coercion.
     with pytest.raises(ValidationError):
@@ -73,6 +92,8 @@ def test_raw_command_preserves_mutable_doc_and_nested_decoder_values():
                     }
                 ],
             },
+            terms=BANK_ACTIVITY_TERMS,
+            missing_question_weight=1,
         )
 
 
@@ -82,9 +103,17 @@ def test_normalized_document_identity_and_lint_are_retained():
         course=raw.course,
         chapter=raw.chapter,
         kind=raw.kind,
-        questions=tuple(BankQuestion(**q) for q in raw.questions),
+        questions=tuple(BankQuestion(**{**q, "weight": 1}) for q in raw.questions),
     )
-    assert ImportBankWithActivityCommand(tenant_id=uuid4(), doc=doc).doc is doc
+    assert (
+        ImportBankWithActivityCommand(
+            tenant_id=uuid4(),
+            doc=doc,
+            terms=BANK_ACTIVITY_TERMS,
+            missing_question_weight=1,
+        ).doc
+        is doc
+    )
     assert lint_bank(doc) == lint_bank(raw) == []
 
 
@@ -258,3 +287,12 @@ def test_raw_read_uses_only_supplied_header_and_preserves_source_read_timing(emp
         assert doc.questions[0]["correct"] is payload
         doc.questions[0]["metadata"] = "mutable"
         assert doc.questions[0]["metadata"] == "mutable"
+
+
+BANK_ACTIVITY_TERMS = BankActivityTerms(
+    pass_threshold_by_kind={"chapter": 0.0, "mid": 0.60, "final": 0.70},
+    fallback_pass_threshold=0.0,
+    new_activity_assessment_mode="graded",
+    new_activity_grading="auto",
+    new_activity_weight=1.0,
+)
