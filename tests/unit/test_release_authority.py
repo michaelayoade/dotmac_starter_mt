@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -91,6 +92,24 @@ def test_derive_surface_follows_a_run_body_script_reference(ra) -> None:
     files["scripts/release_module.py"] = "import sys\n"
     derived_files, _ = ra.derive_surface(_dict_reader(files))
     assert "scripts/release_module.py" in derived_files
+
+
+def test_release_verifier_lock_is_mechanically_reached_from_workflow(ra, monkeypatch):
+    files = _base_files(ra)
+    lock = ".github/bootstrap/release-verifier-requirements-py312.txt"
+    files[lock] = "packaging==26.2 --hash=sha256:00\n"
+    files[ra.ROOT_WORKFLOWS[0]] = (
+        "jobs:\n  verify:\n    steps:\n"
+        f"      - run: python -m pip install --require-hashes -r {lock}\n"
+    )
+    derived, _ = ra.derive_surface(_dict_reader(files))
+    assert lock in derived
+    # Sensitivity: the former token scan silently omitted executable txt input.
+    monkeypatch.setattr(
+        ra, "_GITHUB_TOKEN", re.compile(r"\.github/[A-Za-z0-9_./-]+\.(?:yml|yaml|json)")
+    )
+    broken, _ = ra.derive_surface(_dict_reader(files))
+    assert lock not in broken
 
 
 def test_derive_surface_follows_a_local_composite_action_and_its_run_body(ra) -> None:

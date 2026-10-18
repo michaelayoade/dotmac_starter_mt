@@ -248,6 +248,15 @@ jobs:
 
       # The verification the original run never completed — now with the public
       # index available, which is what #124 fixed.
+      - name: Bootstrap the hash-locked release verifier
+        run: |
+          verifier="$(mktemp -d "${RUNNER_TEMP}/release-verifier.XXXXXX")"
+          python -m venv "$verifier"
+          "$verifier/bin/python" -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r .github/bootstrap/release-verifier-requirements-py312.txt
+          echo "$verifier/bin" >> "$GITHUB_PATH"
+
       - name: Install from the registry, register, and compose
         env:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple

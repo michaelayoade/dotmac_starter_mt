@@ -30,6 +30,18 @@ a stateless wheel containing a migration lineage is refused.
 This is distinct from ``stateless-protocol-adapter``: an adapter has no
 ``ModuleManifest`` and no kernel floor, and remains in its own stricter lane.
 
+## Logical dependency closure is separate from Python imports
+
+``module_dependencies`` maps actual manifest dependency codes to reviewed exact
+distribution pins. It does not widen ``wheel_contents.allowed_requires``:
+Fulfillment can require the Timers manifest through an assembly adapter while
+remaining forbidden from importing its sibling's Python package. Both smoke
+paths use one resolver, reject unreviewed edges, and independently compare each
+installed manifest to the source plan before the unchanged ``ModuleRegistry``.
+Registry first-party artifacts come from the private index alone; their actual
+Python requirements drive resolution, and explicit-path provenance is checked
+before registration. Dependency publication is never part of the target run.
+
 ## Why the kernel floor is checked here
 
 `kernel_floor` is the EARLIEST kernel that can actually load and register the
@@ -49,7 +61,8 @@ module's pyproject is edited without the allowlist following — and
 `tests/architecture/test_kernel_version_sync.py` keeps the allocation and
 capability cases in separate, reasoned maps so a module cannot sit in neither.
 
-Stdlib only, deliberately: this runs before anything is installed.
+Resolve and inspect are stdlib-only. Smoke staging lazily loads the separately
+hash-locked packaging parser, then installs only an inspected wheelhouse offline.
 """
 
 from __future__ import annotations
@@ -65,6 +78,7 @@ import sys
 import tomllib
 import zipfile
 from collections.abc import Iterable
+from contextlib import contextmanager
 from email.parser import Parser
 from itertools import product
 from pathlib import Path
@@ -88,16 +102,8 @@ def load_allowlist() -> dict[str, dict]:
     return data["modules"]
 
 
-def _manifest_db_schema(entry: dict) -> str | None:
-    """Read the manifest's persistence shape without importing the package.
-
-    The release gate runs before dependencies are installed.  The manifest is
-    nevertheless authoritative for whether this is a stateful or stateless
-    installable module, so read its literal ``short_code`` and
-    ``migration_prefix`` declarations from the AST.  Requiring both or neither
-    is the guard that prevents a stateful module with one dropped identity field
-    from being silently treated as stateless.
-    """
+def _manifest_keywords(entry: dict) -> dict[str, ast.expr]:
+    """Read the assigned declaration without importing application code."""
     path = entry["package_path"] / "src" / entry["import_name"] / "manifest.py"
     if not path.is_file():
         raise ReleaseRefused(
@@ -106,7 +112,7 @@ def _manifest_db_schema(entry: dict) -> str | None:
         )
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    declaration: ast.Call | None = None
+    declarations: list[ast.Call] = []
     for statement in tree.body:
         value: ast.expr | None = None
         targets: list[ast.expr] = []
@@ -122,19 +128,28 @@ def _manifest_db_schema(entry: dict) -> str | None:
             isinstance(target, ast.Name) and target.id == entry["manifest_attr"]
             for target in targets
         ):
-            declaration = value
-            break
-    if declaration is None:
+            declarations.append(value)
+    if len(declarations) != 1:
         raise ReleaseRefused(
-            f"{entry['distribution']}: manifest.py does not assign "
-            f"{entry['manifest_attr']!r}"
+            f"{entry['distribution']}: manifest.py must assign "
+            f"{entry['manifest_attr']!r} exactly once"
         )
 
-    keywords = {
+    declaration = declarations[0]
+    if any(keyword.arg is None for keyword in declaration.keywords):
+        raise ReleaseRefused(
+            f"{entry['distribution']}: manifest unpacking is not literal"
+        )
+    return {
         keyword.arg: keyword.value
         for keyword in declaration.keywords
         if keyword.arg is not None
     }
+
+
+def _manifest_db_schema(entry: dict) -> str | None:
+    """Both persistence identity fields must be literal, or both absent."""
+    keywords = _manifest_keywords(entry)
 
     def optional_literal(name: str) -> str | None:
         node = keywords.get(name)
@@ -249,6 +264,144 @@ def _native_package(entry: dict) -> str | None:
             "must equal the reviewed import_name and decimal-core must be boolean"
         )
     return native["python-package"]
+
+
+def _exact_pin(pin: str) -> tuple[str, str]:
+    # No extras, markers, URLs or resolver ranges in reviewed logical edges.
+    match = re.fullmatch(r"([a-z0-9]+(?:-[a-z0-9]+)*)==([0-9][A-Za-z0-9.!+_-]*)", pin)
+    if match is None:
+        raise ReleaseRefused(f"{pin!r} is not an exact pin (name==version)")
+    return match[1], match[2]
+
+
+def _module_identity(entry: dict) -> dict:
+    keywords = _manifest_keywords(entry)
+    try:
+        code = ast.literal_eval(keywords["code"])
+        dependencies = ast.literal_eval(
+            keywords.get("dependencies", ast.Tuple(elts=[]))
+        )
+    except (KeyError, ValueError, TypeError) as error:
+        raise ReleaseRefused(
+            f"{entry['distribution']}: code and dependencies must be literal"
+        ) from error
+    if not isinstance(code, str) or not code:
+        raise ReleaseRefused(f"{entry['distribution']}: invalid module code")
+    if not isinstance(dependencies, tuple) or any(
+        not isinstance(value, str) or not value for value in dependencies
+    ):
+        raise ReleaseRefused(
+            f"{entry['distribution']}: dependencies must be a string tuple"
+        )
+    if len(set(dependencies)) != len(dependencies):
+        raise ReleaseRefused(f"{entry['distribution']}: duplicate logical dependency")
+    return {**entry, "code": code, "dependencies": dependencies}
+
+
+def _module_closure(pins: Iterable[str]) -> list[dict]:
+    """Resolve only reviewed logical edges; Python requirements stay separate.
+
+    The source AST supplies an expected plan, never proof of installed bytes.
+    Both smoke paths independently compare the installed distribution and
+    actual manifest against each descriptor before constructing ModuleRegistry.
+    """
+    modules = load_allowlist()
+    codes: dict[str, str] = {}
+    for distribution, row in sorted(modules.items()):
+        identity = _module_identity(
+            {
+                **row,
+                "distribution": distribution,
+                "package_path": REPO_ROOT / row["package_dir"],
+            }
+        )
+        code = identity["code"]
+        if code in codes:
+            raise ReleaseRefused(
+                f"duplicate module code {code!r}: {codes[code]} and {distribution}"
+            )
+        codes[code] = distribution
+
+    versions: dict[str, str] = {}
+    complete: dict[str, dict] = {}
+    visiting: set[str] = set()
+
+    def visit(pin: str, expected_code: str | None = None) -> None:
+        distribution, version = _exact_pin(pin)
+        if distribution in versions and versions[distribution] != version:
+            raise ReleaseRefused(
+                f"conflicting pins for {distribution}: "
+                f"{versions[distribution]} and {version}"
+            )
+        versions[distribution] = version
+        entry = _module_identity(resolve(distribution))
+        if _declared(entry)["name"] != distribution:
+            raise ReleaseRefused(
+                f"{distribution}: source pyproject distribution disagrees with policy"
+            )
+        if expected_code is not None and entry["code"] != expected_code:
+            raise ReleaseRefused(
+                f"logical dependency {expected_code!r} pins {distribution}, "
+                f"which declares code {entry['code']!r}"
+            )
+        if distribution in visiting:
+            raise ReleaseRefused(f"logical module dependency cycle at {distribution}")
+        if distribution in complete:
+            return
+        policy = entry.get("module_dependencies", {})
+        if not isinstance(policy, dict) or set(policy) != set(entry["dependencies"]):
+            raise ReleaseRefused(
+                f"{distribution}: logical dependency policy disagrees "
+                "with manifest dependencies"
+            )
+        visiting.add(distribution)
+        for code, dependency in sorted(policy.items()):
+            if not isinstance(dependency, str):
+                raise ReleaseRefused(
+                    f"{distribution}: logical dependency needs an exact pin"
+                )
+            visit(dependency, code)
+        visiting.remove(distribution)
+        complete[distribution] = {
+            **entry,
+            "version": version,
+            "native_package": _native_package(entry),
+        }
+
+    for pin in sorted(pins):
+        visit(pin)
+    # Registry construction validates the graph; it does not require input
+    # topological order. Sorting makes repeated/shared roots byte-stable.
+    return [complete[name] for name in sorted(complete)]
+
+
+def _installed_targets(closure: list[dict]) -> list[dict]:
+    return [
+        {
+            key: entry[key]
+            for key in (
+                "distribution",
+                "version",
+                "code",
+                "dependencies",
+                "import_name",
+                "manifest_attr",
+                "db_schema",
+            )
+        }
+        for entry in closure
+    ]
+
+
+def _smoke_dependencies(closure: list[dict], target: str) -> list[Path]:
+    """Logical closure plus existing reviewed Python inputs, built once each."""
+    found = {entry["package_path"] for entry in closure}
+    for entry in closure:
+        found.update(local_first_party_dependencies(entry))
+    found.difference_update(
+        entry["package_path"] for entry in closure if entry["distribution"] == target
+    )
+    return sorted(found)
 
 
 def _inspect_native(entry: dict, wheel: Path) -> None:
@@ -570,17 +723,36 @@ def _venv(path: Path) -> tuple[Path, Path]:
 
 
 _REGISTER = """
-import pathlib, sys
+import importlib, pathlib, site
+from importlib import metadata
 import dotmac_kernel
 from dotmac_kernel.modules import ModuleRegistry
 
 manifests, names = [], {names!r}
-for import_name, attr, schema in names:
-    mod = __import__(import_name, fromlist=[attr])
+installed_roots = [pathlib.Path(root).resolve() for root in site.getsitepackages()]
+for target in names:
+    import_name, attr, schema = (
+        target["import_name"], target["manifest_attr"], target["db_schema"]
+    )
+    dist = metadata.distribution(target["distribution"])
+    assert dist.version == target["version"], (target, dist.version)
+    mod = importlib.import_module(import_name)
     manifest = getattr(mod, attr)
     here = pathlib.Path(mod.__file__).resolve()
     # The installed distribution, never the checkout it was built from.
-    assert "site-packages" in str(here), f"{{import_name}} resolved to {{here}}"
+    assert any(here.is_relative_to(root) for root in installed_roots), here
+    owned = {{pathlib.Path(dist.locate_file(f)).resolve() for f in dist.files or []}}
+    assert here in owned, (import_name, here, "not owned by expected distribution")
+    # The export may come from a submodule; verify that declaration's origin
+    # independently so an installed facade cannot import a checkout manifest.
+    declaration = importlib.import_module(import_name + ".manifest")
+    assert getattr(declaration, attr) is manifest, import_name
+    assert pathlib.Path(declaration.__file__).resolve() in owned, import_name
+    assert manifest.code == target["code"], (target, manifest.code)
+    assert manifest.version == target["version"], (target, manifest.version)
+    assert tuple(manifest.dependencies) == target["dependencies"], (
+        target, manifest.dependencies
+    )
     assert manifest.db_schema == schema, (import_name, manifest.db_schema, schema)
     assert manifest.is_stateful is (schema is not None), (
         import_name, manifest.is_stateful, schema
@@ -621,7 +793,7 @@ for name in {names!r}:
 
 def _verify_installed(
     python: Path,
-    targets: list[tuple[str, str, str | None]],
+    targets: list[dict],
     native_targets: list[str] | None = None,
 ) -> None:
     # `-I`: isolated mode — no user site, no PYTHON* environment, and the
@@ -674,6 +846,386 @@ def _wheel_distribution(wheel: Path) -> str:
     return wheel.name.split("-", 1)[0]
 
 
+def _normal_distribution(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _wheel_metadata(wheel: Path):
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            entries = [
+                name
+                for name in archive.namelist()
+                if name.endswith(".dist-info/METADATA")
+            ]
+            if len(entries) != 1:
+                raise ValueError("expected exactly one METADATA")
+            return Parser().parsestr(archive.read(entries[0]).decode("utf-8"))
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        raise ReleaseRefused(f"{wheel.name}: invalid wheel metadata") from error
+
+
+def _wheel_identity(wheel: Path) -> tuple[str, str]:
+    headers = _wheel_metadata(wheel)
+    names, versions = headers.get_all("Name", []), headers.get_all("Version", [])
+    if len(names) != 1 or len(versions) != 1:
+        raise ReleaseRefused(f"{wheel.name}: expected one Name and Version")
+    name = _normal_distribution(names[0])
+    if name != _normal_distribution(_wheel_distribution(wheel)):
+        raise ReleaseRefused(
+            f"{wheel.name}: filename and METADATA distribution disagree"
+        )
+    if wheel.name.split("-")[1] != versions[0]:
+        raise ReleaseRefused(f"{wheel.name}: filename and METADATA version disagree")
+    return name, versions[0]
+
+
+def _pip_environment() -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("PIP_")
+    }
+    environment["PIP_CONFIG_FILE"] = os.devnull
+    return environment
+
+
+def _packaging_api():
+    # Resolve/inspect remain stdlib-only. Every smoke caller bootstraps this
+    # exact parser from the reviewed hash lock before entering the walker.
+    from importlib import metadata
+
+    from packaging.markers import default_environment
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.specifiers import SpecifierSet
+    from packaging.utils import canonicalize_name
+    from packaging.version import InvalidVersion, Version
+
+    if metadata.version("packaging") != "26.2":
+        raise ReleaseRefused("release verifier requires hash-locked packaging 26.2")
+    return (
+        Requirement,
+        InvalidRequirement,
+        SpecifierSet,
+        canonicalize_name,
+        Version,
+        InvalidVersion,
+        default_environment(),
+    )
+
+
+def _download_one(
+    pip: Path, name: str, specifier: str, index: str, output: Path
+) -> Path:
+    """Only canonical name + parsed version constraints reach pip; no edges."""
+    output.mkdir(parents=True)
+    result = subprocess.run(
+        [
+            str(pip),
+            "download",
+            "--quiet",
+            "--no-deps",
+            "--only-binary=:all:",
+            "--index-url",
+            index,
+            "--dest",
+            str(output),
+            name + specifier,
+        ],
+        env=_pip_environment(),
+        cwd=output.parent,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        # Both authenticated indexes and metadata URLs stay out of exceptions.
+        raise ReleaseRefused(f"binary-only wheel resolution failed for {name}")
+    wheels = _wheels(str(output))
+    if len(wheels) != 1 or any(path.suffix != ".whl" for path in output.iterdir()):
+        raise ReleaseRefused(f"expected exactly one binary wheel for {name}")
+    if _wheel_identity(wheels[0])[0] != name:
+        raise ReleaseRefused(f"wheel resolution substituted distribution {name}")
+    return wheels[0]
+
+
+def _stage_wheels(
+    pip: Path,
+    directory: Path,
+    *,
+    pins: list[str],
+    local: list[Path],
+    permitted: set[str],
+    owner_policy: dict[str, set[str]],
+    private_index: str | None,
+) -> list[Path]:
+    """Expand inspected binary wheels without letting pip traverse metadata.
+
+    This is a bounded fixed-point verifier, not a backtracking resolver. Standard
+    packaging owns PEP 508 parsing, marker environments, extras and specifiers.
+    Direct references are Unsupported even when dormant. First-party extras and
+    markers are also explicitly Unsupported; the qualified module path must use
+    unconditional first-party edges. Third-party extras/markers are evaluated
+    with the actual target interpreter environment and requesting extra context.
+    """
+    (
+        Requirement,
+        InvalidRequirement,
+        SpecifierSet,
+        canonicalize_name,
+        Version,
+        InvalidVersion,
+        environment,
+    ) = _packaging_api()
+
+    def parse(raw: str):
+        try:
+            requirement = Requirement(raw)
+        except InvalidRequirement:
+            raise ReleaseRefused("malformed wheel dependency requirement") from None
+        name = canonicalize_name(requirement.name)
+        if requirement.url is not None:
+            raise ReleaseRefused("Unsupported: direct-reference wheel requirement")
+        if name.startswith("dotmac"):
+            if requirement.extras or requirement.marker is not None:
+                raise ReleaseRefused(
+                    "Unsupported: first-party extras or environment marker"
+                )
+            if name not in permitted:
+                raise ReleaseRefused(f"unapproved first-party wheel dependency: {name}")
+        return name, requirement
+
+    fixed: dict[str, Path] = {}
+    root_requirements = list(pins)
+    for wheel in local:
+        name, version = _wheel_identity(wheel)
+        if name in fixed or not name.startswith("dotmac") or name not in permitted:
+            raise ReleaseRefused(
+                f"duplicate or unapproved local first-party wheel: {name}"
+            )
+        fixed[name] = wheel
+        root_requirements.append(f"{name}=={version}")
+
+    def add(
+        raw: str, constraints: dict[str, set[str]], extras: dict[str, set[str]]
+    ) -> str:
+        name, requirement = parse(raw)
+        constraints.setdefault(name, set()).add(str(requirement.specifier))
+        extras.setdefault(name, set()).update(
+            canonicalize_name(extra) for extra in requirement.extras
+        )
+        return name
+
+    def roots():
+        constraints: dict[str, set[str]] = {}
+        extras: dict[str, set[str]] = {}
+        for raw in root_requirements:
+            add(raw, constraints, extras)
+        return constraints, extras
+
+    def state(constraints, extras):
+        return tuple(
+            (
+                name,
+                str(SpecifierSet(",".join(sorted(constraints[name])))),
+                tuple(sorted(extras[name])),
+            )
+            for name in sorted(constraints)
+        )
+
+    constraints, extras = roots()
+    visited = set()
+    downloaded: dict[tuple[str, str], Path] = {}
+    # Resource bounds refuse an indeterminate graph; they never relax an edge.
+    for number in range(128):
+        current = state(constraints, extras)
+        if current in visited:
+            raise ReleaseRefused("wheel dependency resolution did not converge")
+        visited.add(current)
+        if len(current) > 1024:
+            raise ReleaseRefused("wheel dependency graph exceeds verifier bound")
+        candidates: dict[str, Path] = {}
+        for name, specifier, _requested_extras in current:
+            wheel = fixed.get(name)
+            if wheel is None:
+                if name.startswith("dotmac") and private_index is None:
+                    raise ReleaseRefused(
+                        f"missing approved first-party smoke wheel: {name}"
+                    )
+                index = (
+                    private_index
+                    if name.startswith("dotmac")
+                    else os.environ.get("PUBLIC_INDEX_URL", "https://pypi.org/simple")
+                )
+                key = (name, specifier)
+                wheel = downloaded.get(key)
+                if wheel is None:
+                    wheel = _download_one(
+                        pip, name, specifier, index, directory / str(number) / name
+                    )
+                    downloaded[key] = wheel
+            actual_name, version = _wheel_identity(wheel)
+            try:
+                matches = SpecifierSet(specifier).contains(
+                    Version(version), prereleases=True
+                )
+            except InvalidVersion as error:
+                raise ReleaseRefused(
+                    f"invalid resolved wheel version for {name}"
+                ) from error
+            if actual_name != name or not matches:
+                raise ReleaseRefused(
+                    f"resolved wheel does not satisfy constraints for {name}"
+                )
+            candidates[name] = wheel
+
+        # Rewalk from roots each round: dependencies of a superseded artifact
+        # must not remain as stale, executable inputs in the final wheelhouse.
+        next_constraints, next_extras = roots()
+        queue = sorted(next_constraints)
+        processed: dict[str, frozenset[str]] = {}
+        while queue:
+            name = queue.pop(0)
+            contexts = frozenset({"", *next_extras[name]})
+            if processed.get(name) == contexts or name not in candidates:
+                continue
+            processed[name] = contexts
+            wheel = candidates[name]
+            headers = _wheel_metadata(wheel)
+            provided = {
+                canonicalize_name(extra)
+                for extra in headers.get_all("Provides-Extra", [])
+            }
+            if not next_extras[name].issubset(provided):
+                raise ReleaseRefused(f"wheel lacks a requested extra for {name}")
+            # Parse every edge before any request in the NEXT round. Unsupported
+            # dormant URL/first-party conditional edges are refused as declared.
+            for raw in headers.get_all("Requires-Dist", []):
+                dependency, requirement = parse(raw)
+                if (
+                    dependency.startswith("dotmac")
+                    and name in owner_policy
+                    and dependency not in owner_policy[name]
+                ):
+                    raise ReleaseRefused(
+                        f"{name}: unapproved first-party Python requirement"
+                    )
+                try:
+                    active = requirement.marker is None or any(
+                        requirement.marker.evaluate(
+                            environment={**environment, "extra": extra},
+                            context="metadata",
+                        )
+                        for extra in contexts
+                    )
+                except (KeyError, ValueError) as error:
+                    raise ReleaseRefused(
+                        f"Unsupported: wheel marker environment for {name}"
+                    ) from error
+                if not active:
+                    continue
+                previous = frozenset(next_extras.get(dependency, set()))
+                is_new = dependency not in next_constraints
+                add(raw, next_constraints, next_extras)
+                if is_new or previous != frozenset(next_extras[dependency]):
+                    queue.append(dependency)
+        if state(next_constraints, next_extras) == current:
+            return [candidates[name] for name in sorted(candidates)]
+        constraints, extras = next_constraints, next_extras
+    raise ReleaseRefused("wheel dependency resolution exceeded verifier round bound")
+
+
+def _module_wheel_policy(closure: list[dict]) -> tuple[set[str], dict[str, set[str]]]:
+    owner_policy = {
+        member["distribution"]: {
+            _normal_distribution(name)
+            for name in member["wheel_contents"]["allowed_requires"]
+        }
+        for member in closure
+    }
+    permitted = {"dotmac-kernel", *(member["distribution"] for member in closure)}
+    for names in owner_policy.values():
+        permitted.update(name for name in names if name.startswith("dotmac"))
+    return permitted, owner_policy
+
+
+def _registry_wheels(
+    args: argparse.Namespace, closure: list[dict], pip: Path, directory: Path
+) -> list[Path]:
+    pins = [f"{member['distribution']}=={member['version']}" for member in closure]
+    if args.kernel:
+        _exact_pin(f"dotmac-kernel=={args.kernel}")
+        pins.append(f"dotmac-kernel=={args.kernel}")
+    permitted, owner_policy = _module_wheel_policy(closure)
+    wheels = _stage_wheels(
+        pip,
+        directory,
+        pins=pins,
+        local=[],
+        permitted=permitted,
+        owner_policy=owner_policy,
+        private_index=args.index,
+    )
+    if "dotmac-kernel" not in {_wheel_identity(wheel)[0] for wheel in wheels}:
+        raise ReleaseRefused("private registry omitted the required kernel wheel")
+    return wheels
+
+
+def _offline_install(pip: Path, wheels: list[Path], directory: str | Path) -> None:
+    result = subprocess.run(
+        [str(pip), "install", "--quiet", "--no-index", "--no-deps", *map(str, wheels)],
+        env=_pip_environment(),
+        cwd=directory,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        raise ReleaseRefused("offline wheel installation failed")
+
+
+def _verify_smoke_inputs(
+    entry: dict, closure: list[dict], wheels: list[Path], *, kernel: bool
+) -> None:
+    """Refuse substituted, extra or missing artifacts before pip runs."""
+    paths = [
+        entry["package_path"],
+        *_smoke_dependencies(closure, entry["distribution"]),
+    ]
+    if kernel:
+        paths.append(PACKAGES_ROOT / "dotmac-kernel")
+    expected: dict[str, str] = {}
+    for path in paths:
+        declared = tomllib.loads((path / "pyproject.toml").read_text())["tool"][
+            "poetry"
+        ]
+        name, version = _normal_distribution(declared["name"]), declared["version"]
+        if name in expected:
+            raise ReleaseRefused(f"duplicate first-party source distribution: {name}")
+        expected[name] = version
+    for member in closure:
+        name = _normal_distribution(member["distribution"])
+        if expected[name] != member["version"]:
+            raise ReleaseRefused(
+                f"{name}: local source version differs from exact logical pin "
+                f"{member['version']}"
+            )
+    actual: dict[str, Path] = {}
+    for wheel in wheels:
+        name, version = _wheel_identity(wheel)
+        if name in actual:
+            raise ReleaseRefused(
+                f"duplicate first-party distributions in smoke inputs: {name}"
+            )
+        if name not in expected or version != expected[name]:
+            raise ReleaseRefused(
+                f"unapproved smoke wheel or wrong version: {wheel.name}"
+            )
+        actual[name] = wheel
+    if set(actual) != set(expected):
+        raise ReleaseRefused(
+            f"missing approved smoke wheels: {sorted(set(expected) - set(actual))}"
+        )
+    for member in closure:
+        _inspect_native(member, actual[_normal_distribution(member["distribution"])])
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -689,7 +1241,16 @@ def cmd_build_local_dependencies(args: argparse.Namespace) -> None:
     entry = resolve(args.distribution)
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    dependencies = local_first_party_dependencies(entry)
+    closure = _module_closure(
+        [f"{entry['distribution']}=={_declared(entry)['version']}"]
+    )
+    dependencies = _smoke_dependencies(closure, entry["distribution"])
+    for member in closure:
+        if _declared(member)["version"] != member["version"]:
+            raise ReleaseRefused(
+                f"{member['distribution']}: local source version differs "
+                f"from exact logical pin {member['version']}"
+            )
 
     for dependency in dependencies:
         subprocess.run(
@@ -726,31 +1287,50 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
     entry = resolve(args.distribution)
     import tempfile
 
+    closure = _module_closure(
+        [f"{entry['distribution']}=={_declared(entry)['version']}"]
+    )
+
     # Every first-party wheel is installed by explicit PATH, never resolved by
     # name, so no index can substitute a different artifact for the target,
     # the kernel or a first-party dependency.
     targets = _wheels(args.dist)
     if len(targets) != 1:
         raise SystemExit(f"expected exactly one target wheel in {args.dist}")
+    if _normal_distribution(_wheel_distribution(targets[0])) != entry["distribution"]:
+        raise ReleaseRefused(
+            "target artifact directory does not contain the release target"
+        )
     dependencies: list[Path] = []
     if args.kernel_dist:
-        dependencies += _wheels(args.kernel_dist)
+        kernel_wheels = _wheels(args.kernel_dist)
+        if (
+            len(kernel_wheels) != 1
+            or _normal_distribution(_wheel_distribution(kernel_wheels[0]))
+            != "dotmac-kernel"
+        ):
+            raise ReleaseRefused(
+                "kernel artifact directory must contain exactly the kernel wheel"
+            )
+        dependencies += kernel_wheels
     for dependency_dist in args.dependency_dist:
         dependencies += _wheels(dependency_dist)
     first_party = [*targets, *dependencies]
-    names = [_wheel_distribution(wheel) for wheel in first_party]
-    if len(set(names)) != len(names):
-        raise SystemExit(
-            f"duplicate first-party distributions in smoke inputs: {names}"
-        )
+    _verify_smoke_inputs(entry, closure, first_party, kernel=bool(args.kernel_dist))
 
     with tempfile.TemporaryDirectory() as tmp:
         python, pip = _venv(Path(tmp) / "venv")
-        subprocess.run(
-            [str(pip), "install", "--quiet", *[str(wheel) for wheel in first_party]],
-            check=True,
-            cwd=tmp,
+        permitted, owner_policy = _module_wheel_policy(closure)
+        staged = _stage_wheels(
+            pip,
+            Path(tmp) / "wheelhouse",
+            pins=[],
+            local=first_party,
+            permitted=permitted,
+            owner_policy=owner_policy,
+            private_index=None,
         )
+        _offline_install(pip, staged, tmp)
         subprocess.run(
             [
                 str(python),
@@ -768,8 +1348,12 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
         )
         _verify_installed(
             python,
-            [(entry["import_name"], entry["manifest_attr"], entry["db_schema"])],
-            [native] if (native := _native_package(entry)) else [],
+            _installed_targets(closure),
+            [
+                member["native_package"]
+                for member in closure
+                if member["native_package"]
+            ],
         )
 
     if args.emit_dependency_manifest:
@@ -797,58 +1381,297 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
     `--index` carries the authenticated simple-index URL. Exact pins only: a
     range would let this pass against a version nobody published in this run.
 
-    The private index is `--index-url` and the PUBLIC one is `--extra-index-url`,
-    which is not a convenience: `--index-url` REPLACES the default index, so with
-    it alone pip can see the Dotmac distributions and nothing they depend on.
-    Every module declares `sqlalchemy`, so verification failed for every module
-    that could ever be released — and it failed AFTER publishing, leaving the
-    artifact on the index with no tag. `scripts/consumer_boot_check.sh` pairs the
-    two flags for exactly this reason; the module path had only copied half of it.
+    First-party wheels are downloaded from the private index alone. Actual
+    wheel metadata supplies permitted first-party Python dependency ranges;
+    reviewed logical dependencies remain exact pins. All first-party bytes are
+    then installed by explicit path and their provenance is independently
+    verified. Public fallback supplies only third-party requirements.
 
     `PUBLIC_INDEX_URL` overrides the public index so an air-gapped or mirrored
     runner can point at its own, per the everything-by-config rule.
     """
     import tempfile
 
-    targets: list[tuple[str, str, str | None]] = []
-    native_targets: list[str] = []
-    specs: list[str] = []
-    if args.kernel:
-        # The kernel is NOT an allowlisted module — it has its own release
-        # workflow and its own inspection rules. It is pinned here rather than
-        # resolved, so a composition check proves the set against a SPECIFIC
-        # published kernel instead of whatever the resolver happens to pick.
-        specs.append(f"dotmac-kernel=={args.kernel}")
-    for pair in args.pin:
-        distribution, _, version = pair.partition("==")
-        if not version:
-            raise ReleaseRefused(f"{pair!r} is not an exact pin (name==version)")
-        entry = resolve(distribution)
-        targets.append(
-            (entry["import_name"], entry["manifest_attr"], entry["db_schema"])
-        )
-        if native := _native_package(entry):
-            native_targets.append(native)
-        specs.append(pair)
-
-    public_index = os.environ.get("PUBLIC_INDEX_URL", "https://pypi.org/simple")
+    closure = _module_closure(args.pin)
+    targets = _installed_targets(closure)
+    native_targets = [
+        member["native_package"] for member in closure if member["native_package"]
+    ]
     with tempfile.TemporaryDirectory() as tmp:
         python, pip = _venv(Path(tmp) / "venv")
+        wheels = _registry_wheels(args, closure, pip, Path(tmp) / "registry-wheels")
+        _offline_install(pip, wheels, tmp)
         subprocess.run(
             [
-                str(pip),
-                "install",
-                "--quiet",
-                "--index-url",
-                args.index,
-                "--extra-index-url",
-                public_index,
-                *specs,
+                str(python),
+                "-I",
+                "-c",
+                _PROVENANCE.format(
+                    expected={
+                        _wheel_distribution(wheel): str(wheel)
+                        for wheel in wheels
+                        if _wheel_identity(wheel)[0].startswith("dotmac")
+                    },
+                    checkout=str(REPO_ROOT),
+                ),
             ],
             check=True,
+            cwd=tmp,
         )
         _verify_installed(python, targets, native_targets)
-    print(f"registry verification OK for {', '.join(specs)}")
+    print(
+        "registry verification OK for "
+        + ", ".join(
+            f"{member['distribution']}=={member['version']}" for member in closure
+        )
+    )
+
+
+@contextmanager
+def _candidate_environment():
+    """Keep registry credentials out of installer and installed-code children."""
+    original = dict(os.environ)
+    clean = {
+        key: value
+        for key, value in original.items()
+        if key != "INDEX"
+        and not key.startswith(("PIP_", "TWINE_", "FORGEJO_"))
+        and not (key.endswith("INDEX_URL") and key != "PUBLIC_INDEX_URL")
+    }
+    try:
+        os.environ.clear()
+        os.environ.update(clean)
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+
+def _candidate_source_binding(closure: list[dict]) -> dict[str, str]:
+    """Hash the reviewed plan and implementation, never caller attestations."""
+    paths = {ALLOWLIST, Path(__file__)}
+    for member in closure:
+        package = member["package_path"]
+        paths.update(
+            {
+                package / "pyproject.toml",
+                package / "EXTRACTION.toml",
+                package / "src" / member["import_name"] / "manifest.py",
+            }
+        )
+    return {
+        path.relative_to(REPO_ROOT).as_posix(): _sha256(path) for path in sorted(paths)
+    }
+
+
+def _candidate_installed_check(
+    python: Path, closure: list[dict], expected: dict[str, str], directory: Path
+) -> None:
+    # Capture failures: imports and native loaders must never echo credentials.
+    script = (
+        _PROVENANCE.format(expected=expected, checkout=str(REPO_ROOT))
+        + _REGISTER.format(names=_installed_targets(closure))
+        + _NATIVE_REGISTER.format(
+            names=[
+                member["native_package"]
+                for member in closure
+                if member["native_package"]
+            ],
+            checkout=str(REPO_ROOT),
+        )
+    )
+    result = subprocess.run(
+        [str(python), "-I", "-c", script],
+        cwd=directory,
+        env=_pip_environment(),
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        raise ReleaseRefused("installed candidate verification failed")
+
+
+def cmd_qualify_candidate(args: argparse.Namespace) -> None:
+    # Wheel inspection can invoke native policy subprocesses too, so the clean
+    # environment must cover the entire command, including early failures.
+    with _candidate_environment():
+        _qualify_candidate_impl(args)
+
+
+def _qualify_candidate_impl(args: argparse.Namespace) -> None:
+    """Qualify this local candidate against published dependencies before upload.
+
+    This receipt proves an installation check, not release/admission authority.
+    The output is written only after all checks, with its receipt written last.
+    """
+    import shutil
+    import tempfile
+
+    entry = resolve(args.distribution)
+    version = _declared(entry)["version"]
+    closure = _module_closure([f"{entry['distribution']}=={version}"])
+    target_dir = Path(args.dist)
+    if target_dir.is_symlink() or not target_dir.is_dir():
+        raise ReleaseRefused("target directory must contain exactly one regular wheel")
+    contents = list(target_dir.resolve().iterdir())
+    wheels = _wheels(args.dist)
+    sdists = {
+        f"{name}-{version}.tar.gz"
+        for name in (entry["distribution"], entry["distribution"].replace("-", "_"))
+    }
+    if (
+        len(wheels) != 1
+        or any(path.is_symlink() or not path.is_file() for path in contents)
+        or any(path != wheels[0] and path.name not in sdists for path in contents)
+        or len(contents) > 2
+    ):
+        raise ReleaseRefused(
+            "target directory must contain exactly one regular wheel and "
+            "at most one corresponding source distribution"
+        )
+    candidate = wheels[0]
+    if _wheel_identity(candidate) != (entry["distribution"], version):
+        raise ReleaseRefused("candidate target identity differs from reviewed source")
+    output = Path(args.output).absolute()
+    if output.exists() or output.is_symlink():
+        raise ReleaseRefused("candidate binding output must not exist")
+    if not output.parent.is_dir() or output.parent.is_symlink():
+        raise ReleaseRefused(
+            "candidate binding output parent must be a regular directory"
+        )
+    # Existing content/native policy applies to the exact candidate before any
+    # downloads; this does not build or infer sibling Python versions from HEAD.
+    try:
+        cmd_inspect(argparse.Namespace(distribution=args.distribution, dist=args.dist))
+    except ReleaseRefused:
+        raise ReleaseRefused("candidate wheel-content policy failed") from None
+    source = _candidate_source_binding(closure)
+    candidate_hash = _sha256(candidate)
+    with tempfile.TemporaryDirectory() as tmp:
+        temporary = Path(tmp)
+        snapshot = temporary / candidate.name
+        shutil.copyfile(candidate, snapshot)
+        if _sha256(snapshot) != candidate_hash or _sha256(candidate) != candidate_hash:
+            raise ReleaseRefused("candidate changed during qualification")
+        *_, Version, InvalidVersion, _environment = _packaging_api()
+        try:
+            floor = max(Version(member["kernel_floor"]) for member in closure)
+            kernel = args.kernel or str(floor)
+            _exact_pin(f"dotmac-kernel=={kernel}")
+            if Version(kernel) < floor:
+                raise ReleaseRefused(
+                    "candidate kernel pin is below the reviewed closure floor"
+                )
+        except InvalidVersion:
+            raise ReleaseRefused("invalid candidate kernel version") from None
+        pins = [
+            f"{member['distribution']}=={member['version']}"
+            for member in closure
+            if member["distribution"] != entry["distribution"]
+        ]
+        pins.append(f"dotmac-kernel=={kernel}")
+        python, pip = _venv(temporary / "venv")
+        permitted, owner_policy = _module_wheel_policy(closure)
+        wheels = _stage_wheels(
+            pip,
+            temporary / "wheelhouse",
+            pins=pins,
+            local=[snapshot],
+            permitted=permitted,
+            owner_policy=owner_policy,
+            private_index=args.index,
+        )
+        first_party: dict[str, Path] = {}
+        for wheel in wheels:
+            name, actual_version = _wheel_identity(wheel)
+            if not name.startswith("dotmac"):
+                continue
+            if name in first_party or name not in permitted:
+                raise ReleaseRefused(
+                    "duplicate or unapproved qualified first-party wheel"
+                )
+            first_party[name] = wheel
+            if name == entry["distribution"] and (
+                wheel != snapshot
+                or actual_version != version
+                or _sha256(wheel) != candidate_hash
+            ):
+                raise ReleaseRefused("candidate substitution during qualification")
+        if any(member["distribution"] not in first_party for member in closure):
+            raise ReleaseRefused("missing logical module wheel during qualification")
+        for member in closure:
+            name = member["distribution"]
+            if _wheel_identity(first_party[name])[1] != member["version"]:
+                raise ReleaseRefused(
+                    "qualified logical module version differs from reviewed pin"
+                )
+            _inspect_native(member, first_party[name])
+        if (
+            "dotmac-kernel" not in first_party
+            or _wheel_identity(first_party["dotmac-kernel"])[1] != kernel
+        ):
+            raise ReleaseRefused("qualified published kernel differs from exact pin")
+        hashes = {name: _sha256(wheel) for name, wheel in first_party.items()}
+        _offline_install(pip, wheels, tmp)
+        _candidate_installed_check(
+            python,
+            closure,
+            {name: str(wheel) for name, wheel in first_party.items()},
+            temporary,
+        )
+        if (
+            _sha256(candidate) != candidate_hash
+            or _candidate_source_binding(closure) != source
+            or any(
+                _sha256(wheel) != hashes[name] for name, wheel in first_party.items()
+            )
+        ):
+            raise ReleaseRefused(
+                "candidate, source or qualified wheel changed during checks"
+            )
+        records = [
+            {
+                "name": name,
+                "version": _wheel_identity(wheel)[1],
+                "filename": wheel.name,
+                "sha256": hashes[name],
+            }
+            for name, wheel in sorted(first_party.items())
+        ]
+        if len({record["filename"] for record in records}) != len(records):
+            raise ReleaseRefused("qualified first-party wheel filenames collide")
+        receipt = {
+            "schema": "CandidateQualification.v1",
+            "claim": "candidate-installation-only",
+            "candidate": next(
+                record for record in records if record["name"] == entry["distribution"]
+            ),
+            "kernel": f"dotmac-kernel=={kernel}",
+            "source": source,
+            "logical_modules": _installed_targets(closure),
+            "wheels": records,
+        }
+        # Exclusive creation refuses an output-directory race. No existing
+        # directory is replaced, and no usable receipt survives a failed copy.
+        try:
+            output.mkdir()
+        except FileExistsError:
+            raise ReleaseRefused("candidate binding output must not exist") from None
+        try:
+            for record in records:
+                destination = output / record["filename"]
+                shutil.copyfile(first_party[record["name"]], destination)
+                if _sha256(destination) != record["sha256"]:
+                    raise ReleaseRefused(
+                        "qualified binding copy differs from checked wheel"
+                    )
+            (output / "CandidateQualification.v1.json").write_text(
+                json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+            )
+        except BaseException:
+            shutil.rmtree(output)
+            raise
+    print(f"{entry['distribution']}: candidate installation qualified")
 
 
 def cmd_compare_published(args: argparse.Namespace) -> None:
@@ -983,6 +1806,21 @@ def main() -> int:
         "the smoke installed (SmokeDependencyWheels.v1)",
     )
     p.set_defaults(func=cmd_verify_wheel)
+
+    p = sub.add_parser(
+        "qualify-candidate",
+        help="qualify local candidate against published dependencies",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--dist", required=True)
+    p.add_argument("--index", required=True)
+    p.add_argument(
+        "--kernel", default="", help="exact published kernel; defaults to closure floor"
+    )
+    p.add_argument(
+        "--output", required=True, help="new qualified first-party binding directory"
+    )
+    p.set_defaults(func=cmd_qualify_candidate)
 
     p = sub.add_parser(
         "compare-published",

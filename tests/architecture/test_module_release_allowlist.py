@@ -23,11 +23,14 @@ import argparse
 import ast
 import importlib.util
 import json
+import site
 import subprocess
 import sys
 import tomllib
+import zipfile
+from importlib import metadata
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -364,7 +367,35 @@ def test_release_smoke_executes_against_a_real_stateless_manifest(
     )
     monkeypatch.setitem(sys.modules, probe.__name__, probe)
 
-    script = release._REGISTER.format(names=[("release_smoke_probe", "module", None)])
+    declaration = ModuleType("release_smoke_probe.manifest")
+    declaration.__file__ = probe.__file__
+    declaration.module = probe.module
+    monkeypatch.setitem(sys.modules, declaration.__name__, declaration)
+    monkeypatch.setattr(
+        site, "getsitepackages", lambda: [str(Path(probe.__file__).parent)]
+    )
+    monkeypatch.setattr(
+        metadata,
+        "distribution",
+        lambda _: SimpleNamespace(
+            version="1.0.0",
+            files=[probe.__file__],
+            locate_file=lambda path: path,
+        ),
+    )
+    script = release._REGISTER.format(
+        names=[
+            {
+                "distribution": "release-smoke-probe",
+                "version": "1.0.0",
+                "code": "release_smoke_probe",
+                "dependencies": (),
+                "import_name": "release_smoke_probe",
+                "manifest_attr": "module",
+                "db_schema": None,
+            }
+        ]
+    )
     exec(script, {})  # noqa: S102  # nosec B102 - the checked-in release script
 
 
@@ -537,12 +568,17 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     dirs = {}
     for name, wheel in (
         ("module-dist", "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl"),
-        ("kernel-dist", "dotmac_kernel-0.1.0a105-py3-none-any.whl"),
-        ("first-party-dist", "dotmac_party-0.1.0a3-py3-none-any.whl"),
+        ("kernel-dist", "dotmac_kernel-0.1.0a106-py3-none-any.whl"),
+        ("first-party-dist", "dotmac_ui-0.1.0a8-py3-none-any.whl"),
     ):
         directory = tmp_path / name
         directory.mkdir()
-        (directory / wheel).write_bytes(wheel.encode())
+        distribution, version = wheel.split("-")[:2]
+        with zipfile.ZipFile(directory / wheel, "w") as archive:
+            archive.writestr(
+                f"{distribution}-{version}.dist-info/METADATA",
+                f"Name: {distribution.replace('_', '-')}\nVersion: {version}\n",
+            )
         (directory / "ignored.tar.gz").write_bytes(b"sdist")
         dirs[name] = directory
 
@@ -553,9 +589,9 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     )
     monkeypatch.setattr(module, "_verify_installed", lambda *_args: None)
 
-    def fake_run(command: list[str], *, check: bool, **_kwargs: object) -> None:
-        assert check is True
+    def fake_run(command: list[str], *, check: bool, **_kwargs: object):
         commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     manifest = tmp_path / "out" / "smoke-dependencies.json"
@@ -574,8 +610,8 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     wheels = [arg for arg in install if arg.endswith(".whl")]
     assert sorted(Path(arg).name for arg in wheels) == [
         "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl",
-        "dotmac_kernel-0.1.0a105-py3-none-any.whl",
-        "dotmac_party-0.1.0a3-py3-none-any.whl",
+        "dotmac_kernel-0.1.0a106-py3-none-any.whl",
+        "dotmac_ui-0.1.0a8-py3-none-any.whl",
     ]
     assert provenance[1] == "-I"
     assert "direct_url.json" in provenance[3]
@@ -583,8 +619,8 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     recorded = json.loads(manifest.read_text())
     assert recorded["schema"] == "SmokeDependencyWheels.v1"
     assert [w["filename"] for w in recorded["wheels"]] == [
-        "dotmac_kernel-0.1.0a105-py3-none-any.whl",
-        "dotmac_party-0.1.0a3-py3-none-any.whl",
+        "dotmac_kernel-0.1.0a106-py3-none-any.whl",
+        "dotmac_ui-0.1.0a8-py3-none-any.whl",
     ]
     assert all(len(w["sha256"]) == 64 for w in recorded["wheels"])
 

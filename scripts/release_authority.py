@@ -117,18 +117,18 @@ ROOT_WORKFLOWS: tuple[str, ...] = (
     ".github/workflows/recover-module-release.yml",
 )
 
-#: The checkers that decide whether a release row is accepted. They are not
-#: executed by the release workflows, but changing one changes what a row
-#: must prove, so it is an authority change like any release-path edit — and
-#: so may not share a pull request with a new release row. They are walked as
-#: roots, so their own local imports are covered too.
+#: The checkers that decide whether release evidence is accepted. Some are
+#: invoked before publication. Changing one changes what a release must prove,
+#: so it is an authority change like any release-path edit and may not share a
+#: pull request with a new release row. Their local imports are walked too.
 VERIFICATION_ROOTS: tuple[str, ...] = (
     "scripts/module_release_provenance.py",
     "scripts/check_module_release_verification_append_only.py",
+    "tests/unit/test_module_release_dependency_closure.py",
 )
 
 _SCRIPTS_TOKEN = re.compile(r"scripts/[A-Za-z0-9_./-]+\.(?:py|sh)")
-_GITHUB_TOKEN = re.compile(r"\.github/[A-Za-z0-9_./-]+\.(?:yml|yaml|json)")
+_GITHUB_TOKEN = re.compile(r"\.github/[A-Za-z0-9_./-]+\.(?:yml|yaml|json|txt)")
 _USES_LOCAL = re.compile(r"uses:\s*(\./[A-Za-z0-9_./-]+)")
 _USES_ANY = re.compile(r"""uses:\s*['"]?([^\s'"#]+)""")
 #: A third-party action is admissible only at an immutable commit:
