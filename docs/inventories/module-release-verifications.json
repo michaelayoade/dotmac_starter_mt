@@ -463,6 +463,28 @@
           "sha256": "fc001312fb7f33d5d61e213e46a8107591e956b31578cceab86cec70ca343478"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-learning",
+      "version": "0.1.0a1",
+      "tag": "dotmac-learning-v0.1.0a1",
+      "tag_object": "670967c7a712e5229e590a745aaa797bff4665a4",
+      "peeled_commit": "f674acc9e3235ac1b82bc10c37ba021191730a5b",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_learning-0.1.0a1-py3-none-any.whl": "9f58374ef093b156acfcfde0a84cea9dcaca0dacfc25066942e9a5b9d6db0cab"
+      },
+      "verification_run_id": "39123389198",
+      "source_run_id": "39123389198",
+      "release_authority_digest": "sha256:0e08fdb92b3c12d3669bac3e2d9d9b9ac2ff38031888500be4041cd237dd7e7d",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a106-py3-none-any.whl",
+          "sha256": "1ec69f65acac8fbcd7e18c7cbbd14994685453f75ab4a99d90b4b689c6c901f7"
+        }
+      ]
     }
   ]
 }
