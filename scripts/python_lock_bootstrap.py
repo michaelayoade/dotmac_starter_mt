@@ -561,6 +561,32 @@ _REVIEW_REFUSALS = {
 }
 
 
+_REVIEW_MISMATCH_LABELS = (
+    "HEADER",
+    "LEARNING",
+    "FULFILLMENT",
+    "TEMPLATE",
+    "OTHER",
+    "METADATA",
+    "LEARNING_SEMANTICS",
+)
+_REVIEW_MISMATCH_REFUSALS = {
+    "lock review mismatch: "
+    + ",".join(
+        label
+        for index, label in enumerate(_REVIEW_MISMATCH_LABELS)
+        if mask & (1 << index)
+    ): "lock review mismatch: "
+    + ",".join(
+        label
+        for index, label in enumerate(_REVIEW_MISMATCH_LABELS)
+        if mask & (1 << index)
+    )
+    for mask in range(1, 1 << len(_REVIEW_MISMATCH_LABELS))
+}
+_REVIEW_REFUSALS.update(_REVIEW_MISMATCH_REFUSALS)
+
+
 def _review_partition(raw: bytes) -> tuple[list[tuple[str, int, int]], int]:
     """Map byte record boundaries independently of the parsed TOML document."""
     if len(raw) > 400000:
@@ -755,6 +781,48 @@ def _review_operations(
         or len(reconstructed) != len(generated)
         or _digest(reconstructed) != _digest(generated)
     ):
+        expected = bytes(reconstructed)
+        expected_records, expected_metadata = _review_partition(expected)
+        expected_spans = {
+            name: expected[start:stop] for name, start, stop in expected_records
+        }
+        generated_spans = {
+            name: generated[start:stop] for name, start, stop in generated_records
+        }
+        learning = "dotmac-learning"
+        special = {learning, "dotmac-fulfillment", "dotmac-template-studio"}
+        # Only closed boolean categories leave a failed whole-file comparison.
+        flags = (
+            expected[: expected_records[0][1]] != generated[: generated_records[0][1]],
+            expected_spans[learning] != generated_spans[learning],
+            expected_spans["dotmac-fulfillment"]
+            != generated_spans["dotmac-fulfillment"],
+            expected_spans["dotmac-template-studio"]
+            != generated_spans["dotmac-template-studio"],
+            any(
+                span != generated_spans[name]
+                for name, span in expected_spans.items()
+                if name not in special
+            ),
+            expected[expected_metadata:] != generated[generated_metadata_start:],
+            json.dumps(
+                tomllib.loads(expected_spans[learning].decode("utf-8")),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            != json.dumps(
+                tomllib.loads(generated_spans[learning].decode("utf-8")),
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        labels = ",".join(
+            label
+            for label, differs in zip(_REVIEW_MISMATCH_LABELS, flags, strict=True)
+            if differs
+        )
+        if labels:
+            raise BootstrapError("lock review mismatch: " + labels)
         raise BootstrapError("lock review non-whitelisted churn refused")
     return operations
 

@@ -1198,6 +1198,76 @@ def test_review_rejects_extra_learning_separator_with_matching_receipt(
     receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
     with pytest.raises(producer.BootstrapError) as caught:
         producer._review_artifact(repo)
-    assert str(caught.value) == "lock review non-whitelisted churn refused"
+    assert str(caught.value) == "lock review mismatch: LEARNING"
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+
+
+@pytest.mark.parametrize(
+    "mutation,labels",
+    [
+        ("header", "HEADER"),
+        ("learning_format", "LEARNING"),
+        ("learning_semantics", "LEARNING,LEARNING_SEMANTICS"),
+        ("learning_boolean", "LEARNING,LEARNING_SEMANTICS"),
+        ("fulfillment", "FULFILLMENT"),
+        ("template", "TEMPLATE"),
+        ("other", "OTHER"),
+        ("metadata", "METADATA"),
+        ("combined", "HEADER,OTHER,METADATA"),
+    ],
+)
+def test_review_mismatch_diagnostics_are_only_closed_categories(
+    review_case, mutation, labels, capsys
+):
+    repo, output, _, _ = review_case
+    path = output / "poetry.lock"
+    generated = path.read_text()
+    if mutation in {"header", "combined"}:
+        generated = generated.replace(_REVIEW_HEADER, _REVIEW_HEADER + "# comment\n")
+    if mutation == "learning_format":
+        generated = generated.replace(_REVIEW_LEARNING, _REVIEW_LEARNING + "\n")
+    if mutation == "learning_semantics":
+        generated = generated.replace(
+            _REVIEW_LEARNING,
+            _REVIEW_LEARNING.replace('version = "0.1.0a1"', 'version = "0.1.0a2"'),
+        )
+    if mutation == "learning_boolean":
+        generated = generated.replace(
+            _REVIEW_LEARNING,
+            _REVIEW_LEARNING.replace("optional = false", "optional = 0"),
+        )
+    if mutation == "fulfillment":
+        generated = generated.replace('version = "0.1.0a2"', 'version = "0.1.0a3"')
+    if mutation == "template":
+        generated = generated.replace('version = "0.2.0a6"', 'version = "0.2.0a7"')
+    if mutation in {"other", "combined"}:
+        generated = generated.replace(_REVIEW_ALPHA, _REVIEW_ALPHA + "# comment\n")
+    if mutation in {"metadata", "combined"}:
+        generated += "# comment\n"
+    path.write_text(generated)
+    receipt_path = output / "manifest.json"
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt["lock_sha256"] = hashlib.sha256(generated.encode()).hexdigest()
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_artifact(repo)
+    assert str(caught.value) == "lock review mismatch: " + labels
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+
+
+def test_review_unknown_diagnostic_prefix_does_not_authorize_error_text(
+    review_case, monkeypatch, capsys
+):
+    repo, _, _, _ = review_case
+
+    def refuse(*arguments):
+        raise producer.BootstrapError("lock review mismatch: " + _REVIEW_SENTINEL)
+
+    monkeypatch.setattr(producer, "_review_operations", refuse)
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_artifact(repo)
+    assert str(caught.value) == "lock review refused"
     captured = capsys.readouterr()
     assert captured.out == captured.err == ""
