@@ -1,0 +1,44 @@
+"""Typed bank import intent preserves raw policy and returns immutable observations."""
+
+from dataclasses import FrozenInstanceError, fields
+from uuid import uuid4
+
+import pytest
+from dotmac_learning.bank_activity_contracts import (
+    BankActivityImportResult,
+    ImportBankWithActivityCommand,
+)
+from dotmac_learning.curriculum_contracts import BankDocument
+from pydantic import ValidationError
+
+
+def test_command_uses_existing_bank_document_without_extra_policy_validation():
+    doc = BankDocument(
+        course="source-slug",
+        kind="final",
+        questions=(),
+        policy={"pool": None, "mode": None, "pass_threshold": None},
+    )
+    tenant = uuid4()
+    command = ImportBankWithActivityCommand(tenant_id=tenant, doc=doc)
+    assert command.tenant_id == tenant and command.doc is doc
+    assert command.doc.policy == doc.policy
+    with pytest.raises(ValidationError):
+        ImportBankWithActivityCommand(tenant_id=tenant, doc=doc, unknown=True)
+
+
+def test_result_is_frozen_and_does_not_require_activity_identity_or_defaults():
+    result = BankActivityImportResult(
+        bank_id=uuid4(),
+        title="Final assessment",
+        created=True,
+        applied_policy=(("pool", None), ("max_attempts", 3), ("mode", "exam")),
+    )
+    assert {field.name for field in fields(result)} == {
+        "bank_id",
+        "title",
+        "created",
+        "applied_policy",
+    }
+    with pytest.raises(FrozenInstanceError):
+        result.title = "changed"

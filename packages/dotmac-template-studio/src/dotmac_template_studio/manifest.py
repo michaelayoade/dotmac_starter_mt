@@ -31,6 +31,7 @@ from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.permissions import PermissionSpec
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
+    TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
 from dotmac_kernel.web_surfaces import (
@@ -47,7 +48,7 @@ from dotmac_template_studio.web import template_dir
 
 module = ModuleManifest(
     code="template_studio",
-    version="0.2.0a5",
+    version="0.2.0a6",
     api_routers=[api_router],
     web_surfaces=(
         WebSurfaceContribution(
@@ -156,9 +157,13 @@ module = ModuleManifest(
     # that disabling a module preserves its data.
     core=False,
     # Needs a tenant catalogue for its foreign keys and roles to grant to —
-    # never the kernel's identity/RBAC/audit estate. The assembly binds these
-    # effects to the revisions that supply them (ADR-0006 D1 amendment).
-    requires=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
+    # tenant audit storage is required by its audit writer. The assembly binds
+    # these effects to provider revisions (ADR-0006 D1 amendment).
+    requires=(
+        TENANT_SCOPE_CATALOG_V1.name,
+        MODULE_DATABASE_ROLES_V1.name,
+        TENANT_AUDIT_LOG_V1.name,
+    ),
 )
 
 __all__ = ["module"]

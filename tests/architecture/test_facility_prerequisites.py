@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import tomllib
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,33 @@ from tests.architecture.kernel_facilities import (
 )
 
 # ── Finding the calls ───────────────────────────────────────────────────────
+
+
+@cache
+def _kernel_root_reexports() -> dict[str, str]:
+    """Resolve root exports from their real source imports without importing Kernel."""
+    path = PACKAGES / "dotmac-kernel/src/dotmac_kernel/__init__.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    public = next(
+        set(ast.literal_eval(node.value))
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in node.targets
+        )
+    )
+    return {
+        alias.asname or alias.name: (
+            node.module[len("dotmac_kernel.") :].replace(".", "/") + ":" + alias.name
+        )
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.startswith("dotmac_kernel.")
+        for alias in node.names
+        if (alias.asname or alias.name) in public
+    }
 
 
 def _kernel_facility_calls(path: Path) -> set[str]:
@@ -57,6 +85,7 @@ def _kernel_facility_calls(path: Path) -> set[str]:
     prose about a facility is not a call to it.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    root_exports = _kernel_root_reexports()
 
     # local name -> facility key, for `from ... import name [as alias]`
     direct: dict[str, str] = {}
@@ -75,6 +104,8 @@ def _kernel_facility_calls(path: Path) -> set[str]:
                     modules[local] = f"{tail}/{alias.name}"
                 else:
                     modules[local] = alias.name
+                    if alias.name in root_exports:
+                        direct[local] = root_exports[alias.name]
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if not alias.name.startswith("dotmac_kernel"):
@@ -93,8 +124,11 @@ def _kernel_facility_calls(path: Path) -> set[str]:
             function.value, ast.Name
         ):
             module = modules.get(function.value.id)
-            if module:
-                called.add(f"{module}:{function.attr}")
+            if module is not None:
+                if module:
+                    called.add(f"{module}:{function.attr}")
+                elif function.attr in root_exports:
+                    called.add(root_exports[function.attr])
     return called
 
 
@@ -163,7 +197,10 @@ def _verified_in_migrations(package: Path) -> set[str]:
             for element in ast.walk(node.value):
                 if isinstance(element, ast.Constant) and isinstance(element.value, str):
                     names.add(element.value)
-    return names
+                elif isinstance(element, ast.Attribute) and element.attr == "name":
+                    if isinstance(element.value, ast.Name):
+                        names.add(element.value.id)
+    return _normalise(names)
 
 
 #: Spec constants as modules spell them, mapped to the prerequisite they name.
@@ -172,6 +209,7 @@ _CONSTANTS = {
     "IDEMPOTENCY_LEDGER_V1": "idempotency_ledger.v1",
     "OUTBOX_RELAY_V1": "outbox_relay.v1",
     "PLATFORM_AUDIT_LOG_V1": "platform_audit_log.v1",
+    "TENANT_AUDIT_LOG_V1": "tenant_audit_log.v1",
     "TENANT_SCOPE_CATALOG_V1": "tenant_scope_catalog.v1",
     "MODULE_DATABASE_ROLES_V1": "module_database_roles.v1",
 }
@@ -459,3 +497,59 @@ def test_the_release_allowlist_is_covered_by_the_scan() -> None:
         and name not in scanned
     )
     assert not missing, f"path-dependency modules not scanned: {missing}"
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "from dotmac_kernel import write_audit_event\nwrite_audit_event(db)\n",
+        "from dotmac_kernel import write_audit_event as record\nrecord(db)\n",
+        "import dotmac_kernel as kernel\nkernel.write_audit_event(db)\n",
+        "import dotmac_kernel\ndotmac_kernel.write_audit_event(db)\n",
+    ),
+)
+def test_tenant_audit_root_reexports_are_real_calls(tmp_path, source) -> None:
+    path = tmp_path / "consumer.py"
+    path.write_text(source, encoding="utf-8")
+    assert "audit:write_audit_event" in _kernel_facility_calls(path)
+
+
+def test_tenant_audit_successor_converts_all_three_consumers() -> None:
+    facility = next(item for item in MAPPED if item.key == "audit:write_audit_event")
+    assert facility.prerequisite == "tenant_audit_log.v1"
+    assert facility.key not in FROZEN
+    callers = _callers_of(facility.key)
+    assert {
+        "dotmac-fulfillment/src/dotmac_fulfillment/service.py",
+        "dotmac-template-studio/src/dotmac_template_studio/router.py",
+        "dotmac-template-studio/src/dotmac_template_studio/web.py",
+    } <= callers
+    assert any(path.startswith("dotmac-learning/") for path in callers)
+
+
+@pytest.mark.parametrize(
+    "name", ("dotmac-learning", "dotmac-fulfillment", "dotmac-template-studio")
+)
+def test_tenant_audit_consumers_declare_and_verify_storage(name, tmp_path) -> None:
+    package = PACKAGES / name
+    effect = "tenant_audit_log.v1"
+    assert effect in _normalise(_manifest_requires(package))
+    assert effect in _verified_in_migrations(package)
+    # Sensitivity: removing the real declaration must be visible to the reader.
+    source = next(package.rglob("manifest.py")).read_text(encoding="utf-8")
+    (tmp_path / "manifest.py").write_text(
+        source.replace("TENANT_AUDIT_LOG_V1.name,", ""), encoding="utf-8"
+    )
+    assert effect not in _normalise(_manifest_requires(tmp_path))
+
+
+def test_verification_reader_resolves_tenant_audit_constant_and_empty_tuple(
+    tmp_path,
+) -> None:
+    versions = tmp_path / "migrations/versions"
+    versions.mkdir(parents=True)
+    path = versions / "audit.py"
+    path.write_text("REQUIRES = (TENANT_AUDIT_LOG_V1.name,)\n", encoding="utf-8")
+    assert _verified_in_migrations(tmp_path) == {"tenant_audit_log.v1"}
+    path.write_text("REQUIRES = ()\n", encoding="utf-8")
+    assert _verified_in_migrations(tmp_path) == set()

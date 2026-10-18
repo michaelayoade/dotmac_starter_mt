@@ -1,0 +1,245 @@
+# Reviewed full-domain source inventory; implementation and qualification remain incremental.
+# Allocation PR873 is merged. No module qualification or adoption is asserted.
+schema_version = 1
+package = "dotmac-learning"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Learning results, progress, completion, certificates and events; curriculum and prerequisite lifecycle, question banks, reading and annotations; enrollment, audience, tracks and access; existing exam/grading and attempt policy; delivery scheduling, pacing, announcements, support queues and learning read projections"
+contract = "Prepared 27-table/260-field learning source in one mod_learning namespace and lr lineage. Own the complete required activity-result through progress/completion/certificate path, including labs, curriculum/reading, enrollment/access, original exam/grading and attempt policy, delivery and support domain reads and commands. V5 current storage transfer preflights all 27 tables and 260 persisted fields before delegated insertion, then independently verifies current fields, keys and deletes; V1-V4 retain their original 7/14/21/23-table scopes. This is unpublished source with authored but unexecuted hosted canaries, not qualification, installed adoption or rollback evidence. Fresh Enrollment references translate learner UUIDs to genuine Kernel Party/PartyPerson; legacy stable identity and reference/worker-grant closure remain cutover gates. Trusted product authorization and facilitator account availability are explicit scoped observations; account active/suspended status is distinct from identity activity. Coupled SuccessQueue/instructor reads require a tenant-bound nonexecuting active-account Select embedded in their original SQL; instructor projects membership without filtering roster rows. Actual installed product account storage and identity/profile correspondence remain unqualified. A narrow nonexecuting enrollment relation supports composition with product-owned account/auth SQL; actual installed recipient snapshot and concurrency parity remain unqualified. Kernel owns tenancy, identity, authorization, session authority and audit storage/writer. New audit verification requires actual Kernel publication, prerequisite declaration and proven floor before module promotion. Academy retains content decoding/rendering, presentation, branding, deployment configuration, lab execution/LabTemplate/provider authority, admissions/account/auth/invitations, delivery/preferences/outbox/reminder policy and ERP/integration adapters. Historical ERP acknowledgment facts remain separate from completion. Remaining direct domain writers, including CLI selective Activity policy/prerequisite reconciliation and invitation assignments, require source-preserving commands and installed caller retirement. Preserve one writer/transaction, immutable lineage and populated reversal including accepted new facts, events and deletes. No second consumer, cross-application database access, forced Rust, deployment or speedup claim."
+source_repositories = ["dotmac_academy_app", "dotmac_erp", "dotmac_sub", "dotmac_starter_mt"]
+source_revisions = [
+  "dotmac_academy_app:a99a395e066db4eea3ec1d73219ab5dd006c1d1d",
+  "dotmac_erp:537f0ccba846c1ea3304805ed17a4d3b9711596b",
+  "dotmac_sub:13afd67e43ec946e5e25564628806ce4ddd7441c",
+  "dotmac_starter_mt:2e0c04ce61c50c95472fb26ad1867d5099edb832",
+]
+# Effective accepted Academy audit; initial source_revisions remain immutable.
+# PR177 correction at 61f69194d6591c6a2d13472a5e38c3a5ecf34454 is retained in next_action.
+revalidation_revisions = ["dotmac_academy_app:0968881fc40ad86b3abfea2fc40044dd2dbf47c9"]
+source_paths = [
+  "dotmac_academy_app:app/models/course.py",
+  "dotmac_academy_app:app/models/assessment.py",
+  "dotmac_academy_app:app/models/attempt.py",
+  "dotmac_academy_app:app/models/cohort.py",
+  "dotmac_academy_app:app/models/track.py",
+  "dotmac_academy_app:app/models/offering.py",
+  "dotmac_academy_app:app/models/prerequisite.py",
+  "dotmac_academy_app:app/models/reading.py",
+  "dotmac_academy_app:app/models/bookmark.py",
+  "dotmac_academy_app:app/models/completion.py",
+  "dotmac_academy_app:app/models/certificate.py",
+  "dotmac_academy_app:app/models/learning_event.py",
+  "dotmac_academy_app:app/services/assessment.py",
+  "dotmac_academy_app:app/services/exam_engine.py",
+  "dotmac_academy_app:app/services/grading.py",
+  "dotmac_academy_app:app/services/attempt_policy.py",
+  "dotmac_academy_app:app/services/attempts.py",
+  "dotmac_academy_app:app/services/audit.py",
+  "dotmac_academy_app:app/models/rbac.py",
+  "dotmac_academy_app:app/services/reading_progress.py",
+  "dotmac_academy_app:app/services/completion.py",
+  "dotmac_academy_app:app/services/certificates.py",
+  "dotmac_academy_app:app/services/entitlements.py",
+  "dotmac_academy_app:app/services/roster.py",
+  "dotmac_academy_app:app/services/tracks.py",
+  "dotmac_academy_app:app/services/audience.py",
+  "dotmac_academy_app:app/services/identity.py",
+  "dotmac_academy_app:app/services/lookups.py",
+  "dotmac_academy_app:app/web/instructor.py",
+  "dotmac_academy_app:app/services/authoring.py",
+  "dotmac_academy_app:app/services/content_import.py",
+  "dotmac_academy_app:app/services/catalog.py",
+  "dotmac_academy_app:app/web/learn.py",
+  "dotmac_academy_app:app/services/bank_loader.py",
+  "dotmac_academy_app:app/services/bank_lint.py",
+  "dotmac_academy_app:app/services/bookmarks.py",
+  "dotmac_academy_app:app/services/lab_lifecycle.py",
+  "dotmac_academy_app:app/services/lab_operations.py",
+  "dotmac_erp:app/models/people/training/learning_assessment.py",
+  "dotmac_erp:app/services/people/training/learning_assessment.py",
+  "dotmac_erp:app/services/dotmac_academy/training_sync.py",
+  "dotmac_academy_app:app/api/admissions.py",
+  "dotmac_academy_app:app/api/auth.py",
+  "dotmac_academy_app:app/api/deps.py",
+  "dotmac_academy_app:app/api/erp_applicant_assessments.py",
+  "dotmac_academy_app:app/api/persons.py",
+  "dotmac_academy_app:app/api/rbac.py",
+  "dotmac_academy_app:app/assembly.py",
+  "dotmac_academy_app:app/cli.py",
+  "dotmac_academy_app:app/config.py",
+  "dotmac_academy_app:app/error_tracking.py",
+  "dotmac_academy_app:app/kernel_runtime.py",
+  "dotmac_academy_app:app/main.py",
+  "dotmac_academy_app:app/metrics.py",
+  "dotmac_academy_app:app/models/__init__.py",
+  "dotmac_academy_app:app/models/account_token.py",
+  "dotmac_academy_app:app/models/admissions.py",
+  "dotmac_academy_app:app/models/announcement.py",
+  "dotmac_academy_app:app/models/auth.py",
+  "dotmac_academy_app:app/models/base.py",
+  "dotmac_academy_app:app/models/class_session.py",
+  "dotmac_academy_app:app/models/email_outbox.py",
+  "dotmac_academy_app:app/models/entrance_defaults.py",
+  "dotmac_academy_app:app/models/lab.py",
+  "dotmac_academy_app:app/models/notification.py",
+  "dotmac_academy_app:app/models/onboarding.py",
+  "dotmac_academy_app:app/models/pacing.py",
+  "dotmac_academy_app:app/models/person.py",
+  "dotmac_academy_app:app/models/platform_settings.py",
+  "dotmac_academy_app:app/models/reminder.py",
+  "dotmac_academy_app:app/models/success_queue.py",
+  "dotmac_academy_app:app/models/tenant.py",
+  "dotmac_academy_app:app/operational.py",
+  "dotmac_academy_app:app/services/account_invitations.py",
+  "dotmac_academy_app:app/services/accounts.py",
+  "dotmac_academy_app:app/services/admin_reports.py",
+  "dotmac_academy_app:app/services/admissions.py",
+  "dotmac_academy_app:app/services/agenda.py",
+  "dotmac_academy_app:app/services/analytics.py",
+  "dotmac_academy_app:app/services/announcements.py",
+  "dotmac_academy_app:app/services/applicant_email.py",
+  "dotmac_academy_app:app/services/at_risk.py",
+  "dotmac_academy_app:app/services/bootstrap.py",
+  "dotmac_academy_app:app/services/checks/__init__.py",
+  "dotmac_academy_app:app/services/checks/engine.py",
+  "dotmac_academy_app:app/services/checks/primitives.py",
+  "dotmac_academy_app:app/services/completion_aggregate.py",
+  "dotmac_academy_app:app/services/csv_reports.py",
+  "dotmac_academy_app:app/services/dashboards.py",
+  "dotmac_academy_app:app/services/email.py",
+  "dotmac_academy_app:app/services/email_outbox.py",
+  "dotmac_academy_app:app/services/entrance_exam.py",
+  "dotmac_academy_app:app/services/erp_applicant_assessments.py",
+  "dotmac_academy_app:app/services/erp_assessment_sync.py",
+  "dotmac_academy_app:app/services/erp_integration_security.py",
+  "dotmac_academy_app:app/services/erp_sync.py",
+  "dotmac_academy_app:app/services/exceptions.py",
+  "dotmac_academy_app:app/services/gradebook.py",
+  "dotmac_academy_app:app/services/host_lock.py",
+  "dotmac_academy_app:app/services/hr_digest.py",
+  "dotmac_academy_app:app/services/ical.py",
+  "dotmac_academy_app:app/services/insights.py",
+  "dotmac_academy_app:app/services/lab_content.py",
+  "dotmac_academy_app:app/services/lab_jobs.py",
+  "dotmac_academy_app:app/services/lab_seed.py",
+  "dotmac_academy_app:app/services/labengine/__init__.py",
+  "dotmac_academy_app:app/services/labengine/containerlab.py",
+  "dotmac_academy_app:app/services/labengine/interface.py",
+  "dotmac_academy_app:app/services/learner_dashboard.py",
+  "dotmac_academy_app:app/services/learner_digest.py",
+  "dotmac_academy_app:app/services/learning_events.py",
+  "dotmac_academy_app:app/services/lifecycle.py",
+  "dotmac_academy_app:app/services/localtime.py",
+  "dotmac_academy_app:app/services/management_inquiries.py",
+  "dotmac_academy_app:app/services/notifications.py",
+  "dotmac_academy_app:app/services/onboarding.py",
+  "dotmac_academy_app:app/services/pacing.py",
+  "dotmac_academy_app:app/services/reengagement.py",
+  "dotmac_academy_app:app/services/reminders.py",
+  "dotmac_academy_app:app/services/reports.py",
+  "dotmac_academy_app:app/services/roles.py",
+  "dotmac_academy_app:app/services/scheduling.py",
+  "dotmac_academy_app:app/services/search.py",
+  "dotmac_academy_app:app/services/security.py",
+  "dotmac_academy_app:app/services/settings_store.py",
+  "dotmac_academy_app:app/services/success_queue.py",
+  "dotmac_academy_app:app/services/todo.py",
+  "dotmac_academy_app:app/services/web_auth.py",
+  "dotmac_academy_app:app/ui.py",
+  "dotmac_academy_app:app/web/__init__.py",
+  "dotmac_academy_app:app/web/account.py",
+  "dotmac_academy_app:app/web/accounts.py",
+  "dotmac_academy_app:app/web/admin_home.py",
+  "dotmac_academy_app:app/web/applications.py",
+  "dotmac_academy_app:app/web/apply.py",
+  "dotmac_academy_app:app/web/audit.py",
+  "dotmac_academy_app:app/web/auth.py",
+  "dotmac_academy_app:app/web/bookmarks.py",
+  "dotmac_academy_app:app/web/calendar_feed.py",
+  "dotmac_academy_app:app/web/catalog.py",
+  "dotmac_academy_app:app/web/context.py",
+  "dotmac_academy_app:app/web/gradebook.py",
+  "dotmac_academy_app:app/web/lab_admin.py",
+  "dotmac_academy_app:app/web/labs.py",
+  "dotmac_academy_app:app/web/lifecycle.py",
+  "dotmac_academy_app:app/web/nav.py",
+  "dotmac_academy_app:app/web/notifications.py",
+  "dotmac_academy_app:app/web/onboarding.py",
+  "dotmac_academy_app:app/web/pagination.py",
+  "dotmac_academy_app:app/web/reminders_admin.py",
+  "dotmac_academy_app:app/web/reports.py",
+  "dotmac_academy_app:app/web/responses.py",
+  "dotmac_academy_app:app/web/search.py",
+  "dotmac_academy_app:app/web/settings.py",
+  "dotmac_academy_app:app/web/success_queue.py",
+  "dotmac_academy_app:app/web/teaching.py",
+  "dotmac_academy_app:app/web/templating.py",
+  "dotmac_academy_app:app/web/timetable.py",
+  "dotmac_academy_app:app/web/todo.py",
+  "dotmac_academy_app:scripts/backfill_applicants.py",
+  "dotmac_academy_app:scripts/check_governance_pin.py",
+  "dotmac_academy_app:scripts/seed_academy_demo.py",
+]
+preserved_tests = [
+  "dotmac_academy_app:tests/services/test_assessment_service.py",
+  "dotmac_academy_app:tests/services/test_exam_engine_characterisation.py",
+  "dotmac_academy_app:tests/services/test_question_types.py",
+  "dotmac_academy_app:tests/services/test_manual_grading.py",
+  "dotmac_academy_app:tests/services/test_attempt_policy.py",
+  "dotmac_academy_app:tests/services/test_assessment_modes.py",
+  "dotmac_academy_app:tests/web/test_attempt_limits.py",
+  "dotmac_academy_app:tests/web/test_random_pool.py",
+  "dotmac_academy_app:tests/models/test_concurrency_constraints.py",
+  "dotmac_academy_app:tests/test_assessment_isolation.py",
+  "dotmac_academy_app:tests/services/test_completion.py",
+  "dotmac_academy_app:tests/services/test_certificates.py",
+  "dotmac_academy_app:tests/services/test_learning_events.py",
+  "dotmac_academy_app:tests/services/test_reading_progress.py",
+  "dotmac_academy_app:tests/services/test_roster.py",
+  "dotmac_academy_app:tests/services/test_tracks.py",
+  "dotmac_academy_app:tests/services/test_audience_hr.py",
+  "dotmac_academy_app:tests/web/test_entitlements.py",
+  "dotmac_academy_app:tests/web/test_prerequisites.py",
+  "dotmac_academy_app:tests/test_cohort_isolation.py",
+  "dotmac_academy_app:tests/test_admissions_enrollment.py",
+  "dotmac_academy_app:tests/test_admissions_isolation.py",
+  "dotmac_academy_app:tests/services/test_authoring.py",
+  "dotmac_academy_app:tests/services/test_content_import.py",
+  "dotmac_academy_app:tests/services/test_bank_loader.py",
+  "dotmac_academy_app:tests/web/test_bookmarks.py",
+  "dotmac_academy_app:tests/services/test_lab_lifecycle.py",
+  "dotmac_academy_app:tests/services/test_lab_operations_worker.py",
+  "dotmac_academy_app:tests/services/test_lab_worker_privileges.py",
+  "dotmac_academy_app:tests/web/test_labs_web.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_academy_app"]
+adoption_evidence = []
+composition_boundary = "One tenant-scoped namespace and lineage, independent of Academy app imports and sibling modules. Preserve learner UUID meaning and tenant-safe references; never copy identity tables or weaken references to make composition compile. Existing kernel prerequisites are bound by the assembly, not to product revision IDs inside module migrations. Typed result and delivery/event seams retain admissions, labs, identity, presentation and ERP ownership. No Party facade or private Kernel API workaround."
+inventory_evidence = ["docs/inventories/learning-sources.md", "docs/inventories/learning-assessment-slice.md", "docs/inventories/learning-delivery-support-slice.md", "docs/inventories/learning-participation-slice.md"]
+first_cutover = "Academy alone is first adopter. Qualify the complete activity-result to best-result/course progress/completion/certificate vertical, including its seven-table storage dependency closure and final-lab consequence. All selected domain writes delegate typed commands; course/activity authoring decisions retain their current owner until ported. Preserve every existing ERP ACK fact losslessly and separately from module completion facts; the transitional delivery handoff and policy path remain unresolved at the adoption gate; the accepted Integrator transport ownership remains in force. Do not claim checkpoint relocation, Integrator cutover or writer retirement until the policy hold is resolved and the corresponding handoff is qualified. Then extend the same owner through full curriculum, durable reading/annotations, enrolment/access, assessment using the existing exam engine and attempt policy, learning delivery and learner support until Academy's displaced local learning implementations are retired. A second consumer is not required and none is claimed."
+shadow_and_drift = "Read-only comparison of exact results, best-result ordering, progress, completion timestamps/regression, certificate identity, learning events, enrolment/access refusals and migrated references on fresh and populated PostgreSQL fixtures. Preserve RLS/grants and stable IDs. Stop request/background writers for one qualified table/lineage transfer and writer switch; no dual writes. Verify rollback before and after new writes with preserved records and event state."
+local_copy_retirement = "Remove Academy's displaced domain model/service implementations and direct learning writers as each released-package cutover is proved; preserve only thin authorized adapters and explicit product boundaries. ERP's pre-existing nonauthoritative LMS retirement remains its separately tracked ADR0004 obligation, not a new module consumer or an authority transfer."
+next_action = "Qualify the additive SubmitMCQCommand and submit_mcq_activity orchestration before Academy MCQ adoption: canonical learner admission precedes question reads, Submission/event precedes grading, and required result/completion/certificate effects retain the caller transaction. Preserve the existing pregraded and lab APIs through shared result writing; prove missing/exhausted learner versus question/grading failures, manual/subset behavior and real last-attempt concurrency in hosted CI. Qualify the exact result/curriculum/participation source-PR heads and Kernel audit prerequisite in hosted CI, with every required actual head/base context green and resulting main verified. Independently review and publish the prepared assessment/delivery/support continuation and remaining writer intents without overwriting reviewed upstream repairs. The complete accepted Academy source is 0968881fc40ad86b3abfea2fc40044dd2dbf47c9; original source_revisions remain historical. Complete actual installed recipient composition and caller-by-caller retirement, preserving source one-statement account/enrollment snapshots, intentionally separate HR queries and product boundaries. Kernel release precedes proven floor conversion and new DDL-free audit verification for Learning, Fulfillment and Template Studio; no release identity/floor is guessed. Source 0.1.0a1 remains unpublished/unadopted, using strict in-tree Kernel dependency and hosted-produced matching lock for source qualification only. Build/release/install-back/verify/tag/record each authorized coherent release, verify truthful resulting main, then qualify Academy installed packages outside checkouts, genuine stable identity, incoming references and worker ACL/RLS, final-lab consequences, historical ACK provenance and writer fences. Academy PR178 sync_checkpoint standards failure and accepted Integrator transport ownership remain separate unresolved adoption gates. Prove populated compatible reversal preserving accepted new facts/events/deletes before reactivating old writers. Retire all displaced local domain implementations only after qualified single-writer cutover. No deployment claim."
+
+[[product_writers]]
+product = "dotmac_academy_app"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0968881fc40ad86b3abfea2fc40044dd2dbf47c9"
+evidence_paths = ["app/models/assessment.py", "app/services/assessment.py", "app/services/lab_lifecycle.py", "app/services/completion.py", "app/services/certificates.py", "app/services/entitlements.py"]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "537f0ccba846c1ea3304805ed17a4d3b9711596b"
+evidence_paths = ["app/models/people/training/learning_assessment.py", "app/services/people/training/learning_assessment.py", "app/services/dotmac_academy/training_sync.py"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "no_writer"
+retirement_required = false
+revision = "13afd67e43ec946e5e25564628806ce4ddd7441c"
+evidence_paths = ["app/models", "app/services", "tests"]

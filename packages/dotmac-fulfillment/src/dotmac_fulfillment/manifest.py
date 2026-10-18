@@ -4,6 +4,7 @@ from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
+    TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
 
@@ -11,7 +12,7 @@ from dotmac_fulfillment.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="fulfillment",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     dependencies=("durable_timers",),
     short_code="fulfillment",
@@ -22,6 +23,7 @@ module = ModuleManifest(
         TENANT_SCOPE_CATALOG_V1.name,
         MODULE_DATABASE_ROLES_V1.name,
         IDEMPOTENCY_LEDGER_V1.name,
+        TENANT_AUDIT_LOG_V1.name,
     ),
     outbox_event_types=("fulfillment.reobserve_due.v1",),
     audit_actions=(
