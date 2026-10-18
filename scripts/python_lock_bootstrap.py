@@ -816,10 +816,49 @@ def _review_learning_record(proposal: Proposal) -> bytes:
     ).encode("ascii")
 
 
+# Exact public pypdf 6.19.0 metadata refresh; generated artifact text is never
+# used as a replacement. The removed core marker is inactive for root Python.
+_REVIEW_PYPDF_PREIMAGE_SHA256 = (
+    "d5d75a6c1d26e6e61265b9224c8f9020028fc827056041a3c406e6101d82a74a"
+)
+_REVIEW_PYPDF_INACTIVE_CORE = (
+    "[package.dependencies]\n"
+    'typing-extensions = {version = ">=4.0", '
+    'markers = "python_version < \\"3.11\\""}\n'
+    "\n"
+)
+_REVIEW_PYPDF_EXTRAS = (
+    "[package.extras]\n"
+    'crypto = ["cryptography (>3.0)"]\n'
+    'cryptodome = ["pycryptodome"]\n'
+    'dev = ["flit", "pip-tools", "pre-commit", "pytest-cov", '
+    '"pytest-socket", "pytest-timeout", "pytest-xdist", "wheel"]\n'
+    'docs = ["myst-parser", "sphinx", "sphinx-rtd-theme"]\n'
+    'fonts = ["fonttools"]\n'
+    'full = ["arabic-reshaper", "cryptography (>3.0)", "fonttools", '
+    '"pillow (>=8.0.0)", "python-bidi"]\n'
+    'image = ["pillow (>=8.0.0)"]\n'
+    'rtl-text = ["arabic-reshaper", "python-bidi"]\n'
+    "\n"
+)
+
+
+def _review_pypdf_record(old: bytes) -> bytes:
+    """Refresh only one pinned public record; preserve its artifact identity."""
+    core = _REVIEW_PYPDF_INACTIVE_CORE.encode("ascii")
+    if (
+        len(old) != 579
+        or _digest(old) != _REVIEW_PYPDF_PREIMAGE_SHA256
+        or old.count(core) != 1
+    ):
+        raise BootstrapError("lock review module preimage refused")
+    return old.replace(core, _REVIEW_PYPDF_EXTRAS.encode("ascii"), 1)
+
+
 def _review_operations(
     base: bytes, generated: bytes, proposal: Proposal
 ) -> list[dict[str, object]]:
-    """Reconstruct the entire generated lock from exactly four bounded edits."""
+    """Reconstruct the entire generated lock from exactly five bounded edits."""
     if _digest(base) != _REVIEW_BASE_SHA256 or proposal.schema_version != 2:
         raise BootstrapError("lock review pinned inputs refused")
     records, metadata_start = _review_partition(base)
@@ -865,6 +904,17 @@ def _review_operations(
                 "replacement": replacement.decode("utf-8"),
             }
         )
+    _, start, stop = next(record for record in records if record[0] == "pypdf")
+    old_pypdf = base[start:stop]
+    operations.append(
+        {
+            "kind": "refresh-pypdf-metadata",
+            "offset": start,
+            "old_length": stop - start,
+            "old_sha256": _digest(old_pypdf),
+            "replacement": _review_pypdf_record(old_pypdf).decode("ascii"),
+        }
+    )
     insertion = next(start for name, start, _ in records if name > "dotmac-learning")
     operations.append(
         {

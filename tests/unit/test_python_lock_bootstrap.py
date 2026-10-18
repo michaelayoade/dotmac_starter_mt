@@ -683,6 +683,51 @@ _REVIEW_TS = (
     '[package.dependencies]\ndotmac-kernel = ">=0.1.0a97"\n\n'
 )
 _REVIEW_OMEGA = '[[package]]\nname = "omega"\nversion = "1.0.0"\n\n'
+_REVIEW_PYPDF = (
+    "[[package]]\n"
+    'name = "pypdf"\n'
+    'version = "6.19.0"\n'
+    'description = "A pure-python PDF library capable of splittin'
+    'g, merging, cropping, and transforming PDF files"\n'
+    "optional = false\n"
+    'python-versions = ">=3.9"\n'
+    'groups = ["main"]\n'
+    "files = [\n"
+    '    {file = "pypdf-6.19.0-py3-none-any.whl", hash = "sha256:'
+    "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e4"
+    '8d14"},\n'
+    '    {file = "pypdf-6.19.0.tar.gz", hash = "sha256:bbc43aca29'
+    '2369ccc6cbc8a921991ecf2538a3587ab5a116eff06c321d647155"},\n'
+    "]\n"
+    "\n"
+    "[package.dependencies]\n"
+    'typing-extensions = {version = ">=4.0", markers = "python_ve'
+    'rsion < \\"3.11\\""}\n'
+    "\n"
+)
+_REVIEW_PYPDF_CORE = (
+    "[package.dependencies]\n"
+    'typing-extensions = {version = ">=4.0", '
+    'markers = "python_version < \\"3.11\\""}\n'
+    "\n"
+)
+_REVIEW_PYPDF_EXTRAS = (
+    "[package.extras]\n"
+    'crypto = ["cryptography (>3.0)"]\n'
+    'cryptodome = ["pycryptodome"]\n'
+    'dev = ["flit", "pip-tools", "pre-commit", "pytest-cov", '
+    '"pytest-socket", "pytest-timeout", "pytest-xdist", "wheel"]\n'
+    'docs = ["myst-parser", "sphinx", "sphinx-rtd-theme"]\n'
+    'fonts = ["fonttools"]\n'
+    'full = ["arabic-reshaper", "cryptography (>3.0)", "fonttools", '
+    '"pillow (>=8.0.0)", "python-bidi"]\n'
+    'image = ["pillow (>=8.0.0)"]\n'
+    'rtl-text = ["arabic-reshaper", "python-bidi"]\n'
+    "\n"
+)
+_REVIEW_PYPDF_REFRESHED = _REVIEW_PYPDF.replace(
+    _REVIEW_PYPDF_CORE, _REVIEW_PYPDF_EXTRAS
+)
 _REVIEW_METADATA = (
     '[metadata]\nlock-version = "2.1"\npython-versions = ">=3.12,<3.14"\n'
     'content-hash = "' + "a" * 64 + '"\n'
@@ -735,6 +780,7 @@ def _review_locks():
         + _REVIEW_FU
         + _REVIEW_TS
         + _REVIEW_OMEGA
+        + _REVIEW_PYPDF
         + _REVIEW_METADATA
     )
     generated = (
@@ -748,12 +794,13 @@ def _review_locks():
             "0.1.0a97", "0.1.0a106"
         )
         + _REVIEW_OMEGA
+        + _REVIEW_PYPDF_REFRESHED
         + _REVIEW_METADATA.replace("a" * 64, "b" * 64)
     )
     return base.encode(), generated.encode()
 
 
-def test_review_four_operations_independently_reconstruct_every_generated_byte(
+def test_review_five_operations_independently_reconstruct_every_generated_byte(
     monkeypatch,
 ):
     base, generated = _review_locks()
@@ -768,8 +815,22 @@ def test_review_four_operations_independently_reconstruct_every_generated_byte(
         "dotmac-template-studio",
         "insert-dotmac-learning",
         "metadata-content-hash",
+        "refresh-pypdf-metadata",
     }
-    assert len(operations) == 4
+    assert len(operations) == 5
+    refresh = next(
+        item for item in operations if item["kind"] == "refresh-pypdf-metadata"
+    )
+    assert (
+        base[refresh["offset"] : refresh["offset"] + refresh["old_length"]]
+        == _REVIEW_PYPDF.encode()
+    )
+    assert refresh["old_length"] == 579
+    assert (
+        refresh["old_sha256"]
+        == "d5d75a6c1d26e6e61265b9224c8f9020028fc827056041a3c406e6101d82a74a"
+    )
+    assert refresh["replacement"] == _REVIEW_PYPDF_REFRESHED
     rebuilt = base
     for item in reversed(operations):
         offset, length = item["offset"], item["old_length"]
@@ -787,7 +848,7 @@ def test_review_four_operations_independently_reconstruct_every_generated_byte(
 @pytest.fixture
 def review_case(checkout_v2, monkeypatch):
     repo, context = checkout_v2
-    monkeypatch.setattr(producer, "_REVIEW_BASE_RECORD_COUNT", 4)
+    monkeypatch.setattr(producer, "_REVIEW_BASE_RECORD_COUNT", 5)
     base, generated = _review_locks()
     document = _review_document()
     raw = json.dumps(document).encode()
@@ -869,7 +930,7 @@ def test_review_emits_one_bounded_packet_without_generation_or_writes(
     assert lines[0] == producer._REVIEW_BEGIN and lines[2] == producer._REVIEW_END
     assert len(lines) == 3 and captured.err == ""
     packet = json.loads(lines[1])
-    assert packet["purpose"] == "UNQUALIFIED" and len(packet["operations"]) == 4
+    assert packet["purpose"] == "UNQUALIFIED" and len(packet["operations"]) == 5
     assert len(lines[1]) <= producer._REVIEW_PACKET_LIMIT and lines[1].isascii()
     assert packet["receipt"]["checkout_sha"] == HEAD
     assert (
@@ -1311,12 +1372,12 @@ def test_review_masks_isolate_record_and_public_fields(
     with pytest.raises(producer._ReviewDiagnosticReady) as caught:
         producer._review_artifact(repo)
     masks = caught.value.masks
-    assert masks.raw == (True, False, False, False)
+    assert masks.raw == (True, False, False, False, False)
     assert (
         tuple(index for index, bit in enumerate(masks.semantic[0]) if bit)
         == field_indexes
     )
-    assert masks.semantic[1:] == ((False,) * 13,) * 3
+    assert masks.semantic[1:] == ((False,) * 13,) * 4
     encoded = producer._review_diagnostic_json(masks)
     assert _REVIEW_SENTINEL not in encoded
     assert capsys.readouterr() == ("", "")
@@ -1337,7 +1398,7 @@ def test_review_masks_multiple_records_and_expected_module_replacements(
     receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
     with pytest.raises(producer._ReviewDiagnosticReady) as caught:
         producer._review_artifact(repo)
-    assert caught.value.masks.raw == (True, True, False, False)
+    assert caught.value.masks.raw == (True, True, False, False, False)
     assert caught.value.masks.semantic[0] == (False,) * 13
     assert caught.value.masks.semantic[1] == (False,) * 12 + (True,)
     assert capsys.readouterr() == ("", "")
@@ -1354,19 +1415,19 @@ def test_review_semantic_comparison_distinguishes_json_types(before, after):
 def test_review_mask_validation_rejects_malformed_dimensions_and_values(
     monkeypatch, invalid, capsys
 ):
-    monkeypatch.setattr(producer, "_REVIEW_BASE_RECORD_COUNT", 4)
-    good = producer._ReviewMasks((False,) * 7, (False,) * 4, ((False,) * 13,) * 4)
+    monkeypatch.setattr(producer, "_REVIEW_BASE_RECORD_COUNT", 5)
+    good = producer._ReviewMasks((False,) * 7, (False,) * 5, ((False,) * 13,) * 5)
     cases = [
         ((False,) * 8, good.raw, good.semantic),
-        (good.categories, (False,) * 5, good.semantic),
-        (good.categories, good.raw, ((False,) * 13,) * 3),
-        (good.categories, good.raw, ((False,) * 14,) * 4),
-        (good.categories, good.raw, ([False] * 13,) * 4),
+        (good.categories, (False,) * 6, good.semantic),
+        (good.categories, good.raw, ((False,) * 13,) * 4),
+        (good.categories, good.raw, ((False,) * 14,) * 5),
+        (good.categories, good.raw, ([False] * 13,) * 5),
         (invalid, good.raw, good.semantic),
         (good.categories, invalid, good.semantic),
         (good.categories, good.raw, invalid),
-        (good.categories, good.raw, ((False,) * 12 + (invalid,),) * 4),
-        (good.categories, (False,) * 3 + (invalid,), good.semantic),
+        (good.categories, good.raw, ((False,) * 12 + (invalid,),) * 5),
+        (good.categories, (False,) * 4 + (invalid,), good.semantic),
         ((False,) * 6 + (invalid,), good.raw, good.semantic),
     ]
     for arguments in cases:
@@ -1430,8 +1491,8 @@ def test_review_cli_emits_only_bounded_negative_masks_and_fixed_refusal(
     assert captured.err.isascii()
     assert len(lines[1]) <= 8192
     packet = json.loads(lines[1])
-    assert packet["raw"] == [1, 0, 0, 0]
-    assert packet["semantic"] == [[0] * 13] * 4
+    assert packet["raw"] == [1, 0, 0, 0, 0]
+    assert packet["semantic"] == [[0] * 13] * 5
     assert packet["categories"] == [0, 0, 0, 0, 1, 0, 0]
     assert set(packet) == {"base_sha256", "categories", "raw", "semantic"}
 
@@ -1440,7 +1501,7 @@ def test_review_diagnostic_serialization_revalidates_before_any_cli_print(
     review_case, monkeypatch, capsys
 ):
     repo, _, _, _ = review_case
-    masks = producer._ReviewMasks((False,) * 7, (False,) * 4, ((False,) * 13,) * 4)
+    masks = producer._ReviewMasks((False,) * 7, (False,) * 5, ((False,) * 13,) * 5)
     ready = producer._ReviewDiagnosticReady(masks)
     ready.masks = _REVIEW_SENTINEL
 
@@ -1466,7 +1527,7 @@ def test_review_operation_mismatch_is_typed_and_silent_before_receipt_checks(
     with pytest.raises(producer._ReviewMismatch) as caught:
         producer._review_operations(base, generated, _proposal(_review_document()))
     assert type(caught.value) is producer._ReviewMismatch
-    assert caught.value.masks.raw == (True, False, False, False)
+    assert caught.value.masks.raw == (True, False, False, False, False)
     assert capsys.readouterr() == ("", "")
 
 
@@ -1504,7 +1565,7 @@ def test_review_revalidates_mutated_mismatch_before_pending_assignment(
     review_case, monkeypatch, invalid, capsys
 ):
     repo, _, _, _ = review_case
-    masks = producer._ReviewMasks((False,) * 7, (False,) * 4, ((False,) * 13,) * 4)
+    masks = producer._ReviewMasks((False,) * 7, (False,) * 5, ((False,) * 13,) * 5)
     mismatch = producer._ReviewMismatch(masks)
     mismatch.masks = invalid
 
@@ -1520,3 +1581,141 @@ def test_review_revalidates_mutated_mismatch_before_pending_assignment(
     captured = capsys.readouterr()
     assert captured.out == captured.err == ""
     assert producer._REVIEW_BEGIN not in captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "version",
+        "hash",
+        "core_retained",
+        "core_widened",
+        "unknown_extra",
+        "missing_extra",
+        "member_constraint",
+        "comment",
+        "url",
+    ],
+)
+def test_review_pypdf_nonwhitelisted_changes_refuse_with_self_consistent_receipt(
+    review_case, mutation, capsys
+):
+    repo, output, _, _ = review_case
+    replacement = _REVIEW_PYPDF_REFRESHED
+    if mutation == "version":
+        replacement = replacement.replace('version = "6.19.0"', 'version = "6.19.1"')
+    elif mutation == "hash":
+        replacement = replacement.replace(
+            "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14", "0" * 64
+        )
+    elif mutation == "core_retained":
+        replacement += _REVIEW_PYPDF_CORE
+    elif mutation == "core_widened":
+        replacement += _REVIEW_PYPDF_CORE.replace(">=4.0", ">=3.0")
+    elif mutation == "unknown_extra":
+        replacement += 'unknown = ["' + _REVIEW_SENTINEL + '"]\n'
+    elif mutation == "missing_extra":
+        replacement = replacement.replace('fonts = ["fonttools"]\n', "")
+    elif mutation == "member_constraint":
+        replacement = replacement.replace(
+            "cryptography (>3.0)", "cryptography (>4.0)", 1
+        )
+    elif mutation == "comment":
+        replacement += "# " + _REVIEW_SENTINEL + "\n"
+    else:
+        replacement += '[package.source]\nurl = "https://' + _REVIEW_SENTINEL + '"\n'
+    path = output / "poetry.lock"
+    generated = path.read_text()
+    assert generated.count(_REVIEW_PYPDF_REFRESHED) == 1
+    path.write_text(generated.replace(_REVIEW_PYPDF_REFRESHED, replacement))
+    receipt_path = output / "manifest.json"
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt["lock_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+    with pytest.raises(producer._ReviewDiagnosticReady) as caught:
+        producer._review_artifact(repo)
+    masks = caught.value.masks
+    assert masks.raw == (False, False, False, False, True)
+    assert masks.semantic[:4] == ((False,) * 13,) * 4
+    assert masks.categories == (False, False, False, False, True, False, False)
+    encoded = producer._review_diagnostic_json(masks)
+    assert _REVIEW_SENTINEL not in encoded
+    assert producer._REVIEW_BEGIN not in encoded
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("mutation", ["version", "hash", "core", "comment"])
+def test_review_pypdf_refresh_requires_exact_public_preimage(mutation, capsys):
+    raw = _REVIEW_PYPDF.encode()
+    if mutation == "version":
+        raw = raw.replace(b"6.19.0", b"6.19.1")
+    elif mutation == "hash":
+        raw = raw.replace(b"7e5d6e", b"0e5d6e")
+    elif mutation == "core":
+        raw = raw.replace(b">=4.0", b">=3.0")
+    else:
+        raw += b"# private\n"
+    with pytest.raises(producer.BootstrapError) as caught:
+        producer._review_pypdf_record(raw)
+    assert str(caught.value) == "lock review module preimage refused"
+    assert capsys.readouterr() == ("", "")
+
+
+def test_review_pypdf_refresh_preserves_public_artifact_identity_and_closed_extra_set():
+    import tomllib
+
+    before = tomllib.loads(_REVIEW_PYPDF)["package"][0]
+    refreshed = producer._review_pypdf_record(_REVIEW_PYPDF.encode())
+    assert refreshed == _REVIEW_PYPDF_REFRESHED.encode()
+    after = tomllib.loads(refreshed.decode())["package"][0]
+    assert {key: value for key, value in before.items() if key != "dependencies"} == {
+        key: value for key, value in after.items() if key != "extras"
+    }
+    assert "dependencies" not in after
+    assert set(after["extras"]) == {
+        "crypto",
+        "cryptodome",
+        "dev",
+        "docs",
+        "fonts",
+        "full",
+        "image",
+        "rtl-text",
+    }
+
+
+def test_review_pypdf_churn_cli_withholds_positive_packet_and_emits_only_masks(
+    review_case, monkeypatch, capsys
+):
+    repo, output, _, _ = review_case
+    path = output / "poetry.lock"
+    path.write_text(
+        path.read_text().replace(
+            _REVIEW_PYPDF_REFRESHED,
+            _REVIEW_PYPDF_REFRESHED + "# " + _REVIEW_SENTINEL + "\n",
+        )
+    )
+    receipt_path = output / "manifest.json"
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt["lock_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(producer.sys, "argv", ["python_lock_bootstrap", "--review"])
+    assert producer.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    lines = captured.err.splitlines()
+    assert lines[0] == producer._REVIEW_DIAGNOSTIC_BEGIN
+    assert lines[2:] == [
+        producer._REVIEW_DIAGNOSTIC_END,
+        "error: lock review non-whitelisted churn refused",
+    ]
+    assert (
+        _REVIEW_SENTINEL not in captured.err
+        and producer._REVIEW_BEGIN not in captured.err
+    )
+    packet = json.loads(lines[1])
+    assert packet["raw"] == [0, 0, 0, 0, 1]
+    assert packet["semantic"] == [[0] * 13] * 5
+    assert packet["categories"] == [0, 0, 0, 0, 1, 0, 0]
+    assert captured.err.isascii() and len(lines[1]) <= 8192
