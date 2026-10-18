@@ -1094,22 +1094,41 @@ specifics) points here and must never fork these rules.
     `docs/inventories/deployment-foundation-sources.md` for the eighteen defects
     deliberately NOT extracted)
 
-42. **A human credential lifecycle has ONE owner, and provisioning cannot be
+42. **A human credential lifecycle has ONE owner, and recovery provisioning cannot be
     handed material.** `dotmac_kernel.credential_lifecycle` owns provisioning,
     verification, individually authorized reset completion and approved cohort
-    force reset for HUMAN password credentials. It is stateless: five typed
-    product ports, every database effect in the CALLER's transaction, no
+    force reset for HUMAN password credentials. It is stateless: the existing
+    recovery API has five typed product ports, with three optional assignment
+    ports appended after `clock`; every database effect is in the CALLER's transaction, no
     session, no ORM, no HTTP status, no provider client and no network import.
     Machine credentials (`machine_auth`), federated identity (`external_identity`)
     and DEVICE/SERVICE credentials (`AccessCredential`, `SnmpCredential`) are out
     of scope — a sweep keyed on `*Credential` hands the owner responsibilities it
     must not have.
 
-    Four properties, each structural rather than procedural. **Verification
+    **Scope amendment — 2026-10-18 (source prepared; qualification pending).**
+    The SAME owner supports both secret-free unknown-material recovery
+    provisioning through `provision` AND product-authorized supplied-password
+    assignment for the inventoried Academy web creation, CLI tenant bootstrap
+    and seed creation/selected replacement paths. Renaming a material-bearing
+    operation "assignment" alone is insufficient: `assign_authorized_password`
+    requires installed authority, assignment-store and assignment-audit ports,
+    closed create-absent/CAS-replace commands, actual current actor evidence,
+    installed settings-backed policy, one hash and explicit persisted
+    `reset_required=False`. `provision` retains NO secret argument or
+    secret-bearing field. This is an explicit owner-contract extension, not a
+    waiver, arbitrary product hasher, generic permission or recovery-proof
+    substitution. New ports append after existing `clock`; old APIs and
+    positional construction remain compatible. The 2026-08-30 Sub incident
+    rationale, unknown-material containment and hash-call ratchet remain binding.
+    See ADR-0006's dated 2026-10-18 amendment and the credential source inventory
+    for authority/audit binding, policy settings and qualification gates.
+
+    Four properties of the existing recovery API, each structural rather than procedural. **Verification
     returns a typed verdict** (`accepted`, `reset_required`, `invalid`, `locked`,
     `disabled`), never a boolean and never a session: a boolean forces every
     caller to re-derive what it cannot carry, which is why `dotmac_sub` has FOUR
-    verification owners. **Provisioning has no parameter a secret can arrive
+    verification owners. **Recovery `provision` has no parameter a secret can arrive
     through and no field one can leave through** — Sub's
     `reseller_onboarding._create_credential` took a caller-supplied `password` no
     supported caller passed, and that unused parameter is how one value reached
@@ -1123,6 +1142,22 @@ specifics) points here and must never fork these rules.
     duplicate, malformed, stale and changed cohorts, applies all targets or none,
     and its separate authorization carries `approval_decision_ref` and no
     `approved_by`.
+
+    **Historical identity transfer is bounded maintenance, not provisioning.**
+    `dotmac_kernel.migrations.identity_history.import_identity_history` may copy
+    existing credential and session rows unchanged through a trusted, reviewed
+    product decoder into the canonical Kernel schema. It accepts no new password,
+    generates no material, and performs no hash, verification, reset or rehash.
+    The caller owns an app_admin transaction, source authority, explicit target
+    activation cohort and writer cutover. The importer verifies the installed
+    migration/catalog/privilege boundary, refuses occupied targets and undeclared
+    audit ownership, and records the current operation separately from copied
+    historical audit evidence. Safe parameter/result logging is required before
+    decoding. Locks protect the copy transaction; they are not a lasting writer
+    fence. Product policy extensions remain product-owned. This maintenance path
+    grants no runtime CRUD or password-provisioning exception. Hosted synthetic
+    setup may mint fixtures using the existing approved owner before copying;
+    continuity checks use that same authentication owner without replacing hashes.
 
     Direct calls to `hash_password`/`verify_password`/`password_needs_rehash`
     outside the two owner files are FROZEN DEBT, measured by call graph across

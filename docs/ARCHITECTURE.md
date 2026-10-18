@@ -4253,3 +4253,91 @@ uses from new payment, invoice and revenue events; V1–V3 remain separate contr
 This is a source candidate, not data admission or activation. Open receivables and
 other unsupported opening lanes, real Sub cash qualification, released artifact
 adoption, ERP mapping and the coupled production switch remain separate work.
+
+## Historical identity transfer boundary (unpublished source)
+
+`dotmac_kernel.migrations.identity_history.import_identity_history` is a bounded
+maintenance entry point for transferring existing tenancy, human identity,
+credentials, sessions, roles, grants and historical audit rows to Kernel ownership.
+A trusted product decoder supplies the reviewed source schema and field decoding.
+The importer requires eight fixed relocated relation names, their declared OIDs
+and primary-key identity; it does not own product account-policy extensions.
+Historical IDs, timestamps,
+credential material, session state and nullable audit provenance are copied exactly.
+Explicit current activation and operation audit evidence are separate decisions.
+
+The caller supplies an app_admin Connection and owns its root transaction. The
+importer creates no engine, session or transaction and grants no online writer new
+privileges. It checks the installed migration head, canonical catalog and grants,
+locks the bounded source/target relations, refuses occupied targets, and requires
+safe parameter/result logging before decoding. A decoder is trusted code, not a
+sandbox. Transaction locks do not replace the assembly's lasting writer fence.
+
+The Kernel audit-action registry owns `identity.history_imported`; registry
+composition includes this reserved action without a product redeclaration. Copied historical audit
+rows retain unknown provenance as null and do not become current actor evidence.
+The ordinary credential lifecycle remains the sole provisioning, verification and
+reset owner. The transfer never generates, verifies, resets or rehashes passwords.
+Synthetic hosted setup may use the existing approved owner before transfer;
+authentication continuity must be tested through the real owner afterwards.
+
+This source declaration is not qualification or product adoption evidence. Coupled
+hosted tests must prove genuine installed migration replay, catalog/privilege
+refusal, all eight copied families, authentication continuity and rollback. Academy
+must separately supply its reviewed decoder and product extensions, rebind retained
+foreign keys, fence displaced writers, preserve Integration delivery ACK state,
+and recover new accepted activity when reversing a populated cutover. Package
+publication alone does not establish those live migration properties.
+
+## Supplied-password assignment owner extension (unpublished source, 2026-10-18)
+
+This is source prepared against the inventoried owner contract; hosted runtime
+qualification and installed product adoption remain pending.
+The SAME `dotmac_kernel.credential_lifecycle.CredentialLifecycle` is the declared
+owner of unknown-material recovery provisioning AND product-authorized
+supplied-password creation/selected replacement. Existing `provision` remains
+secret-free. Historical identity transfer remains material-preserving maintenance
+and grants no runtime assignment authority. The preceding unpublished
+identity-history/account-reset documentation remains applicable.
+
+| Decision/effect | Named owner / installed product responsibility |
+| --- | --- |
+| Assignment sequencing, closed commands, one policy/one hash, persisted False, receipt | Kernel CredentialLifecycle `assign_authorized_password` |
+| Exact command authority, actual current actor, real session/grants or Connection privileges under lock | Product-installed CredentialAssignmentAuthorityPort |
+| Locked absence or old Party/tenant/credential/version CAS; no unrelated side effects | Product-installed CredentialAssignmentStorePort |
+| Current append-only audit derived from private actual actor/root context; persisted audit ID | Product-installed CredentialAssignmentAuditPort, same bound adapter as authority |
+| Strength, role matrix, runtime-authority policy | Product effective settings-backed ports; Kernel has no policy default |
+| Whole Person/role/credential rollback and session/grant/Party lock participation | Product caller boundary using public conflict_savepoint; existing transaction authority |
+
+Closed `CredentialCreateAbsentV1` and `CredentialReplaceSelectedV1` bind target
+CredentialSubjectRef, explicit opaque tenant, purpose, exact sorted role tuple,
+reason and correlation; replace binds previous subject and version. Previous and
+target Party may differ only within the same application/principal-kind/
+credential/tenant envelope. No tenant parsing from opaque text. Assignment ports
+append after `clock`, preserving existing constructor arguments; old audit/store
+ports and APIs are unchanged. A separate material-free
+`CredentialAssignmentAuditEntryV1` carries command, exact issued evidence,
+`previous_credential_version` (None for creation), `credential_version` and
+`occurred_at`; its action is fixed as `credential.password.assigned`. It carries
+no credential snapshot or hash. `record_assignment` returns a real current audit ID. The bound adapter
+rejects copied/stale/cross-transaction evidence and derives actor from private
+actual context using existing user/service/api_key/system kinds.
+
+The Academy inventory proves the web create, platform-session bootstrap and
+independent seed credential-selection/reassignment paths. Web/bootstrap currently
+have no strength restriction, seed has stronger minimum/sentinel rules, and reset
+has a separate configurable default 8. These remain distinct documented settings
+defaults. Preserve actual role matrix and `platform_api` bootstrap privileges;
+no app_admin-only requirement, fake actor or external approval ceremony. Assignment
+has no generated intermediate material, recovery intent, counter clear, unlock,
+session revoke or alias fanout. Seed selected credential ID and unrelated state
+remain intact. Full contract, lock/authority/audit binding and acceptance obligations
+are ADR-0006's 2026-10-18 amendment and
+`docs/inventories/credential-lifecycle-sources.md`.
+
+Owner implementation and typed declarations are source-prepared. Composed
+source/catalogue review, product wiring, hosted real-role/Postgres/concurrency
+qualification, future release and installed adoption remain pending. No version is allocated and published 106
+must not be republished. No production identity, runtime privileges or credential
+material was inspected. Populated recovery must retain new assignment state and
+current audits, not restore an old binary/database snapshot alone.

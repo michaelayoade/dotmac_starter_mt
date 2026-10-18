@@ -365,7 +365,7 @@ from dotmac_kernel.web_surfaces import (
     surface_path,
 )
 
-__version__ = "0.1.0a106"
+__version__ = "0.1.0a106+dev"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -429,6 +429,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.migrations.catalog",
         "dotmac_kernel.migrations.configuration",
         "dotmac_kernel.migrations.gate",
+        "dotmac_kernel.migrations.identity_history",
         # Public because an ASSEMBLY must declare its prerequisite bindings and
         # a MODULE migration must verify them — both are consumer-facing halves
         # of the composition contract, not kernel internals (ADR-0006 D1

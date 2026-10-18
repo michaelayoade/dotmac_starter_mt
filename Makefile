@@ -11,6 +11,9 @@ TEST_DB_PLATFORM_USER ?= platform_api
 TEST_DB_PLATFORM_PASSWORD ?= platform_api
 TEST_DB_HOST ?= localhost
 TEST_DB_NAME ?= starter_test
+# Separate hosted-only whole-graph replay; canonical roles come from test-db-up.
+IDENTITY_GRAPH_DB_NAME ?= starter_identity_graph_test
+IDENTITY_GRAPH_DATABASE_URL ?= postgresql+psycopg://app_admin@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(IDENTITY_GRAPH_DB_NAME)
 
 DEPLOY_DESCRIPTOR ?= deploy/product.toml
 DEPLOY_RENDERED ?= deploy/rendered
@@ -145,6 +148,7 @@ test-integration: ## Postgres RLS tests (needs test-db-up)
 	TEST_DATABASE_URL=postgresql+psycopg://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	TEST_PLATFORM_DATABASE_URL=postgresql+psycopg://$(TEST_DB_PLATFORM_USER):$(TEST_DB_PLATFORM_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	TEST_MIGRATION_DATABASE_URL=postgresql+psycopg://$(TEST_DB_ADMIN_USER):$(TEST_DB_ADMIN_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
+	IDENTITY_GRAPH_DATABASE_URL=$(IDENTITY_GRAPH_DATABASE_URL) \
 	poetry run pytest tests -q --ignore=tests/unit --ignore=tests/architecture
 test: test-unit ## Default test suite
 test-cov: ## Unit tests with coverage
@@ -157,6 +161,13 @@ test-db-up: ## Start disposable test Postgres (TEST_DB_PORT, default 5433) and m
 	MIGRATION_DATABASE_URL=postgresql+psycopg://$(TEST_DB_ADMIN_USER):$(TEST_DB_ADMIN_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	DATABASE_URL=postgresql+psycopg://$(TEST_DB_ADMIN_USER):$(TEST_DB_ADMIN_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	poetry run alembic upgrade heads
+# Create once, without migrations or stamping. Existing databases fail closed.
+# template0 has no application relations; app_admin owns the fresh database.
+test-identity-graph-db-create: ## Hosted CI: create EMPTY composed-graph database after test-db-up
+	@test "$(CI)" = true || { echo "Identity graph database setup requires hosted CI" >&2; exit 1; }
+	@test "$(IDENTITY_GRAPH_DB_NAME)" != "$(TEST_DB_NAME)" || { echo "Identity graph database must be distinct" >&2; exit 1; }
+	TEST_DB_PORT=$(TEST_DB_PORT) TEST_DB_ADMIN_USER=$(TEST_DB_ADMIN_USER) TEST_DB_ADMIN_PASSWORD=$(TEST_DB_ADMIN_PASSWORD) TEST_DB_NAME=$(TEST_DB_NAME) \
+	docker compose -f docker-compose.test.yml exec -T postgres createdb --username "$(TEST_DB_ADMIN_USER)" --maintenance-db "$(TEST_DB_NAME)" --owner app_admin --template template0 -- "$(IDENTITY_GRAPH_DB_NAME)"
 test-db-down: ## Stop test Postgres
 	TEST_DB_PORT=$(TEST_DB_PORT) TEST_DB_ADMIN_USER=$(TEST_DB_ADMIN_USER) TEST_DB_ADMIN_PASSWORD=$(TEST_DB_ADMIN_PASSWORD) TEST_DB_NAME=$(TEST_DB_NAME) \
 	docker compose -f docker-compose.test.yml down -v
@@ -209,7 +220,7 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 	IMAGE_NAME=$(IMAGE_NAME) APP_PORT=$(APP_PORT) ./scripts/deploy.sh $(TAG)
 
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts poetry-lock-check check test test-unit \
-	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
+	test-integration test-cov test-db-up test-identity-graph-db-create test-db-down migrate migrate-new dev \
 	css-build css-watch ui-build ui-check palette-baseline published-source-drift-baseline released-lineage-coverage-baseline facet-nav-baseline connector-baseline connector-ratchet \
 	credential-baseline credential-ratchet \
 	executor-retirement-check executor-retirement-baseline executor-retirement-receipt \

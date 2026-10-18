@@ -308,9 +308,11 @@ def test_no_orphan_permission_declarations() -> None:
 
 
 def test_no_orphan_audit_action_declarations() -> None:
-    actions = {
-        a for m in _assembly_manifests() for a in m.audit_actions
-    } - _ALLOWED_ORPHAN_AUDIT_ACTIONS
+    # Include the Kernel-owned manifest composed by the installed registry.
+    actions = (
+        set(AuditActionRegistry.from_manifests(_assembly_manifests()).actions())
+        - _ALLOWED_ORPHAN_AUDIT_ACTIONS
+    )
     orphans = _orphans(actions)
     assert not orphans, (
         "Declared audit action(s) with no consumer (dead declaration): "
@@ -364,8 +366,20 @@ def test_orphan_allowlists_are_accurate() -> None:
     # toward empty instead of accumulating stale exceptions.
     manifests = _assembly_manifests()
     permission_codes = {spec.code for m in manifests for spec in m.permissions}
-    action_codes = {a for m in manifests for a in m.audit_actions}
+    action_codes = set(AuditActionRegistry.from_manifests(manifests).actions())
     stale_permissions = _ALLOWED_ORPHAN_PERMISSIONS - _orphans(permission_codes)
     stale_actions = _ALLOWED_ORPHAN_AUDIT_ACTIONS - _orphans(action_codes)
     assert not stale_permissions, sorted(stale_permissions)
     assert not stale_actions, sorted(stale_actions)
+
+
+def test_kernel_audit_declaration_requires_a_real_consumer(monkeypatch) -> None:
+    registry = AuditActionRegistry.from_manifests(_assembly_manifests())
+    assert registry.owner("identity.history_imported") == "kernel"
+    corpus = _consumer_corpus()
+    monkeypatch.setattr(
+        f"{__name__}._consumer_corpus",
+        lambda: corpus.replace("identity.history_imported", "missing_kernel_consumer"),
+    )
+    with pytest.raises(AssertionError, match=r"identity\.history_imported"):
+        test_no_orphan_audit_action_declarations()

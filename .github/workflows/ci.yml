@@ -299,6 +299,7 @@ jobs:
       TEST_DB_PORT: "5433"
       TEST_DB_HOST: localhost
       TEST_DB_NAME: starter_test
+      IDENTITY_GRAPH_DB_NAME: starter_identity_graph_test
       TEST_DB_ADMIN_USER: postgres
       TEST_DB_ADMIN_PASSWORD: postgres
       TEST_DB_USER: app_user
@@ -333,6 +334,8 @@ jobs:
       - run: '[ -d .venv ] || python -m venv .venv'
       - run: poetry install
       - run: make test-db-up
+      # Reuse cluster roles, but replay the composed graph in an EMPTY database.
+      - run: make test-identity-graph-db-create
       - run: make test-integration
       - run: make test-db-down
         if: always()

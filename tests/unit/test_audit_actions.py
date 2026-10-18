@@ -1,7 +1,7 @@
 """Consumer tests for the audit-action registry (`dotmac_kernel.audit_actions`)
 and its consumer, `dotmac_kernel.audit.write_audit_event`.
 
-The registry DESCRIBES which audit actions exist (declared by manifests); the
+The registry DESCRIBES which audit actions exist (Kernel and manifests); the
 writer is the one place an action is recorded. These pin the public contract:
 one owning module per action, fail-closed on duplicates, and a write of an
 undeclared action rejected BEFORE anything reaches the session.
@@ -45,9 +45,101 @@ def test_registry_declares_and_owns_actions() -> None:
     )
     assert reg.is_declared("role.grant")
     assert reg.owner("role.grant") == "rbac"
-    assert reg.actions() == {"role.create", "role.grant", "invoice.issue"}
+    assert reg.actions() == {
+        "identity.history_imported",
+        "role.create",
+        "role.grant",
+        "invoice.issue",
+    }
     assert not reg.is_declared("role.granted")  # the typo
     assert reg.owner("role.granted") is None
+
+
+def test_empty_manifests_compose_the_kernel_action() -> None:
+    reg = AuditActionRegistry.from_manifests(())
+    assert reg.actions() == {"identity.history_imported"}
+    assert reg.owner("identity.history_imported") == "kernel"
+    reg.require("identity.history_imported")
+
+
+def test_kernel_declaration_is_an_actual_feature_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dotmac_kernel.features as features
+
+    constructed: list[FeatureManifest] = []
+
+    def capture_manifest(
+        *, name: str, audit_actions: tuple[str, ...]
+    ) -> FeatureManifest:
+        manifest = FeatureManifest(name=name, audit_actions=audit_actions)
+        constructed.append(manifest)
+        return manifest
+
+    monkeypatch.setattr(features, "FeatureManifest", capture_manifest)
+    reg = AuditActionRegistry.from_manifests(())
+
+    assert len(constructed) == 1
+    manifest = constructed[0]
+    assert isinstance(manifest, FeatureManifest)
+    assert manifest.name == "kernel"
+    assert manifest.audit_actions == ("identity.history_imported",)
+    assert reg.actions() == set(manifest.audit_actions)
+    assert reg.owner("identity.history_imported") == manifest.name
+
+
+def test_composition_derives_ownership_and_reservation_from_the_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dotmac_kernel.features as features
+
+    declaration = FeatureManifest(
+        name="manifest_owner", audit_actions=("manifest.event",)
+    )
+
+    def substitute_manifest(
+        *, name: str, audit_actions: tuple[str, ...]
+    ) -> FeatureManifest:
+        assert name == "kernel"
+        assert audit_actions == ("identity.history_imported",)
+        return declaration
+
+    monkeypatch.setattr(features, "FeatureManifest", substitute_manifest)
+    reg = AuditActionRegistry.from_manifests(())
+    assert reg.actions() == {"manifest.event"}
+    assert reg.owner("manifest.event") == declaration.name
+    with pytest.raises(DuplicateAuditActionError):
+        AuditActionRegistry.from_manifests([_m("other", "manifest.event")])
+
+
+def test_generator_manifests_compose_kernel_and_ordinary_owners() -> None:
+    manifests = (_m(name, action) for name, action in [("academy", "academy.event")])
+    reg = AuditActionRegistry.from_manifests(manifests)
+    assert reg.actions() == {"identity.history_imported", "academy.event"}
+    assert reg.owner("identity.history_imported") == "kernel"
+    assert reg.owner("academy.event") == "academy"
+
+
+@pytest.mark.parametrize("owner", ["academy", "other", "kernel"])
+def test_manifest_cannot_declare_a_reserved_kernel_action(owner: str) -> None:
+    with pytest.raises(DuplicateAuditActionError, match="reserved.*Kernel"):
+        AuditActionRegistry.from_manifests([_m(owner, "identity.history_imported")])
+
+
+def test_explicit_constructor_keeps_same_owner_duplicates() -> None:
+    reg = AuditActionRegistry(
+        [
+            ("kernel", "identity.history_imported"),
+            ("kernel", "identity.history_imported"),
+        ]
+    )
+    assert reg.actions() == {"identity.history_imported"}
+    assert reg.owner("identity.history_imported") == "kernel"
+
+
+def test_explicit_constructor_rejects_different_owner_duplicates() -> None:
+    with pytest.raises(DuplicateAuditActionError):
+        AuditActionRegistry([("a", "shared.event"), ("b", "shared.event")])
 
 
 def test_require_rejects_an_undeclared_action() -> None:
@@ -69,8 +161,12 @@ def test_one_module_may_repeat_its_own_action() -> None:
     assert reg.owner("a.event") == "a"
 
 
-def test_uninstalled_registry_declares_nothing() -> None:
-    assert AuditActionRegistry(()).actions() == frozenset()
+def test_explicit_empty_registry_declares_nothing() -> None:
+    reg = AuditActionRegistry(())
+    assert reg.actions() == frozenset()
+    assert reg.owner("identity.history_imported") is None
+    with pytest.raises(UndeclaredAuditActionError):
+        reg.require("identity.history_imported")
 
 
 # ── write_audit_event consumes the registry ─────────────────────────────────
@@ -185,6 +281,7 @@ def test_a_real_feature_action_is_declared_by_its_own_module() -> None:
     from app.features import FEATURE_MODULES
 
     reg = AuditActionRegistry.from_manifests(load_manifests(FEATURE_MODULES))
+    assert reg.owner("identity.history_imported") == "kernel"
     assert reg.owner("role.grant") == "rbac"
     assert reg.owner("settings.update") == "settings"
     assert reg.owner("platform.tenant.create") == "tenants"

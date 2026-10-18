@@ -271,3 +271,183 @@ not an approval.
 - The sibling rows in the baseline are enforced only where the fleet is beside
   the checkout AND the recorded commit is present locally. In CI they abstain by
   design; the `dotmac_starter_mt` row is the always-enforced half.
+
+## Scope amendment — 2026-10-18: Academy authorized supplied-password paths
+
+Status: product source audit and bounded SAME-owner contract review complete.
+Assignment-engine source is prepared; composed source/catalogue review, hosted
+qualification, future release and installed product adoption remain pending. This
+amendment supplements, rather than rewrites, the 2026-08-30 Sub rationale,
+deliberate departures, measured baselines and adoption gates above. In particular,
+"every credential-creating path calls provision" now means every supported path
+uses the SAME owner: secret-free unknown-material recovery `provision`, or the
+explicitly authorized supplied-password assignment contract in ADR-0006's dated
+2026-10-18 amendment. Merely renaming a product writer is insufficient. The old
+`provision` signature still accepts no secret and yields no secret-bearing field.
+No hash-call baseline is changed here; lowering requires actual retirement.
+
+### Immutable audit scope and evidence
+
+Academy source: `a5ffe6316e97bf33e17ef9c1f00788796f5e5a5a`, tree
+`3e5678114a65ad760fa85f3367719a087bbf3b07`; locally supplied exact source closure
+`/private/tmp/academy-a5-python-closure-20261017`. All 460 Python files parsed
+with standard-library AST; no import/runtime/test execution. This closure covers
+application, scripts and tests. The current protected Starter baseline for ADR,
+inventory and EXTRACTION is `43aeb79ff481a8927c38e681fc43ec0314037a14`, fetched
+through the dedicated GitHub read connector at that exact ref. AGENTS/ARCHITECTURE
+use the prepared unpublished identity-history-full-22-v2 source and preserve its
+account-reset/history amendments. This does not rerun the historical Sub/ERP/CP
+production audit or claim Academy production runtime was inspected. Academy is
+the concrete product-first behavior source for this bounded extension; actual
+production privileges and installed parity remain to be qualified.
+
+Knowledge scoped searches succeeded for project:dotmac_starter_mt and
+project:dotmac_academy_app. Canonical records retrieved:
+`learning-academy-credential-adapter-plan-2026-10-18` v2,
+`academy-learning-core-extraction-goal-2026-10-16` v168 and
+`learning-academy-credential-reset-consolidated-source-2026-10-18` v1.
+An initial miss used an accidental root-prefixed slug; corrected GET succeeded.
+No scope denial. Knowledge describes plans/source status, not runtime proof.
+
+### All actual assignment entrypoints and transitive callsites
+
+| Entrypoint / source | Existing behavior at immutable Academy revision | Required installed seam |
+| --- | --- | --- |
+| `app/web/accounts.py:492 users_create` → `:514 create_user`; `app/services/accounts.py:29`, hash `:84` | Actual request cookie/session via require_web_user; tenant and role-grant query; instructor/admin create students, admin alone creates instructor/admin. Normalized email, duplicate check, ensured roles, Person + credential + grant, flush without commit. NO strength restriction. create_user has NO actor/context argument. | Request-bound authority re-resolves cookie HMAC, fresh session/tenant/activity/status/grants and locks real rows; thread actual context into service. Settings-backed role policy preserves matrix and validates exact granted tenant role. Savepoint encloses all Person/role/credential work. |
+| `app/cli.py:61 _bootstrap` → platform_session `:67` → `bootstrap_tenant :68`; `app/services/bootstrap.py:42`, hash `:84` | Creates tenant, three roles, initial admin Person/credential/grant with supplied password and no strength restriction; caller owns commit. | SAME Connection current_role/session_user/catalog/effective privileges + exact tenant-create context. Initial migration explicitly allows platform_api tenant INSERT and identity CRUD; do not require app_admin alone. Installed settings-backed runtime/role/strength policy. |
+| `scripts/seed_academy_demo.py:49 main` → absent admin `create_user :67`; existing admin missing credential hash `:92`; selected credential hash `:97` | Seed resolves password before DB, minimum 12 plus sentinel refusal with no secret default. Uses migration_database_url; selects tenant, then Person by tenant/email, separately credential by tenant/email via unordered first(). If present, reassigns credential.person_id to selected admin and replaces hash. Adds admin/instructor grants. | Real same-Connection runtime privileges and exact tenant/admin/credential selection context; URL/env/password are not authority. Missing credential uses create-absent; selected credential uses CAS replace with explicit expected previous subject/version, preserving source selector. Prior Party MAY differ from target admin. |
+
+The web cookie path is actual source, not invented authorization:
+`app/services/web_auth.py:96 _current_person` hashes the cookie token and selects
+tenant session with no revocation and future expiry, then requires active Person;
+`:117 require_web_user` establishes tenant/request context. `_role_slugs` is
+`app/web/accounts.py:52`. These existing reads are NOT a fresh locked assignment
+authority today. Future adapter must lock/revalidate real rows, retain actual
+Session/root/actor/command context and coordinate revoke/delete/grant writers.
+
+Bootstrap initial grants are source-visible in
+`alembic/versions/20260504_0001_initial_tenant_schema.py:419-430`: platform_api
+can mutate tenants and identity rows. Its docstring's narrower superuser/migration
+example does not override executable grants. Actual Connection privilege proof
+is hosted work still owed; no production role privileges inspected.
+
+Seed selected credential retains credential ID, email/alias values, failure
+counters, lockout and sessions. There is no counter clear/unlock/revoke/alias
+fanout in its overwrite branch. Existing target Person name/status and intended
+grants remain product effects inside the same whole-account savepoint. Explicit
+previous-subject binding preserves real independently selected prior principal
+reassignment, rather than treating it as impossible or using create-or-overwrite.
+
+### Complete non-test primitive call census (AST calls, not grep mentions)
+
+At this exact Academy source revision: six hash_password calls in four files,
+two verify_password calls in two files, zero password_needs_rehash calls.
+Four hashes are assignment paths above. Two others remain distinct:
+`app/services/lifecycle.py:126 set_account_password` and `:266 accept_invite`.
+Verification is `app/services/web_auth.py:51` and `app/web/account.py:140`.
+Account reset/authenticated password change/invite/login retirement and genuine
+subject proof remain required; assignment does not replace their authorization.
+No other non-test calls to these primitive names were found across the 460-file
+AST closure. This is a direct-name call census, not a claim to detect arbitrary
+reflective/dynamic invocation. Test fixtures are excluded from runtime debt.
+
+### Existing product tests to preserve (read, not run)
+
+- `tests/services/test_accounts.py`: Person/credential/grant creation, duplicate
+  email, normalization and invalid role.
+- `tests/web/test_accounts.py`: instructor student creation, instructor refusal
+  for admin, admin creation and immediate login/learner access, existing role
+  management and invitation behavior.
+- `tests/services/test_bootstrap.py`: tenant/roles/admin/credential/grant.
+- `tests/test_seed_admin_password.py`: missing/weak refusal, stronger accepted
+  password and no hardcoded password default scan.
+- `tests/services/test_lifecycle.py`, `tests/web/test_lifecycle_web.py`,
+  `tests/web/test_account.py`, `tests/web/test_web_auth.py`,
+  `tests/test_auth_lockout.py` and `tests/services/test_account_invitations.py`:
+  related reset, invitation, session and lockout regression surfaces.
+
+There is no claim these old tests cover the new authority/CAS/audit contract;
+the seed script's prior-party-different behavior needs a new explicit canary.
+Kernel's existing owner unit/ratchet/boundary suites remain. The 25 assignment
+unit-test functions are authored, not run; composed public compatibility and
+installed product/CAS/concurrency qualification remain pending.
+
+### Owner extension, audit binding and policy composition
+
+ADR-0006's 2026-10-18 amendment defines closed create-absent/replace-selected
+commands; installed authority obtains actual material-free actor evidence, new
+assignment store binds old Party/tenant/credential/version CAS, one installed
+policy and one hash persist explicit reset_required=False. No recovery intent,
+unknown intermediate, failure clear, session revoke or alias sync. Existing
+store.write_hash and old audit entry/port stay unchanged; optional three
+assignment ports append AFTER clock without moving old arguments.
+
+The separate CredentialAssignmentAuditEntryV1 has exactly command, EXACT issued
+authority evidence, previous_credential_version (None for creation),
+credential_version and occurred_at. Its action is fixed as
+credential.password.assigned; prior/target identity and correlation are already
+bound by the command. No credential snapshots or hashes are included.
+CredentialAssignmentAuditPort.record_assignment returns a real
+current audit ID carried in the material-free receipt. Authority and audit share
+one bound adapter with private Session/root/command/actual actor; copied, stale,
+cross-root evidence and changed outcomes refuse. Current audit actor derives from
+private actual context using canonical user/service/api_key/system kinds; no fake
+human, new database kind or missing-identity system fallback. Opaque subject refs
+are product-resolved; Kernel cannot parse a tenant from them.
+
+User requirement: "nothing hardcoded, composable policy settings only".
+Strength, role matrix and runtime-authority policy compose installed typed
+effective settings-backed ports. Existing web/bootstrap no-strength behavior,
+seed stronger minimum 12/sentinels and reset-only documented default 8 stay
+separate settings defaults. Exact sorted roles refuse duplicates and must match
+actual tenant roles/grants. No engine policy default, arbitrary product hasher,
+new permission, external approval ceremony or provider redirection. Stable schema/
+action IDs and identity/version constraints are contracts, not policy knobs.
+
+### Remaining installation, qualification and recovery gates
+
+No engine/public exports/catalogue/compatibility changes were made. Independent
+review and coordinator approval must close this dossier before implementation.
+Then owe engine and material-containment/old-signature/constructor/CAS/evidence
+unit canaries; product settings-backed ports and real web/CLI/seed wiring; exact
+seed prior-party same/different and unchanged side-effect tests; canonical Party/
+PartyPerson/tenant and product policy state; current action declaration/audit;
+whole-account savepoint and real caught-response rollback; coordinated session/
+grant/Party lock order and participating revocation/membership/session writers.
+
+Hosted tests must prove actual privileged platform bootstrap/seed and ordinary
+role refusal on the same Connection; genuine migrated Postgres tenant isolation,
+absence/CAS/concurrent grant/principal/version races; fresh cookie/session/status
+refusals, one policy/one hash/False/current audit ID, copied/stale/cross-transaction
+evidence refusal, failure after every write/audit and failed-rollback fatality.
+Installed future wheel/release qualification is pending; published 106 must not
+be republished and no successor is allocated. Current production privileges,
+accounts, passwords and sessions were not inspected. No local runtime/import/
+tests/build/install/SQL compilation/DB/Docker/SSH/network shell was used.
+
+Preserve the separately reviewed reset-state/adapter/settings source and all
+history-import/account-reset requirements. Full installed Academy auth/provision/
+invite/admin/bootstrap/seed retirement, canonical FK/catalog and complete Learning
+retirement remain pending. Populated recovery must retain NEW accepted facts,
+events/deletes, identity, credentials/versions/assignments/audits, references,
+grants and Integration ACK/confirmed ERP receipts with one writer. An old backup
+or binary restore alone does not close recovery. No release, adoption, deployment
+or production readiness is asserted by this five-file source amendment.
+
+### Source file byte seals (SHA-256, immutable Academy revision above)
+
+| Source path | SHA-256 |
+| --- | --- |
+| `app/services/accounts.py` | `e337a114fa282558d4db8d776e39b26fb2075563cb9b093375af6e42f77987f2` |
+| `app/web/accounts.py` | `1aa300795aa53b47b83a302411a00bea0d34477fc751f8b5a950f2fbd24919e8` |
+| `app/services/bootstrap.py` | `60a1c0747f3d353e514ac676e1a2e9daee2c820ed6e54df9338704e9275d3be2` |
+| `app/cli.py` | `f0cff4e51ff5024d95f9af0ca91287559296ee47852136b3df9275bf8a125d1c` |
+| `scripts/seed_academy_demo.py` | `35274d98cc8b93799835a3598ab5519e8bc7fdcd0f62ce36bfdbfc21f1f93e1e` |
+| `app/services/web_auth.py` | `245c036f6fda2367a9a5e3393e6cd0574944f2cb0816cfd00584a9f1497f2856` |
+| `app/services/lifecycle.py` | `fcb2e97af8e92859adc5d76899c9c2226271669085fd92109c280d93cef9e7d7` |
+| `app/web/account.py` | `fd06ec72ff3c5ca7cb097debc9a16ad6537cee9dc0c91831e4b09c9f80c7dcb1` |
+| `alembic/versions/20260504_0001_initial_tenant_schema.py` | `33f9569bccc1562a2973df75e597332bb13b3003bab4d1815943e6cbee3eba3e` |
+| `tests/services/test_accounts.py` | `6cad9f220cf4fae5231bab041848dbb105560fce094f6f458dffd328adb17418` |
+| `tests/web/test_accounts.py` | `8ee0c123afc1760c1b62757c09aca24faed4c09b872e2d8f857ca1dab3b0ec89` |
+| `tests/services/test_bootstrap.py` | `5300f0573ce57909a02b71345a85865cc7305721eed1b499e38ee3bf25d9ded7` |
+| `tests/test_seed_admin_password.py` | `394144b01977aaed53fcd35795db9e1ea55578825a8583758ea4004389915e78` |

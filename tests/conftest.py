@@ -85,7 +85,8 @@ def admin_engine():
     url = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv("TEST_DATABASE_URL")
     if not url:
         pytest.skip("TEST_DATABASE_URL not set — these tests require a real Postgres")
-    engine = create_engine(url, future=True)
+    # Hide bound history material; the importer also refuses DEBUG row logging.
+    engine = create_engine(url, future=True, hide_parameters=True, echo=False)
     yield engine
     engine.dispose()
 

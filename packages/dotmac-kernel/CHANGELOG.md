@@ -6,6 +6,29 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a107 — Unpublished source inventory
+
+The next numeric alpha is derived from the current annotated a106 tag; this
+heading allocates no version. Source is marked `0.1.0a106+dev` until the protected
+authorization-only and immediate mechanical allocation sequence. Hosted source
+and installed-artifact qualification, publication and Academy adoption remain
+pending. Published a106 and its migration bytes remain immutable.
+
+### Added
+
+- Bounded historical identity transfer on the caller's `app_admin` Connection,
+  preserving identity, credential, session, grant and historical audit material.
+  Current maintenance audit attribution stays separate from copied history.
+- The forward credential `(tenant_id, id)` key and tenant-qualified references;
+  published migration history is unchanged.
+- Account-reset completion and authorized supplied-password creation/selected
+  replacement in the existing `CredentialLifecycle`, with explicit product
+  authority, store and current-actor audit ports and settings-backed policy.
+  Existing secret-free provisioning and verification behavior is retained.
+- Hosted whole-graph Kernel/Learning replay using a distinct empty PostgreSQL
+  database, plus authored rollback, privilege, preservation and assignment
+  canaries. Source preparation is not execution evidence or product activation.
+
 ## 0.1.0a106 — Release inventory
 
 This inventories the proposed request-evidence and audit-history successor to
