@@ -779,9 +779,11 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # The ReleaseAuthority.v1 canonical digest document; owned by
     # release_authority.py, stored nowhere but as the ledger's digest.
     "release_authority.py": 1,
-    # The SmokeDependencyWheels.v1 manifest verify-wheel emits; owned by
-    # release_module.py, carried only as a workflow artifact.
-    "release_module.py": 1,
+    # Two release_module.py-owned workflow artifacts, neither a Foundation
+    # store record: verify-wheel emits SmokeDependencyWheels.v1, and
+    # _qualify_candidate_impl emits CandidateQualification.v1 for the checked
+    # candidate installation and its source/wheel bindings.
+    "release_module.py": 2,
     # Installed floor-probe evidence: module_floor_probe.py owns the field
     # contract for installed origins, allocation and exact API refusal. Its
     # stdout is retained as a floor workflow artifact; it writes no Foundation

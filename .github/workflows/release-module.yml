@@ -222,12 +222,11 @@ jobs:
         working-directory: packages/dotmac-kernel
         run: poetry build --output "${GITHUB_WORKSPACE}/kernel-dist"
 
-      # A module may depend on another FIRST-PARTY distribution only when that
-      # name is present in its reviewed `allowed_requires`. The build job has no
-      # registry credential, so build those dependencies from this exact main
-      # checkout and supply their wheels locally. Discovery is the intersection
-      # of `allowed_requires` and packages/* metadata: merely existing in the
-      # repository never opts a package into this release.
+      # Reviewed logical module_dependencies pins supply the required manifest
+      # closure. Python dependencies stay separately limited by allowed_requires.
+      # The build job has no registry credential, so build both reviewed sets
+      # from this exact main checkout and supply their wheels by explicit path.
+      # Merely existing in the repository never opts a package into the release.
       - name: Build allowed first-party dependency wheels for the smoke
         run: |
           python scripts/release_module.py build-local-dependencies \
@@ -235,9 +234,19 @@ jobs:
             --output "${GITHUB_WORKSPACE}/dependency-dist"
 
       # Release-artifact smoke: install the freshly built wheel into a clean
-      # venv and register its manifest through ModuleRegistry (which includes
+      # venv and register its required dependency closure through ModuleRegistry
+      # (which includes
       # NamespaceRegistry for stateful members). Proves the bytes about to be
       # published are installable and registrable, not merely well-formed.
+      - name: Bootstrap the hash-locked release verifier
+        run: |
+          verifier="$(mktemp -d "${RUNNER_TEMP}/release-verifier.XXXXXX")"
+          python -m venv "$verifier"
+          "$verifier/bin/python" -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r .github/bootstrap/release-verifier-requirements-py312.txt
+          echo "$verifier/bin" >> "$GITHUB_PATH"
+
       - name: Release wheel smoke
         env:
           PACKAGE_DIR: ${{ steps.resolve.outputs.package_dir }}
@@ -268,8 +277,14 @@ jobs:
           docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/source:ro" --workdir /source \
             python:3.12-slim-bookworm \
-            python scripts/release_module.py verify-wheel "$MODULE" \
-              --dist "$PACKAGE_DIR/dist" \
+            sh -ec '
+              python -m venv /tmp/release-verifier
+              /tmp/release-verifier/bin/python -m pip install \
+                --disable-pip-version-check --require-hashes --only-binary=:all: \
+                -r .github/bootstrap/release-verifier-requirements-py312.txt
+              exec /tmp/release-verifier/bin/python scripts/release_module.py \
+                verify-wheel "$@"
+            ' sh "$MODULE" --dist "$PACKAGE_DIR/dist" \
               --kernel-dist /source/kernel-dist \
               --dependency-dist /source/dependency-dist
 
@@ -315,6 +330,129 @@ jobs:
         with:
           name: ${{ inputs.module }}-dist
           path: dist
+
+      # Qualify these SAME candidate bytes against already-published inputs.
+      # No candidate upload, rebuild or additional credential boundary occurs.
+      - name: Snapshot the build-once candidate artifacts
+        run: |
+          echo "CANDIDATE_BASELINE=${RUNNER_TEMP}/candidate-original-artifacts.json" >> "$GITHUB_ENV"
+          echo "CANDIDATE_QUALIFIED=${RUNNER_TEMP}/candidate-qualified" >> "$GITHUB_ENV"
+          python - <<'PYCODE'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path('dist')
+          paths = sorted(root.iterdir())
+          assert paths and all(p.is_file() and not p.is_symlink() for p in paths)
+          rows = {p.name: {'bytes': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in paths}
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'candidate-original-artifacts.json').write_text(json.dumps(rows, sort_keys=True, indent=2) + '\n')
+          PYCODE
+
+      - name: Bootstrap hash-locked candidate qualification tools
+        run: |
+          verifier="$(mktemp -d "${RUNNER_TEMP}/candidate-verifier.XXXXXX")"
+          python -m venv "$verifier"
+          "$verifier/bin/python" -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r .github/bootstrap/candidate-qualification-requirements-linux-py312.txt
+          echo "$verifier/bin" >> "$GITHUB_PATH"
+
+      - name: Qualify the candidate against published dependency wheels
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python scripts/release_module.py qualify-candidate "$MODULE" \
+            --dist dist --index "$INDEX" --output "$CANDIDATE_QUALIFIED"
+
+      # Fixed regression protocol for the repaired Fulfillment release. Generic
+      # candidate qualification above derives every dependency from policy.
+      - name: Prove genuine Fulfillment dependency closure and refusal canaries
+        if: inputs.module == 'dotmac-fulfillment' && inputs.version == '0.1.0a2'
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          test -d "$CANDIDATE_QUALIFIED"
+          export MODULE_RELEASE_CLOSURE_WHEEL_DIR="$CANDIDATE_QUALIFIED"
+          python -I -m pytest --noconftest -c /dev/null -p no:cacheprovider \
+            --junitxml="${RUNNER_TEMP}/candidate-closure.xml" \
+            tests/unit/test_module_release_dependency_closure.py::test_genuine_installed_fulfillment_timer_closure \
+            tests/unit/test_module_release_dependency_closure.py::test_installed_manifest_must_independently_match_plan \
+            tests/unit/test_module_release_dependency_closure.py::test_genuine_checkout_import_refused \
+            tests/unit/test_module_release_dependency_closure.py::test_required_native_extension_cannot_be_missing
+          python - <<'PYCODE'
+          import os, pathlib, xml.etree.ElementTree as ET
+          root = ET.parse(pathlib.Path(os.environ['RUNNER_TEMP'], 'candidate-closure.xml')).getroot()
+          cases = root.findall('.//testcase')
+          assert len(cases) == 7, len(cases)
+          assert all(not c.findall('skipped') and not c.findall('failure') and not c.findall('error') for c in cases)
+          PYCODE
+
+      - name: Bind required qualification evidence to the actual source and build
+        run: |
+          python - <<'PYCODE'
+          import hashlib, json, os, pathlib, subprocess
+          baseline_path = pathlib.Path(os.environ['CANDIDATE_BASELINE'])
+          baseline = json.loads(baseline_path.read_bytes())
+          receipt_path = pathlib.Path(os.environ['CANDIDATE_QUALIFIED'], 'CandidateQualification.v1.json')
+          assert receipt_path.is_file() and not receipt_path.is_symlink()
+          receipt_bytes = receipt_path.read_bytes()
+          receipt = json.loads(receipt_bytes)
+          candidate = receipt['candidate']
+          assert candidate['name'] == os.environ['MODULE']
+          assert candidate['version'] == os.environ['VERSION']
+          assert candidate['filename'] in baseline
+          assert candidate['sha256'] == baseline[candidate['filename']]['sha256']
+          assert candidate['filename'].endswith('.whl')
+          receipt_source = receipt['source']
+          assert receipt_source and 'scripts/release_module.py' in receipt_source
+          for relative, digest in receipt_source.items():
+              path = pathlib.Path(relative)
+              assert not path.is_absolute() and '..' not in path.parts
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+          junit = pathlib.Path(os.environ['RUNNER_TEMP'], 'candidate-closure.xml')
+          fixed_protocol = os.environ['MODULE'] == 'dotmac-fulfillment' and os.environ['VERSION'] == '0.1.0a2'
+          if fixed_protocol:
+              assert junit.is_file() and not junit.is_symlink()
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          assert git('rev-parse', 'HEAD') == os.environ['GITHUB_SHA']
+          packet = {'schema_version': 1, 'kind': 'candidate_qualification_observation',
+                    'publication_authority': False, 'admission_authority': False,
+                    'head': git('rev-parse', 'HEAD'), 'tree': git('rev-parse', 'HEAD^{tree}'),
+                    'parents': git('show', '-s', '--format=%P', 'HEAD').split(),
+                    'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+                    'module': os.environ['MODULE'], 'version': os.environ['VERSION'],
+                    'candidate': candidate, 'original_artifacts': baseline,
+                    'receipt': {'bytes': len(receipt_bytes), 'sha256': hashlib.sha256(receipt_bytes).hexdigest()},
+                    'genuine_regression_protocol': {'required_cases': 7} if fixed_protocol else None}
+          if junit.is_file():
+              data = junit.read_bytes()
+              packet['junit'] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'candidate-qualification-packet.json').write_text(json.dumps(packet, sort_keys=True, indent=2) + '\n')
+          PYCODE
+
+      - name: Retain candidate qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.module }}-candidate-qualification
+          path: |
+            ${{ runner.temp }}/candidate-original-artifacts.json
+            ${{ runner.temp }}/candidate-qualification-packet.json
+            ${{ runner.temp }}/candidate-qualified/CandidateQualification.v1.json
+            ${{ runner.temp }}/candidate-closure.xml
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Recheck build-once bytes and current main before publication
+        run: |
+          python - <<'PYCODE'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path('dist')
+          expected = json.loads(pathlib.Path(os.environ['CANDIDATE_BASELINE']).read_bytes())
+          paths = sorted(root.iterdir())
+          assert paths and all(p.is_file() and not p.is_symlink() for p in paths)
+          actual = {p.name: {'bytes': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in paths}
+          assert actual == expected
+          PYCODE
+          bash scripts/assert_current_main.sh "${GITHUB_SHA}"
 
       # Publish the SAME bytes `build` inspected and smoked — downloaded, never
       # rebuilt.
@@ -402,9 +540,18 @@ jobs:
             --dist "${ARTIFACT_DIR}"
 
       # Install the PUBLISHED release from the index into a clean venv and
-      # register it. Requires the kernel at `kernel_floor` to already be
+      # register it with its required dependency closure. Requires the kernel at `kernel_floor` to already be
       # published — an earlier kernel raises UnallocatedNamespaceError, which is
       # why the kernel release always precedes a module release.
+      - name: Bootstrap the hash-locked release verifier
+        run: |
+          verifier="$(mktemp -d "${RUNNER_TEMP}/release-verifier.XXXXXX")"
+          python -m venv "$verifier"
+          "$verifier/bin/python" -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r .github/bootstrap/release-verifier-requirements-py312.txt
+          echo "$verifier/bin" >> "$GITHUB_PATH"
+
       - name: Install from the Forgejo registry and verify
         env:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
@@ -415,18 +562,18 @@ jobs:
 
       # LEVEL 2 — composition, when this release completes a set.
       #
-      # Level 1 above proves this module installs and registers ALONE. That is
+      # Level 1 above proves this module installs and registers with its required dependency closure. That is
       # not the question a consuming assembly asks: it installs every module
       # beside ONE kernel and registers them together. ModuleRegistry validates
       # identities, dependencies and contracts, and delegates the stateful set
       # to NamespaceRegistry for distinct schemas, prefixes, branch labels and
-      # tables. Two modules that each pass alone can still collide.
+      # tables. Two modules that each pass with their required dependency closure can still collide.
       #
       # Runs BEFORE the tag, deliberately. The module is already published by
       # this point and a composition failure cannot unpublish it — but the tag
       # is this repository's assertion that the release is good, and it should
       # not be written for a version whose set does not compose. The honest
-      # intermediate state is "published, verified alone, composition failed",
+      # intermediate state is "published, verified with required dependency closure, composition failed",
       # and a bad SET is repaired by a NEW release, never by mutating a
       # published one.
       #

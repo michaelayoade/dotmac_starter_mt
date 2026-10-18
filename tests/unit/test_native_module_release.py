@@ -10,7 +10,7 @@ import site
 import subprocess
 import zipfile
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -236,13 +236,31 @@ def test_both_release_smokes_derive_native_targets(
     release, monkeypatch, tmp_path, command, native
 ):
     metadata = entry(tmp_path, native=native)
+    descriptor = {
+        **metadata,
+        "version": "0.2.0a1",
+        "code": "probe",
+        "dependencies": (),
+        "native_package": release._native_package(metadata),
+    }
+    monkeypatch.setattr(release, "_module_closure", lambda _: [descriptor])
+    monkeypatch.setattr(release, "_declared", lambda _: {"version": "0.2.0a1"})
+    monkeypatch.setattr(release, "_verify_smoke_inputs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(release, "_registry_wheels", lambda *_args: [])
+    monkeypatch.setattr(
+        release, "_stage_wheels", lambda *args, **kwargs: kwargs["local"]
+    )
     path = wheel(tmp_path)
     calls = []
     monkeypatch.setattr(release, "resolve", lambda _name: metadata)
     monkeypatch.setattr(
         release, "_venv", lambda _path: (Path("/venv/python"), Path("/venv/pip"))
     )
-    monkeypatch.setattr(release.subprocess, "run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        release.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
+    )
     monkeypatch.setattr(release, "_verify_installed", lambda *args: calls.append(args))
     if command == "wheel":
         release.cmd_verify_wheel(
@@ -265,7 +283,7 @@ def test_both_release_smokes_derive_native_targets(
     assert calls == [
         (
             Path("/venv/python"),
-            [("dotmac_probe", "module", None)],
+            release._installed_targets([descriptor]),
             ["dotmac_probe"] if native else [],
         )
     ]

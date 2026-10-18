@@ -4,7 +4,7 @@ defaults:
     shell: bash --noprofile --norc -eo pipefail {0}
 
 # The SECOND verification level. `release-module.yml` proves each module
-# installs and registers ALONE; this proves the published set composes — both
+# installs and registers with its required dependency closure; this proves the published set composes — both
 # exact versions installed beside one published kernel, both manifests
 # registered through a single `NamespaceRegistry`.
 #
@@ -47,6 +47,15 @@ jobs:
 
       # Every pin is resolved through the allowlist before anything is
       # installed, so this cannot be pointed at an arbitrary distribution.
+      - name: Bootstrap the hash-locked release verifier
+        run: |
+          verifier="$(mktemp -d "${RUNNER_TEMP}/release-verifier.XXXXXX")"
+          python -m venv "$verifier"
+          "$verifier/bin/python" -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary=:all: \
+            -r .github/bootstrap/release-verifier-requirements-py312.txt
+          echo "$verifier/bin" >> "$GITHUB_PATH"
+
       - name: Install the published set and register every manifest together
         env:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple

@@ -1173,6 +1173,9 @@
         "The first Cloud participant adapter its prior row required is an",
         "ADOPTION milestone that cannot be built against an unreleased wheel."
       ],
+      "module_dependencies": {
+        "durable_timers": "dotmac-durable-timers==0.1.0a1"
+      },
       "package_dir": "packages/dotmac-fulfillment",
       "import_name": "dotmac_fulfillment",
       "manifest_attr": "module",
