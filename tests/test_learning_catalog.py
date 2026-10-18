@@ -768,8 +768,16 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
                     "mod_learning.course_completions"
                 )
             ).one() == ("in_progress", 0.0, None)
+            # FORCE RLS rejects the tenant change before NOT NULL is evaluated.
             _refused(
-                conn, "UPDATE mod_learning.courses SET tenant_id=NULL", {}, "23502"
+                conn, "UPDATE mod_learning.courses SET tenant_id=NULL", {}, "42501"
+            )
+            assert (
+                conn.scalar(
+                    text("SELECT tenant_id FROM mod_learning.courses WHERE id=:id"),
+                    {"id": course},
+                )
+                == tenant
             )
             _refused(
                 conn,
@@ -792,6 +800,23 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
                 conn.scalar(text("SELECT count(*) FROM mod_learning.submissions")) == 0
             )
             assert conn.scalar(text("SELECT count(*) FROM mod_learning.scores")) == 0
+        # The app transaction has committed before the existing migration role
+        # independently proves the database constraint, avoiding cross-role locks.
+        with admin.begin() as conn:
+            assert conn.scalar(text("SELECT current_user")) == "app_admin"
+            _refused(
+                conn,
+                "UPDATE mod_learning.courses SET tenant_id=NULL WHERE id=:id",
+                {"id": course},
+                "23502",
+            )
+            assert (
+                conn.scalar(
+                    text("SELECT tenant_id FROM mod_learning.courses WHERE id=:id"),
+                    {"id": course},
+                )
+                == tenant
+            )
     finally:
         app.dispose()
         admin.dispose()
