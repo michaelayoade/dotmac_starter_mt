@@ -1,5 +1,7 @@
 {
   "internal_modules": [
+    "dotmac_kernel._identity_operation",
+    "dotmac_kernel._identity_persistence",
     "dotmac_kernel._transactions",
     "dotmac_kernel.display",
     "dotmac_kernel.middleware",
@@ -7,6 +9,16 @@
     "dotmac_kernel.web_runtime"
   ],
   "modules": {
+    "dotmac_kernel._identity_operation": {
+      "classification": "internal",
+      "exports": null,
+      "status": "unavailable"
+    },
+    "dotmac_kernel._identity_persistence": {
+      "classification": "internal",
+      "exports": null,
+      "status": "unavailable"
+    },
     "dotmac_kernel._transactions": {
       "classification": "internal",
       "exports": null,
@@ -574,7 +586,9 @@
         "lock_parties",
         "lock_person",
         "lock_roles",
-        "provision_missing_roles"
+        "provision_missing_roles",
+        "remove_grants",
+        "revoke_party_sessions"
       ],
       "status": "declared"
     },

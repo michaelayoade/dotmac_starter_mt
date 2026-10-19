@@ -1,9 +1,9 @@
 """Tenant-scoped auth service — register/login flows + the web (cookie)
 login/logout surface.
 
-All `select()`/session-mutation calls for the auth domain live here —
-`app/features/auth/router.py` and `app/features/auth/web.py` only resolve
-dependencies, call these functions, and shape the response.
+Auth orchestration lives here; exact session revocation DML delegates to the
+Kernel's public identity storage adapter. `app/features/auth/router.py` and
+`app/features/auth/web.py` resolve dependencies, delegate and shape responses.
 
 Registration creates a `party_type == person` `Party` plus its `PartyPerson`
 subtype row in the same transaction — `Party` replaced `Person` (Task 6); the
@@ -22,12 +22,17 @@ to create one.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from sys import exc_info
+from typing import NoReturn
 from uuid import UUID
 
 from dotmac_kernel.exceptions import ConflictError, ForbiddenError, UnauthorizedError
 from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.identity_storage import revoke_party_sessions
 from dotmac_kernel.models import (
     AuthSession,
     Party,
@@ -44,10 +49,16 @@ from dotmac_kernel.security import (
     verify_password,
 )
 from dotmac_kernel.settings_resolver import resolve
-from dotmac_kernel.transactions import conflict_savepoint
-from sqlalchemy import func, select
+from dotmac_kernel.transactions import (
+    ConflictSavepointPhase,
+    ConflictSavepointProtocolError,
+    conflict_savepoint,
+    current_conflict_savepoint,
+)
+from sqlalchemy import event, func, insert, select, update
+from sqlalchemy.engine import Connection, NestedTransaction, RootTransaction
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, SessionTransaction
 
 from app.features.auth.schemas import LoginRequest, RegisterRequest
 from app.features.auth.spec import REGISTRATION_POLICY
@@ -167,61 +178,90 @@ def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
     cleared; see `docs/ARCHITECTURE.md`'s "Auth credentials" ownership row
     and `docs/superpowers/phase2-backlog.md`'s (resolved) F2 entry.
     """
-    email = normalize_email(payload.email)
-    party = db.scalars(
-        select(Party)
-        .where(Party.tenant_id == tenant.id)
-        .where(Party.party_type == PartyType.person)
-        # `email` is already lowercased by `normalize_email` above, so this
-        # predicate is defense-in-depth, not the normalization itself — but
-        # it must be `func.lower(Party.email) == email`, not a bare
-        # `Party.email == email`, because that's *exactly* the expression
-        # the partial functional index `uq_parties_tenant_lower_email`
-        # (`(tenant_id, lower(email)) WHERE email IS NOT NULL`, see
-        # `dotmac_kernel/models.py::Party.__table_args__`) is built on. Postgres
-        # only matches a functional index when the query's WHERE clause is
-        # syntactically the same expression the index was created with — a
-        # bare `Party.email == email` would silently fall back to a seq
-        # scan on this column.
-        .where(func.lower(Party.email) == email)
-    ).first()
-    credential = (
-        db.scalars(
-            select(UserCredential)
-            .where(UserCredential.tenant_id == tenant.id)
-            .where(UserCredential.party_id == party.id)
+    with _operation(db) as owner:
+        email = normalize_email(payload.email)
+        owner.check()
+        tid = tenant.id
+        owner.check()
+        party = db.scalars(
+            select(Party)
+            .where(Party.tenant_id == tid)
+            .where(Party.party_type == PartyType.person)
+            # `email` is already lowercased by `normalize_email` above, so this
+            # predicate is defense-in-depth, not the normalization itself — but
+            # it must be `func.lower(Party.email) == email`, not a bare
+            # `Party.email == email`, because that's *exactly* the expression
+            # the partial functional index `uq_parties_tenant_lower_email`
+            # (`(tenant_id, lower(email)) WHERE email IS NOT NULL`, see
+            # `dotmac_kernel/models.py::Party.__table_args__`) is built on. Postgres
+            # only matches a functional index when the query's WHERE clause is
+            # syntactically the same expression the index was created with — a
+            # bare `Party.email == email` would silently fall back to a seq
+            # scan on this column.
+            .where(func.lower(Party.email) == email)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         ).first()
-        if party is not None
-        else None
-    )
-    if credential is None:
-        # Constant-work miss path (Task 5): burn one real verification
-        # against the dummy hash so "unknown email"/"no credential" costs
-        # the same as "wrong password" — closing the 2c-auth backlog's
-        # timing-oracle line.
-        verify_password(payload.password, _DUMMY_HASH)
-        raise UnauthorizedError("Invalid credentials")
-    if not verify_password(payload.password, credential.password_hash):
-        raise UnauthorizedError("Invalid credentials")
-
-    # Upgrade-on-login (Task 5): a successfully verified legacy PBKDF2 (or
-    # outdated-parameter Argon2id) hash is re-written as current Argon2id —
-    # the only moment the plaintext is available to re-hash.
-    if password_needs_rehash(credential.password_hash):
-        credential.password_hash = hash_password(payload.password)
-        db.flush()
-
-    token, expires_at = issue_access_token(credential.party_id, tenant.id)
-    db.add(
-        AuthSession(
-            tenant_id=tenant.id,
-            party_id=credential.party_id,
-            token_hash=hash_token(token),
-            expires_at=expires_at,
+        credential = (
+            db.scalars(
+                select(UserCredential)
+                .where(UserCredential.tenant_id == tid)
+                .where(UserCredential.party_id == party.id)
+                .execution_options(populate_existing=True)
+            ).first()
+            if party is not None
+            else None
         )
-    )
-    db.flush()
-    return LoginResult(access_token=token)
+        owner.check()  # includes ORM population/refresh callbacks
+        if credential is None:
+            # Constant-work miss path (Task 5): burn one real verification
+            # against the dummy hash so "unknown email"/"no credential" costs
+            # the same as "wrong password" — closing the 2c-auth backlog's
+            # timing-oracle line.
+            verify_password(payload.password, _DUMMY_HASH)
+            owner.check()
+            raise UnauthorizedError("Invalid credentials")
+        credential_hash = credential.password_hash
+        owner.check()
+        verified = verify_password(payload.password, credential_hash)
+        owner.check()
+        if not verified:
+            raise UnauthorizedError("Invalid credentials")
+
+        # Upgrade-on-login (Task 5): a successfully verified legacy PBKDF2 (or
+        # outdated-parameter Argon2id) hash is re-written as current Argon2id —
+        # the only moment the plaintext is available to re-hash.
+        needs_rehash = password_needs_rehash(credential_hash)
+        owner.check()
+        if needs_rehash:
+            owner.track(credential, ("password_hash", "updated_at"))
+            db.execute(
+                update(UserCredential.__table__)
+                .where(
+                    UserCredential.tenant_id == tid,
+                    UserCredential.id == credential.id,
+                    UserCredential.party_id == party.id,
+                )
+                .values(password_hash=hash_password(payload.password))
+            )
+            db.refresh(credential, attribute_names=["password_hash", "updated_at"])
+            owner.check()
+
+        pid = credential.party_id
+        owner.check()
+        token, expires_at = issue_access_token(pid, tid)
+        owner.check()
+        digest = hash_token(token)
+        owner.check()
+        db.execute(
+            insert(AuthSession.__table__).values(
+                tenant_id=tid,
+                party_id=pid,
+                token_hash=digest,
+                expires_at=expires_at,
+            )
+        )
+        return LoginResult(access_token=token)
 
 
 def get_current_user_view(db: Session, party: Party) -> PersonView:
@@ -265,18 +305,57 @@ def web_logout(db: Session, tenant: Tenant, token: str | None) -> None:
     logout must always succeed from the caller's point of view (clearing a
     stale cookie is not an error).
     """
-    if not token:
-        return
-    session = db.scalars(
-        select(AuthSession)
-        .where(AuthSession.tenant_id == tenant.id)
-        .where(AuthSession.token_hash == hash_token(token))
-        .where(AuthSession.revoked_at.is_(None))
-    ).first()
-    if session is None:
-        return
-    session.revoked_at = datetime.now(UTC)
-    db.flush()
+    with _operation(db) as owner:
+        if not token:
+            return
+        tid = tenant.id
+        owner.check()
+        digest = hash_token(token)
+        # Detached discovery is not authority, and takes no child lock.
+        found = db.execute(
+            select(AuthSession.id, AuthSession.party_id).where(
+                AuthSession.tenant_id == tid,
+                AuthSession.token_hash == digest,
+            )
+        ).first()
+        if found is None:
+            return
+        sid, pid = found
+        principal = db.scalar(
+            select(Party.id)
+            .where(
+                Party.tenant_id == tid,
+                Party.id == pid,
+            )
+            .with_for_update()
+        )
+        if principal is None:
+            return
+        # The complete operation cohort is this exact proved row. Recheck
+        # token membership after the parent wait, before any session lock.
+        cohort = tuple(
+            db.scalars(
+                select(AuthSession.id)
+                .where(
+                    AuthSession.tenant_id == tid,
+                    AuthSession.party_id == pid,
+                    AuthSession.id == sid,
+                    AuthSession.token_hash == digest,
+                )
+                .order_by(AuthSession.id)
+                .with_for_update()
+            )
+        )
+        if not cohort:
+            return
+        revoke_party_sessions(
+            db,
+            tenant_id=tid,
+            party_id=pid,
+            session_ids=cohort,
+            revoked_at=datetime.now(UTC),
+        )
+        _refresh_sessions(db, cohort, owner=owner)
 
 
 __all__ = [
@@ -288,3 +367,290 @@ __all__ = [
     "web_login",
     "web_logout",
 ]
+
+
+# The reference assembly imports only public Kernel APIs. Its bounded operation
+# guard stays in this owner; the Kernel binding owner has its own private guard.
+_REFERENCE_FAILED_ROOT = "_reference_auth_failed_identity_root"
+
+
+def _hold_reference_root(db: Session, root: SessionTransaction) -> None:
+    if db.get_transaction() is root:
+        db.info[_REFERENCE_FAILED_ROOT] = root
+
+
+@event.listens_for(Session, "before_commit")
+def _refuse_failed_reference_root(db: Session) -> None:
+    root = db.get_transaction()
+    if root is not None and db.info.get(_REFERENCE_FAILED_ROOT) is root:
+        raise ConflictSavepointProtocolError(
+            "reference identity root requires owner rollback"
+        )
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _clear_reference_root(db: Session, transaction: SessionTransaction) -> None:
+    if (
+        transaction.parent is None
+        and db.info.get(_REFERENCE_FAILED_ROOT) is transaction
+    ):
+        db.info.pop(_REFERENCE_FAILED_ROOT, None)
+
+
+def _pending(db: Session) -> None:
+    # Passive collection membership: never load attributes to decide cleanliness.
+    if db.new or db.dirty or db.deleted:
+        raise ConflictSavepointProtocolError(
+            "identity operation requires clean pending state"
+        )
+
+
+@dataclass
+class _Operation:
+    db: Session
+    root: SessionTransaction
+    savepoint: SessionTransaction | None = None
+    failed: bool = False
+    connection: Connection | None = None
+    physical_root: RootTransaction | None = None
+    physical_savepoint: NestedTransaction | None = None
+    physical_guarded: bool = False
+    physical_recovery_started: bool = False
+    physical_recovered: bool = False
+    affected: list[tuple[object, tuple[str, ...]]] = field(default_factory=list)
+
+    def track(self, row: object, attributes: tuple[str, ...]) -> None:
+        from sqlalchemy import inspect
+
+        self.check()
+        state = inspect(row)
+        if state.session is not self.db or not state.persistent:
+            self.refuse()
+        self.affected.append((row, attributes))
+
+    def refuse(self) -> NoReturn:
+        self.failed = True
+        raise ConflictSavepointProtocolError("identity operation protocol differs")
+
+    def check(self) -> None:
+        try:
+            _pending(self.db)
+        except ConflictSavepointProtocolError:
+            self.failed = True
+            raise
+        if (
+            self.failed
+            or self.db.get_transaction() is not self.root
+            or not self.root.is_active
+        ):
+            self.refuse()
+        if self.connection is not None:
+            if (
+                self.physical_root is None
+                or not self.physical_root.is_active
+                or self.connection.get_transaction() is not self.physical_root
+            ):
+                self.refuse()
+            if self.savepoint is not None and (
+                self.physical_savepoint is None
+                or not self.physical_savepoint.is_active
+                or self.connection.get_nested_transaction()
+                is not self.physical_savepoint
+            ):
+                self.refuse()
+        if self.savepoint is not None:
+            state = current_conflict_savepoint(self.db)
+            if (
+                state is None
+                or state.root is not self.root
+                or state.savepoint is not self.savepoint
+                or self.db.get_nested_transaction() is not self.savepoint
+                or not self.savepoint.is_active
+                or state.phase
+                not in (ConflictSavepointPhase.BODY, ConflictSavepointPhase.RELEASE)
+            ):
+                self.refuse()
+
+
+@contextmanager
+def _operation(db: Session) -> Generator[_Operation, None, None]:
+    # These are the first operations, before any connection, ORM refresh,
+    # savepoint, callback or implicit autobegin. Preexisting state stays intact.
+    _pending(db)
+    root = db.get_transaction()
+    if root is None or not root.is_active:
+        raise ConflictSavepointProtocolError(
+            "identity operation requires an active caller root"
+        )
+    owner = _Operation(db, root)
+
+    def before_flush(*args: object) -> None:
+        # All participating mutations are explicit Core statements. Never let
+        # begin_nested/release or a callback flush a pending ORM object.
+        owner.refuse()
+
+    def before_execute(*args: object) -> None:
+        owner.check()
+
+    def cursor_check(*args: object) -> None:
+        state = current_conflict_savepoint(db)
+        if (
+            state is not None
+            and state.root is root
+            and state.savepoint is owner.savepoint
+            and state.phase is ConflictSavepointPhase.ROLLBACK
+        ):
+            if owner.physical_recovery_started:
+                owner.physical_recovered = True
+            return  # the public helper owns physical recovery, even after refusal
+        owner.check()
+
+    def before_commit(*args: object) -> None:
+        owner.check()
+        state = current_conflict_savepoint(db)
+        if (
+            owner.savepoint is None
+            or state is None
+            or state.savepoint is not owner.savepoint
+            or state.phase is not ConflictSavepointPhase.RELEASE
+        ):
+            owner.refuse()
+
+    def no_physical_completion(*args: object) -> None:
+        owner.refuse()
+
+    def physical_release(*args: object) -> None:
+        state = current_conflict_savepoint(db)
+        if (
+            state is None
+            or state.savepoint is not owner.savepoint
+            or state.phase is not ConflictSavepointPhase.RELEASE
+        ):
+            owner.refuse()
+        owner.check()
+
+    def physical_recovery(*args: object) -> None:
+        state = current_conflict_savepoint(db)
+        if (
+            state is None
+            or state.savepoint is not owner.savepoint
+            or state.phase is not ConflictSavepointPhase.ROLLBACK
+        ):
+            owner.refuse()
+        owner.physical_recovery_started = True
+
+    physical_listeners = (
+        ("before_cursor_execute", cursor_check),
+        ("after_cursor_execute", cursor_check),
+        ("commit", no_physical_completion),
+        ("rollback", no_physical_completion),
+        ("savepoint", no_physical_completion),
+        ("release_savepoint", physical_release),
+        ("rollback_savepoint", physical_recovery),
+    )
+    listeners = (
+        ("before_flush", before_flush),
+        ("do_orm_execute", before_execute),
+        ("before_commit", before_commit),
+    )
+    for name, callback in listeners:
+        event.listen(db, name, callback)
+    connection = None
+    completed = False
+    try:
+        with db.no_autoflush:
+            owner.check()
+            with conflict_savepoint(db):
+                state = current_conflict_savepoint(db)
+                if state is None or state.root is not root:
+                    owner.refuse()
+                owner.savepoint = state.savepoint
+                owner.check()
+                # Force the actual SAVEPOINT before any product query/mutation.
+                # Opening hooks cannot flush: the guard was installed before
+                # begin_nested. A hook-produced pending value is never refreshed.
+                connection = db.connection()
+                owner.connection = connection
+                owner.physical_root = connection.get_transaction()
+                owner.physical_savepoint = connection.get_nested_transaction()
+                owner.check()
+                for name, callback in physical_listeners:
+                    event.listen(connection, name, callback)
+                owner.physical_guarded = True
+                yield owner
+                owner.check()
+            owner.savepoint = None
+            owner.check()
+            completed = True
+    finally:
+        preserving_primary = exc_info()[0] is not None
+        cleanup_failed = False
+        if not completed and db.get_transaction() is root and root.is_active:
+            if owner.connection is not None and (
+                owner.physical_root is None
+                or not owner.physical_root.is_active
+                or owner.connection.get_transaction() is not owner.physical_root
+                or (owner.physical_guarded and not owner.physical_recovered)
+            ):
+                _hold_reference_root(db, root)
+            if not (db.new or db.dirty or db.deleted):
+                from sqlalchemy import inspect
+
+                for row, attributes in owner.affected:
+                    if db.new or db.dirty or db.deleted:
+                        _hold_reference_root(db, root)
+                        break
+                    row_state = inspect(row)
+                    if row_state.session is db and row_state.persistent:
+                        try:
+                            # Core writes do not create UOW dirty snapshots.
+                            # Expire ONLY known clean affected fields after the
+                            # owning SP recovers, never unrelated caller state.
+                            db.expire(row, attribute_names=list(attributes))
+                        except BaseException:
+                            _hold_reference_root(db, root)
+            else:
+                _hold_reference_root(db, root)
+        owner.affected.clear()
+        if connection is not None:
+            for name, callback in physical_listeners:
+                try:
+                    if event.contains(connection, name, callback):
+                        event.remove(connection, name, callback)
+                except BaseException:
+                    cleanup_failed = True
+        for name, callback in listeners:
+            try:
+                if event.contains(db, name, callback):
+                    event.remove(db, name, callback)
+            except BaseException:
+                cleanup_failed = True
+        if cleanup_failed:
+            _hold_reference_root(db, root)
+            if not preserving_primary:
+                raise ConflictSavepointProtocolError(
+                    "identity operation guard cleanup differs"
+                )
+        # Recovery hooks may not leave work outside the recovered SAVEPOINT.
+        # Do not replace the primary exception or clear any pending values.
+        if db.get_transaction() is root and (db.new or db.dirty or db.deleted):
+            _hold_reference_root(db, root)
+
+
+def _refresh_sessions(
+    db: Session, ids: tuple[object, ...], *, owner: _Operation
+) -> None:
+    """Owners refresh only already-cached CLEAN affected revocation attributes."""
+    from dotmac_kernel.models import AuthSession
+    from sqlalchemy import inspect
+
+    _pending(db)
+    wanted = set(ids)
+    for row in tuple(db.identity_map.values()):
+        if isinstance(row, AuthSession):
+            identity = inspect(row).identity
+            if identity is not None and identity[0] in wanted:
+                owner.track(row, ("revoked_at", "updated_at"))
+                _pending(db)
+                db.refresh(row, attribute_names=["revoked_at", "updated_at"])
+                _pending(db)

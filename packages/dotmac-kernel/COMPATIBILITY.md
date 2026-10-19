@@ -173,7 +173,7 @@ Two rules travel with it:
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
 | `dotmac_kernel.identity_provisioning` | `BootstrapTenantV1`, `BootstrapRoleV1`, `BootstrapPolicyV1`, `BootstrapProductPort`, `BootstrapProductOperation`, `IdentityProvisioningAssemblyV1`, `BootstrapTenantResultV1`, `install_identity_provisioning`, `bootstrap_tenant`; trusted offline composition on the strictly bound runtime with actual same-Connection role/catalog/policy/canonical/audit verification through physical precommit. Unpublished source; installed qualification pending. |
-| `dotmac_kernel.identity_storage` | `NewTenantValues`, `TenantFact`, `create_tenant`, `PartyFact`, `PersonFact`, `RoleFact`, `GrantFact`, `NewPersonValues`, `find_party_exact_email`, `find_party_normalized_email`, `lock_parties`, `lock_person`, `lock_roles`, `lock_grants`, `credential_member_ids`, `create_person`, `provision_missing_roles`, `ensure_grant`, `delete_person`; caller-owned storage and locks, observations only; `create_person` returns the actual canonical `Party` row. No authorization or transaction boundary. Unpublished source; installed qualification pending. |
+| `dotmac_kernel.identity_storage` | `NewTenantValues`, `TenantFact`, `create_tenant`, `PartyFact`, `PersonFact`, `RoleFact`, `GrantFact`, `NewPersonValues`, `find_party_exact_email`, `find_party_normalized_email`, `lock_parties`, `lock_person`, `lock_roles`, `lock_grants`, `credential_member_ids`, `create_person`, `provision_missing_roles`, `ensure_grant`, `delete_person`, `remove_grants`, `revoke_party_sessions`; caller-owned storage and locks, observations only; `create_person` returns the actual canonical `Party` row. No authorization or transaction boundary. Unpublished source; installed qualification pending. |
 | `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `ReceiverAppliedState`, `APPLIED_STATE_SCHEMA`, `UNKNOWN_DIGEST`, `applied_state_payload`, `parse_applied_state`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses, and the ADR-0007 applied-state envelope: `APPLIED_STATE_ENVELOPE_SCHEMA`, `APPLIED_STATE_DOMAIN`, `DEPLOYMENT_CHALLENGE_DOMAIN`, `DEPLOYMENT_CHALLENGE_SCHEMA`, `DEPLOYMENT_RESPONSE_SCHEMA`, `AppliedStateEnvelope`, `DeploymentSigner`, `DeploymentVerificationKey`, `VerifiedAppliedState`, `DeploymentPossessionChallenge`, `DeploymentPossessionResponse`, `VerifiedDeploymentPossession`, `applied_state_signing_input`, `seal_applied_state`, `verify_applied_state`, `answer_possession_challenge`, `verify_possession` (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
 | `dotmac_kernel.logging` | `setup_logging` |
 | `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `OutboxEvent`, `PlatformOutboxEvent`, `OutboxStatus` (see "Outbox/inbox" below) |
@@ -1240,11 +1240,11 @@ moving a caller from the first to the second is one identifier.
   retire. Retained only for a step-up ceremony that mints no session; removed in
   the next minor unless such a consumer is named in its docstring. Never use it
   to complete a login.
-- **Not provided: session revocation.** Disabling a binding stops further
-  logins; it does not retract sessions already issued, because a session does
-  not yet record which binding produced it. The contract for that column and
-  its revocation operation is written in the module docstring and is a separate
-  slice. Global logout is out of scope by design.
+- **Selective session revocation was delivered in a67.** Disable includes all
+  sessions from that exact binding, including expired rows, preserving earlier
+  revocation timestamps and provenance. The source-only 2026-10-19 amendment
+  below extracts its persistence owner and adds explicit account/exact selectors;
+  it does not change disable into account-wide logout.
 
 ### Human credential lifecycle (`dotmac_kernel.credential_lifecycle`)
 
@@ -1699,7 +1699,8 @@ capabilities or proof of locks. Callers supply the Session, tenant, explicit
 values, required lock order and business decisions, and own commit/rollback.
 The public functions are find_party_exact_email, find_party_normalized_email,
 lock_parties, lock_person, lock_roles, lock_grants, credential_member_ids,
-create_person, provision_missing_roles, ensure_grant and delete_person.
+create_person, provision_missing_roles, ensure_grant, delete_person, remove_grants
+and revoke_party_sessions (the last two are the source-only amendment below).
 NewPersonValues contains only canonical Party/PartyPerson fields; Academy keeps
 its existing product DTO and explicitly projects it into Kernel values.
 
@@ -1806,3 +1807,86 @@ This unallocated development source adds `0030_credential_tenant_key` and the
 separately described identity owner changes. `0.1.0a106+dev` is neither
 publication nor successor numeric allocation. Source inspection does not
 qualify hosted execution, installed artifacts, product adoption or release.
+
+
+## Identity revocation and common-Party serialization — 2026-10-19 source only
+
+Exactly two storage APIs are added:
+
+- `remove_grants(db, *, tenant_id, party_id, expected: tuple[GrantFact, ...])`
+  validates the full exact four-field cohort before deleting it and returns the
+  actually removed facts in UUID order. Empty is no DML; drift refuses generically.
+- `revoke_party_sessions(db, *, tenant_id, party_id, session_ids, revoked_at)`
+  requires both final arguments. Explicit `None` selects all scoped sessions;
+  tuple selects exact membership and empty selects none. It returns only IDs
+  transitioned from NULL, sorted. Expired and external-derived sessions count;
+  prior revocations, token hashes, expiry, provenance and row IDs are preserved.
+  Updated metadata uses the supplied aware operation timestamp, suppressing the
+  model's implicit onupdate clock. No storage clock or reason policy is added.
+
+Both require clean `Session.new/dirty/deleted` before any IO and an already
+active caller root/public conflict SAVEPOINT, physically materialized by its
+owner. They use detached Core columns/DML, no ORM population/refresh/flush,
+factory, transaction creation, commit, rollback, audit or authority. The caller
+already holds its immediate actor/target Party union sorted, then subordinate
+locks and the complete current session cohort before any acting-session lock.
+Facts and selectors grant neither permission nor evidence of locks.
+
+All binding write/finalize/stamp APIs and reference login/logout establish
+local guarded operation SAVEPOINTs before IO. Their entry passive check refuses
+ALL pending state without changing histories; before_flush rejects every pending
+ORM flush because these owners use immediate Core writes. Query/materialization,
+callback and release checks preserve the exact root and failed latch. Unexpected
+callback work rolls back the operation; direct root completion and callback work
+outside recoverable boundaries are fatal protocol violations, never successful
+policy refusals. Only known clean affected ORM attributes are refreshed. Guards
+are enforcement for reviewed application hooks, not a sandbox for arbitrary
+in-process direct SQL/DBAPI transactions. Reference auth keeps its bounded guard
+locally to respect the assembly's public-only Kernel import boundary.
+
+Binding writers discover exact owner without a child lock, take Party then
+binding, and recheck ownership after waits. Fresh detached different-owner bind
+collision preserves the exact advisory error before an irrelevant Party lock.
+Disable prelocks its whole binding-session cohort sorted and delegates to the
+single private `_identity_persistence` DML owner. Finalization retains Party and
+binding through the caller's provenance-bearing session INSERT/root completion.
+Login takes Party before credential/session issuance. Logout retains its exact
+proved-session/no-op behavior and calls the public exact selector.
+
+Same-root reentry, later lower-UUID children and successive different-Party calls
+remain callable. A retained common Party serializes participating roots; each
+operation knows its immediate Party set, not unknowable future children. The
+existing sorted `lock_parties` helper may prelock a caller-known union. There is
+no new closure capability, widening refusal, fresh-root restriction, mutex,
+implicit restart or deadlock retry-as-success. Unknown future arbitrary-order
+multi-Party roots and nonparticipating/fleet/raw writers are not certified.
+
+Source census at immutable c89 found 22 named binding write call sites, all
+Starter tests, zero inspected production callers. Reference auth logout is the
+actual immediate public revocation consumer. Four Academy revocation writers
+remain pending in their dependent capsule; no global one-writer retirement is
+claimed. There is no installable-module caller of either new primitive; exact
+empty sets are frozen in `tests/architecture/kernel_facilities.py`, with no
+invented storage prerequisite or broadened OUT_OF_SCOPE exemption.
+
+Hosted pending/callback/cancel, composition, exact selection/privacy, actual
+PostgreSQL Party-blocking and old canary qualification is authored, NOT RUN.
+The same-Party binder race now asserts the exact advisory refusal without an
+IntegrityError; distinct-Party same-subject arbitration retains real SQLSTATE
+23505/exact constraint evidence and synchronizes actual final service reads.
+Actual Academy command authority/profile/self-effect/original33 qualification,
+installed pair, all source review, OIDC activation, release and adoption remain
+open. No version or operational authority follows from this source amendment.
+
+The immediate Core phases also compare the actual Connection RootTransaction
+and NestedTransaction identities. Scoped physical completion/savepoint event
+checks permit only the public helper's exact RELEASE/ROLLBACK phases. If an API
+custody violation damages those handles, completion is refused and the actual
+root owner must roll back; it is never classified as business success. On an
+ordinary recovered operation failure, only already-clean known affected ORM
+attributes are expired without IO, so Core effects cannot survive as stale
+cached proof. Unrelated caller state is never expired or refreshed. An exact
+failed-SAVEPOINT latch prevents a caller catching a post-DML primitive exception
+from releasing partial effects; rollback clears that scope, retaining earlier
+root work. Hosted tests also require a subsequent ordinary SAVEPOINT to release
+after recoverable failures, ruling out a falsely healthy but poisoned root.

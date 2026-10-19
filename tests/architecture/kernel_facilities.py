@@ -287,6 +287,23 @@ FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
         "empty set until a real prerequisite binds any proposed module adoption.",
         frozenset(),
     ),
+    "identity_storage:remove_grants": (
+        "Deletes an exact detached tenant/Party GrantFact cohort in the caller's "
+        "active conflict SAVEPOINT, with clean ORM state and caller-held locks. "
+        "No declared prerequisite supplies canonical grant DELETE privileges or "
+        "the caller authority/locking contract. No installable module calls it "
+        "in this source inventory; freeze that exact empty caller set.",
+        frozenset(),
+    ),
+    "identity_storage:revoke_party_sessions": (
+        "Updates only the explicit tenant/Party AuthSession cohort in the caller's "
+        "active conflict SAVEPOINT. None/all and tuple/exact are selectors, not "
+        "authority. No declared prerequisite supplies session UPDATE privileges "
+        "or the caller authority/locking contract. Reference app auth logout is "
+        "an assembly caller, not an installable module; the module caller set "
+        "is empty in this source inventory and remains frozen exactly.",
+        frozenset(),
+    ),
     "identity_storage:delete_person": (
         "Deletes exactly the tenant-bound person Party, relying on incoming owner FK "
         "policy. party_person_catalog.v1 supplies SELECT references, not deletion "

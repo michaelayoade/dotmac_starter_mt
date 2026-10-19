@@ -351,3 +351,485 @@ def test_collisions_propagate_and_delete_is_caller_rollback_owned(storage_case):
     with pytest.raises(ValueError, match="deletion outcome"), conflict_savepoint(c.db):
         store.delete_person(c.db, tenant_id=tid, party_id=fact.id)
     assert c.db.get_transaction() is c.root
+
+
+def _storage_principal(c, tid):
+    values = _values(tid, uuid4().hex + "@example.test")
+    person = store.create_person(c.db, values=values)
+    store.lock_parties(c.db, tenant_id=tid, party_ids=(person.id,))
+    return person.id
+
+
+def test_exact_grant_removal_preserves_unselected_rows_and_refuses_drift(storage_case):
+    c = storage_case
+    tid = c.tenants[0]
+    pid = _storage_principal(c, tid)
+    roles = store.provision_missing_roles(
+        c.db,
+        tenant_id=tid,
+        catalog=(),
+        configured_names={"remove": "Remove", "preserve": "Preserve"},
+        missing_role_ids={"remove": uuid4(), "preserve": uuid4()},
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    grants = tuple(
+        store.ensure_grant(
+            c.db,
+            tenant_id=tid,
+            party_id=pid,
+            role_id=role.id,
+            new_grant_id=uuid4(),
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        for role in roles
+    )
+    before = tuple(
+        c.db.execute(
+            select(PartyRoleGrant.__table__)
+            .where(PartyRoleGrant.tenant_id == tid, PartyRoleGrant.party_id == pid)
+            .order_by(PartyRoleGrant.id)
+        )
+    )
+    bad = store.GrantFact(grants[0].id, tid, pid, uuid4())
+    with pytest.raises(ValueError, match="cohort differs"), conflict_savepoint(c.db):
+        c.db.connection()  # materialize the caller-owned physical savepoint
+        store.remove_grants(c.db, tenant_id=tid, party_id=pid, expected=(bad,))
+    assert (
+        tuple(
+            c.db.execute(
+                select(PartyRoleGrant.__table__)
+                .where(PartyRoleGrant.tenant_id == tid, PartyRoleGrant.party_id == pid)
+                .order_by(PartyRoleGrant.id)
+            )
+        )
+        == before
+    )
+    with conflict_savepoint(c.db):
+        c.db.connection()
+        assert store.remove_grants(c.db, tenant_id=tid, party_id=pid, expected=()) == ()
+        assert store.remove_grants(
+            c.db, tenant_id=tid, party_id=pid, expected=(grants[0],)
+        ) == (grants[0],)
+    assert (
+        c.db.execute(
+            select(PartyRoleGrant.id).where(PartyRoleGrant.id == grants[0].id)
+        ).first()
+        is None
+    )
+    assert (
+        c.db.execute(
+            select(PartyRoleGrant.id).where(PartyRoleGrant.id == grants[1].id)
+        ).scalar_one()
+        == grants[1].id
+    )
+    preserved = c.db.execute(
+        select(PartyRoleGrant.__table__).where(PartyRoleGrant.id == grants[1].id)
+    ).one()
+    assert preserved == next(row for row in before if row.id == grants[1].id)
+    assert c.db.get_transaction() is c.root
+
+
+def test_session_revocation_exact_empty_all_idempotence_and_unchanged_material(
+    storage_case,
+):
+    from datetime import timedelta
+
+    from dotmac_kernel.models import AuthSession, ExternalIdentityBinding
+
+    c = storage_case
+    tid = c.tenants[0]
+    pid = _storage_principal(c, tid)
+    other = _storage_principal(c, c.tenants[1])
+    ids = tuple(uuid4() for _ in range(4))
+    old = NOW - timedelta(days=3)
+    table = AuthSession.__table__
+    binding_id = uuid4()
+    c.db.execute(
+        insert(ExternalIdentityBinding.__table__).values(
+            id=binding_id,
+            tenant_id=tid,
+            party_id=pid,
+            provider_binding="storage-" + uuid4().hex,
+            issuer="https://storage.example.test",
+            subject=uuid4().hex,
+            is_active=True,
+            bound_by="storage canary",
+            bind_reason="provenance canary",
+            bound_at=NOW,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    for index, sid in enumerate(ids):
+        c.db.execute(
+            insert(table).values(
+                id=sid,
+                tenant_id=tid if index < 3 else c.tenants[1],
+                party_id=pid if index < 3 else other,
+                token_hash=(str(index) * 64),
+                expires_at=NOW - timedelta(days=1),
+                revoked_at=old if index == 2 else None,
+                created_at=old,
+                external_identity_binding_id=binding_id if index == 0 else None,
+            )
+        )
+    before = {
+        row.id: row
+        for row in c.db.execute(
+            select(table).where(table.c.id.in_(ids)).order_by(table.c.id)
+        )
+    }
+    with conflict_savepoint(c.db):
+        c.db.connection()
+        assert (
+            store.revoke_party_sessions(
+                c.db, tenant_id=tid, party_id=pid, session_ids=(), revoked_at=NOW
+            )
+            == ()
+        )
+        assert store.revoke_party_sessions(
+            c.db, tenant_id=tid, party_id=pid, session_ids=(ids[1],), revoked_at=NOW
+        ) == (ids[1],)
+        assert (
+            store.revoke_party_sessions(
+                c.db,
+                tenant_id=tid,
+                party_id=pid,
+                session_ids=(ids[1],),
+                revoked_at=NOW + timedelta(hours=1),
+            )
+            == ()
+        )
+        assert store.revoke_party_sessions(
+            c.db, tenant_id=tid, party_id=pid, session_ids=None, revoked_at=NOW
+        ) == (ids[0],)
+    after = {
+        row.id: row
+        for row in c.db.execute(
+            select(table).where(table.c.id.in_(ids)).order_by(table.c.id)
+        )
+    }
+    for sid in ids:
+        assert after[sid].token_hash == before[sid].token_hash
+        assert after[sid].expires_at == before[sid].expires_at
+        assert (
+            after[sid].external_identity_binding_id
+            == before[sid].external_identity_binding_id
+        )
+        assert after[sid].created_at == before[sid].created_at
+    assert after[ids[0]].revoked_at == NOW
+    assert after[ids[1]].revoked_at == NOW
+    assert after[ids[2]].revoked_at == old
+    assert after[ids[3]].revoked_at is None
+
+    assert after[ids[0]].updated_at == NOW
+    assert after[ids[1]].updated_at == NOW
+    assert after[ids[2]].updated_at == before[ids[2]].updated_at
+    assert after[ids[3]].updated_at == before[ids[3]].updated_at
+
+
+def test_foreign_session_cohort_refuses_before_any_transition(storage_case):
+    from dotmac_kernel.models import AuthSession
+
+    c = storage_case
+    tid, foreign = c.tenants
+    pid = _storage_principal(c, tid)
+    other = _storage_principal(c, foreign)
+    local_id, foreign_id = uuid4(), uuid4()
+    for sid, tenant_id, party_id in (
+        (local_id, tid, pid),
+        (foreign_id, foreign, other),
+    ):
+        c.db.execute(
+            insert(AuthSession.__table__).values(
+                id=sid,
+                tenant_id=tenant_id,
+                party_id=party_id,
+                token_hash=uuid4().hex * 2,
+                expires_at=NOW,
+                created_at=NOW,
+            )
+        )
+    for scope in ((local_id, foreign_id), (uuid4(),)):
+        with (
+            pytest.raises(ValueError, match="cohort differs"),
+            conflict_savepoint(c.db),
+        ):
+            c.db.connection()
+            store.revoke_party_sessions(
+                c.db, tenant_id=tid, party_id=pid, session_ids=scope, revoked_at=NOW
+            )
+        assert tuple(
+            c.db.scalars(
+                select(AuthSession.revoked_at).where(
+                    AuthSession.id.in_((local_id, foreign_id))
+                )
+            )
+        ) == (None, None)
+    with pytest.raises(ValueError, match="cohort differs"), conflict_savepoint(c.db):
+        c.db.connection()
+        store.revoke_party_sessions(
+            c.db,
+            tenant_id=foreign,
+            party_id=pid,
+            session_ids=(local_id,),
+            revoked_at=NOW,
+        )
+    assert c.db.get_transaction() is c.root
+
+
+@pytest.mark.parametrize("pending_kind", ("new", "dirty", "deleted"))
+def test_storage_pending_refusal_does_no_io_and_preserves_caller_state(
+    storage_case, pending_kind
+):
+    from dotmac_kernel.transactions import ConflictSavepointProtocolError
+    from sqlalchemy import event
+    from sqlalchemy import inspect as sa_inspect
+
+    c = storage_case
+    tid = c.tenants[0]
+    pid = _storage_principal(c, tid)
+    row = c.db.get(Party, pid)
+    if pending_kind == "new":
+        pending = Tenant(id=uuid4(), slug=uuid4().hex, name="Caller pending")
+        c.db.add(pending)
+    elif pending_kind == "dirty":
+        pending = row
+        pending.display_name = "Caller pending"
+    else:
+        pending = row
+        c.db.delete(pending)
+    before = (tuple(c.db.new), tuple(c.db.dirty), tuple(c.db.deleted))
+    history = (
+        sa_inspect(pending).attrs.name.history
+        if pending_kind == "new"
+        else sa_inspect(pending).attrs.display_name.history
+    )
+    calls = []
+
+    def observe(*args):
+        calls.append(1)
+
+    connection = c.db.connection()
+    event.listen(connection, "before_cursor_execute", observe)
+    try:
+        for command in (
+            lambda: store.remove_grants(c.db, tenant_id=tid, party_id=pid, expected=()),
+            lambda: store.revoke_party_sessions(
+                c.db, tenant_id=tid, party_id=pid, session_ids=(), revoked_at=NOW
+            ),
+        ):
+            with pytest.raises(
+                ConflictSavepointProtocolError, match="clean pending state"
+            ):
+                command()
+        assert calls == []
+        assert (tuple(c.db.new), tuple(c.db.dirty), tuple(c.db.deleted)) == before
+        assert (
+            sa_inspect(pending).attrs.name.history
+            if pending_kind == "new"
+            else sa_inspect(pending).attrs.display_name.history
+        ) == history
+        assert c.db.get_transaction() is c.root
+    finally:
+        event.remove(connection, "before_cursor_execute", observe)
+    # The fixture root rolls back all caller-owned pending work itself.
+
+
+def test_revocation_callback_pending_refuses_and_preserves_prior_flushed_root(
+    storage_case,
+):
+    from dotmac_kernel.models import AuthSession
+    from dotmac_kernel.transactions import ConflictSavepointProtocolError
+    from sqlalchemy import event
+
+    c = storage_case
+    tid = c.tenants[0]
+    pid = _storage_principal(c, tid)
+    sid = uuid4()
+    c.db.execute(
+        insert(AuthSession.__table__).values(
+            id=sid,
+            tenant_id=tid,
+            party_id=pid,
+            token_hash=uuid4().hex * 2,
+            expires_at=NOW,
+            created_at=NOW,
+        )
+    )
+    connection = c.db.connection()
+    injected = Tenant(id=uuid4(), slug=uuid4().hex, name="Callback pending")
+    calls = []
+
+    def inject(conn, cursor, statement, parameters, context, executemany):
+        # Real SQLAlchemy callback; do not record SQL or parameters. The next
+        # statement after materialization is the primitive's detached inventory.
+        calls.append(1)
+        c.db.add(injected)
+
+    with (
+        pytest.raises(ConflictSavepointProtocolError, match="clean pending state"),
+        conflict_savepoint(c.db),
+    ):
+        c.db.connection()
+        event.listen(connection, "after_cursor_execute", inject, once=True)
+        store.revoke_party_sessions(
+            c.db, tenant_id=tid, party_id=pid, session_ids=(sid,), revoked_at=NOW
+        )
+    assert calls == [1]
+    assert c.db.get_transaction() is c.root
+    assert c.db.get(Party, pid) is not None
+    assert (
+        c.db.scalar(select(AuthSession.revoked_at).where(AuthSession.id == sid)) is None
+    )
+    assert c.db.scalar(select(Tenant.id).where(Tenant.id == injected.id)) is None
+    assert not c.db.new and not c.db.dirty and not c.db.deleted
+
+
+def test_caught_post_dml_callback_cannot_release_partial_primitive_effect(storage_case):
+    from dotmac_kernel.models import AuthSession
+    from dotmac_kernel.transactions import ConflictSavepointProtocolError
+    from sqlalchemy import event
+
+    class InjectedFailure(Exception):
+        pass
+
+    c = storage_case
+    tid = c.tenants[0]
+    pid = _storage_principal(c, tid)
+    sid = uuid4()
+    c.db.execute(
+        insert(AuthSession.__table__).values(
+            id=sid,
+            tenant_id=tid,
+            party_id=pid,
+            token_hash=uuid4().hex * 2,
+            expires_at=NOW,
+            created_at=NOW,
+        )
+    )
+    connection = c.db.connection()
+    invoked = []
+
+    def fail_after_update(conn, cursor, statement, parameters, context, executemany):
+        if context.isupdate and not invoked:
+            invoked.append(1)
+            raise InjectedFailure()
+
+    with pytest.raises(
+        ConflictSavepointProtocolError, match="requires savepoint rollback"
+    ):
+        with conflict_savepoint(c.db):
+            c.db.connection()
+            event.listen(connection, "after_cursor_execute", fail_after_update)
+            try:
+                try:
+                    store.revoke_party_sessions(
+                        c.db,
+                        tenant_id=tid,
+                        party_id=pid,
+                        session_ids=(sid,),
+                        revoked_at=NOW,
+                    )
+                except InjectedFailure:
+                    pass  # caller cannot turn a failed issued phase into release
+            finally:
+                event.remove(connection, "after_cursor_execute", fail_after_update)
+    assert invoked == [1]
+    assert c.db.get_transaction() is c.root
+    assert c.db.scalar(select(Party.id).where(Party.id == pid)) == pid
+    assert (
+        c.db.scalar(select(AuthSession.revoked_at).where(AuthSession.id == sid)) is None
+    )
+    assert not c.db.new and not c.db.dirty and not c.db.deleted
+    with conflict_savepoint(c.db):
+        c.db.connection()
+    assert c.db.get_transaction() is c.root
+
+
+def test_grant_cohort_duplicate_missing_foreign_scope_never_removes_subset(
+    storage_case,
+):
+    c = storage_case
+    tid, foreign = c.tenants
+    pid = _storage_principal(c, tid)
+    role = store.provision_missing_roles(
+        c.db,
+        tenant_id=tid,
+        catalog=(),
+        configured_names={"exact": "Exact"},
+        missing_role_ids={"exact": uuid4()},
+        created_at=NOW,
+        updated_at=NOW,
+    )[0]
+    grant = store.ensure_grant(
+        c.db,
+        tenant_id=tid,
+        party_id=pid,
+        role_id=role.id,
+        new_grant_id=uuid4(),
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    cases = (
+        (tid, pid, (grant, grant)),
+        (tid, pid, (grant, store.GrantFact(uuid4(), tid, pid, role.id))),
+        (foreign, pid, (store.GrantFact(grant.id, foreign, pid, role.id),)),
+        (tid, uuid4(), (grant,)),
+    )
+    for tenant_id, party_id, expected in cases:
+        with pytest.raises(ValueError), conflict_savepoint(c.db):
+            c.db.connection()
+            store.remove_grants(
+                c.db, tenant_id=tenant_id, party_id=party_id, expected=expected
+            )
+        assert (
+            c.db.scalar(select(PartyRoleGrant.id).where(PartyRoleGrant.id == grant.id))
+            == grant.id
+        )
+    assert c.db.get_transaction() is c.root
+
+
+def test_required_revocation_shapes_refuse_before_query_or_dml(storage_case):
+    from dotmac_kernel.transactions import ConflictSavepointProtocolError
+    from sqlalchemy import event
+
+    c = storage_case
+    tid = c.tenants[0]
+    pid = _storage_principal(c, tid)
+    connection = c.db.connection()
+    calls = []
+
+    def observe(*args):
+        calls.append(1)
+
+    with conflict_savepoint(c.db):
+        c.db.connection()
+        event.listen(connection, "before_cursor_execute", observe)
+        try:
+            for ids, at in (
+                ((), NOW.replace(tzinfo=None)),
+                ((uuid4(),) * 2, NOW),
+                ([], NOW),
+            ):
+                with pytest.raises(ValueError):
+                    store.revoke_party_sessions(
+                        c.db,
+                        tenant_id=tid,
+                        party_id=pid,
+                        session_ids=ids,
+                        revoked_at=at,
+                    )
+            with pytest.raises(TypeError):
+                store.revoke_party_sessions(
+                    c.db, tenant_id=tid, party_id=pid, revoked_at=NOW
+                )
+            assert calls == []
+        finally:
+            event.remove(connection, "before_cursor_execute", observe)
+    with pytest.raises(ConflictSavepointProtocolError, match="caller savepoint"):
+        store.revoke_party_sessions(
+            c.db, tenant_id=tid, party_id=pid, session_ids=(), revoked_at=NOW
+        )

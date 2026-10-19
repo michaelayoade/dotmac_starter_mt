@@ -3815,7 +3815,7 @@ Ownership, since three writers touch this and only one owns each fact:
 | fact | owner |
 |---|---|
 | whether a binding is active | `dotmac_kernel.external_identity` |
-| whether a session is revoked | `dotmac_kernel.external_identity` (one writer) |
+| whether a session is revoked | Kernel private `_identity_persistence` DML owner via binding/public storage adapters; four Academy delegates still pending |
 | that a session EXISTS at all | the assembly that mints it |
 | which binding a session came from | the assembly, stamping the kernel's answer |
 
@@ -3823,19 +3823,23 @@ The assembly mints sessions and therefore stamps the column, using the
 `binding_id` `finalize_external_login` returned and nothing else. The kernel
 cannot enforce that — it does not mint sessions — so the rule is stated in the
 module docstring and the cost of ignoring it (an unattributable session) is
-stated with it. What the kernel DOES own is revocation: a product that revoked
-sessions itself would be a second writer of `revoked_at`, so the helper is
-private to the disable path.
+stated with it. The current source amendment centralizes revocation persistence
+in private `_identity_persistence`, reached by the selective binding adapter and
+explicit public storage selectors. Product authorization remains local. Four
+Academy delegates remain pending; global writer closure is not claimed.
 
 The FK carries `party_id` deliberately —
 `(tenant_id, party_id, external_identity_binding_id)` → `(tenant_id, party_id,
 id)`. Without it a session could cite a binding belonging to a different party
 in the same tenant, and selective revocation would revoke the wrong person.
 
-**Still open:** the login re-reads the party but does not LOCK it. `parties` has
-many other writers, and locking binding-then-party would deadlock against any
-transaction that touches a party before its binding. The answer is unchanged —
-revoke the sessions, do not lock the world.
+**Source-only amendment, 2026-10-19:** participating binding writers now discover
+owner without a child lock, acquire Party BEFORE binding, and recheck under both
+locks. Reference login/logout participate. The full current session cohort is
+sorted before any acting-session lock. Retained common-Party serialization
+covers successive same-root children; it does not certify arbitrary unknown
+future multi-Party composition. The detailed pending/root/public contract is in
+Kernel COMPATIBILITY.md, “Identity revocation and common-Party serialization”.
 
 `record_external_authentication` is DEPRECATED: it stamps a decision the caller
 already made, which is the second half of the racy pair. It is retained only for
@@ -4561,3 +4565,24 @@ checks remain required. No writer is retired: Starter reference tenant
 constructors and ERP/Sub writers remain unretired, with source parity references
 and existing hash-call debt unchanged. All changes are source-only; no installed,
 hosted, release, Academy factory or pair-adoption qualification is claimed.
+
+
+### Identity owner amendment — 2026-10-19, unpublished source
+
+| Concern | Owner | Boundary |
+|---|---|---|
+| Exact canonical grant removal | `dotmac_kernel.identity_storage.remove_grants` | Detached exact facts/Core DELETE; caller authorization/Party+grant locks/root/materialized operation SAVEPOINT |
+| Session revocation DML | private `dotmac_kernel._identity_persistence` | Explicit None/all or tuple/exact selectors and caller aware timestamp; no authority, engine, factory, flush or clock |
+| Binding selection/disable and issuance decision | `dotmac_kernel.external_identity` | Party then binding then complete sorted sessions; selective semantics and provenance retained |
+| Binding pending/root/callback enforcement | private `dotmac_kernel._identity_operation` | Scoped guard, immediate Core stages, passive all-pending refusal; no public capability |
+| Reference password issuance/exact logout | `app.features.auth.service` | Same Party-first protocol; local bounded guard imports only public Kernel APIs; logout delegates storage |
+
+The guard mechanics are intentionally local to the reference assembly and private
+inside Kernel: exporting private authority to share them would violate the
+public-surface boundary. All product policies/audits stay in their existing
+owners. Existing legacy document sections describe delivered a64/a67 behavior;
+this source amendment supplies the stronger parent order and extracted owner.
+Four Academy DML delegates, actual command authority/profile/self-effect tests,
+installed qualification and full writer retirement remain OPEN. See
+`docs/inventories/external-identity-sources.md` for the exact inspected caller and
+writer census. Source AST/pinned Ruff are not runtime or release evidence.

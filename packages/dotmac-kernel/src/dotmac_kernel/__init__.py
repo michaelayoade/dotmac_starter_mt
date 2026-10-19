@@ -493,6 +493,8 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
 # write helpers are the `settings_admin` narrow surface, not general API.
 INTERNAL_MODULES: frozenset[str] = frozenset(
     {
+        "dotmac_kernel._identity_operation",
+        "dotmac_kernel._identity_persistence",
         "dotmac_kernel._transactions",
         "dotmac_kernel.display",
         "dotmac_kernel.middleware",

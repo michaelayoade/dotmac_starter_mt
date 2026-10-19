@@ -50,13 +50,12 @@ binding that was already inactive when the login took the lock.
 - **A session that already existed.** Serializing the decision cannot retract a
   session issued a minute earlier. That needs selective revocation, which needs
   session provenance — the contract below.
-- **A party deactivated concurrently.** `finalize_external_login` re-reads the
-  party under the binding's lock, so it sees every deactivation committed
-  before that point. It deliberately does not take a second lock on `parties`:
-  that row has many other writers, and a login that locked binding-then-party
-  would deadlock against any transaction that touches a party before its
-  binding. The residual window is the same shape as the one above and has the
-  same answer — revoke the sessions, do not lock the world.
+- **Participating party lifecycle operations.** Every binding writer first
+  discovers its exact owner without a child lock, acquires that Party, and only
+  then acquires/rechecks the binding. Finalization retains both locks through
+  the caller's session INSERT and root completion. The common parent serializes
+  participating issuance, revocation and later same-Party operations. Arbitrary
+  nonparticipating writers and unknown future multi-Party roots are not proved.
 - **Isolation level.** The re-check assumes READ COMMITTED (Postgres's
   default), where a `FOR UPDATE` that waits on a concurrent writer re-reads the
   committed row version once the lock is granted. Under REPEATABLE READ or
@@ -138,7 +137,9 @@ configured for something else entirely.
 
 ## Transactions and audit
 
-Every function here mutates and flushes; none commits. The caller's assembly
+The resolver reads only. Writers use guarded immediate Core DML in a physical
+public conflict SAVEPOINT; none flushes pending ORM state or commits. The caller's
+assembly
 owns its session boundary, while `dotmac_kernel.db` remains the kernel's public
 transaction authority (hard rule 8). Expected conflicts use the kernel-private,
 engine-free savepoint mechanic so importing or calling this service never
@@ -156,14 +157,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from dotmac_kernel._transactions import conflict_savepoint
+from dotmac_kernel._identity_operation import _Operation, _operation, _refresh_sessions
+from dotmac_kernel._identity_persistence import _revoke_sessions
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
 from dotmac_kernel.models import (
     AuthSession,
@@ -172,9 +173,6 @@ from dotmac_kernel.models import (
     PartyType,
     Tenant,
 )
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from sqlalchemy.engine import CursorResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,9 +187,9 @@ class ResolvedExternalIdentity:
 
     What it is for now is the thing the id was always better suited to: telling
     a session which binding produced it, so disabling that binding can revoke
-    exactly those sessions and no others. The column that receives it does not
-    exist yet — see the module docstring's deferred contract — and until it
-    does, `binding_id` is a value a caller may record in its own audit event.
+    exactly those sessions and no others. The canonical nullable provenance column
+    is delivered; password sessions
+    carry None, and external sessions must stamp this exact returned binding.
 
     Returned by BOTH entry points, deliberately: the read and the login path
     hand back the same shape, so switching a caller from one to the other is a
@@ -286,74 +284,66 @@ def finalize_external_login(
     issuer: str,
     subject: str,
 ) -> ResolvedExternalIdentity | None:
-    """Decide the login and record it as ONE locked step, or refuse.
+    """Decide and stamp a verified login under retained Party then binding locks.
 
-    The only entry point a caller may end a session on. It locks the binding,
-    re-checks under that lock everything that would refuse the login, stamps
-    `last_authenticated_at`, and returns the party — so the caller adds its
-    session in the SAME transaction, with the row still held. A concurrent
-    disable cannot land between the decision and the session, because it needs
-    the lock this call is holding. The module docstring has the interleaving
-    this closes, and the ones it does not.
+    Detached discovery grants nothing. Recheck the same owner, enabled binding,
+    tenant and active person after waiting. Every business refusal is None; no
+    subject-enumeration detail is returned. The caller mints its provenance-
+    bearing session in the SAME root while Party and binding remain held.
 
-    Same parameters and same return shape as `resolve_external_identity`, so
-    moving a caller off the racy pair is one identifier. `None` for every
-    refusal, for the same reason resolution refuses that way: a typed error per
-    reason would let a caller distinguish "no such subject" from "disabled
-    binding", and that distinction is a subject-enumeration oracle handed to
-    whoever can drive a login. The caller turns `None` into its own refusal.
-
-    Two implementation details are load-bearing rather than incidental:
-
-    * The locking read matches on the identity tuple ALONE and checks
-      `is_active` in Python afterwards. Putting `is_active` in the `WHERE`
-      would work — Postgres re-evaluates a locking query's predicate against
-      the newly committed row version, so a disabled row would simply drop out
-      — but it would put the re-check in a place a reader cannot see, and it
-      would silently stop being a re-check under an isolation level that
-      raises instead of re-evaluating. The tuple is the unique key, so the
-      lock is still on exactly one row.
-    * `populate_existing=True` on both reads. Without it a session that had
-      already loaded either row would get the identity map's copy: the `SELECT
-      … FOR UPDATE` would take the lock, and then the code would test a value
-      cached from BEFORE the concurrent disable. A lock that guards a stale
-      attribute is worse than no lock, because it looks correct.
-
-    Mutates and flushes; `dotmac_kernel.db` owns the commit (hard rule 8) — and
-    that ownership is the point, not a formality. The caller's commit is what
-    releases the lock, so the session it mints and the stamp made here become
-    visible together or not at all.
-    """
-    binding = db.scalars(
-        select(ExternalIdentityBinding)
-        .where(ExternalIdentityBinding.tenant_id == tenant.id)
-        .where(ExternalIdentityBinding.provider_binding == provider_binding.strip())
-        .where(ExternalIdentityBinding.issuer == issuer.strip())
-        .where(ExternalIdentityBinding.subject == subject.strip())
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    ).first()
-    if binding is None:
-        return None
-    # Under the lock, and only now, is `is_active` an answer rather than an
-    # observation: no other transaction can flip it until this one commits.
-    if not binding.is_active:
-        return None
-
-    party = db.scalars(
-        select(Party)
-        .where(Party.tenant_id == tenant.id)
-        .where(Party.id == binding.party_id)
-        .execution_options(populate_existing=True)
-    ).first()
-    if party is None:
-        return None
-    if not party.is_active or party.party_type != PartyType.person:
-        return None
-
-    binding.last_authenticated_at = datetime.now(UTC)
-    db.flush()
-    return ResolvedExternalIdentity(party=party, binding_id=binding.id)
+    Requires clean pending ORM state and an active caller root. A guarded public
+    conflict SAVEPOINT is physically materialized before queries; Core DML never
+    flushes caller work. Both clean ORM reads refresh under their respective
+    locks. Same-root later children remain supported without a closure registry.
+    Arbitrary unknown-future multi-Party deadlock freedom is not claimed."""
+    with _operation(db) as owner:
+        tid = tenant.id
+        owner.check()
+        selectors = (
+            ExternalIdentityBinding.tenant_id == tid,
+            ExternalIdentityBinding.provider_binding == provider_binding.strip(),
+            ExternalIdentityBinding.issuer == issuer.strip(),
+            ExternalIdentityBinding.subject == subject.strip(),
+        )
+        discovered = db.scalar(
+            select(ExternalIdentityBinding.party_id).where(*selectors)
+        )
+        if discovered is None:
+            return None
+        # The common parent is held through the caller's later session INSERT
+        # and root completion. A waiting disable cannot already hold a child.
+        party = db.scalars(
+            select(Party)
+            .where(Party.tenant_id == tid, Party.id == discovered)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        owner.check()
+        if party is None:
+            return None
+        binding = db.scalars(
+            select(ExternalIdentityBinding)
+            .where(*selectors)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        owner.check()
+        if binding is None or binding.party_id != discovered or not binding.is_active:
+            return None
+        if not party.is_active or party.party_type != PartyType.person:
+            return None
+        owner.track(binding, ("last_authenticated_at", "updated_at"))
+        db.execute(
+            update(ExternalIdentityBinding.__table__)
+            .where(
+                ExternalIdentityBinding.id == binding.id,
+                ExternalIdentityBinding.tenant_id == tid,
+            )
+            .values(last_authenticated_at=datetime.now(UTC))
+        )
+        db.refresh(binding, attribute_names=["last_authenticated_at", "updated_at"])
+        owner.check()
+        return ResolvedExternalIdentity(party=party, binding_id=binding.id)
 
 
 def bind_external_identity(
@@ -367,113 +357,139 @@ def bind_external_identity(
     bound_by: str,
     reason: str,
 ) -> ExternalIdentityBinding:
-    """Bind a verified external subject to `party`, with evidence.
+    """Bind a verified subject to a local person, with explicit evidence.
 
-    Deliberately an ADMINISTRATIVE act, not something a login performs. The
-    whole no-auto-provision posture rests on this being a separate decision:
-    somebody with authority decided this external subject is this person, and
-    `bound_by`/`reason` record who and why. Both are required and non-blank,
-    a port delta over ERP (which records neither) taken from Sub's CHECK-forced
-    evidence pair.
+    This administrative act never provisions, matches email or repoints a
+    different owner. Original text/tenant/person checks and advisory errors are
+    retained. A fresh detached different-owner collision refuses BEFORE an
+    irrelevant proposed Party lock. Successful paths lock Party, then recheck
+    exact binding/provider membership; same-party rebind reactivates/re-evidences.
+    Unique constraints still arbitrate distinct-party concurrent subject claims.
+    IntegrityError becomes the original recoverable ConflictError after the
+    operation SAVEPOINT rolls back, preserving earlier root work and tenant GUC.
 
-    Idempotent for the SAME party — re-binding reactivates and re-evidences the
-    existing row, which is how a disabled binding is restored (ERP's behaviour).
-    Re-binding a subject that already belongs to a DIFFERENT party raises
-    `ConflictError`: silently repointing it would transfer an account, and the
-    unique constraints refuse it anyway — this just makes the refusal legible
-    instead of an `IntegrityError` at flush time.
-
-    Raises `ValueError` on blank/oversized input, `ConflictError` on a
-    cross-party collision — including one that only materialises under
-    concurrency, where the unique constraints arbitrate and the loser gets a
-    `ConflictError` rather than a transaction-aborting `IntegrityError`.
-    Mutates and flushes; the caller owns the commit.
-    """
-    provider_binding = _require_text(
-        provider_binding, field="provider_binding", limit=80
-    )
-    issuer = _require_text(issuer, field="issuer", limit=512)
-    subject = _require_text(subject, field="subject", limit=255)
-    bound_by = _require_text(bound_by, field="bound_by", limit=120)
-    reason = _require_text(reason, field="bind_reason", limit=500)
-
-    if party.tenant_id != tenant.id:
-        raise ConflictError(
-            "party belongs to a different tenant than the binding being created"
-        )
-    if party.party_type != PartyType.person:
-        raise ConflictError(
-            "only a person party can hold an external identity — an organization "
-            "has no one to authenticate"
-        )
-
-    existing = db.scalars(
-        select(ExternalIdentityBinding)
-        .where(ExternalIdentityBinding.tenant_id == tenant.id)
-        .where(ExternalIdentityBinding.provider_binding == provider_binding)
-        .where(ExternalIdentityBinding.issuer == issuer)
-        .where(ExternalIdentityBinding.subject == subject)
-    ).first()
-    if existing is not None:
-        if existing.party_id != party.id:
-            raise ConflictError(
-                "this external subject is already bound to a different party at "
-                "this provider. Disabling that binding does NOT release the "
-                "subject: the row keeps occupying the unique key, so the only "
-                "paths are to re-enable it for the same party or to delete it "
-                "deliberately, which discards the evidence of who bound it."
-            )
-        existing.is_active = True
-        existing.bound_at = datetime.now(UTC)
-        existing.bound_by = bound_by
-        existing.bind_reason = reason
-        db.flush()
-        return existing
-
-    # The party's OTHER binding at this same provider, if any. The unique
-    # constraint would refuse this too; catching it here names which of the two
-    # rules was broken, since the two failures need different operator actions.
-    held = db.scalars(
-        select(ExternalIdentityBinding)
-        .where(ExternalIdentityBinding.tenant_id == tenant.id)
-        .where(ExternalIdentityBinding.provider_binding == provider_binding)
-        .where(ExternalIdentityBinding.party_id == party.id)
-    ).first()
-    if held is not None:
-        raise ConflictError(
-            "this party already holds an external identity at this provider — "
-            "a party may hold at most one per provider registration"
-        )
-
-    # The two lookups above are ADVISORY, not arbitration. Between them and this
-    # INSERT, a concurrent binder can pass the same checks — both see no row,
-    # both proceed, and the database decides. Without a savepoint the loser's
-    # `IntegrityError` would abort the whole request transaction (taking `SET
-    # LOCAL app.current_tenant` with it, so any DB access in the caller's
-    # `except ConflictError` handler runs with no tenant context and fails
-    # closed under FORCE RLS — the F3 failure `conflict_savepoint` exists for),
-    # and the caller would get a raw `IntegrityError` instead of the
-    # `ConflictError` this function documents.
-    #
-    # The unique constraints are what actually arbitrate; the earlier lookups
-    # only buy a SPECIFIC message naming which of the two rules was broken, and
-    # they cannot tell them apart once the race is lost. Hence the generic
-    # message here — it must not claim to know which constraint fired.
+    Clean pending state and active caller root precede all IO. Checked Core DML
+    replaces pending ORM writes; return is the actual clean same-Session row.
+    No commit, new root, closure declaration or fresh-root restriction exists."""
     try:
-        with conflict_savepoint(db):
-            binding = ExternalIdentityBinding(
-                tenant_id=tenant.id,
-                party_id=party.id,
-                provider_binding=provider_binding,
-                issuer=issuer,
-                subject=subject,
-                is_active=True,
-                bound_at=datetime.now(UTC),
-                bound_by=bound_by,
-                bind_reason=reason,
+        with _operation(db) as owner:
+            provider_binding = _require_text(
+                provider_binding, field="provider_binding", limit=80
             )
-            db.add(binding)
-            db.flush()
+            issuer = _require_text(issuer, field="issuer", limit=512)
+            subject = _require_text(subject, field="subject", limit=255)
+            bound_by = _require_text(bound_by, field="bound_by", limit=120)
+            reason = _require_text(reason, field="bind_reason", limit=500)
+            proposed_tenant = party.tenant_id
+            owner.check()
+            tid = tenant.id
+            owner.check()
+            if proposed_tenant != tid:
+                raise ConflictError(
+                    "party belongs to a different tenant than the binding being created"
+                )
+            proposed_type = party.party_type
+            owner.check()
+            if proposed_type != PartyType.person:
+                raise ConflictError(
+                    "only a person party can hold an external identity — "
+                    "an organization has no one to authenticate"
+                )
+            pid = party.id
+            owner.check()
+            selectors = (
+                ExternalIdentityBinding.tenant_id == tid,
+                ExternalIdentityBinding.provider_binding == provider_binding,
+                ExternalIdentityBinding.issuer == issuer,
+                ExternalIdentityBinding.subject == subject,
+            )
+            # Fresh detached negative evidence refuses without acquiring an
+            # irrelevant proposed Party or conflicting owner's binding lock.
+            observed = db.scalar(
+                select(ExternalIdentityBinding.party_id).where(*selectors)
+            )
+            if observed is not None and observed != pid:
+                _different_party()
+            locked = db.scalars(
+                select(Party)
+                .where(Party.tenant_id == tid, Party.id == pid)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).first()
+            owner.check()
+            if locked is None:
+                raise ConflictError(
+                    "party belongs to a different tenant than the binding being created"
+                )
+            if locked.party_type != PartyType.person:
+                raise ConflictError(
+                    "only a person party can hold an external identity — "
+                    "an organization has no one to authenticate"
+                )
+            existing = db.scalars(
+                select(ExternalIdentityBinding)
+                .where(*selectors)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).first()
+            owner.check()
+            if existing is not None:
+                if existing.party_id != pid:
+                    _different_party()
+                owner.track(
+                    existing,
+                    ("is_active", "bound_at", "bound_by", "bind_reason", "updated_at"),
+                )
+                db.execute(
+                    update(ExternalIdentityBinding.__table__)
+                    .where(
+                        ExternalIdentityBinding.id == existing.id,
+                        ExternalIdentityBinding.tenant_id == tid,
+                        ExternalIdentityBinding.party_id == pid,
+                    )
+                    .values(
+                        is_active=True,
+                        bound_at=datetime.now(UTC),
+                        bound_by=bound_by,
+                        bind_reason=reason,
+                    )
+                )
+                db.refresh(existing)
+                owner.check()
+                return existing
+            held = db.scalar(
+                select(ExternalIdentityBinding.id).where(
+                    ExternalIdentityBinding.tenant_id == tid,
+                    ExternalIdentityBinding.provider_binding == provider_binding,
+                    ExternalIdentityBinding.party_id == pid,
+                )
+            )
+            if held is not None:
+                raise ConflictError(
+                    "this party already holds an external identity at this provider — "
+                    "a party may hold at most one per provider registration"
+                )
+            bid = db.scalar(
+                insert(ExternalIdentityBinding.__table__)
+                .values(
+                    tenant_id=tid,
+                    party_id=pid,
+                    provider_binding=provider_binding,
+                    issuer=issuer,
+                    subject=subject,
+                    is_active=True,
+                    bound_at=datetime.now(UTC),
+                    bound_by=bound_by,
+                    bind_reason=reason,
+                )
+                .returning(ExternalIdentityBinding.id)
+            )
+            return db.scalars(
+                select(ExternalIdentityBinding).where(
+                    ExternalIdentityBinding.id == bid,
+                    ExternalIdentityBinding.tenant_id == tid,
+                )
+            ).one()
     except IntegrityError as exc:
         raise ConflictError(
             "this external identity was bound concurrently — either the subject "
@@ -481,160 +497,168 @@ def bind_external_identity(
             "identity there. Re-read the current binding before retrying; the "
             "unique constraints arbitrate, and this request lost."
         ) from exc
-    return binding
 
 
 def disable_external_identity_binding(
     db: Session, *, tenant: Tenant, binding_id: UUID
 ) -> ExternalIdentityBinding:
-    """Deactivate a binding, keeping the row.
+    """Disable and revoke exactly this tenant binding's sessions atomically.
 
-    Retention is the point (ERP: *"Disabling a binding retains the record for
-    auditability"*). A deleted row would erase the evidence of who bound the
-    identity and why, at exactly the moment that evidence becomes interesting.
+    The subject remains occupied: disable never releases or repoints it.
+    Detached discovery precedes Party lock, binding lock and ownership recheck.
+    The complete current binding-session cohort is acquired in UUID order before
+    shared private persistence changes unrevoked rows. Expired rows are included;
+    prior timestamps, token hashes, expiry and provenance survive. Other bindings
+    and password sessions are untouched. Repeated disable is a supported no-op
+    for prior revocations; missing/foreign binding is the original NotFoundError.
 
-    **Disabling does NOT release the subject.** The row keeps occupying
-    `uq_external_identity_bindings_tenant_provider_subject`, so the same
-    external subject cannot afterwards be bound to a DIFFERENT party while it
-    exists — `bind_external_identity` raises `ConflictError`. Re-binding the
-    same party reactivates this row. That is deliberate and it is the safe
-    default: silently freeing the tuple would make "disable" a step on the path
-    to handing an external identity to somebody else, which is the takeover this
-    table exists to prevent. Reassignment is a delete, and a delete is a
-    decision to discard evidence.
-
-    **It REVOKES the sessions that binding produced**, in this call and this
-    transaction. The contract's wording was deliberate: *disabling and revoking
-    must not be two calls a caller can do half of*. There is no
-    `revoke_sessions=False` — a flag whose off position leaves live sessions for
-    a disabled identity is not flexibility.
-
-    ## The lock is EXPLICIT, and that is a correction
-
-    An earlier draft read the row with `db.get` and relied on the eventual
-    `UPDATE` to serialise. That does not hold: `db.get` takes no lock, so a login
-    already inside `finalize_external_login` could commit its session AFTER this
-    transaction had scanned for sessions to revoke, and that session would
-    survive its own binding's disablement. The read here is
-    `SELECT … FOR UPDATE` on the same row `finalize_external_login` locks, which
-    is what actually orders the two.
-
-    Both interleavings then end correctly:
-
-    * **login first** — it holds the lock, so this call WAITS. The login commits
-      its session, this call acquires the lock, and the revocation below sweeps
-      up the session that was just issued. Disabling is never beaten by a login
-      that happened to be a moment earlier.
-    * **disable first** — this call holds the lock, so the login blocks. On
-      acquiring it, `finalize_external_login` re-reads under EvalPlanQual, sees
-      `is_active = False`, and refuses. No session is issued at all.
-
-    Scope is SELECTIVE. Sessions from other bindings and from password logins
-    are untouched; a global logout is a different decision with a different blast
-    radius and does not belong on this path.
-
-    Raises `NotFoundError` if no such binding exists IN THIS TENANT — a
-    cross-tenant id is a miss, not an error disclosing that the id is real.
-    Mutates and flushes; the caller owns the commit, and it is the commit that
-    releases the lock.
-    """
-    binding = db.execute(
-        select(ExternalIdentityBinding)
-        .where(
-            ExternalIdentityBinding.id == binding_id,
-            ExternalIdentityBinding.tenant_id == tenant.id,
+    Clean pending state and active caller root are checked before IO; a guarded
+    physical public conflict SAVEPOINT encloses Core writes. Only known clean
+    affected attributes refresh; caller owns root completion and retained locks."""
+    with _operation(db) as owner:
+        tid = tenant.id
+        owner.check()
+        discovered = db.scalar(
+            select(ExternalIdentityBinding.party_id).where(
+                ExternalIdentityBinding.tenant_id == tid,
+                ExternalIdentityBinding.id == binding_id,
+            )
         )
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    ).scalar_one_or_none()
-    if binding is None:
-        raise NotFoundError("external identity binding not found")
-
-    binding.is_active = False
-    _revoke_sessions_for_binding(db, tenant=tenant, binding_id=binding.id)
-    db.flush()
-    return binding
+        if discovered is None:
+            raise NotFoundError("external identity binding not found")
+        principal = db.scalar(
+            select(Party.id)
+            .where(Party.tenant_id == tid, Party.id == discovered)
+            .with_for_update()
+        )
+        if principal is None:
+            raise NotFoundError("external identity binding not found")
+        binding = db.scalars(
+            select(ExternalIdentityBinding)
+            .where(
+                ExternalIdentityBinding.id == binding_id,
+                ExternalIdentityBinding.tenant_id == tid,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        owner.check()
+        if binding is None or binding.party_id != discovered:
+            raise NotFoundError("external identity binding not found")
+        owner.track(binding, ("is_active", "updated_at"))
+        _revoke_sessions_for_binding(
+            db,
+            tenant=tenant,
+            binding_id=binding.id,
+            party_id=discovered,
+            owner=owner,
+        )
+        db.execute(
+            update(ExternalIdentityBinding.__table__)
+            .where(
+                ExternalIdentityBinding.tenant_id == tid,
+                ExternalIdentityBinding.id == binding.id,
+                ExternalIdentityBinding.party_id == discovered,
+                ExternalIdentityBinding.is_active.is_(True),
+            )
+            .values(is_active=False)
+        )
+        db.refresh(binding, attribute_names=["is_active", "updated_at"])
+        owner.check()
+        return binding
 
 
 def _revoke_sessions_for_binding(
-    db: Session, *, tenant: Tenant, binding_id: UUID
+    db: Session, *, tenant: Tenant, binding_id: UUID, party_id: UUID, owner: _Operation
 ) -> int:
-    """Revoke every unrevoked session this binding produced. Returns the count.
+    """Private selective adapter to the sole Kernel revocation DML owner.
 
-    PRIVATE, and it stays private until something other than
-    `disable_external_identity_binding` needs it. A public function with one
-    in-module caller is surface a consumer can reach around the decision that
-    owns it — here, revoking without disabling would leave the binding able to
-    mint a replacement session immediately, which is not an operation anybody
-    has asked for and is a footgun if offered.
-
-    `auth_sessions.revoked_at` has ONE writer. A product that revoked sessions
-    itself would be a second one. An assembly MINTS sessions — its own decision,
-    and it stamps the provenance column when it does — but ending them on an
-    IDENTITY decision belongs to the kernel, which is what knows a binding was
-    disabled.
-
-    Idempotent by predicate rather than by bookkeeping: `revoked_at IS NULL`
-    means a repeat revokes nothing, and a session revoked earlier for another
-    reason keeps its original timestamp. Overwriting it would move the recorded
-    moment somebody was signed out, which is the one fact the column carries.
-
-    Expired sessions are included deliberately. One past `expires_at` is already
-    refused at authentication so revoking changes no access — but it makes the
-    row say what happened, and an operator reading the trail should not have to
-    reason about which rows were skipped because a clock had passed.
-    """
-    result = db.execute(
-        update(AuthSession)
-        .where(
-            AuthSession.tenant_id == tenant.id,
-            AuthSession.external_identity_binding_id == binding_id,
-            AuthSession.revoked_at.is_(None),
+    Party and exact binding are already held by disable. Acquire the complete
+    current binding-session cohort sorted, then sample its operation time. The
+    shared owner preserves NULL-only/idempotent/expired/provenance semantics.
+    Four dependent Academy writers remain open; no global retirement is claimed."""
+    ids = tuple(
+        db.scalars(
+            select(AuthSession.id)
+            .where(
+                AuthSession.tenant_id == tenant.id,
+                AuthSession.party_id == party_id,
+                AuthSession.external_identity_binding_id == binding_id,
+            )
+            .order_by(AuthSession.id)
+            .with_for_update()
         )
-        .values(revoked_at=datetime.now(UTC))
     )
-    # `rowcount` lives on the DBAPI cursor result; the ORM's `Result` does not
-    # declare it, so it is read through `cast` rather than silenced.
-    return int(cast("CursorResult[Any]", result).rowcount)
+    changed = _revoke_sessions(
+        db,
+        tenant_id=tenant.id,
+        party_id=party_id,
+        binding_id=binding_id,
+        session_ids=ids,
+        revoked_at=datetime.now(UTC),
+    )
+    _refresh_sessions(db, ids, owner=owner)
+    return len(changed)
 
 
 def record_external_authentication(
     db: Session, *, tenant: Tenant, binding_id: UUID
 ) -> None:
-    """DEPRECATED. Stamp `last_authenticated_at` for a decision made elsewhere.
+    """DEPRECATED: stamp an already-decided authentication, never mint a login.
 
-    It survives, deprecated rather than deleted or absorbed, and the argument
-    for each is worth writing down because the wrong reading of "keep it" is
-    what would reopen the defect.
+    Retained for an evidenced step-up ceremony with no new session; removed next
+    minor unless a real consumer is named. Login must use finalize_external_login.
+    This writer still participates in Party-before-binding serialization and
+    exact owner recheck. Missing/foreign binding remains NotFoundError; inactive
+    bindings may still be stamped, preserving the old supported behavior.
 
-    **Why not absorbed.** `finalize_external_login` does stamp, so the stamping
-    code is duplicated — but they are not the same operation. This one records
-    an authentication the CALLER already decided; that one MAKES the decision
-    and records it in the same locked step. Folding this into that would mean
-    exporting a way to stamp without deciding, which is precisely the half of
-    the pair that made resolve-then-issue look safe.
-
-    **Why not deleted.** It has one use that is not the defect: recording that
-    an already-authenticated principal exercised the binding again — a step-up
-    or re-authentication ceremony where no new session is minted, so there is
-    nothing to linearize and nothing a lock would protect. That case is real
-    but has no consumer in the fleet today, which is why this is a deprecation
-    with a condition and not a permanent surface: it is REMOVED in the next
-    minor unless such a consumer appears and is named here.
-
-    **Never** as the second half of resolve-then-stamp. That pair reads the
-    binding without a lock and writes after, so an administrator disabling the
-    binding in between gets a successful-looking disable and a live session
-    derived from the identity it revoked. If a session is going to exist at the
-    end of the flow, the flow starts at `finalize_external_login`.
-
-    Raises `NotFoundError` if no such binding exists IN THIS TENANT.
-    """
-    binding = db.get(ExternalIdentityBinding, binding_id)
-    if binding is None or binding.tenant_id != tenant.id:
-        raise NotFoundError("external identity binding not found")
-    binding.last_authenticated_at = datetime.now(UTC)
-    db.flush()
+    Clean pending state and active caller root precede a guarded materialized
+    public conflict SAVEPOINT/Core update. No commit or pending ORM flush."""
+    with _operation(db) as owner:
+        tid = tenant.id
+        owner.check()
+        discovered = db.scalar(
+            select(ExternalIdentityBinding.party_id).where(
+                ExternalIdentityBinding.tenant_id == tid,
+                ExternalIdentityBinding.id == binding_id,
+            )
+        )
+        if discovered is None:
+            raise NotFoundError("external identity binding not found")
+        principal = db.scalar(
+            select(Party.id)
+            .where(
+                Party.tenant_id == tid,
+                Party.id == discovered,
+            )
+            .with_for_update()
+        )
+        if principal is None:
+            raise NotFoundError("external identity binding not found")
+        binding = db.scalars(
+            select(ExternalIdentityBinding)
+            .where(
+                ExternalIdentityBinding.tenant_id == tid,
+                ExternalIdentityBinding.id == binding_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        owner.check()
+        if binding is None or binding.party_id != discovered:
+            raise NotFoundError("external identity binding not found")
+        owner.track(binding, ("last_authenticated_at", "updated_at"))
+        db.execute(
+            update(ExternalIdentityBinding.__table__)
+            .where(
+                ExternalIdentityBinding.tenant_id == tid,
+                ExternalIdentityBinding.id == binding_id,
+                ExternalIdentityBinding.party_id == discovered,
+            )
+            .values(last_authenticated_at=datetime.now(UTC))
+        )
+        db.refresh(binding, attribute_names=["last_authenticated_at", "updated_at"])
+        owner.check()
 
 
 __all__ = [
@@ -645,3 +669,13 @@ __all__ = [
     "record_external_authentication",
     "resolve_external_identity",
 ]
+
+
+def _different_party() -> None:
+    raise ConflictError(
+        "this external subject is already bound to a different party at "
+        "this provider. Disabling that binding does NOT release the "
+        "subject: the row keeps occupying the unique key, so the only "
+        "paths are to re-enable it for the same party or to delete it "
+        "deliberately, which discards the evidence of who bound it."
+    )

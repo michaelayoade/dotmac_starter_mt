@@ -44,8 +44,17 @@ def expectation(checkout: Path, destination: Path) -> None:
     version = None
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
+            require(node.level <= 1, "Source root relative owner escapes package")
+            if node.level == 1:
+                owner = (
+                    f"dotmac_learning.{node.module}"
+                    if node.module
+                    else "dotmac_learning"
+                )
+            else:
+                owner = node.module
             for alias in node.names:
-                bindings[alias.asname or alias.name] = [node.module, alias.name]
+                bindings[alias.asname or alias.name] = [owner, alias.name]
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "__all__":

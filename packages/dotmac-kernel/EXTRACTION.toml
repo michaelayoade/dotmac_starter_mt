@@ -394,3 +394,25 @@ evidence_paths = ["app/services/accounts.py", "app/web/accounts.py", "app/servic
 # JSONB comparison remains database-owned. Catalog scope is the existing
 # importer contract, not a full RI fingerprint. Source-only V4 is unallocated,
 # unreleased and unqualified; complete baseline/hosted/installed proof pending.
+
+# Identity owner amendment 2026-10-19, source-only V3 plus adopted composition
+# correction: two exact public storage primitives remove_grants and
+# revoke_party_sessions; existing signatures remain unchanged. Existing binding
+# revocation DML moves to private _identity_persistence. Private
+# _identity_operation owns the binding writer's clean/root/callback mechanics;
+# reference app/features/auth/service.py retains equivalent bounded orchestration
+# locally and imports only public storage/transactions. No new authority API.
+# Source: immutable c89 external_identity.py:559-598 selective writer and
+# reference auth service.py:148-224/262-279 issuance/logout. Four Academy writers
+# inventoried below are NOT ported by this capsule. Product policy remains local.
+# Actual named external write callers: 22 test sites, zero inspected production
+# callers. Same-root/lower-child composition stays callable without closure
+# declaration or fresh-root refusal. Arbitrary unknown-future multi-Party
+# deadlock freedom is not claimed. No new prerequisite/migration/version/role.
+# New source tests extend test_identity_storage, external_identity_isolation,
+# external_identity_login_race and unit/test_auth_service. All original test
+# definitions/assertions retained except Root-authorized per-case arbitration
+# oracle adaptation: same-Party serial advisory refusal, distinct-Party actual
+# SQLSTATE23505/constraint with real final-read synchronization. Hosted NOT RUN.
+# Full pending/callback/rollback/cancel/actual role+RLS/race/installed qualification
+# and independent implementation review remain mandatory; no retirement claim.

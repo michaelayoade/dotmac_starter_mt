@@ -15,10 +15,16 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from dotmac_kernel._identity_persistence import (
+    _clean_boundary,
+    _revoke_sessions,
+    _storage_phase,
+    _uuid,
+)
 from dotmac_kernel.models import (
     Party,
     PartyPerson,
@@ -49,6 +55,8 @@ __all__ = (
     "provision_missing_roles",
     "ensure_grant",
     "delete_person",
+    "remove_grants",
+    "revoke_party_sessions",
 )
 
 
@@ -403,3 +411,93 @@ def create_tenant(db: Session, *, values: NewTenantValues) -> TenantFact:
     db.add(row)
     db.flush()
     return TenantFact(row.id, row.slug, row.name, row.is_active)
+
+
+def remove_grants(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    party_id: UUID,
+    expected: tuple[GrantFact, ...],
+) -> tuple[GrantFact, ...]:
+    """Remove exactly fresh caller-inventoried grants; facts are not authority.
+
+    Caller owns full Party/subordinate lock closure and an already materialized
+    public conflict SAVEPOINT in its active root. No ORM state is refreshed,
+    flushed, expired or populated. Any pending caller work is refused before IO.
+    """
+    root, savepoint = _clean_boundary(db)
+    _uuid(tenant_id)
+    _uuid(party_id)
+    if not isinstance(expected, tuple):
+        raise ValueError("identity storage grant cohort shape differs")
+    for fact in expected:
+        if not isinstance(fact, GrantFact):
+            raise ValueError("identity storage grant cohort shape differs")
+        for value in (fact.id, fact.tenant_id, fact.party_id, fact.role_id):
+            _uuid(value)
+        if fact.tenant_id != tenant_id or fact.party_id != party_id:
+            raise ValueError("identity storage grant cohort differs")
+    ids = tuple(fact.id for fact in expected)
+    if len(set(ids)) != len(ids):
+        raise ValueError("identity storage grant cohort shape differs")
+    if not expected:
+        return ()
+    expected = tuple(sorted(expected, key=lambda fact: fact.id))
+    table = PartyRoleGrant.__table__
+    columns = (table.c.id, table.c.tenant_id, table.c.party_id, table.c.role_id)
+    predicates = (
+        table.c.tenant_id == tenant_id,
+        table.c.party_id == party_id,
+        table.c.id.in_(ids),
+    )
+    with _storage_phase(db):
+        _clean_boundary(db, root=root, savepoint=savepoint)
+        found = tuple(
+            GrantFact(*row)
+            for row in db.execute(
+                select(*columns).where(*predicates).order_by(table.c.id)
+            )
+        )
+        _clean_boundary(db, root=root, savepoint=savepoint)
+        if found != expected:
+            raise ValueError("identity storage grant cohort differs")
+        removed = tuple(
+            sorted(
+                (
+                    GrantFact(*row)
+                    for row in db.execute(
+                        delete(table).where(*predicates).returning(*columns)
+                    )
+                ),
+                key=lambda fact: fact.id,
+            )
+        )
+        _clean_boundary(db, root=root, savepoint=savepoint)
+        if removed != expected:
+            raise ValueError("identity storage grant removal outcome differs")
+    return removed
+
+
+def revoke_party_sessions(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    party_id: UUID,
+    session_ids: tuple[UUID, ...] | None,
+    revoked_at: datetime,
+) -> tuple[UUID, ...]:
+    """End only the selected canonical cohort in the caller's SAVEPOINT.
+
+    None explicitly selects all tenant/Party sessions, including expired and
+    externally derived rows. A tuple selects exact membership; empty means none.
+    Caller supplies the aware operation timestamp after its complete Party-first
+    lock phase. IDs and returned observations confer no authority.
+    """
+    return _revoke_sessions(
+        db,
+        tenant_id=tenant_id,
+        party_id=party_id,
+        session_ids=session_ids,
+        revoked_at=revoked_at,
+    )
