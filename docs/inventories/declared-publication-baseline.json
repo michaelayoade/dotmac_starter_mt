@@ -157,11 +157,6 @@
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adopter baseline. Candidate a6 includes a5 immutable rule supersession, sealed rule/band membership, bounded policy history and advisory preview; a6 adds caller-transaction exact catalog/rule authoring without internal savepoint completion, reusing Tax validation and replay comparators. The Sub owner must roll back and retry whole commands on unique insert contention. Sub policy UI requires a verified published successor and real owner/permission binding; no unpublished pin, financial writer or production authority is activated. Remove only through the exact authorized release record.",
       "state": "declared-unpublished"
     },
-    "dotmac-template-studio": {
-      "declared": "0.2.0a6",
-      "reason": "UNPUBLISHED TENANT-AUDIT SUCCESSOR. Version 0.2.0a6 adds the DDL-free ts_0003_tenant_audit.py prerequisite successor and raises the declared Kernel floor to >=0.1.0a106 for tenant audit storage. Published 0.2.0a5 and its migration bytes remain unchanged. Hosted source and installed floor qualification, authorized artifact publication and exact tag verification remain pending. Remove this row only with the verified 0.2.0a6 publication record; source preparation does not activate adopters.",
-      "state": "declared-unpublished"
-    },
     "dotmac-usage": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill, dedupe proof and aggregate shadow; it does not compose the module, move usage authority, or retire Sub's writer. Raw AAA, rating, billing and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",

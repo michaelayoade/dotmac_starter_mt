@@ -2093,6 +2093,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-template-studio ──
+    "dotmac-template-studio-v0.2.0a6": (
+        "dotmac-template-studio",
+        "d94ff7edb8a8cfc28c709b40a1b9f87ea38d16c9",
+        {
+            "ts_0001_templates.py": (
+                "511073d3225c8fa9be09c687500e0515efbb5d8fdc4859791e1e4f16ed7308f4"
+            ),
+            "ts_0002_notification_identity.py": (
+                "b50c2387f54a877cf0f0ff772bcfc84083a973595c490d6facf6bf7a8f196088"
+            ),
+            "ts_0003_tenant_audit.py": (
+                "29d89b87ba393eb4121615a5b6af3f8d16e2100b8023715e341b1d95d0613ea3"
+            ),
+        },
+    ),
     "dotmac-template-studio-v0.2.0a5": (
         "dotmac-template-studio",
         "94eca47845b93bd444a859abd6dc688411a5a7ea",
@@ -7736,7 +7751,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-sales": frozenset(),
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
-    "dotmac-template-studio": frozenset({"ts_0003_tenant_audit.py"}),
+    "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(
