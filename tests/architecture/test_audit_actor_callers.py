@@ -148,7 +148,8 @@ def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     # Five Learning callers: announcement creation, attempt grant, schedule
     # execution, and the two success-queue actions. Their frozen context earns
     # its closed vocabulary through the same construction proof as RepairActor.
-    assert len(calls) == 26, "the ratchet must change when the caller set changes"
+    # Offline identity bootstrap adds one explicit system actor with its evidence ref.
+    assert len(calls) == 27, "the ratchet must change when the caller set changes"
 
     problems = [
         f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}: {problem}"

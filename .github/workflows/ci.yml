@@ -244,6 +244,62 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/module_release_provenance.py --base "$BASE_SHA"
 
+      - name: Derive canonical release authority ledger for review
+        run: |
+          preview_root="$(mktemp -d "$RUNNER_TEMP/release-authority-review.XXXXXX")"
+          git archive --format=tar HEAD | tar -x -C "$preview_root"
+          RELEASE_AUTHORITY_PREVIEW_ROOT="$preview_root" python - <<'PYCODE'
+          import base64, hashlib, json, os, subprocess, sys
+          from pathlib import Path
+          archived = Path(os.environ["RELEASE_AUTHORITY_PREVIEW_ROOT"])
+          artifact = Path(os.environ["RUNNER_TEMP"]) / "release-authority-review"
+          artifact.mkdir(parents=True, exist_ok=True)
+          ledger_rel = Path("docs/inventories/release-authority.json")
+          generator_rel = Path("scripts/release_authority.py")
+          original = ledger_rel.read_bytes()
+          baseline_digest = hashlib.sha256(original).hexdigest()
+          if hashlib.sha256((archived / ledger_rel).read_bytes()).hexdigest() != baseline_digest:
+              raise SystemExit("Archived release authority ledger differs from checkout")
+          subprocess.run([sys.executable, str(archived / generator_rel), "write"], cwd=archived, check=True)
+          generated = (archived / ledger_rel).read_bytes()
+          generated_document = json.loads(generated)
+          if set(generated_document) != {"$comment", "schema", "active", "history"}:
+              raise SystemExit("Unexpected canonical release authority ledger envelope")
+          if ledger_rel.read_bytes() != original:
+              raise SystemExit("Review derivation modified the checked-in ledger")
+          (artifact / "release-authority.json").write_bytes(generated)
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          pull_request = event.get("pull_request", {})
+          provenance = {
+              "schema": "dotmac.release_authority.review.v1",
+              "checked_out_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "checked_out_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+              "github_sha": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "event_name": os.environ["GITHUB_EVENT_NAME"],
+              "pull_request_head_sha": pull_request.get("head", {}).get("sha"),
+              "pull_request_base_sha": pull_request.get("base", {}).get("sha"),
+              "generator_path": str(generator_rel),
+              "generator_sha256": hashlib.sha256((archived / generator_rel).read_bytes()).hexdigest(),
+              "baseline_ledger_sha256": baseline_digest,
+              "generated_ledger_path": str(ledger_rel),
+              "generated_ledger_sha256": hashlib.sha256(generated).hexdigest(),
+              "checked_in_ledger_unchanged": True,
+          }
+          provenance_bytes = (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode()
+          (artifact / "provenance.json").write_bytes(provenance_bytes)
+          # The framed payloads contain only the tracked path/digest ledger and its CI provenance.
+          print("DOTMAC_RELEASE_AUTHORITY_REVIEW_V1:" + base64.b64encode(generated).decode())
+          print("DOTMAC_RELEASE_AUTHORITY_PROVENANCE_V1:" + base64.b64encode(provenance_bytes).decode())
+          PYCODE
+      - name: Retain canonical release authority review artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-authority-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-authority-review/
+          if-no-files-found: error
+
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -306,8 +362,8 @@ jobs:
           seen = {m for m in required if any(c.get("classname", "") == m or c.get("classname", "").startswith(m + ".") for c in selected)}
           definitions = set()
           for module in required:
-              source = Path(*module.split(".")).with_suffix(".py")
-              for node in ast.parse(source.read_text()).body:
+              module_source = Path(*module.split(".")).with_suffix(".py")
+              for node in ast.parse(module_source.read_text()).body:
                   if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
                       definitions.add((module, node.name))
                   elif isinstance(node, ast.ClassDef):
