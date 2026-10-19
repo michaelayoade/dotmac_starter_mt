@@ -5,8 +5,8 @@
 - Deciders: Michael
 - Supersedes: none
 - Extends: ADR-0058 (adds an eleventh narrow owner), ADR-0040 (narrow independent
-  owners), ADR-0038 (adds a disposition: the AccessCredential family leaves
-  "excluded everywhere"; network-access keeps the projection)
+  owners), ADR-0038 (adds a ledger row for the AccessCredential family, which
+  the ledger does not list today; network-access keeps the projection)
 - Exception to: ADR-0038's single-suite network cutover sequencing (ADR-0017's
   general moratorium was relaxed by its own later amendments; this is the
   operative sequencing exception)
@@ -125,9 +125,13 @@ the `secret_version` at which it was set); `row_version`; `policy_version`; and
 `previous_secret_ciphertext`, defined as the **last converged** version and
 destroyed only when a newer version converges.
 
-`identifier` is unique per projection namespace (realm), not merely per tenant.
-After revoke an identifier is not reused for a quarantine period set by a
-tenant setting.
+Each credential carries an opaque `projection_namespace` (the RADIUS realm or
+equivalent), defaulting from a tenant setting. A namespace belongs to exactly
+one tenant, and `identifier` is unique per namespace. Because tenant-scoped
+tables cannot enforce uniqueness across tenants, a namespace that is shared is
+a configuration error: a collision at the projection target is a **failed
+projection** and is never an overwrite. After revoke an identifier is not
+reused within that namespace for a quarantine period set by a tenant setting.
 
 **Owner-held Services facts.** The owner keeps a local projection of each bound
 service's status and customer, fed by `dotmac-services` events (ADR-0024). Every
@@ -160,6 +164,11 @@ only ended Services state) and its customer equals the new service's customer.
 Rebind is also refused while the credential is `suspended` or while its
 compromise marker is newer than the last converged rotation. Cross-customer reuse
 is impossible, not merely discouraged.
+
+**Stale facts.** If the owner-held Services facts are stale (the relevant event
+has not yet arrived) and a predecessor link exists, the result is `ask` or
+`hold_activation`, never a silent `new`; a silent `new` would recreate the
+reported symptom.
 
 **Secret on rebind.** The setting `access_credentials.secret_on_rebind`
 (`keep` | `rotate`, default `keep` per D3) decides whether inheritance also
@@ -196,7 +205,7 @@ engine, if present, adds conditional overrides only and calls the same commands.
 | `RotateSecret` | active or suspended, state unchanged | Generated or supplied. |
 | `ChangeIdentifier` | active or suspended, state unchanged | Old identifier travels in the effect. |
 | `SuspendCredential` | active to suspended | Security reasons only; may set the compromise marker. |
-| `ResumeCredential` | suspended to active | After a compromise, requires a `secret_version` greater than at suspension, converged. |
+| `ResumeCredential` | suspended to active | After a compromise, requires only a `secret_version` greater than the compromise marker's; that version is then projected and the marker clears when it converges. |
 | `RevokeCredential` | any to revoked | On expiry of the revoke grace (below), or by staff. |
 
 Resolution is a read (`credential.resolve_preview`) that mutates nothing; the
@@ -204,7 +213,8 @@ decision is recorded inside the Rebind or Issue command, so no unrecorded
 decision exists.
 
 A new `RotateSecret` or `ChangeIdentifier` is refused while one is pending,
-except retry and revert. Revert targets the last converged version.
+except retry and revert. Revert targets the last converged version, and is
+refused for any version at or below the compromise marker's `secret_version`.
 
 Every command runs under `execute_once` (ADR-0014) keyed on tenant, scope
 `access_credentials.<command>` and a caller idempotency key; checks
@@ -213,8 +223,9 @@ service references, booleans for what changed, never the secret); and writes
 exactly one outbox event in the same transaction. No external call occurs inside
 that transaction.
 
-**Revoke after grace** is a durable timer owned by this package
-(`dotmac-durable-timers`); it does not depend on the rules engine.
+**Revoke after grace** is a timer scheduled through an assembly-supplied
+durable-timers adapter (no sibling import, following the fulfillment pattern);
+it does not depend on the rules engine.
 
 ### 6. Every policy is a tenant setting (nothing hard-coded)
 
@@ -267,8 +278,10 @@ inside the adopting assembly, so no key crosses an application boundary.
 (ADR-0038 section 6), so plaintext cannot cross an in-process port. The assembly
 binds the owner's projection-fetch port (ADR-0024: no sibling import). The
 secret reaches the connector only through a synchronous, mutually
-authenticated fetch keyed by (credential_id, secret_version), authorised
-per request and rate-limited. Alternatively it may be envelope-encrypted to the
+authenticated fetch keyed by (credential_id, secret_version). The fetch is
+honoured only for a (credential_id, secret_version) that has an open projection
+request issued by network-access, and at most once per request; any other
+fetch is refused and audited. It is also rate-limited. Alternatively it may be envelope-encrypted to the
 connector's key for that version. In neither case does the secret appear in an
 outbox row, a delivery, retry or dead-letter row, an event, a log, an
 exception or a drift record on either side. Test obligation: persisted
@@ -376,12 +389,19 @@ Adoption proceeds by shadow, then cutover. Sub remains the writer during a
 dual-run in which the owner computes decisions for each Sub activation and a
 drift report compares decisions and row fingerprints. Expected explained-drift
 classes are declared before shadow starts: the revoke grace, the Sub status map
-(below), and one-way-hash rows. The gate is zero unexplained drift against those
+(below), one-way-hash rows, and the cutover withdrawal described next. The gate is zero unexplained drift against those
 classes over at least 30 days, with a minimum observed count for each
 disposition including inherit and decline (thresholds to be set by Michael). At
 cutover Starter becomes the authority and Sub's table becomes a read projection
 with exactly one writer (the Starter sync adapter). At suite cutover,
 network-access consumes the owner's events directly.
+
+**Cutover behaviour change (proposed with the projection invariant; requires
+Michael's confirmation).** Sub today leaves credentials on cancelled
+subscriptions in RADIUS (for example when a new service is created before the old
+one is cancelled), so they still authenticate. Under the projection invariant
+those users are withdrawn at cutover. This is an intended behaviour change and
+an expected drift class, to be announced to operations before cutover.
 
 ### 11. Sub's `ensure_pppoe_credential` becomes a thin call; no secret is ever sent
 
@@ -445,7 +465,7 @@ name must not pull the non-candidates in.
 - Relocation: a CPE left at the old premises keeps the old identity if the
   secret is kept. Tenants should use `secret_on_rebind=rotate` for relocation.
 - A compromised credential can be rotated while suspended without being
-  re-enabled, cannot be rebound, and can resume only on a newer converged secret.
+  re-enabled, cannot be rebound, and can resume only on a secret newer than the compromise marker.
 - Suspension must be enforced: under the proposed projection invariant a
   suspended credential is withdrawn from RADIUS, and nothing ships that merely
   signals.
