@@ -46,6 +46,11 @@ ISP_ONLY_MODULES = {
     "dotmac-network-access",
     "dotmac-pon-access",
 }
+#: Modules withdrawn from network-suite-v1 by the ADR-0038 amendment of
+#: 2026-10-19. Retained frozen in packages/; never adopted.
+WITHDRAWN_MODULES = {"dotmac-pon-access"}
+WITHDRAWN_COHORT = "withdrawn-retained-in-sub"
+SUITE_COHORT = "network-suite-v1"
 REUSED_FOUNDATIONS = {"dotmac-inventory", "dotmac-assets"}
 
 
@@ -199,11 +204,18 @@ def _validate_ledger(ledger: dict[str, Any]) -> None:
             f"{name} must cut over in Sub before another product",
             problems,
         )
-        _require(
-            module.get("adoption_cohort") == "network-suite-v1",
-            f"{name} must remain in the single network-suite adoption cohort",
-            problems,
-        )
+        if name in WITHDRAWN_MODULES:
+            _require(
+                module.get("adoption_cohort") == WITHDRAWN_COHORT,
+                f"{name} must be recorded as withdrawn and retained in Sub",
+                problems,
+            )
+        else:
+            _require(
+                module.get("adoption_cohort") == SUITE_COHORT,
+                f"{name} must remain in the single network-suite adoption cohort",
+                problems,
+            )
         _require(
             module.get("runtime_module_dependencies") == [],
             f"{name} must not import a sibling module",
@@ -356,6 +368,10 @@ def test_complete_suite_contract_ledger_is_typed_and_orm_free() -> None:
     assert set(contracts) == EXPECTED_MODULES
     for package, contract in contracts.items():
         assert contract["package"] == package
+        expected_cohort = (
+            WITHDRAWN_COHORT if package in WITHDRAWN_MODULES else None
+        )
+        assert contract.get("adoption_cohort") == expected_cohort
         assert contract["contract_module"].endswith(".contracts")
         assert contract["returns_orm_instances"] is False
         assert contract["uses_opaque_cross_owner_refs"] is True
@@ -408,3 +424,23 @@ def test_detector_rejects_a_second_stock_or_asset_owner() -> None:
     network_inventory["reuses_foundations"] = ["dotmac-assets"]
     with pytest.raises(NetworkDecompositionError):
         _validate_ledger(ledger)
+
+
+def test_detector_rejects_withdrawing_any_other_module() -> None:
+    ledger = copy.deepcopy(_load_ledger())
+    _module_map(ledger)["dotmac-ipam"]["adoption_cohort"] = WITHDRAWN_COHORT
+    with pytest.raises(NetworkDecompositionError):
+        _validate_ledger(ledger)
+
+
+def test_detector_rejects_readmitting_or_unrecording_the_withdrawn_module() -> None:
+    for value in (SUITE_COHORT, "ipam-early"):
+        ledger = copy.deepcopy(_load_ledger())
+        _module_map(ledger)["dotmac-pon-access"]["adoption_cohort"] = value
+        with pytest.raises(NetworkDecompositionError):
+            _validate_ledger(ledger)
+
+
+def test_withdrawn_module_stays_frozen_in_packages() -> None:
+    for name in WITHDRAWN_MODULES:
+        assert (PACKAGES_DIR / name / "EXTRACTION.toml").is_file()
