@@ -1927,6 +1927,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-fulfillment ──
+    "dotmac-fulfillment-v0.1.0a2": (
+        "dotmac-fulfillment",
+        "936fa1636336b5c9ee899df578117003fee076a0",
+        {
+            "fu_0001_fulfillment.py": (
+                "fa41945d34a08fc7f96d529f7ccc1f103a2b90b5c7095153dcc08f4283afe254"
+            ),
+            "fu_0002_tenant_audit.py": (
+                "8a34a809f3b5dc1ac438d2b422f39579fb1a0c11bbea63cbf18d5c41af7b812e"
+            ),
+        },
+    ),
     "dotmac-fulfillment-v0.1.0a1": (
         "dotmac-fulfillment",
         "be02e28d11a0ba849b4974273f5a2d4bd7806a4a",
@@ -7702,7 +7714,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-subscriptions": frozenset(),
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
-    "dotmac-fulfillment": frozenset({"fu_0002_tenant_audit.py"}),
+    "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset({"tx_0004_rule_supersession.py"}),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
