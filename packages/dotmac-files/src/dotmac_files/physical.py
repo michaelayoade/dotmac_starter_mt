@@ -56,6 +56,9 @@ _MEDIA_BY_EXTENSION = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".rtf": "application/rtf",
 }
 
 
@@ -151,12 +154,41 @@ def _looks_like_plain_text(payload: bytes) -> bool:
     return all(char.isprintable() or char in "\t\r\n\f\v" for char in sample)
 
 
+_HEIC_BRANDS = frozenset(
+    {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs"}
+)
+_HEIF_BRANDS = frozenset({b"mif1", b"mif2", b"msf1"})
+
+
+def _bmff_image_media_type(sample: bytes) -> str | None:
+    """Classify an ISO-BMFF ``ftyp`` major brand as HEIC or HEIF.
+
+    Camera phones store photos as HEIF-family files whose only reliable
+    signature is the file-type box: a 4-byte box size, the literal
+    ``ftyp``, then the major brand. Other BMFF brands (MP4 ``isom``,
+    AVIF ``avif``) deliberately do not match and stay unsupported.
+    """
+    if len(sample) < 12 or sample[4:8] != b"ftyp":
+        return None
+    brand = sample[8:12]
+    if brand in _HEIC_BRANDS:
+        return "image/heic"
+    if brand in _HEIF_BRANDS:
+        return "image/heif"
+    return None
+
+
 def _detect_media_type(content: IO[bytes]) -> str:
     content.seek(0)
     sample = content.read(8192)
     content.seek(0)
     if sample.startswith(b"%PDF-"):
         return "application/pdf"
+    if sample.startswith(b"{\\rtf"):
+        return "application/rtf"
+    bmff_media_type = _bmff_image_media_type(sample)
+    if bmff_media_type is not None:
+        return bmff_media_type
     if sample.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
     if sample.startswith(b"\xff\xd8\xff"):

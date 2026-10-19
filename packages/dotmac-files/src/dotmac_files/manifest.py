@@ -11,7 +11,7 @@ from dotmac_files.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="files",
-    version="0.1.0a6",
+    version="0.1.0a7",
     core=False,
     short_code="files",
     migration_prefix="fi",

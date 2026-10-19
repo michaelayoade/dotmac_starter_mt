@@ -1,5 +1,17 @@
 # Changelog — dotmac-files
 
+## 0.1.0a7 — allocated source candidate, not yet published
+
+- Recognise HEIC/HEIF photos and RTF documents by content signature:
+  ``.heic``/``.heif`` via the ISO-BMFF ``ftyp`` major brand (HEIC
+  brands as ``image/heic``, ``mif1``/``mif2``/``msf1`` as
+  ``image/heif``; other BMFF brands such as MP4 ``isom`` and AVIF stay
+  unsupported), and ``.rtf`` via the ``{\rtf`` header as
+  ``application/rtf`` (checked before the plain-text fallback, which
+  would otherwise claim RTF bodies). Required by the ERP fleet
+  attachment and HR handbook cutovers, whose legacy policies admit
+  these types.
+
 ## 0.1.0a6 — allocated source candidate, not yet published
 
 - Recognise Word and plain-text uploads by content signature: legacy

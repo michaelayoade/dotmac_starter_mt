@@ -127,6 +127,11 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Released a1 remains unchanged. Candidate a2 adds separate Billing-shaped V2 rendering with honest recorded provenance, shared Kernel a103 canonical encoding and strict in-memory PDF validation. Hosted acceptance, authorized publication and install-back verification precede product qualification; no Sub pin, official-artifact authority or financial writer activation changes here.",
       "state": "declared-unpublished"
     },
+    "dotmac-files": {
+      "declared": "0.1.0a7",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a6 remains published and tagged as dotmac-files-v0.1.0a6. 0.1.0a7 adds HEIC/HEIF (ISO-BMFF ftyp major brand) and RTF content-signature detection for the ERP fleet and HR handbook cutovers; the release track publishes and tags it after merge.",
+      "state": "declared-unpublished"
+    },
     "dotmac-fulfillment": {
       "declared": "0.1.0a2",
       "reason": "UNPUBLISHED TENANT-AUDIT SUCCESSOR. Version 0.1.0a2 adds the DDL-free fu_0002_tenant_audit.py prerequisite successor and raises the declared Kernel floor to >=0.1.0a106 for tenant audit storage. Published 0.1.0a1 and its migration bytes remain unchanged. Hosted source and installed floor qualification, authorized artifact publication and exact tag verification remain pending. Remove this row only with the verified 0.1.0a2 publication record; source preparation does not activate adopters.",
