@@ -1224,7 +1224,17 @@ def test_ci_job_run_body_sensitivity_plant_catches_an_interpolated_expression() 
 
 
 def _provenance_invocations_bound(job: dict) -> bool:
-    steps = [step for step in job["steps"] if "run" in step]
+    # The canonical-ledger review emitter is a separate, non-verifying step.
+    # Keep every provenance invocation subject to the exact event/env checks.
+    steps = [
+        step
+        for step in job["steps"]
+        if "run" in step
+        and not (
+            step.get("name") == "Derive canonical release authority ledger for review"
+            and "module_release_provenance.py" not in step["run"]
+        )
+    ]
     expected = {
         "github.event_name == 'pull_request'": (
             "python scripts/module_release_provenance.py "
@@ -1280,6 +1290,25 @@ def test_ci_job_invocation_sensitivity_catches_missing_or_wrong_comparison(
         )
     else:
         push["env"]["BASE_SHA"] = "${{ github.event.pull_request.base.sha }}"
+    assert not _provenance_invocations_bound(job)
+
+
+@pytest.mark.parametrize("plant", ["extra-command", "spoofed-review", "duplicate-pr"])
+def test_ci_job_invocation_sensitivity_rejects_extra_provenance_runs(
+    plant: str,
+) -> None:
+    job = _ci_job()
+    if plant == "duplicate-pr":
+        extra = next(
+            dict(step)
+            for step in job["steps"]
+            if step.get("if") == "github.event_name == 'pull_request'" and "run" in step
+        )
+    else:
+        extra = {"run": "python scripts/module_release_provenance.py"}
+        if plant == "spoofed-review":
+            extra["name"] = "Derive canonical release authority ledger for review"
+    job["steps"].append(extra)
     assert not _provenance_invocations_bound(job)
 
 

@@ -530,7 +530,7 @@ jobs:
           set -euo pipefail
           probe_dir=$(mktemp -d "$RUNNER_TEMP/kernel-identity.XXXXXXXX")
           echo "IDENTITY_PROBE_DIR=$probe_dir" >> "$GITHUB_ENV"
-          poetry -C packages/dotmac-kernel build -f wheel
+          poetry -C "$GITHUB_WORKSPACE/packages/dotmac-kernel" build -f wheel
           shopt -s nullglob
           wheels=(packages/dotmac-kernel/dist/*.whl)
           test "${#wheels[@]}" -eq 1
@@ -559,7 +559,7 @@ jobs:
           python scripts/verify_learning_installed.py --write-expectation "$LEARNING_EXPECTATION_PATH" --checkout "$GITHUB_WORKSPACE"
           test -f "$IDENTITY_WHEEL_PATH"
           test "$(sha256sum "$IDENTITY_WHEEL_PATH" | cut -d ' ' -f 1)" = "$IDENTITY_WHEEL_SHA256"
-          poetry -C packages/dotmac-learning build -f wheel
+          poetry -C "$GITHUB_WORKSPACE/packages/dotmac-learning" build -f wheel
           poetry run python scripts/release_module.py inspect dotmac-learning --dist packages/dotmac-learning/dist
           shopt -s nullglob
           wheels=(packages/dotmac-learning/dist/*.whl)
