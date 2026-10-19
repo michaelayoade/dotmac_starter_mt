@@ -131,6 +131,8 @@ def test_pending_serial_and_current_clean_issued_at_preserve_caller(
             )
         root = db.get_transaction()
         savepoint = db.begin_nested() if nested else None
+        # SQLAlchemy materializes a caller savepoint lazily on the first SELECT.
+        expected_read_sql = (["savepoint"] if nested else []) + ["select"]
         original_autoflush = db.autoflush
         db.autoflush = mode != "disabled"
         cached.serial = "CALLER"
@@ -155,7 +157,7 @@ def test_pending_serial_and_current_clean_issued_at_preserve_caller(
             assert db.get(Certificate, cert_id) is cached
             assert inspect(cached).attrs.serial.history == history
             assert inspect(cached).attrs.issued_at.history.has_changes() is False
-            assert seen == ["select"] and flushes == [] and not db.new
+            assert seen == expected_read_sql and flushes == [] and not db.new
             assert db.get_transaction() is root
             assert db.get_nested_transaction() is savepoint
         finally:

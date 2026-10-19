@@ -559,6 +559,7 @@ def test_every_family_and_current_audit_failure_rolls_back_all(
 )
 def test_real_refusals_before_any_target_write(imported_case, fault):
     case = imported_case
+    original_expected = case.expected
     if fault == "occupied":
         table = next(t for t in history._TARGETS if t.name == "tenants")
         case.connection.execute(
@@ -617,6 +618,7 @@ def test_real_refusals_before_any_target_write(imported_case, fault):
     with pytest.raises(history.IdentityHistoryImportRefused):
         _import(case)
     case.root.rollback()
+    case.expected = original_expected
     with case.connection.begin():
         _assert_source_unchanged(case)
         for table in history._TARGETS:

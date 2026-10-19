@@ -204,7 +204,7 @@ def test_successful_public_comparison_is_data_not_import_authority(imported_case
     case.connection.execute(
         sa.update(_table("tenants"))
         .where(_table("tenants").c.id == changed.tenants[0].id)
-        .values(name="changed")
+        .values(name="changed", updated_at=changed.tenants[0].updated_at)
     )
     assert _verify(case, receipt, changed) is None
     with pytest.raises(history.IdentityHistoryImportRefused):

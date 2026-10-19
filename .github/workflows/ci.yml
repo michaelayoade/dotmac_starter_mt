@@ -466,6 +466,11 @@ jobs:
           make test-identity-reference-db-migrate 2>&1 | tee identity-reference-migrations.log
       - run: make test-identity-graph-db-create
         id: identity_graph_create
+      - name: Prove bootstrap cancellation and custody before the full integration suite
+        id: identity_bootstrap_preflight
+        run: |
+          PYTEST_ADDOPTS='-k "test_actual_postgresql_owner_denial_cancellation_and_custody or test_safe_exception_stage_excludes_material_and_bounds_chains"' \
+            make test-integration INTEGRATION_JUNIT=identity-bootstrap-preflight.xml
       - name: Full ordinary integration suite including identity graph
         id: identity_integration
         run: make test-integration
@@ -607,6 +612,7 @@ jobs:
           if-no-files-found: error
           path: |
             identity-integration.xml
+            identity-bootstrap-preflight.xml
             identity-collection.json
             identity-status.json
             identity-membership-cleanup.json

@@ -4,9 +4,11 @@ Actual Academy positive/extension/cohort/precommit cases live with the real CLI
 consumer. These tests never install callback-True or synthetic table authority.
 """
 
+import json
 import multiprocessing
 import os
 import traceback
+from queue import Empty
 
 import pytest
 
@@ -71,14 +73,15 @@ def _case(name, result):
                     )
             elif name == "foreign":
                 with (
-                    DatabaseRuntime(engine=engine).platform_session() as db,
                     pytest.raises(RuntimeBindingError),
+                    DatabaseRuntime(engine=engine).platform_session() as db,
                 ):
-                    bootstrap_tenant(
-                        db,
-                        BootstrapTenantV1("test", "Test", "owner@example.test"),
-                        password="call-local",
-                    )
+                    with pytest.raises(RuntimeBindingError):
+                        bootstrap_tenant(
+                            db,
+                            BootstrapTenantV1("test", "Test", "owner@example.test"),
+                            password="call-local",
+                        )
             elif name == "request":
                 producer = runtime.platform_request_session()
                 db = next(producer)
@@ -141,6 +144,102 @@ class _Cancelled(BaseException):
     pass
 
 
+def _safe_exception_stage(error):
+    """Only bounded class/frame facts, including suppressed exception context."""
+    pending = [(error, "root", None)]
+    visited = set()
+    exceptions = []
+    while pending and len(exceptions) < 12:
+        current, edge, parent = pending.pop(0)
+        if id(current) in visited:
+            continue
+        visited.add(id(current))
+        frames = []
+        trace = current.__traceback__
+        while trace is not None and len(frames) < 8:
+            code = trace.tb_frame.f_code
+            frames.append(
+                {
+                    "file": os.path.basename(code.co_filename)[:120],
+                    "function": code.co_name[:120],
+                    "line": trace.tb_lineno,
+                }
+            )
+            trace = trace.tb_next
+        index = len(exceptions)
+        exceptions.append(
+            {
+                "class": type(current).__name__[:120],
+                "edge": edge,
+                "parent": parent,
+                "frames": frames,
+                "frames_truncated": trace is not None,
+            }
+        )
+        for relation, linked in (
+            ("cause", current.__cause__),
+            ("context", current.__context__),
+        ):
+            if linked is not None and id(linked) not in visited:
+                pending.append((linked, relation, index))
+    return {"exceptions": exceptions, "truncated": bool(pending)}
+
+
+def test_safe_exception_stage_excludes_material_and_bounds_chains():
+    assert os.environ.get("CI") == "true", "hosted only"
+    sentinel = "public-synthetic-stage-privacy-sentinel"
+
+    class PoisonedStageError(Exception):
+        def __str__(self):
+            raise AssertionError("stage helper called exception str")
+
+        def __repr__(self):
+            raise AssertionError("stage helper called exception repr")
+
+    def raise_synthetic(depth):
+        private_local = sentinel
+        if depth:
+            raise_synthetic(depth - 1)
+        raise PoisonedStageError(private_local)
+
+    try:
+        raise_synthetic(12)
+    except PoisonedStageError as caught:
+        suppressed = LookupError(sentinel)
+        caught.__context__ = suppressed
+        caught.__suppress_context__ = True
+        suppressed.__cause__ = caught  # Cycle must not revisit the root.
+        chain = caught
+        for _ in range(20):
+            linked = PoisonedStageError(sentinel)
+            chain.__cause__ = linked
+            chain = linked
+        stage = _safe_exception_stage(caught)
+    encoded = json.dumps(stage)
+    assert sentinel not in encoded
+    assert len(encoded) < 40000
+    assert stage["truncated"] is True
+    assert len(stage["exceptions"]) == 12
+    assert stage["exceptions"][0]["class"] == "PoisonedStageError"
+    assert stage["exceptions"][0]["frames_truncated"] is True
+    assert any(
+        item["class"] == "LookupError" and item["edge"] == "context"
+        for item in stage["exceptions"]
+    )
+    assert sum(item["edge"] == "root" for item in stage["exceptions"]) == 1
+    assert all(len(item["frames"]) <= 8 for item in stage["exceptions"])
+    assert stage["exceptions"][0]["frames"][0]["function"] == (
+        "test_safe_exception_stage_excludes_material_and_bounds_chains"
+    )
+    assert all(
+        set(frame) == {"file", "function", "line"}
+        and "/" not in frame["file"]
+        and isinstance(frame["line"], int)
+        for item in stage["exceptions"]
+        for frame in item["frames"]
+    )
+
+
 def _postgres_denial(mode, url, result):
     from types import SimpleNamespace
 
@@ -171,9 +270,13 @@ def _postgres_denial(mode, url, result):
         "custom",
         True,
     )
+    product_opened = False
+    caught_meta = None
 
     class UnavailableProduct:
         def open(self, connection, command):
+            nonlocal product_opened
+            product_opened = True
             assert connection.dialect.name == "postgresql"
             if mode == "cancel":
                 raise original
@@ -212,6 +315,7 @@ def _postgres_denial(mode, url, result):
                     password="call-local",
                 )
             except BaseException as caught:
+                caught_meta = _safe_exception_stage(caught)
                 if mode == "cancel":
                     assert caught is original
                 elif mode == "damaged":
@@ -220,6 +324,7 @@ def _postgres_denial(mode, url, result):
                     assert isinstance(caught, ValueError)
             else:
                 raise AssertionError("owner admitted unavailable product authority")
+            assert product_opened is True
             if mode == "damaged":
                 assert not root.is_active
                 assert not db.in_transaction()
@@ -229,8 +334,14 @@ def _postgres_denial(mode, url, result):
             with pytest.raises(RuntimeBindingError):
                 db.commit()
         result.put(None)
-    except BaseException:
-        result.put(traceback.format_exc())
+    except BaseException as failure:
+        stage = {
+            "product_opened": product_opened,
+            "caught": caught_meta,
+            "outer": _safe_exception_stage(failure),
+        }
+        print("DOTMAC_IDENTITY_TEST_STAGE_V1:" + json.dumps(stage), flush=True)
+        result.put(stage)
     finally:
         engine.dispose()
 
@@ -246,13 +357,18 @@ def test_actual_postgresql_owner_denial_cancellation_and_custody(
         target=_postgres_denial, args=(mode, identity_reference_url, result)
     )
     process.start()
-    process.join(45)
-    if process.is_alive():
-        process.terminate()
-        process.join()
-        pytest.fail("PostgreSQL bootstrap denial canary timed out")
+    try:
+        outcome = result.get(timeout=45)
+    except Empty:
+        pytest.fail("PostgreSQL bootstrap denial canary timed out", pytrace=False)
+    finally:
+        process.join(5)
+        if process.is_alive():
+            process.terminate()
+            process.join()
+            pytest.fail("PostgreSQL bootstrap denial canary timed out")
     assert process.exitcode == 0
-    assert result.get(timeout=5) is None
+    assert outcome is None
 
 
 @pytest.fixture
@@ -380,9 +496,9 @@ def test_lookup_floor_refuses_shadowing(bootstrap_catalog_connection, kind):
         )
     else:
         connection.execute(
-            text("CREATE TEMP TABLE bootstrap_temp_namespace(value pg_catalog.integer)")
+            text("CREATE TEMP TABLE bootstrap_temp_namespace(value pg_catalog.int4)")
         )
-        connection.execute(text(f"CREATE DOMAIN pg_temp.{kind} AS pg_catalog.integer"))
+        connection.execute(text(f"CREATE DOMAIN pg_temp.{kind} AS pg_catalog.int4"))
         connection.execute(text("SET LOCAL search_path TO pg_catalog, public"))
     with pytest.raises(ValueError, match="offline bootstrap"):
         _lookup_floor(connection)
@@ -466,7 +582,7 @@ def test_lookup_floor_accepts_own_actual_temporary_namespace(
 
     connection = bootstrap_catalog_connection
     connection.execute(
-        text("CREATE TEMP TABLE bootstrap_temp_namespace(value pg_catalog.integer)")
+        text("CREATE TEMP TABLE bootstrap_temp_namespace(value pg_catalog.int4)")
     )
     connection.execute(text("SET LOCAL search_path TO pg_catalog, public"))
     assert connection.scalar(text("SELECT pg_catalog.pg_my_temp_schema()"))

@@ -730,6 +730,8 @@ def test_pending_scheduling_notes_and_fresh_clean_audit_values(
             )
         root = db.get_transaction()
         savepoint = db.begin_nested() if nested else None
+        # SQLAlchemy materializes a caller savepoint lazily on the first SELECT.
+        expected_read_sql = (["savepoint"] if nested else []) + ["select"]
         db.autoflush = mode != "disabled"
         row.notes = "caller pending"
         pending_cohort.name = "unrelated pending"
@@ -757,7 +759,7 @@ def test_pending_scheduling_notes_and_fresh_clean_audit_values(
                     assert row.notes == "caller pending"
                     if mode != "native":
                         assert inspect(row).attrs.notes.history == history
-                        assert seen == ["select"]
+                        assert seen == expected_read_sql
                     assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
                 else:
                     title = "SQL title" if command == "noop" else "command title"
@@ -785,7 +787,7 @@ def test_pending_scheduling_notes_and_fresh_clean_audit_values(
                         == "unrelated pending"
                     )
             if mode != "native":
-                assert seen[0] == "select"
+                assert seen[: len(expected_read_sql)] == expected_read_sql
             assert db.get(ClassSession, session_id) is row
             assert db.get_transaction() is root
             assert db.get_nested_transaction() is savepoint

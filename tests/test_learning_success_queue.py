@@ -1553,6 +1553,8 @@ def test_pending_success_guard_and_different_scalar_keep_actual_single_audit(
             )
         root = db.get_transaction()
         savepoint = db.begin_nested() if nested else None
+        # SQLAlchemy materializes a caller savepoint lazily on the first SELECT.
+        expected_read_sql = (["savepoint"] if nested else []) + ["select"]
         db.autoflush = mode != "disabled"
         row.recommended_action = "caller pending"
         if not allowed:
@@ -1605,7 +1607,7 @@ def test_pending_success_guard_and_different_scalar_keep_actual_single_audit(
                         assert {
                             key: inspect(row).attrs[key].history for key in histories
                         } == histories
-                        assert seen == ["select"] and flushes == []
+                        assert seen == expected_read_sql and flushes == []
                     assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
                 assert row.severity == "high"
                 assert db.get(SuccessQueueEntry, row_id) is row

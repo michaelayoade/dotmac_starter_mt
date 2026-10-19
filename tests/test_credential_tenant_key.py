@@ -245,7 +245,23 @@ def test_installed_credential_key_supports_tenant_fk_and_caller_rollback(
     assert len(foreign_keys) == 1
     fk = foreign_keys[0]
     assert fk["constrained_columns"] == ["tenant_id", "credential_id"]
-    assert fk["referred_schema"] == "public"
+    assert fk["referred_schema"] in (None, "public")
+    target = case.connection.execute(
+        sa.text(
+            "SELECT c.confrelid=pg_catalog.to_regclass('public.user_credentials'), "
+            "n.nspname, t.relname "
+            "FROM pg_catalog.pg_constraint c "
+            "JOIN pg_catalog.pg_class t ON t.oid=c.confrelid "
+            "JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace "
+            "WHERE c.conrelid=pg_catalog.to_regclass(:probe) "
+            "AND c.conname=:name AND c.contype='f'"
+        ),
+        {
+            "probe": case.schema + ".credential_policy_probe",
+            "name": "credential_policy_probe_tenant_credential_fk",
+        },
+    ).one()
+    assert tuple(target) == (True, "public", "user_credentials")
     assert fk["referred_table"] == "user_credentials"
     assert fk["referred_columns"] == ["tenant_id", "id"]
     assert fk["options"]["ondelete"] == "CASCADE"
