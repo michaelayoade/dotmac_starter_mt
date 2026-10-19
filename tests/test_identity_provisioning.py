@@ -261,6 +261,7 @@ def _postgres_denial(mode, url, result):
     engine = create_engine(
         url,
         hide_parameters=True,
+        echo=False,
     )
     runtime = DatabaseRuntime(engine=engine)
     original = _Cancelled("original cancellation instance")
