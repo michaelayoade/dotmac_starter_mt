@@ -134,7 +134,7 @@ def _zip_payload() -> bytes:
 def _document_policy() -> FilePolicy:
     return FilePolicy(
         max_bytes=1_048_576,
-        allowed_extensions=frozenset({".doc", ".docx", ".txt", ".zip"}),
+        allowed_extensions=frozenset({".doc", ".docx", ".txt", ".zip", ".rtf"}),
         allowed_media_types=frozenset(
             {
                 "application/msword",
@@ -142,17 +142,32 @@ def _document_policy() -> FilePolicy:
                 ".wordprocessingml.document",
                 "text/plain",
                 "application/zip",
+                "application/rtf",
             }
         ),
     )
 
 
+def _bmff_payload(brand: bytes) -> bytes:
+    box_size = (24).to_bytes(4, "big")
+    return box_size + b"ftyp" + brand + b"\x00\x00\x00\x00" + brand + b"mif1"
+
+
 def _image_policy() -> FilePolicy:
     return FilePolicy(
         max_bytes=1_048_576,
-        allowed_extensions=frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"}),
+        allowed_extensions=frozenset(
+            {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif"}
+        ),
         allowed_media_types=frozenset(
-            {"image/png", "image/jpeg", "image/gif", "image/webp"}
+            {
+                "image/png",
+                "image/jpeg",
+                "image/gif",
+                "image/webp",
+                "image/heic",
+                "image/heif",
+            }
         ),
     )
 
@@ -254,6 +269,8 @@ def test_excel_formats_are_recognised_by_content_signature(
         ("avatar.jpeg", "image/jpeg", b"\xff\xd8\xff\xe1image"),
         ("avatar.gif", "image/gif", b"GIF89aimage"),
         ("avatar.webp", "image/webp", b"RIFF\x05\x00\x00\x00WEBPimage"),
+        ("photo.heic", "image/heic", _bmff_payload(b"heic")),
+        ("photo.heif", "image/heif", _bmff_payload(b"mif1")),
     ],
 )
 def test_academy_avatar_formats_are_recognised_by_content_signature(
@@ -287,6 +304,11 @@ def test_academy_avatar_formats_are_recognised_by_content_signature(
         ),
         ("notes.txt", "text/plain", b"plain meeting notes\nsecond line\n"),
         ("bundle.zip", "application/zip", _zip_payload()),
+        (
+            "policy.rtf",
+            "application/rtf",
+            b"{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Arial;}} Policy body}",
+        ),
     ],
 )
 def test_document_formats_are_recognised_by_content_signature(
@@ -301,6 +323,30 @@ def test_document_formats_are_recognised_by_content_signature(
         chunks=(payload,),
     )
     assert prepared.detected_media_type == media_type
+
+
+def test_an_mp4_bmff_brand_declared_as_heic_is_rejected() -> None:
+    with pytest.raises(UnsafeFile, match="no supported signature"):
+        prepare_upload(
+            MemoryProvider(),
+            scope=TenantScope(uuid4()),
+            policy=_image_policy(),
+            original_filename="clip.heic",
+            declared_media_type="image/heic",
+            chunks=(_bmff_payload(b"isom"),),
+        )
+
+
+def test_an_rtf_declared_as_plain_text_is_rejected() -> None:
+    with pytest.raises(UnsafeFile, match="does not match"):
+        prepare_upload(
+            MemoryProvider(),
+            scope=TenantScope(uuid4()),
+            policy=_document_policy(),
+            original_filename="notes.txt",
+            declared_media_type="text/plain",
+            chunks=(b"{\\rtf1\\ansi disguised rich text}",),
+        )
 
 
 def test_a_docx_declared_as_a_plain_zip_is_rejected() -> None:
