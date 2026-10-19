@@ -507,6 +507,32 @@
           "sha256": "1ec69f65acac8fbcd7e18c7cbbd14994685453f75ab4a99d90b4b689c6c901f7"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-fulfillment",
+      "version": "0.1.0a2",
+      "tag": "dotmac-fulfillment-v0.1.0a2",
+      "tag_object": "fa409538cfae366fa4f87c2bd81fbfe5680694b9",
+      "peeled_commit": "936fa1636336b5c9ee899df578117003fee076a0",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_fulfillment-0.1.0a2-py3-none-any.whl": "120413005476d8f98d5ccf96548379c522a438a2c6d2677ab8d50c85e2faea19"
+      },
+      "verification_run_id": "39188804848",
+      "source_run_id": "39188804848",
+      "release_authority_digest": "sha256:6dd2f9c58fe5690288a977ef686e38c860b2a9b4cfd0c61f6244a6b725e53061",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_durable_timers-0.1.0a1-py3-none-any.whl",
+          "sha256": "94a0e6f015ca3504d8c9b17ad50f1734b0f595b6c27e350d324268b67b676636"
+        },
+        {
+          "filename": "dotmac_kernel-0.1.0a106-py3-none-any.whl",
+          "sha256": "1ec69f65acac8fbcd7e18c7cbbd14994685453f75ab4a99d90b4b689c6c901f7"
+        }
+      ]
     }
   ]
 }
