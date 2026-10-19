@@ -12,9 +12,11 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.models import (
@@ -351,18 +353,23 @@ def delete_person(db: Session, *, tenant_id: UUID, party_id: UUID) -> None:
 
     result = None
     try:
-        result = db.execute(
-            delete(Party).where(
-                Party.tenant_id == tenant_id,
-                Party.id == party_id,
-                Party.party_type == PartyType.person,
-            )
+        # A DELETE without RETURNING produces a zero-column CursorResult.
+        result = cast(
+            CursorResult[tuple[()]],
+            db.execute(
+                delete(Party).where(
+                    Party.tenant_id == tenant_id,
+                    Party.id == party_id,
+                    Party.party_type == PartyType.person,
+                )
+            ),
         )
         if result.rowcount != 1:
             raise ValueError("bound person deletion outcome differs")
         db.flush()
     finally:
-        db = tenant_id = party_id = result = None
+        del db, tenant_id, party_id
+        result = None
 
 
 @dataclass(frozen=True, slots=True)

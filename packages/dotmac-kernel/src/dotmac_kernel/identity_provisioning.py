@@ -11,7 +11,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal, NoReturn, Protocol
+from typing import Literal, NoReturn, Protocol, cast
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -104,8 +104,8 @@ class BootstrapPolicyV1:
         _require(type(pairs) is tuple and bool(pairs))
         for pair in pairs:
             _require(type(pair) is tuple and len(pair) == 2)
-            for role in pair:
-                _text(role, 63)
+            for database_role in pair:
+                _text(database_role, 63)
         _require(len(set(pairs)) == len(pairs))
         _require(type(self.roles) is tuple and bool(self.roles))
         for role in self.roles:
@@ -183,7 +183,7 @@ def install_identity_provisioning(assembly: IdentityProvisioningAssemblyV1) -> N
 # Fixed canonical write-set only. These Core projections address actual public
 # relations; their metadata never substitutes for the independent catalog checks.
 _TABLES = tuple(
-    model.__table__.to_metadata(sa.MetaData(), schema="public")
+    cast(sa.Table, model.__table__).to_metadata(sa.MetaData(), schema="public")
     for model in (
         Tenant,
         Party,
@@ -294,7 +294,7 @@ def _catalog(connection: Connection) -> tuple[object, ...]:
             )
             if isinstance(column.type, sa.String):
                 _require(
-                    live["type"].length
+                    cast(sa.String, live["type"]).length
                     == (
                         20
                         if table.name == "parties" and column.name == "party_type"
@@ -302,7 +302,7 @@ def _catalog(connection: Connection) -> tuple[object, ...]:
                     )
                 )
             if isinstance(column.type, sa.DateTime):
-                _require(live["type"].timezone is True)
+                _require(cast(sa.DateTime, live["type"]).timezone is True)
         posture = connection.execute(
             sa.text(
                 "SELECT c.oid,c.relkind,c.relrowsecurity,c.relforcerowsecurity, "
@@ -684,7 +684,8 @@ class _Bootstrap:
             self.policy.__post_init__()
             self.identity = _database_identity(connection, self.policy)
             self.catalog = _catalog(connection)
-        assert self.operation is not None and self.policy is not None
+        if not (self.operation is not None and self.policy is not None):
+            raise ValueError("offline bootstrap admission or outcome differs")
         self.policy.__post_init__()
         _require(
             type(self.operation.policy) is BootstrapPolicyV1
@@ -771,9 +772,10 @@ class _Bootstrap:
     def credential(self, connection: Connection) -> None:
         _safe_logging(connection)
         command, snapshot = self.assignment, self.snapshot
-        assert (
+        if not (
             command is not None and snapshot is not None and self.operation is not None
-        )
+        ):
+            raise ValueError("offline bootstrap admission or outcome differs")
         _require(
             self.cohort(connection) == (UUID(command.target_subject.credential_ref),)
         )
@@ -816,7 +818,8 @@ class _Bootstrap:
             and self.evidence is None
             and self.db is not None
         )
-        assert self.connection is not None and self.identity is not None
+        if not (self.connection is not None and self.identity is not None):
+            raise ValueError("offline bootstrap admission or outcome differs")
         self.revalidate(self.connection)
         _require(not self.cohort(self.connection))
         # Length-independent structured database/login identity; effective role
@@ -833,7 +836,8 @@ class _Bootstrap:
             and command is self.assignment
             and self.evidence is not None
         )
-        assert self.connection is not None
+        if not (self.connection is not None):
+            raise ValueError("offline bootstrap admission or outcome differs")
         _require(not self.cohort(self.connection))
         return None
 
@@ -850,11 +854,12 @@ class _Bootstrap:
             and self.db is not None
             and reset_required is False
         )
-        assert (
+        if not (
             self.connection is not None
             and self.db is not None
             and self.operation is not None
-        )
+        ):
+            raise ValueError("offline bootstrap admission or outcome differs")
         if type(command) is not CredentialCreateAbsentV1:
             raise TypeError("bootstrap accepts only its exact create-absent assignment")
         _require(not self.cohort(self.connection))
@@ -889,14 +894,15 @@ class _Bootstrap:
             and entry.command is self.assignment
             and entry.authority is self.evidence
         )
-        assert (
+        if not (
             self.connection is not None
             and self.db is not None
             and self.assignment is not None
             and self.evidence is not None
             and self.snapshot is not None
             and self.identity is not None
-        )
+        ):
+            raise ValueError("offline bootstrap admission or outcome differs")
         self.revalidate(self.connection)
         self.credential(self.connection)
         _require(
@@ -970,7 +976,8 @@ def bootstrap_tenant(
         with _protected_platform_operation(db, state.revalidate) as connection:
             now = datetime.now(UTC)
             policy, operation = state.policy, state.operation
-            assert policy is not None and operation is not None
+            if not (policy is not None and operation is not None):
+                raise ValueError("offline bootstrap admission or outcome differs")
             # Real canonical Tenant exists before any tenant-scoped writes.
             tenant = identity_storage.create_tenant(
                 db,

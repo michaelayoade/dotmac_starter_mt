@@ -76,10 +76,11 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from sqlalchemy import Connection, Engine, create_engine, event, text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.engine import NestedTransaction, RootTransaction
+from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 if TYPE_CHECKING:
     from dotmac_kernel.identity_provisioning import IdentityProvisioningAssemblyV1
@@ -1030,10 +1031,10 @@ class _PlatformScope:
         self.factory = runtime.platform_session_factory
         self.factory_configuration = dict(self.factory.kw)
         self.factory_class = self.factory.class_
-        self.root: Any = None
+        self.root: SessionTransaction | None = None
         self.connection: Connection | None = None
         self.connection_listening = False
-        self.physical_root: Any = None
+        self.physical_root: RootTransaction | None = None
         self.dbapi: Any = None
         self.backend_xid: tuple[Any, ...] | None = None
         self.validators: list[Callable[[Connection], None]] = []
@@ -1042,10 +1043,10 @@ class _PlatformScope:
         self.failed = False
         self.runtime_commit = False
         self.opening_savepoint = False
-        self.savepoint: Any = None
-        self.closing_savepoint: Any = None
-        self.rolling_back_savepoint: Any = None
-        self.physical_nested: Any = None
+        self.savepoint: SessionTransaction | None = None
+        self.closing_savepoint: SessionTransaction | None = None
+        self.rolling_back_savepoint: SessionTransaction | None = None
+        self.physical_nested: NestedTransaction | None = None
         self.creating_physical_savepoint = False
         self.custody_damaged = False
         self.damaged_cleanup_done = False
@@ -1059,11 +1060,11 @@ class _PlatformScope:
         self.failed = True
         self.validators.clear()
 
-    def refuse(self, reason: str) -> None:
+    def refuse(self, reason: str) -> NoReturn:
         self.poison()
         raise RuntimeBindingError(f"Protected platform boundary refuses: {reason}")
 
-    def transaction_created(self, db: Session, transaction: Any) -> None:
+    def transaction_created(self, db: Session, transaction: SessionTransaction) -> None:
         if transaction.parent is None:
             if self.root is None and not self.retired:
                 self.root = transaction
@@ -1074,7 +1075,7 @@ class _PlatformScope:
                 self.refuse("only the operation-owned savepoint is permitted")
             self.savepoint = transaction
 
-    def transaction_ended(self, db: Session, transaction: Any) -> None:
+    def transaction_ended(self, db: Session, transaction: SessionTransaction) -> None:
         if transaction is self.root:
             self.retired = True
             if self.protected and not self.runtime_commit:
@@ -1137,8 +1138,10 @@ class _PlatformScope:
         # SQLAlchemy marks the Session root PREPARED before Connection.commit;
         # only that runtime-owned physical commit phase may inspect it inactive.
         prepared_commit = physical_commit and self.runtime_commit
-        if self.db.get_transaction() is not self.root or (
-            not prepared_commit and not self.root.is_active
+        if (
+            self.root is None
+            or self.db.get_transaction() is not self.root
+            or (not prepared_commit and not self.root.is_active)
         ):
             self.refuse("the issued Session root changed or became inactive")
         if self.db.get_nested_transaction() is not self.savepoint:
@@ -1150,6 +1153,7 @@ class _PlatformScope:
             or connection.invalidated
             or connection.engine is not self.engine
             or (not prepared_commit and self.db.connection() is not connection)
+            or self.physical_root is None
             or connection.get_transaction() is not self.physical_root
             or not self.physical_root.is_active
             or connection.connection.dbapi_connection is not self.dbapi
@@ -1219,7 +1223,7 @@ class _PlatformScope:
         self.creating_physical_savepoint = False
 
     def check_savepoint_completion(
-        self, connection: Connection, name: str, phase: Any
+        self, connection: Connection, name: str, phase: SessionTransaction | None
     ) -> None:
         physical = self.physical_nested
         if (

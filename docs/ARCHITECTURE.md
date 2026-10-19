@@ -2864,6 +2864,18 @@ consumer promotion. No provider migration or audit writer is copied into Learnin
 | Installed Kernel-floor qualification | `scripts/module_floor_check.sh` owns one-wheel builds, tag/cache provenance and isolated environments; `scripts/module_floor_probe.py` owns strict installed mode/evidence checks under the existing hosted `kernel-floors` lane. Learning-only registry proof verifies all 27 tables; Fulfillment/Template Studio tenant-audit API proof preserves their logical dependencies. Numeric floors, enrollment, actual hosted execution and registry-byte verification remain separate publication gates. |
 | Full current storage transfer | `delivery_transfer` and `delivery_transfer_contracts` V5; full27 catalog, visibility, emptiness, 260-field representation, actual FK and source unique closure precede any delegated V4 insert. Independent current-field/key/delete readback follows. V1–V4 retain their original 7/14/21/23 scopes. |
 
+`results.read_lab_result` reads a detached `ScoreFact` through a frozen
+`LabResultRead`: exact tenant/person/activity/instance selectors and inclusive
+actual claimed/finished submission timestamps, with missing/inverted bounds
+matching nothing. The linked Score and Submission must share tenant and
+submission ID; latest score uses the accepted created-at then ID ordering.
+Core column projections and local autoflush suppression preserve caller ORM
+pending state and transaction boundaries. This lookup proves no durability
+outside the caller transaction. Academy retains owned-instance/course access,
+operation eligibility, reset/deploy selection and pending/UI state; these IDs
+and timestamps confer no authority. PR182's 37 Academy canaries remain an
+installed-adoption gate, not coverage claimed by this source addition.
+
 The prepared source now includes the instructor, support and learner-dashboard/insight
 reads; Academy retirement and installed-consumer qualification remain pending. Academy retains authorization,
 authentication/account availability, presentation, deployment configuration,

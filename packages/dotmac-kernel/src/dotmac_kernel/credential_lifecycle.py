@@ -1162,7 +1162,7 @@ class CredentialAuthenticatedAccountPasswordPolicyRefused(CredentialPolicyViolat
             "policy_rejected",
         ):
             raise ValueError("invalid authenticated password policy refusal")
-        self.code = code
+        self.code: Literal["confirmation_mismatch", "policy_rejected"] = code
         super().__init__(code)
 
 

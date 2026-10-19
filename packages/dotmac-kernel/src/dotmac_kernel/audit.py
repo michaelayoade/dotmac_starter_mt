@@ -30,6 +30,7 @@ platform audit trail predates this contract and is not changed by this slice.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -422,7 +423,9 @@ def _write_audit_event_on_connection(
     if values["occurred_at"] is None:
         del values["occurred_at"]
     statement = (
-        sa.insert(AuditEvent.__table__).values(**values).returning(AuditEvent.id)
+        sa.insert(cast(sa.Table, AuditEvent.__table__))
+        .values(**values)
+        .returning(AuditEvent.id)
     )
     return connection.execute(statement).scalar_one()
 

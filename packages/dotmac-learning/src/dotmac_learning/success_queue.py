@@ -513,7 +513,7 @@ def _get_entry(db: Session, tenant_id: UUID, entry_id: UUID) -> SuccessQueueEntr
     ).first()
     if result is None:
         raise SuccessNotFound("queue entry not found")
-    entry = result[0]
+    entry = cast(SuccessQueueEntry, result[0])
     untouched = inspect(entry).unmodified
     for column, fresh_value in zip(
         SuccessQueueEntry.__table__.columns, result[1:], strict=True

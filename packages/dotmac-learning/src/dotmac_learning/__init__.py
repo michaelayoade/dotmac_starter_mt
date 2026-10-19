@@ -312,6 +312,7 @@ from dotmac_learning.result_contracts import (
     AttemptAdmissionPolicy,
     GradedResult,
     LabResultCommand,
+    LabResultRead,
     MCQResultCommand,
     OverrideScoreCommand,
     ResultBadRequest,
@@ -322,6 +323,7 @@ from dotmac_learning.result_contracts import (
 )
 from dotmac_learning.results import (
     override_score,
+    read_lab_result,
     record_lab_result,
     record_mcq_result,
     submit_mcq_activity,
@@ -1257,4 +1259,6 @@ __all__ = [
     "decoded_doc_from_db",
     "get_certificate",
     "instructor_cohort_by_id",
+    "LabResultRead",
+    "read_lab_result",
 ]

@@ -24,7 +24,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -272,7 +272,8 @@ _TARGET_MODELS = (
     AuditEvent.__table__,
 )
 _TARGETS = tuple(
-    table.to_metadata(sa.MetaData(), schema="public") for table in _TARGET_MODELS
+    cast(sa.Table, table).to_metadata(sa.MetaData(), schema="public")
+    for table in _TARGET_MODELS
 )
 _ACTION = "identity.history_imported"
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,62}\Z")
@@ -406,10 +407,8 @@ def _relation_fact(connection: Connection, schema: str, name: str) -> tuple[int,
         ),
         {"schema": schema, "name": name},
     ).one_or_none()
-    _refuse(
-        row is not None and row[2] == "r" and row[1] == "app_admin",
-        "relation ownership or kind",
-    )
+    if not (row is not None and row[2] == "r" and row[1] == "app_admin"):
+        raise IdentityHistoryImportRefused("relation ownership or kind")
     return row[0], row[1]
 
 
@@ -509,7 +508,8 @@ def _installed_kernel_coverage(
         _refuse(isinstance(supplied[code], Path), "module source path required")
         location = supplied[code].resolve(strict=True)
         owner = manifest.migration_owner()
-        _refuse(owner is not None, "stateful module owner absent")
+        if owner is None:
+            raise IdentityHistoryImportRefused("stateful module owner absent")
         actual_owner = namespaces.get(code)
         _refuse(
             actual_owner is not None
@@ -542,11 +542,11 @@ def _installed_kernel_coverage(
     )
     _refuse(report.ok, "installed migration composition refused")
     for record in report.revisions:
-        owner = report.attribution[record.revision]
+        attributed_owner = report.attribution[record.revision]
         wanted = wanted_owners[record.location]
         _refuse(
             wanted is not None
-            and owner
+            and attributed_owner
             == {
                 "owner": wanted.owner,
                 "branch_label": wanted.branch_label,
@@ -772,7 +772,7 @@ def _target_catalog_preflight(
             )
         )
         live_unique.update(
-            tuple(index["column_names"])
+            tuple(cast(str, name) for name in index["column_names"])
             for index in indexes
             if index.get("unique")
             and index["name"] in full_unique_indexes
@@ -1017,8 +1017,8 @@ def _rows_preflight(
     for family in _FAMILIES[1:]:
         for row in getattr(rows, family):
             _refuse(row.tenant_id in tenants, "tenant reference outside cohort")
-    for family in (rows.user_credentials, rows.auth_sessions, rows.person_roles):
-        for row in family:
+    for person_family in (rows.user_credentials, rows.auth_sessions, rows.person_roles):
+        for row in person_family:
             person = people.get(row.person_id)
             _refuse(
                 person is not None and person.tenant_id == row.tenant_id,
@@ -1125,56 +1125,60 @@ def _rows_preflight(
                 _refuse(_time(value), "target time shape")
 
 
-def _target(table: sa.Table) -> sa.Table:
-    return next(target for target in _TARGETS if target.name == table.name)
+def _target(table: sa.sql.FromClause) -> sa.Table:
+    return next(
+        target for target in _TARGETS if target.name == cast(sa.Table, table).name
+    )
 
 
 def _projections(
     rows: IdentityHistoryRowsV1,
 ) -> Iterable[tuple[sa.Table, dict[str, object]]]:
-    for row in rows.tenants:
-        yield _target(Tenant.__table__), _values(row)
-    for row in rows.tenant_domains:
-        yield _target(TenantDomain.__table__), _values(row)
-    for row in rows.people:
-        base = _values(row)
+    for tenant_row in rows.tenants:
+        yield _target(Tenant.__table__), _values(tenant_row)
+    for domain_row in rows.tenant_domains:
+        yield _target(TenantDomain.__table__), _values(domain_row)
+    for person_row in rows.people:
+        base = _values(person_row)
         del base["first_name"], base["last_name"]
         yield (
             _target(Party.__table__),
             {
                 **base,
                 "party_type": PartyType.person,
-                "display_name": person_display_name(row.first_name, row.last_name),
+                "display_name": person_display_name(
+                    person_row.first_name, person_row.last_name
+                ),
                 "is_active": True,
                 "custom_fields": {},
             },
         )
-    for row in rows.people:
+    for person_row in rows.people:
         yield (
             _target(PartyPerson.__table__),
             {
-                "party_id": row.id,
-                "first_name": row.first_name,
-                "last_name": row.last_name,
+                "party_id": person_row.id,
+                "first_name": person_row.first_name,
+                "last_name": person_row.last_name,
             },
         )
-    for row in rows.user_credentials:
-        values = _values(row)
+    for credential_row in rows.user_credentials:
+        values = _values(credential_row)
         values["party_id"] = values.pop("person_id")
         yield _target(UserCredential.__table__), values
-    for row in rows.auth_sessions:
-        values = _values(row)
+    for session_row in rows.auth_sessions:
+        values = _values(session_row)
         values["party_id"] = values.pop("person_id")
         values["external_identity_binding_id"] = None
         yield _target(AuthSession.__table__), values
-    for row in rows.roles:
-        yield _target(Role.__table__), _values(row)
-    for row in rows.person_roles:
-        values = _values(row)
+    for role_row in rows.roles:
+        yield _target(Role.__table__), _values(role_row)
+    for grant_row in rows.person_roles:
+        values = _values(grant_row)
         values["party_id"] = values.pop("person_id")
         yield _target(PartyRoleGrant.__table__), values
-    for row in rows.audit_events:
-        values = _values(row)
+    for audit_row in rows.audit_events:
+        values = _values(audit_row)
         values["actor_party_id"] = values.pop("actor_person_id")
         for name in (
             "actor_type",
@@ -1323,32 +1327,33 @@ def _comparison_predicates(table: sa.Table, values: dict[str, object]) -> list:
     for column in table.c:
         value = values[column.name]
         if isinstance(column.type, sa.JSON):
+            expected_json: sa.sql.elements.ColumnElement[object]
             if type(value) is HistoricalJsonbV1:
                 _refuse(type(value.raw_json) is str, "historical JSONB text required")
-                expected = sa.cast(
+                expected_json = sa.cast(
                     sa.bindparam(None, value.raw_json, type_=sa.Text), JSONB
                 )
             else:
                 # Use the importer's JSONB serializer, including JSON literal
                 # null for Python None; SQL NULL must remain distinguishable.
-                expected = sa.bindparam(None, value, type_=column.type)
+                expected_json = sa.bindparam(None, value, type_=column.type)
             predicates.append(
                 sa.cast(column, sa.Text).is_not_distinct_from(
-                    sa.cast(expected, sa.Text)
+                    sa.cast(expected_json, sa.Text)
                 )
             )
         else:
-            expected = (
+            expected_scalar = (
                 value
                 if isinstance(value, sa.sql.elements.ClauseElement)
                 else sa.bindparam(None, value, type_=column.type)
             )
-            predicates.append(column.is_not_distinct_from(expected))
+            predicates.append(column.is_not_distinct_from(expected_scalar))
     return predicates
 
 
 def _verify_projected_values(connection: Connection, projections: list) -> None:
-    expected_keys = {table.name: set() for table in _TARGETS}
+    expected_keys: dict[str, set[object]] = {table.name: set() for table in _TARGETS}
     for table, values in projections:
         key = next(iter(table.primary_key.columns))
         identifier = values[key.name]
@@ -1427,6 +1432,8 @@ def verify_identity_history(
     try:
         _check_connection(connection)
         root = connection.get_transaction()
+        if root is None:
+            raise IdentityHistoryImportRefused("caller root transaction required")
         _operation_preflight(expected, operation)
         tenants, ids = _verification_receipt_preflight(
             rows, expected, operation, receipt

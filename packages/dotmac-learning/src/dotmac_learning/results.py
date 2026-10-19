@@ -23,6 +23,7 @@ from .result_contracts import (
     AttemptAdmissionPolicy,
     GradedResult,
     LabResultCommand,
+    LabResultRead,
     MCQResultCommand,
     OverrideScoreCommand,
     ResultBadRequest,
@@ -452,3 +453,63 @@ def override_score(db: Session, payload: OverrideScoreCommand) -> ResultWrite:
         ),
     )
     return ResultWrite(_submission_fact(sub), _score_fact(score), consequence, ())
+
+
+def read_lab_result(db: Session, query: LabResultRead) -> ScoreFact | None:
+    """Read the latest linked score in the supplied instance/check window.
+
+    This reads the caller's transaction, including already-flushed changes;
+    it does not prove durability beyond that transaction. Core projections avoid
+    cached ORM provenance and preserve caller pending values/history. This
+    explicitly read-only lookup suppresses autoflush, without owning a boundary.
+    Academy retains operation eligibility, authorization and reset/deploy policy.
+    """
+    if (
+        query.claimed_at is None
+        or query.finished_at is None
+        or query.claimed_at > query.finished_at
+    ):
+        return None
+    scores, submissions = Score.__table__, Submission.__table__
+    statement = (
+        select(*scores.c)
+        .join(
+            submissions,
+            (scores.c.submission_id == submissions.c.id)
+            & (scores.c.tenant_id == submissions.c.tenant_id),
+        )
+        .where(
+            scores.c.tenant_id == query.tenant_id,
+            submissions.c.tenant_id == query.tenant_id,
+            submissions.c.person_id == query.person_id,
+            submissions.c.activity_id == query.activity_id,
+            submissions.c.answers["instance"].astext == str(query.instance_id),
+            submissions.c.created_at >= query.claimed_at,
+            submissions.c.created_at <= query.finished_at,
+        )
+        .order_by(scores.c.created_at.desc(), scores.c.id.desc())
+        .limit(1)
+    )
+    with db.no_autoflush:
+        row = db.execute(statement).mappings().first()
+    if row is None:
+        return None
+    return ScoreFact(
+        **{
+            name: deepcopy(row[name])
+            for name in (
+                "id",
+                "tenant_id",
+                "submission_id",
+                "score",
+                "max_score",
+                "fraction",
+                "passed",
+                "source",
+                "override_reason",
+                "created_at",
+                "updated_at",
+            )
+        },
+        per_item=_JSON.validate_python(deepcopy(row["per_item"])),
+    )

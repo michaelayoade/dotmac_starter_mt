@@ -53,7 +53,7 @@ def expectation(checkout: Path, destination: Path) -> None:
                 if isinstance(target, ast.Name) and target.id == "__version__":
                     version = ast.literal_eval(node.value)
     require(
-        exports is not None and len(exports) == len(set(exports)) == 533,
+        exports is not None and len(exports) == len(set(exports)) == 535,
         "Source Learning export extent differs",
     )
     require(
@@ -205,7 +205,7 @@ def installed_packages(expected: dict, receipt: dict) -> None:
         wheels[distribution] = {"sha256": wheel_digest, "version": version}
     receipt.update(
         wheels=wheels,
-        learning_exports=533,
+        learning_exports=535,
         kernel_exports=281,
         owner_binding_sha256=hashlib.sha256(
             json.dumps(expected["bindings"], sort_keys=True).encode()
@@ -406,6 +406,7 @@ def vertical(admin_url, user_url, receipt: dict) -> None:
         EventWrite,
         GradedResult,
         LabResultCommand,
+        LabResultRead,
         RosterAuthority,
         SubmitMCQCommand,
         bulk_enroll,
@@ -417,6 +418,7 @@ def vertical(admin_url, user_url, receipt: dict) -> None:
         get_completion,
         get_course,
         issue_certificate,
+        read_lab_result,
         recompute_completion,
         record_lab_result,
         submit_mcq_activity,
@@ -644,6 +646,47 @@ def vertical(admin_url, user_url, receipt: dict) -> None:
 
                 grade = GradedResult(score=1, max_score=1, fraction=1, passed=True)
                 produced = lab_producer(grade)
+                # Actual ledger timestamps exercise inclusive matching. The
+                # synthetic context never establishes product-operation authority.
+                read_values = {
+                    "tenant_id": tenant,
+                    "person_id": person,
+                    "activity_id": lab,
+                    "instance_id": instance,
+                    "claimed_at": produced.submission.created_at,
+                    "finished_at": produced.submission.created_at,
+                }
+                read_before = counts(db)
+                read_nested = db.get_nested_transaction()
+                require(
+                    produced.score is not None
+                    and read_lab_result(db, LabResultRead(**read_values))
+                    == produced.score,
+                    "Installed owned-instance ledger read differs",
+                )
+                require(
+                    read_lab_result(
+                        db,
+                        LabResultRead(**dict(read_values, instance_id=uuid4())),
+                    )
+                    is None,
+                    "Installed ledger read crossed instance selector",
+                )
+                require(
+                    read_lab_result(
+                        db,
+                        LabResultRead(**dict(read_values, finished_at=None)),
+                    )
+                    is None,
+                    "Installed ledger read accepted an absent worker bound",
+                )
+                require(
+                    counts(db) == read_before
+                    and db.get_transaction() is root
+                    and db.get_nested_transaction() is read_nested,
+                    "Installed ledger read changed effects or caller boundary",
+                )
+                receipt["lab_result_read"] = True
                 require(
                     produced.completion is not None
                     and produced.completion.first_completion
