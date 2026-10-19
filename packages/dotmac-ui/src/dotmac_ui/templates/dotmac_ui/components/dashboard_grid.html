@@ -1,0 +1,6 @@
+{# Responsive two-column dashboard composition. The caller owns content. #}
+{% macro dashboard_grid(label="Dashboard sections") -%}
+<section class="dmui-dashboard-grid" aria-label="{{ label }}">
+  {% if caller is defined %}{{ caller() }}{% endif %}
+</section>
+{%- endmacro %}

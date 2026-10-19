@@ -1,0 +1,18 @@
+{# Generic dashboard panel. Permission checks and content stay host-owned. #}
+{% macro dashboard_panel(title="", description="", action_label="", action_url="", span="half") -%}
+{% set panel_span = span if span in ("half", "full") else "half" %}
+<section class="dmui-dashboard-panel dmui-dashboard-panel--{{ panel_span }}">
+  <header class="dmui-dashboard-panel__header">
+    <div class="dmui-dashboard-panel__heading">
+      <h2 class="dmui-dashboard-panel__title">{{ title }}</h2>
+      {% if description %}<p class="dmui-dashboard-panel__description">{{ description }}</p>{% endif %}
+    </div>
+    {% if action_label and action_url %}
+    <a class="dmui-dashboard-panel__action" href="{{ action_url }}">{{ action_label }}</a>
+    {% endif %}
+  </header>
+  <div class="dmui-dashboard-panel__body">
+    {% if caller is defined %}{{ caller() }}{% endif %}
+  </div>
+</section>
+{%- endmacro %}

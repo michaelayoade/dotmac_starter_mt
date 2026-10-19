@@ -80,6 +80,68 @@ _RENDER_CASES: dict[str, tuple[dict[str, object], ...]] = {
         }
         for state in ("ready", "loading", "empty", "error")
     ),
+    "dashboard_grid": ({"label": "Operations dashboard"},),
+    "dashboard_panel": tuple(
+        {
+            "title": "Dashboard panel",
+            "description": "Release artifact proof.",
+            "action_label": "View all",
+            "action_url": "/admin/items",
+            "span": span,
+        }
+        for span in ("half", "full")
+    ),
+    "metric_card": tuple(
+        {
+            "label": "Customers",
+            "value": "12,481",
+            "primary_detail": "946 active",
+            "secondary_detail": "10+ this month",
+            "href": "/admin/customers" if index else "",
+            "tone": tone,
+        }
+        for index, tone in enumerate(
+            ("neutral", "positive", "info", "warning", "negative")
+        )
+    ),
+    "notice_banner": (
+        {
+            "title": "What's new",
+            "message": "Dashboard metrics have been refreshed.",
+            "dismiss_label": "Dismiss announcement",
+        },
+    ),
+    "dashboard_line_chart": (
+        {
+            "title": "Tickets Performance",
+            "description": "SLA health by service team",
+            "series": tuple(
+                {
+                    "label": tone,
+                    "tone": tone,
+                    "path": "M44 180 L180 140 L320 120 L460 80 L590 50",
+                }
+                for tone in ("neutral", "positive", "info", "warning", "negative")
+            ),
+            "range_label": "17 Sep – 16 Oct",
+            "filter_label": "Service team",
+            "filter_name": "service_team",
+            "filter_options": (
+                {"value": "all", "label": "All teams", "selected": True},
+                {"value": "support", "label": "Support"},
+            ),
+        },
+    ),
+    "notification_toast": (
+        {
+            "title": "You were mentioned",
+            "message": "A support team mentioned you on ticket #1842.",
+            "action_label": "Open ticket",
+            "action_url": "/admin/tickets/1842",
+            "dismiss_label": "Dismiss notification",
+            "auto_dismiss_ms": 8000,
+        },
+    ),
 }
 
 
