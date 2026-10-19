@@ -743,7 +743,10 @@ def _target_catalog_preflight(
             if isinstance(constraint, sa.UniqueConstraint)
         }
         expected_unique.update(
-            tuple(expression.name for expression in index.expressions)
+            tuple(
+                cast("sa.Column[object]", expression).name
+                for expression in index.expressions
+            )
             for index in table.indexes
             if index.unique
             and all(

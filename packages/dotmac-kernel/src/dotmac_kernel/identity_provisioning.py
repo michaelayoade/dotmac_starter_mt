@@ -431,7 +431,7 @@ def _catalog(connection: Connection) -> tuple[object, ...]:
             if isinstance(item, sa.UniqueConstraint)
         )
         expected_unique.update(
-            tuple(column.name for column in item.expressions)
+            tuple(cast("sa.Column[object]", column).name for column in item.expressions)
             for item in table.indexes
             if item.unique
             and all(isinstance(column, sa.Column) for column in item.expressions)
