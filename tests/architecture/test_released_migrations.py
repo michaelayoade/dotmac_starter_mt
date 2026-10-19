@@ -1589,6 +1589,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # a2's root is the published atomic catalogue. a3 adds fi_0002 rather than
     # changing this digest, so an existing a2 installation and a fresh a3
     # installation converge through an ordinary Alembic upgrade.
+    "dotmac-files-v0.1.0a7": (
+        "dotmac-files",
+        "d94ff7edb8a8cfc28c709b40a1b9f87ea38d16c9",
+        {
+            "fi_0001_stored_files.py": (
+                "58976eab44ccfaaa77af255c52f92ef333e650e89ee3f6808211820b3c3b4fd0"
+            ),
+            "fi_0002_selectable_planes.py": (
+                "9cdaf0da282402777d6c2e694c60d29f8078a0d48c64211e9a6a67dc1ac05581"
+            ),
+        },
+    ),
     "dotmac-files-v0.1.0a6": (
         "dotmac-files",
         "19accb23ee10b16048088b3beb7e374d16ab31b4",
