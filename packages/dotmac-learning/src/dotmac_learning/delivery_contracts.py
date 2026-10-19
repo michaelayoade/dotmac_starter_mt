@@ -95,6 +95,7 @@ class SessionChange:
 class SessionUpdate:
     session: ClassSessionFact
     changes: tuple[SessionChange, ...]
+    audit_event_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)

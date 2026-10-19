@@ -35,6 +35,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy import DateTime, ForeignKey, String, Uuid, func
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from dotmac_kernel.audit_actions import active_audit_actions
@@ -232,6 +233,56 @@ def resolve_event_attribution(source_application: str | None) -> str:
     return host
 
 
+def _current_audit_event_values(
+    *,
+    tenant_id: UUID,
+    actor_party_id: UUID | None = None,
+    actor_type: str,
+    actor_id: str | None = None,
+    actor_label: str | None = None,
+    source_application: str | None = None,
+    action: str,
+    entity_type: str,
+    entity_id: str | None = None,
+    request_id: str | None = None,
+    status_code: int | None = None,
+    is_success: bool | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    occurred_at: datetime | None = None,
+    details: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Validate current-event vocabulary/identity/attribution before mutation."""
+    active_audit_actions().require(action)
+    resolved_type, resolved_id = resolve_audit_actor(
+        actor_type=actor_type,
+        actor_id=actor_id,
+        actor_party_id=actor_party_id,
+    )
+    # Validated with `action` and the actor pair, BEFORE anything is added to
+    # the session, for the same reason those two are: a rejected write must
+    # leave no partial state behind in the caller's transaction.
+    resolved_application = resolve_event_attribution(source_application)
+    return {
+        "tenant_id": tenant_id,
+        "actor_type": resolved_type,
+        "actor_id": resolved_id,
+        "actor_label": actor_label,
+        "actor_party_id": actor_party_id,
+        "source_application": resolved_application,
+        "action": action,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "request_id": request_id,
+        "status_code": status_code,
+        "is_success": is_success,
+        "ip_address": ip_address,
+        "user_agent": user_agent,
+        "occurred_at": occurred_at,
+        "details": details or {},
+    }
+
+
 def write_audit_event(
     db: Session,
     *,
@@ -280,23 +331,66 @@ def write_audit_event(
     `created_at` — it is not a parameter, because a caller cannot know when the
     row will be written.
     """
-    active_audit_actions().require(action)
-    resolved_type, resolved_id = resolve_audit_actor(
+    event = AuditEvent(
+        **_current_audit_event_values(
+            tenant_id=tenant_id,
+            actor_party_id=actor_party_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            actor_label=actor_label,
+            source_application=source_application,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            request_id=request_id,
+            status_code=status_code,
+            is_success=is_success,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            occurred_at=occurred_at,
+            details=details,
+        )
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def _write_audit_event_on_connection(
+    connection: Connection,
+    *,
+    tenant_id: UUID,
+    actor_party_id: UUID | None = None,
+    actor_type: str,
+    actor_id: str | None = None,
+    actor_label: str | None = None,
+    source_application: str | None = None,
+    action: str,
+    entity_type: str,
+    entity_id: str | None = None,
+    request_id: str | None = None,
+    status_code: int | None = None,
+    is_success: bool | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    occurred_at: datetime | None = None,
+    details: dict[str, object] | None = None,
+) -> UUID:
+    """Append a current event on the caller's PostgreSQL/psycopg transaction.
+
+    Private audit-owner mechanism, not maintenance authorization. The caller
+    must supply an active root on a non-autocommit psycopg connection. Logical
+    begin before the first SQL is supported; no DBAPI INTRANS state is required.
+    Unsupported or unverifiable drivers refuse. No Session, transaction control,
+    historical import, or created_at override is introduced here.
+    """
+    values = _current_audit_event_values(
+        tenant_id=tenant_id,
+        actor_party_id=actor_party_id,
         actor_type=actor_type,
         actor_id=actor_id,
-        actor_party_id=actor_party_id,
-    )
-    # Validated with `action` and the actor pair, BEFORE anything is added to
-    # the session, for the same reason those two are: a rejected write must
-    # leave no partial state behind in the caller's transaction.
-    resolved_application = resolve_event_attribution(source_application)
-    event = AuditEvent(
-        tenant_id=tenant_id,
-        actor_type=resolved_type,
-        actor_id=resolved_id,
         actor_label=actor_label,
-        actor_party_id=actor_party_id,
-        source_application=resolved_application,
+        source_application=source_application,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
@@ -306,11 +400,31 @@ def write_audit_event(
         ip_address=ip_address,
         user_agent=user_agent,
         occurred_at=occurred_at,
-        details=details or {},
+        details=details,
     )
-    db.add(event)
-    db.flush()
-    return event
+    if connection.closed or connection.invalidated:
+        raise ValueError("audit append requires a live caller transaction")
+    root = connection.get_transaction()
+    if root is None or not root.is_active or not connection.in_transaction():
+        raise ValueError("audit append requires an active caller transaction")
+    if (
+        connection.dialect.name != "postgresql"
+        or connection.dialect.driver != "psycopg"
+    ):
+        raise ValueError("audit append requires a PostgreSQL psycopg connection")
+    if connection.get_execution_options().get("isolation_level") == "AUTOCOMMIT":
+        raise ValueError("audit append refuses autocommit")
+    autocommit = getattr(connection.connection.driver_connection, "autocommit", None)
+    if autocommit is not False:
+        raise ValueError("audit append requires verified non-autocommit psycopg")
+    # The ORM's ordinary None handling omits this server-defaulted value.
+    # Core must do the same so a current event gets the database's now().
+    if values["occurred_at"] is None:
+        del values["occurred_at"]
+    statement = (
+        sa.insert(AuditEvent.__table__).values(**values).returning(AuditEvent.id)
+    )
+    return connection.execute(statement).scalar_one()
 
 
 def write_platform_audit_event(

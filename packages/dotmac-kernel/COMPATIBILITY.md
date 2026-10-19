@@ -153,7 +153,7 @@ Two rules travel with it:
 | `dotmac_kernel.consent` | `ConsentError`, `filter_eligible`, `is_marketing`, `list_suppressions`, `may_send`, `normalize_address`, `normalize_channel`, `register_marketing_categories`, `register_numeric_channels`, `registered_marketing_categories`, `suppress`, `suppression_reason`, `suppression_reasons_for_addresses`, `unsuppress`, `unsuppress_marketing` |
 | `dotmac_kernel.consent_models` | `REASON_BOUNCE`, `REASON_COMPLAINT`, `REASON_ERASURE`, `REASON_MANUAL`, `REASON_UNSUBSCRIBE`, `SCOPE_ALL`, `SCOPE_MARKETING`, `SUPPRESSION_REASONS`, `SUPPRESSION_SCOPES`, `CommunicationSuppression` |
 | `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
-| `dotmac_kernel.credential_lifecycle` | `CredentialLifecycle`, `CredentialSubjectRef`, `CredentialSnapshot`, `CredentialVerificationResult`, `CredentialVerificationVerdict`, `CredentialResetTargetV1`, `CredentialResetPlanV1`, `CredentialResetPlanDigestV1`, `CredentialResetAuthorizationV1`, `CredentialResetOutcomeV1`, `CredentialResetReceiptV1`, `CredentialResetCompletionReceiptV1`, `CredentialProvisioningReceiptV1`, `CredentialRecoveryAuthorizationV1`, `CredentialRecoveryIntentV1`, `CredentialSessionRevocationIntentV1`, `CredentialAuditEntryV1`, `CredentialStorePort`, `SessionRevocationPort`, `RecoveryIntentPort`, `PasswordPolicyPort`, `CredentialAuditPort`, `SecretSource`, `default_secret_source`, `REDACTED`, `CREDENTIAL_LIFECYCLE_SCHEMA_VERSION`, `CredentialLifecycleError` + its subclasses (the single owner of human credential decisions; submodule-only — see "Human credential lifecycle" below) |
+| `dotmac_kernel.credential_lifecycle` | `CredentialAccountRef`, `CredentialAccountRecoveryAuthorizationV1`, `CredentialAccountResetCompletionReceiptV1`, `CredentialAccountResetPort`, `CredentialAccountSessionRevocationCompletionV1`, `CredentialLifecycle`, `CredentialSubjectRef`, `CredentialSnapshot`, `CredentialVerificationResult`, `CredentialVerificationVerdict`, `CredentialResetTargetV1`, `CredentialResetPlanV1`, `CredentialResetPlanDigestV1`, `CredentialResetAuthorizationV1`, `CredentialResetOutcomeV1`, `CredentialResetReceiptV1`, `CredentialResetCompletionReceiptV1`, `CredentialProvisioningReceiptV1`, `CredentialRecoveryAuthorizationV1`, `CredentialRecoveryIntentV1`, `CredentialSessionRevocationIntentV1`, `CredentialAuditEntryV1`, `CredentialStorePort`, `SessionRevocationPort`, `RecoveryIntentPort`, `PasswordPolicyPort`, `CredentialAuditPort`, `SecretSource`, `default_secret_source`, `REDACTED`, `CREDENTIAL_LIFECYCLE_SCHEMA_VERSION`, `CredentialLifecycleError` + its subclasses (the single owner of human credential decisions; submodule-only — see "Human credential lifecycle" below) |
 | `dotmac_kernel.crud` | `CRUDManager` |
 | `dotmac_kernel.session_runtime` | `DatabaseRuntime`, `TenantLookup`, `CANONICAL_TENANT_SETTING` |
 | `dotmac_kernel.db` | `runtime`, `get_db`, `get_platform_db`, `platform_session`, `resolver_session`, `tenant_scope`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
@@ -172,6 +172,8 @@ Two rules travel with it:
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
+| `dotmac_kernel.identity_provisioning` | `BootstrapTenantV1`, `BootstrapRoleV1`, `BootstrapPolicyV1`, `BootstrapProductPort`, `BootstrapProductOperation`, `IdentityProvisioningAssemblyV1`, `BootstrapTenantResultV1`, `install_identity_provisioning`, `bootstrap_tenant`; trusted offline composition on the strictly bound runtime with actual same-Connection role/catalog/policy/canonical/audit verification through physical precommit. Unpublished source; installed qualification pending. |
+| `dotmac_kernel.identity_storage` | `NewTenantValues`, `TenantFact`, `create_tenant`, `PartyFact`, `PersonFact`, `RoleFact`, `GrantFact`, `NewPersonValues`, `find_party_exact_email`, `find_party_normalized_email`, `lock_parties`, `lock_person`, `lock_roles`, `lock_grants`, `credential_member_ids`, `create_person`, `provision_missing_roles`, `ensure_grant`, `delete_person`; caller-owned storage and locks, observations only; `create_person` returns the actual canonical `Party` row. No authorization or transaction boundary. Unpublished source; installed qualification pending. |
 | `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `ReceiverAppliedState`, `APPLIED_STATE_SCHEMA`, `UNKNOWN_DIGEST`, `applied_state_payload`, `parse_applied_state`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses, and the ADR-0007 applied-state envelope: `APPLIED_STATE_ENVELOPE_SCHEMA`, `APPLIED_STATE_DOMAIN`, `DEPLOYMENT_CHALLENGE_DOMAIN`, `DEPLOYMENT_CHALLENGE_SCHEMA`, `DEPLOYMENT_RESPONSE_SCHEMA`, `AppliedStateEnvelope`, `DeploymentSigner`, `DeploymentVerificationKey`, `VerifiedAppliedState`, `DeploymentPossessionChallenge`, `DeploymentPossessionResponse`, `VerifiedDeploymentPossession`, `applied_state_signing_input`, `seal_applied_state`, `verify_applied_state`, `answer_possession_challenge`, `verify_possession` (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
 | `dotmac_kernel.logging` | `setup_logging` |
 | `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `OutboxEvent`, `PlatformOutboxEvent`, `OutboxStatus` (see "Outbox/inbox" below) |
@@ -195,6 +197,7 @@ Two rules travel with it:
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.migrations.configuration` | `select_migration_database_url`, `set_alembic_database_url` — pure held-material selection with explicit fallback permission and percent escaping only at the Alembic ConfigParser write boundary |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
+| `dotmac_kernel.migrations.identity_history` | `HistoricalAuditEventV1`, `HistoricalCredentialV1`, `HistoricalJsonbV1`, `HistoricalPersonRoleV1`, `HistoricalPersonV1`, `HistoricalRoleV1`, `HistoricalSessionV1`, `HistoricalTenantDomainV1`, `HistoricalTenantV1`, `IdentityHistoryCohortV1`, `IdentityHistoryCountsV1`, `IdentityHistoryImportOperationV1`, `IdentityHistoryImportReceiptV1`, `IdentityHistoryImportRefused`, `IdentityHistoryManifestV1`, `IdentityHistoryRelationsV1`, `IdentityHistoryRowsV1`, `IdentityHistorySourceV1`, `import_identity_history` — `HistoricalJsonbV1(raw_json: str)` carries source JSONB text through bound PostgreSQL validation/casting without Python numeric parsing; caller-owned PostgreSQL historical identity maintenance, without runtime provisioning or transaction control. Optional `assembly_versions`, `module_registry`, `module_versions` and `prerequisite_bindings` describe the whole trusted installed graph, including disabled stateful modules; explicit bindings must already match the caller Alembic environment, and the importer never installs them. Live exact revision ancestry covers the installed Kernel head without requiring unapplied source successors. Graph checks do not attest genuine replay. **Unpublished source enrollment; installed hosted qualification pending.** |
 | `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE`, `DEFAULT_PLATFORM_ROLE`, `TABLE_PRIVILEGES` (the post-migration live-catalog contract, both planes — see the same section) |
 | `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_party_person_catalog`, `verify_tenant_audit_log`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
 | `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `PARTY_PERSON_CATALOG_V1`, `TENANT_AUDIT_LOG_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
@@ -1299,6 +1302,42 @@ place — or from one place that is about to become two.
    **This is product security authority.** `dotmac-deployment-control` owns
    fleet deployment intent and must not authorize an account mutation.
 
+#### Complete current account reset (unpublished; qualification pending)
+
+`CredentialLifecycle.complete_account_reset(authorization, secret, *, account)`
+adds the existing product operation that sets one chosen password on every
+current credential of a principal. `CredentialAccountRecoveryAuthorizationV1`
+names a `CredentialAccountRef` (application, principal kind, and an opaque
+principal reference bound to tenant plus principal), a genuine recovery/proof
+reference, and its proven/expiry timestamps. It cannot select a credential
+subset. Expiry is refused strictly before the captured current time; equality
+is admitted. Product callers retain their existing preliminary password check
+before spending a recovery token. The owner then validates the installed
+`PasswordPolicyPort` against each actual named subject before hashing once.
+
+The additive `CredentialAccountResetPort` must consume the actual principal
+proof exactly once, lock the principal and its complete current membership,
+validate tenant/principal/credential relationships, clear failure/lockout state
+for each named member, and synchronously revoke all principal sessions. It
+returns `CredentialAccountSessionRevocationCompletionV1`, a completed effect
+reference, time and non-negative session count; an outbox intent is insufficient.
+Fresh `CredentialStorePort` locks independently check each member and version,
+including BIGINT overflow refusal before hashing/writes. Each explicit store
+write uses the same hash, advances that member's own version by one, and sets
+`reset_required=False`; the adapter must CAS from new version minus one.
+Per-credential audit entries and `CredentialAccountResetCompletionReceiptV1`
+contain references, versions, time and revocation facts, never material. Any
+failure requires caller rollback of proof and all effects; port exceptions are
+masked. The five existing constructor ports and earlier entry points are
+unchanged. No password generation, provisioning intent, session issuance,
+transaction management or product adapter is added by this method.
+
+This source surface still requires its real Academy proof/store/account-policy
+adapter and hosted transaction/CAS/rollback qualification. Current adoption
+`lifecycle_version=0` records bookkeeping, not a historical password count.
+Initial credential creation, invitations and CLI setup remain separate proof
+and intent gaps; this method makes no complete owner-adoption claim.
+
 #### What you supply
 
 Five ports, all typed, all yours. `CredentialStorePort` (rows, locking and
@@ -1477,3 +1516,293 @@ reader and transfer contract before switching writers. Downgrade refuses
 unknown timestamps or entity names longer than 120 rather than inventing,
 truncating or deleting evidence. This source inventory establishes neither
 publication nor identity/lineage adoption.
+
+## Authorized supplied-password assignment — unpublished source, 2026-10-18
+
+The same `CredentialLifecycle` adds `assign_authorized_password(command, secret)`.
+Existing methods, recovery provisioning's secret-free signature, five existing
+ports and old audit entry remain unchanged. Three optional constructor fields
+append AFTER `clock`: `assignment_authority`, `assignment_store`,
+`assignment_audit`; only the new operation requires them and installed `policy`.
+No version is allocated; published `0.1.0a106` remains immutable.
+
+The additive public surface is `CredentialCreateAbsentV1`,
+`CredentialReplaceSelectedV1`, their closed `CredentialAssignmentCommandV1`
+union, `CredentialAssignmentAuthorityEvidenceV1`,
+`CredentialAssignmentAuditEntryV1`, `CredentialAssignmentReceiptV1`,
+`CredentialAssignmentAuthorityPort`, `CredentialAssignmentStorePort`,
+`CredentialAssignmentAuditPort` and `CredentialAssignmentError`.
+
+Commands bind opaque target/tenant/purpose/reason/correlation and an exact,
+non-empty sorted role tuple; duplicates refuse. Replacement binds exact prior
+subject and nonnegative signed-64-bit version, sharing application, principal
+kind and credential ID with the target; prior Party may differ. Product ports
+resolve actual tenant semantics without parsing principal references. Creation
+accepts the store's actual valid initial version; replacement requires expected
+version plus one and refuses overflow. No fallback overwrite occurs.
+
+Installed authority alone issues evidence for the exact command. The engine
+passes that EXACT instance to current audit and receipt. Public evidence is not
+intrinsic authority: the SAME bound product authority/audit adapter must verify
+private actual Session/root/command/actor context, reject copies/stale/cross-root
+state, validate outcome, derive the real `user`/`service`/`api_key`/`system` actor,
+flush an actual current audit row and return its non-empty ID. The audit entry
+has exactly command, authority, previous version (None for creation), new version
+and aware occurrence time. Its fixed action is `credential.password.assigned`;
+it carries no snapshots or hashes. The actual product assembly must declare
+that consumed action; the generic registry is unchanged.
+
+Assignment invokes the installed product password policy once and hashes once,
+persists explicit `reset_required=False`, checks actual returned target/hash/
+version/state, then audits and returns a material-free receipt. Kernel supplies
+no strength, role or runtime-policy defaults. There is no generated intermediate,
+recovery intent, failure clear, unlock, session revocation or alias fanout.
+All port/policy/hash/store/audit errors become a generic material-masked
+`CredentialAssignmentError` with suppressed exception display context. The
+CALLER's root/public savepoint MUST roll back ALL account and credential effects
+before translating failures into responses. The engine creates no transaction.
+
+Source and mocked-port unit canaries do not qualify product authorization,
+real tenant/grant/session/Party locks, writer participation or transaction
+rollback. Hosted public-catalog verification, existing owner regressions, genuine
+Postgres/product/actual-role/concurrency/material/atomic-audit tests, independent
+review, installed future artifact, release and adoption remain owed. Source tests
+were written, not run locally. Preserve populated recovery of NEW assignment
+state, versions and current audits; no production activation is claimed.
+
+
+### Purpose-bound invitation claim — unpublished source, 2026-10-18
+
+`CredentialCreateAbsentFromProofV1` extends the existing closed assignment
+command union in `dotmac_kernel.credential_lifecycle`. It is submodule-only,
+like the existing credential lifecycle API; no eager top-level export is added.
+Its six fields are `target_subject`, `tenant_ref`, `purpose_ref`, `proof_ref`,
+`reason_code` and `correlation_ref`. It carries no password, asserted actor,
+role list, or timestamp. The existing `CredentialCreateAbsentV1` still requires
+nonempty intended roles; selected replacement and recovery contracts are unchanged.
+The matching use is Academy's existing invitation acceptance: a valid invitation
+can be accepted after role removal, including by a credentialless roleless user.
+Creating a credential at invitation issuance would change that behavior.
+
+The command is not authorization. The installed product authority must prove the
+actual tenant, subject and purpose from the genuine single-use invitation, under
+the caller transaction and common principal-first locking protocol. Token proof
+identity binds `proof_ref` to the returned `authority_evidence_ref`; a token UUID
+is proof/correlation, never an invented actor identity. A valid bearer may establish
+the actual target user for this limited claim; target identity alone proves nothing.
+Product-private operation context must bind the same Session/root transaction and
+exact command, validate the genuine token digest, kind, unused state and expiry
+with a clock sampled after lock waits, and consume the token before returning
+authority. Expiry equality remains valid, preserving the existing invitation rule.
+Credential creation must refuse ANY credential for the account, not merely a
+collision at a newly generated credential UUID. Whole-operation rollback must
+retain token usability when creation or audit fails, including when a caller
+catches the error and commits its outer transaction. Sibling invitation consumption
+belongs in that same product boundary; private authority context must be cleared.
+
+The same `assign_authorized_password` engine performs one installed policy check,
+one hash, one create, persisted-state validation, bound audit and a material-free
+receipt. Product defaults remain composable Settings/environment policy. This
+claim adds no implicit role, session, status change or eligibility requirement;
+Academy's suspended/inactive invitation behavior must be preserved. No recovery
+`provision` material argument, arbitrary hasher waiver or second owner is admitted.
+
+The two-file v2 owner capsule is independently source-reviewed, not installed or
+runtime-qualified. Its manifest SHA-256 is
+`d44818094b60bcccfbce0171e282134d1b55233fd8402b08679c3c39113448db`.
+All 25 earlier assignment tests retain their exact ASTs. New tests are authored,
+not executed; a portable fake rollback test is not PostgreSQL atomicity evidence.
+Hosted type/tests, genuine Academy locking/concurrency/token/audit/root recovery,
+installed public-catalog verification and a separately authorized successor
+release remain required. Published Kernel 106 and the frozen caller baseline are
+unchanged. No invitation writer retirement or Academy activation is claimed.
+
+
+### Authenticated account password change — unpublished source, 2026-10-18
+
+The matching Academy self-service password-change path now has a distinct
+`CredentialLifecycle.change_authenticated_account_password` source operation
+in the SAME stateless credential owner. It is submodule-only. The closed
+`CredentialAuthenticatedAccountPasswordChangeV1` carries the account reference,
+reason code and correlation reference; passwords are separate operation arguments,
+never command, receipt or audit fields. Its method-scoped
+`CredentialAuthenticatedAccountPasswordChangePort` preserves constructor and old
+recovery, verification, assignment and positional API compatibility.
+
+This is deliberately separate from selected-credential assignment and recovery.
+Academy's actual route compares the first unordered credential, then confirmation,
+then its existing eight-character minimum. Failure changes no aliases, counters,
+locks, sessions or tokens. A valid existing self-session permits a matching old
+password even when the selected credential is locked, inactive or reset-required.
+Public login verification is unchanged; it may rehash the old password and is not
+used for this purpose. Recovery proof is not fabricated from a cookie. Repeating
+selected assignment would hash once per alias and cannot preserve this behavior.
+
+The new operation compares only the actual selected fresh hash without rehashing,
+then runs a request-bound confirmation-first policy followed by the product's
+Settings-backed purpose policy. Academy's existing minimum is 8, with its default
+owned only by product Settings/environment and separately configurable from
+creation and reset. Closed material-free refusal codes are
+`current_password_invalid`, `confirmation_mismatch` and `policy_rejected`;
+unexpected failures are masked rather than reflected as policy messages.
+Empty locked membership with no verification subject truthfully yields the
+current-password refusal; inconsistent subject/membership bindings fail closed.
+
+Product authority proves the genuine user, exact cookie session, tenant and
+principal under common Party/subtype/profile/session/complete-credential locks.
+Public DTOs and equal or copied evidence are not proof: the adapter binds the
+exact issued evidence to its private Session/root and command, then revalidates
+that authority and full fresh membership after blocking acquisition. Membership
+reads are mutation-free. Alias normalization occurs only after old-password,
+confirmation and policy validation. The store shares that same private context,
+updates exactly one named member with its expected version CAS to the next
+version, and performs no hidden fanout. The owner computes ONE new hash for the
+entire cohort and validates each persisted member, explicitly clears reset state,
+and clears every failure counter and lock while preserving IDs and unrelated
+aliases, eligibility, status and grants.
+
+Success revokes every nonrevoked session, including expired sessions, and consumes
+every unused password-reset token, including expired tokens. Already revoked
+sessions, used reset proofs and other token kinds remain unchanged. The operation
+records actual bound material-free user audit under `credential.password.changed`,
+with member versions and completed revocation/invalidation evidence. Product
+assembly must enroll this action and verify actual persisted effects; receipt DTOs
+alone are not database proof. A deliberately revoked current session is not
+required to remain unrevoked at audit time. Private context is cleared on all exits.
+
+The caller owns one public operation savepoint and the root transaction. Failure
+must roll back ALL operation effects. Expected product responses are translated
+only after proving recovery to the same active root; if recovery cannot be proved,
+root rollback is required. No owner or adapter commits a caller transaction, and
+no refusal falls back to a legacy primitive.
+
+Owner v2 manifest SHA-256:
+`a4e0d3acc79d86a42540aec319632e40bb71aded36679cba62eb556e9e4dc0f7`.
+Independent source review closed all three port-contract clarifications; executable
+AST and all 17 authored portable tests are unchanged from v1. Existing owner
+methods and constructor retain their exact ASTs. Tests have not run; portable
+fake stores do not prove PostgreSQL atomicity or concurrency. Real Academy
+cookie authority, token canonical references, complete migrated fixtures,
+per-member CAS, natural lock races, audit containment, hosted type/tests and
+installed public-catalog/artifact verification remain required. Canonical CAS,
+locked authority revalidation, explicit reset bookkeeping and current audit are
+added requirements, not a claim of identical concurrent failure behavior. No
+release allocation, published-106 mutation, product activation or frozen caller
+retirement follows from source preparation.
+
+
+## Canonical identity storage split — 2026-10-19, source only
+
+`dotmac_kernel.identity_storage` is the public engine-free storage module. Its
+PartyFact, PersonFact, RoleFact and GrantFact are detached observations, never
+capabilities or proof of locks. Callers supply the Session, tenant, explicit
+values, required lock order and business decisions, and own commit/rollback.
+The public functions are find_party_exact_email, find_party_normalized_email,
+lock_parties, lock_person, lock_roles, lock_grants, credential_member_ids,
+create_person, provision_missing_roles, ensure_grant and delete_person.
+NewPersonValues contains only canonical Party/PartyPerson fields; Academy keeps
+its existing product DTO and explicitly projects it into Kernel values.
+
+Queries, tenant predicates, UUID/order/locking/populate_existing behavior,
+collision propagation and two canonical creation flushes are retained
+from the pinned Academy helper. create_person returns the actual canonical
+same-Session Party row as a strong reference; this return grants no authority.
+Academy projects PartyFact after its third flush, preserving final observed row
+values even when a real profile-flush listener changes a Party field, without
+adding any query. Academy appends its unchanged profile constructor
+and third flush, retaining arbitrary valid product status and detached prefs.
+Role names/custom rows survive additive provisioning. Required explicit None
+inputs to ensure_grant omit UUID/timestamp constructor keywords and preserve ORM
+and server defaults. delete_person keeps its bound-person rowcount check and
+finally cleanup. Credential membership reads all IDs without alias/status/policy
+filtering or credential material; CredentialLifecycle remains the credential
+writer. The module imports no engine, product, Settings or bootstrap authority.
+
+This prepares source only. Hosted PostgreSQL canaries are authored, NOT RUN.
+No version, dependency floor, release, installed qualification, product adoption
+or writer retirement is claimed. Starter's existing reference tenant writer is
+not changed or retired. The split creates no Tenant primitive, registry or new
+bootstrap API. Existing Academy helper callers retain their signatures and facts.
+
+
+## Offline bootstrap source contract — 2026-10-19
+
+`dotmac_kernel.identity_provisioning` adds BootstrapTenantV1, BootstrapRoleV1,
+BootstrapPolicyV1, BootstrapProductPort/BootstrapProductOperation,
+IdentityProvisioningAssemblyV1, BootstrapTenantResultV1,
+install_identity_provisioning and bootstrap_tenant. It is supported submodule
+API only. Installation requires the identical strictly bound runtime; identity
+idempotence permits the same assembly object only and replacement refuses.
+The command contains slug/name/email only; password is a separate call argument.
+No caller actor, role flags, adapter, hash or generic authorization boolean exists.
+`identity_storage` adds explicit NewTenantValues/TenantFact/create_tenant only;
+all old generic definitions remain unchanged. Existing owner DTOs, hashing,
+recovery APIs and strict runtime provenance/savepoint/cancellation semantics are
+preserved. Authorization checks actual paired DB identities and catalog effects;
+precommit reads use Connection Core while Session PREPARED. No local or hosted
+runtime qualification has run. Future version remains UNALLOCATED/UNRELEASED;
+106 is immutable and does not qualify these APIs.
+
+
+### 2026-10-19 source amendment: historical identity comparison
+
+The future, UNALLOCATED/UNRELEASED Kernel V4 source adds
+`dotmac_kernel.migrations.identity_history.verify_identity_history(connection,
+rows, expected, operation, receipt, *, assembly_versions=None,
+module_registry=None, module_versions=None, prerequisite_bindings=()) -> None`.
+Academy's historical importer is the matching consumer. It compares all eight
+original source families against all nine populated canonical targets and the
+exact current import audit cohort. It reuses the importer's projections and
+catalog predicates, with a separate catalog-only preflight; ordinary import
+still requires empty targets. No writes, audit append, transaction control,
+material output, public capture DTO or adoption authority is introduced.
+
+JSONB raw text compares inside PostgreSQL without Python numeric decoding;
+ordinary JSON uses the existing serializer. Both current audit times must equal
+the same root's `transaction_timestamp()`. All target keys and values, including
+outside-tenant extras, are checked. Catalog verification has the importer's
+existing bounded scope: reflected FK endpoint/delete checks are not a full
+constraint-name/update/match/deferrability/RI fingerprint. A004's exact incoming
+retained FK/RI and parent-key proof remains separate.
+
+This paired source has authored hosted canaries, not executed qualification.
+The partial capsule requires the genuine full pinned migration baseline and
+installed owner composition. Published106 does not supply this future API.
+Fresh genesis, a004/a005, commit/runtime custody, Integration/ERP evidence and
+forward recovery remain pending; no whole-product adoption is claimed.
+
+
+### 2026-10-19 current-main integration provenance correction
+
+Academy composed313 is a prepared canonical helper, not evidence of a
+production-used canonical implementation. Reuse of its reviewed existing-owner
+mechanics is distinct from production references: Sub lifecycle at
+`7b5a7220a90a3c86b4afd339a1e3950dbcfddf2b`, ERP audit at
+`01b1d6758ea2d5926eaf68f4bf40e3a67a15f2e8`, and Academy's actual supplied-password
+and bootstrap behavior at `a5ffe6316e97bf33e17ef9c1f00788796f5e5a5a`.
+The explicit negative inventory and source path/hash seals in Kernel
+`EXTRACTION.toml` identify ERP Person/PersonRole and Sub
+SubscriberRole/SystemUserRole as nonqualifying canonical Party implementations.
+Canonical storage, protected provenance and historical comparison are new
+contracts after that inventory; no new business policy follows from absence.
+The package remains `historical-mixed`. Prior dated sections are historical
+source records; this correction governs the prepared current-main composition.
+
+`verify_identity_history` compares all nine target values and key extents using
+the importer's existing bounded catalog predicates. It adds no audit or writes
+and holds no transaction authority; it is not an exhaustive RI fingerprint or
+adoption authority. Academy's private original-snapshot association and a003/V5
+checks remain required. No writer is retired: Starter reference tenant
+constructors and ERP/Sub writers remain unretired, with source parity references
+and existing hash-call debt unchanged. All changes are source-only; no installed,
+hosted, release, Academy factory or pair-adoption qualification is claimed.
+
+
+### Historical correction — 2026-10-19
+
+The tenant audit history paragraph records the earlier proposal. Revision
+`0029_audit_history_shape` was subsequently published in Kernel `0.1.0a106`.
+This unallocated development source adds `0030_credential_tenant_key` and the
+separately described identity owner changes. `0.1.0a106+dev` is neither
+publication nor successor numeric allocation. Source inspection does not
+qualify hosted execution, installed artifacts, product adoption or release.

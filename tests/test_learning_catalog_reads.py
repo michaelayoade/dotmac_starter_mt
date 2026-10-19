@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from dotmac_learning import catalog_reads
+from dotmac_learning import account_cohort_names, catalog_reads
 from dotmac_learning.curriculum_models import Chapter
 from dotmac_learning.models import Activity, Course, CourseCompletion, Score, Submission
 from dotmac_learning.participation_models import (
@@ -58,7 +58,11 @@ def enroll(db, tenant, person, course, *, role="student"):
         ends_at=datetime.now(UTC) - timedelta(days=1),
     )
     enrollment = Enrollment(
-        tenant_id=tenant, cohort_id=cohort.id, person_id=person, role_in_cohort=role
+        tenant_id=tenant,
+        cohort_id=cohort.id,
+        person_id=person,
+        role_in_cohort=role,
+        status="active",
     )
     db.add_all([offering, enrollment])
     db.flush()
@@ -325,3 +329,129 @@ def test_completion_uses_current_best_not_persisted_completion_or_any_pass(
             db, tenant_id=tenant, person_id=person, course_id=empty
         )
         assert empty_structure.parts == empty_structure.course_activities == ()
+
+
+def test_account_cohort_names_all_states_duplicates_and_caller_scope(result_database):
+    admin, app, tenant, person, _, _, other, other_person, *_ = result_database
+    # Reuse genuine Kernel Party/PartyPerson provisioning from the migrated fixture.
+    with admin.begin() as conn:
+        second_person = result_tests._person(conn, tenant)
+    with scoped(app, other) as db:
+        foreign_cohort = Cohort(
+            tenant_id=other, name="Foreign cohort", discipline="engineering"
+        )
+        db.add(foreign_cohort)
+        db.flush()
+        db.add(
+            Enrollment(
+                tenant_id=other,
+                cohort_id=foreign_cohort.id,
+                person_id=other_person,
+                status="active",
+                role_in_cohort="student",
+            )
+        )
+    with scoped(app, tenant) as db:
+        assert account_cohort_names is catalog_reads.account_cohort_names
+        assert account_cohort_names(db, tenant_id=tenant, person_id=person) == []
+        assert account_cohort_names(db, tenant_id=tenant, person_id=second_person) == []
+        # Labels are stored facts, including whitespace; neither state nor cohort
+        # status grants this read a business-policy filter. No offering is needed.
+        cases = (
+            ("Zulu", "active"),
+            ("Alpha", "inactive"),
+            ("Alpha", "pending"),
+            ("Middle", "completed"),
+            ("Raw label ", "withdrawn"),
+            ("Unknown state", "source_state"),
+        )
+        for name, status in cases:
+            cohort = Cohort(
+                tenant_id=tenant,
+                name=name,
+                discipline="engineering",
+                status="inactive",
+            )
+            db.add(cohort)
+            db.flush()
+            db.add(
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort.id,
+                    person_id=person,
+                    status=status,
+                    role_in_cohort="student",
+                )
+            )
+        own_cohort = Cohort(
+            tenant_id=tenant, name="Other person", discipline="engineering"
+        )
+        db.add(own_cohort)
+        db.flush()
+        db.add(
+            Enrollment(
+                tenant_id=tenant,
+                cohort_id=own_cohort.id,
+                person_id=second_person,
+                status="active",
+                role_in_cohort="student",
+            )
+        )
+        db.flush()
+        root = db.get_transaction()
+        connection = db.connection()
+        scope = db.scalar(text("SELECT current_setting('app.current_tenant')"))
+        assert db.execute(
+            text(
+                "SELECT current_user, rolsuper, rolbypassrls FROM pg_catalog.pg_roles "
+                "WHERE rolname=current_user"
+            )
+        ).one() == ("app_user", False, False)
+        before = db.execute(
+            select(Enrollment.id, Enrollment.person_id, Enrollment.status).order_by(
+                Enrollment.id
+            )
+        ).all()
+        assert account_cohort_names(db, tenant_id=tenant, person_id=person) == [
+            "Alpha",
+            "Alpha",
+            "Middle",
+            "Raw label ",
+            "Unknown state",
+            "Zulu",
+        ]
+        assert account_cohort_names(db, tenant_id=tenant, person_id=second_person) == [
+            "Other person"
+        ]
+        assert account_cohort_names(db, tenant_id=tenant, person_id=other_person) == []
+        assert account_cohort_names(db, tenant_id=other, person_id=other_person) == []
+        assert db.get_transaction() is root and root.is_active
+        assert db.connection() is connection
+        assert db.scalar(text("SELECT current_setting('app.current_tenant')")) == scope
+        assert not db.new and not db.dirty and not db.deleted
+        assert (
+            db.execute(
+                select(Enrollment.id, Enrollment.person_id, Enrollment.status).order_by(
+                    Enrollment.id
+                )
+            ).all()
+            == before
+        )
+        assert db.scalar(select(func.count()).select_from(Cohort)) == len(cases) + 1
+        # The caller can continue using its transaction after every read.
+        sentinel = Cohort(
+            tenant_id=tenant,
+            name="Caller still owns transaction",
+            discipline="engineering",
+        )
+        db.add(sentinel)
+        db.flush()
+        assert db.scalar(select(Cohort.name).where(Cohort.id == sentinel.id)) == (
+            "Caller still owns transaction"
+        )
+        assert db.get_transaction() is root and root.is_active
+    with scoped(app, other) as db:
+        assert account_cohort_names(db, tenant_id=tenant, person_id=person) == []
+        assert account_cohort_names(db, tenant_id=other, person_id=other_person) == [
+            "Foreign cohort"
+        ]

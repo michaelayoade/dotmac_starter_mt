@@ -85,7 +85,8 @@ def admin_engine():
     url = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv("TEST_DATABASE_URL")
     if not url:
         pytest.skip("TEST_DATABASE_URL not set — these tests require a real Postgres")
-    engine = create_engine(url, future=True)
+    # Hide bound history material; the importer also refuses DEBUG row logging.
+    engine = create_engine(url, future=True, hide_parameters=True, echo=False)
     yield engine
     engine.dispose()
 
@@ -355,3 +356,294 @@ def open_registration(admin_session: Session, tenant) -> None:
         )
     )
     admin_session.commit()
+
+
+@pytest.fixture(scope="session")
+def identity_reference_url():
+    """Require the exact run-owned hosted reference DSN before any connection."""
+    import re
+
+    from sqlalchemy.engine import make_url
+
+    assert os.environ.get("CI") == os.environ.get("GITHUB_ACTIONS") == "true"
+    run, attempt = (
+        os.environ.get("GITHUB_RUN_ID", ""),
+        os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+    )
+    assert re.fullmatch(r"[0-9]+", run) and re.fullmatch(r"[0-9]+", attempt)
+    assert os.environ.get("COMPOSE_PROJECT_NAME") == f"starter-identity-{run}-{attempt}"
+    raw = os.environ.get("IDENTITY_REFERENCE_DATABASE_URL")
+    assert raw, "Hosted identity reference configuration required"
+    url = make_url(raw)
+    port = os.environ.get("TEST_DB_PORT", "")
+    assert re.fullmatch(r"[0-9]{1,5}", port) and 0 < int(port) < 65536
+    names = []
+    for kind in ("REFERENCE", "GRAPH", "INSTALLED"):
+        name = f"starter_identity_{kind.lower()}_{run}_{attempt}"
+        assert len(name) <= 63
+        assert os.environ.get(f"IDENTITY_{kind}_DB_NAME") == name
+        raw_other = os.environ[f"IDENTITY_{kind}_DATABASE_URL"]
+        assert raw_other == f"postgresql+psycopg://app_admin@localhost:{port}/{name}"
+        other = make_url(raw_other)
+        assert (
+            other.drivername,
+            other.username,
+            other.password,
+            other.host,
+            other.port,
+            other.database,
+        ) == ("postgresql+psycopg", "app_admin", None, "localhost", int(port), name)
+        assert not other.query
+        names.append(name)
+    assert len({*names, os.environ["TEST_DB_NAME"]}) == 4
+    assert url.database == names[0]
+    return raw
+
+
+@pytest.fixture(scope="session")
+def identity_reference_engine(identity_reference_url):
+    engine = create_engine(identity_reference_url, hide_parameters=True, echo=False)
+    try:
+        with engine.connect() as connection:
+            assert tuple(
+                connection.execute(
+                    text(
+                        "SELECT current_user, session_user, current_database(), "
+                        "rolcanlogin, rolsuper, rolbypassrls FROM pg_roles WHERE "
+                        "rolname=current_user"
+                    )
+                ).one()
+            ) == (
+                "app_admin",
+                "app_admin",
+                os.environ["IDENTITY_REFERENCE_DB_NAME"],
+                True,
+                False,
+                True,
+            )
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE "
+                        "datname=current_database()"
+                    )
+                )
+                == "app_admin"
+            )
+        yield engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def identity_reference_composition():
+    """Derive all trusted locations from the actual ini and gate attribution."""
+    from pathlib import Path
+    from types import MappingProxyType, SimpleNamespace
+
+    from dotmac_kernel.migrations import versions_dir
+    from dotmac_kernel.migrations.gate import run_gate, version_locations_from_ini
+    from dotmac_kernel.modules import ModuleRegistry
+    from dotmac_kernel.planes import (
+        install_module_plane_selections,
+        installed_module_plane_selections,
+    )
+    from dotmac_kernel.prerequisites import (
+        install_prerequisite_bindings,
+        installed_bindings,
+    )
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from app.assembly import assembly
+    from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
+    ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+    locations = version_locations_from_ini(ini)
+    report = run_gate(
+        assembly.modules,
+        locations,
+        bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+        module_planes=assembly.module_planes,
+    )
+    assert report.ok, "Actual reference migration composition refused"
+    registry = ModuleRegistry(assembly.modules)
+    stateful = {m.code for m in registry.startup_order() if m.is_stateful}
+    by_owner = {}
+    for record in report.revisions:
+        by_owner.setdefault(report.attribution[record.revision]["owner"], set()).add(
+            record.location.resolve()
+        )
+    assert set(by_owner) == {"kernel", "assembly", *stateful}
+    assert all(len(paths) == 1 for paths in by_owner.values())
+    owned = {owner: next(iter(paths)) for owner, paths in by_owner.items()}
+    assert set(owned.values()) == {p.resolve() for p in locations}
+    assert owned["kernel"] == versions_dir().resolve()
+    before_bindings, before_planes = (
+        installed_bindings(),
+        installed_module_plane_selections(),
+    )
+    try:
+        install_prerequisite_bindings(ASSEMBLY_PREREQUISITE_BINDINGS)
+        install_module_plane_selections(assembly.module_planes)
+        bindings, planes = installed_bindings(), installed_module_plane_selections()
+        assert bindings == tuple(
+            sorted(ASSEMBLY_PREREQUISITE_BINDINGS, key=lambda b: b.prerequisite)
+        )
+        assert planes == tuple(sorted(assembly.module_planes, key=lambda p: p.module))
+        scripts = ScriptDirectory.from_config(Config(str(ini)))
+        heads = frozenset(scripts.get_heads())
+        kwargs = MappingProxyType(
+            {
+                "assembly_versions": owned["assembly"],
+                "module_registry": registry,
+                "module_versions": MappingProxyType(
+                    {code: owned[code] for code in stateful}
+                ),
+                "prerequisite_bindings": bindings,
+            }
+        )
+        yield SimpleNamespace(
+            kwargs=kwargs,
+            planes=planes,
+            bindings=bindings,
+            modules=assembly.modules,
+            heads=heads,
+            report=report,
+        )
+    finally:
+        install_prerequisite_bindings(before_bindings)
+        install_module_plane_selections(before_planes)
+        assert installed_bindings() == before_bindings
+        assert installed_module_plane_selections() == before_planes
+
+
+@pytest.fixture
+def identity_app_user_switch(identity_reference_engine, identity_reference_url):
+    """Own one temporary downward SET-only grant, after shared migrations."""
+    import json
+    from pathlib import Path
+
+    from sqlalchemy.engine import make_url
+
+    admin = make_url(os.environ["TEST_MIGRATION_DATABASE_URL"])
+    target = make_url(identity_reference_url)
+    assert (
+        admin.drivername,
+        admin.username,
+        admin.host,
+        admin.port,
+        admin.database,
+    ) == (
+        "postgresql+psycopg",
+        "postgres",
+        "localhost",
+        target.port,
+        os.environ["TEST_DB_NAME"],
+    )
+    membership = (
+        "SELECT count(*) FROM pg_auth_members WHERE "
+        "roleid='app_user'::regrole AND member='app_admin'::regrole"
+    )
+    posture = (
+        "SELECT rolname, rolcanlogin, rolsuper, rolbypassrls FROM "
+        "pg_roles WHERE rolname IN ('app_user', 'app_admin') ORDER BY "
+        "rolname"
+    )
+    engine = create_engine(admin, hide_parameters=True, echo=False)
+    owned = False
+    status = Path("identity-membership-cleanup.json")
+
+    def record_cleanup(event):
+        events = json.loads(status.read_text())["events"] if status.exists() else []
+        events.append(event)
+        result = (
+            "failure"
+            if "failure" in events
+            else "success"
+            if events.count("success") == events.count("pending")
+            else "pending"
+        )
+        status.write_text(
+            json.dumps({"status": result, "owned": True, "events": events}) + "\n"
+        )
+
+    try:
+        with engine.begin() as connection:
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT current_user = 'postgres' AND session_user = 'postgres'"
+                    )
+                )
+                is True
+            )
+            before = tuple(tuple(row) for row in connection.execute(text(posture)))
+            assert before == (
+                ("app_admin", True, False, True),
+                ("app_user", True, False, False),
+            )
+            assert (
+                connection.scalar(text(membership)) == 0
+            ), "Unexpected pre-existing role membership"
+            connection.execute(
+                text(
+                    "GRANT app_user TO app_admin WITH SET TRUE, INHERIT FALSE, "
+                    "ADMIN FALSE"
+                )
+            )
+            owned = True
+        record_cleanup("pending")
+        with engine.connect() as connection:
+            assert tuple(
+                connection.execute(
+                    text(
+                        "SELECT set_option, inherit_option, admin_option FROM "
+                        "pg_auth_members WHERE roleid='app_user'::regrole AND "
+                        "member='app_admin'::regrole"
+                    )
+                ).one()
+            ) == (True, False, False)
+        with identity_reference_engine.begin() as connection:
+            connection.execute(text("SET LOCAL ROLE app_user"))
+            assert tuple(
+                connection.execute(
+                    text(
+                        "SELECT current_user, rolsuper, rolbypassrls FROM pg_roles "
+                        "WHERE rolname=current_user"
+                    )
+                ).one()
+            ) == ("app_user", False, False)
+            connection.execute(text("SET LOCAL ROLE app_admin"))
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT current_user = session_user "
+                        "AND current_user = 'app_admin'"
+                    )
+                )
+                is True
+            )
+        yield
+    finally:
+        try:
+            if owned:
+                # imported_case has closed its connection and rolled back first.
+                # Retire its idle pool before revoking our scoped SET permission.
+                try:
+                    identity_reference_engine.dispose()
+                finally:
+                    with engine.begin() as connection:
+                        connection.execute(text("REVOKE app_user FROM app_admin"))
+                with engine.connect() as connection:
+                    assert connection.scalar(text(membership)) == 0
+                    assert (
+                        tuple(tuple(row) for row in connection.execute(text(posture)))
+                        == before
+                    )
+                record_cleanup("success")
+        except BaseException:
+            record_cleanup("failure")
+            raise
+        finally:
+            engine.dispose()

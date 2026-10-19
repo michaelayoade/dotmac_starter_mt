@@ -19,8 +19,60 @@ from .curriculum_contracts import ChapterFact
 from .curriculum_models import Chapter
 from .entitlements import unmet_prerequisites, visible_course_ids
 from .models import Activity, Course
+from .participation_models import Cohort, Enrollment
 from .projections import best_scores_for
 from .references import CourseFact, _activity_fact, _course_fact
+
+
+def catalog_course_by_slug(
+    db: Session, *, tenant_id: UUID, slug: str
+) -> CourseFact | None:
+    """Indexed tenant-local discovery; caller owns authorization/transaction."""
+    row = db.scalars(
+        select(Course)
+        .where(Course.tenant_id == tenant_id, Course.slug == slug)
+        .limit(1)
+    ).first()
+    return None if row is None else _course_fact(row)
+
+
+def catalog_chapter_by_number(
+    db: Session, *, tenant_id: UUID, course_id: UUID, number: int
+) -> ChapterFact | None:
+    """Read one chapter bound to both tenant and course, without an access claim."""
+    row = db.scalars(
+        select(Chapter)
+        .where(
+            Chapter.tenant_id == tenant_id,
+            Chapter.course_id == course_id,
+            Chapter.number == number,
+        )
+        .limit(1)
+    ).first()
+    return None if row is None else _chapter_fact(row)
+
+
+def account_cohort_names(db: Session, *, tenant_id: UUID, person_id: UUID) -> list[str]:
+    """Stored cohort names for this person, across all enrollment states.
+
+    Preserve duplicate labels and database name ordering. The caller supplies a
+    genuine Kernel PartyPerson UUID and retains its Session, tenant GUC, and
+    transaction ownership; account authorization and display belong to the product.
+    """
+    return list(
+        db.scalars(
+            select(Cohort.name)
+            .join(
+                Enrollment,
+                (Enrollment.cohort_id == Cohort.id)
+                & (Enrollment.tenant_id == Cohort.tenant_id),
+            )
+            .where(Cohort.tenant_id == tenant_id)
+            .where(Enrollment.tenant_id == tenant_id)
+            .where(Enrollment.person_id == person_id)
+            .order_by(Cohort.name)
+        ).all()
+    )
 
 
 def my_courses(
@@ -169,4 +221,12 @@ def course_structure(
     )
 
 
-__all__ = ["my_courses", "all_courses", "course_completion", "course_structure"]
+__all__ = [
+    "my_courses",
+    "all_courses",
+    "catalog_course_by_slug",
+    "catalog_chapter_by_number",
+    "course_completion",
+    "course_structure",
+    "account_cohort_names",
+]

@@ -2,8 +2,12 @@
 
 An *audit action* (e.g. ``"role.grant"``) is a module's declaration, on its
 manifest's ``audit_actions``, that a named auditable event EXISTS and that this
-module owns it. This module builds the registry of those declarations and is the
-ONE place that answers "is this action real?".
+module owns it. Kernel-owned actions are declared by a private `FeatureManifest`
+here and composed with installed manifests by
+`AuditActionRegistry.from_manifests`; manifests cannot redeclare them, even under
+the name "kernel". This module builds the registry
+of those declarations and is the ONE place that answers "is this action real?".
+A declaration describes vocabulary only; it grants no import authority.
 
 Same shape and same fail-closed posture as
 ``dotmac_kernel.capabilities.CapabilityCatalogue`` and
@@ -32,7 +36,7 @@ an uninstalled audit registry would reject every write inside the caller's
 transaction and turn a wiring mistake into a failed business operation. See the
 comment above the sentinel below.
 
-Import-safe: pure data over the manifests; no engine, no I/O.
+Import-safe: pure data over Kernel declarations and manifests; no engine, no I/O.
 """
 
 from __future__ import annotations
@@ -45,19 +49,22 @@ if TYPE_CHECKING:  # avoids a runtime cycle: `features` imports this module
 
 
 class DuplicateAuditActionError(ValueError):
-    """Two modules declared the same audit action — there is no single owner."""
+    """Conflicting owners or a manifest redeclared a reserved Kernel action."""
 
 
 class UndeclaredAuditActionError(KeyError):
-    """An audit action was written that no installed module declares."""
+    """An audit action was written that the installed registry does not declare."""
 
 
 class AuditActionRegistry:
-    """The immutable set of audit actions declared across a set of modules.
+    """The immutable set of audit actions and their owners.
 
-    Build it once from the installed manifests (`from_manifests`); then ask it
-    whether an action being written is real (`is_declared`/`require`) and who
-    owns it (`owner`). Construction fails closed on a duplicate declaration.
+    Compose Kernel declarations with installed manifests (`from_manifests`);
+    explicit construction uses only the supplied declarations, including none.
+    Then ask whether an action being written is real (`is_declared`/`require`)
+    and who
+    owns it (`owner`). Conflicting owners fail closed; manifest composition
+    also refuses every redeclaration of a reserved Kernel action.
     """
 
     __slots__ = ("_owner_by_action",)
@@ -78,28 +85,54 @@ class AuditActionRegistry:
 
     @classmethod
     def from_manifests(cls, manifests: Iterable[AnyManifest]) -> AuditActionRegistry:
-        return cls(
-            (manifest.name, action)
-            for manifest in manifests
-            for action in manifest.audit_actions
+        """Compose Kernel-owned actions and the installed manifests.
+
+        Empty manifests still declare Kernel actions. Every manifest declaration
+        of a reserved Kernel action is refused, including one named "kernel".
+        """
+
+        # Import and construct only at composition time: audit_actions is loaded
+        # early by the package, while FeatureManifest owns the declaration type.
+        # This declares vocabulary without installing a synthetic Kernel module.
+        from dotmac_kernel.features import FeatureManifest
+
+        kernel_manifest = FeatureManifest(
+            name="kernel",
+            audit_actions=("identity.history_imported", "credential.password.assigned"),
         )
 
+        def declarations() -> Iterable[tuple[str, str]]:
+            for action in kernel_manifest.audit_actions:
+                yield kernel_manifest.name, action
+            for manifest in manifests:
+                for action in manifest.audit_actions:
+                    if action in kernel_manifest.audit_actions:
+                        raise DuplicateAuditActionError(
+                            f"audit action {action!r} declared by manifest "
+                            f"{manifest.name!r} is reserved to Kernel — "
+                            "remove it from the manifest; Kernel declares it"
+                        )
+                    yield manifest.name, action
+
+        return cls(declarations())
+
     def is_declared(self, action: str) -> bool:
-        """True iff some installed module declares `action`."""
+        """True iff the installed registry declares `action`."""
         return action in self._owner_by_action
 
     def require(self, action: str) -> None:
         """Raise `UndeclaredAuditActionError` unless `action` is declared."""
         if action not in self._owner_by_action:
             raise UndeclaredAuditActionError(
-                f"audit action {action!r} is not declared by any installed "
-                "module — declare it on the writing module's manifest "
+                f"audit action {action!r} is not declared by the installed "
+                "registry — compose Kernel declarations with `from_manifests`; "
+                "declare module-owned actions on the writing module's manifest "
                 "(`audit_actions=(...)`) rather than inventing it at the "
                 "write site"
             )
 
     def owner(self, action: str) -> str | None:
-        """The module that declares `action`, or None if undeclared."""
+        """The declaring owner (Kernel or module), or None if undeclared."""
         return self._owner_by_action.get(action)
 
     def actions(self) -> frozenset[str]:
@@ -111,7 +144,7 @@ class AuditActionRegistry:
 # two is a real trap. A process that never installs a registry — a worker, a
 # Celery task, a CLI, a migration helper, anything that does not build an app —
 # would otherwise be told that its perfectly well-declared action "is not
-# declared by any installed module", sending the reader to the wrong file
+# declared by the installed registry", sending the reader to the wrong file
 # entirely. The sentinel below keeps the two answerable separately.
 _active_registry: AuditActionRegistry | None = None
 
@@ -127,8 +160,8 @@ class AuditActionsNotInstalledError(RuntimeError):
 def install_audit_actions(registry: AuditActionRegistry) -> None:
     """Install the process-active audit-action registry.
 
-    Called by `create_app` with the registry built from the INSTALLED module set
-    (not the enabled subset — a disabled module's actions stay declared, so a
+    Called by `create_app` with Kernel declarations composed with the INSTALLED
+    module set (not the enabled subset — a disabled module's actions stay declared, so a
     still-running writer never trips on a deployment toggle). A consumer that
     builds an app by hand must call this itself, exactly as it must call
     `install_surface_globals` / `install_permissions`.

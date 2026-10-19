@@ -302,3 +302,54 @@ def test_v5_keeps_all_prior_transfer_versions_bound_to_their_owners():
         for operation in ("export_snapshot", "import_snapshot", "verify_snapshot"):
             name = operation + suffix
             assert getattr(learning, name) is getattr(owner, name)
+
+
+def test_public_session_update_retains_required_audit_receipt():
+    from dataclasses import MISSING, fields
+
+    from dotmac_learning.delivery_contracts import SessionUpdate
+
+    assert learning.SessionUpdate is SessionUpdate
+    receipt = fields(learning.SessionUpdate)[-1]
+    assert receipt.name == "audit_event_id"
+    assert receipt.default is MISSING and receipt.default_factory is MISSING
+
+
+def test_success_receipt_exports_keep_original_owner_identity_and_required_fields():
+    from dataclasses import MISSING, fields
+    from inspect import signature
+
+    from dotmac_learning import success_contracts, success_queue
+
+    for name in ("SuccessTransitionEffect", "SegmentMessageEffect"):
+        owner = getattr(success_contracts, name)
+        assert getattr(learning, name) is owner
+        assert name in learning.__all__
+        assert owner.__dataclass_params__.frozen
+        assert [field.name for field in fields(owner)] == [
+            "entry" if name == "SuccessTransitionEffect" else "result",
+            "audit_event_id",
+        ]
+        assert all(
+            field.default is MISSING and field.default_factory is MISSING
+            for field in fields(owner)
+        )
+    for public, original, source in (
+        (
+            "transition_success_entry_with_receipt",
+            "transition",
+            "transition_with_receipt",
+        ),
+        (
+            "message_segment_with_receipt",
+            "message_segment",
+            "message_segment_with_receipt",
+        ),
+    ):
+        operation = getattr(success_queue, source)
+        assert getattr(learning, public) is operation
+        assert public in learning.__all__
+        assert (
+            signature(operation).parameters
+            == signature(getattr(success_queue, original)).parameters
+        )

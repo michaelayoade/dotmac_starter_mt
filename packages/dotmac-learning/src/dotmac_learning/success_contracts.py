@@ -131,6 +131,22 @@ class SegmentMessageResult:
     action_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class SuccessTransitionEffect:
+    """Observed transition and its actual audit row in the caller transaction."""
+
+    entry: QueueFact
+    audit_event_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentMessageEffect:
+    """Observed delivery result and its actual caller-transaction audit row."""
+
+    result: SegmentMessageResult
+    audit_event_id: UUID
+
+
 class SegmentDeliveryProtocol(Protocol):
     """Product delivers notify then email on this exact caller Session."""
 
@@ -153,5 +169,7 @@ __all__ = [
     "QueueListFact",
     "SegmentMessageFact",
     "SegmentMessageResult",
+    "SuccessTransitionEffect",
+    "SegmentMessageEffect",
     "SegmentDeliveryProtocol",
 ]

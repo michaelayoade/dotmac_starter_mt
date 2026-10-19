@@ -7800,7 +7800,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-work-orders": frozenset(),
     "dotmac-ticketing": frozenset(),
     "dotmac-deployment-control": frozenset(),
-    "dotmac-learning": frozenset(),
+    "dotmac-learning": frozenset({"lr_0007_enrollment_state_policy.py"}),
 }
 
 

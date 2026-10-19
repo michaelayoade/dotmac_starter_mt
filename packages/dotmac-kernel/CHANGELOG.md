@@ -6,6 +6,63 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased development source — version unallocated
+
+Source marker `0.1.0a106+dev` allocates no release. Hosted and installed
+qualification, independent composition review, publication and Academy adoption
+remain pending. Published a106 and every released migration remain immutable.
+
+### Added
+
+- A distinct purpose-bound invitation create command in the same assignment
+  owner, preserving the existing role-required command and genuine roleless
+  invitation acceptance. Product token authority and installed adoption remain
+  qualification gates.
+- Authenticated account-wide password change in the same owner, preserving one
+  new hash across all aliases and existing account cleanup effects, with a
+  method-scoped authority/CAS/audit port. Hosted and installed qualification and
+  Academy activation remain pending; portable tests are authored, not run.
+- Bounded historical identity transfer on the caller's `app_admin` Connection,
+  preserving identity, credential, session, grant and historical audit material.
+  Current maintenance audit attribution stays separate from copied history.
+- The forward credential `(tenant_id, id)` key and tenant-qualified references;
+  published migration history is unchanged.
+- Account-reset completion and authorized supplied-password creation/selected
+  replacement in the existing `CredentialLifecycle`, with explicit product
+  authority, store and current-actor audit ports and settings-backed policy.
+  Existing secret-free provisioning and verification behavior is retained.
+- Hosted whole-graph Kernel/Learning replay using a distinct empty PostgreSQL
+  database, plus authored rollback, privilege, preservation and assignment
+  canaries. Source preparation is not execution evidence or product activation.
+
+
+### 2026-10-19 source amendment: historical identity comparison
+
+The future, UNALLOCATED/UNRELEASED Kernel V4 source adds
+`dotmac_kernel.migrations.identity_history.verify_identity_history(connection,
+rows, expected, operation, receipt, *, assembly_versions=None,
+module_registry=None, module_versions=None, prerequisite_bindings=()) -> None`.
+Academy's historical importer is the matching consumer. It compares all eight
+original source families against all nine populated canonical targets and the
+exact current import audit cohort. It reuses the importer's projections and
+catalog predicates, with a separate catalog-only preflight; ordinary import
+still requires empty targets. No writes, audit append, transaction control,
+material output, public capture DTO or adoption authority is introduced.
+
+JSONB raw text compares inside PostgreSQL without Python numeric decoding;
+ordinary JSON uses the existing serializer. Both current audit times must equal
+the same root's `transaction_timestamp()`. All target keys and values, including
+outside-tenant extras, are checked. Catalog verification has the importer's
+existing bounded scope: reflected FK endpoint/delete checks are not a full
+constraint-name/update/match/deferrability/RI fingerprint. A004's exact incoming
+retained FK/RI and parent-key proof remains separate.
+
+This paired source has authored hosted canaries, not executed qualification.
+The partial capsule requires the genuine full pinned migration baseline and
+installed owner composition. Published106 does not supply this future API.
+Fresh genesis, a004/a005, commit/runtime custody, Integration/ERP evidence and
+forward recovery remain pending; no whole-product adoption is claimed.
+
 ## 0.1.0a106 — Release inventory
 
 This inventories the proposed request-evidence and audit-history successor to

@@ -4,9 +4,13 @@ Uses the real Alembic learning@head fixture. Delivery and tenant-audit revisions
 must be integrated before execution; no metadata creation or stamps substitute.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from threading import Event
+from time import monotonic, sleep
+from uuid import UUID, uuid4
 
 import pytest
 from dotmac_kernel import audit_actions
@@ -24,8 +28,10 @@ from dotmac_learning.delivery_contracts import (
 from dotmac_learning.delivery_models import ClassSession
 from dotmac_learning.manifest import module
 from dotmac_learning.participation_models import Cohort, Enrollment
-from sqlalchemy import create_engine, event, func, select, text
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy import create_engine, event, func, inspect, select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
+from sqlalchemy.orm import defer
+from sqlalchemy.orm.attributes import NO_VALUE
 
 from tests import test_learning_catalog as learning_catalog
 from tests.test_learning_catalog import _person, _scope, _tenant
@@ -74,6 +80,7 @@ def scheduling_database(learning_database):
                     cohort_id=cohort,
                     person_id=person,
                     role_in_cohort="instructor",
+                    status="active",
                 )
             )
         yield admin, app, tenant, other, cohort, person, outsider
@@ -355,6 +362,9 @@ def test_source_update_empty_clearing_iso_audit_sql_order_and_boundaries(
             audit = db.scalar(
                 select(AuditEvent).where(AuditEvent.entity_id == str(session.id))
             )
+            assert isinstance(result.audit_event_id, UUID)
+            assert result.audit_event_id == audit.id
+            assert audit.is_success is None and audit.occurred_at is not None
             assert audit.details["changes"]["starts_at"] == {
                 "from": NOW.isoformat(),
                 "to": (NOW + timedelta(hours=2)).isoformat(),
@@ -407,7 +417,8 @@ def test_unchanged_update_flushes_without_audit_and_tenant_binding_before_sql(
         pending = db.scalar(select(Cohort).where(Cohort.id == cohort))
         pending.name = "pending"
         with db.no_autoflush:
-            assert update(db, tenant, session.id).changes == ()
+            result = update(db, tenant, session.id)
+            assert result.changes == () and result.audit_event_id is None
         assert flushes
         assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
 
@@ -415,6 +426,7 @@ def test_unchanged_update_flushes_without_audit_and_tenant_binding_before_sql(
             raise AssertionError("tenant mismatch must precede SQL")
 
         monkeypatch.setattr(db, "scalar", forbidden)
+        monkeypatch.setattr(db, "execute", forbidden)
         with pytest.raises(SchedulingBadRequest, match="another tenant"):
             scheduling.update_session(
                 db,
@@ -569,3 +581,466 @@ def test_commands_require_existing_caller_transaction(scheduling_database):
         with pytest.raises(TransactionChanged, match="active caller root"):
             create(db, tenant, cohort)
         assert db.get_transaction() is None
+
+
+def test_stale_identity_update_uses_current_row_for_noop(scheduling_database):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    with scoped(app, tenant) as db:
+        session = create(db, tenant, cohort)
+    with scoped(app, tenant) as db:
+        cached = db.get(ClassSession, session.id)
+        assert cached.title == "Class"
+        with app.begin() as conn:
+            _scope(conn, tenant)
+            conn.execute(
+                ClassSession.__table__.update()
+                .where(ClassSession.id == session.id)
+                .values(title="current")
+            )
+        # Read behavior stays unchanged; the update alone refreshes and locks.
+        assert (
+            scheduling.get_session(db, tenant_id=tenant, session_id=session.id).title
+            == "Class"
+        )
+        root = db.get_transaction()
+        with db.begin_nested():
+            nested = db.get_nested_transaction()
+            result = update(db, tenant, session.id, title="current")
+            assert cached.title == result.session.title == "current"
+            assert result.changes == () and result.audit_event_id is None
+            assert db.get_transaction() is root
+            assert db.get_nested_transaction() is nested
+        assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
+
+
+def test_update_waits_for_row_writer_then_audits_current_values(scheduling_database):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    with scoped(app, tenant) as db:
+        session = create(db, tenant, cohort)
+    cached, written, started, release = Event(), Event(), Event(), Event()
+    pids = {}
+
+    def winner():
+        assert cached.wait(10)
+        with app.begin() as conn:
+            _scope(conn, tenant)
+            conn.execute(text("SET LOCAL statement_timeout='15s'"))
+            pids["winner"] = conn.scalar(text("SELECT pg_backend_pid()"))
+            conn.execute(
+                ClassSession.__table__.update()
+                .where(ClassSession.id == session.id)
+                .values(title="winner")
+            )
+            written.set()
+            assert release.wait(10)
+        return "committed"
+
+    def contender():
+        with scoped(app, tenant) as db:
+            db.execute(text("SET LOCAL statement_timeout='15s'"))
+            row = db.get(ClassSession, session.id)
+            assert row.title == "Class"
+            pids["contender"] = db.scalar(text("SELECT pg_backend_pid()"))
+            cached.set()
+            assert written.wait(10)
+            root = db.get_transaction()
+            with db.begin_nested():
+                nested = db.get_nested_transaction()
+                started.set()
+                result = update(db, tenant, session.id, title="contender")
+                assert db.get_transaction() is root
+                assert db.get_nested_transaction() is nested
+                assert row.title == result.session.title == "contender"
+                assert [
+                    (c.field, c.from_value, c.to_value) for c in result.changes
+                ] == [("title", "winner", "contender")]
+                audit = db.get(AuditEvent, result.audit_event_id)
+                assert audit is not None and audit.id == result.audit_event_id
+                assert audit.details["changes"] == {
+                    "title": {"from": "winner", "to": "contender"}
+                }
+                assert audit.is_success is None and audit.occurred_at is not None
+                return result.audit_event_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one, two = pool.submit(winner), pool.submit(contender)
+        try:
+            assert started.wait(10)
+            with app.connect().execution_options(
+                isolation_level="AUTOCOMMIT"
+            ) as observer:
+                deadline = monotonic() + 5
+                while monotonic() < deadline:
+                    waiting = observer.execute(
+                        text(
+                            "SELECT wait_event_type, pg_blocking_pids(pid) "
+                            "FROM pg_stat_activity WHERE pid=:pid"
+                        ),
+                        {"pid": pids["contender"]},
+                    ).one_or_none()
+                    if (
+                        waiting is not None
+                        and waiting[0] == "Lock"
+                        and pids["winner"] in waiting[1]
+                    ):
+                        break
+                    sleep(0.01)  # Pacing; the PostgreSQL lock state is the proof.
+                else:
+                    pytest.fail("session update did not wait for the row writer")
+        finally:
+            release.set()
+            cached.set()
+            written.set()
+        assert one.result(timeout=20) == "committed"
+        event_id = two.result(timeout=20)
+    with scoped(app, tenant) as db:
+        assert isinstance(event_id, UUID)
+        audit = db.get(AuditEvent, event_id)
+        assert audit is not None
+        assert audit.tenant_id == tenant and audit.entity_id == str(session.id)
+        assert audit.action == "scheduling.update_session"
+        assert db.scalar(select(func.count()).select_from(AuditEvent)) == 1
+        assert (
+            scheduling.get_session(db, tenant_id=tenant, session_id=session.id).title
+            == "contender"
+        )
+        unchanged = update(db, tenant, session.id, title="contender")
+        assert unchanged.changes == () and unchanged.audit_event_id is None
+        assert db.scalar(select(func.count()).select_from(AuditEvent)) == 1
+
+
+@pytest.mark.parametrize("mode", ["disabled", "suppressed", "native"])
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("command", ["change", "noop", "invalid", "same_field"])
+def test_pending_scheduling_notes_and_fresh_clean_audit_values(
+    scheduling_database, mode, nested, command
+):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    with scoped(app, tenant) as db:
+        session_id = create(db, tenant, cohort, notes="old", location="old room").id
+    with scoped(app, tenant) as db:
+        row = db.get(ClassSession, session_id)
+        pending_cohort = db.get(Cohort, cohort)
+        with app.begin() as conn:
+            _scope(conn, tenant)
+            conn.execute(
+                ClassSession.__table__.update()
+                .where(ClassSession.id == session_id)
+                .values(title="SQL title", location="SQL room")
+            )
+        root = db.get_transaction()
+        savepoint = db.begin_nested() if nested else None
+        db.autoflush = mode != "disabled"
+        row.notes = "caller pending"
+        pending_cohort.name = "unrelated pending"
+        if command == "same_field":
+            row.title = "caller title"
+        history = inspect(row).attrs.notes.history
+        seen = []
+
+        def observe(conn, cursor, statement, parameters, execution_context, many):
+            seen.append(statement.lstrip().split()[0].lower())
+
+        event.listen(app, "before_cursor_execute", observe)
+        try:
+            with db.no_autoflush if mode == "suppressed" else nullcontext():
+                if command == "invalid":
+                    with pytest.raises(SchedulingBadRequest, match="ends_at"):
+                        update(
+                            db,
+                            tenant,
+                            session_id,
+                            title="command title",
+                            starts_at=NOW + timedelta(days=1),
+                        )
+                    assert row.title == "command title"
+                    assert row.notes == "caller pending"
+                    if mode != "native":
+                        assert inspect(row).attrs.notes.history == history
+                        assert seen == ["select"]
+                    assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
+                else:
+                    title = "SQL title" if command == "noop" else "command title"
+                    result = update(db, tenant, session_id, title=title)
+                    assert result.session.notes == row.notes == "caller pending"
+                    assert row.location == result.session.location == "SQL room"
+                    if command == "noop":
+                        assert result.changes == () and result.audit_event_id is None
+                        assert (
+                            db.scalar(select(func.count()).select_from(AuditEvent)) == 0
+                        )
+                    else:
+                        old = "caller title" if command == "same_field" else "SQL title"
+                        assert [
+                            (c.field, c.from_value, c.to_value) for c in result.changes
+                        ] == [("title", old, title)]
+                        (audit,) = db.scalars(select(AuditEvent)).all()
+                        assert audit.id == result.audit_event_id
+                        assert audit.details["changes"] == {
+                            "title": {"from": old, "to": title}
+                        }
+                    assert db.scalar(select(ClassSession.notes)) == "caller pending"
+                    assert (
+                        db.scalar(select(Cohort.name).where(Cohort.id == cohort))
+                        == "unrelated pending"
+                    )
+            if mode != "native":
+                assert seen[0] == "select"
+            assert db.get(ClassSession, session_id) is row
+            assert db.get_transaction() is root
+            assert db.get_nested_transaction() is savepoint
+        finally:
+            event.remove(app, "before_cursor_execute", observe)
+        db.rollback()
+    with scoped(app, tenant) as db:
+        row = db.get(ClassSession, session_id)
+        assert (row.title, row.location, row.notes) == ("SQL title", "SQL room", "old")
+        assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
+
+
+@pytest.mark.parametrize("clean", ["expired", "deferred"])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("notes", "old"),
+        ("notes", None),
+        ("notes", "DELETE"),
+        ("id", "KEY"),
+        ("tenant_id", "KEY"),
+    ],
+)
+def test_scheduling_refusal_preserves_scalar_history_and_pending_keys(
+    scheduling_database, clean, field, value
+):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    with scoped(app, tenant) as db:
+        session_id = create(db, tenant, cohort, notes="old", location="old room").id
+    with scoped(app, tenant) as db:
+        row = db.scalars(
+            select(ClassSession)
+            .options(defer(ClassSession.location))
+            .where(ClassSession.id == session_id)
+        ).one()
+        if clean == "expired":
+            db.expire(row, ["location"])
+        assert inspect(row).attrs.location.loaded_value is NO_VALUE
+        with app.begin() as conn:
+            _scope(conn, tenant)
+            conn.execute(
+                ClassSession.__table__.update()
+                .where(ClassSession.id == session_id)
+                .values(location="SQL room")
+            )
+        db.autoflush = False
+        if value == "DELETE":
+            delattr(row, field)
+        else:
+            setattr(row, field, uuid4() if value == "KEY" else value)
+        attribute = inspect(row).attrs[field]
+        before = (attribute.loaded_value, attribute.history)
+        assert field not in inspect(row).unmodified
+        with pytest.raises(SchedulingBadRequest, match="Unknown status"):
+            update(db, tenant, session_id, status="invalid")
+        assert (attribute.loaded_value, attribute.history) == before
+        assert row.location == "SQL room"
+        assert inspect(row).identity == (session_id,)
+        db.rollback()
+
+
+def test_scheduling_native_explicit_flush_failure_is_not_reset(scheduling_database):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    with scoped(app, tenant) as db:
+        session_id = create(db, tenant, cohort).id
+    with scoped(app, tenant) as db:
+        row = db.get(ClassSession, session_id)
+        db.autoflush = False
+        row.tenant_id = None
+        with pytest.raises(ProgrammingError) as denied:
+            update(db, tenant, session_id, title="native failure")
+        assert denied.value.orig.sqlstate == "42501"
+        assert not db.is_active
+        db.rollback()
+    with scoped(app, tenant) as db:
+        assert db.get(ClassSession, session_id).title == "Class"
+        assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
+
+
+def test_pending_notes_wait_for_row_writer_and_use_current_audit_values(
+    scheduling_database,
+):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    with scoped(app, tenant) as db:
+        session = create(db, tenant, cohort)
+    cached, written, started, release = Event(), Event(), Event(), Event()
+    pids = {}
+
+    def winner():
+        assert cached.wait(10)
+        with app.begin() as conn:
+            _scope(conn, tenant)
+            conn.execute(text("SET LOCAL statement_timeout='15s'"))
+            pids["winner"] = conn.scalar(text("SELECT pg_backend_pid()"))
+            conn.execute(
+                ClassSession.__table__.update()
+                .where(ClassSession.id == session.id)
+                .values(title="winner")
+            )
+            written.set()
+            assert release.wait(10)
+        return "committed"
+
+    def contender():
+        with scoped(app, tenant) as db:
+            db.execute(text("SET LOCAL statement_timeout='15s'"))
+            row = db.get(ClassSession, session.id)
+            assert row.title == "Class"
+            pids["contender"] = db.scalar(text("SELECT pg_backend_pid()"))
+            cached.set()
+            assert written.wait(10)
+            root = db.get_transaction()
+            with db.begin_nested():
+                nested = db.get_nested_transaction()
+                db.autoflush = False
+                row.notes = "pending through lock wait"
+                started.set()
+                result = update(db, tenant, session.id, title="contender")
+                assert db.get_transaction() is root
+                assert db.get_nested_transaction() is nested
+                assert row.title == result.session.title == "contender"
+                assert row.notes == result.session.notes == "pending through lock wait"
+                assert [
+                    (c.field, c.from_value, c.to_value) for c in result.changes
+                ] == [("title", "winner", "contender")]
+                audit = db.get(AuditEvent, result.audit_event_id)
+                assert audit is not None and audit.id == result.audit_event_id
+                assert audit.details["changes"] == {
+                    "title": {"from": "winner", "to": "contender"}
+                }
+                assert audit.is_success is None and audit.occurred_at is not None
+                return result.audit_event_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one, two = pool.submit(winner), pool.submit(contender)
+        try:
+            assert started.wait(10)
+            with app.connect().execution_options(
+                isolation_level="AUTOCOMMIT"
+            ) as observer:
+                deadline = monotonic() + 5
+                while monotonic() < deadline:
+                    waiting = observer.execute(
+                        text(
+                            "SELECT wait_event_type, pg_blocking_pids(pid) "
+                            "FROM pg_stat_activity WHERE pid=:pid"
+                        ),
+                        {"pid": pids["contender"]},
+                    ).one_or_none()
+                    if (
+                        waiting is not None
+                        and waiting[0] == "Lock"
+                        and pids["winner"] in waiting[1]
+                    ):
+                        break
+                    sleep(0.01)  # Pacing; the PostgreSQL lock state is the proof.
+                else:
+                    pytest.fail("session update did not wait for the row writer")
+        finally:
+            release.set()
+            cached.set()
+            written.set()
+        assert one.result(timeout=20) == "committed"
+        event_id = two.result(timeout=20)
+    with scoped(app, tenant) as db:
+        assert isinstance(event_id, UUID)
+        audit = db.get(AuditEvent, event_id)
+        assert audit is not None
+        assert audit.tenant_id == tenant and audit.entity_id == str(session.id)
+        assert audit.action == "scheduling.update_session"
+        assert db.scalar(select(func.count()).select_from(AuditEvent)) == 1
+        assert (
+            scheduling.get_session(db, tenant_id=tenant, session_id=session.id).title
+            == "contender"
+        )
+        unchanged = update(db, tenant, session.id, title="contender")
+        assert unchanged.changes == () and unchanged.audit_event_id is None
+        assert db.scalar(select(func.count()).select_from(AuditEvent)) == 1
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["transient", "pending", "external_deleted", "pending_delete", "flushed_delete"],
+)
+def test_scheduling_native_membership_and_missing_sql(scheduling_database, state):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    if state not in {"transient", "pending"}:
+        with scoped(app, tenant) as db:
+            row_id = create(db, tenant, cohort).id
+    else:
+        row_id = uuid4()
+    with scoped(app, tenant) as db:
+        db.autoflush = False
+        if state in {"transient", "pending"}:
+            row = ClassSession(
+                id=row_id,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                title="unpersisted",
+                starts_at=NOW,
+                status="scheduled",
+                session_type="live_class",
+            )
+            if state == "pending":
+                db.add(row)
+        else:
+            row = db.get(ClassSession, row_id)
+            if state == "external_deleted":
+                with app.begin() as conn:
+                    _scope(conn, tenant)
+                    conn.execute(
+                        ClassSession.__table__.delete().where(ClassSession.id == row_id)
+                    )
+            else:
+                db.delete(row)
+                if state == "flushed_delete":
+                    db.flush()
+        if state == "pending_delete":
+            with pytest.raises(SchedulingBadRequest, match="Unknown status"):
+                update(db, tenant, row_id, status="invalid")
+            assert row in db.deleted and row not in db.new
+        else:
+            with pytest.raises(SchedulingNotFound):
+                update(db, tenant, row_id)
+        if state == "transient":
+            assert inspect(row).transient
+        elif state == "pending":
+            assert row in db.new and inspect(row).pending
+        elif state == "flushed_delete":
+            assert inspect(row).deleted
+        db.rollback()
+
+
+def test_scheduling_early_guard_does_not_flush_invalid_unrelated_row(
+    scheduling_database,
+):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    with scoped(app, tenant) as db:
+        row_id = create(db, tenant, cohort).id
+    with scoped(app, tenant) as db:
+        unrelated = db.get(Cohort, cohort)
+        db.autoflush = False
+        unrelated.name = None
+        history = inspect(unrelated).attrs.name.history
+        with pytest.raises(SchedulingBadRequest, match="Unknown status"):
+            update(db, tenant, row_id, status="invalid")
+        assert db.is_active and inspect(unrelated).attrs.name.history == history
+        assert db.scalar(select(func.count()).select_from(AuditEvent)) == 0
+        db.rollback()
+
+
+def test_scheduling_scalar_projection_matches_actual_mapped_keys():
+    mapper = inspect(ClassSession)
+    assert set(mapper.column_attrs.keys()) == set(ClassSession.__table__.columns.keys())
+    assert all(
+        attribute.key == attribute.columns[0].key and len(attribute.columns) == 1
+        for attribute in mapper.column_attrs
+    )

@@ -23,9 +23,25 @@ def test_relation_nonbypass_tenant_positive_negative_and_wrong_tenant_cohort(
         _scope(conn, other)
         other_cohort = _cohort(conn, other)
     with scoped(app, tenant) as db:
-        db.add(Enrollment(tenant_id=tenant, cohort_id=cohort, person_id=people[0]))
+        db.add(
+            Enrollment(
+                tenant_id=tenant,
+                cohort_id=cohort,
+                person_id=people[0],
+                role_in_cohort="student",
+                status="active",
+            )
+        )
     with scoped(app, other) as db:
-        db.add(Enrollment(tenant_id=other, cohort_id=other_cohort, person_id=outsider))
+        db.add(
+            Enrollment(
+                tenant_id=other,
+                cohort_id=other_cohort,
+                person_id=outsider,
+                role_in_cohort="student",
+                status="active",
+            )
+        )
     for current, own_person, own_cohort, foreign, foreign_cohort in (
         (tenant, people[0], cohort, other, other_cohort),
         (other, outsider, other_cohort, tenant, cohort),
@@ -71,21 +87,41 @@ def test_relation_active_students_dedup_optional_cohort_and_no_cohort_status_fil
         db.get(Cohort, second).status = "archived"
         db.add_all(
             [
-                Enrollment(tenant_id=tenant, cohort_id=cohort, person_id=people[0]),
-                Enrollment(tenant_id=tenant, cohort_id=second, person_id=people[0]),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort,
+                    person_id=people[0],
+                    role_in_cohort="student",
+                    status="active",
+                ),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=second,
+                    person_id=people[0],
+                    role_in_cohort="student",
+                    status="active",
+                ),
                 Enrollment(
                     tenant_id=tenant,
                     cohort_id=cohort,
                     person_id=people[1],
                     role_in_cohort="instructor",
+                    status="active",
                 ),
                 Enrollment(
                     tenant_id=tenant,
                     cohort_id=cohort,
                     person_id=people[2],
                     status="dropped",
+                    role_in_cohort="student",
                 ),
-                Enrollment(tenant_id=tenant, cohort_id=third, person_id=people[1]),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=third,
+                    person_id=people[1],
+                    role_in_cohort="student",
+                    status="active",
+                ),
             ]
         )
         recipients = db.scalars(
@@ -113,7 +149,13 @@ def test_relation_construction_is_sql_free_outer_execution_autoflushes_original_
     _, app, tenant, _, cohort, people, _, _ = roster_database
     with scoped(app, tenant) as db:
         root = db.get_transaction()
-        pending = Enrollment(tenant_id=tenant, cohort_id=cohort, person_id=people[0])
+        pending = Enrollment(
+            tenant_id=tenant,
+            cohort_id=cohort,
+            person_id=people[0],
+            role_in_cohort="student",
+            status="active",
+        )
         db.add(pending)
         statements, flushed = [], []
 

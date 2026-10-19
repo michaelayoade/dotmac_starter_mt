@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from .completion import lock_existing_completion
 from .event_contracts import EventWrite
@@ -34,6 +35,29 @@ def _fact(cert: Certificate) -> CertificateFact:
         created_at=cert.created_at,
         updated_at=cert.updated_at,
     )
+
+
+def get_certificate(
+    db: Session, *, tenant_id: UUID, person_id: UUID, course_id: UUID
+) -> CertificateFact | None:
+    """Read an issued record without completion eligibility or issuance effects."""
+    result = db.execute(
+        select(Certificate, *Certificate.__table__.c).where(
+            Certificate.tenant_id == tenant_id,
+            Certificate.person_id == person_id,
+            Certificate.course_id == course_id,
+        )
+    ).first()
+    if result is None:
+        return None
+    cert = result[0]
+    untouched = inspect(cert).unmodified
+    for column, fresh_value in zip(
+        Certificate.__table__.columns, result[1:], strict=True
+    ):
+        if column.key in untouched:
+            set_committed_value(cert, column.key, fresh_value)
+    return _fact(cert)
 
 
 def issue_certificate(db: Session, payload: CertificateCommand) -> CertificateIssue:

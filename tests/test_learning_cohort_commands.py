@@ -284,7 +284,15 @@ def test_writers_require_root_before_sql_and_removal_propagates_autoflush_failur
             event.remove(app, "before_cursor_execute", executed)
     with scoped(app, tenant) as db:
         root = db.get_transaction()
-        db.add(Enrollment(tenant_id=tenant, cohort_id=uuid4(), person_id=people[0]))
+        db.add(
+            Enrollment(
+                tenant_id=tenant,
+                cohort_id=uuid4(),
+                person_id=people[0],
+                role_in_cohort="student",
+                status="active",
+            )
+        )
         with pytest.raises(IntegrityError):
             cohorts.remove_facilitator(db, command, authority=authority)
         assert not root.is_active

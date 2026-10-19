@@ -156,7 +156,7 @@ Kernel-first publication and consumer-conversion plan.
 | instructor_reads | Cohort/workspace/roster/facilitator facts, course/track choices, active counts, progress/risk and authorable-course eligibility. |
 | support_reads | At-risk course calculations, learning CSV/admin-report aggregates, weekly learner activity and reminder-source facts. |
 | dashboards | Legacy cohort_overview missing-completion-as-zero and course-scoped score inactivity, distinct from insights.cohort_overview. |
-| catalog_reads | my_courses, all_courses, course_completion and course_structure; prepared curriculum only ports public_catalog. Continue selection uses the first activity per chapter, unlike dashboard resume. |
+| catalog_reads | catalog_course_by_slug and catalog_chapter_by_number are indexed tenant/course-bound fact reads without authorization or commit; my_courses, all_courses, course_completion and course_structure; prepared curriculum only ports public_catalog. Continue selection uses the first activity per chapter, unlike dashboard resume. |
 | search | Source staff/access eligibility, SQL matching and per-category caps; Academy renders snippets. |
 | product-support learning facts | Public facts replace Event/Completion/Enrollment/Score SQL in hr_digest.snapshot, reengagement.stranded_learners and email._queue_first_pass_intents. Authentication availability, stranded-account recipients, opt-outs and email delivery remain Academy. |
 
@@ -376,3 +376,11 @@ installed-package execution remain separate gates. Stable identity, incoming
 references, lab worker ACL/RLS, historical ERP ACK provenance, writer fences and
 compatible reversal preserving accepted new facts/deletes precede activation and
 retirement. No second consumer, forced Rust rewrite, deployment or speedup claim.
+
+
+Academy certificate outbox attachment reads use public `get_course` and
+`get_certificate(db, tenant_id=..., person_id=..., course_id=...)`. The latter
+returns the existing detached `CertificateFact` or None, with no completion
+eligibility check, issuance, lock, or commit. Academy owns historical recipient
+contact projection and PDF rendering/delivery. Source only; hosted tests not run,
+future Learning and Kernel dependencies UNALLOCATED/UNRELEASED.
