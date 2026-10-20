@@ -377,7 +377,7 @@ from dotmac_learning.transfer_contracts import (
     VerificationObservation,
 )
 
-__version__ = "0.1.0a1+dev"
+__version__ = "0.1.0a2"
 
 
 from dotmac_learning.account_contracts import (

@@ -178,8 +178,8 @@
       "state": "declared-unpublished"
     },
     "dotmac-learning": {
-      "declared": "0.1.0a1+dev",
-      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE. Published Learning 0.1.0a1 remains immutable. Reviewed successor source includes explicit enrollment state, scoped account observations, receipt/read APIs and forward lr7. Hosted source and exact installed Kernel/Learning pair qualification, independent combined review and later separate release allocation remain required. No numeric successor, Academy adoption or writer retirement is claimed. Remove only through the truthful successor release record.",
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET RELEASED. Published Learning 0.1.0a1 remains immutable. Reviewed successor source includes explicit enrollment state, scoped account observations, receipt/read APIs and forward lr7, and is now allocated as 0.1.0a2 for a separate release dispatch. Hosted source and exact installed Kernel/Learning pair qualification and independent combined review remain required. No publication, Academy adoption or writer retirement is claimed. Remove only through the truthful successor release record.",
       "state": "declared-unpublished"
     }
   }

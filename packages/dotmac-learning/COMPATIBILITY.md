@@ -2,8 +2,9 @@
 
 ## Current source correction — 2026-10-19
 
-Published `0.1.0a1` is immutable. This prepared successor declares
-`0.1.0a1+dev` for source qualification only; no numeric successor is allocated.
+Published `0.1.0a1` is immutable. This prepared successor is now allocated
+as `0.1.0a2` (allocated source candidate, not yet published); the former
+`+dev` source-qualification marker allocated nothing.
 The actual declared published Kernel floor is `>=0.1.0a106`, including the
 Learning namespace allocation. The older initial-declaration and floor statements
 below are historical and are superseded by this dated correction.
@@ -339,6 +340,6 @@ Caller transaction, savepoint, validation, explicit flush and actual Kernel audi
 ownership remain with the existing owners. No refresh, early flush, transaction
 boundary, fallback attachment or result-level idempotence API is introduced.
 The dependency floor is exactly the published Kernel >=0.1.0a106; the unchanged
-Learning development identity is 0.1.0a1+dev, not a release allocation. This is a
+Learning successor identity is allocated as 0.1.0a2, not yet published. This is a
 source-only repair with authored PostgreSQL canaries. Independent source review,
 combined-source hosted qualification and the exact installed pair remain required.
