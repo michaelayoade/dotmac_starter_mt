@@ -70,8 +70,8 @@ The complete Learning255 continuation now source-prepares required bulk and
 invitation snapshots, genuine tenant-bound bulk account presence, the complete
 base constructor census, and additive `lr_0007` removal of the two Enrollment
 ORM/server defaults. Released migrations and existing accepted enrollment facts
-are preserved. This port declares `0.1.0a1+dev` for source qualification; published
-a1 is immutable and no numeric successor is allocated. Shared composition,
+are preserved. This port declares `0.1.0a2` (allocated successor, not yet
+published); published a1 is immutable. Shared composition,
 independent composed review, hosted suites and the exact installed Kernel/Learning
 pair remain unqualified. Settings-owned product policy, full Academy caller
 retirement and ERP integration/recovery remain owed.

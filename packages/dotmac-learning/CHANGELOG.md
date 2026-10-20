@@ -1,12 +1,14 @@
 # Changelog — dotmac-learning
 
-## Unreleased development source — version unallocated
+## 0.1.0a2 — allocated source candidate, not yet published
 
 Current correction, 2026-10-19: `0.1.0a1` was published and remains immutable.
 The numbered section below records historical preparation notes; its former
 "Unreleased" and publication-pending statements are superseded here.
-This successor uses `0.1.0a1+dev` solely for source qualification and retains the
-actual published Kernel floor `>=0.1.0a106`.
+This successor is now allocated as `0.1.0a2` (formerly the `+dev`
+source-qualification marker, which allocated nothing) and retains the
+actual published Kernel floor `>=0.1.0a106`. Publication remains a separate
+release dispatch; no tag or index entry is claimed by this allocation.
 
 - Preserve the full 27-table/260-field domain and all 520 existing root exports;
   add five reads: course by slug, chapter by number, account cohort names,

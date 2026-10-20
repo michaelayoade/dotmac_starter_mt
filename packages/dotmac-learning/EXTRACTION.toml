@@ -1,6 +1,7 @@
 # Current correction — 2026-10-19 (supersedes historical unpublished/floor notes).
-# Published 0.1.0a1 is immutable; successor source is 0.1.0a1+dev, with no
-# numeric release allocation. Actual declared published Kernel floor: >=0.1.0a106.
+# Published 0.1.0a1 is immutable; successor source is now allocated as
+# 0.1.0a2 (allocated source candidate, not yet published). Actual declared
+# published Kernel floor: >=0.1.0a106.
 # Full 27-table/260-field source preserves all 520 prior exports, adding 13.
 # Prepared required admission/bulk/invitation snapshots, genuine account-presence
 # selection, required SessionUpdate audit_event_id, actual success effect receipts,

@@ -2807,13 +2807,14 @@ write:
 
 ### Learning assessment, delivery and read continuation (prepared source)
 
-2026-10-19 source amendment: Learning declares `0.1.0a1+dev`; published a1
+2026-10-19 source amendment: Learning declares `0.1.0a2` (allocated successor,
+not yet published); published a1
 and its six released migrations remain immutable. Forward unreleased
 `lr_0007_enrollment_state_policy` removes the Enrollment role/status
 schema defaults. Callers supply explicit state snapshots; product
 settings remain the policy owner. The combined hosted graph must execute actual
 Kernel0030 and Learninglr7 before the later synthetic assembly edge. Exact
-installed-pair qualification, release allocation, Academy adoption and writer
+installed-pair qualification, publication, Academy adoption and writer
 retirement remain separate unproven gates.
 
 
