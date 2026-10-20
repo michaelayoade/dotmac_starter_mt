@@ -1,7 +1,7 @@
 # ADR-0076: Service access credentials have one owner, bound to the service instance
 
-- Status: Proposed (draft; build-once direction approved by Michael 2026-10-19, ADR text not yet accepted)
-- Date: 2026-10-19
+- Status: Accepted (2026-10-20)
+- Date: 2026-10-20
 - Deciders: Michael
 - Supersedes: none
 - Extends: ADR-0058 (adds an eleventh narrow owner), ADR-0040 (narrow independent
@@ -16,7 +16,7 @@
   decision on the same cutover), ADR-0024 (apps compose by synchronizing data;
   no sibling imports), ADR-0025 (imports own the run)
 
-This is a documentation-only draft. It authorises no code, no migration and no
+This is a documentation-only record. It authorises no code, no migration and no
 production change. Decision labels refer to the decisions Michael approved on
 2026-10-19, each restated in one line where used:
 
@@ -32,8 +32,8 @@ production change. Decision labels refer to the decisions Michael approved on
   reveal link or self-care.
 
 Decisions about the temporary Sub bridge and separate security corrections of
-existing Sub exposures are tracked outside this ADR. The one marked
-"proposed; requires Michael's confirmation" in section 8 is not yet decided.
+existing Sub exposures are tracked outside this ADR. The projection invariant
+in section 8 was confirmed by Michael on 2026-10-20.
 
 ## Context
 
@@ -321,7 +321,7 @@ contain no secret, asserted on every command path.
    Sub). Residual risk named: an unplanned reconnect between RADIUS projection
    and the CPE push fails authentication.
 
-**Projection invariant (proposed; requires Michael's confirmation).** A RADIUS
+**Projection invariant (confirmed by Michael, 2026-10-20).** A RADIUS
 user exists only for a credential in `active` that is bound to a live service.
 Network-access withdraws the user otherwise (for `suspended`, `revoked`,
 `issued`, a terminated bound service including the revoke grace window, and a
@@ -391,17 +391,17 @@ drift report compares decisions and row fingerprints. Expected explained-drift
 classes are declared before shadow starts: the revoke grace, the Sub status map
 (below), one-way-hash rows, and the cutover withdrawal described next. The gate is zero unexplained drift against those
 classes over at least 30 days, with a minimum observed count for each
-disposition including inherit and decline (thresholds to be set by Michael). At
+disposition including inherit and decline (approximately 20 inherited, 10 declined and 50 created; exact numbers are set from the Sub bridge baseline, and the window is extended rather than the counts lowered). At
 cutover Starter becomes the authority and Sub's table becomes a read projection
 with exactly one writer (the Starter sync adapter). At suite cutover,
 network-access consumes the owner's events directly.
 
-**Cutover behaviour change (proposed with the projection invariant; requires
-Michael's confirmation).** Sub today leaves credentials on cancelled
+**Cutover behaviour change (confirmed by Michael, 2026-10-20, with the
+projection invariant).** Sub today leaves credentials on cancelled
 subscriptions in RADIUS (for example when a new service is created before the old
 one is cancelled), so they still authenticate. Under the projection invariant
 those users are withdrawn at cutover. This is an intended behaviour change and
-an expected drift class, to be announced to operations before cutover.
+an expected drift class, support is warned before cutover.
 
 ### 11. Sub's `ensure_pppoe_credential` becomes a thin call; no secret is ever sent
 
@@ -427,7 +427,7 @@ not a one-to-one copy of the Starter policy, so the mapping is explicit:
 |---|---|
 | new-service mode `new` | `on_replacement_service=new` |
 | new-service mode `inherit` | single-candidate inference plus the `inherit_if_unambiguous` fallback; not Starter `inherit` |
-| inherit-from statuses {disabled, canceled, expired} | no direct equivalent: Services has one ended state (TERMINATED), so an explicit Sub-to-Services status map is required; if `disabled` maps to a non-ended state, Starter refuses what Sub allows |
+| inherit-from statuses {disabled, canceled, expired} | no direct equivalent: Services has one ended state (TERMINATED), so an explicit Sub-to-Services status map is required; decided 2026-10-20: Sub `disabled` maps to Services SUSPENDED, because a disabled subscription can be restored; Sub's inherit from `disabled` therefore has no Starter equivalent and is an expected drift class |
 | change-disconnect | `change_disconnect` (without `after_cpe_readback`) |
 | (none) | revoke grace: no Sub equivalent |
 
@@ -511,17 +511,21 @@ name must not pull the non-candidates in.
    table in section 3 refuses illegal moves.
 2. Namespace and prefix are allocated in the package's first commit, not
    reserved.
-3. Resolved by design: Suspend does not ship unconsumed (section 8). Open:
-   Michael to confirm the projection invariant.
+3. Resolved: Suspend does not ship unconsumed (section 8), and Michael confirmed
+   the projection invariant on 2026-10-20.
 4. Resolved: reveal link and self-care ship in phase 1; Starter never sends a
    secret.
-5. Default ended-state list is `[TERMINATED]`; grace defaults to 30 days and the
-   credential is not projected during grace. Michael to confirm the 30 days.
+5. Resolved: the default ended-state list is `[TERMINATED]`; grace defaults to
+   30 days, adjustable per tenant (confirmed 2026-10-20), and the credential is
+   not projected during grace.
 6. Resolved: the end reason is not available as a typed fact, so the control
    moves to the owner's compromise marker.
-7. Shadow window of at least 30 days, a minimum count per disposition, and zero
-   unexplained drift; Michael to set the thresholds.
+7. Resolved in principle: at least 30 days, zero unexplained drift, and minimum
+   counts of about 20 inherited, 10 declined and 50 created. Still open: the exact
+   numbers, set from the Sub bridge baseline query.
 8. `mac_binding` stays in this package in phase 2; `cpe_management` and Wi-Fi
    keys are deferred; no kind is declared before it has a consumer.
-9. The explicit Sub-to-Services status map, especially for `disabled`.
+9. Resolved: Sub `disabled` maps to Services SUSPENDED (restorable), recorded as
+   expected drift. The mapping for `canceled` and `expired` to TERMINATED follows
+   the status map at build.
 10. The Sub exposures correction as a cutover precondition: owner and timing.
