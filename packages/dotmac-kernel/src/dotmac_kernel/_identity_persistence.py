@@ -11,9 +11,10 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from sys import exc_info
+from typing import cast
 from uuid import UUID
 
-from sqlalchemy import event, select, update
+from sqlalchemy import Table, event, select, update
 from sqlalchemy.engine import Connection, NestedTransaction, RootTransaction
 from sqlalchemy.orm import Session, SessionTransaction
 
@@ -232,7 +233,7 @@ def _revoke_sessions(
         or revoked_at.utcoffset() is None
     ):
         raise ValueError("identity storage requires an aware operation timestamp")
-    table = AuthSession.__table__
+    table = cast(Table, AuthSession.__table__)
     predicates = [table.c.tenant_id == tenant_id, table.c.party_id == party_id]
     if binding_id is not None:
         predicates.append(table.c.external_identity_binding_id == binding_id)

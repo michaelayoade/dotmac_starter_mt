@@ -157,9 +157,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import Table, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -334,7 +335,7 @@ def finalize_external_login(
             return None
         owner.track(binding, ("last_authenticated_at", "updated_at"))
         db.execute(
-            update(ExternalIdentityBinding.__table__)
+            update(cast(Table, ExternalIdentityBinding.__table__))
             .where(
                 ExternalIdentityBinding.id == binding.id,
                 ExternalIdentityBinding.tenant_id == tid,
@@ -441,7 +442,7 @@ def bind_external_identity(
                     ("is_active", "bound_at", "bound_by", "bind_reason", "updated_at"),
                 )
                 db.execute(
-                    update(ExternalIdentityBinding.__table__)
+                    update(cast(Table, ExternalIdentityBinding.__table__))
                     .where(
                         ExternalIdentityBinding.id == existing.id,
                         ExternalIdentityBinding.tenant_id == tid,
@@ -470,7 +471,7 @@ def bind_external_identity(
                     "a party may hold at most one per provider registration"
                 )
             bid = db.scalar(
-                insert(ExternalIdentityBinding.__table__)
+                insert(cast(Table, ExternalIdentityBinding.__table__))
                 .values(
                     tenant_id=tid,
                     party_id=pid,
@@ -554,7 +555,7 @@ def disable_external_identity_binding(
             owner=owner,
         )
         db.execute(
-            update(ExternalIdentityBinding.__table__)
+            update(cast(Table, ExternalIdentityBinding.__table__))
             .where(
                 ExternalIdentityBinding.tenant_id == tid,
                 ExternalIdentityBinding.id == binding.id,
@@ -649,7 +650,7 @@ def record_external_authentication(
             raise NotFoundError("external identity binding not found")
         owner.track(binding, ("last_authenticated_at", "updated_at"))
         db.execute(
-            update(ExternalIdentityBinding.__table__)
+            update(cast(Table, ExternalIdentityBinding.__table__))
             .where(
                 ExternalIdentityBinding.tenant_id == tid,
                 ExternalIdentityBinding.id == binding_id,

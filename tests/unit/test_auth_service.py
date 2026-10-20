@@ -408,7 +408,20 @@ def test_reference_login_callback_and_cancel_preserve_prior_root_work(
                 db.flush()
             db.expunge(pending)
 
-    if phase == "open":
+    if phase == "cancel":
+        # An exit exception raised inside cursor execution invalidates the
+        # connection by SQLAlchemy design (is_exit_exception), after which
+        # no savepoint rollback can preserve the root; raise at the ORM
+        # execute boundary so cancellation itself is what is exercised.
+        target, name = db, "do_orm_execute"
+
+        def listener(state):
+            if not invoked and state.is_insert:
+                inject()
+                raise AssertionError("unreachable: inject cancels")
+            return None
+
+    elif phase == "open":
         target, name = db, "after_transaction_create"
 
         def listener(session, transaction):
@@ -428,7 +441,7 @@ def test_reference_login_callback_and_cancel_preserve_prior_root_work(
                 return
             is_read = getattr(compiled.statement, "is_select", False)
             if not invoked and (
-                (phase in ("write", "cancel") and context.isinsert)
+                (phase == "write" and context.isinsert)
                 or (phase in ("query", "flush") and is_read)
             ):
                 inject()

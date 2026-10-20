@@ -688,7 +688,20 @@ def test_binding_callback_or_cancellation_rolls_back_only_materialized_operation
                     session.flush()
                 session.expunge(pending)
 
-        if phase == "open":
+        if phase == "cancel":
+            # An exit exception raised inside cursor execution invalidates
+            # the connection by SQLAlchemy design (is_exit_exception), after
+            # which no savepoint rollback can preserve the root; raise at
+            # the ORM execute boundary so cancellation itself is exercised.
+            target, name = session, "do_orm_execute"
+
+            def listener(state):
+                if not invoked and state.is_insert:
+                    inject()
+                    raise AssertionError("unreachable: inject cancels")
+                return None
+
+        elif phase == "open":
             target, name = session, "after_transaction_create"
 
             def listener(db, transaction):
@@ -708,7 +721,7 @@ def test_binding_callback_or_cancellation_rolls_back_only_materialized_operation
                     return
                 is_read = getattr(compiled.statement, "is_select", False)
                 if not invoked and (
-                    (phase in ("write", "cancel") and context.isinsert)
+                    (phase == "write" and context.isinsert)
                     or (phase in ("query", "flush") and is_read)
                 ):
                     inject()
@@ -1021,17 +1034,34 @@ def test_reference_auth_actual_app_role_post_write_fault_recovers_same_root(
         )
         invoked = []
 
-        def listener(conn, cursor, statement, parameters, context, executemany):
-            if not invoked and (
-                (command == "login" and context.isinsert)
-                or (command == "logout" and context.isupdate)
-            ):
-                invoked.append(1)
-                if fault == "cancel":
-                    raise Cancelled()
-                session.add(injected)
+        if fault == "cancel":
+            # An exit exception raised inside cursor execution invalidates
+            # the connection by SQLAlchemy design (is_exit_exception), after
+            # which no savepoint rollback can preserve the root; raise at
+            # the ORM execute boundary so cancellation itself is exercised.
+            target, name = session, "do_orm_execute"
 
-        event.listen(connection, "after_cursor_execute", listener)
+            def listener(state):
+                if not invoked and (
+                    (command == "login" and state.is_insert)
+                    or (command == "logout" and state.is_update)
+                ):
+                    invoked.append(1)
+                    raise Cancelled()
+                return None
+
+        else:
+            target, name = connection, "after_cursor_execute"
+
+            def listener(conn, cursor, statement, parameters, context, executemany):
+                if not invoked and (
+                    (command == "login" and context.isinsert)
+                    or (command == "logout" and context.isupdate)
+                ):
+                    invoked.append(1)
+                    session.add(injected)
+
+        event.listen(target, name, listener)
         with pytest.raises(
             Cancelled if fault == "cancel" else ConflictSavepointProtocolError
         ):
@@ -1041,7 +1071,7 @@ def test_reference_auth_actual_app_role_post_write_fault_recovers_same_root(
                 )
             else:
                 reference_auth.web_logout(session, tenant, token)
-        event.remove(connection, "after_cursor_execute", listener)
+        event.remove(target, name, listener)
         listener = None
         assert invoked == [1]
         assert session.get_transaction() is root
@@ -1069,7 +1099,7 @@ def test_reference_auth_actual_app_role_post_write_fault_recovers_same_root(
         assert session.get_transaction() is root
     finally:
         if listener is not None:
-            event.remove(connection, "after_cursor_execute", listener)
+            event.remove(target, name, listener)
         session.rollback()
         session.close()
 

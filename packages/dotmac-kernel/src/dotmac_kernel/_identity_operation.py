@@ -46,6 +46,7 @@ class _Operation:
     physical_root: RootTransaction | None = None
     physical_savepoint: NestedTransaction | None = None
     physical_guarded: bool = False
+    physical_released: bool = False
     physical_recovery_started: bool = False
     physical_recovered: bool = False
     affected: list[tuple[object, tuple[str, ...]]] = field(default_factory=list)
@@ -55,7 +56,7 @@ class _Operation:
 
         self.check()
         state = inspect(row)
-        if state.session is not self.db or not state.persistent:
+        if state is None or state.session is not self.db or not state.persistent:
             self.refuse()
         self.affected.append((row, attributes))
 
@@ -82,21 +83,29 @@ class _Operation:
                 or self.connection.get_transaction() is not self.physical_root
             ):
                 self.refuse()
-            if self.savepoint is not None and (
-                self.physical_savepoint is None
-                or not self.physical_savepoint.is_active
-                or self.connection.get_nested_transaction()
-                is not self.physical_savepoint
+            if (
+                self.savepoint is not None
+                and not self.physical_released
+                and (
+                    self.physical_savepoint is None
+                    or not self.physical_savepoint.is_active
+                    or self.connection.get_nested_transaction()
+                    is not self.physical_savepoint
+                )
             ):
                 self.refuse()
-        if self.savepoint is not None:
+        if self.savepoint is not None and not self.physical_released:
             state = current_conflict_savepoint(self.db)
             if (
                 state is None
                 or state.root is not self.root
                 or state.savepoint is not self.savepoint
                 or self.db.get_nested_transaction() is not self.savepoint
-                or not self.savepoint.is_active
+                # SA deactivates the ORM savepoint before physical RELEASE.
+                or (
+                    not self.savepoint.is_active
+                    and state.phase is not ConflictSavepointPhase.RELEASE
+                )
                 or state.phase
                 not in (ConflictSavepointPhase.BODY, ConflictSavepointPhase.RELEASE)
             ):
@@ -150,6 +159,29 @@ def _operation(db: Session) -> Generator[_Operation, None, None]:
     def no_physical_completion(*args: object) -> None:
         owner.refuse()
 
+    def physical_savepoint_event(*args: object) -> None:
+        # An enclosing harness may restart its SAVEPOINT from
+        # after_transaction_end once this operation's own savepoint has
+        # ended; a new savepoint during BODY still refuses.
+        state = current_conflict_savepoint(db)
+        if (
+            state is not None
+            and state.savepoint is owner.savepoint
+            and db.get_nested_transaction() is not owner.savepoint
+            and (
+                (
+                    state.phase is ConflictSavepointPhase.RELEASE
+                    and owner.physical_released
+                )
+                or (
+                    state.phase is ConflictSavepointPhase.ROLLBACK
+                    and owner.physical_recovery_started
+                )
+            )
+        ):
+            return
+        owner.refuse()
+
     def physical_release(*args: object) -> None:
         state = current_conflict_savepoint(db)
         if (
@@ -159,6 +191,7 @@ def _operation(db: Session) -> Generator[_Operation, None, None]:
         ):
             owner.refuse()
         owner.check()
+        owner.physical_released = True
 
     def physical_recovery(*args: object) -> None:
         state = current_conflict_savepoint(db)
@@ -175,7 +208,7 @@ def _operation(db: Session) -> Generator[_Operation, None, None]:
         ("after_cursor_execute", cursor_check),
         ("commit", no_physical_completion),
         ("rollback", no_physical_completion),
-        ("savepoint", no_physical_completion),
+        ("savepoint", physical_savepoint_event),
         ("release_savepoint", physical_release),
         ("rollback_savepoint", physical_recovery),
     )
@@ -232,7 +265,11 @@ def _operation(db: Session) -> Generator[_Operation, None, None]:
                         _require_owner_rollback(db, root)
                         break
                     row_state = inspect(row)
-                    if row_state.session is db and row_state.persistent:
+                    if (
+                        row_state is not None
+                        and row_state.session is db
+                        and row_state.persistent
+                    ):
                         try:
                             # Core writes do not create UOW dirty snapshots.
                             # Expire ONLY known clean affected fields after the

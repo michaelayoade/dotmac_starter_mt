@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import Table, delete, func, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
@@ -444,7 +444,7 @@ def remove_grants(
     if not expected:
         return ()
     expected = tuple(sorted(expected, key=lambda fact: fact.id))
-    table = PartyRoleGrant.__table__
+    table = cast(Table, PartyRoleGrant.__table__)
     columns = (table.c.id, table.c.tenant_id, table.c.party_id, table.c.role_id)
     predicates = (
         table.c.tenant_id == tenant_id,
