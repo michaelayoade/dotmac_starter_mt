@@ -49,6 +49,7 @@ def _setup(db, tenant, person, cohort, courses):
         person_id=person,
         track_id=track.id,
         role_in_cohort="instructor",
+        status="active",
     )
     db.add(enrollment)
     db.flush()
@@ -122,7 +123,13 @@ def test_any_unlocked_route_then_explicit_prerequisites_duplicate_unmet_source_o
         db.flush()
         db.add_all(
             [
-                Enrollment(tenant_id=tenant, cohort_id=legacy.id, person_id=person),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=legacy.id,
+                    person_id=person,
+                    role_in_cohort="student",
+                    status="active",
+                ),
                 CourseOffering(tenant_id=tenant, cohort_id=legacy.id, course_id=b),
             ]
         )

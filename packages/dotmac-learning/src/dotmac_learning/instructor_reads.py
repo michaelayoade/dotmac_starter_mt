@@ -504,3 +504,13 @@ def cohort_exists(db: Session, *, tenant_id: UUID, cohort_id: UUID) -> bool:
         )
         is not None
     )
+
+
+def cohort_by_id(
+    db: Session, *, tenant_id: UUID, cohort_id: UUID
+) -> ReportCohort | None:
+    """One tenant-constrained point lookup for Academy cohort detail consumers."""
+    cohort = db.scalars(
+        select(Cohort).where(Cohort.tenant_id == tenant_id, Cohort.id == cohort_id)
+    ).first()
+    return _cohort_fact(cohort) if cohort is not None else None

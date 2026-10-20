@@ -30,7 +30,13 @@ def seed(db, tenant, person, course, activity):
     db.flush()
     db.add_all(
         [
-            Enrollment(tenant_id=tenant, cohort_id=cohort.id, person_id=person),
+            Enrollment(
+                tenant_id=tenant,
+                cohort_id=cohort.id,
+                person_id=person,
+                role_in_cohort="student",
+                status="active",
+            ),
             CourseOffering(tenant_id=tenant, cohort_id=cohort.id, course_id=course),
         ]
     )

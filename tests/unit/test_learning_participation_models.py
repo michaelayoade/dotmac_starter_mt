@@ -77,7 +77,6 @@ LENGTHS = {
 }
 DEFAULTS = {
     "cohorts": {"status": "active", "delivery_mode": "self_paced"},
-    "enrollments": {"role_in_cohort": "student", "status": "active"},
     "tracks": {"status": "active"},
     "track_courses": {"order_index": "0"},
     "cohort_tracks": {"status": "active"},
@@ -149,3 +148,11 @@ def test_enrollment_identity_translation_targets_genuine_kernel_and_cascades():
     assert not Cohort.__table__.c.entrance_bank_id.foreign_keys
     assert TrackCourse.__table__.c.order_index.default.arg == 0
     assert Track.__table__.c.status.default.arg == "active"
+
+
+def test_enrollment_state_requires_explicit_orm_and_server_facts():
+    for name in ("role_in_cohort", "status"):
+        column = Enrollment.__table__.c[name]
+        assert column.default is None
+        assert column.server_default is None
+        assert column.nullable is False

@@ -3,7 +3,8 @@ password material.
 
 This is the stateless engine for what a product does to a HUMAN password
 credential — provision it, verify it, complete an individually authorized
-reset, and force-reset an approved cohort. It holds no session, no ORM model, no
+reset, reset an account's complete current membership, and force-reset an
+approved cohort. It holds no session, no ORM model, no
 provider client and no network reach; every persistent or external effect goes
 through a typed product port, and every database effect happens inside the
 CALLER's transaction.
@@ -560,7 +561,120 @@ class CredentialResetCompletionReceiptV1:
     schema_version: int = CREDENTIAL_LIFECYCLE_SCHEMA_VERSION
 
 
+@dataclass(frozen=True, slots=True, order=True)
+class CredentialAccountRef:
+    """A product principal, independent of any one credential.
+
+    The product must bind principal_ref to its tenant and principal together;
+    the kernel treats that reference as opaque, as with CredentialSubjectRef.
+    """
+
+    application: str
+    principal_kind: str
+    principal_ref: str
+
+    def __post_init__(self) -> None:
+        _require_opaque(self.application, "application")
+        _require_opaque(self.principal_kind, "principal kind")
+        _require_opaque(self.principal_ref, "tenant-bound principal reference")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAccountRecoveryAuthorizationV1:
+    """A proven single-use principal proof for ALL its current credentials.
+
+    No caller-selected subset or credential generation is authorized here.
+    The account port must validate and consume the genuine product proof.
+    """
+
+    account: CredentialAccountRef
+    recovery_ref: str
+    proven_at: datetime
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.account, CredentialAccountRef):
+            raise TypeError("account must be a CredentialAccountRef")
+        _require_opaque(self.recovery_ref, "recovery reference")
+        _require_aware(self.proven_at, "recovery proof timestamp")
+        _require_aware(self.expires_at, "recovery expiry")
+        if self.expires_at < self.proven_at:
+            raise ValueError("account recovery expires before it was proven")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAccountSessionRevocationCompletionV1:
+    """Completed synchronous principal-session revocation, never an intent.
+
+    Zero sessions is a valid completed result. The reference identifies the
+    product's actual effect record in the caller's transaction.
+    """
+
+    account: CredentialAccountRef
+    completion_ref: str
+    completed_at: datetime
+    revoked_session_count: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.account, CredentialAccountRef):
+            raise TypeError("account must be a CredentialAccountRef")
+        _require_opaque(self.completion_ref, "revocation completion reference")
+        _require_aware(self.completed_at, "revocation completion timestamp")
+        if (
+            type(self.revoked_session_count) is not int
+            or self.revoked_session_count < 0
+        ):
+            raise ValueError("revoked session count must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAccountResetCompletionReceiptV1:
+    """Material-free evidence of a complete current account reset."""
+
+    account: CredentialAccountRef
+    recovery_ref: str
+    completed_at: datetime
+    outcomes: tuple[CredentialResetOutcomeV1, ...]
+    revocation: CredentialAccountSessionRevocationCompletionV1
+    schema_version: int = CREDENTIAL_LIFECYCLE_SCHEMA_VERSION
+
+
 # ── Product ports ───────────────────────────────────────────────────────────
+
+
+class CredentialAccountResetPort(Protocol):
+    """Account-specific effects in the SAME caller-owned transaction.
+
+    This additive method port does not change the lifecycle constructor's five
+    existing ports. It must validate the actual tenant/principal/credential
+    relationship, spend a genuine principal proof once, and lock the principal
+    plus its COMPLETE current credential membership against additions/removals
+    until transaction end. Returning a caller subset is a contract violation.
+    Store writes remain explicit per member through CredentialStorePort;
+    implementations must CAS from credential_version-1 to credential_version.
+    No method may commit or hide credential fan-out behind a single write.
+    """
+
+    def consume(self, authorization: CredentialAccountRecoveryAuthorizationV1) -> bool:
+        """Atomically validate/spend the actual principal proof; False if refused."""
+
+    def lock_current_credentials(
+        self, account: CredentialAccountRef
+    ) -> tuple[CredentialSnapshot, ...]:
+        """Principal and full membership lock, with current persisted snapshots."""
+
+    def clear_failure_state(self, subject: CredentialSubjectRef) -> None:
+        """Clear failed attempts and lockout for exactly this named credential."""
+
+    def revoke_sessions(
+        self,
+        account: CredentialAccountRef,
+        *,
+        reason_code: str,
+        correlation_ref: str,
+        completed_at: datetime,
+    ) -> CredentialAccountSessionRevocationCompletionV1:
+        """Revoke all principal sessions synchronously and return completed facts."""
 
 
 class CredentialStorePort(Protocol):
@@ -684,6 +798,682 @@ def _dummy_hash() -> str:
     return _DUMMY_HASH
 
 
+# ── Product-authorized supplied-password assignment ─────────────────────────
+
+
+class CredentialAssignmentError(CredentialLifecycleError):
+    """Assignment refused or incomplete; the caller must roll back all effects."""
+
+
+_ASSIGNMENT_MAX_VERSION: Final[int] = (1 << 63) - 1
+
+
+def _assignment_opaque(value: str) -> None:
+    if type(value) is not str or not value.strip():
+        raise ValueError("assignment reference must be a non-empty string")
+
+
+def _assignment_version(value: object) -> None:
+    if type(value) is not int or not 0 <= value <= _ASSIGNMENT_MAX_VERSION:
+        raise ValueError(
+            "assignment version must be a nonnegative signed 64-bit integer"
+        )
+
+
+def _assignment_subject(value: CredentialSubjectRef) -> None:
+    if type(value) is not CredentialSubjectRef:
+        raise TypeError("assignment subject must be a CredentialSubjectRef")
+    for reference in (
+        value.application,
+        value.principal_kind,
+        value.principal_ref,
+        value.credential_ref,
+    ):
+        _assignment_opaque(reference)
+
+
+def _assignment_time(value: datetime) -> None:
+    if type(value) is not datetime:
+        raise TypeError("assignment timestamp must be a datetime")
+    _require_aware(value, "assignment timestamp")
+
+
+def _assignment_command_fields(
+    target_subject: CredentialSubjectRef,
+    tenant_ref: str,
+    purpose_ref: str,
+    intended_role_refs: tuple[str, ...],
+    reason_code: str,
+    correlation_ref: str,
+) -> None:
+    _assignment_subject(target_subject)
+    for reference in (tenant_ref, purpose_ref, reason_code, correlation_ref):
+        _assignment_opaque(reference)
+    if type(intended_role_refs) is not tuple or not intended_role_refs:
+        raise ValueError("assignment roles must be a non-empty sorted tuple")
+    for reference in intended_role_refs:
+        _assignment_opaque(reference)
+    if tuple(sorted(intended_role_refs)) != intended_role_refs or len(
+        set(intended_role_refs)
+    ) != len(intended_role_refs):
+        raise ValueError("assignment roles must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialCreateAbsentV1:
+    """Create absent state; product authority resolves opaque tenant and roles."""
+
+    target_subject: CredentialSubjectRef
+    tenant_ref: str
+    purpose_ref: str
+    intended_role_refs: tuple[str, ...]
+    reason_code: str
+    correlation_ref: str
+
+    def __post_init__(self) -> None:
+        _assignment_command_fields(
+            self.target_subject,
+            self.tenant_ref,
+            self.purpose_ref,
+            self.intended_role_refs,
+            self.reason_code,
+            self.correlation_ref,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialCreateAbsentFromProofV1:
+    """Create an account's first credential from genuine product-validated proof.
+
+    These opaque references are an observation, never authority by themselves.
+    No roles, actor, proof timestamps or credential material belong in this DTO.
+    """
+
+    target_subject: CredentialSubjectRef
+    tenant_ref: str
+    purpose_ref: str
+    proof_ref: str
+    reason_code: str
+    correlation_ref: str
+
+    def __post_init__(self) -> None:
+        _assignment_subject(self.target_subject)
+        for reference in (
+            self.tenant_ref,
+            self.purpose_ref,
+            self.proof_ref,
+            self.reason_code,
+            self.correlation_ref,
+        ):
+            _assignment_opaque(reference)
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialReplaceSelectedV1:
+    """CAS the selected prior subject/version, allowing an authorized Party change.
+
+    Tenant membership cannot be inferred from opaque principal text. The installed
+    authority and store resolve both Parties in the command's actual tenant.
+    """
+
+    target_subject: CredentialSubjectRef
+    tenant_ref: str
+    purpose_ref: str
+    intended_role_refs: tuple[str, ...]
+    reason_code: str
+    correlation_ref: str
+    expected_previous_subject: CredentialSubjectRef
+    expected_credential_version: int
+
+    def __post_init__(self) -> None:
+        _assignment_command_fields(
+            self.target_subject,
+            self.tenant_ref,
+            self.purpose_ref,
+            self.intended_role_refs,
+            self.reason_code,
+            self.correlation_ref,
+        )
+        _assignment_subject(self.expected_previous_subject)
+        _assignment_version(self.expected_credential_version)
+        previous = self.expected_previous_subject
+        target = self.target_subject
+        if (
+            previous.application != target.application
+            or previous.principal_kind != target.principal_kind
+            or previous.credential_ref != target.credential_ref
+        ):
+            raise ValueError("assignment prior and target credential envelopes differ")
+
+
+CredentialAssignmentCommandV1 = (
+    CredentialCreateAbsentV1
+    | CredentialCreateAbsentFromProofV1
+    | CredentialReplaceSelectedV1
+)
+
+
+def _assignment_command(command: CredentialAssignmentCommandV1) -> None:
+    if type(command) not in (
+        CredentialCreateAbsentV1,
+        CredentialCreateAbsentFromProofV1,
+        CredentialReplaceSelectedV1,
+    ):
+        raise TypeError("assignment command must be a closed assignment variant")
+    command.__post_init__()
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAssignmentAuthorityEvidenceV1:
+    """Material-free observation, NOT intrinsic proof of authority.
+
+    Only an installed product port may issue this for the actual locked context.
+    Its bound audit adapter must reject copies, stale/cross-root context and
+    changed outcomes against private Session/transaction/command/actor state.
+    """
+
+    command: CredentialAssignmentCommandV1
+    actor_kind: Literal["user", "service", "api_key", "system"]
+    actor_ref: str
+    authority_evidence_ref: str
+
+    def __post_init__(self) -> None:
+        _assignment_command(self.command)
+        if type(self.actor_kind) is not str or self.actor_kind not in (
+            "user",
+            "service",
+            "api_key",
+            "system",
+        ):
+            raise ValueError("assignment actor kind is invalid")
+        _assignment_opaque(self.actor_ref)
+        _assignment_opaque(self.authority_evidence_ref)
+        if (
+            type(self.command) is CredentialCreateAbsentFromProofV1
+            and self.authority_evidence_ref != self.command.proof_ref
+        ):
+            raise ValueError("assignment authority proof reference differs")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAssignmentAuditEntryV1:
+    """Current assignment audit input; no snapshots or material-bearing fields."""
+
+    command: CredentialAssignmentCommandV1
+    authority: CredentialAssignmentAuthorityEvidenceV1
+    previous_credential_version: int | None
+    credential_version: int
+    occurred_at: datetime
+
+    def __post_init__(self) -> None:
+        _assignment_command(self.command)
+        if type(self.authority) is not CredentialAssignmentAuthorityEvidenceV1:
+            raise TypeError("assignment authority evidence is invalid")
+        self.authority.__post_init__()
+        if self.authority.command is not self.command:
+            raise ValueError("assignment authority command differs")
+        _assignment_version(self.credential_version)
+        if isinstance(
+            self.command, CredentialCreateAbsentV1 | CredentialCreateAbsentFromProofV1
+        ):
+            if self.previous_credential_version is not None:
+                raise ValueError("creation has no previous credential version")
+        else:
+            _assignment_version(self.previous_credential_version)
+            if self.previous_credential_version is None:
+                raise ValueError("replacement requires a previous version")
+            if (
+                self.previous_credential_version
+                != self.command.expected_credential_version
+                or self.credential_version != self.previous_credential_version + 1
+            ):
+                raise ValueError("assignment audit versions differ from selected CAS")
+        _assignment_time(self.occurred_at)
+
+    @property
+    def action(self) -> Literal["credential.password.assigned"]:
+        return "credential.password.assigned"
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAssignmentReceiptV1:
+    """Material-free outcome; prior/target refs and correlation are in command."""
+
+    command: CredentialAssignmentCommandV1
+    authority: CredentialAssignmentAuthorityEvidenceV1
+    previous_credential_version: int | None
+    credential_version: int
+    audit_ref: str
+    occurred_at: datetime
+    reset_required: Literal[False] = False
+    schema_version: int = CREDENTIAL_LIFECYCLE_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        CredentialAssignmentAuditEntryV1(
+            self.command,
+            self.authority,
+            self.previous_credential_version,
+            self.credential_version,
+            self.occurred_at,
+        )
+        _assignment_opaque(self.audit_ref)
+        if self.reset_required is not False:
+            raise ValueError("assigned credential must persist reset_required=False")
+        if type(self.schema_version) is not int or self.schema_version != 1:
+            raise ValueError("assignment schema version is invalid")
+
+
+class CredentialAssignmentAuthorityPort(Protocol):
+    """Resolve actual authority/tenant/grants and hold real participating locks.
+
+    Authority and audit are the same bound product adapter. No public DTO, URL,
+    supplied password, caller boolean or actor ID establishes actual authority.
+
+    Proof creation requires actual valid single-use proof consumption inside the
+    caller's whole public savepoint BEFORE evidence issuance. Lock actual Party,
+    required subtype/profile, token and complete credential-membership state in
+    product order before reading clocks or checking inclusive expiry. Bind the
+    exact command, consumed proof, genuine actor and current private Session/root
+    to evidence; proof_ref equals authority_evidence_ref, never an actor identity.
+    A verified bearer may authenticate the actual user subject; a target ID alone
+    cannot. Reject unsupported variants rather than borrowing role-based checks.
+    """
+
+    def authorize_and_lock(
+        self, command: CredentialAssignmentCommandV1
+    ) -> CredentialAssignmentAuthorityEvidenceV1: ...
+
+
+class CredentialAssignmentStorePort(Protocol):
+    """Caller-transaction store; enforce actual tenant and selected Party/version CAS.
+
+    All writers must participate in the real lock order. Return actual persisted
+    state, preserving selected credential ID and unrelated state. Creation owns
+    its initial version; replacement must advance the expected version exactly once.
+
+    Proof creation requires absence of all credentials for the account, not
+    merely an unused new credential UUID. Preserve actual product eligibility,
+    Party/profile status,
+    grants and unrelated state; no implicit activation, role or session changes.
+    Its adapter supplies actual initial state/version rather than kernel defaults.
+    """
+
+    def lock_current(
+        self, command: CredentialAssignmentCommandV1
+    ) -> CredentialSnapshot | None: ...
+
+    def create_absent(
+        self,
+        command: CredentialCreateAbsentV1 | CredentialCreateAbsentFromProofV1,
+        *,
+        password_hash: str,
+        reset_required: Literal[False],
+    ) -> CredentialSnapshot: ...
+
+    def replace_selected(
+        self,
+        command: CredentialReplaceSelectedV1,
+        *,
+        password_hash: str,
+        credential_version: int,
+        reset_required: Literal[False],
+    ) -> CredentialSnapshot: ...
+
+
+class CredentialAssignmentAuditPort(Protocol):
+    """Validate exact issued evidence against private bound authority/root context.
+
+    Verify actual persisted outcome, derive actual actor, flush a current audit
+    row, return its non-empty ID and clear context on completion/failure. Product
+    assembly declares the consumed action. No-op/fabricated IDs are not completion.
+    For proof creation verify exact consumed-proof evidence and command identity
+    against the private current Session/root, never trust a copied DTO. Clear
+    private context on every exit, including failures before this audit is called.
+    """
+
+    def record_assignment(self, entry: CredentialAssignmentAuditEntryV1) -> str: ...
+
+
+def _assignment_snapshot(snapshot: CredentialSnapshot) -> None:
+    if type(snapshot) is not CredentialSnapshot:
+        raise TypeError("assignment store did not return a credential snapshot")
+    _assignment_subject(snapshot.subject)
+    _assignment_version(snapshot.credential_version)
+    _assignment_opaque(snapshot.password_hash)
+    if any(
+        type(value) is not bool
+        for value in (snapshot.is_active, snapshot.is_locked, snapshot.reset_required)
+    ):
+        raise ValueError("assignment snapshot state must be boolean")
+
+
+class CredentialAuthenticatedAccountPasswordChangeError(CredentialLifecycleError):
+    """Change incomplete; the caller must roll back the whole operation."""
+
+
+class CredentialAuthenticatedAccountPasswordPolicyRefused(CredentialPolicyViolation):
+    """Deferred private product confirmation/policy refusal, without material."""
+
+    def __init__(
+        self, code: Literal["confirmation_mismatch", "policy_rejected"]
+    ) -> None:
+        if type(code) is not str or code not in (
+            "confirmation_mismatch",
+            "policy_rejected",
+        ):
+            raise ValueError("invalid authenticated password policy refusal")
+        self.code: Literal["confirmation_mismatch", "policy_rejected"] = code
+        super().__init__(code)
+
+
+class CredentialAuthenticatedAccountPasswordChangeRefused(
+    CredentialAuthenticatedAccountPasswordChangeError
+):
+    """Closed expected refusal; fixed code is safe to map to product messages."""
+
+    def __init__(
+        self,
+        code: Literal[
+            "current_password_invalid", "confirmation_mismatch", "policy_rejected"
+        ],
+    ) -> None:
+        if type(code) is not str or code not in (
+            "current_password_invalid",
+            "confirmation_mismatch",
+            "policy_rejected",
+        ):
+            raise ValueError("invalid authenticated password change refusal")
+        self.code = code
+        super().__init__(code)
+
+
+def _authenticated_change_account(account: CredentialAccountRef) -> None:
+    if type(account) is not CredentialAccountRef:
+        raise TypeError("authenticated change needs an exact account reference")
+    for reference in (
+        account.application,
+        account.principal_kind,
+        account.principal_ref,
+    ):
+        _assignment_opaque(reference)
+
+
+def _authenticated_change_subject(
+    account: CredentialAccountRef, subject: CredentialSubjectRef
+) -> None:
+    _assignment_subject(subject)
+    if (subject.application, subject.principal_kind, subject.principal_ref) != (
+        account.application,
+        account.principal_kind,
+        account.principal_ref,
+    ):
+        raise ValueError("authenticated change credential is outside account")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAuthenticatedAccountPasswordChangeV1:
+    """Change the authenticated account's complete credential membership."""
+
+    account: CredentialAccountRef
+    reason_code: str
+    correlation_ref: str
+
+    def __post_init__(self) -> None:
+        _authenticated_change_account(self.account)
+        _assignment_opaque(self.reason_code)
+        _assignment_opaque(self.correlation_ref)
+
+
+def _authenticated_change_command(
+    command: CredentialAuthenticatedAccountPasswordChangeV1,
+) -> None:
+    if type(command) is not CredentialAuthenticatedAccountPasswordChangeV1:
+        raise TypeError("authenticated password change command is a closed type")
+    command.__post_init__()
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAuthenticatedAccountPasswordChangeAuthorityV1:
+    """Observation only; exact issued instance requires private cookie/root binding.
+
+    An actual self-cookie authenticates this user, independently of credential
+    eligibility flags. session_ref is a material-free session ID, never a cookie.
+    verification_subject is the actual unordered first credential selected by
+    the product query, not a canonical alias, caller choice or any-match search.
+    None represents no credential; it can only lead to a current-password refusal.
+    """
+
+    command: CredentialAuthenticatedAccountPasswordChangeV1
+    actor_kind: Literal["user"]
+    actor_ref: str
+    session_ref: str
+    verification_subject: CredentialSubjectRef | None
+
+    def __post_init__(self) -> None:
+        _authenticated_change_command(self.command)
+        if type(self.actor_kind) is not str or self.actor_kind != "user":
+            raise ValueError("authenticated change requires genuine user authority")
+        _assignment_opaque(self.actor_ref)
+        _assignment_opaque(self.session_ref)
+        if self.verification_subject is not None:
+            _authenticated_change_subject(
+                self.command.account, self.verification_subject
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAuthenticatedAccountPasswordChangeOutcomeV1:
+    """A material-free named member CAS outcome."""
+
+    subject: CredentialSubjectRef
+    previous_credential_version: int
+    credential_version: int
+
+    def __post_init__(self) -> None:
+        _assignment_subject(self.subject)
+        _assignment_version(self.previous_credential_version)
+        _assignment_version(self.credential_version)
+        if self.credential_version != self.previous_credential_version + 1:
+            raise ValueError("authenticated change outcome is not one CAS advance")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAccountResetTokenInvalidationCompletionV1:
+    """Completed invalidation of every unused reset token, including expired."""
+
+    account: CredentialAccountRef
+    completion_ref: str
+    completed_at: datetime
+    invalidated_token_count: int
+
+    def __post_init__(self) -> None:
+        _authenticated_change_account(self.account)
+        _assignment_opaque(self.completion_ref)
+        _assignment_time(self.completed_at)
+        if (
+            type(self.invalidated_token_count) is not int
+            or self.invalidated_token_count < 0
+        ):
+            raise ValueError("invalidated reset token count must be nonnegative")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAuthenticatedAccountPasswordChangeAuditEntryV1:
+    """Bound complete account change facts, without hashes or passwords."""
+
+    command: CredentialAuthenticatedAccountPasswordChangeV1
+    authority: CredentialAuthenticatedAccountPasswordChangeAuthorityV1
+    outcomes: tuple[CredentialAuthenticatedAccountPasswordChangeOutcomeV1, ...]
+    revocation: CredentialAccountSessionRevocationCompletionV1
+    invalidation: CredentialAccountResetTokenInvalidationCompletionV1
+    occurred_at: datetime
+
+    def __post_init__(self) -> None:
+        _authenticated_change_command(self.command)
+        if (
+            type(self.authority)
+            is not CredentialAuthenticatedAccountPasswordChangeAuthorityV1
+        ):
+            raise TypeError("invalid authenticated change authority")
+        self.authority.__post_init__()
+        if self.authority.command is not self.command:
+            raise ValueError("authenticated change authority command differs")
+        if type(self.outcomes) is not tuple or not self.outcomes:
+            raise ValueError("authenticated change requires complete outcomes")
+        seen: set[CredentialSubjectRef] = set()
+        for outcome in self.outcomes:
+            if (
+                type(outcome)
+                is not CredentialAuthenticatedAccountPasswordChangeOutcomeV1
+            ):
+                raise TypeError("invalid authenticated change outcome")
+            outcome.__post_init__()
+            _authenticated_change_subject(self.command.account, outcome.subject)
+            if outcome.subject in seen:
+                raise ValueError("duplicate authenticated change outcome")
+            seen.add(outcome.subject)
+        if self.authority.verification_subject not in seen:
+            raise ValueError("authenticated change verification subject was omitted")
+        _assignment_time(self.occurred_at)
+        if type(self.revocation) is not CredentialAccountSessionRevocationCompletionV1:
+            raise TypeError("authenticated change needs completed session revocation")
+        self.revocation.__post_init__()
+        _authenticated_change_account(self.revocation.account)
+        _assignment_opaque(self.revocation.completion_ref)
+        _assignment_time(self.revocation.completed_at)
+        if (
+            type(self.invalidation)
+            is not CredentialAccountResetTokenInvalidationCompletionV1
+        ):
+            raise TypeError("authenticated change needs completed reset invalidation")
+        self.invalidation.__post_init__()
+        for completion in (self.revocation, self.invalidation):
+            if (
+                completion.account != self.command.account
+                or completion.completed_at != self.occurred_at
+            ):
+                raise ValueError("authenticated change completion differs")
+
+    @property
+    def action(self) -> Literal["credential.password.changed"]:
+        return "credential.password.changed"
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialAuthenticatedAccountPasswordChangeReceiptV1:
+    """Material-free receipt; public facts alone do not establish authority."""
+
+    command: CredentialAuthenticatedAccountPasswordChangeV1
+    authority: CredentialAuthenticatedAccountPasswordChangeAuthorityV1
+    outcomes: tuple[CredentialAuthenticatedAccountPasswordChangeOutcomeV1, ...]
+    revocation: CredentialAccountSessionRevocationCompletionV1
+    invalidation: CredentialAccountResetTokenInvalidationCompletionV1
+    occurred_at: datetime
+    audit_ref: str
+    schema_version: int = CREDENTIAL_LIFECYCLE_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        CredentialAuthenticatedAccountPasswordChangeAuditEntryV1(
+            self.command,
+            self.authority,
+            self.outcomes,
+            self.revocation,
+            self.invalidation,
+            self.occurred_at,
+        )
+        _assignment_opaque(self.audit_ref)
+        if type(self.schema_version) is not int or self.schema_version != 1:
+            raise ValueError("authenticated change receipt schema is invalid")
+
+
+class CredentialAuthenticatedAccountPasswordChangePort(Protocol):
+    """Private request-local authority/effects in one caller-owned public savepoint.
+
+    Bind actual Session/root, exact command and issued evidence instance to the
+    real user/cookie/session and full tenant-bound principal membership. Acquire
+    Party, required subtype/profile, session and complete credential locks in the
+    product order. Membership reads MUST NOT normalize aliases or mutate state.
+    All account/credential/session/token writers participate in the same locks.
+    Public DTOs, actor IDs and equal/copied evidence never establish authority.
+    No method commits or rolls back. A caught failure requires rollback of the
+    whole operation's public savepoint: aliases, credentials, policies, sessions,
+    tokens and audit. The caller must prove recovery within the same root;
+    otherwise it must roll back the caller root.
+
+    This port and the lifecycle's self.store MUST share the same private actual
+    Session/root, tenant and complete locked cohort context. Each self.store
+    lock/write targets exactly the NAMED member. write_hash must atomically CAS
+    that member's expected version n to n+1, refusing any mismatch; it must never
+    hide fan-out to other credentials. The generic CredentialStorePort contract
+    alone does not establish these stronger operation-specific guarantees.
+    """
+
+    def authorize_and_lock(
+        self, command: CredentialAuthenticatedAccountPasswordChangeV1
+    ) -> CredentialAuthenticatedAccountPasswordChangeAuthorityV1: ...
+
+    def lock_current_credentials(
+        self, account: CredentialAccountRef
+    ) -> tuple[CredentialSnapshot, ...]:
+        """Fresh complete membership, read-only; no alias synchronization.
+
+        Empty membership is permitted only with verification_subject=None and
+        leads to current_password_invalid. Nonempty membership with None, or
+        empty membership with a selected subject, is invalid authority.
+        """
+
+    def revalidate_before_change(
+        self,
+        authority: CredentialAuthenticatedAccountPasswordChangeAuthorityV1,
+        credentials: tuple[CredentialSnapshot, ...],
+    ) -> bool:
+        """Reject copied/cross-root evidence or any omitted/added/changed member.
+
+        Sample fresh product clock AFTER every blocking acquisition, then verify
+        actual self-cookie/session and Party/profile authority again. True only
+        for the exact privately issued evidence and locked complete cohort.
+        """
+
+    def synchronize_account_aliases(
+        self, authority: CredentialAuthenticatedAccountPasswordChangeAuthorityV1
+    ) -> None:
+        """After checks normalize actual account email/compatible alias only.
+
+        Preserve all credential IDs, membership, unrelated aliases and statuses.
+        """
+
+    def clear_failure_state(self, subject: CredentialSubjectRef) -> None:
+        """Clear failed attempts/lockout for exactly this member, preserving state."""
+
+    def revoke_sessions(
+        self,
+        account: CredentialAccountRef,
+        *,
+        reason_code: str,
+        correlation_ref: str,
+        completed_at: datetime,
+    ) -> CredentialAccountSessionRevocationCompletionV1:
+        """Synchronously revoke every nonrevoked session, including expired ones."""
+
+    def invalidate_outstanding_reset_tokens(
+        self, account: CredentialAccountRef, *, completed_at: datetime
+    ) -> CredentialAccountResetTokenInvalidationCompletionV1:
+        """Consume every unused password-reset token, including expired ones."""
+
+    def record_change(
+        self, entry: CredentialAuthenticatedAccountPasswordChangeAuditEntryV1
+    ) -> str:
+        """Verify exact private evidence, full outcomes, failure state/completions.
+
+        Check actual persisted state and record actual material-free user audit;
+        return its ID. Do not require the deliberately revoked session to remain
+        unrevoked. No other token, grant, status or recovery effect is implied.
+        """
+
+    def clear_context(self) -> None:
+        """Clear private authority/root/material context on every exit; never raise."""
+
+
 # ── The engine ──────────────────────────────────────────────────────────────
 
 
@@ -702,6 +1492,307 @@ class CredentialLifecycle:
     policy: PasswordPolicyPort | None = None
     secret_source: SecretSource = default_secret_source
     clock: Callable[[], datetime] = _utcnow
+    assignment_authority: CredentialAssignmentAuthorityPort | None = None
+    assignment_store: CredentialAssignmentStorePort | None = None
+    assignment_audit: CredentialAssignmentAuditPort | None = None
+
+    def assign_authorized_password(
+        self, command: CredentialAssignmentCommandV1, secret: str
+    ) -> CredentialAssignmentReceiptV1:
+        """Assign supplied material through genuine installed product authority.
+
+        Every error is material-masked. This method owns no transaction: callers
+        MUST roll back ALL account/role/credential/audit effects after any failure,
+        including errors caught for a normal response. Runtime authority, tenant
+        semantics and lock participation remain the installed product's duty.
+        """
+        try:
+            _assignment_command(command)
+            if type(secret) is not str:
+                raise TypeError("assignment material must be a string")
+            authority_port = self.assignment_authority
+            store = self.assignment_store
+            audit = self.assignment_audit
+            policy = self.policy
+            if (
+                authority_port is None
+                or store is None
+                or audit is None
+                or policy is None
+            ):
+                raise ValueError("assignment requires all installed ports and policy")
+
+            authority = authority_port.authorize_and_lock(command)
+            if type(authority) is not CredentialAssignmentAuthorityEvidenceV1:
+                raise TypeError("assignment authority returned invalid evidence")
+            authority.__post_init__()
+            if authority.command is not command:
+                raise ValueError("assignment authority returned a different command")
+
+            current = store.lock_current(command)
+            previous_version: int | None = None
+            next_version: int | None = None
+            if isinstance(
+                command, CredentialCreateAbsentV1 | CredentialCreateAbsentFromProofV1
+            ):
+                if current is not None:
+                    raise ValueError("assignment expected absent state")
+            else:
+                if current is None:
+                    raise ValueError("assignment selected credential is absent")
+                _assignment_snapshot(current)
+                if (
+                    current.subject != command.expected_previous_subject
+                    or current.credential_version != command.expected_credential_version
+                ):
+                    raise ValueError("assignment selected credential changed")
+                previous_version = current.credential_version
+                if previous_version == _ASSIGNMENT_MAX_VERSION:
+                    raise ValueError("assignment version exhausted")
+                next_version = previous_version + 1
+
+            # Only the supplied settings-backed product policy decides strength.
+            policy.validate(command.target_subject, secret)
+            password_hash = hash_password(secret)
+            _assignment_opaque(password_hash)
+            if isinstance(
+                command, CredentialCreateAbsentV1 | CredentialCreateAbsentFromProofV1
+            ):
+                persisted = store.create_absent(
+                    command,
+                    password_hash=password_hash,
+                    reset_required=False,
+                )
+            else:
+                # Replacement always has a checked prior version above.
+                if next_version is None:
+                    raise ValueError("assignment replacement version is missing")
+                persisted = store.replace_selected(
+                    command,
+                    password_hash=password_hash,
+                    credential_version=next_version,
+                    reset_required=False,
+                )
+            _assignment_snapshot(persisted)
+            if (
+                persisted.subject != command.target_subject
+                or persisted.password_hash != password_hash
+                or persisted.reset_required is not False
+                or (
+                    next_version is not None
+                    and persisted.credential_version != next_version
+                )
+            ):
+                raise ValueError("assignment persisted outcome differs")
+
+            now = self.clock()
+            entry = CredentialAssignmentAuditEntryV1(
+                command,
+                authority,
+                previous_version,
+                persisted.credential_version,
+                now,
+            )
+            audit_ref = audit.record_assignment(entry)
+            _assignment_opaque(audit_ref)
+            return CredentialAssignmentReceiptV1(
+                command,
+                authority,
+                previous_version,
+                persisted.credential_version,
+                audit_ref,
+                now,
+            )
+        except Exception:
+            raise CredentialAssignmentError(
+                "credential assignment failed; rollback required"
+            ) from None
+        finally:
+            del secret
+
+    def change_authenticated_account_password(
+        self,
+        command: CredentialAuthenticatedAccountPasswordChangeV1,
+        current_secret: str,
+        new_secret: str,
+        *,
+        account: CredentialAuthenticatedAccountPasswordChangePort,
+    ) -> CredentialAuthenticatedAccountPasswordChangeReceiptV1:
+        """Verify the actual selected old hash, then set one NEW hash on all aliases.
+
+        Genuine cookie authority is separate from credential eligibility: inactive,
+        locked and reset-required snapshots do not deny a valid old comparison.
+        Never call login verify (which may rehash old material). Deferred product
+        confirmation and configured policy run only after the old comparison.
+        Every effect remains inside the caller's whole rollback boundary.
+        """
+        refusal: (
+            Literal[
+                "current_password_invalid", "confirmation_mismatch", "policy_rejected"
+            ]
+            | None
+        ) = None
+        try:
+            _authenticated_change_command(command)
+            if type(current_secret) is not str or type(new_secret) is not str:
+                raise TypeError("authenticated change material must be strings")
+            if self.policy is None:
+                raise ValueError("authenticated change requires installed policy")
+            authority = account.authorize_and_lock(command)
+            if (
+                type(authority)
+                is not CredentialAuthenticatedAccountPasswordChangeAuthorityV1
+            ):
+                raise TypeError("invalid authenticated change authority")
+            authority.__post_init__()
+            if authority.command is not command:
+                raise ValueError("authenticated change authority command differs")
+            observed = account.lock_current_credentials(command.account)
+            if type(observed) is not tuple:
+                raise TypeError("authenticated change membership must be a tuple")
+            if not observed:
+                if authority.verification_subject is not None:
+                    raise ValueError(
+                        "empty cohort has a selected verification credential"
+                    )
+                refusal = "current_password_invalid"
+                raise ValueError("no current credential")
+            seen: set[CredentialSubjectRef] = set()
+            locked: list[CredentialSnapshot] = []
+            selected: CredentialSnapshot | None = None
+            for member in observed:
+                _assignment_snapshot(member)
+                _authenticated_change_subject(command.account, member.subject)
+                if member.subject in seen:
+                    raise ValueError("duplicate authenticated change membership")
+                seen.add(member.subject)
+                current = self.store.lock_for_update(member.subject)
+                if current is None:
+                    raise ValueError("authenticated change credential disappeared")
+                _assignment_snapshot(current)
+                if (
+                    current != member
+                    or current.credential_version == _ASSIGNMENT_MAX_VERSION
+                ):
+                    raise ValueError(
+                        "authenticated change credential drift or exhausted version"
+                    )
+                locked.append(current)
+                if current.subject == authority.verification_subject:
+                    selected = current
+            if selected is None:
+                raise ValueError("authenticated change selected credential omitted")
+            if verify_password(current_secret, selected.password_hash) is not True:
+                refusal = "current_password_invalid"
+                raise ValueError("current comparison refused")
+            try:
+                self.policy.validate(selected.subject, new_secret)
+            except CredentialAuthenticatedAccountPasswordPolicyRefused as rejected:
+                if (
+                    type(rejected)
+                    is not CredentialAuthenticatedAccountPasswordPolicyRefused
+                ):
+                    raise TypeError(
+                        "invalid authenticated change policy refusal"
+                    ) from None
+                if type(rejected.code) is not str or rejected.code not in (
+                    "confirmation_mismatch",
+                    "policy_rejected",
+                ):
+                    raise ValueError(
+                        "invalid authenticated change policy code"
+                    ) from None
+                refusal = rejected.code
+                raise ValueError("new material refused") from None
+            # Complete cohort and actual cookie authority are checked after ALL
+            # blocking locks, before even normalization or a new hash occurs.
+            if account.revalidate_before_change(authority, tuple(locked)) is not True:
+                raise ValueError("authenticated change private authority/cohort drift")
+            now = self.clock()
+            _assignment_time(now)
+            account.synchronize_account_aliases(authority)
+            synchronized = account.lock_current_credentials(command.account)
+            if type(synchronized) is not tuple or len(synchronized) != len(locked):
+                raise ValueError("alias synchronization changed credential membership")
+            for member in synchronized:
+                _assignment_snapshot(member)
+            if {member.subject: member for member in synchronized} != {
+                member.subject: member for member in locked
+            }:
+                raise ValueError(
+                    "alias synchronization changed credential cohort/state"
+                )
+            password_hash = hash_password(new_secret)
+            _assignment_opaque(password_hash)
+            outcomes: list[CredentialAuthenticatedAccountPasswordChangeOutcomeV1] = []
+            for current in locked:
+                next_version = current.credential_version + 1
+                self.store.write_hash(
+                    current.subject,
+                    password_hash=password_hash,
+                    credential_version=next_version,
+                    reset_required=False,
+                )
+                account.clear_failure_state(current.subject)
+                persisted = self.store.lock_for_update(current.subject)
+                if persisted is None:
+                    raise ValueError(
+                        "authenticated change persisted credential missing"
+                    )
+                _assignment_snapshot(persisted)
+                if (
+                    persisted.subject != current.subject
+                    or persisted.password_hash != password_hash
+                    or persisted.credential_version != next_version
+                    or persisted.reset_required is not False
+                    or persisted.is_locked is not False
+                    or persisted.is_active is not current.is_active
+                ):
+                    raise ValueError("authenticated change persisted outcome differs")
+                outcomes.append(
+                    CredentialAuthenticatedAccountPasswordChangeOutcomeV1(
+                        current.subject, current.credential_version, next_version
+                    )
+                )
+            revocation = account.revoke_sessions(
+                command.account,
+                reason_code=command.reason_code,
+                correlation_ref=command.correlation_ref,
+                completed_at=now,
+            )
+            invalidation = account.invalidate_outstanding_reset_tokens(
+                command.account, completed_at=now
+            )
+            entry = CredentialAuthenticatedAccountPasswordChangeAuditEntryV1(
+                command, authority, tuple(outcomes), revocation, invalidation, now
+            )
+            audit_ref = account.record_change(entry)
+            _assignment_opaque(audit_ref)
+            return CredentialAuthenticatedAccountPasswordChangeReceiptV1(
+                command,
+                authority,
+                entry.outcomes,
+                revocation,
+                invalidation,
+                now,
+                audit_ref,
+            )
+        except Exception:
+            if refusal is not None:
+                raise CredentialAuthenticatedAccountPasswordChangeRefused(
+                    refusal
+                ) from None
+            raise CredentialAuthenticatedAccountPasswordChangeError(
+                "authenticated password change failed; rollback required"
+            ) from None
+        finally:
+            del current_secret, new_secret
+            try:
+                account.clear_context()
+            except Exception:
+                raise CredentialAuthenticatedAccountPasswordChangeError(
+                    "authenticated password change cleanup failed; rollback required"
+                ) from None
 
     # ── provisioning ────────────────────────────────────────────────────────
 
@@ -896,6 +1987,154 @@ class CredentialLifecycle:
             recovery_ref=authorization.recovery_ref,
             completed_at=now,
         )
+
+    # ── complete current account reset ──────────────────────────────────────
+
+    def complete_account_reset(
+        self,
+        authorization: CredentialAccountRecoveryAuthorizationV1,
+        secret: str,
+        *,
+        account: CredentialAccountResetPort,
+    ) -> CredentialAccountResetCompletionReceiptV1:
+        """Spend one principal proof and set one chosen hash on ALL credentials.
+
+        The account port owns genuine proof validation and complete membership
+        locking. Fresh store locks and every version are checked here before
+        policy validation, one hash, or any credential write. Sessions must be
+        revoked synchronously, once for the principal, rather than merely
+        queued. Any failure requires the caller to roll back proof and effects.
+        Product errors are masked because a port has seen caller material.
+        """
+        password_hash: str | None = None
+        try:
+            if type(authorization) is not CredentialAccountRecoveryAuthorizationV1:
+                raise CredentialAuthorizationError("account proof is required")
+            now = self.clock()
+            _require_aware(now, "account reset timestamp")
+            if authorization.expires_at < now or authorization.proven_at > now:
+                raise CredentialAuthorizationError(
+                    "account proof is outside its window"
+                )
+            if self.policy is None:
+                raise CredentialPolicyViolation(
+                    "account reset needs an installed policy"
+                )
+            if account.consume(authorization) is not True:
+                raise CredentialAuthorizationError("account proof was refused or spent")
+
+            principal = authorization.account
+            observed = account.lock_current_credentials(principal)
+            if type(observed) is not tuple or not observed:
+                raise CredentialCohortDrift("account has no complete credential cohort")
+            seen: set[CredentialSubjectRef] = set()
+            locked: list[CredentialSnapshot] = []
+            for member in observed:
+                if not isinstance(member, CredentialSnapshot):
+                    raise CredentialCohortDrift("account membership is not a snapshot")
+                subject = member.subject
+                if (
+                    not isinstance(subject, CredentialSubjectRef)
+                    or subject.application != principal.application
+                    or subject.principal_kind != principal.principal_kind
+                    or subject.principal_ref != principal.principal_ref
+                    or subject in seen
+                ):
+                    raise CredentialCohortDrift(
+                        "account membership is not unique and bound"
+                    )
+                seen.add(subject)
+                current = self.store.lock_for_update(subject)
+                if (
+                    not isinstance(current, CredentialSnapshot)
+                    or current.subject != subject
+                    or type(member.credential_version) is not int
+                    or type(current.credential_version) is not int
+                    or current.credential_version != member.credential_version
+                    or not 0 <= current.credential_version < (2**63 - 1)
+                ):
+                    raise CredentialCohortDrift("account credential generation drifted")
+                locked.append(current)
+
+            # Policy belongs to each real subject, never an invented credential
+            # used to approximate an account-level check.
+            for current in locked:
+                self.policy.validate(current.subject, secret)
+            password_hash = hash_password(secret)
+            outcomes: list[CredentialResetOutcomeV1] = []
+            for current in locked:
+                next_version = current.credential_version + 1
+                self.store.write_hash(
+                    current.subject,
+                    password_hash=password_hash,
+                    credential_version=next_version,
+                    reset_required=False,
+                )
+                account.clear_failure_state(current.subject)
+                outcomes.append(
+                    CredentialResetOutcomeV1(
+                        subject=current.subject,
+                        previous_credential_version=current.credential_version,
+                        credential_version=next_version,
+                        reset_required=False,
+                        sessions_revoked=True,
+                    )
+                )
+
+            reason_code = "credential.reset.completed"
+            revocation = account.revoke_sessions(
+                principal,
+                reason_code=reason_code,
+                correlation_ref=authorization.recovery_ref,
+                completed_at=now,
+            )
+            if (
+                type(revocation) is not CredentialAccountSessionRevocationCompletionV1
+                or revocation.account != principal
+                or revocation.completed_at != now
+            ):
+                raise CredentialEffectNotRecorded("account sessions were not revoked")
+            for outcome in outcomes:
+                self.audit.record_event(
+                    CredentialAuditEntryV1(
+                        subject=outcome.subject,
+                        action="credential.reset.completed",
+                        reason_code=reason_code,
+                        credential_version=outcome.credential_version,
+                        occurred_at=now,
+                        correlation_ref=authorization.recovery_ref,
+                    )
+                )
+            return CredentialAccountResetCompletionReceiptV1(
+                account=principal,
+                recovery_ref=authorization.recovery_ref,
+                completed_at=now,
+                outcomes=tuple(outcomes),
+                revocation=revocation,
+            )
+        except CredentialAuthorizationError:
+            raise CredentialAuthorizationError(
+                "account reset authorization refused"
+            ) from None
+        except CredentialCohortDrift:
+            raise CredentialCohortDrift(
+                "account reset credential cohort refused"
+            ) from None
+        except CredentialPolicyViolation:
+            raise CredentialPolicyViolation(
+                "account reset password policy refused"
+            ) from None
+        except CredentialEffectNotRecorded:
+            raise CredentialEffectNotRecorded(
+                "account reset effect was not completed"
+            ) from None
+        except Exception:
+            raise CredentialLifecycleError(
+                "account reset failed; caller must roll back"
+            ) from None
+        finally:
+            del password_hash
+            del secret
 
     # ── cohort force reset ──────────────────────────────────────────────────
 
@@ -1140,4 +2379,30 @@ __all__ = [
     "SecretSource",
     "SessionRevocationPort",
     "default_secret_source",
+    "CredentialAuthenticatedAccountPasswordChangeError",
+    "CredentialAuthenticatedAccountPasswordPolicyRefused",
+    "CredentialAuthenticatedAccountPasswordChangeRefused",
+    "CredentialAuthenticatedAccountPasswordChangeV1",
+    "CredentialAuthenticatedAccountPasswordChangeAuthorityV1",
+    "CredentialAuthenticatedAccountPasswordChangeOutcomeV1",
+    "CredentialAccountResetTokenInvalidationCompletionV1",
+    "CredentialAuthenticatedAccountPasswordChangeAuditEntryV1",
+    "CredentialAuthenticatedAccountPasswordChangeReceiptV1",
+    "CredentialAuthenticatedAccountPasswordChangePort",
+    "CredentialAssignmentAuditEntryV1",
+    "CredentialAssignmentAuditPort",
+    "CredentialAssignmentAuthorityEvidenceV1",
+    "CredentialAssignmentAuthorityPort",
+    "CredentialAssignmentCommandV1",
+    "CredentialAssignmentError",
+    "CredentialAssignmentReceiptV1",
+    "CredentialAssignmentStorePort",
+    "CredentialCreateAbsentFromProofV1",
+    "CredentialCreateAbsentV1",
+    "CredentialReplaceSelectedV1",
+    "CredentialAccountRef",
+    "CredentialAccountRecoveryAuthorizationV1",
+    "CredentialAccountResetCompletionReceiptV1",
+    "CredentialAccountResetPort",
+    "CredentialAccountSessionRevocationCompletionV1",
 ]

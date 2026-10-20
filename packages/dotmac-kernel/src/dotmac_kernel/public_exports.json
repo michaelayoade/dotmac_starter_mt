@@ -1,5 +1,7 @@
 {
   "internal_modules": [
+    "dotmac_kernel._identity_operation",
+    "dotmac_kernel._identity_persistence",
     "dotmac_kernel._transactions",
     "dotmac_kernel.display",
     "dotmac_kernel.middleware",
@@ -7,6 +9,16 @@
     "dotmac_kernel.web_runtime"
   ],
   "modules": {
+    "dotmac_kernel._identity_operation": {
+      "classification": "internal",
+      "exports": null,
+      "status": "unavailable"
+    },
+    "dotmac_kernel._identity_persistence": {
+      "classification": "internal",
+      "exports": null,
+      "status": "unavailable"
+    },
     "dotmac_kernel._transactions": {
       "classification": "internal",
       "exports": null,
@@ -226,10 +238,35 @@
       "classification": "supported",
       "exports": [
         "CREDENTIAL_LIFECYCLE_SCHEMA_VERSION",
+        "CredentialAccountRecoveryAuthorizationV1",
+        "CredentialAccountRef",
+        "CredentialAccountResetCompletionReceiptV1",
+        "CredentialAccountResetPort",
+        "CredentialAccountResetTokenInvalidationCompletionV1",
+        "CredentialAccountSessionRevocationCompletionV1",
+        "CredentialAssignmentAuditEntryV1",
+        "CredentialAssignmentAuditPort",
+        "CredentialAssignmentAuthorityEvidenceV1",
+        "CredentialAssignmentAuthorityPort",
+        "CredentialAssignmentCommandV1",
+        "CredentialAssignmentError",
+        "CredentialAssignmentReceiptV1",
+        "CredentialAssignmentStorePort",
         "CredentialAuditEntryV1",
         "CredentialAuditPort",
+        "CredentialAuthenticatedAccountPasswordChangeAuditEntryV1",
+        "CredentialAuthenticatedAccountPasswordChangeAuthorityV1",
+        "CredentialAuthenticatedAccountPasswordChangeError",
+        "CredentialAuthenticatedAccountPasswordChangeOutcomeV1",
+        "CredentialAuthenticatedAccountPasswordChangePort",
+        "CredentialAuthenticatedAccountPasswordChangeReceiptV1",
+        "CredentialAuthenticatedAccountPasswordChangeRefused",
+        "CredentialAuthenticatedAccountPasswordChangeV1",
+        "CredentialAuthenticatedAccountPasswordPolicyRefused",
         "CredentialAuthorizationError",
         "CredentialCohortDrift",
+        "CredentialCreateAbsentFromProofV1",
+        "CredentialCreateAbsentV1",
         "CredentialEffectNotRecorded",
         "CredentialLifecycle",
         "CredentialLifecycleError",
@@ -238,6 +275,7 @@
         "CredentialProvisioningReceiptV1",
         "CredentialRecoveryAuthorizationV1",
         "CredentialRecoveryIntentV1",
+        "CredentialReplaceSelectedV1",
         "CredentialResetAuthorizationV1",
         "CredentialResetCompletionReceiptV1",
         "CredentialResetOutcomeV1",
@@ -509,6 +547,48 @@
       "exports": [
         "normalize_email",
         "person_display_name"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.identity_provisioning": {
+      "classification": "supported",
+      "exports": [
+        "BootstrapPolicyV1",
+        "BootstrapProductOperation",
+        "BootstrapProductPort",
+        "BootstrapRoleV1",
+        "BootstrapTenantResultV1",
+        "BootstrapTenantV1",
+        "IdentityProvisioningAssemblyV1",
+        "bootstrap_tenant",
+        "install_identity_provisioning"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.identity_storage": {
+      "classification": "supported",
+      "exports": [
+        "GrantFact",
+        "NewPersonValues",
+        "NewTenantValues",
+        "PartyFact",
+        "PersonFact",
+        "RoleFact",
+        "TenantFact",
+        "create_person",
+        "create_tenant",
+        "credential_member_ids",
+        "delete_person",
+        "ensure_grant",
+        "find_party_exact_email",
+        "find_party_normalized_email",
+        "lock_grants",
+        "lock_parties",
+        "lock_person",
+        "lock_roles",
+        "provision_missing_roles",
+        "remove_grants",
+        "revoke_party_sessions"
       ],
       "status": "declared"
     },
@@ -824,6 +904,32 @@
         "scan_location",
         "scan_revision_file",
         "version_locations_from_ini"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.migrations.identity_history": {
+      "classification": "supported",
+      "exports": [
+        "HistoricalAuditEventV1",
+        "HistoricalCredentialV1",
+        "HistoricalJsonbV1",
+        "HistoricalPersonRoleV1",
+        "HistoricalPersonV1",
+        "HistoricalRoleV1",
+        "HistoricalSessionV1",
+        "HistoricalTenantDomainV1",
+        "HistoricalTenantV1",
+        "IdentityHistoryCohortV1",
+        "IdentityHistoryCountsV1",
+        "IdentityHistoryImportOperationV1",
+        "IdentityHistoryImportReceiptV1",
+        "IdentityHistoryImportRefused",
+        "IdentityHistoryManifestV1",
+        "IdentityHistoryRelationsV1",
+        "IdentityHistoryRowsV1",
+        "IdentityHistorySourceV1",
+        "import_identity_history",
+        "verify_identity_history"
       ],
       "status": "declared"
     },
@@ -1967,6 +2073,8 @@
     "dotmac_kernel.idempotency",
     "dotmac_kernel.idempotency_models",
     "dotmac_kernel.identity",
+    "dotmac_kernel.identity_provisioning",
+    "dotmac_kernel.identity_storage",
     "dotmac_kernel.licensing",
     "dotmac_kernel.logging",
     "dotmac_kernel.machine_auth",
@@ -1991,6 +2099,7 @@
     "dotmac_kernel.migrations.catalog",
     "dotmac_kernel.migrations.configuration",
     "dotmac_kernel.migrations.gate",
+    "dotmac_kernel.migrations.identity_history",
     "dotmac_kernel.migrations.verify",
     "dotmac_kernel.models",
     "dotmac_kernel.models_platform",

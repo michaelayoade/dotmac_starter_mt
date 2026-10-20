@@ -467,13 +467,21 @@ def test_no_public_entry_point_except_verify_and_complete_reset_takes_material()
     None
 ):
     """Scoped to the WHOLE public surface, so a second provisioning helper
-    cannot quietly reintroduce the shape."""
+    cannot quietly reintroduce the shape. The two typed assignment/reset
+    commands require installed authority or a consumed principal proof; their
+    policy, locking and material-masking contracts are covered by
+    test_credential_assignment.py and test_credential_account_reset.py."""
     import inspect
 
     banned = {"password", "secret", "new_password", "temporary_password", "token"}
     offenders = []
     for name, member in inspect.getmembers(CredentialLifecycle, inspect.isfunction):
-        if name.startswith("_") or name in {"verify", "complete_reset"}:
+        if name.startswith("_") or name in {
+            "verify",
+            "complete_reset",
+            "assign_authorized_password",
+            "complete_account_reset",
+        }:
             continue
         overlap = banned & set(inspect.signature(member).parameters)
         if overlap:

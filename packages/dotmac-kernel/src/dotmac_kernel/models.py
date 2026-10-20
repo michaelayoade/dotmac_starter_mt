@@ -322,6 +322,8 @@ class UserCredential(Base, TimestampMixin):
 
     __tablename__ = "user_credentials"
     __table_args__ = (
+        # Product credential policy extensions carry this tenant-qualified FK.
+        UniqueConstraint("tenant_id", "id", name="uq_user_credentials_tenant_id_id"),
         ForeignKeyConstraint(
             ["tenant_id", "party_id"],
             ["parties.tenant_id", "parties.id"],

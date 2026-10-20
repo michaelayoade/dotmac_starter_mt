@@ -145,6 +145,56 @@ class UnclassifiedPerson:
     name: str
 
 
+@dataclass(frozen=True, slots=True)
+class AdmissionEnrollmentInitialState:
+    """Required product policy snapshot for a newly created admission enrollment.
+
+    Match the unconstrained String(20) storage bounds without inventing a role
+    or status vocabulary. Empty and whitespace strings are preserved verbatim.
+    This value carries no authorization or account eligibility evidence.
+    """
+
+    role_in_cohort: str
+    status: str
+
+    def __post_init__(self) -> None:
+        for name in ("role_in_cohort", "status"):
+            value = getattr(self, name)
+            if type(value) is not str:
+                raise TypeError(f"{name} must be a builtin str")
+            if len(value) > 20:
+                raise ValueError(f"{name} must contain at most 20 characters")
+
+
+@dataclass(frozen=True, slots=True)
+class BulkEnrollmentInitialState:
+    """Required product facts for a new bulk enrollment; no authority evidence."""
+
+    role_in_cohort: str
+    status: str
+
+    def __post_init__(self) -> None:
+        for name in ("role_in_cohort", "status"):
+            value = getattr(self, name)
+            if type(value) is not str:
+                raise TypeError(f"{name} must be a builtin str")
+            if len(value) > 20:
+                raise ValueError(f"{name} must contain at most 20 characters")
+
+
+@dataclass(frozen=True, slots=True)
+class InvitationEnrollmentInitialState:
+    """Required product status for a new invitation enrollment only."""
+
+    status: str
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not str:
+            raise TypeError("status must be a builtin str")
+        if len(self.status) > 20:
+            raise ValueError("status must contain at most 20 characters")
+
+
 class EnsureAdmissionEnrollmentCommand(ParticipationCommand):
     """Enrollment intent from an already authorized product admission flow.
 

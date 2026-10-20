@@ -577,3 +577,317 @@ def test_an_unforced_race_never_lands_between_the_two_legal_outcomes(
         )
     finally:
         _cleanup(admin_session, party_id=party_id, binding_id=binding_id)
+
+
+def _locking_stage(context):
+    compiled = context.compiled
+    if compiled is None:
+        return None
+    statement = compiled.statement
+    if getattr(statement, "_for_update_arg", None) is None:
+        return None
+    names = {getattr(item, "name", None) for item in statement.get_final_froms()}
+    if "parties" in names:
+        return "party"
+    if "external_identity_bindings" in names:
+        return "binding"
+    if "auth_sessions" in names:
+        return "session"
+    return None
+
+
+def _cohort_worker(
+    factory,
+    tenant_id,
+    party_id,
+    actor_id,
+    binding_id,
+    kind,
+    ready,
+    release,
+    observations,
+    first,
+):
+    from datetime import UTC, datetime
+
+    from dotmac_kernel import identity_storage as store
+    from dotmac_kernel.models import AuthSession
+    from dotmac_kernel.transactions import conflict_savepoint
+    from sqlalchemy import event, select
+
+    session = _as_tenant(factory, tenant_id)
+    connection = session.connection()
+
+    def observe(conn, cursor, statement, parameters, context, executemany):
+        stage = _locking_stage(context)
+        if stage is not None:
+            observations[kind + "_stage"] = stage
+
+    event.listen(connection, "before_cursor_execute", observe)
+    try:
+        _bound_waits(session)
+        assert session.scalar(text("SELECT current_user")) == "app_user"
+        observations[kind + "_pid"] = session.scalar(text("SELECT pg_backend_pid()"))
+        tenant = session.get(Tenant, tenant_id)
+        if not first:
+            assert ready.wait(_BARRIER_TIMEOUT)
+        if kind == "disable":
+            disable_external_identity_binding(
+                session, tenant=tenant, binding_id=binding_id
+            )
+            outcome = "disabled"
+        else:
+            # A real storage caller, not a product-authority substitute. This
+            # proves the underlying S1/S2 locking protocol; actual Academy
+            # self-status authority/profile qualification remains its own gate.
+            with conflict_savepoint(session):
+                session.connection()
+                assert tuple(
+                    row.id
+                    for row in store.lock_parties(
+                        session, tenant_id=tenant_id, party_ids=(party_id,)
+                    )
+                ) == (party_id,)
+                cohort = tuple(
+                    session.scalars(
+                        select(AuthSession.id)
+                        .where(
+                            AuthSession.tenant_id == tenant_id,
+                            AuthSession.party_id == party_id,
+                        )
+                        .order_by(AuthSession.id)
+                        .with_for_update()
+                    )
+                )
+                actor = session.execute(
+                    select(AuthSession.revoked_at, AuthSession.expires_at).where(
+                        AuthSession.tenant_id == tenant_id,
+                        AuthSession.party_id == party_id,
+                        AuthSession.id == actor_id,
+                    )
+                ).one()
+                now = datetime.now(UTC)
+                if actor.revoked_at is not None:
+                    outcome = "actor_revoked"
+                elif actor.expires_at <= now:
+                    outcome = "actor_expired"
+                else:
+                    store.revoke_party_sessions(
+                        session,
+                        tenant_id=tenant_id,
+                        party_id=party_id,
+                        session_ids=cohort,
+                        revoked_at=now,
+                    )
+                    outcome = "cohort_revoked"
+        if first:
+            ready.set()
+            assert release.wait(_BARRIER_TIMEOUT)
+        session.commit()
+        return outcome
+    finally:
+        event.remove(connection, "before_cursor_execute", observe)
+        session.close()
+
+
+def _wait_for_party_block(factory, tenant_id, observations, loser, winner):
+    import time
+
+    deadline = time.monotonic() + 12
+    observer = _as_tenant(factory, tenant_id)
+    try:
+        while time.monotonic() < deadline:
+            pid = observations.get(loser + "_pid")
+            blocker = observations.get(winner + "_pid")
+            if pid is not None and blocker is not None:
+                blockers = observer.scalar(
+                    text("SELECT pg_blocking_pids(:pid)"), {"pid": pid}
+                )
+                if blocker in blockers:
+                    assert observations.get(loser + "_stage") == "party"
+                    return
+            time.sleep(0.01)
+        pytest.fail("participating loser did not block on the common Party")
+    finally:
+        observer.rollback()
+        observer.close()
+
+
+@pytest.mark.parametrize("first", ("cohort", "disable"))
+@pytest.mark.parametrize("actor_from_binding", (True, False))
+def test_s2_actor_s1_binding_race_waits_at_party_before_any_child(
+    admin_session, tenant_a, tenant_sessionmaker, first, actor_from_binding
+):
+    from datetime import UTC, datetime, timedelta
+
+    from dotmac_kernel.models import AuthSession
+    from sqlalchemy import insert
+
+    pid, bid = _seed(tenant_sessionmaker, tenant_a.id)
+    base = uuid.uuid4().int & ~3
+    s1, s2 = uuid.UUID(int=base + 1), uuid.UUID(int=base + 2)
+    setup = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        for sid, binding in ((s1, bid), (s2, bid if actor_from_binding else None)):
+            setup.execute(
+                insert(AuthSession.__table__).values(
+                    id=sid,
+                    tenant_id=tenant_a.id,
+                    party_id=pid,
+                    token_hash=uuid.uuid4().hex * 2,
+                    expires_at=datetime.now(UTC) + timedelta(hours=1),
+                    external_identity_binding_id=binding,
+                )
+            )
+        setup.commit()
+    finally:
+        setup.close()
+    ready, release = threading.Event(), threading.Event()
+    observations = {}
+    loser = "disable" if first == "cohort" else "cohort"
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            winner_future = pool.submit(
+                _cohort_worker,
+                tenant_sessionmaker,
+                tenant_a.id,
+                pid,
+                s2,
+                bid,
+                first,
+                ready,
+                release,
+                observations,
+                True,
+            )
+            loser_future = pool.submit(
+                _cohort_worker,
+                tenant_sessionmaker,
+                tenant_a.id,
+                pid,
+                s2,
+                bid,
+                loser,
+                ready,
+                release,
+                observations,
+                False,
+            )
+            try:
+                assert ready.wait(_BARRIER_TIMEOUT)
+                _wait_for_party_block(
+                    tenant_sessionmaker, tenant_a.id, observations, loser, first
+                )
+            finally:
+                release.set()
+            outcomes = {
+                first: winner_future.result(timeout=_FUTURE_TIMEOUT),
+                loser: loser_future.result(timeout=_FUTURE_TIMEOUT),
+            }
+        assert outcomes["disable"] == "disabled"
+        assert outcomes["cohort"] == (
+            "actor_revoked"
+            if first == "disable" and actor_from_binding
+            else "cohort_revoked"
+        )
+        state = _observe(admin_session, party_id=pid, binding_id=bid)
+        assert state["binding_active"] is False
+        assert state["sessions"] == 2
+        assert state["revoked"] == 2
+    finally:
+        release.set()
+        _cleanup(admin_session, party_id=pid, binding_id=bid)
+
+
+def _known_union_worker(
+    factory, tenant_id, pairs, kind, ready, release, observations, first
+):
+    from dotmac_kernel import identity_storage as store
+    from dotmac_kernel.external_identity import record_external_authentication
+    from sqlalchemy import event
+
+    session = _as_tenant(factory, tenant_id)
+    connection = session.connection()
+
+    def observe(conn, cursor, statement, parameters, context, executemany):
+        stage = _locking_stage(context)
+        if stage is not None:
+            observations[kind + "_stage"] = stage
+
+    event.listen(connection, "before_cursor_execute", observe)
+    try:
+        _bound_waits(session)
+        assert session.scalar(text("SELECT current_user")) == "app_user"
+        observations[kind + "_pid"] = session.scalar(text("SELECT pg_backend_pid()"))
+        tenant = session.get(Tenant, tenant_id)
+        root = session.get_transaction()
+        if not first:
+            assert ready.wait(_BARRIER_TIMEOUT)
+        # This is the old optional PHYSICAL prelock API, not a new declaration
+        # or capability. The two callers supply opposite orderings of one union.
+        locked = store.lock_parties(
+            session, tenant_id=tenant_id, party_ids=tuple(pid for pid, bid in pairs)
+        )
+        assert tuple(row.id for row in locked) == tuple(
+            sorted(pid for pid, bid in pairs)
+        )
+        for _pid, bid in pairs:
+            record_external_authentication(session, tenant=tenant, binding_id=bid)
+        assert session.get_transaction() is root
+        if first:
+            ready.set()
+            assert release.wait(_BARRIER_TIMEOUT)
+        session.commit()
+        return "stamped_both"
+    finally:
+        event.remove(connection, "before_cursor_execute", observe)
+        session.close()
+
+
+def test_preheld_known_party_union_allows_opposite_composed_binding_orders(
+    admin_session, tenant_a, tenant_sessionmaker
+):
+    pairs = tuple(_seed(tenant_sessionmaker, tenant_a.id) for _ in range(2))
+    ready, release = threading.Event(), threading.Event()
+    observations = {}
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(
+                _known_union_worker,
+                tenant_sessionmaker,
+                tenant_a.id,
+                pairs,
+                "forward",
+                ready,
+                release,
+                observations,
+                True,
+            )
+            second = pool.submit(
+                _known_union_worker,
+                tenant_sessionmaker,
+                tenant_a.id,
+                tuple(reversed(pairs)),
+                "reverse",
+                ready,
+                release,
+                observations,
+                False,
+            )
+            try:
+                assert ready.wait(_BARRIER_TIMEOUT)
+                _wait_for_party_block(
+                    tenant_sessionmaker, tenant_a.id, observations, "reverse", "forward"
+                )
+            finally:
+                release.set()
+            assert first.result(timeout=_FUTURE_TIMEOUT) == "stamped_both"
+            assert second.result(timeout=_FUTURE_TIMEOUT) == "stamped_both"
+        for pid, bid in pairs:
+            assert (
+                _observe(admin_session, party_id=pid, binding_id=bid)["stamped"] is True
+            )
+    finally:
+        release.set()
+        for pid, bid in pairs:
+            _cleanup(admin_session, party_id=pid, binding_id=bid)

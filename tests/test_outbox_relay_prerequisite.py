@@ -89,9 +89,11 @@ def _broken(admin_url: str, statements: Sequence[str]) -> Iterator[Connection]:
     in PostgreSQL too, which is why the dispatcher-posture cases can live here
     beside the schema ones.
 
-    `statements` is a sequence rather than a string because two breaks are
-    genuinely two statements: a role holding grants cannot be dropped until
-    `DROP OWNED BY` releases them.
+    `statements` keeps each controlled break explicit. The absent-role case
+    transactionally renames the role instead of dropping it: other migrated
+    databases in this cluster may still hold grants on that role OID. Renaming
+    makes the required name genuinely absent without deleting those grants;
+    rollback restores the same role and all of its dependencies.
     """
     engine = create_engine(admin_url)
     conn = engine.connect()
@@ -244,10 +246,7 @@ BREAKS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     # ── Dispatcher privileges ───────────────────────────────────────────────
     (
         "tenant-dispatcher-role-absent",
-        (
-            "DROP OWNED BY outbox_dispatcher",
-            "DROP ROLE outbox_dispatcher",
-        ),
+        ("ALTER ROLE outbox_dispatcher RENAME TO prerequisite_absent_dispatcher",),
         r"database role 'outbox_dispatcher' does not exist",
     ),
     (

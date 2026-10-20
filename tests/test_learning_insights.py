@@ -90,12 +90,19 @@ def populated(result_database):
         db.flush()
         db.add_all(
             [
-                Enrollment(tenant_id=tenant, cohort_id=cohort.id, person_id=person),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort.id,
+                    person_id=person,
+                    role_in_cohort="student",
+                    status="active",
+                ),
                 Enrollment(
                     tenant_id=tenant,
                     cohort_id=cohort.id,
                     person_id=instructor,
                     role_in_cohort="instructor",
+                    status="active",
                 ),
             ]
         )
@@ -298,7 +305,15 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
         own = Cohort(tenant_id=other, name="Own", discipline="B")
         db.add(own)
         db.flush()
-        db.add(Enrollment(tenant_id=other, cohort_id=own.id, person_id=other_person))
+        db.add(
+            Enrollment(
+                tenant_id=other,
+                cohort_id=own.id,
+                person_id=other_person,
+                role_in_cohort="student",
+                status="active",
+            )
+        )
         event(db, other, other_person, None, NOW - timedelta(days=1))
         assert (
             insights.cohort_overview(

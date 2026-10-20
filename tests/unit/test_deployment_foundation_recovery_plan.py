@@ -794,6 +794,14 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # message (`render_module_release_tag_evidence`), whose single owner is
     # this release-record tooling and whose only store is the git tag object.
     "write_release_record.py": 2,
+    # The identity installed-wheel probe owns its value-free qualification
+    # receipt at the requested output path; it is not a Kernel operational record.
+    "verify_kernel_identity_installed.py": 1,
+    # The Learning probe owns LearningInstalledExpectation.v1 (source AST
+    # qualification input), the local owner-binding digest in its receipt, and
+    # the final installed-pair qualification receipt. None writes a Learning
+    # operational store or a Foundation lease/release/attestation document.
+    "verify_learning_installed.py": 3,
 }
 
 

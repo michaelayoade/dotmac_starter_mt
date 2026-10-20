@@ -229,6 +229,8 @@ def test_participation_commands_and_access_keep_their_public_owner():
             participation_contracts,
             (
                 "ActivateEnrollmentCommand",
+                "AdmissionEnrollmentInitialState",
+                "EnsureAdmissionEnrollmentCommand",
                 "ActivationResult",
                 "AssignFacilitatorCommand",
                 "AudienceCounts",
@@ -250,6 +252,7 @@ def test_participation_commands_and_access_keep_their_public_owner():
             roster,
             (
                 "activate_enrollment",
+                "ensure_admission_enrollment",
                 "assign_facilitator",
                 "bulk_enroll",
                 "set_roster_state",

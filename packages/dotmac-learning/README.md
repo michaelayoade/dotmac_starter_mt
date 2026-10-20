@@ -20,7 +20,7 @@ source staging/flush behavior; the application boundary commits or rolls back. C
 and `versions_dir()` lineage, bind the three declared Kernel prerequisites, and
 use genuine Kernel tenant, Party and PartyPerson records. The prepared manifest owns 27 tables in `mod_learning` and the independent
 `learning` Alembic branch, from `lr_0001_learning` through
-`lr_0006_delivery_support`. `lr_0005_tenant_audit` verifies the existing Kernel
+`lr_0007_enrollment_state_policy`. `lr_0005_tenant_audit` verifies the existing Kernel
 audit catalog without copying its provider or writer. Promotion requires the new
 Kernel audit API to be published, a proven dependency floor and the additional
 audit prerequisite declaration. These release gates remain outstanding. The
@@ -142,7 +142,14 @@ eligibility remains a separate source observation. Actual installed Academy acco
 storage, identity correspondence and concurrency parity remain unqualified.
 
 `ensure_admission_enrollment` owns enrollment lookup/create/track adjustment while
-preserving existing role, status and audience. Applicant, intake, identity,
+preserving all existing role, status, audience, employee and access metadata.
+Its required keyword `initial_state=AdmissionEnrollmentInitialState(...)` carries
+product-resolved `role_in_cohort` and `status` only for a new row. Both fields are
+required builtin strings of at most 20 characters, preserved verbatim. Existing
+command intent and caller transaction ownership are unchanged. This intentional
+API change requires a new future release; released a1 is immutable. See
+[admission policy compatibility](../../docs/learning-admission-initial-state-policy.md).
+Applicant, intake, identity,
 admissions transitions and ERP acknowledgment remain product responsibilities.
 All prepared continuations still require hosted qualification, release, installed
 Academy execution, full caller retirement and qualified reversal.
@@ -169,3 +176,31 @@ installed typing and shared class/function identity outside the checkout. Full
 module dependency/registry qualification remains a separate required gate.
 These checks, release and Academy installed adoption remain pending; source unit
 subprocess canaries with an explicit source path are not installed-package proof.
+
+
+Enrollment creation requires product-owned state snapshots: `BulkEnrollmentInitialState`
+(role and status), `AdmissionEnrollmentInitialState` (role and status), and
+`InvitationEnrollmentInitialState` (status; the required role policy still maps roles).
+They preserve exact builtin strings up to 20 characters, including blank values.
+Every public owner reconstructs its exact snapshot before database access.
+Bulk also requires tenant-bound `AccountPresenceSelection`; its one-column person
+relation must express actual product profile/account presence, allowing inactive
+accounts. It conveys neither active-account eligibility nor authorization.
+Existing enrollment activation remains an explicit command and facilitator
+assignment retains its guarded instructor/active semantics.
+
+Revision `lr_0007_enrollment_state_policy` removes only the two enrollment server
+defaults. Current ORM columns likewise require explicit facts. It does not rewrite
+rows or change constraints, indexes, RLS or grants. Its downgrade restores historical
+schema defaults only and does not recover or erase post-upgrade accepted facts.
+Hosted PostgreSQL qualification is required; this source capsule has no runtime claim.
+
+
+Bulk creation of a non-student enrollment requires admin authority, including
+when product policy configures the instructor role. Refused new members appear
+in `admin_required`; other emails continue. The policy vocabulary stays open for
+admins. For this refusal mode, track validation remains first and read-only;
+only permitted existing members cause track offerings to be ensured. Existing
+activation, normal student/admin bulk behavior, and caller transactions retain
+their established semantics. Genuine product Request authorization remains the
+consumer's responsibility; the Learning authority DTO is not independent proof.

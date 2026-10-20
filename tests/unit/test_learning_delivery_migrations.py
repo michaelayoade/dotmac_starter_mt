@@ -28,6 +28,7 @@ def _assembly_bindings():
     (
         ("lr_0005_tenant_audit", "lr_0004_assessment"),
         ("lr_0006_delivery_support", "lr_0005_tenant_audit"),
+        ("lr_0007_enrollment_state_policy", "lr_0006_delivery_support"),
     ),
 )
 def test_lineage_and_pre_ddl_prerequisite_refusal(monkeypatch, name, parent):
@@ -48,7 +49,13 @@ def test_lineage_and_pre_ddl_prerequisite_refusal(monkeypatch, name, parent):
         pytest.fail("DDL ran before prerequisite verification")
 
     monkeypatch.setattr(migration, "require_prerequisites", refuse)
-    for operation in ("create_table", "create_index", "execute", "add_column"):
+    for operation in (
+        "create_table",
+        "create_index",
+        "execute",
+        "add_column",
+        "alter_column",
+    ):
         monkeypatch.setattr(migration.op, operation, forbidden)
     with pytest.raises(RuntimeError, match="provider catalog refused"):
         migration.upgrade()

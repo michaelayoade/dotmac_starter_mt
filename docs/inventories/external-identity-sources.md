@@ -218,3 +218,59 @@ mandatory in any extraction.
 Adds `external_identity_bindings` to the kernel (migration `0024`) and
 `dotmac_kernel.external_identity`. It adds **no protocol client** — that is D4's
 separate decision and remains unbuilt.
+
+
+## F. Bounded identity persistence/lock amendment — 2026-10-19 source only
+
+Inventory parent: immutable Starter c89cc4f877e1bedd08138426f98ed34a5db6864c.
+This amends existing owners after the V3 contract/composition correction; no new
+product-first claim or generic identity authority is invented.
+
+| Actual old writer | Source adaptation | Remaining gate |
+|---|---|---|
+| Kernel external_identity.py:559-598 | Selective binding adapter delegates single private revocation DML owner; Party-before-binding and complete sorted binding-session locks | Hosted both-order/common-Party races and installed compatibility |
+| Starter app/features/auth/service.py:148-224 | Party before credential recheck/session INSERT; guarded clean physical SAVEPOINT/Core stages | Hosted reference auth and hook qualification |
+| Starter app/features/auth/service.py:262-279 | Exact proved-session logout delegates public storage selector; missing/revoked no-op retained | Hosted exact cached state/idempotence |
+| Academy canonical_lifecycle.py:164 | Pending dependent capsule | OPEN: no global one-writer closure |
+| Academy credential_lifecycle.py:314 | Pending dependent capsule; preserve real audit/count/completion | OPEN |
+| Academy password_change.py:445 | Pending dependent capsule; preserve real hash cohort/audit/self effect | OPEN |
+| Academy web_auth.py:63 | Pending dependent capsule; exact logout only | OPEN |
+| Kernel platform_auth.py:284 | Different PlatformSession plane, unchanged | Outside AuthSession writer consolidation |
+
+The c89 named-call census has 22 binding write calls, all tests:
+unit/test_external_identity.py16, test_session_provenance.py3,
+test_external_identity_login_race.py2, test_external_identity_isolation.py1.
+There are zero inspected production named callers in Kernel/app/Academy495.
+This is source evidence, not dynamic/fleet/trigger closure. All30 original unit
+binding tests and original provenance/race/isolation canaries remain required.
+Same-Party bind/disable/reactivate, later second provider/lower child, and
+successive different-Party calls retain API support; no future-root registry or
+widening refusal is added. Callers may prelock a known union with existing
+lock_parties. The guarantee is common-Party participating serialization, not
+arbitrary unknown-future multi-Party deadlock freedom.
+
+The new public remove_grants primitive is required by Academy's planned managed
+role replacement; the new public revoke_party_sessions has actual Starter
+reference logout consumer and four inventoried pending Academy consumers.
+Selectors/facts are data only. Both require clean caller ORM state, existing
+active root/materialized public conflict SAVEPOINT, caller authorization and
+canonical locks. No installable-module caller appears in the inspected package
+sources, so two precise FROZEN empty sets are added in kernel_facilities.py;
+there is no new broad exclusion or claimed grant-providing prerequisite.
+
+Hosted tests add passive pending preservation before IO; actual opening/query/
+write/flush/release callbacks and BaseException cancellation with physical
+operation rollback/earlier-root/GUC checks; committed/preexisting lower-child
+composition and stale negative collision while proposed Party is separately
+locked; and pg_blocking_pids plus actual compiled-lock-target observation for
+S2>S1 cohort-vs-binding races in both orders. These storage races do not replace
+actual Academy request authority/profile/status/self-effect qualification.
+
+Party-first serialization changes the old same-Party/two-subject race oracle:
+its loser must now be the exact existing advisory error with no IntegrityError.
+Distinct-Party/same-subject still proves real database uniqueness using bounded
+actual final service-read synchronization and trusted SQLSTATE23505/exact
+constraint diagnostics. Raw exception/SQL/parameter strings are never retained.
+Original per-case winner/root/GUC/isolation invariants remain. All hosted tests
+are authored NOT RUN; full source review, original33, installed pair, OIDC
+activation, release/adoption and operational changes remain OPEN.

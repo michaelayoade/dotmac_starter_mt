@@ -48,6 +48,7 @@ def seed(db, tenant, person, course, activity):
         person_id=person,
         role_in_cohort="instructor",
         access_ends_at=NOW + timedelta(days=5),
+        status="active",
     )
     chapters = [
         Chapter(
@@ -343,6 +344,7 @@ def test_soonest_effective_offering_selected_and_card_deadline_includes_passed_w
             cohort_id=cohort.id,
             role_in_cohort="student",
             access_ends_at=NOW + timedelta(days=10),
+            status="active",
         )
         db.add_all([other_off, other_enrollment])
         db.flush()
@@ -410,7 +412,13 @@ def test_start_chapter_one_resume_numbers_and_due_now_neither_bucket(
             [
                 off,
                 chapter,
-                Enrollment(tenant_id=tenant, cohort_id=cohort.id, person_id=person),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort.id,
+                    person_id=person,
+                    role_in_cohort="student",
+                    status="active",
+                ),
             ]
         )
         db.flush()
@@ -504,7 +512,13 @@ def test_touch_ties_keep_read_then_first_course_and_completed_latest_does_not_fa
                 CourseOffering(
                     tenant_id=tenant, cohort_id=cohort.id, course_id=other_course.id
                 ),
-                Enrollment(tenant_id=tenant, cohort_id=cohort.id, person_id=person),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort.id,
+                    person_id=person,
+                    role_in_cohort="student",
+                    status="active",
+                ),
             ]
         )
         db.flush()

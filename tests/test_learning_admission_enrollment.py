@@ -11,6 +11,7 @@ from dotmac_kernel.models import Party
 from dotmac_learning import roster
 from dotmac_learning.models import Course
 from dotmac_learning.participation_contracts import (
+    AdmissionEnrollmentInitialState,
     EnsureAdmissionEnrollmentCommand,
     enrollment_fact,
 )
@@ -82,10 +83,21 @@ def flush_calls(db, monkeypatch):
 
 
 @pytest.mark.parametrize("person_is_active", [True, False])
-def test_new_active_student_genuine_person_and_no_offerings_audit_or_boundary_change(
+@pytest.mark.parametrize(
+    "initial_role,initial_status",
+    [
+        ("student", "active"),
+        ("instructor", "dropped"),
+        ("界" * 20, "界" * 20),
+        ("", "  "),
+    ],
+)
+def test_new_configured_state_genuine_person_and_no_offerings_audit_or_boundary_change(
     roster_database,
     monkeypatch,
     person_is_active,
+    initial_role,
+    initial_status,
 ):
     _, app, tenant, _, cohort, people, _, _ = roster_database
     with scoped(app, tenant) as db, db.begin_nested():
@@ -95,7 +107,11 @@ def test_new_active_student_genuine_person_and_no_offerings_audit_or_boundary_ch
         root, nested = db.get_transaction(), db.get_nested_transaction()
         calls = flush_calls(db, monkeypatch)
         fact = roster.ensure_admission_enrollment(
-            db, command(tenant, cohort, people[0], track)
+            db,
+            command(tenant, cohort, people[0], track),
+            initial_state=AdmissionEnrollmentInitialState(
+                role_in_cohort=initial_role, status=initial_status
+            ),
         )
         assert (fact.tenant_id, fact.cohort_id, fact.person_id, fact.track_id) == (
             tenant,
@@ -104,8 +120,8 @@ def test_new_active_student_genuine_person_and_no_offerings_audit_or_boundary_ch
             track,
         )
         assert (fact.role_in_cohort, fact.status, fact.audience) == (
-            "student",
-            "active",
+            initial_role,
+            initial_status,
             None,
         )
         assert calls.count("ensure_admission_enrollment") == 1
@@ -116,7 +132,11 @@ def test_new_active_student_genuine_person_and_no_offerings_audit_or_boundary_ch
             fact.status = "changed"
     with scoped(app, tenant) as db:
         stored = db.get(Enrollment, fact.id)
-        assert stored.status == "active" and stored.track_id == track
+        assert (stored.role_in_cohort, stored.status, stored.track_id) == (
+            initial_role,
+            initial_status,
+            track,
+        )
 
 
 @pytest.mark.parametrize("status", ["active", "waitlisted", "dropped", "inactive"])
@@ -149,7 +169,11 @@ def test_existing_only_changes_track_preserves_status_role_audience_and_metadata
         calls = flush_calls(db, monkeypatch)
         selected = None if target == "null" else second
         fact = roster.ensure_admission_enrollment(
-            db, command(tenant, cohort, people[0], selected)
+            db,
+            command(tenant, cohort, people[0], selected),
+            initial_state=AdmissionEnrollmentInitialState(
+                role_in_cohort="configured-new-role", status="configured-new-state"
+            ),
         )
         after = asdict(fact)
         assert fact.track_id == selected
@@ -187,7 +211,11 @@ def test_same_track_no_explicit_flush_but_query_retains_caller_autoflush(
         caller_cohort.name = "Autoflushed caller mutation"
         calls = flush_calls(db, monkeypatch)
         fact = roster.ensure_admission_enrollment(
-            db, command(tenant, cohort, people[0], selected)
+            db,
+            command(tenant, cohort, people[0], selected),
+            initial_state=AdmissionEnrollmentInitialState(
+                role_in_cohort="student", status="active"
+            ),
         )
         assert fact == before
         assert "ensure_admission_enrollment" not in calls
@@ -204,7 +232,11 @@ def test_non_bypass_b_wrong_scope_cannot_create_or_change_a_enrollment(roster_da
     _, app, tenant, other, cohort, people, outsider, _ = roster_database
     with scoped(app, tenant) as db:
         original = roster.ensure_admission_enrollment(
-            db, command(tenant, cohort, people[0])
+            db,
+            command(tenant, cohort, people[0]),
+            initial_state=AdmissionEnrollmentInitialState(
+                role_in_cohort="student", status="active"
+            ),
         )
     with pytest.raises(DBAPIError):
         with scoped(app, other) as db:
@@ -215,11 +247,23 @@ def test_non_bypass_b_wrong_scope_cannot_create_or_change_a_enrollment(roster_da
                 )
             ).one() == (False, False)
             assert db.scalar(select(func.count()).select_from(Enrollment)) == 0
-            roster.ensure_admission_enrollment(db, command(tenant, cohort, people[0]))
+            roster.ensure_admission_enrollment(
+                db,
+                command(tenant, cohort, people[0]),
+                initial_state=AdmissionEnrollmentInitialState(
+                    role_in_cohort="student", status="active"
+                ),
+            )
     # A tenant-B write with A's cohort also fails its real composite source FK.
     with pytest.raises(IntegrityError):
         with scoped(app, other) as db:
-            roster.ensure_admission_enrollment(db, command(other, cohort, outsider))
+            roster.ensure_admission_enrollment(
+                db,
+                command(other, cohort, outsider),
+                initial_state=AdmissionEnrollmentInitialState(
+                    role_in_cohort="student", status="active"
+                ),
+            )
     with scoped(app, tenant) as db:
         assert enrollment_fact(db.get(Enrollment, original.id)) == original
         assert db.scalar(select(func.count()).select_from(Enrollment)) == 1
@@ -234,7 +278,13 @@ def test_genuine_person_fk_refusal_propagates_and_caller_rolls_back(
     with pytest.raises(IntegrityError):
         with scoped(app, tenant) as db:
             db.get(Cohort, cohort).name = "Must roll back with failed enrollment"
-            roster.ensure_admission_enrollment(db, command(tenant, cohort, person))
+            roster.ensure_admission_enrollment(
+                db,
+                command(tenant, cohort, person),
+                initial_state=AdmissionEnrollmentInitialState(
+                    role_in_cohort="student", status="active"
+                ),
+            )
     with scoped(app, tenant) as db:
         assert db.get(Cohort, cohort).name != "Must roll back with failed enrollment"
         assert db.scalar(select(func.count()).select_from(Enrollment)) == 0
@@ -255,6 +305,9 @@ def test_source_fk_errors_not_prevalidated_or_translated(
                     people[0],
                     uuid4() if bad_reference == "track" else None,
                 ),
+                initial_state=AdmissionEnrollmentInitialState(
+                    role_in_cohort="student", status="active"
+                ),
             )
     with scoped(app, tenant) as db:
         assert db.scalar(select(func.count()).select_from(Enrollment)) == 0
@@ -265,13 +318,21 @@ def test_existing_track_fk_failure_rolls_back_track_and_caller_writes(roster_dat
     with scoped(app, tenant) as db:
         first, _ = tracks(db, tenant, cohort)
         original = roster.ensure_admission_enrollment(
-            db, command(tenant, cohort, people[0], first)
+            db,
+            command(tenant, cohort, people[0], first),
+            initial_state=AdmissionEnrollmentInitialState(
+                role_in_cohort="student", status="active"
+            ),
         )
     with pytest.raises(IntegrityError):
         with scoped(app, tenant) as db:
             db.get(Cohort, cohort).name = "Caller write to roll back"
             roster.ensure_admission_enrollment(
-                db, command(tenant, cohort, people[0], uuid4())
+                db,
+                command(tenant, cohort, people[0], uuid4()),
+                initial_state=AdmissionEnrollmentInitialState(
+                    role_in_cohort="student", status="active"
+                ),
             )
     with scoped(app, tenant) as db:
         assert enrollment_fact(db.get(Enrollment, original.id)) == original
@@ -283,7 +344,13 @@ def test_requires_existing_root_transaction_without_starting_one(roster_database
     with Session(bind=app) as db:
         assert db.get_transaction() is None
         with pytest.raises(TransactionChanged, match="already active caller root"):
-            roster.ensure_admission_enrollment(db, command(tenant, cohort, people[0]))
+            roster.ensure_admission_enrollment(
+                db,
+                command(tenant, cohort, people[0]),
+                initial_state=AdmissionEnrollmentInitialState(
+                    role_in_cohort="student", status="active"
+                ),
+            )
         assert db.get_transaction() is None
 
 
@@ -296,14 +363,22 @@ def test_caller_root_nested_continuity_and_caller_owned_success_rollback(
         first, second = tracks(db, tenant, cohort)
         if operation != "new":
             original = roster.ensure_admission_enrollment(
-                db, command(tenant, cohort, people[0], first)
+                db,
+                command(tenant, cohort, people[0], first),
+                initial_state=AdmissionEnrollmentInitialState(
+                    role_in_cohort="student", status="active"
+                ),
             )
     with pytest.raises(RuntimeError, match="caller chooses rollback"):
         with scoped(app, tenant) as db, db.begin_nested():
             root, nested = db.get_transaction(), db.get_nested_transaction()
             selected = first if operation == "unchanged" else second
             roster.ensure_admission_enrollment(
-                db, command(tenant, cohort, people[0], selected)
+                db,
+                command(tenant, cohort, people[0], selected),
+                initial_state=AdmissionEnrollmentInitialState(
+                    role_in_cohort="student", status="active"
+                ),
             )
             assert (
                 db.get_transaction() is root and db.get_nested_transaction() is nested

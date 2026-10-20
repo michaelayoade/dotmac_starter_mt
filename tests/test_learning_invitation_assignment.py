@@ -7,6 +7,7 @@ import pytest
 from dotmac_learning import roster
 from dotmac_learning.participation_contracts import (
     EnsureInvitationEnrollmentCommand,
+    InvitationEnrollmentInitialState,
     ParticipationBadRequest,
     ParticipationForbidden,
     RosterAuthority,
@@ -104,6 +105,7 @@ def test_invitation_assignment_restricted_actor_a_positive_b_negative(
             command(assignment_database, selected_course_ids=courses[:1]),
             authority=RosterAuthority(tenant, False),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert result.activation is None and not result.preserved_instructor_role
     with scoped(app, other) as db:
@@ -124,6 +126,7 @@ def test_invitation_assignment_restricted_actor_a_positive_b_negative(
             command(assignment_database),
             authority=RosterAuthority(tenant, False),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         db.flush()
     assert refused.value.orig.sqlstate == "42501"
@@ -149,6 +152,7 @@ def test_authority_mismatch_refuses_before_sql(role_policy, assignment_database)
                     command(assignment_database),
                     authority=RosterAuthority(other, True),
                     role_policy=role_policy,
+                    initial_state=InvitationEnrollmentInitialState("active"),
                 )
             assert statements == []
         finally:
@@ -167,6 +171,7 @@ def test_existing_active_instructor_is_never_downgraded(
             command(assignment_database),
             authority=RosterAuthority(tenant, admin),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert row.role_in_cohort == "instructor"
         assert result.preserved_instructor_role
@@ -200,6 +205,7 @@ def test_nonadmin_refusal_preserves_source_partial_role_write_and_outer_rollback
                 ),
                 authority=RosterAuthority(tenant, False),
                 role_policy=role_policy,
+                initial_state=InvitationEnrollmentInitialState("active"),
             )
         except ParticipationBadRequest:
             assert row.role_in_cohort == "instructor" and row.status == status
@@ -239,6 +245,7 @@ def test_new_role_mapping_stages_without_extra_flush(
                 ),
                 authority=RosterAuthority(tenant, False),
                 role_policy=role_policy,
+                initial_state=InvitationEnrollmentInitialState("active"),
             )
             assert result.activation is None
             assert result.member_role == member_role
@@ -261,6 +268,7 @@ def test_existing_student_promotion_and_canonical_activation(
             command(assignment_database).model_copy(update={"global_role": "admin"}),
             authority=RosterAuthority(tenant, True),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert row.role_in_cohort == "instructor" and row.status == "active"
         assert not result.preserved_instructor_role
@@ -302,6 +310,7 @@ def test_omitted_track_is_preserved_and_selected_courses_reactivate_in_order(
                 ),
                 authority=RosterAuthority(tenant, False),
                 role_policy=role_policy,
+                initial_state=InvitationEnrollmentInitialState("active"),
             )
             assert selected == [courses[2], courses[1], courses[2]]
             assert flushes == [(courses[2],), (courses[1],)]
@@ -319,6 +328,7 @@ def test_omitted_track_is_preserved_and_selected_courses_reactivate_in_order(
             command(assignment_database, selected_course_ids=(offerings[0].course_id,)),
             authority=RosterAuthority(tenant, False),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert offerings[0].status == "active"
 
@@ -346,6 +356,7 @@ def test_track_owner_runs_before_selected_courses_on_same_session(
             ),
             authority=RosterAuthority(tenant, False),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert observed[0][0] is db and db.get_transaction() is root
         assert db.scalar(select(TrackCourse.course_id)) == courses[0]
@@ -365,6 +376,7 @@ def test_caller_autoflush_disabled_leaves_source_duplicate_work_staged(
             command(assignment_database, selected_course_ids=(courses[1], courses[1])),
             authority=RosterAuthority(tenant, False),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert len(db.new) == 3  # enrollment and both source-order offerings
         # The source does not deduplicate or catch this; caller owns rollback.
@@ -385,6 +397,7 @@ def test_propagated_offering_failure_rolls_back_prior_source_writes(
             command(assignment_database, selected_course_ids=(uuid4(), uuid4())),
             authority=RosterAuthority(tenant, False),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
     with scoped(app, tenant) as db:
         assert db.scalars(select(Enrollment)).all() == []
@@ -409,6 +422,7 @@ def test_reactivation_returns_source_observation_and_preserved_role(
             ),
             authority=RosterAuthority(tenant, role == "instructor"),
             role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert row.status == "active" and row.role_in_cohort == role
         assert result.activation.outcome == "reactivated"
@@ -427,6 +441,7 @@ def test_existing_root_required_and_nested_boundary_preserved(
                 command(assignment_database),
                 authority=RosterAuthority(tenant, True),
                 role_policy=role_policy,
+                initial_state=InvitationEnrollmentInitialState("active"),
             )
         assert db.get_transaction() is None
     with pytest.raises(RuntimeError, match="caller rollback"):
@@ -437,6 +452,7 @@ def test_existing_root_required_and_nested_boundary_preserved(
                 command(assignment_database),
                 authority=RosterAuthority(tenant, True),
                 role_policy=role_policy,
+                initial_state=InvitationEnrollmentInitialState("active"),
             )
             assert (
                 db.get_transaction() is root and db.get_nested_transaction() is nested
@@ -470,6 +486,7 @@ def test_configured_custom_global_role_is_persisted(
             ),
             authority=RosterAuthority(tenant, False),
             role_policy=policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert result.member_role == configured_role and result.activation is None
         assert policy.calls == ["configured-guide"]
@@ -492,6 +509,7 @@ def test_configured_familiar_global_label_persists_student(
             ),
             authority=RosterAuthority(tenant, False),
             role_policy=policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
         assert result.member_role == "student" and not result.preserved_instructor_role
         assert policy.calls == [global_role]
@@ -530,6 +548,7 @@ def test_invalid_configured_role_refuses_before_sql_or_staging(
                     intent,
                     authority=RosterAuthority(tenant, False),
                     role_policy=policy,
+                    initial_state=InvitationEnrollmentInitialState("active"),
                 )
             assert statements == []
             assert not db.new and not db.dirty and not db.deleted
@@ -544,3 +563,31 @@ def test_invalid_configured_role_refuses_before_sql_or_staging(
         assert db.scalars(select(Enrollment)).all() == []
         assert db.scalars(select(CourseOffering)).all() == []
         assert tuple(db.scalars(select(TrackCourse.course_id))) == before_track_courses
+
+
+def test_invitation_configured_new_status_then_explicit_activation(
+    assignment_database, role_policy
+):
+    app, tenant, _, _, _, _, people = assignment_database
+    with scoped(app, tenant) as db:
+        intent = command(assignment_database)
+        first = roster.ensure_invitation_enrollment(
+            db,
+            intent,
+            authority=RosterAuthority(tenant, False),
+            role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("pending-business"),
+        )
+        assert first.activation is None
+        row = db.scalar(select(Enrollment).where(Enrollment.person_id == people[0]))
+        assert (row.role_in_cohort, row.status) == ("student", "pending-business")
+        second = roster.ensure_invitation_enrollment(
+            db,
+            intent,
+            authority=RosterAuthority(tenant, False),
+            role_policy=role_policy,
+            initial_state=InvitationEnrollmentInitialState("new-status"),
+        )
+        assert second.activation.outcome == "reactivated"
+        assert second.activation.previous_status == "pending-business"
+        assert (row.role_in_cohort, row.status) == ("student", "active")

@@ -2,6 +2,9 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from copy import deepcopy
+from dataclasses import FrozenInstanceError
+from datetime import timedelta
 from threading import Event
 from time import monotonic, sleep
 from uuid import uuid4
@@ -28,17 +31,22 @@ from dotmac_learning.result_contracts import (
     AdmissionRefused,
     GradedResult,
     LabResultCommand,
+    LabResultRead,
     MCQResultCommand,
     OverrideScoreCommand,
     ResultBadRequest,
     TransactionChanged,
 )
+from pydantic import ValidationError
 from sqlalchemy import (
     create_engine,
+    event,
     func,
+    inspect,
     select,
     text,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from tests import test_learning_catalog as learning_catalog
@@ -1215,3 +1223,346 @@ def test_submit_requires_active_caller_transaction_and_read_committed(result_dat
     with scoped(strict, tenant) as db:
         with pytest.raises(TransactionChanged, match="READ COMMITTED"):
             results.submit_mcq_activity(db, submit_command(result_database))
+
+
+# Read canaries are source-authored first; execution belongs to hosted Postgres CI.
+def _lab_read_record(fixture, *, instance=None, fraction=0.5):
+    _, app, tenant, person, _, activity, *_ = fixture
+    instance = instance or uuid4()
+    with scoped(app, tenant) as db:
+        row = db.scalar(select(Activity).where(Activity.id == activity))
+        row.type = "lab"
+        db.flush()
+        value = results.record_lab_result(
+            db,
+            LabResultCommand(
+                tenant_id=tenant,
+                person_id=person,
+                activity_id=activity,
+                instance_id=instance,
+                seed={"nested": {"value": 12}},
+                grading=GradedResult(
+                    score=fraction,
+                    max_score=1,
+                    fraction=fraction,
+                    passed=False,
+                    per_item=[{"nested": {"passed": False}}],
+                ),
+            ),
+        )
+    return (
+        LabResultRead(
+            tenant_id=tenant,
+            person_id=person,
+            activity_id=activity,
+            instance_id=instance,
+            claimed_at=value.submission.created_at,
+            finished_at=value.submission.created_at,
+        ),
+        value,
+    )
+
+
+def test_lab_read_cross_tenant_isolation_first(result_database):
+    admin, app, tenant, _, _, _, other, *_ = result_database
+    query, value = _lab_read_record(result_database)
+    with scoped(app, other) as db:
+        assert results.read_lab_result(db, query) is None
+        assert (
+            results.read_lab_result(db, query.model_copy(update={"tenant_id": other}))
+            is None
+        )
+    # Privileged access cannot turn a foreign query tenant into provenance.
+    with Session(bind=admin) as db:
+        assert (
+            results.read_lab_result(db, query.model_copy(update={"tenant_id": other}))
+            is None
+        )
+    with scoped(app, tenant) as db:
+        assert results.read_lab_result(db, query) == value.score
+
+
+@pytest.mark.parametrize("field", ["person_id", "activity_id", "instance_id"])
+def test_lab_read_exact_identity_no_activity_best_fallback(result_database, field):
+    _, app, tenant, *_ = result_database
+    query, _ = _lab_read_record(result_database, fraction=0.9)
+    unrelated, _ = _lab_read_record(result_database, fraction=0.2)
+    with scoped(app, tenant) as db:
+        assert (
+            results.read_lab_result(db, query.model_copy(update={field: uuid4()}))
+            is None
+        )
+        assert results.read_lab_result(db, unrelated).fraction == 0.2
+        assert results.read_lab_result(db, query).fraction == 0.9
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    ["missing_claim", "missing_finish", "both_missing", "inverted", "before", "after"],
+)
+def test_lab_read_missing_inverted_and_other_windows_fail_closed(
+    result_database, bounds
+):
+    _, app, tenant, *_ = result_database
+    query, _ = _lab_read_record(result_database)
+    at = query.claimed_at
+    delta = timedelta(microseconds=1)
+    updates = {
+        "missing_claim": {"claimed_at": None},
+        "missing_finish": {"finished_at": None},
+        "both_missing": {"claimed_at": None, "finished_at": None},
+        "inverted": {"claimed_at": at + delta, "finished_at": at},
+        "before": {"claimed_at": at - delta, "finished_at": at - delta},
+        "after": {"claimed_at": at + delta, "finished_at": at + delta},
+    }[bounds]
+    with scoped(app, tenant) as db:
+        assert results.read_lab_result(db, query.model_copy(update=updates)) is None
+        assert results.read_lab_result(db, query) is not None
+
+
+def test_lab_read_inclusive_edges_and_separate_operation_windows(result_database):
+    admin, app, tenant, *_ = result_database
+    query, first = _lab_read_record(result_database)
+    second_query, second = _lab_read_record(
+        result_database, instance=query.instance_id, fraction=0.2
+    )
+    later = query.claimed_at + timedelta(seconds=10)
+    with admin.begin() as conn:
+        conn.execute(
+            Submission.__table__.update()
+            .where(Submission.id == second.submission.id)
+            .values(created_at=later)
+        )
+    with scoped(app, tenant) as db:
+        for updates in (
+            {},
+            {"claimed_at": query.claimed_at - timedelta(seconds=1)},
+            {"finished_at": query.finished_at + timedelta(seconds=1)},
+        ):
+            assert (
+                results.read_lab_result(db, query.model_copy(update=updates)).id
+                == first.score.id
+            )
+        assert (
+            results.read_lab_result(
+                db,
+                second_query.model_copy(
+                    update={"claimed_at": later, "finished_at": later}
+                ),
+            ).id
+            == second.score.id
+        )
+
+
+def test_lab_read_latest_score_then_id_retains_accepted_ranking(result_database):
+    admin, app, tenant, *_ = result_database
+    query, value = _lab_read_record(result_database, fraction=0.9)
+    with scoped(app, tenant) as db:
+        override = results.override_score(
+            db,
+            OverrideScoreCommand(
+                tenant_id=tenant,
+                submission_id=value.submission.id,
+                score_value=0.2,
+                max_score=1,
+                reason="later lower score",
+            ),
+        )
+    later = value.score.created_at + timedelta(seconds=1)
+    with admin.begin() as conn:
+        conn.execute(
+            Score.__table__.update()
+            .where(Score.id == override.score.id)
+            .values(created_at=later)
+        )
+        # Mutable current activity type is not historical result provenance.
+        conn.execute(
+            Activity.__table__.update()
+            .where(Activity.id == query.activity_id)
+            .values(type="mcq_test")
+        )
+    with scoped(app, tenant) as db:
+        assert results.read_lab_result(db, query).id == override.score.id
+    with admin.begin() as conn:
+        conn.execute(
+            Score.__table__.update()
+            .where(Score.id == value.score.id)
+            .values(created_at=later)
+        )
+    with scoped(app, tenant) as db:
+        assert results.read_lab_result(db, query).id == max(
+            value.score.id, override.score.id
+        )
+
+
+@pytest.mark.parametrize("side", ["score", "submission"])
+def test_lab_read_real_composite_fk_refuses_mismatched_tenant_pair(
+    result_database, side
+):
+    admin, app, tenant, _, _, _, other, *_ = result_database
+    query, value = _lab_read_record(result_database)
+    # The genuine composite FK forbids the impossible cross-tenant pair.
+    # Do not disable constraints, weaken RLS or fabricate rows to test the join.
+    with admin.connect() as conn, conn.begin():
+        with pytest.raises(IntegrityError) as caught, conn.begin_nested():
+            if side == "score":
+                conn.execute(
+                    Score.__table__.update()
+                    .where(Score.id == value.score.id)
+                    .values(tenant_id=other)
+                )
+            else:
+                conn.execute(
+                    Submission.__table__.update()
+                    .where(Submission.id == value.submission.id)
+                    .values(tenant_id=other)
+                )
+        assert caught.value.orig.sqlstate == "23503"
+    with scoped(app, tenant) as db:
+        assert results.read_lab_result(db, query).id == value.score.id
+
+
+def test_lab_read_deep_detached_public_fact_and_frozen_query(result_database):
+    import dotmac_learning
+
+    _, app, tenant, *_ = result_database
+    query, value = _lab_read_record(result_database)
+    assert dotmac_learning.LabResultRead is LabResultRead
+    assert dotmac_learning.read_lab_result is results.read_lab_result
+    with pytest.raises(ValidationError, match="frozen"):
+        query.instance_id = uuid4()
+    with scoped(app, tenant) as db:
+        fact = dotmac_learning.read_lab_result(db, query)
+        assert fact == value.score
+        assert not hasattr(fact, "answers")
+        with pytest.raises(FrozenInstanceError):
+            fact.score = 999
+        fact.per_item[0]["nested"]["passed"] = True
+        assert results.read_lab_result(db, query).per_item == value.score.per_item
+    assert fact.id == value.score.id
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_lab_read_no_sql_writes_or_flush_preserves_caller_pending_history(
+    result_database, nested
+):
+    admin, app, tenant, person, _, activity, *_ = result_database
+    query, value = _lab_read_record(result_database)
+    with scoped(app, tenant) as db:
+        sub = db.get(Submission, value.submission.id)
+        score = db.get(Score, value.score.id)
+        savepoint = db.begin_nested() if nested else None
+        root = db.get_transaction()
+        # Fresh Core values must win over stale identity-map values, while
+        # same-value, null and genuinely dirty caller state stays untouched.
+        with admin.begin() as conn:
+            conn.execute(
+                Score.__table__.update()
+                .where(Score.id == score.id)
+                .values(score=0.25, per_item=[{"fresh": {"nested": [1]}}])
+            )
+        score.score = score.score
+        score.override_reason = None
+        score.per_item = [{"pending": True}]
+        sub.answers = {"instance": str(uuid4())}
+        sub.activity_id = uuid4()
+        pending = Submission(
+            tenant_id=tenant,
+            person_id=person,
+            activity_id=activity,
+            answers={"pending": True},
+            attempt_no=100,
+        )
+        db.add(pending)
+        before_dirty, before_new = set(db.dirty), set(db.new)
+        histories = {
+            (obj, name): deepcopy(inspect(obj).attrs[name].history)
+            for obj, names in (
+                (score, ("score", "override_reason", "per_item")),
+                (sub, ("answers", "activity_id")),
+            )
+            for name in names
+        }
+        statements, effects = [], []
+
+        def sql(_conn, _cursor, statement, _params, _context, _many):
+            statements.append(statement)
+
+        def effect(*_args):
+            effects.append("transaction_or_flush_effect")
+
+        connection = db.connection()
+        event.listen(connection, "before_cursor_execute", sql)
+        watched = (
+            "before_flush",
+            "after_commit",
+            "after_rollback",
+            "after_transaction_create",
+        )
+        for name in watched:
+            event.listen(db, name, effect)
+        try:
+            fact = results.read_lab_result(db, query)
+            assert fact.score == 0.25
+            assert fact.per_item == [{"fresh": {"nested": [1]}}]
+            assert (
+                results.read_lab_result(
+                    db, query.model_copy(update={"instance_id": uuid4()})
+                )
+                is None
+            )
+            assert db.get_transaction() is root
+            assert db.get_nested_transaction() is savepoint
+            assert set(db.dirty) == before_dirty and set(db.new) == before_new
+            assert all(
+                inspect(obj).attrs[name].history == history
+                for (obj, name), history in histories.items()
+            )
+            assert effects == []
+            assert len(statements) == 2
+            assert all(
+                statement.lstrip().upper().startswith("SELECT")
+                for statement in statements
+            )
+            assert db.autoflush is True
+        finally:
+            event.remove(connection, "before_cursor_execute", sql)
+            for name in watched:
+                event.remove(db, name, effect)
+        db.expunge(pending)
+        db.expire_all()
+        assert db.scalar(text("SELECT current_setting('app.current_tenant')")) == str(
+            tenant
+        )
+
+
+def test_lab_read_flushed_caller_result_does_not_claim_commit(result_database):
+    _, app, tenant, person, _, activity, *_ = result_database
+    original, _ = _lab_read_record(result_database)
+    instance = uuid4()
+    with scoped(app, tenant) as db:
+        root = db.get_transaction()
+        value = results.record_lab_result(
+            db,
+            LabResultCommand(
+                tenant_id=tenant,
+                person_id=person,
+                activity_id=activity,
+                instance_id=instance,
+                seed={},
+                grading=GradedResult(score=0, max_score=1, fraction=0, passed=False),
+            ),
+        )
+        query = original.model_copy(
+            update={
+                "instance_id": instance,
+                "claimed_at": value.submission.created_at,
+                "finished_at": value.submission.created_at,
+            }
+        )
+        assert results.read_lab_result(db, query) == value.score
+        assert db.get_transaction() is root
+        db.rollback()  # Caller retains the complete rollback decision.
+    with scoped(app, tenant) as db:
+        assert results.read_lab_result(db, query) is None
+        assert results.read_lab_result(db, original) is not None

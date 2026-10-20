@@ -11,6 +11,12 @@ TEST_DB_PLATFORM_USER ?= platform_api
 TEST_DB_PLATFORM_PASSWORD ?= platform_api
 TEST_DB_HOST ?= localhost
 TEST_DB_NAME ?= starter_test
+INTEGRATION_JUNIT ?= identity-integration.xml
+IDENTITY_REFERENCE_DB_NAME ?=
+IDENTITY_GRAPH_DB_NAME ?=
+LEARNING_PAIR_DB_NAME ?=
+IDENTITY_INSTALLED_DB_NAME ?=
+IDENTITY_TEST_DB_NAME ?=
 
 DEPLOY_DESCRIPTOR ?= deploy/product.toml
 DEPLOY_RENDERED ?= deploy/rendered
@@ -142,10 +148,13 @@ check: poetry-lock-check lint lint-imports type-check security migration-gate ui
 test-unit: ## Fast SQLite unit + architecture tests
 	poetry run pytest tests/unit tests/architecture -q
 test-integration: ## Postgres RLS tests (needs test-db-up)
+	@test "$$CI" = true && test -n "$$IDENTITY_GRAPH_DATABASE_URL" && test -n "$$IDENTITY_REFERENCE_DATABASE_URL" || { echo "Hosted identity graph configuration required" >&2; exit 1; }
 	TEST_DATABASE_URL=postgresql+psycopg://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	TEST_PLATFORM_DATABASE_URL=postgresql+psycopg://$(TEST_DB_PLATFORM_USER):$(TEST_DB_PLATFORM_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	TEST_MIGRATION_DATABASE_URL=postgresql+psycopg://$(TEST_DB_ADMIN_USER):$(TEST_DB_ADMIN_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
-	poetry run pytest tests -q --ignore=tests/unit --ignore=tests/architecture
+	IDENTITY_REFERENCE_DATABASE_URL="$$IDENTITY_REFERENCE_DATABASE_URL" \
+	IDENTITY_GRAPH_DATABASE_URL="$$IDENTITY_GRAPH_DATABASE_URL" \
+	poetry run pytest tests -q --ignore=tests/unit --ignore=tests/architecture --junitxml="$(INTEGRATION_JUNIT)"
 test: test-unit ## Default test suite
 test-cov: ## Unit tests with coverage
 	poetry run pytest tests/unit tests/architecture --cov=app --cov-report=term-missing
@@ -160,6 +169,64 @@ test-db-up: ## Start disposable test Postgres (TEST_DB_PORT, default 5433) and m
 test-db-down: ## Stop test Postgres
 	TEST_DB_PORT=$(TEST_DB_PORT) TEST_DB_ADMIN_USER=$(TEST_DB_ADMIN_USER) TEST_DB_ADMIN_PASSWORD=$(TEST_DB_ADMIN_PASSWORD) TEST_DB_NAME=$(TEST_DB_NAME) \
 	docker compose -f docker-compose.test.yml down -v
+# Hosted-only empty identity databases. No existing target is reused or removed.
+# The reference migrations supply real cluster roles before this helper is called.
+test-identity-db-create:
+	@set -eu; \
+	test "$$CI" = true && test "$$GITHUB_ACTIONS" = true; \
+	printf '%s' "$$GITHUB_RUN_ID" | LC_ALL=C grep -Eq '^[0-9]+$$'; \
+	printf '%s' "$$GITHUB_RUN_ATTEMPT" | LC_ALL=C grep -Eq '^[0-9]+$$'; \
+	test "$$COMPOSE_PROJECT_NAME" = "starter-identity-$$GITHUB_RUN_ID-$$GITHUB_RUN_ATTEMPT"; \
+	test "$$TEST_DB_HOST" = localhost && test "$$TEST_DB_ADMIN_USER" = postgres; \
+	printf '%s' "$$TEST_DB_PORT" | LC_ALL=C grep -Eq '^[0-9]{1,5}$$'; \
+	test "$${#LEARNING_PAIR_DB_NAME}" -le 63 && test "$${#IDENTITY_REFERENCE_DB_NAME}" -le 63 && test "$${#IDENTITY_GRAPH_DB_NAME}" -le 63 && test "$${#IDENTITY_INSTALLED_DB_NAME}" -le 63; \
+	test "$$TEST_DB_PORT" -gt 0 && test "$$TEST_DB_PORT" -lt 65536; \
+	printf '%s' "$$IDENTITY_TEST_DB_NAME" | LC_ALL=C grep -Eq '^[a-z][a-z0-9_]{0,62}$$'; \
+	test "$$IDENTITY_TEST_DB_NAME" != "$$TEST_DB_NAME"; \
+	test "$$LEARNING_PAIR_DB_NAME" != "$$TEST_DB_NAME" && test "$$LEARNING_PAIR_DB_NAME" != "$$IDENTITY_REFERENCE_DB_NAME" && test "$$LEARNING_PAIR_DB_NAME" != "$$IDENTITY_GRAPH_DB_NAME" && test "$$LEARNING_PAIR_DB_NAME" != "$$IDENTITY_INSTALLED_DB_NAME"; \
+	test "$$LEARNING_PAIR_DB_NAME" = "starter_learning_pair_$${GITHUB_RUN_ID}_$${GITHUB_RUN_ATTEMPT}"; \
+	test "$$IDENTITY_GRAPH_DB_NAME" != "$$IDENTITY_INSTALLED_DB_NAME"; \
+	test "$$IDENTITY_REFERENCE_DB_NAME" != "$$IDENTITY_GRAPH_DB_NAME"; \
+	test "$$IDENTITY_REFERENCE_DB_NAME" != "$$IDENTITY_INSTALLED_DB_NAME"; \
+	test "$$IDENTITY_REFERENCE_DB_NAME" != "$$TEST_DB_NAME"; \
+	test "$$IDENTITY_GRAPH_DB_NAME" != "$$TEST_DB_NAME"; \
+	test "$$IDENTITY_INSTALLED_DB_NAME" != "$$TEST_DB_NAME"; \
+	test "$$IDENTITY_REFERENCE_DB_NAME" = "starter_identity_reference_$${GITHUB_RUN_ID}_$${GITHUB_RUN_ATTEMPT}"; \
+	test "$$IDENTITY_GRAPH_DB_NAME" = "starter_identity_graph_$${GITHUB_RUN_ID}_$${GITHUB_RUN_ATTEMPT}"; \
+	test "$$IDENTITY_INSTALLED_DB_NAME" = "starter_identity_installed_$${GITHUB_RUN_ID}_$${GITHUB_RUN_ATTEMPT}"; \
+	case "$$IDENTITY_TEST_DB_NAME" in "$$IDENTITY_REFERENCE_DB_NAME"|"$$IDENTITY_GRAPH_DB_NAME"|"$$IDENTITY_INSTALLED_DB_NAME"|"$$LEARNING_PAIR_DB_NAME") ;; *) exit 1 ;; esac; \
+	test "$$(docker compose -f docker-compose.test.yml exec -T postgres psql -X -U postgres -d "$$TEST_DB_NAME" -Atc "SELECT current_user = 'postgres' AND EXISTS (SELECT FROM pg_roles WHERE rolname='app_admin' AND rolcanlogin AND rolbypassrls AND NOT rolsuper)")" = t; \
+	test "$$(docker compose -f docker-compose.test.yml exec -T postgres psql -X -U postgres -d "$$TEST_DB_NAME" -Atc "SELECT count(*) FROM pg_database WHERE datname='$$IDENTITY_TEST_DB_NAME'")" = 0; \
+	docker compose -f docker-compose.test.yml exec -T postgres createdb -U postgres --template=template0 --owner=app_admin "$$IDENTITY_TEST_DB_NAME"
+
+test-identity-reference-db-create:
+	@IDENTITY_TEST_DB_NAME="$$IDENTITY_REFERENCE_DB_NAME" $(MAKE) test-identity-db-create
+
+test-identity-reference-db-migrate:
+	@set -eu; \
+	test "$$CI" = true && test "$$GITHUB_ACTIONS" = true; \
+	printf '%s' "$$GITHUB_RUN_ID" | LC_ALL=C grep -Eq '^[0-9]+$$'; \
+	printf '%s' "$$GITHUB_RUN_ATTEMPT" | LC_ALL=C grep -Eq '^[0-9]+$$'; \
+	test "$$COMPOSE_PROJECT_NAME" = "starter-identity-$$GITHUB_RUN_ID-$$GITHUB_RUN_ATTEMPT"; \
+	test "$$TEST_DB_HOST" = localhost && test "$$TEST_DB_ADMIN_USER" = postgres; \
+	printf '%s' "$$TEST_DB_PORT" | LC_ALL=C grep -Eq '^[0-9]{1,5}$$'; \
+	test "$$TEST_DB_PORT" -gt 0 && test "$$TEST_DB_PORT" -lt 65536; \
+	test "$$IDENTITY_REFERENCE_DB_NAME" = "starter_identity_reference_$${GITHUB_RUN_ID}_$${GITHUB_RUN_ATTEMPT}"; \
+	test "$${#IDENTITY_REFERENCE_DB_NAME}" -le 63; \
+	test "$$IDENTITY_REFERENCE_DB_NAME" != "$$TEST_DB_NAME" && test "$$IDENTITY_REFERENCE_DB_NAME" != "$$IDENTITY_GRAPH_DB_NAME" && test "$$IDENTITY_REFERENCE_DB_NAME" != "$$IDENTITY_INSTALLED_DB_NAME"; \
+	test "$$IDENTITY_REFERENCE_DATABASE_URL" = "postgresql+psycopg://app_admin@localhost:$$TEST_DB_PORT/$$IDENTITY_REFERENCE_DB_NAME"; \
+	test "$$(docker compose -f docker-compose.test.yml exec -T postgres psql -X -U app_admin -d "$$IDENTITY_REFERENCE_DB_NAME" -Atc "SELECT current_user='app_admin' AND session_user='app_admin' AND r.rolcanlogin AND NOT r.rolsuper AND r.rolbypassrls AND pg_get_userbyid(d.datdba)='app_admin' AND NOT EXISTS (SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%') AND (SELECT count(*)=4 AND bool_and(NOT rolsuper AND NOT rolbypassrls) FROM pg_roles WHERE rolname IN ('app_user','platform_api','outbox_dispatcher','platform_outbox_dispatcher')) FROM pg_roles r CROSS JOIN pg_database d WHERE r.rolname=current_user AND d.datname=current_database()")" = t || { echo "Identity reference owner/empty-catalog precondition failed" >&2; exit 1; }; \
+	MIGRATION_DATABASE_URL="$$IDENTITY_REFERENCE_DATABASE_URL" DATABASE_URL="$$IDENTITY_REFERENCE_DATABASE_URL" poetry run alembic -c alembic.ini upgrade heads
+
+test-identity-graph-db-create:
+	@IDENTITY_TEST_DB_NAME="$$IDENTITY_GRAPH_DB_NAME" $(MAKE) test-identity-db-create
+
+test-learning-pair-db-create:
+	@IDENTITY_TEST_DB_NAME="$$LEARNING_PAIR_DB_NAME" $(MAKE) test-identity-db-create
+
+test-identity-installed-db-create:
+	@IDENTITY_TEST_DB_NAME="$$IDENTITY_INSTALLED_DB_NAME" $(MAKE) test-identity-db-create
+
 # Graph commands never run `env.py`, so they cannot see the bindings it
 # installs. Exporting the pointer here keeps `make migrate-graph` truthful about
 # cross-lineage edges; `upgrade` does not need it (env.py installs directly).
@@ -209,7 +276,7 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 	IMAGE_NAME=$(IMAGE_NAME) APP_PORT=$(APP_PORT) ./scripts/deploy.sh $(TAG)
 
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts poetry-lock-check check test test-unit \
-	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
+	test-integration test-cov test-db-up test-db-down test-identity-db-create test-identity-reference-db-create test-identity-reference-db-migrate test-identity-graph-db-create test-identity-installed-db-create test-learning-pair-db-create migrate migrate-new dev \
 	css-build css-watch ui-build ui-check palette-baseline published-source-drift-baseline released-lineage-coverage-baseline facet-nav-baseline connector-baseline connector-ratchet \
 	credential-baseline credential-ratchet \
 	executor-retirement-check executor-retirement-baseline executor-retirement-receipt \

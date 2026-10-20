@@ -7757,7 +7757,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-inbox": frozenset(
         {"ib_0002_supplied_identity.py", "ib_0003_transport_refs.py"}
     ),
-    "dotmac-kernel": frozenset(),
+    # Tenant-qualified credential key remains editable until a verified published
+    # tag carries this revision and its digest is recorded above.
+    "dotmac-kernel": frozenset({"20261017_0030_credential_tenant_key.py"}),
     "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
@@ -7800,7 +7802,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-work-orders": frozenset(),
     "dotmac-ticketing": frozenset(),
     "dotmac-deployment-control": frozenset(),
-    "dotmac-learning": frozenset(),
+    "dotmac-learning": frozenset({"lr_0007_enrollment_state_policy.py"}),
 }
 
 

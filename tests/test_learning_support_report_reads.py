@@ -411,7 +411,11 @@ def test_empty_course_cohort_uuid_sentinel_collision_preserved(report_database):
         db.add_all(
             [
                 Enrollment(
-                    tenant_id=f["tenant"], cohort_id=empty.id, person_id=f["person"]
+                    tenant_id=f["tenant"],
+                    cohort_id=empty.id,
+                    person_id=f["person"],
+                    role_in_cohort="student",
+                    status="active",
                 ),
                 CourseCompletion(
                     tenant_id=f["tenant"],

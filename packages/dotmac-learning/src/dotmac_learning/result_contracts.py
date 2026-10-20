@@ -68,6 +68,22 @@ class LabResultCommand(Command):
     grading: GradedResult
 
 
+class LabResultRead(Command):
+    """Selectors for a caller-authorized instance and actual check worker window.
+
+    Academy owns instance/course access, operation eligibility and reset/deploy
+    selection. IDs and inclusive claimed/finished bounds describe that selected
+    operation; they confer no authority. Missing or inverted bounds match nothing.
+    """
+
+    tenant_id: UUID
+    person_id: UUID
+    activity_id: UUID
+    instance_id: UUID
+    claimed_at: datetime | None
+    finished_at: datetime | None
+
+
 class OverrideScoreCommand(Command):
     tenant_id: UUID
     submission_id: UUID
