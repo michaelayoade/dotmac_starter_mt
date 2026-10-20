@@ -1,8 +1,8 @@
 """Pure requirements engine: conditions, composition, validation, evaluation.
 
-Not wired into any existing behaviour. Consumers import this package directly (the legacy compiler, which
-needs the ORM-backed entitlements, is imported from ``.legacy`` explicitly);
-it is intentionally not re-exported from ``dotmac_learning``.
+Not wired into any existing behaviour. Consumers import this package directly.
+The legacy compiler needs the ORM-backed entitlements, so it is imported from
+``.legacy`` explicitly and is not re-exported here.
 """
 
 from .conditions import (
