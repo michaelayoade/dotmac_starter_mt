@@ -1,6 +1,6 @@
 # ADR-0076: Service access credentials have one owner, bound to the service instance
 
-- Status: Accepted (2026-10-20); amended 2026-10-20 to replace the time-based shadow gate with gates on the shared governed rails, to make credential kinds a registry, and to name the Sub exposure preconditions (sections 10, 13, 14)
+- Status: Accepted (2026-10-20); amended 2026-10-20 to replace the time-based shadow gate with gates on the shared governed rails, to make credential kinds a registry, and to name the credential-handling preconditions (sections 10, 13, 14); amended again 2026-10-20 after architect review
 - Date: 2026-10-20
 - Deciders: Michael
 - Supersedes: none
@@ -32,7 +32,8 @@ production change. Decision labels refer to the decisions Michael approved on
   reveal link or self-care.
 
 Decisions about the temporary Sub bridge and separate security corrections of
-existing Sub exposures are tracked outside this ADR. The projection invariant
+existing credential-handling weaknesses in the predecessor system are tracked
+privately outside this ADR. The projection invariant
 in section 8 was confirmed by Michael on 2026-10-20.
 
 ## Context
@@ -118,7 +119,7 @@ leaves the credential untouched.
 
 A credential carries: `id`, `tenant_id`; `service_reference`;
 `customer_reference` (opaque, set at issue from a typed Services fact); an
-optional opaque `access_point_reference`; `kind` (`pppoe`, `ipoe_option82`,
+optional opaque `access_point_reference`; `kind` (`pppoe`;
 further kinds declared in the kind registry, section 13); `identifier`; `secret_ciphertext`;
 `secret_fingerprint` (keyed HMAC, section 7); `secret_version`;
 `last_converged_secret_version`; `state`; a `compromise_marker` (nullable, with
@@ -170,6 +171,10 @@ is impossible, not merely discouraged.
 has not yet arrived) and a predecessor link exists, the result is `ask` or
 `hold_activation`, never a silent `new`; a silent `new` would recreate the
 reported symptom.
+
+**Explicit link to a non-ended predecessor.** An explicit replacement link
+whose predecessor has not ended resolves to `ask` or `hold_activation`, never
+`new`.
 
 **Secret on rebind.** The setting `access_credentials.secret_on_rebind`
 (`keep` | `rotate`, default `keep` per D3) decides whether inheritance also
@@ -382,8 +387,9 @@ status). A state is never inferred.
 Inactive rows are not blanket-mapped to `revoked`: revoked is terminal and would
 make cancel-first credentials, the core of the reported symptom, permanently
 uninheritable. Also routed to `needs_review`: one-way-hash secrets, decrypt
-failures, ambiguous kind derivation (both or neither of the PPPoE and option-82
-fields), and duplicate active identifiers. The cutover gate requires an empty
+failures, ambiguous kind derivation, rows whose only identity is an option-82 field,
+and duplicate active identifiers. Option-82 fields on imported PPPoE rows are
+kept as opaque source attributes. The cutover gate requires an empty
 exceptions queue, each item resolved by an explicit command.
 
 **Verification uses the shared rails; nothing runs in shadow in production.**
@@ -398,32 +404,54 @@ owner-command registry. There is no time window and no fixed count.
   filed.
 - **Backtest.** A window of real Sub credential events (replacements, restores,
   edits) is replayed through the module's decision functions and compared with
-  Sub's actual outcomes. Known Sub defects are declared in advance as
-  expected-difference classes: the revoke grace, the Sub status map (including
-  `disabled` to SUSPENDED), one-way-hash rows, the cutover withdrawal described
-  below, and the Sub reactivation overwrite. Any other difference blocks.
+  Sub's actual outcomes. The backtest harness and the cutover operation are
+  owner-provided; the rails supply preview, digest approval, `execute_once`,
+  evidence and the kill switch. Each expected-difference class is a predicate
+  over a named (Sub outcome, Starter outcome) pair, digest-approved before the
+  run, with per-class counts reported. The classes are: the revoke grace; the
+  Sub status map, covering only Sub-inherit against Starter-ask or hold for a
+  `disabled` (SUSPENDED) predecessor, and a Starter `new` there blocks; one-way-hash
+  rows; Sub reactivation with a new secret against Starter inheriting the same
+  identifier; and the cutover withdrawal, which is a governed operation (below)
+  rather than a free class. Events whose as-of facts cannot be reconstructed
+  are UNKNOWN (ADR-0032), never matches, and each must be classified. Any other
+  difference blocks.
 - **Saved tests.** The Sub bridge cases and the architect review edge cases
   (cross-customer refusal, compromise path, stale facts, relocation,
   create-then-cancel and cancel-then-create ordering) become permanent golden
   tests in the package.
 - **Real-record preview.** "What would happen to this customer" is available
   before any write, from the read-only resolve preview.
-- **Guarded rollout.** Cutover proceeds per tenant or region with a
-  `max_targets` cap and a kill switch. It auto-stops on an invariant breach:
-  any cross-customer inheritance, or a projection failure rate above a
-  threshold held as a tenant setting.
+- **Guarded rollout.** The authority switch is per tenant and sealed: one
+  writer, no partial-region authority, so a per-region rollout never creates two
+  writers on one table. After the switch the kill switch fails closed (owner
+  commands refuse; activations hold). Rollback to the Sub writer is a governed
+  operation whose preview lists the rows and secret versions created since the
+  switch. Caps (`max_targets`) and the kill switch also apply to the bridge
+  `inherit` flip and to the withdrawal batch. Rollout auto-stops on an
+  invariant breach: any cross-customer inheritance, or a projection failure
+  rate above a tenant-setting threshold; the failure-rate stop requires the Sub
+  bridge's surfaced-failure fix before the suite cutover.
 - **Cutover gate.** Zero unexplained backtest differences, all saved tests
   green, and import exceptions resolved. At cutover Starter becomes the
   authority and Sub's table becomes a read projection with exactly one writer
   (the Starter sync adapter). At suite cutover, network-access consumes the
   owner's events directly.
+- **Rail dependency.** `dotmac-governed-operations`, `dotmac-automation-rules`
+  and the kernel owner-command registry are not yet built; this cutover is
+  sequenced after them.
+- **Evidence hygiene.** Plans, digests, previews and evidence carry ids,
+  classifications and keyed fingerprints only, never secrets.
 
 **Cutover behaviour change (confirmed by Michael, 2026-10-20, with the
 projection invariant).** Sub today leaves credentials on cancelled
 subscriptions in RADIUS (for example when a new service is created before the old
 one is cancelled), so they still authenticate. Under the projection invariant
-those users are withdrawn at cutover. This is an intended behaviour change and
-an expected drift class, support is warned before cutover.
+those users are withdrawn at cutover. This is an intended behaviour change;
+support is warned before cutover. The withdrawal is a governed operation
+(preview list, digest approval, `max_targets`). A credential with an
+authenticated session within a tenant-setting lookback is an exception that
+blocks until resolved, not an expected difference.
 
 ### 11. Sub's `ensure_pppoe_credential` becomes a thin call; no secret is ever sent
 
@@ -460,42 +488,48 @@ when `ensure_pppoe_credential` becomes the thin call.
 
 Kinds are declared as data inside the package, following the ADR-0008 registry
 pattern. Each kind declares its policies and its projection target; the
-lifecycle, commands and effect contract are shared. Reactions such as "service
-replaced, therefore rebind" are automation rules composed on the shared
-lifecycle, not kind-specific code. No kind is declared before it has a consumer.
-Phase 1 declares `pppoe` and `ipoe_option82`. In scope later: `mac_binding` and
+lifecycle, commands and effect contract are shared. Replacement continuity is
+the owner's activation policy (section 4) and works with the rules engine paused
+or absent; automation rules add only conditional overrides that call the same
+commands. No kind is declared before it has a consumer. Phase 1 declares
+`pppoe`. `ipoe_option82` is later, declared when a counted Sub population and a
+network-access projection target exist. Also later: `mac_binding` and
 hotspot/voucher login. Out of scope: CPE management, Wi-Fi keys and ONT web
 credentials (device configuration, which stays in Sub for now), and
-infrastructure credentials (OLT, NAS, router, under the F3 rule).
+infrastructure credentials (OLT, NAS, router), whose rule is that stored values
+never resolve `env://` and `bao://` is used only for allowlisted fields under
+system-owned prefixes.
 
-### 14. Sub exposures are cutover preconditions served by Starter
+### 14. Credential-handling preconditions are served by Starter
 
-The existing Sub exposures (plaintext password in an edit page; reveal gated by
-a broad read permission; secrets sent by SMS and email; Sub's TR-069 endpoint)
-are retired by Starter capabilities, not by new Sub features:
+Existing credential-handling defects in the predecessor system are fixed there
+as stopgaps only, tracked privately, and are not cutover substitutes. The
+cutover preconditions are Starter capabilities:
 
 - the module's single audited reveal, plus a secure link or self-care page,
   which ends secrets in SMS and email;
-- a notification template contract in which a secret can only render as a link,
-  owned by the Starter notifications owner (to be confirmed);
-- device configuration to CPEs through Integrator's authenticated connectors
-  (ADR-0038), replacing Sub's TR-069 endpoint;
+- a notification template contract in which a secret can only render as a link:
+  templates belong to `dotmac-template-studio` (a credential notice's render
+  context carries only a reveal link), sending goes through kernel
+  `messaging`/`delivery` with `consent`/`channel_policy`, and composition is an
+  assembly journey in a transactional category (ADR-0075);
 - any purge of historical rows as a governed operation.
 
-Sub-side fixes are stopgaps only and are not cutover substitutes.
+CPE dialer configuration stays with Sub's ACS single-writer programme and is not
+a precondition of this cutover; it supplies the typed readback of section 8.
 
 ## Reuse
 
 | Candidate | Disposition |
 |---|---|
 | PPPoE credential | In scope, phase 1 |
-| IPoE / DHCP option-82 identity | In scope, phase 1 (no secret) |
-| MAC binding (IPoE / option-82) | Later, as a declared kind in this package (section 13) |
+| IPoE / DHCP option-82 identity | Later, declared when a counted Sub population and a projection target exist (section 13) |
+| MAC binding | Later, as a declared kind in this package (section 13) |
 | Hotspot/voucher login identity | Later, as a declared kind (section 13); voucher issuance itself is a distinct commercial concern |
 | CPE management, Wi-Fi keys and ONT web credentials | Out of scope: device configuration, stays in Sub for now |
 | At-rest key rotation of desired-config credentials | Not a candidate: kernel crypto rotation |
 | ACS/TR-069 provider credentials | Not a candidate: machine credentials, Integrator connector plus OpenBao |
-| Router, NAS, OLT API/SSH, SNMP secrets (infrastructure credentials) | Out of scope under the F3 rule: Integrator / router control plane |
+| Router, NAS, OLT API/SSH, SNMP secrets (infrastructure credentials) | Out of scope: Integrator / router control plane; stored values never resolve `env://`, and `bao://` only for allowlisted fields under system-owned prefixes |
 | Staff device login | Not a candidate: human identity via IdP and RBAC |
 | Portal/customer logins | Not a candidate: kernel `credential_lifecycle` |
 
@@ -522,9 +556,9 @@ name must not pull the non-candidates in.
 - Disconnect never precedes convergence on rotate; on suspend or revoke it
   follows withdrawal and convergence.
 - Credential `suspended` is a security hold, not a billing lever.
-- Reveal and change are distinct permissions. Until Sub's existing exposures
-  are retired (plaintext password rendered into an edit page; reveal gated by a
-  broad read permission), the mirror period inherits them, so their retirement
+- Reveal and change are distinct permissions. Until existing credential-handling
+  weaknesses in the predecessor system are retired, the mirror period inherits
+  them, so their retirement
   through the Starter preconditions in section 14 is a precondition of cutover
   and the claim that reveal is independent of customer read access is not true
   until then.
@@ -579,5 +613,7 @@ name must not pull the non-candidates in.
 9. Resolved: Sub `disabled` maps to Services SUSPENDED (restorable), recorded as
    expected drift. The mapping for `canceled` and `expired` to TERMINATED follows
    the status map at build.
-10. Resolved: the exposures are cutover preconditions served by Starter (section
-    14). Still open: the identity of the Starter notifications owner.
+10. Resolved: the credential-handling preconditions are served by Starter
+    (section 14). The notifications owner is resolved: templates belong to
+    `dotmac-template-studio`, sending to kernel `messaging`/`delivery` with
+    `consent`/`channel_policy`, and composition to an ADR-0075 assembly journey.
