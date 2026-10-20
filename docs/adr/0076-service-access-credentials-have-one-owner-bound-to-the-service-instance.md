@@ -559,9 +559,7 @@ name must not pull the non-candidates in.
 - Reveal and change are distinct permissions. Until existing credential-handling
   weaknesses in the predecessor system are retired, the mirror period inherits
   them, so their retirement
-  through the Starter preconditions in section 14 is a precondition of cutover
-  and the claim that reveal is independent of customer read access is not true
-  until then.
+  through the Starter preconditions in section 14 is a precondition of cutover.
 - Import quarantines one-way-hash and undecryptable secrets; nothing is
   reconstructed.
 
