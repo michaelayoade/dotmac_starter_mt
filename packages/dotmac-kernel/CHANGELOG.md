@@ -6,11 +6,12 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Unreleased development source — version unallocated
+## 0.1.0a107 — Release inventory
 
-Source marker `0.1.0a106+dev` allocates no release. Hosted and installed
-qualification, independent composition review, publication and Academy adoption
-remain pending. Published a106 and every released migration remain immutable.
+This inventories the proposed identity-lifecycle and account-writer successor
+to verified `0.1.0a106` (source marker `0.1.0a106+dev`). It allocates no
+version and proves no publication or product adoption; protected release
+authorization and independently verified artifacts remain required.
 
 ### Added
 
@@ -34,6 +35,15 @@ remain pending. Published a106 and every released migration remain immutable.
 - Hosted whole-graph Kernel/Learning replay using a distinct empty PostgreSQL
   database, plus authored rollback, privilege, preservation and assignment
   canaries. Source preparation is not execution evidence or product activation.
+- Account identity writers (external-identity finalize/bind/disable, identity
+  storage and the reference login/logout paths) serialize on the owning Party
+  before any child rows, with session cohorts locked in identifier order;
+  distinct-Party same-subject conflicts still arbitrate through the trusted
+  PostgreSQL 23505 constraint. Public signatures and behavior are unchanged.
+  The conflict-savepoint guard tolerates ORM savepoint inactivity only at
+  physical release; body-phase, clean-pending-entry and root-identity refusals
+  are unchanged. Hosted evidence landed with #907 (unit 18,556 and
+  integration 4,033 green on `22d3bdf6`, requalified unchanged at `df905bf5`).
 
 
 ### 2026-10-19 source amendment: historical identity comparison
