@@ -368,9 +368,7 @@ def test_complete_suite_contract_ledger_is_typed_and_orm_free() -> None:
     assert set(contracts) == EXPECTED_MODULES
     for package, contract in contracts.items():
         assert contract["package"] == package
-        expected_cohort = (
-            WITHDRAWN_COHORT if package in WITHDRAWN_MODULES else None
-        )
+        expected_cohort = WITHDRAWN_COHORT if package in WITHDRAWN_MODULES else None
         assert contract.get("adoption_cohort") == expected_cohort
         assert contract["contract_module"].endswith(".contracts")
         assert contract["returns_orm_instances"] is False
