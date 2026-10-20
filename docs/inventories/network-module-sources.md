@@ -188,6 +188,11 @@ safe engineering sequence, never a runtime package dependency.
 | 8 | `dotmac-network-access` | NAS/RADIUS access-state projection, authentication/accounting observations, active sessions, and reconciliation. | ISP only | Commercial eligibility is separated from provider-neutral access state and transport. |
 | 9 | `dotmac-pon-access` | OLT/ONT/PON inventory, assignment, commissioning, desired configuration, provisioning, observation, and reconciliation. | ISP only | Product eligibility, fiber links, generic inventory, and provider clients are separated. |
 
+> **Amendment 2026-10-19:** module 9 (`dotmac-pon-access`) is withdrawn from
+> network-suite-v1 and kept frozen in `packages/` (`adoption_cohort =
+> "withdrawn-retained-in-sub"`). OLT/ONT/PON and ACS/TR-069 authority stays in
+> Sub under the single-writer rule. See the amendment in ADR-0038.
+
 The full present-day table/service families, representative source paths,
 parity tests, exclusions, entry gates, and retirement gates are in
 `docs/inventories/network-module-dispositions.toml`. That file is checked by

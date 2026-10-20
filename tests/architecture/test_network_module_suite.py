@@ -1,4 +1,9 @@
-"""One structural conformance kit for all nine network-suite modules."""
+"""One structural conformance kit for all nine network-suite modules.
+
+``dotmac-pon-access`` was withdrawn from network-suite-v1 (ADR-0038 amendment,
+2026-10-19) but remains a retained, frozen package, so its structural
+conformance (namespace, tenant plane, immutable contracts) stays enforced here.
+"""
 
 from __future__ import annotations
 

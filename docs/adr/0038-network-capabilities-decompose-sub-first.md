@@ -1,6 +1,6 @@
 # ADR-0038: Network capabilities are built as one bounded suite before Sub adoption
 
-- Status: Accepted
+- Status: Accepted (amended 2026-10-19: `dotmac-pon-access` withdrawn from network-suite-v1)
 - Date: 2026-08-18
 - Deciders: Michael
 - Supersedes: none
@@ -86,10 +86,13 @@ canary in the same review.
 Every network module uses Sub's production implementation and tests as its
 initial code source. Sub is also the concrete candidate consumer and the first
 network-suite cutover. A network package does not become `adopted` merely
-because its code or lineage is complete: all nine remain `audit-complete`
-until the composed suite is exact-pinned, migrated, shadow-verified and enabled
-in Sub and every displaced local writer is sealed and retired. A failure in
-one module's adoption gate blocks the coordinated suite cutover.
+because its code or lineage is complete: the eight suite modules remain
+`audit-complete` until the composed suite is exact-pinned, migrated,
+shadow-verified and enabled in Sub and every displaced local writer is sealed
+and retired. A failure in one module's adoption gate blocks the coordinated
+suite cutover. `dotmac-pon-access` is not part of that cohort after the
+2026-10-19 amendment below; it is retained frozen at `audit-complete` and is
+never adopted.
 
 This decision uses ADR-0006's 2026-08-12 amendment: a second consumer proves
 reuse but is not permission to share. The three dossier states therefore apply
@@ -293,3 +296,34 @@ module vocabulary and creates multiple connector control planes.
 **Fold general observability into Network Observability.** The production
 telemetry control plane already exists and has a different operational owner;
 duplicating it creates drift rather than a reusable network domain.
+
+## Amendment 2026-10-19: `dotmac-pon-access` withdrawn from network-suite-v1
+
+Michael decided on 2026-10-19 that ONT configuration and ACS/TR-069 stay in
+Sub plus GenieACS and are not moved to Starter, and that a modular single
+writer is enforced per state instead.
+
+- **Withdrawal.** `dotmac-pon-access` is withdrawn from network-suite-v1. The
+  suite is eight modules for adoption purposes. The package, its released tag
+  lineage, migrations and Kernel namespace stay in place, frozen at
+  `audit-complete`, so that released history is not rewritten. It is never
+  adopted and gets no further development. The ledgers record it as
+  `adoption_cohort = "withdrawn-retained-in-sub"`. Only this module may carry
+  that value; the architecture canaries enforce that.
+- **Authority.** OLT/ONT/PON inventory, ONT desired configuration, OLT-side
+  ONT state and ACS/TR-069 I/O remain Sub authority. Each state has exactly one
+  owning writer inside Sub, with other code calling that owner's typed commands.
+  Section 6 (Integrator ownership of OLT/ACS/TR-069 I/O) no longer applies to
+  ACS/TR-069 or OLT ONT I/O for Sub.
+- **Network control.** `dotmac-network-control` stays in the suite. It no longer
+  receives ONT or ACS commands; Sub's own network operations remain the command
+  engine for ONT.
+- **RADIUS unaffected.** `dotmac-network-access` (NAS/RADIUS) is not changed.
+  "Access" in this amendment means ACS/TR-069 only.
+- **Adoption blockers.** The two recorded `dotmac-pon-access` adoption blockers
+  (Sub issue 1964, unassociated ONTs; Sub issue 1898, provider-bypass canary)
+  become Sub single-writer work and no longer gate a Starter cutover.
+- **Ledger and canary.** The disposition ledger, contract ledger and the
+  architecture canaries change in the same review, as section 1 requires. The
+  withdrawal is scoped to this one module; every other module keeps all of its
+  existing checks.
