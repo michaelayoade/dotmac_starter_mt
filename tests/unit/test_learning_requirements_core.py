@@ -170,7 +170,9 @@ def test_minimum_score(subject, field):
     cond = Cond(
         "minimum_score", {"subject": subject, "ref_id": str(ref), "min_pct": 70}
     )
-    assert run(cond, facts(**{field: {ref: 0.7}})).passed  # boundary is inclusive
+    ok = run(cond, facts(**{field: {ref: 0.7}}))
+    assert ok.passed  # boundary is inclusive
+    assert ok.root.satisfied[0].params["actual_fraction"] == 0.7
     low = run(cond, facts(**{field: {ref: 0.69}}))
     assert not low.passed and low.reasons[0].code == "score_below_minimum"
     missing = run(cond)
@@ -191,25 +193,39 @@ def test_attempts_at_least():
     assert refused.reasons[0].code == "kind_not_allowed_for_target"
 
 
-def test_enrolled_before():
-    cohort = uuid4()
+def test_enrolled_before_is_target_scoped():
+    target = course_target()
     cond = Cond("enrolled_before", {"at": "2026-06-01T00:00:00+00:00"})
-    early = facts(enrolled_at_by_cohort={cohort: datetime(2026, 5, 31, tzinfo=UTC)})
-    assert run(cond, early).passed
-    late = facts(enrolled_at_by_cohort={cohort: datetime(2026, 6, 1, tzinfo=UTC)})
-    assert run(cond, late).reasons[0].code == "enrolled_after_cutoff"
-    assert run(cond).reasons[0].code == "fact_missing"
+
+    def at(moment, key=None):
+        return facts(
+            enrolled_at_by_target={key or ("course_access", target.id): moment}
+        )
+
+    assert run(cond, at(datetime(2026, 5, 31, tzinfo=UTC)), target).passed
+    late = run(cond, at(datetime(2026, 6, 1, tzinfo=UTC)), target)
+    assert late.reasons[0].code == "enrolled_after_cutoff" and not late.indeterminate
+    # Another target's enrollment does not count: absent is unknown.
+    other = run(
+        cond, at(datetime(2026, 1, 1, tzinfo=UTC), ("course_access", uuid4())), target
+    )
+    assert other.reasons[0].code == "fact_missing" and other.indeterminate
+    assert run(cond, None, target).reasons[0].code == "fact_missing"
 
 
 def test_manual_approval_binds_to_target_and_node_path():
     target = course_target()
     cond = Cond("manual_approval", {"approver_permission": "learning.approve"})
     expr = All((All(()), cond))  # the approval node lives at "all/1"
-    ok = facts(approvals=frozenset({("course_access", target.id, "all/1")}))
-    assert run(expr, ok, target).passed
-    wrong_path = facts(approvals=frozenset({("course_access", target.id, "all/0")}))
+    ok = facts(approvals={("course_access", target.id, "all/1"): "approval-row-1"})
+    approved = run(expr, ok, target)
+    assert approved.passed
+    assert [(e.kind, e.id) for e in approved.evidence] == [
+        ("approval", "approval-row-1")
+    ]
+    wrong_path = facts(approvals={("course_access", target.id, "all/0"): "r"})
     assert run(expr, wrong_path, target).reasons[0].code == "approval_missing"
-    other = facts(approvals=frozenset({("course_access", uuid4(), "all/1")}))
+    other = facts(approvals={("course_access", uuid4(), "all/1"): "r"})
     assert not run(expr, other, target).passed
 
 
@@ -559,3 +575,46 @@ def test_narrower_scope_is_additive_only(leaves):
     res = run(combine_additive(t, f), fx)
     assert not res.passed and res.reasons[0].path == "all/1"
     assert not run(combine_additive(f, t), fx).passed
+
+
+def _missing():
+    return Cond("course_completed", {"course_id": "not-a-uuid"})  # invalid params
+
+
+def _missing_fact():
+    return Cond(
+        "minimum_score",
+        {"subject": "activity", "ref_id": str(uuid4()), "min_pct": 50},
+    )
+
+
+def test_unknown_stays_failed_under_not_and_composition(leaves):
+    t, f, fx = leaves
+    m = _missing_fact()
+    res = run(Not(m), fx)
+    assert not res.passed and res.indeterminate
+    assert res.reasons[0].code == "fact_missing"
+    twice = run(Not(Not(m)), fx)
+    assert not twice.passed and twice.indeterminate
+    assert not run(Not(_missing()), fx).passed
+    # any(missing, true) passes; all(missing, false) is definitely false.
+    assert run(Any((m, t)), fx).passed
+    definite = run(All((m, f)), fx)
+    assert not definite.passed and not definite.indeterminate
+    # all(missing, true) and any(missing, false) stay indeterminate.
+    assert run(All((m, t)), fx).indeterminate
+    assert run(Any((m, f)), fx).indeterminate
+    assert not run(Any((m, f)), fx).passed
+    # not(definite false) is still true.
+    assert run(Not(f), fx).passed and not run(Not(f), fx).indeterminate
+
+
+def test_indeterminate_root_fails_and_disallowed_kind_is_indeterminate():
+    res = run(_missing_fact())
+    assert not res.passed and res.indeterminate and res.root.indeterminate
+    target = attempt_target()
+    cond = Cond("track_position", {"track_id": str(uuid4())})
+    disallowed = run(cond, None, target)
+    assert not disallowed.passed and disallowed.indeterminate
+    assert run(_missing()).indeterminate
+    assert not run(done(uuid4())).indeterminate

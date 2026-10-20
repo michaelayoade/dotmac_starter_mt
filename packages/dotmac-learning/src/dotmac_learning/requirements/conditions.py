@@ -60,6 +60,9 @@ class LeafResult:
     code: str
     params: Mapping[str, object]
     evidence: tuple[EvidenceRef, ...] = ()
+    # Not satisfied because the answer is unknown (missing fact, bad params,
+    # disallowed kind), as opposed to definitely false. Never inverted by not().
+    indeterminate: bool = False
 
 
 @dataclass(frozen=True)
@@ -156,7 +159,7 @@ def _fail(code: str, params: Mapping[str, object]) -> LeafResult:
 
 
 def _missing(fact: str, **params: object) -> LeafResult:
-    return _fail("fact_missing", {"fact": fact, **params})
+    return LeafResult(False, "fact_missing", {"fact": fact, **params}, (), True)
 
 
 # --------------------------------------------------------------------------
@@ -206,7 +209,7 @@ def _minimum_score(params: BaseModel, ctx: LeafContext) -> LeafResult:
     if fraction is None:
         return _missing(fact, **detail)
     if fraction >= p.min_pct / 100:
-        return _pass("minimum_score", detail, evidence)
+        return _pass("minimum_score", {**detail, "actual_fraction": fraction}, evidence)
     return _fail("score_below_minimum", {**detail, "actual_fraction": fraction})
 
 
@@ -226,14 +229,12 @@ def _attempts_at_least(params: BaseModel, ctx: LeafContext) -> LeafResult:
 def _enrolled_before(params: BaseModel, ctx: LeafContext) -> LeafResult:
     p = _typed(EnrolledBeforeParams, params)
     detail: dict[str, object] = {"at": p.at.isoformat()}
-    enrolled = ctx.facts.enrolled_at_by_cohort
-    if not enrolled:
-        return _missing("enrolled_at_by_cohort", **detail)
-    # Earliest enrollment in the facts; the loader scopes which cohorts count.
-    cohort_id, first = min(enrolled.items(), key=lambda item: (item[1], str(item[0])))
+    first = ctx.facts.enrolled_at_by_target.get((ctx.target.kind, ctx.target.id))
+    if first is None:
+        return _missing("enrolled_at_by_target", **detail)
     if first < p.at:
         return _pass(
-            "enrolled_before", detail, EvidenceRef("enrollment", str(cohort_id))
+            "enrolled_before", detail, EvidenceRef("enrollment", str(ctx.target.id))
         )
     return _fail("enrolled_after_cutoff", detail)
 
@@ -241,13 +242,9 @@ def _enrolled_before(params: BaseModel, ctx: LeafContext) -> LeafResult:
 def _manual_approval(params: BaseModel, ctx: LeafContext) -> LeafResult:
     p = _typed(ManualApprovalParams, params)
     detail: dict[str, object] = {"approver_permission": p.approver_permission}
-    key = (ctx.target.kind, ctx.target.id, ctx.path)
-    if key in ctx.facts.approvals:
-        return _pass(
-            "manual_approval",
-            detail,
-            EvidenceRef("approval", f"{ctx.target.id}:{ctx.path}"),
-        )
+    approval_id = ctx.facts.approvals.get((ctx.target.kind, ctx.target.id, ctx.path))
+    if approval_id is not None:
+        return _pass("manual_approval", detail, EvidenceRef("approval", approval_id))
     return _fail("approval_missing", detail)
 
 

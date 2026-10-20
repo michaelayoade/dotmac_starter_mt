@@ -1,6 +1,7 @@
 """Pure requirements engine: conditions, composition, validation, evaluation.
 
-Not wired into any existing behaviour. Consumers import this package directly;
+Not wired into any existing behaviour. Consumers import this package directly (the legacy compiler, which
+needs the ORM-backed entitlements, is imported from ``.legacy`` explicitly);
 it is intentionally not re-exported from ``dotmac_learning``.
 """
 
@@ -32,11 +33,6 @@ from .expression import (
     walk,
 )
 from .facts import LearnerFacts, Route, Target
-from .legacy import (
-    compile_course_access,
-    legacy_unmet_prerequisites,
-    to_course_access_state,
-)
 from .validate import (
     CERTIFICATE_FINAL_MIN_PCT,
     MAX_DEPTH,
@@ -76,15 +72,12 @@ __all__ = [
     "UnknownConditionKindError",
     "ValidationIssue",
     "combine_additive",
-    "compile_course_access",
     "content_hash",
     "default_registry",
     "dependency_edges",
     "evaluate",
     "find_cycles",
-    "legacy_unmet_prerequisites",
     "parse",
-    "to_course_access_state",
     "to_data",
     "to_json",
     "validate",

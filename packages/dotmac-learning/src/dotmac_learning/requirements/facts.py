@@ -45,7 +45,11 @@ class LearnerFacts:
     course_final_fraction: Mapping[UUID, float] = field(default_factory=dict)
     course_grade_fraction: Mapping[UUID, float] = field(default_factory=dict)
     attempts_by_activity: Mapping[UUID, int] = field(default_factory=dict)
-    enrolled_at_by_cohort: Mapping[UUID, datetime] = field(default_factory=dict)
-    approvals: frozenset[tuple[str, UUID, str]] = frozenset()
+    # Earliest ACTIVE enrollment that entitles each target; absent = unknown.
+    enrolled_at_by_target: Mapping[tuple[TargetKind, UUID], datetime] = field(
+        default_factory=dict
+    )
+    # (target kind, target id, node path) -> approval row id (unrevoked, unexpired).
+    approvals: Mapping[tuple[str, UUID, str], str] = field(default_factory=dict)
     routes_by_course: Mapping[UUID, tuple[Route, ...]] = field(default_factory=dict)
     product_facts: Mapping[str, object] = field(default_factory=dict)

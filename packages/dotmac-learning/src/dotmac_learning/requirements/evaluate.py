@@ -4,6 +4,13 @@ Children are always evaluated in declared order with no short-circuit, so every
 failing leaf is explained. ``reasons`` on a node are why it failed (failing
 leaves, in declared order); ``satisfied`` are why it passed. ``not`` swaps the
 two and prefixes the codes with ``not.``.
+
+Three-valued logic keeps unknowns fail-closed: a leaf that cannot be decided
+(missing fact, invalid params, kind not allowed for the target) is *failed and
+indeterminate*. ``not`` never inverts it (it stays failed and indeterminate);
+``all`` is false if any child is definitely false, else indeterminate if any
+child is, else true; ``any`` is true if any child is true, else indeterminate
+if any child is, else false. An indeterminate root fails.
 """
 
 from __future__ import annotations
@@ -46,6 +53,8 @@ class NodeResult:
     evidence: tuple[EvidenceRef, ...]
     children: tuple[NodeResult, ...]
     satisfied: tuple[Reason, ...] = ()
+    # Failed because unknown, not because definitely false (see module doc).
+    indeterminate: bool = False
 
 
 @dataclass(frozen=True)
@@ -54,6 +63,7 @@ class EvaluationResult:
     root: NodeResult
     reasons: tuple[Reason, ...]
     evidence: tuple[EvidenceRef, ...]
+    indeterminate: bool = False
 
 
 def _dedupe(evidence: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
@@ -87,17 +97,25 @@ def _eval_cond(
     spec = registry.require(node.kind)
     if target.kind not in spec.targets:
         reason = Reason("kind_not_allowed_for_target", path, {"kind": node.kind})
-        return NodeResult(path, node.kind, False, (reason,), (), ())
+        return NodeResult(path, node.kind, False, (reason,), (), (), indeterminate=True)
     try:
         params = spec.params_model.model_validate(dict(node.params))
     except ValidationError:
         reason = Reason("invalid_params", path, {"kind": node.kind})
-        return NodeResult(path, node.kind, False, (reason,), (), ())
+        return NodeResult(path, node.kind, False, (reason,), (), (), indeterminate=True)
     leaf = spec.evaluate(params, LeafContext(facts, target, path))
     reason = Reason(leaf.code, path, leaf.params)
     if leaf.passed:
         return NodeResult(path, node.kind, True, (), leaf.evidence, (), (reason,))
-    return NodeResult(path, node.kind, False, (reason,), leaf.evidence, ())
+    return NodeResult(
+        path,
+        node.kind,
+        False,
+        (reason,),
+        leaf.evidence,
+        (),
+        indeterminate=leaf.indeterminate,
+    )
 
 
 def _eval(
@@ -111,6 +129,16 @@ def _eval(
         return _eval_cond(node, path, facts, registry, target)
     if isinstance(node, Not):
         child = _eval(node.child, child_path(path, "not", 0), facts, registry, target)
+        if child.indeterminate:
+            return NodeResult(
+                path,
+                "not",
+                False,
+                child.reasons,
+                child.evidence,
+                (child,),
+                indeterminate=True,
+            )
         if child.passed:
             return NodeResult(
                 path, "not", False, _prefixed(child.satisfied), child.evidence, (child,)
@@ -124,9 +152,12 @@ def _eval(
         for index, child in enumerate(node.children)
     )
     evidence = _dedupe(tuple(e for child in children for e in child.evidence))
+    unknown = any(child.indeterminate for child in children)
     if kind == "all":
-        passed = all(child.passed for child in children)
-        if passed:
+        definitely_false = any(
+            not child.passed and not child.indeterminate for child in children
+        )
+        if not definitely_false and not unknown:
             return NodeResult(
                 path,
                 kind,
@@ -137,7 +168,13 @@ def _eval(
                 _concat(children, failed=False),
             )
         return NodeResult(
-            path, kind, False, _concat(children, failed=True), evidence, children
+            path,
+            kind,
+            False,
+            _concat(children, failed=True),
+            evidence,
+            children,
+            indeterminate=unknown and not definitely_false,
         )
     if not children:
         reason = Reason("empty_any", path, {})
@@ -148,7 +185,13 @@ def _eval(
         )
         return NodeResult(path, kind, True, (), evidence, children, satisfied)
     return NodeResult(
-        path, kind, False, _concat(children, failed=True), evidence, children
+        path,
+        kind,
+        False,
+        _concat(children, failed=True),
+        evidence,
+        children,
+        indeterminate=unknown,
     )
 
 
@@ -166,4 +209,5 @@ def evaluate(
         root=root,
         reasons=root.reasons if not root.passed else (),
         evidence=_dedupe(root.evidence),
+        indeterminate=root.indeterminate,
     )

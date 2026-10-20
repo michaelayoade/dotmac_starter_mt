@@ -41,13 +41,15 @@ from dotmac_learning.requirements import (
     LearnerFacts,
     Route,
     Target,
-    compile_course_access,
     default_registry,
     evaluate,
+)
+from dotmac_learning.requirements.legacy import (
+    PREREQUISITE_FALLBACK,
+    compile_course_access,
     legacy_unmet_prerequisites,
     to_course_access_state,
 )
-from dotmac_learning.requirements.legacy import PREREQUISITE_FALLBACK
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -137,11 +139,18 @@ def _assert_parity(db, tenant, person, stats=None):
                 titles.get(legacy_state.locked_until_course_id),
                 PREREQUISITE_FALLBACK,
             )
+            assert mapped.locked_until_course_id in unmet
+            assert mapped.locked_reason == _course_lock_reason(
+                titles.get(mapped.locked_until_course_id), PREREQUISITE_FALLBACK
+            )
         else:
             assert mapped.locked_until_course_id == legacy_state.locked_until_course_id
             assert mapped.locked_reason == legacy_state.locked_reason
         if stats is not None:
             stats["courses"] += 1
+            route_passes = [n.passed for n in result.root.children[0].children]
+            stats["mixed_routes"] += any(route_passes) and not all(route_passes)
+            stats["several_unmet"] += len(unmet) > 1
             stats["route_locked"] += route_locked
             stats["prerequisite_locked"] += mapped.locked and not route_locked
             stats["open"] += not mapped.locked
@@ -411,13 +420,20 @@ def _build(db, tenant, person, rng):
 
 def test_parity_200_seeded_random_scenarios(track_case):
     engine, tenant, _, person, _cohort, _courses, _ = track_case
-    stats = {"courses": 0, "route_locked": 0, "prerequisite_locked": 0, "open": 0}
+    stats = {
+        "courses": 0,
+        "route_locked": 0,
+        "prerequisite_locked": 0,
+        "open": 0,
+        "mixed_routes": 0,
+        "several_unmet": 0,
+    }
     with Session(engine) as db, db.begin():
         _scope(db, tenant)
         for seed in range(200):
             savepoint = db.begin_nested()
             try:
-                _build(db, tenant, person, random.Random(seed)  # noqa: S311 - deterministic test data)
+                _build(db, tenant, person, random.Random(seed))  # noqa: S311
                 _assert_parity(db, tenant, person, stats)
             except AssertionError as exc:
                 raise AssertionError(f"parity mismatch at seed {seed}") from exc
@@ -428,3 +444,6 @@ def test_parity_200_seeded_random_scenarios(track_case):
     assert stats["route_locked"] > 0
     assert stats["prerequisite_locked"] > 0
     assert stats["open"] > 0
+    # Courses reached by several routes, one open and one locked.
+    assert stats["mixed_routes"] > 0
+    assert stats["several_unmet"] > 0
