@@ -530,6 +530,8 @@ jobs:
           set -euo pipefail
           probe_dir=$(mktemp -d "$RUNNER_TEMP/kernel-identity.XXXXXXXX")
           echo "IDENTITY_PROBE_DIR=$probe_dir" >> "$GITHUB_ENV"
+          export IDENTITY_EXPECTED_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("packages/dotmac-kernel/pyproject.toml", "rb"))["tool"]["poetry"]["version"])')
+          echo "IDENTITY_EXPECTED_VERSION=$IDENTITY_EXPECTED_VERSION" >> "$GITHUB_ENV"
           poetry -C "$GITHUB_WORKSPACE/packages/dotmac-kernel" build -f wheel
           shopt -s nullglob
           wheels=(packages/dotmac-kernel/dist/*.whl)

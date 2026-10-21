@@ -59,7 +59,7 @@ def _checkout(tmp_path: Path, *, bank_line: str) -> Path:
     pyproject.write_text('[tool.poetry.dependencies]\ndotmac-kernel = ">=0.1.0a106"\n')
     kernel_init = tmp_path / "packages/dotmac-kernel/src/dotmac_kernel/__init__.py"
     kernel_init.parent.mkdir(parents=True)
-    kernel_init.write_text("")
+    kernel_init.write_text('__version__ = "0.1.0a999"\n')
     modules = tmp_path / ".github/release-modules.json"
     modules.parent.mkdir(parents=True)
     modules.write_text(
@@ -90,6 +90,7 @@ def test_relative_root_imports_record_absolute_owners(probe, tmp_path):
         "    BankDoc,\n    balance_targets,\n    propose_balance,\n)\n",
     )
     document = _expectation(probe, checkout, tmp_path)
+    assert document["kernel_version"] == "0.1.0a999"
     for name, binding in _RELATIVE.items():
         assert document["bindings"][name] == binding
     owners = {owner for owner, _exported in document["bindings"].values()}
