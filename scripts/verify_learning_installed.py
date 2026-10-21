@@ -69,14 +69,24 @@ def expectation(checkout: Path, destination: Path) -> None:
         set(exports) - set(bindings) == {"__version__"},
         "Unresolved source root owner binding",
     )
+    kernel_source = checkout / "packages/dotmac-kernel/src/dotmac_kernel/__init__.py"
+    kernel_version = None
+    for node in ast.parse(kernel_source.read_text()).body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "__version__":
+                    kernel_version = ast.literal_eval(node.value)
+    require(
+        isinstance(kernel_version, str) and bool(kernel_version),
+        "Source Kernel version differs",
+    )
     document = {
         "schema": "LearningInstalledExpectation.v1",
         "source_sha": os.environ["GITHUB_SHA"],
         "base_sha": os.environ["LEARNING_BASE_SHA"],
         "root_source_sha256": digest(source),
-        "kernel_root_source_sha256": digest(
-            checkout / "packages/dotmac-kernel/src/dotmac_kernel/__init__.py"
-        ),
+        "kernel_root_source_sha256": digest(kernel_source),
+        "kernel_version": kernel_version,
         "kernel_requirement": tomllib.loads(
             (checkout / "packages/dotmac-learning/pyproject.toml").read_text()
         )["tool"]["poetry"]["dependencies"]["dotmac-kernel"],
@@ -131,7 +141,7 @@ def installed_packages(expected: dict, receipt: dict) -> None:
             )
     wheels = {}
     for distribution, package, version, variable in (
-        ("dotmac-kernel", dotmac_kernel, "0.1.0a106+dev", "IDENTITY"),
+        ("dotmac-kernel", dotmac_kernel, expected["kernel_version"], "IDENTITY"),
         ("dotmac-learning", dotmac_learning, expected["version"], "LEARNING"),
     ):
         require(

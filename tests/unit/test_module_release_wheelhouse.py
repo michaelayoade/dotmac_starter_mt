@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import subprocess
+import tomllib
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,12 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _source_kernel_version() -> str:
+    return tomllib.loads((ROOT / "packages/dotmac-kernel/pyproject.toml").read_text())[
+        "tool"
+    ]["poetry"]["version"]
 
 
 @pytest.fixture()
@@ -276,7 +283,7 @@ def test_smoke_refusal_happens_before_any_install(release, monkeypatch, tmp_path
         "0.1.0a2",
         requires=["vendor @ https://unapproved.invalid/source.tar.gz"],
     )
-    kernel = wheel(tmp_path / "kernel", "dotmac-kernel", "0.1.0a106+dev")
+    kernel = wheel(tmp_path / "kernel", "dotmac-kernel", _source_kernel_version())
     timer = wheel(tmp_path / "timer", "dotmac-durable-timers", "0.1.0a1")
     commands = []
     monkeypatch.setattr(

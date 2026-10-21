@@ -44,6 +44,14 @@ KERNEL_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-kernel.yml"
 SCRIPT = PROJECT_ROOT / "scripts" / "release_module.py"
 
 
+def _source_kernel_version() -> str:
+    return tomllib.loads(
+        (PROJECT_ROOT / "packages/dotmac-kernel/pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )["tool"]["poetry"]["version"]
+
+
 def _release_module_script():
     spec = importlib.util.spec_from_file_location("release_module", SCRIPT)
     assert spec is not None
@@ -564,11 +572,13 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     by filename and SHA-256."""
     module = _release_module_script()
     commands: list[list[str]] = []
+    kernel_version = _source_kernel_version()
+    kernel_wheel = f"dotmac_kernel-{kernel_version}-py3-none-any.whl"
 
     dirs = {}
     for name, wheel in (
         ("module-dist", "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl"),
-        ("kernel-dist", "dotmac_kernel-0.1.0a106+dev-py3-none-any.whl"),
+        ("kernel-dist", kernel_wheel),
         ("first-party-dist", "dotmac_ui-0.1.0a8-py3-none-any.whl"),
     ):
         directory = tmp_path / name
@@ -610,7 +620,7 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     wheels = [arg for arg in install if arg.endswith(".whl")]
     assert sorted(Path(arg).name for arg in wheels) == [
         "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl",
-        "dotmac_kernel-0.1.0a106+dev-py3-none-any.whl",
+        kernel_wheel,
         "dotmac_ui-0.1.0a8-py3-none-any.whl",
     ]
     assert provenance[1] == "-I"
@@ -619,7 +629,7 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     recorded = json.loads(manifest.read_text())
     assert recorded["schema"] == "SmokeDependencyWheels.v1"
     assert [w["filename"] for w in recorded["wheels"]] == [
-        "dotmac_kernel-0.1.0a106+dev-py3-none-any.whl",
+        kernel_wheel,
         "dotmac_ui-0.1.0a8-py3-none-any.whl",
     ]
     assert all(len(w["sha256"]) == 64 for w in recorded["wheels"])

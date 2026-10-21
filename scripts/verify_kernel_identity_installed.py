@@ -128,9 +128,11 @@ def verify_package(receipt: dict[str, object]):
         orm.sessionmaker.__call__ = original_maker_call
 
     version = importlib.metadata.version("dotmac-kernel")
+    expected_version = os.environ.get("IDENTITY_EXPECTED_VERSION")
     require(
-        version == dotmac_kernel.__version__ == "0.1.0a106+dev",
-        "Candidate development version differs",
+        expected_version is not None
+        and version == dotmac_kernel.__version__ == expected_version,
+        "Candidate version differs from source expectation",
     )
     wheel = Path(os.environ["IDENTITY_WHEEL_PATH"]).resolve(strict=True)
     digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
