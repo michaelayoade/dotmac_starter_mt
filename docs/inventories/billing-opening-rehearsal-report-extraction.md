@@ -236,3 +236,27 @@ assembly, duplicate/unknown/mismatched invoice and settlement inputs, propagatio
 of actual originals/effects into manifests and reports, preserved V3 observations
 and refusal to qualify an original alone. These proofs are authored for hosted
 CI; local pinned Ruff and stdlib static checks do not establish runtime acceptance.
+
+## Opening-rehearsal assembly drafter (disposable assembly tooling) — 2026-10-24
+
+`scripts/billing_opening_assembly_drafter.py` is the unpublished read-only
+drafter for the candidate `billing.opening.rehearsal.assembly.v1` file the
+adapter requires (Step 5, Phase A). Inputs are Sub's census wire JSON and a
+closed, declared target-state file (the assembly scalars, the copy's pristine
+position per partition or one shared pristine position, and an optional UUIDv5
+namespace for target account ids). It performs identity mapping only: source
+account, invoice and settlement ids are carried across verbatim, and
+precisions come from the census's declared `currency_precisions`. It computes,
+defaults, rounds and qualifies no financial value, and a partition, invoice or
+settlement it cannot map identically is omitted and counted as a blocker in
+`summary.csv` so the adapter reports it as unmapped. Output is deterministic
+(sorted, canonical JSON; same sha256 across runs), refuses to overwrite, and
+the package parser and single assembly digest are the only judge of validity.
+A draft is not approval: Michael approves the exact digest separately.
+
+Unit tests: `tests/unit/test_billing_opening_assembly_drafter.py`.
+
+Deletion trigger: delete the script and its tests with the adapter, once a
+verified `OpeningWindowSealV1` is stored for the target scope and three
+complete runs have been compared.
+
