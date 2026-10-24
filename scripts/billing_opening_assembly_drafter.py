@@ -242,6 +242,11 @@ def _precisions(declared: Mapping[str, object]) -> dict[str, int]:
     return result
 
 
+def _canonical_json(value: object, *, indent: int | None = None) -> str:
+    """The drafter's one JSON canonicalizer: sorted keys, UTF-8 text."""
+    return json.dumps(value, sort_keys=True, indent=indent, ensure_ascii=False)
+
+
 def draft_assembly(
     census: Mapping[str, object],
     target: Mapping[str, object],
@@ -451,12 +456,9 @@ def draft_assembly(
     }
     # The package is the only judge of a valid declaration and its identity.
     try:
-        parsed = parse_opening_rehearsal_assembly(
-            json.loads(json.dumps(document, sort_keys=True))
-        )
-        if opening_rehearsal_assembly_wire(parsed) != json.loads(
-            json.dumps(document, sort_keys=True)
-        ):
+        normalized = json.loads(_canonical_json(document))
+        parsed = parse_opening_rehearsal_assembly(normalized)
+        if opening_rehearsal_assembly_wire(parsed) != normalized:
             raise _bad("target_state_not_canonical")
         digest = opening_rehearsal_assembly_digest(parsed)
     except OpeningEvidenceError:
@@ -491,9 +493,7 @@ def draft_assembly(
 
 def render_outputs(draft: Draft) -> tuple[str, str]:
     """Deterministic (assembly.json, summary.csv) text for one draft."""
-    assembly_text = (
-        json.dumps(draft.assembly, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
-    )
+    assembly_text = _canonical_json(draft.assembly, indent=2) + "\n"
     assembly_sha = hashlib.sha256(assembly_text.encode()).hexdigest()
     rows: list[tuple[str, str, str]] = [
         ("input", "census_sha256", draft.census_sha256),
@@ -576,10 +576,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_pair(targets, (assembly_text, summary_text))
     except (DraftError, OpeningEvidenceError, OSError) as exc:
         code = exc.code if isinstance(exc, DraftError) else "malformed_input"
-        print(json.dumps({"drafted": False, "refused": code}, sort_keys=True))
+        print(_canonical_json({"drafted": False, "refused": code}))
         return 2
     print(
-        json.dumps(
+        _canonical_json(
             {
                 "drafted": True,
                 "assembly_json_sha256": hashlib.sha256(
@@ -588,8 +588,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "assembly_digest": draft.digest,
                 "summary_csv_sha256": hashlib.sha256(summary_text.encode()).hexdigest(),
                 "blockers": len(draft.blockers),
-            },
-            sort_keys=True,
+            }
         )
     )
     return 1 if draft.blockers else 0
