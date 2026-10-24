@@ -1,8 +1,8 @@
 """Lane 3 same-job broker handoff: the shared wire contract, strict and closed.
 
-Protocol ``dotmac.lane3.broker-handoff.v1``. Both sides import this module: the
-job-side client (``lane3_handoff_client``) and the host-side controller and
-coordinator (``lane3_handoff_controller``, ``lane3_handoff_coordinator``).
+Protocol ``dotmac.lane3.broker-handoff.v1``. The job-side client, host-side
+controller and coordinator that imported this module were removed with the
+retired handoff.
 
 Framing is one request per connection: a 4-byte big-endian unsigned length,
 then one UTF-8 JSON object of at most 8192 bytes and a write-half-close.

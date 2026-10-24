@@ -628,35 +628,6 @@ entitlement grants. Billing may update subscription state, and metering may
 feed quota and/or billing, but request handlers consult local entitlement and
 quota decisions—not payment providers or raw license payloads.
 
-### Lane 3 bounded proof campaign mechanics
-
-The product-owned `scripts/lane3_campaign_management.py` owns the one-shot
-retained-management timer handoff; `lane3_campaign_client.py` owns non-root,
-short-lived proof material and its systemd client; `lane3_campaign_transport.py`
-owns the exact-UID, exact-address SSH-only transport window. The identity helper
-owns only accounts it can prove it created. These operational helpers do not
-change the installed handoff controller or grant deployment authorization.
-The issuer adapter owns its one-shot public certificate exchange and bounded
-supervisor; the bridge owns the ordered management stdio protocol; the runner
-owns qualification before matrix invocation; the remote adapter owns the public
-request/response exchange; and the composition adapter owns stage and cleanup
-ordering. Their canonical implementations are `lane3_campaign_issuer.py`,
-`lane3_campaign_bridge.py`, `lane3_campaign_runner.py`,
-`lane3_campaign_remote.py` and `lane3_campaign_composition.py`. The operator
-adapter, `lane3_campaign_operator.py`, owns the bounded Mac control sequence
-and requires actual archived closure plus a fresh empty runner-group read before
-requesting management removal. `lane3_campaign_invoker.py` owns the bounded
-parent processes and closed management checkpoint. The operator reviews the
-actual protected proof and cleanup before separately invoking the custody and
-B8 exchange; a broker grant never admits that phase. Their JSON envelopes and
-digests describe these
-product-owned protocols, not Foundation
-leases or release-store records. Host-specific inputs, custody material and
-approval records remain private protected deployment inputs. Hosted CI tests
-the canonical source files whose hashes bind deployment. See [the campaign
-evidence boundary](LANE3_PROOF_CAMPAIGN.md). Shipping these helpers is not a live-proof,
-N3 acceptance, Gate-0 acceptance or Foundation allocation.
-
 ### Build and deployment execution: `dotmac-deployment-foundation` (as built, 2026-08-28)
 
 ADR-0003 § "Infrastructure provisioning and deployment execution" declared
@@ -4055,38 +4026,13 @@ source/route/handshake checks and source-bound HTTP over that existing channel;
 it owns no tunnel provisioning, privilege grants or runtime activation. Host
 root/kernel/configuration remain in its stated trust boundary.
 
-The broker-handoff preparation is product-owned source, not an installed
-runtime or Gate 0 acceptance. Its owners and consumers are:
+The broker-handoff controller, coordinator, installer and proof-campaign
+helpers were removed with the retired Lane 3 handoff path. The pinned transport
+that remains is owned as follows:
 
 | Component | Owner and responsibility | Consumer |
 |---|---|---|
-| `lane3_broker_origin.py`, `lane3_handoff_protocol.py` | Starter: exact-origin grammar and bounded, value-free protocol | Controller, coordinator and job client |
-| `lane3_handoff_coordinator.py`, `lane3_handoff_resolver.py` | Starter: authoritative GitHub qualification, immutable source installation, exact DNS capture and durable JIT cleanup | Independently approved host ceremony |
-| `lane3_handoff_coordinator.py::parse_config`, `authority_binding`, `assemble_v2_config`; `lane3_execution.py::require_admission_evidence` | Starter: explicit reviewed proof source capability, v2 qualification/config digest and same-commit admission DATA validation; candidate execution remains unsupported | Existing controller independent approval and measured runtime bundle; explicit private factory adapter |
-| `lane3_campaign_bootstrap.py` | Starter: measure the closed private bootstrap union/observation-age profile, require complete positive-TTL observations and identical chains from both configured TCP resolvers, retain all record/acquisition provenance, and freeze the deduplicated union with 60-second earliest-capture age | Root preview/freeze and the actual coordinator launch path under the original campaign deadline; broker TTL/grant policy remains separately owned |
-| `lane3_handoff_controller.py` | Starter: root lease journal, task identity, UID-scoped firewall, launch budget, exact-owned rollback and fresh read-only WireGuard checks | Coordinator and authenticated consumed-lease client over the private socket |
-| `lane3_handoff_install.py` | Starter: immutable installation bundle, protected independent configuration, locked management dispatch, durable install rollback, explicit uninstall and boot-readiness barrier | Host administrator and the fixed coordinator management channel |
-| `lane3_handoff_bootstrap.py`, `lane3_handoff_client.py` | Starter: verify staged bytes before supplier imports; consume the job-bound grant using the original launch budget | Protected launcher amendment, separately reviewed |
 | `lane3_github_oidc.py` pinned transport | Starter: TLS identity and exact numeric destination; persist request-start evidence before sending credentials | Explicit topology-source composition |
-
-The launcher must wire request-start and proof-outcome events explicitly.
-The KV proof outcome is runner-reported, not independently observed by root.
-After request start, issuance remains `UNKNOWN`; a bounded KV proof records
-its own result and does not prove whether an issuance occurred. Root-owned
-configuration, finite independently approved origins, GitHub API authority,
-host kernel and custody remain trust assumptions. Hosted synthetic coverage
-does not establish the composed production rollback/reboot proof. Installation,
-human review of the launcher and its source-policy change, protected-run
-approval and Gate 0 acceptance remain separate; `admission_evidence` is null.
-
-The pinned WireGuard composition requires the lease client's root-check
-callback; missing or failed checks never fall back to job-side sudo. Each
-request compares the consumer's canonical five-field channel digest with the
-fixed protected live configuration, performs fresh public-state checks and
-returns only a fixed status. No caller-selected command or path crosses this
-boundary. Runner `NoNewPrivileges` remains enabled. Synthetic root command
-metadata proves callback/socket behavior, not real kernel WireGuard state or
-the complete production systemd composition.
 
 ### Tax policy adjustment provenance (2026-10-13)
 

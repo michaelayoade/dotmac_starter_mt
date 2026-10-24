@@ -220,7 +220,7 @@ def github_openbao_source(
     fields. This does not activate the default source or alter job permissions.
 
     ``oidc_pinned`` is an optional ``lane3_github_oidc.PinnedBrokerTarget`` built
-    from a verified handoff grant (``lane3_handoff_client``). When given, the
+    from a verified handoff grant. When given, the
     token request connects only to that grant's numeric address. When omitted,
     the legacy connect-time hostname resolution is kept for existing callers
     that have no handoff grant.
