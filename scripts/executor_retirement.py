@@ -891,7 +891,8 @@ def parse_ssh_constraint(row: Any, where: str) -> SshConstraint:
             )
     if row["restrict"] not in RESTRICT_STATES:
         raise InventoryError(
-            f"{where}: ssh_constraint `restrict` must be one of {list(RESTRICT_STATES)}"
+            f"{where}: ssh_constraint `restrict` must be one of "
+            f"{list(RESTRICT_STATES)}"
         )
     if not row["fingerprint"].startswith("SHA256:"):
         raise InventoryError(
@@ -2067,7 +2068,7 @@ def coverage(
             f"{', '.join(live.families_declaration_only) or 'none'}"
         )
         lines.append(
-            f"    declared ABSENT: {', '.join(live.families_absent) or 'none'}"
+            "    declared ABSENT: " f"{', '.join(live.families_absent) or 'none'}"
         )
         if live.tree_only_absences:
             lines.append(
@@ -2756,7 +2757,8 @@ def _validate_no_return(raw: dict, source: str, status: str, inventory) -> None:
         _coordinate(row, where, ("identity", "disposition_after"))
         _require(
             row["disposition_after"] in MECHANISM_DISPOSITIONS,
-            f"{where}: disposition_after must be one of {list(MECHANISM_DISPOSITIONS)}",
+            f"{where}: disposition_after must be one of "
+            f"{list(MECHANISM_DISPOSITIONS)}",
         )
         accounted.add(row["identity"])
 

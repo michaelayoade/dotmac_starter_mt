@@ -292,7 +292,8 @@ def cmd_resolve(args: argparse.Namespace) -> None:
 
     if poetry["name"] != args.distribution:
         raise ReleaseRefused(
-            f"pyproject declares {poetry['name']!r}, dispatched {args.distribution!r}"
+            f"pyproject declares {poetry['name']!r}, dispatched "
+            f"{args.distribution!r}"
         )
     if args.version and poetry["version"] != args.version:
         raise ReleaseRefused(

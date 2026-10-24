@@ -1061,8 +1061,8 @@ class SystemBackend:
         for s in specs:
             proto = "ip" if ipaddress.ip_address(s["address"]).version == 4 else "ip6"
             lines.append(
-                f"insert rule inet {self.table} {self.chain_name} position {anchor} "
-                f"meta skuid {uid} {proto} daddr {s['address']} tcp dport 22 "
+                f'insert rule inet {self.table} {self.chain_name} position {anchor} '
+                f'meta skuid {uid} {proto} daddr {s["address"]} tcp dport 22 '
                 f'ct state new counter accept comment "{s["comment"]}"'
             )
         self.run(["/usr/sbin/nft", "-f", "-"], ("\n".join(lines) + "\n").encode())

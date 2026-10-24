@@ -516,7 +516,8 @@ def parse_module_release_verifications(
             # null for a tag its own run created; otherwise the DIFFERENT
             # recovery run that adopted a tag the original run had written.
             raise ReleaseRecordError(
-                f"module verification {row.get('tag')} has an invalid adopting_run_id"
+                f"module verification {row.get('tag')} has an invalid "
+                "adopting_run_id"
             )
         tag = row["tag"]
         distribution, version = _coordinate(tag, targets=governed)

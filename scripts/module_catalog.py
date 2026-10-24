@@ -421,7 +421,8 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
             expected_dir = package_dir.relative_to(repo_root).as_posix()
             if adapter_entry.get("package_dir") != expected_dir:
                 raise CatalogError(
-                    f"{distribution}: adapter package_dir disagrees with {expected_dir}"
+                    f"{distribution}: adapter package_dir disagrees with "
+                    f"{expected_dir}"
                 )
             if classification != "stateless-protocol-adapter":
                 raise CatalogError(

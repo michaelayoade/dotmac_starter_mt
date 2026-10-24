@@ -73,7 +73,7 @@ def verify_wheel(wheel: Path, module: str) -> None:
                     r"\b(?:_?mpd_|dm_|MPD_)\w*", symbols
                 ):
                     raise RuntimeError(
-                        "Decimal must be statically linked with private symbols"
+                        "Decimal must be statically linked " "with private symbols"
                     )
 
 
