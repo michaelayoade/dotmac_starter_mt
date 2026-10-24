@@ -162,8 +162,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
 
     if manifest["name"] != args.distribution:
         raise ReleaseRefused(
-            f"pyproject declares {manifest['name']!r}, dispatched "
-            f"{args.distribution!r}"
+            f"pyproject declares {manifest['name']!r}, dispatched {args.distribution!r}"
         )
     # A FROZEN CANDIDATE'S IDENTITY COMES FROM ITS RECEIPT, NOT FROM SOURCE.
     #

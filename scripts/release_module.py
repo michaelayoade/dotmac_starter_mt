@@ -107,8 +107,7 @@ def _manifest_keywords(entry: dict) -> dict[str, ast.expr]:
     path = entry["package_path"] / "src" / entry["import_name"] / "manifest.py"
     if not path.is_file():
         raise ReleaseRefused(
-            f"{entry['distribution']}: no manifest.py at "
-            f"{path.relative_to(REPO_ROOT)}"
+            f"{entry['distribution']}: no manifest.py at {path.relative_to(REPO_ROOT)}"
         )
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -506,8 +505,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
 
     if manifest["name"] != args.distribution:
         raise ReleaseRefused(
-            f"pyproject declares {manifest['name']!r}, dispatched "
-            f"{args.distribution!r}"
+            f"pyproject declares {manifest['name']!r}, dispatched {args.distribution!r}"
         )
     if args.version and manifest["version"] != args.version:
         raise ReleaseRefused(

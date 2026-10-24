@@ -43,6 +43,11 @@ INVOICE_1 = "00000000-0000-0000-0000-000000000001"
 SETTLEMENT_1 = "00000000-0000-0000-0000-000000001001"
 PAYMENT_1 = "00000000-0000-0000-0000-000000002001"
 NAMESPACE = "00000000-0000-0000-0000-0000000000f0"
+DERIVATION = {
+    "method": "uuid5",
+    "namespace": NAMESPACE,
+    "name_format": "fixture-name|{source_account_id}|{currency}",
+}
 
 
 def _fixture(name):
@@ -55,7 +60,8 @@ def _target(**overrides):
     state.update(
         schema=drafter.TARGET_STATE_SCHEMA,
         account_id_derivation=None,
-        pristine_position=None,
+        idempotency_key_format="fixture-key:{source_account_id}:{currency}",
+        pristine_positions=None,
         partition_targets=[
             {
                 "source_account_id": ACCOUNT,
@@ -166,7 +172,7 @@ def test_missing_target_account_is_a_blocker_never_a_default():
 def test_derived_target_accounts_need_a_declared_namespace_and_pristine_position():
     only_namespace = _target(
         partition_targets=[],
-        account_id_derivation={"method": "uuid5", "namespace": NAMESPACE},
+        account_id_derivation=DERIVATION,
     )
     draft = _draft(target=only_namespace)
     assert "target_position_unavailable" in _codes(draft)
@@ -174,16 +180,20 @@ def test_derived_target_accounts_need_a_declared_namespace_and_pristine_position
 
     full = _target(
         partition_targets=[],
-        account_id_derivation={"method": "uuid5", "namespace": NAMESPACE},
-        pristine_position={
-            "expected_position_fingerprint": "pristine-fp",
-            "posting_watermark": "wm:0",
+        account_id_derivation=DERIVATION,
+        pristine_positions={
+            "NGN": {
+                "expected_position_fingerprint": "pristine-fp",
+                "posting_watermark": "wm:0",
+            }
         },
     )
     draft = _draft(target=full)
     assert draft.blockers == []
     (partition,) = draft.assembly["partitions"]
-    assert partition["account_id"] == str(uuid5(UUID(NAMESPACE), f"{ACCOUNT}:NGN"))
+    assert partition["account_id"] == str(
+        uuid5(UUID(NAMESPACE), f"fixture-name|{ACCOUNT}|NGN")
+    )
     assert partition["expected_position_fingerprint"] == "pristine-fp"
 
 
@@ -406,14 +416,17 @@ def test_drafter_is_registered_as_transitional_with_a_deletion_trigger():
         (ROOT / "packages/dotmac-billing/EXTRACTION.toml").read_text(encoding="utf-8")
     )
     note = extraction["source_mode_note"]
-    assert "scripts/billing_opening_assembly_drafter.py" in note
-    assert "deleted once" in note
+    entry = note.split("scripts/billing_opening_assembly_drafter.py", 1)[1]
+    entry = entry.split(". ", 1)[0] + ". " + entry.split(". ", 2)[1]
+    assert "identity mapping only" in entry
+    assert "is deleted" in entry and "OpeningWindowSealV1" in entry
     inventory = (
         ROOT / "docs/inventories/billing-opening-rehearsal-report-extraction.md"
     ).read_text(encoding="utf-8")
     section = inventory.split("## Opening-rehearsal assembly drafter", 1)[1]
     assert "Deletion trigger" in section
     assert "identity mapping only" in section
+    assert "OpeningWindowSealV1" in section
 
 
 def test_sub_serializer_output_drafts_and_runs_through_the_adapter(tmp_path, capsys):
@@ -442,3 +455,73 @@ def test_sub_serializer_output_drafts_and_runs_through_the_adapter(tmp_path, cap
         assert artifact.unmapped.invoices == ()
         rendered.append(adapter.render_opening_rehearsal_census(artifact))
     assert rendered[0] == rendered[1]
+
+
+def test_pristine_positions_are_per_currency_never_shared_across_currencies():
+    census = _fixture("census_one_eligible_v2.json")
+    draft = _draft(
+        census,
+        _target(
+            partition_targets=[],
+            account_id_derivation=DERIVATION,
+            pristine_positions={
+                "USD": {
+                    "expected_position_fingerprint": "usd-fp",
+                    "posting_watermark": "usd:0",
+                }
+            },
+        ),
+    )
+    assert "target_position_unavailable" in _codes(draft)
+    assert draft.assembly["partitions"] == []
+
+
+def test_formats_are_declared_inputs_with_no_defaults():
+    target = _target()
+    del target["idempotency_key_format"]
+    with pytest.raises(drafter.DraftError):
+        _draft(target=target)
+    no_name = _target(account_id_derivation={"method": "uuid5", "namespace": NAMESPACE})
+    with pytest.raises(drafter.DraftError):
+        _draft(target=no_name)
+    for bad in ("{amount}", "{currency!r}", "{currency:>5}", "{", ""):
+        with pytest.raises(drafter.DraftError):
+            _draft(target=_target(idempotency_key_format=bad))
+    draft = _draft(_census_with_settlement())
+    (partition,) = draft.assembly["partitions"]
+    assert partition["idempotency_key"] == f"fixture-key:{ACCOUNT}:NGN"
+
+
+def test_precision_mismatch_invoice_is_blocked_not_mapped():
+    payload = _census_with_settlement()
+    payload["invoices"][0]["precision"] = 3
+    draft = _draft(payload)
+    assert "invoice_precision_mismatch" in _codes(draft)
+    assert draft.assembly["invoice_mappings"] == []
+    assert "settlement_invoice_unmapped" in _codes(draft)
+
+
+def test_duplicate_settlements_are_all_blocked_not_first_wins():
+    payload = _census_with_settlement()
+    payload["settlements"].append(dict(payload["settlements"][0]))
+    draft = _draft(payload)
+    assert _codes(draft).count("duplicate_census_settlement") == 1
+    assert draft.assembly["discharge_mappings"] == []
+
+
+def test_failed_second_rename_leaves_nothing(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    real = drafter.os.replace
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise OSError("boom")
+        real(src, dst)
+
+    monkeypatch.setattr(drafter.os, "replace", flaky)
+    with pytest.raises(OSError):
+        drafter._write_pair((out / "assembly.json", out / "summary.csv"), ("a", "b"))
+    assert list(out.iterdir()) == []

@@ -9,7 +9,7 @@ declares the rehearsal copy's coordinates and pristine partition positions.
 It maps identities only. Source account, invoice and settlement identifiers are
 carried across verbatim (or, for target accounts, derived by an explicitly
 declared UUIDv5 namespace). It never invents, defaults, rounds or computes a
-financial value: no amount, residual, fingerprint, watermark or precision is
+financial value: no amount, residual, fingerprint, posting mark or precision is
 ever produced here. Anything it cannot map identically is reported as a
 blocker, and the unmappable partition/invoice/settlement is left out of the
 candidate so the adapter reports it as unmapped. The draft is neither an
@@ -30,6 +30,7 @@ import hashlib
 import io
 import json
 import os
+import string
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -74,7 +75,13 @@ _SCALAR_KEYS = (
     "accepted_manual_holds",
 )
 _TARGET_KEYS = frozenset(
-    {"schema", "account_id_derivation", "pristine_position", "partition_targets"}
+    {
+        "schema",
+        "account_id_derivation",
+        "idempotency_key_format",
+        "pristine_positions",
+        "partition_targets",
+    }
     | set(_SCALAR_KEYS)
 )
 _PARTITION_TARGET_KEYS = frozenset(
@@ -87,7 +94,8 @@ _PARTITION_TARGET_KEYS = frozenset(
     }
 )
 _PRISTINE_KEYS = frozenset({"expected_position_fingerprint", "posting_watermark"})
-_DERIVATION_KEYS = frozenset({"method", "namespace"})
+_DERIVATION_KEYS = frozenset({"method", "namespace", "name_format"})
+_FORMAT_FIELDS = frozenset({"source_account_id", "currency"})
 _MAPPABLE_SETTLEMENT_KINDS = frozenset({"payment", "credit_note"})
 
 
@@ -177,6 +185,21 @@ def _read_json(path: Path, code: str) -> tuple[bytes, Mapping[str, object]]:
     return raw, _obj(value, code)
 
 
+def _template(value: object) -> str:
+    """A declared format using only the two identity fields; nothing defaults."""
+    text = _text(value, "malformed_target_state")
+    try:
+        parsed = list(string.Formatter().parse(text))
+    except ValueError:
+        raise _bad("malformed_target_state") from None
+    for _literal, name, spec, conversion in parsed:
+        if name is None:
+            continue
+        if name not in _FORMAT_FIELDS or spec or conversion:
+            raise _bad("malformed_target_state")
+    return text
+
+
 def _target_state(payload: Mapping[str, object]) -> Mapping[str, object]:
     root = _closed(payload, _TARGET_KEYS, "malformed_target_state")
     if root["schema"] != TARGET_STATE_SCHEMA:
@@ -187,11 +210,15 @@ def _target_state(payload: Mapping[str, object]) -> Mapping[str, object]:
         if row["method"] != "uuid5":
             raise _bad("malformed_target_state")
         _uuid(row["namespace"], "malformed_target_state")
-    pristine = root["pristine_position"]
+        _template(row["name_format"])
+    _template(root["idempotency_key_format"])
+    pristine = root["pristine_positions"]
     if pristine is not None:
-        row = _closed(pristine, _PRISTINE_KEYS, "malformed_target_state")
-        _text(row["expected_position_fingerprint"], "malformed_target_state")
-        _text(row["posting_watermark"], "malformed_target_state")
+        for currency, entry in _obj(pristine, "malformed_target_state").items():
+            _text(currency, "malformed_target_state")
+            row = _closed(entry, _PRISTINE_KEYS, "malformed_target_state")
+            _text(row["expected_position_fingerprint"], "malformed_target_state")
+            _text(row["posting_watermark"], "malformed_target_state")
     for item in _list(root["partition_targets"], "malformed_target_state"):
         row = _closed(item, _PARTITION_TARGET_KEYS, "malformed_target_state")
         _uuid(row["source_account_id"], "malformed_target_state")
@@ -282,10 +309,12 @@ def draft_assembly(
         )
     derivation = target["account_id_derivation"]
     namespace = _uuid(_obj(derivation)["namespace"]) if derivation is not None else None
+    name_format = _template(_obj(derivation)["name_format"]) if derivation else ""
+    key_format = _template(target["idempotency_key_format"])
     pristine = (
-        _obj(target["pristine_position"])
-        if target["pristine_position"] is not None
-        else None
+        _obj(target["pristine_positions"])
+        if target["pristine_positions"] is not None
+        else {}
     )
     resolved: dict[tuple[UUID, str], dict[str, object]] = {}
     for account, currency in sorted(universe, key=lambda k: (str(k[0]), k[1])):
@@ -297,29 +326,34 @@ def draft_assembly(
         if row is not None:
             target_account = _uuid(row["account_id"])
             fingerprint = _text(row["expected_position_fingerprint"])
-            watermark = _text(row["posting_watermark"])
+            position_mark = _text(row["posting_watermark"])
         else:
             if namespace is None:
                 blockers.append(Blocker("target_account_unavailable", reference))
                 continue
-            target_account = uuid5(namespace, f"{account}:{currency}")
-            if pristine is None:
+            target_account = uuid5(
+                namespace,
+                name_format.format_map(
+                    {"source_account_id": str(account), "currency": currency}
+                ),
+            )
+            position = pristine.get(currency)
+            if position is None:
                 blockers.append(Blocker("target_position_unavailable", reference))
                 continue
-            fingerprint = _text(pristine["expected_position_fingerprint"])
-            watermark = _text(pristine["posting_watermark"])
+            fingerprint = _text(_obj(position)["expected_position_fingerprint"])
+            position_mark = _text(_obj(position)["posting_watermark"])
         resolved[(account, currency)] = {
             "source_account_id": str(account),
             "source_account_key": f"source-account:{account}",
             "account_id": str(target_account),
             "currency": currency,
             "precision": precisions[currency],
-            "idempotency_key": (
-                f"opening-rehearsal:{_text(target['account_mapping_version'])}:"
-                f"{account}:{currency}"
+            "idempotency_key": key_format.format_map(
+                {"source_account_id": str(account), "currency": currency}
             ),
             "expected_position_fingerprint": fingerprint,
-            "posting_watermark": watermark,
+            "posting_watermark": position_mark,
         }
     # One target account may back only one source partition.
     by_target: dict[str, list[tuple[UUID, str]]] = {}
@@ -349,6 +383,7 @@ def draft_assembly(
         declared_precision = precisions[str(currency)]
         if row.get("precision") != declared_precision:
             blockers.append(Blocker("invoice_precision_mismatch", str(invoice_id)))
+            continue
         invoice_mappings.append(
             {
                 "source_invoice_id": str(invoice_id),
@@ -360,7 +395,8 @@ def draft_assembly(
 
     # --- discharge mappings (active settlements on eligible invoices) -------
     discharge_mappings: list[dict[str, object]] = []
-    seen_settlements: set[tuple[str, UUID]] = set()
+    in_scope: list[tuple[Mapping[str, object], UUID, str, UUID]] = []
+    occurrences: dict[tuple[str, UUID], int] = {}
     for item in _list(census.get("settlements")):
         row = _obj(item)
         invoice_id = _uuid(row.get("invoice_id"))
@@ -368,11 +404,17 @@ def draft_assembly(
             continue
         kind = _text(row.get("kind"))
         settlement_id = _uuid(row.get("id"))
+        in_scope.append((row, invoice_id, kind, settlement_id))
+        key = (kind, settlement_id)
+        occurrences[key] = occurrences.get(key, 0) + 1
+    for _kind, settlement_id in sorted(
+        (k for k, n in occurrences.items() if n > 1), key=str
+    ):
+        blockers.append(Blocker("duplicate_census_settlement", str(settlement_id)))
+    for row, invoice_id, kind, settlement_id in in_scope:
         reference = str(settlement_id)
-        if (kind, settlement_id) in seen_settlements:
-            blockers.append(Blocker("duplicate_census_settlement", reference))
+        if occurrences[(kind, settlement_id)] > 1:
             continue
-        seen_settlements.add((kind, settlement_id))
         if kind not in _MAPPABLE_SETTLEMENT_KINDS:
             blockers.append(Blocker("unsupported_settlement_kind", reference, kind))
             continue
@@ -485,10 +527,26 @@ def render_outputs(draft: Draft) -> tuple[str, str]:
     return assembly_text, buffer.getvalue()
 
 
-def _write_new(path: Path, text: str) -> None:
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(text)
+def _write_pair(targets: tuple[Path, Path], texts: tuple[str, str]) -> None:
+    """Write both files to private temps, then rename both; else leave nothing."""
+    temps: list[Path] = []
+    renamed: list[Path] = []
+    try:
+        for target, text in zip(targets, texts, strict=True):
+            temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+            descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            temps.append(temp)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(text)
+        for temp, target in zip(temps, targets, strict=True):
+            if target.exists():
+                raise _bad("output_exists")
+            os.replace(temp, target)
+            renamed.append(target)
+    except BaseException:
+        for path in (*temps, *renamed):
+            path.unlink(missing_ok=True)
+        raise
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -515,8 +573,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         targets = (out_dir / "assembly.json", out_dir / "summary.csv")
         if any(path.exists() for path in targets):
             raise _bad("output_exists")
-        _write_new(targets[0], assembly_text)
-        _write_new(targets[1], summary_text)
+        _write_pair(targets, (assembly_text, summary_text))
     except (DraftError, OpeningEvidenceError, OSError) as exc:
         code = exc.code if isinstance(exc, DraftError) else "malformed_input"
         print(json.dumps({"drafted": False, "refused": code}, sort_keys=True))

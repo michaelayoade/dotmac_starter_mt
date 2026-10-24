@@ -284,8 +284,7 @@ def _await_completed(
     while run.get("status") != "completed":
         if elapsed >= wait_seconds:
             raise ProvenanceError(
-                f"{label} run {run_id} is still running after waiting "
-                f"{wait_seconds}s"
+                f"{label} run {run_id} is still running after waiting {wait_seconds}s"
             )
         sleep(poll_seconds)
         elapsed += poll_seconds
@@ -1010,8 +1009,7 @@ def main(argv: list[str] | None = None) -> int:
         commit_result = _git("rev-parse", f"{tag}^{{commit}}")
         if commit_result.returncode != 0:
             print(
-                f"module release provenance REFUSED: cannot resolve {tag} to a "
-                "commit",
+                f"module release provenance REFUSED: cannot resolve {tag} to a commit",
                 file=sys.stderr,
             )
             return 1

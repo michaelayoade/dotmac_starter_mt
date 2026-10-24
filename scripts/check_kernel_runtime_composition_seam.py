@@ -188,9 +188,9 @@ def main() -> None:
     app = create_app(spec)
     # `resolve_database_runtime()` must already resolve to the installed runtime
     # the instant `create_app` returns — before any request, before lifespan.
-    assert (
-        resolve_database_runtime() is runtime
-    ), "create_app(spec) did not install spec.database_runtime"
+    assert resolve_database_runtime() is runtime, (
+        "create_app(spec) did not install spec.database_runtime"
+    )
     with TestClient(app) as client:
         # Entering the context manager runs the ASGI lifespan, which is where
         # `_required_setting_errors()` calls
@@ -290,9 +290,9 @@ def main() -> None:
         dispatcher_db.close()
 
     # ── the reference runtime was never reached, anywhere above ─────────────
-    assert (
-        sys.modules.get("dotmac_kernel.db") is None
-    ), "dotmac_kernel.db was imported during the probe"
+    assert sys.modules.get("dotmac_kernel.db") is None, (
+        "dotmac_kernel.db was imported during the probe"
+    )
     print("PASS dotmac_kernel.db stayed unimported for the whole probe")
 
 
@@ -331,9 +331,9 @@ def main_strict_refusal() -> None:
     try:
         create_app(spec)
     except RuntimeError as exc:
-        assert "require_database_runtime" in str(
-            exc
-        ), f"create_app refused for the wrong reason: {exc}"
+        assert "require_database_runtime" in str(exc), (
+            f"create_app refused for the wrong reason: {exc}"
+        )
     else:
         raise AssertionError(
             "create_app built successfully with require_database_runtime=True "
@@ -876,9 +876,9 @@ def main_reference_import_after_strict_bind() -> None:
     try:
         import dotmac_kernel.db  # noqa: F401
     except RuntimeError as exc:
-        assert "already sealed a REQUIRED" in str(
-            exc
-        ), f"the import refused, but for the wrong reason: {exc}"
+        assert "already sealed a REQUIRED" in str(exc), (
+            f"the import refused, but for the wrong reason: {exc}"
+        )
     else:
         raise AssertionError(
             "dotmac_kernel.db imported successfully AFTER a strict binding "

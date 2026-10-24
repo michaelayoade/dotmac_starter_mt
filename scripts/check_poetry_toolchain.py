@@ -84,9 +84,7 @@ def active_version(output: str) -> str:
 def require_match(wanted: str, actual: str, surface: str) -> None:
     """Reject version drift with the owning and derived surfaces named."""
     if actual != wanted:
-        _fail(
-            f"{surface} uses Poetry {actual}, but pyproject.toml requires " f"{wanted}"
-        )
+        _fail(f"{surface} uses Poetry {actual}, but pyproject.toml requires {wanted}")
 
 
 def validate_repository(bootstrap_paths: list[Path] | None = None) -> str:

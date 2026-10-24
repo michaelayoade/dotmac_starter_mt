@@ -864,8 +864,7 @@ def _run_window(args: argparse.Namespace) -> int:
     if args.write:
         WINDOW_BASELINE_PATH.write_text(render_window_baseline(rows), encoding="utf-8")
         print(
-            f"wrote {WINDOW_BASELINE_PATH.relative_to(REPO_ROOT)} "
-            f"({len(rows)} row(s))"
+            f"wrote {WINDOW_BASELINE_PATH.relative_to(REPO_ROOT)} ({len(rows)} row(s))"
         )
         return EXIT_OK
 

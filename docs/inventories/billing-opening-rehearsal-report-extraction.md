@@ -243,15 +243,16 @@ CI; local pinned Ruff and stdlib static checks do not establish runtime acceptan
 drafter for the candidate `billing.opening.rehearsal.assembly.v1` file the
 adapter requires (Step 5, Phase A). Inputs are Sub's census wire JSON and a
 closed, declared target-state file (the assembly scalars, the copy's pristine
-position per partition or one shared pristine position, and an optional UUIDv5
-namespace for target account ids). It performs identity mapping only: source
+position per partition or per currency, the declared idempotency-key format,
+and an optional UUIDv5 namespace plus declared name format for target account
+ids; none of these has a default and a missing one refuses). It performs identity mapping only: source
 account, invoice and settlement ids are carried across verbatim, and
 precisions come from the census's declared `currency_precisions`. It computes,
 defaults, rounds and qualifies no financial value, and a partition, invoice or
 settlement it cannot map identically is omitted and counted as a blocker in
 `summary.csv` so the adapter reports it as unmapped. Output is deterministic
 (sorted, canonical JSON; same sha256 across runs), refuses to overwrite, and
-the package parser and single assembly digest are the only judge of validity.
+output is written atomically (both files or neither), and the package parser and single assembly digest are the only judge of validity. Discharge references are `<kind>:<settlement_id>`.
 A draft is not approval: Michael approves the exact digest separately.
 
 Unit tests: `tests/unit/test_billing_opening_assembly_drafter.py`.

@@ -345,8 +345,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.smoke_dependencies is None:
             raise ReleaseRecordError(
-                "--smoke-dependencies is required when creating or re-accepting "
-                "a tag"
+                "--smoke-dependencies is required when creating or re-accepting a tag"
             )
         smoke_wheels = read_smoke_dependencies(args.smoke_dependencies)
         wheel_filename, wheel_sha256 = module_wheel_digest(

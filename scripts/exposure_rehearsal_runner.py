@@ -693,7 +693,7 @@ def _collect_probe_phase(args: argparse.Namespace) -> dict:
     if completed.returncode != 0:
         raise ProbeRefused(
             # No argv here: it carries the private vantage and target.
-            "the probe phase refused: " f"{completed.stderr.strip() or 'no stderr'}"
+            f"the probe phase refused: {completed.stderr.strip() or 'no stderr'}"
         )
     try:
         return json.loads(completed.stdout)
