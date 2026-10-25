@@ -1,0 +1,6 @@
+{command}
+  VERSION : LABOLTV000R000C00
+  PRODUCT : LAB-OLT
+  Uptime is 0 day(s), 0 hour(s), 1 minute(s)
+
+lab-olt#

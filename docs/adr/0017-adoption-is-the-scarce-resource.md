@@ -31,6 +31,20 @@ does not authorize a provider switch in one plugin, a provider branch in the
 Integrator engine or assembly, product identifiers in provider metadata, or a
 financial lifecycle decision in a connector.
 
+## Amendment, 2026-10-25: owner-directed exception for `dotmac-device-cli`
+
+Michael approved, on 2026-10-25, that device CLI knowledge and dialogue logic is
+built once in Starter (ADR-0077). This lifts decision 2's moratorium for exactly
+one named unit: `dotmac-device-cli` (stateless capability profiles, dialect
+interface, dialogue state machine over an injected channel, response classifier
+and limiter policy; no I/O, credentials or transport). It is an owner-directed
+exception like those for `dotmac-files`, `dotmac-imports`, `dotmac-approvals` and
+`dotmac-auth-oidc`, not evidence that a product is independently blocked, and not
+a general route for an unnamed network or provider facility. Product-first
+treatment, dossier states, the adoption test and the release ordering are
+unchanged and are set out in ADR-0077; no adoption is claimed and the dossier
+stays `audit-complete` until a real Sub cutover retires a local implementation.
+
 ## Amendment, 2026-08-18: Backoffice replacement retires ERP authority first
 
 ADR-0006's 2026-08-18 vertical-replacement amendment resolves how

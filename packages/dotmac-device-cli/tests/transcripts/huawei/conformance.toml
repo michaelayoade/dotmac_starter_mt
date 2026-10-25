@@ -1,0 +1,13 @@
+# Samples the conformance suite checks every Huawei profile against.
+# All prompts and addresses are synthetic.
+
+[prompts]
+user = "lab-olt>"
+privileged = "lab-olt#"
+config = "lab-olt(config)#"
+interface = ["lab-olt(config-if-gpon-0/1)#"]
+not_a_prompt = ["  { <cr>||<K> }:", "---- More ( Press 'Q' to break ) ----", "Are you sure? (y/n)[n]:"]
+
+[refs]
+samples = ["0/2/1", "0/ 2/1", "0/2/1 5", "0/2/1:5", "0/ 2/1 5"]
+invalid = ["gpon-onu_0/1/2:3", "0/2", "abc", ""]

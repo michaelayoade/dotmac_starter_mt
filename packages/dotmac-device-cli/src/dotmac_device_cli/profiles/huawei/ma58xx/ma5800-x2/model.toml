@@ -1,0 +1,6 @@
+[layer]
+id = "huawei-ma5800-x2"
+kind = "model"
+
+[profile]
+model_patterns = ["MA5800-X2"]

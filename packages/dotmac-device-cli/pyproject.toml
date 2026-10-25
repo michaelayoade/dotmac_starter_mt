@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "dotmac-device-cli"
+version = "0.1.0a1"
+description = "Stateless device CLI knowledge and dialogue logic (capability profiles, prompt/pager/confirmation state machine, response classification, parsers, limiter policy). No transport, credentials or I/O."
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_device_cli", from = "src" }]
+include = [
+    { path = "src/dotmac_device_cli/py.typed", format = ["sdist", "wheel"] },
+    # Capability profiles are data and ship inside the wheel.
+    { path = "src/dotmac_device_cli/profiles/**/*.toml", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# Standard library only (ADR-0077). No kernel floor: a consumer never raises its
+# kernel pin to read a library. TOML profiles are read with `tomllib`.
+python = ">=3.11,<3.14"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

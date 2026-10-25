@@ -1,0 +1,22 @@
+{command}
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side
+  -----------------------------------------------------------------------------
+  0/2/1      0  4857544300000001  active      online   normal   match    no 
+  0/2/1      1  4857544300000002  active      offline  initial  initial  no 
+  0/2/1      2  4857544300000003  active      online   normal   match    no 
+  -----------------------------------------------------------------------------
+  { <cr>||<K> }:
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/2/1       0   CUSTOMER_01_zone_Zone_1_authd_20240101
+  0/2/1       1   CUSTOMER_02_zone_Zone_1_authd_20240101
+                   -synthetic-wrap-a_,
+                   synthetic-wrap-b
+  0/2/1       2   CUSTOMER_03_zone_Zone_1_authd_20240101
+  -----------------------------------------------------------------------------
+  In port 0/2/1, the total of ONTs are: 3, online: 2
+  -----------------------------------------------------------------------------
+
+lab-olt#

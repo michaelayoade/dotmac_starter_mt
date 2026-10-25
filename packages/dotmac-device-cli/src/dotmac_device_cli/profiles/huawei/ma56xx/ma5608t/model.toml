@@ -1,0 +1,6 @@
+[layer]
+id = "huawei-ma5608t"
+kind = "model"
+
+[profile]
+model_patterns = ["MA5608T"]
