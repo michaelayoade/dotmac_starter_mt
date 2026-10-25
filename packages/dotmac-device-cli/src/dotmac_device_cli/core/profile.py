@@ -261,7 +261,7 @@ def _int(data: Mapping[str, Any], key: str, path: str, *, minimum: int = 0) -> i
     value = data[key]
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ProfileError(f"{path}.{key}: integer >= {minimum} required")
-    return value
+    return int(value)
 
 
 def _num(data: Mapping[str, Any], key: str, path: str) -> float:
