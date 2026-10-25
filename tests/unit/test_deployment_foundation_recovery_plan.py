@@ -730,34 +730,10 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "foundation_candidate.py": 1,
     "foundation_disposition.py": 1,
     "kernel_release_authorization.py": 1,
-    # Campaign records are product-owned host lifecycle documents, never
-    # Foundation leases/releases. Client owns its approval/material/closure
-    # encoding; identity owns its account journal and independently verifies
-    # the transport manifest digest before releasing a UID. Management owns
-    # the immutable callback binding. Transport owns its manifest/baseline
-    # digest, durable state encoding and two value-free CLI receipt shapes.
-    # Composition owns the original deadline envelope; remote owns its exact
-    # public exchange manifest; runner owns its material and execution views.
-    # These are campaign protocols, never Foundation release-store documents.
-    "lane3_campaign_client.py": 1,
-    "lane3_campaign_composition.py": 1,
-    "lane3_campaign_identity.py": 2,
-    "lane3_campaign_management.py": 1,
-    "lane3_campaign_remote.py": 1,
-    "lane3_campaign_runner.py": 2,
-    "lane3_campaign_transport.py": 4,
-    # The pre-import bootstrap hashes the supplier module map before protocol
-    # code is trusted; it cannot import that code to serialize its own admission
-    # input. This digest is not a Foundation store or host-lease release record.
-    "lane3_handoff_bootstrap.py": 1,
     # The Lane 3 broker-handoff wire contract's canonical JSON
     # (`lane3_handoff_protocol.canonical_json`): it defines `grant_digest` and
     # every handoff digest, is owned by that protocol module, and is written to
     # no Foundation store; it is not a host-lease release record.
-    # The host installer owns its immutable bundle/config and transaction
-    # encoding; these are local installation records, not Foundation release
-    # documents. It must verify runtime bytes before importing the protocol.
-    "lane3_handoff_install.py": 1,
     "lane3_handoff_protocol.py": 1,
     "lane3_runner_capability.py": 1,
     "palette_debt_baseline.py": 1,
