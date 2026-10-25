@@ -778,6 +778,11 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # the final installed-pair qualification receipt. None writes a Learning
     # operational store or a Foundation lease/release/attestation document.
     "verify_learning_installed.py": 3,
+    # The opening-rehearsal assembly drafter owns its candidate
+    # `billing.opening.rehearsal.assembly.v1` file, summary and stdout receipt
+    # through ONE helper (`_canonical_json`). Read-only disposable tooling; it
+    # writes no Foundation plan, lease, release or package-owned store.
+    "billing_opening_assembly_drafter.py": 1,
 }
 
 
