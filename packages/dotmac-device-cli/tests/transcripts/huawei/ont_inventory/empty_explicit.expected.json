@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "ok",
+    "explicitly_empty": true,
+    "entries": []
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "privileged"
+}

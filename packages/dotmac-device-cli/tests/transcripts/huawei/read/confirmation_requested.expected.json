@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "unreadable",
+    "reason": "confirmation_requested",
+    "detail": "confirmation not on the allow-list"
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "dirty"
+}

@@ -171,6 +171,11 @@
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named first intended consumer; ERP and CRM are later consumers under the dossier. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move workforce authority, or retire any Sub/ERP/CRM writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
+    },
+    "dotmac-device-cli": {
+      "declared": "0.1.0a1",
+      "reason": "FIRST SOURCE, NOT YET PUBLISHED. 0.1.0a1 is the stateless device CLI knowledge and dialogue package under ADR-0077 and the ADR-0017 owner-directed exception; it has no tag, no registry artifact and no release-allowlist row. Publication is a release-captain action by Michael's go, in a gap between billing and IPAM releases; no Sub pin, adoption or product writer change is claimed here. Remove this row only through the authorized release-record transition for dotmac-device-cli-v0.1.0a1.",
+      "state": "never-published"
     }
   }
 }

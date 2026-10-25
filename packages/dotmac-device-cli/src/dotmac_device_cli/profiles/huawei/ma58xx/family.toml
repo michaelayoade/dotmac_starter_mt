@@ -1,0 +1,33 @@
+# Family layer: Huawei MA58xx. F/S/P is written with slashes and the line editor
+# needs no slow send.
+
+[layer]
+id = "huawei-ma58xx"
+kind = "family"
+
+[ssh]
+ciphers = ["aes256-ctr"]
+
+[send]
+inter_command_delay = 0.0
+
+[limits]
+session_slots = 4
+release_grace_seconds = 0
+
+[capabilities]
+slash_fsp_display = true
+scoped_autofind = true
+ont_wan_config = true
+ont_internet_config = true
+port_vlan = true
+traffic_table = true
+
+[templates.read]
+ont_info_all = "display ont info {frame}/{slot} {port} all"
+ont_detail = "display ont info {frame}/{slot} {port} {ont_id}"
+
+# A low-privilege user gets the command echoed with its spaces stripped followed
+# by "Unknown command". That is a privilege problem, not a syntax problem.
+[error_markers]
+insufficient_privilege = '(?im)(?:\A\s*[^\s%]{12,}[ \t]*\r?\n\s*%\s*Unknown command[^\r\n]*\s*$)|(?:^\s*(?:%\s*)?(?:Permission|Access) denied[^\r\n]*$)'

@@ -1,0 +1,4 @@
+operation = "logout"
+origin = "hand-authored"
+command = "quit"
+covers = ["logout_foreign_confirm"]

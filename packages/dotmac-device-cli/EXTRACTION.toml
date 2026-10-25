@@ -1,0 +1,87 @@
+schema_version = 1
+package = "dotmac-device-cli"
+# NOT an optional-module: nothing installs this. It has no ModuleManifest, no
+# namespace or lineage and no kernel floor - a product constructs a session over
+# a channel it already authenticated and calls it. Naming it a module would send
+# a reader looking for a lineage that does not exist (ADR-0077).
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "product-first"
+
+owner = "Stateless device CLI knowledge and dialogue logic for network equipment: layered capability profiles (vendor, family, model, firmware) as validated data, a dialect interface per vendor for addressing and parsing, the prompt/mode/pager/continuation/confirmation/logout state machine run over an injected channel, the response classifier, vendor-neutral typed operations and results, the per-device session limiter policy over an injected lock store, and a reusable conformance suite with a synthetic transcript corpus"
+
+contract = "Given an already-authenticated interactive channel and a profile resolved from the CONFIGURED vendor, model and firmware, drive the device CLI safely and return Ok, Unreadable (a closed set of reasons) or Unsupported - never a silent empty and never another vendor's syntax. Absence is a value set only from the device's own words. A read never answers a confirmation; a write answers only the exact question its template declares; a session that cannot prove it is idle at a prompt is closed without typing. The package owns no transport, credential, socket, database, clock or environment access: the host (Dotmac Sub today, Integrator later) authenticates, supplies the channel and a lock-store adapter, and keeps the pool, metrics, settings and credential decryption."
+
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
+
+# Read at this Sub release (the prod release deployed 2026-10-25). Device
+# knowledge and the limiter key derivation are copied from it; nothing is imported.
+source_revisions = [
+  "dotmac_sub:7999c3019198ad2ce870e2645da65d73bd22ed6e",
+  "dotmac_erp:bcc32dbc179f989d44f791aaff87b3ba45a09e3e",
+]
+
+source_paths = [
+  "dotmac_sub:app/services/network/olt_ssh.py",
+  "dotmac_sub:app/services/network/olt_ssh_session.py",
+  "dotmac_sub:app/services/network/olt_ssh_limiter.py",
+  "dotmac_sub:app/services/network/olt_ssh_ont/status.py",
+  "dotmac_sub:app/services/network/huawei_cli_response.py",
+  "dotmac_sub:app/services/network/parsers/cli.py",
+  "dotmac_sub:app/services/network/parsers/loader.py",
+  "dotmac_sub:app/services/network/parsers/templates/huawei/display_ont_info.textfsm",
+  "dotmac_sub:app/services/adapters/olt_types/huawei.py",
+  "dotmac_starter_mt:docs/adr/0077-device-cli-drivers-are-stateless-knowledge-over-a-host-channel.md",
+  "dotmac_starter_mt:docs/inventories/device-cli-sources.md",
+]
+
+preserved_tests = [
+  "dotmac_sub:tests/test_olt_ssh_prompt_paging.py",
+  "dotmac_sub:tests/test_olt_ssh_limiter.py",
+  "dotmac_sub:tests/test_huawei_cli_response.py",
+  "dotmac_sub:tests/test_olt_parsers.py",
+  "dotmac_starter_mt:tests/unit/test_device_cli_limiter.py",
+  "dotmac_starter_mt:tests/unit/test_device_cli_session.py",
+  "dotmac_starter_mt:tests/unit/test_device_cli_parser.py",
+  "dotmac_starter_mt:tests/unit/test_device_cli_profiles.py",
+  "dotmac_starter_mt:tests/unit/test_device_cli_conformance.py",
+  "dotmac_starter_mt:tests/architecture/test_device_cli_package.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_sub"]
+
+authority_boundary = "ADR-0077 under the ADR-0074 section 4 clarification (no I/O, no credentials, no transport in Starter) and ADR-0038 section 6 (OLT vendor protocol I/O is Integrator connector territory; ONT/OLT business logic stays Sub authority). This package is knowledge and dialogue logic only. The paramiko runner, the Postgres advisory-lock store, the pool, metrics, settings, credential decryption and every database read or write stay in the host. Starter is public: tests use synthetic data and RFC 5737 documentation ranges only; real-capture parity stays in Sub."
+
+inventory_evidence = [
+  "docs/inventories/device-cli-sources.md",
+]
+
+first_cutover = "Dotmac Sub reads: after publication, Sub pins the package, supplies a paramiko-backed channel and a Postgres advisory-lock store adapter, and swaps its read paths to the typed operations behind unchanged public function names. The swap lands before the IPAM W1 switch, never in the same release or freeze window, and device-cli is released only in gaps between billing and IPAM releases. Writes are a later slice behind an explicit WriteGrant."
+
+shadow_and_drift = "Parity is proved by backtest, not by running two implementations side by side: Sub replays its private, anonymised real-capture corpus through the pinned package once, with expectations identical to the old code's, before any Sub file is deleted. The limiter shares slots with Sub's current code through byte-identical lock keys, pinned by golden vectors that must change in both repositories together. Starter proves the synthetic corpus replays to hand-written goldens for every claimed capability of every profile."
+
+local_copy_retirement = "At the Sub read swap, Sub deletes each moved file in the pull request that swaps its callers (the dialogue parts of olt_ssh.py, olt_ssh_session.py, the limiter policy, the Huawei parsers and classifier) and keeps its existing tests as parity tests against the package. Ratchets in Sub count raw channel sends, _open_shell call sites and paging-off literals toward zero."
+
+next_action = "Review and merge the ADR, then release 0.1.0a1 in a train gap on the owner's go. Lab hardware for read acceptance (MA5608T V800R013, MA5800) is a separate owner decision; no profile may claim lab_verified without a receipt hash. Slice 2 adds the remaining read operations and the Sub runner adapter design; ZTE, further Huawei models, FiberHome and Nokia arrive as data, a dialect where addressing differs, and transcripts."
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "7999c3019198ad2ce870e2645da65d73bd22ed6e"
+evidence_paths = [
+  "app/services/network/olt_ssh.py",
+  "app/services/network/olt_ssh_limiter.py",
+  "app/services/network/olt_ssh_session.py",
+]
+
+# ERP was searched at this exact revision for SSH/CLI device drivers (paramiko,
+# netmiko, telnetlib, Huawei, OLT and `display ont` strings) in app/ and tests/:
+# no match. That is a statement about this search, not about ERP's design.
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "no_writer"
+retirement_required = false
+revision = "bcc32dbc179f989d44f791aaff87b3ba45a09e3e"
+evidence_paths = ["app", "tests"]

@@ -1,0 +1,108 @@
+# Vendor layer: Huawei (dialect "huawei"). Everything here is inherited by every
+# Huawei family, model and firmware layer, which override only what differs.
+# Device knowledge only: no site names, addresses, usernames or credentials.
+
+[layer]
+id = "huawei"
+kind = "vendor"
+
+[profile]
+vendor = "huawei"
+family = "olt"
+dialect = "huawei"
+verification = { status = "unverified", receipt_sha256 = "" }
+
+[ssh]                        # applied by the HOST; this package never connects
+kex = ["diffie-hellman-group-exchange-sha1", "diffie-hellman-group1-sha1"]
+host_key_types = ["ssh-rsa"]
+ciphers = ["aes128-cbc"]
+macs = ["hmac-sha1"]
+password_only = true
+
+[prompts]
+user = '(?:^|\r?\n)[^\s#>]+>\s*$'
+privileged = '(?:^|\r?\n)[^\s#>]+#\s*$'
+config = '\(config\)#\s*$'
+interface_gpon = '\(config-if-gpon-\d+/\d+\)#\s*$'
+derive_from_prompt_line = true
+pager = '---- More(?:\s*\([^)]*\)\s*)?----|Press any key'
+continuation = '\{[^\r\n{}]*\}\s*:?\s*$'
+confirm = '\(y/n\)|\[Y/N\]'
+
+[privilege]
+enter = "enable"
+expect = "privileged"
+elevate = "unsupported"
+
+[paging]                     # paging-off is unsupported until a lab receipt proves a command
+off_command = "unsupported"
+on_pager = "answer_space"
+strip = ["pager_marker", "ansi"]
+
+[send]
+atomic_line = true
+settle_seconds = 0.4
+drain_before_command = true
+inter_command_delay = 0.1
+max_line_length = 200
+verify_echo = true
+
+[continuation]
+answer_cr_only_if_offered = true
+max_cr_answers = 3
+
+[logout]
+command = "quit"
+max_attempts = 4
+confirm_regex = 'log ?out\?\s*\(y/n\)'
+confirm_answer = "y"
+only_from_states = ["user", "privileged"]
+max_seconds = 3.0
+
+[confirmations]              # per WRITE template; nothing else is ever answered
+
+[limits]
+session_slots = 2
+reserved_priority_slots = 1
+release_grace_seconds = 2
+relogin_grace_seconds = 2
+max_reopens_per_scope = 3
+write_max_logins = 2
+
+# Read the model and firmware out of `display version` text, to REPORT a mismatch
+# with the configured profile. The profile is never chosen from this text.
+[detect]
+model = '(?mi)^\s*PRODUCT\s*:\s*(\S+)'
+firmware = '(?mi)^\s*VERSION\s*:\s*\S*?(V\d{3}R\d{3})'
+
+[capabilities]
+slash_fsp_display = false
+scoped_autofind = false
+ont_wan_config = false
+ont_internet_config = false
+home_gateway_config = false
+port_vlan = false
+traffic_table = false
+
+# Anything not declared true here (or in a later layer) is UNSUPPORTED.
+[operations]
+version = false
+list_onts = false
+ont_detail = false
+service_ports = false
+
+[templates.read]
+version = "display version"
+
+[templates.write]            # phase 2, behind an explicit WriteGrant; none in 0.1.0a1
+
+# Checked in a fixed priority order (see classifier), not file order.
+[error_markers]
+unknown_command = '(?im)^\s*%\s*Unknown command[^\r\n]*$'
+parameter_error = '(?im)^\s*(?:%|Failure:)\s*Parameter error[^\r\n]*$'
+insufficient_privilege = '(?im)^\s*(?:%\s*)?(?:Permission|Access) denied[^\r\n]*$'
+ont_absent = '(?im)^\s*Failure:\s*(?:The\s+)?(?:required\s+)?ONT\s+does\s+not\s+exist\s*\.?\s*$'
+unrecognized_response = '(?im)^\s*(?:Failure|Error)\s*:[^\r\n]*$'
+
+[quirks]
+paging_off_unproven = { text = "no lab proof of a paging-off command; the pager is answered with a space", transcripts = ["paging/answer_space"] }

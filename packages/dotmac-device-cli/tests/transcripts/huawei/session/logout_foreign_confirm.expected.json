@@ -1,0 +1,10 @@
+{
+  "result": {
+    "status": "logout",
+    "result": "forced"
+  },
+  "sent": [
+    "quit\n"
+  ],
+  "final_state": "closed"
+}

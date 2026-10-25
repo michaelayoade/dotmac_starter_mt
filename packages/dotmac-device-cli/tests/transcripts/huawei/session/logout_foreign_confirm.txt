@@ -1,0 +1,2 @@
+quit
+  Are you sure to delete the ONT? (y/n)[n]:

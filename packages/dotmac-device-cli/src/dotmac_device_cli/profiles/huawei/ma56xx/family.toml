@@ -1,0 +1,10 @@
+# Family layer: Huawei MA56xx (older generation). The F/S/P arguments are separate
+# words ("display ont info 0 2 1 all") and the line editor needs a slow send.
+
+[layer]
+id = "huawei-ma56xx"
+kind = "family"
+
+[templates.read]
+ont_info_all = "display ont info {frame} {slot} {port} all"
+ont_detail = "display ont info {frame} {slot} {port} {ont_id}"

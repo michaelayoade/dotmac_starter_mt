@@ -1,0 +1,5 @@
+operation = "list_onts"
+origin = "hand-authored"
+command = "display ont info 0 2 1 all"
+ref = "0/2/1"
+covers = []

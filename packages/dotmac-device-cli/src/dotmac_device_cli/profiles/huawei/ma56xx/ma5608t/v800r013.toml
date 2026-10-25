@@ -1,0 +1,17 @@
+# Firmware layer: MA5608T V800R013. Holds the quirks seen on this train.
+
+[layer]
+id = "huawei-ma5608t-v800r013"
+kind = "firmware"
+
+[profile]
+firmware_patterns = ["^V800R013"]
+verification = { status = "prod_observed", receipt_sha256 = "" }   # no lab receipt yet
+
+[operations]
+version = true
+list_onts = true
+
+[quirks]
+spaced_fsp = { text = "F/S/P is printed as '0/ 2/1' with a padded slot", transcripts = ["ont_inventory/spaced_fsp"] }
+line_editor_spaces = { text = "spaces collapse if the line arrives mid-redraw; the echo shows the collapsed command", transcripts = ["send/space_collapse_echo"] }

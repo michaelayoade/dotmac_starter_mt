@@ -1454,6 +1454,16 @@ packages/dotmac-fiber-plant/     network-suite-v1: outside-plant structures,
                                  strands, splices, terminations, continuity
 packages/dotmac-network-access/  network-suite-v1: access projections,
                                  authentication/accounting facts and sessions
+packages/dotmac-device-cli/      STATELESS device CLI knowledge and dialogue logic
+  src/dotmac_device_cli/         (ADR-0077): layered capability profiles
+                 (vendor/family/model/firmware TOML), a dialect interface per
+                 vendor, the prompt/pager/confirmation state machine over a
+                 host-injected channel, a response classifier, vendor-neutral
+                 typed operations and limiter policy over an injected lock
+                 store. No I/O, credentials or transport; standard library
+                 only, no kernel floor, not a module. A conformance suite and
+                 a synthetic transcript corpus gate every profile. Dotmac Sub
+                 is the candidate host; audit-complete, no adopter yet.
 packages/dotmac-pon-access/      network-suite-v1: OLT/ONT commissioning,
                                  desired state and optical evidence
                  The nine network-suite-v1 candidates each own one independent
