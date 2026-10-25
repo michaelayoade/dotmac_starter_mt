@@ -14,8 +14,9 @@ CLOSED: no lock, no session.
 KEEP IN SYNC WITH SUB: ``slot_key``/``intent_key`` are copied byte for byte from
 Sub's ``olt_ssh_limiter._signed_key`` so old and new code share slots in the
 same database during the swap. A different derivation would briefly allow twice
-the sessions. ``tests/unit/test_device_cli_limiter.py`` pins known vectors; a
-change to either side must change both and the vectors.
+the sessions. ``tests/unit/test_device_cli_limiter.py`` pins known vectors HERE;
+Sub has none (it only tests that keys are distinct), so Sub must mirror them
+when it adopts this package. ``device_key`` MUST be ``str(olt.id)``.
 """
 
 from __future__ import annotations

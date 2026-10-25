@@ -94,6 +94,23 @@ def test_a_claimed_capability_without_a_transcript_fails(tmp_path: Path) -> None
     assert any("claims 'version' but has no transcript" in p for p in problems)
 
 
+def test_a_true_capability_without_a_transcript_fails() -> None:
+    profile = PROFILES[0]  # MA5608T: nothing is proven, so nothing may be true
+    claim = dataclasses.replace(
+        profile, capabilities={**profile.capabilities, "port_vlan": True}
+    )
+    problems = conformance_violations(claim, CORPUS)
+    assert any("capability 'port_vlan' true but no transcript" in p for p in problems)
+
+
+def test_a_transcript_tagging_an_unknown_capability_fails(tmp_path: Path) -> None:
+    corpus = _planted_corpus(tmp_path)
+    meta = corpus / "huawei/ont_inventory/normal.meta.toml"
+    meta.write_text(meta.read_text() + 'capabilities = ["port_vlann"]\n')
+    problems = conformance_violations(PROFILES[0], corpus)
+    assert any("unknown capability 'port_vlann'" in p for p in problems)
+
+
 def test_a_claim_the_dialect_cannot_serve_fails() -> None:
     profile = PROFILES[0]
     over = dataclasses.replace(
@@ -152,7 +169,7 @@ def test_a_dirty_publication_guard_input_is_refused_not_cleaned() -> None:
     assert publication_violations("mac 3C:DA:2A:11:22:33")
     assert publication_violations("CUSTOMER_Acme_Corp_authd_20240101")
     assert publication_violations("password hunter2")
-    assert publication_violations("boi-olt#")
+    assert publication_violations("olt-a#")
     assert not publication_violations(
         "198.51.100.7 4857544300000001 00:00:5E:00:53:01 lab-olt# "
         "CUSTOMER_01_zone_Zone_1_authd_20240101"

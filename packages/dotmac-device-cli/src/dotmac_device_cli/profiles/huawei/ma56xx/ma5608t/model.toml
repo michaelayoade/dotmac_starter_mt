@@ -4,7 +4,3 @@ kind = "model"
 
 [profile]
 model_patterns = ["MA5608T"]
-
-[capabilities]
-port_vlan = true
-traffic_table = true

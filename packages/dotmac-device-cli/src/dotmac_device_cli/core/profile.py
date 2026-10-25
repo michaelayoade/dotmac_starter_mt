@@ -35,6 +35,21 @@ LOGOUT_STATES = frozenset({"user", "privileged"})
 # command and parses the reply; the engine never names a vendor.
 OPERATIONS = frozenset({"version", "list_onts", "ont_detail", "service_ports"})
 
+# Device facts a profile may declare TRUE. A fixed set: a misspelled or invented
+# flag is refused, and the conformance suite requires a replayed transcript with a
+# golden for every flag that is true (anything not proven stays false).
+CAPABILITIES = frozenset(
+    {
+        "slash_fsp_display",
+        "scoped_autofind",
+        "ont_wan_config",
+        "ont_internet_config",
+        "home_gateway_config",
+        "port_vlan",
+        "traffic_table",
+    }
+)
+
 # Classifier ids a profile may define: every Reason, plus the one that is a
 # VALUE rather than a failure (the device affirmatively said the thing is absent).
 MARKER_IDS = frozenset({r.value for r in Reason} | {"ont_absent"})
@@ -488,6 +503,8 @@ def load_profile_document(data: dict[str, Any]) -> Profile:
     caps_raw = _table(data, "capabilities", "")
     caps: dict[str, bool] = {}
     for cid in caps_raw:
+        if cid not in CAPABILITIES:
+            raise ProfileError(f"capabilities.{cid}: not a known capability")
         caps[cid] = _bool(caps_raw, cid, "capabilities")
 
     det_raw = _table(data, "detect", "")

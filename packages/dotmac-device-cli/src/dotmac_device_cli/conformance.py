@@ -33,7 +33,7 @@ from typing import Any
 from dotmac_device_cli.core.classifier import OntInventory
 from dotmac_device_cli.core.dialect import RefError, dialect_for
 from dotmac_device_cli.core.ops import list_onts, ont_detail, service_ports, version
-from dotmac_device_cli.core.profile import Profile
+from dotmac_device_cli.core.profile import CAPABILITIES, Profile
 from dotmac_device_cli.core.results import Ok, Unreadable, Unsupported
 from dotmac_device_cli.core.session import (
     CliSession,
@@ -64,6 +64,7 @@ class Case:
     command: str  # exact command line or "*"
     ref: str | None
     covers: frozenset[str]
+    capabilities: frozenset[str]
     eof_after_answer: bool
     text: str
     expected: Mapping[str, Any]
@@ -94,6 +95,7 @@ def load_cases(dirs: list[Path]) -> dict[str, Case]:
                 command=meta.get("command", "*"),
                 ref=meta.get("ref"),
                 covers=frozenset(meta.get("covers", [])),
+                capabilities=frozenset(meta.get("capabilities", [])),
                 eof_after_answer=bool(meta.get("eof_after_answer", False)),
                 text=txt,
                 expected=expected,
@@ -239,6 +241,19 @@ def conformance_violations(profile: Profile, corpus_root: Path) -> list[str]:
     for op in claimed:
         if not any(c.operation == op for c in cases.values()):
             problems.append(f"{profile.id}: claims {op!r} but has no transcript for it")
+    proven = (
+        frozenset().union(*(c.capabilities for c in cases.values()))
+        if cases
+        else frozenset()
+    )
+    for tag in sorted(proven - CAPABILITIES):
+        problems.append(f"{profile.id}: a transcript tags unknown capability {tag!r}")
+    for cap, on in sorted(profile.capabilities.items()):
+        if on and cap not in proven:
+            problems.append(
+                f"{profile.id}: declares capability {cap!r} true but no "
+                "transcript proves it"
+            )
     for op, on in profile.operations.items():
         if (
             on

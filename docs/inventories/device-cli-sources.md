@@ -42,6 +42,11 @@ Sub tests that become parity tests at the Sub swap: `tests/test_olt_ssh_prompt_p
   version` field layout used by `detect()` are inferences recorded in the
   profile layers. The MA5800 paging-off evidence conflicts, so paging-off is
   `unsupported` on both models until a lab receipt exists.
+- The `display ont info ... all` shape is two tables: data rows, then a
+  "F/S/P ONT-ID Description" table (pager mid-table, long descriptions wrapped onto
+  indented continuation lines), then the "total of ONTs are: N" trailer. The
+  parser joins descriptions by ONT id and treats the trailer as a completeness
+  check. How a wrapped description is joined (no separator) is an inference.
 - The corpus is synthetic and hand-authored; byte layout (CRLF, cursor-back
   sequences, padded F/S/P) is reproduced from the layouts the Sub fixtures
   exercise, with none of their content.

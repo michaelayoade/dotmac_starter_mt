@@ -88,7 +88,7 @@ with `<case>.txt` (the device's reply, byte for byte, `{command}` standing for
 the echoed command so a shared case holds for every model's spelling),
 `<case>.expected.json` (the golden, **written by hand** from the device's own
 words, never regenerated from the parser under test) and `<case>.meta.toml`
-(`operation`, `command`, `ref`, `covers`, `origin`). A case lives at the
+(`operation`, `command`, `ref`, `covers`, optional `capabilities`, `origin`). A case lives at the
 broadest layer where it holds for every descendant and is replayed through each
 descendant profile.
 
@@ -97,7 +97,9 @@ the reusable suite. For every profile it checks prompt and mode detection,
 pager and continuation handling, clean logout and refusal of foreign
 confirmations, `Unreadable` versus explicitly empty, the `OntRef` round trip,
 that every `quirks.*.transcripts` id exists, and that **every claimed operation
-has a transcript with a golden**. A profile that claims a capability without a
+has a transcript with a golden**, and so does every `[capabilities]` flag declared
+true (a case tags it with `capabilities = ["..."]`; the flag names are a fixed
+set and an unknown one is refused). Unproven flags stay false. A profile that claims a capability without a
 transcript fails CI.
 
 **Starter is public.** Use synthetic data only: serials `48575443` + `0000NNNN`
@@ -114,7 +116,8 @@ BACKGROUND, reserved slots, an intent lock so background yields, no
 hold-and-wait, fail closed when the store is unreachable) over an abstract
 `LockStore`. **`slot_key`/`intent_key` are byte-identical to Sub's
 `olt_ssh_limiter` and must stay in sync**: `tests/unit/test_device_cli_limiter.py`
-pins known vectors. A host may only lower a profile's limits.
+pins known vectors here (Sub pins none; mirror them when Sub adopts). The device
+key MUST be `str(olt.id)`. A host may only lower a profile's limits.
 
 ## Not in 0.1.0a1
 

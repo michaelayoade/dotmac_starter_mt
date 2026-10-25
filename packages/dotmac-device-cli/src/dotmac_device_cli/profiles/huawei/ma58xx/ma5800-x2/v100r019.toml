@@ -9,7 +9,8 @@ id = "huawei-ma5800-x2-v100r019"
 kind = "firmware"
 
 [profile]
-firmware_patterns = ["^V100R019", "^V100R02"]
+firmware_patterns = ["^V100R019"]   # exact R019 only; R02x needs its own layer and evidence
+verification = { status = "unverified", receipt_sha256 = "" }
 
 [operations]
 version = true

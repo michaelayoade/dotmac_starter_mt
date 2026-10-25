@@ -17,9 +17,18 @@
         "serial": "4857544300000002",
         "admin_state": "active",
         "run_state": "offline",
+        "config_state": "initial",
+        "match_state": "initial",
+        "description": "CUSTOMER_02_zone_Zone_1_authd_20240101-synthetic-wrap-a_,synthetic-wrap-b"
+      },
+      {
+        "ref": "0/2/1 2",
+        "serial": "4857544300000003",
+        "admin_state": "active",
+        "run_state": "online",
         "config_state": "normal",
         "match_state": "match",
-        "description": ""
+        "description": "CUSTOMER_03_zone_Zone_1_authd_20240101"
       }
     ]
   },

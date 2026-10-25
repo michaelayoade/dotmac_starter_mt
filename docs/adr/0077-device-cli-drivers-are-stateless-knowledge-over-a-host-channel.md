@@ -79,10 +79,16 @@ in Starter.** The package:
 - holds no host key, address, site name or fleet count in a profile.
 
 It is enforced by an import-linter contract and by an AST test with a
-sensitivity proof. The clarification is specific to this named package. It is
-not a general admission route for provider code, and it does not widen the
-2026-09-02 ruling, ADR-0074 section 4 or ADR-0038 section 6: the runner,
-credentials and transport remain outside Starter.
+sensitivity proof. The clarification is specific to named packages and is not a
+general admission route for provider code.
+
+**This is a widening, and it is the owner's.** ADR-0074 section 4 admits exactly
+one provider-specific package (`dotmac-routeros-config`). D2 adds
+`dotmac-device-cli` as a **second named package** under the same "no I/O, no
+credentials, no transport" clarification. Michael approved that widening on
+2026-10-25. It widens the list of named packages and nothing else: the runner,
+credentials and transport remain outside Starter, and the 2026-09-02 ruling and
+ADR-0038 section 6 are otherwise unchanged.
 
 ### 3. ADR-0017 named exception (D2)
 
@@ -153,9 +159,13 @@ free-text allow-list tightening, paging-off, firmware upgrade or lab hardware
 - A later release row will change the release-authority digest and is made in
   its own change.
 - Sub gains a code-only swap path with rollback by redeploying the previous
-  release; the lock keys are byte-identical to Sub's so old and new code share
-  slots during the swap. **They must stay in sync**; pinned vectors in both
-  repositories fail if either side drifts.
+  release; the lock keys use Sub's derivation byte for byte so old and new code
+  share slots during the swap. Sub does **not** currently pin key vectors (its
+  tests only check that keys are distinct), so the vectors are pinned **in this
+  package** and must be mirrored into Sub's tests when Sub adopts it; until then
+  drift on Sub's side is not detected by Sub. The `device_key` passed to the
+  limiter **MUST** be `str(olt.id)`, as Sub passes today; any other string
+  addresses different slots and silently doubles the sessions the device sees.
 - ZTE, more Huawei models, FiberHome and Nokia cost data, transcripts and, where
   addressing differs, one dialect.
 - Governance overhead is accepted in exchange for one shared, public, reviewable

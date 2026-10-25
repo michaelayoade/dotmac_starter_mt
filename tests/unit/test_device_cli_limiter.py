@@ -26,6 +26,9 @@ from dotmac_device_cli.testing import FakeClock, InMemoryLockBackend
 # (blake2b, 8-byte digest, big-endian, signed) at release 7999c3019. If this
 # test must change, Sub's limiter must change in the same step, or the two will
 # stop sharing slots in the shared database and briefly allow twice the sessions.
+# Sub pins no vectors of its own (it only tests that keys are distinct): these
+# must be mirrored into Sub when it adopts this package. The device key must be
+# str(olt.id).
 SLOT_VECTORS = {
     "00000000-0000-4000-8000-000000000001": (
         -3148890172339245725,

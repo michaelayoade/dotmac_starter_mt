@@ -128,6 +128,26 @@ def test_a_template_with_an_unknown_placeholder_is_refused(tmp_path: Path) -> No
         discover(root)
 
 
+def test_an_unknown_or_misspelled_capability_is_refused(tmp_path: Path) -> None:
+    root = _copy_tree(tmp_path)
+    fam = root / "huawei/ma58xx/family.toml"
+    fam.write_text(fam.read_text().replace("slash_fsp_display", "slash_fps_display"))
+    with pytest.raises(ProfileError, match="not a known capability"):
+        discover(root)
+
+
+def test_firmware_patterns_do_not_leak_to_neighbouring_trains() -> None:
+    assert isinstance(REGISTRY.resolve("huawei", "MA5800-X2", "V100R021C00"), NoProfile)
+    assert REGISTRY.resolve("huawei", "MA5800-X2", "V100R019C10") is MA5800
+    assert MA5800.verification.status == "unverified"
+
+
+def test_only_proven_capabilities_are_true() -> None:
+    assert MA5800.capabilities["slash_fsp_display"] is True
+    assert [k for k, v in MA5800.capabilities.items() if v] == ["slash_fsp_display"]
+    assert not any(MA5608T.capabilities.values())
+
+
 def test_an_unknown_operation_name_is_refused(tmp_path: Path) -> None:
     root = _copy_tree(tmp_path)
     fw = root / "huawei/ma56xx/ma5608t/v800r013.toml"

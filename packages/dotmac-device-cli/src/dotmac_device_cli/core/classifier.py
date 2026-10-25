@@ -115,14 +115,29 @@ def classify_table(
                 f"{parsed.data_row_hints} rows seen, {len(parsed.rows)} parsed",
                 evidence,
             )
-        if (
-            parsed.declared_total is not None
-            and len(parsed.rows) < parsed.declared_total
-        ):
+        if parsed.orphan_descriptions:
+            return Unreadable(
+                Reason.ROWS_UNPARSED,
+                f"{parsed.orphan_descriptions} description(s) match no listed ONT",
+                evidence,
+            )
+        # The trailer ("the total of ONTs are: N") is a completeness check.
+        if parsed.declared_total is None:
+            return Unreadable(
+                Reason.TRUNCATED, "rows listed but no total trailer", evidence
+            )
+        if len(parsed.rows) < parsed.declared_total:
             return Unreadable(
                 Reason.TRUNCATED,
                 f"device declared {parsed.declared_total} ONTs, "
                 f"{len(parsed.rows)} listed",
+                evidence,
+            )
+        if len(parsed.rows) > parsed.declared_total:
+            return Unreadable(
+                Reason.ROWS_UNPARSED,
+                f"{len(parsed.rows)} rows listed, device declared "
+                f"{parsed.declared_total}",
                 evidence,
             )
         return Ok(OntInventory(parsed.rows, False), evidence)

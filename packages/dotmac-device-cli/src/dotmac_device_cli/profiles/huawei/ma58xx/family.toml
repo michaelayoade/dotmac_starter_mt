@@ -15,13 +15,9 @@ inter_command_delay = 0.0
 session_slots = 4
 release_grace_seconds = 0
 
+# Only what a transcript proves is true; the vendor layer defaults every flag false.
 [capabilities]
 slash_fsp_display = true
-scoped_autofind = true
-ont_wan_config = true
-ont_internet_config = true
-port_vlan = true
-traffic_table = true
 
 [templates.read]
 ont_info_all = "display ont info {frame}/{slot} {port} all"
