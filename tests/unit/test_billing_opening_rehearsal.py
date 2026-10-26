@@ -495,16 +495,28 @@ def test_closed_frozen_boundary_rejects_bags_and_mutation():
         run.source.population_complete = False
 
 
-def test_available_v2_total_fields_cannot_replace_missing_documentary_or_wht_evidence():
+def test_supplied_bound_original_satisfies_documentary_evidence_m8_minimal():
+    # M8-minimal (Phase B decision 2026-10-26): an original supplied through
+    # assembly-aligned evidence and passing the binding checks attests the
+    # documentary side; missing discharge evidence still blocks on its own.
     run = _run()
     assert run.previews[0].admissible
     codes = _codes(run)
-    assert "original_documentary_evidence_unavailable" in codes
+    assert "original_documentary_evidence_unavailable" not in codes
     assert "historical_discharge_evidence_unavailable" in codes
     assert not report_opening_rehearsal(run).complete_exact_reconciliation
     assert not compare_opening_rehearsals(
         tuple(_run(i) for i in range(3))
     ).candidate_evidence_complete
+
+
+def test_missing_original_stays_documentary_evidence_unavailable():
+    run = _run()
+    items = tuple(
+        replace(item, original=None) for item in run.manifest.receivables
+    )
+    changed = replace(run, manifest=replace(run.manifest, receivables=items))
+    assert "original_documentary_evidence_unavailable" in _codes(changed)
 
 
 def test_source_original_and_discharge_cancellation_is_not_hidden_by_residual():
@@ -661,7 +673,7 @@ def test_closed_excluded_documentary_history_is_not_compared_to_eligible_manifes
     assert "source_original_total_mismatch" not in codes
     assert "source_discharge_total_mismatch" not in codes
     assert "excluded_money_unresolved" not in codes
-    assert "original_documentary_evidence_unavailable" in codes
+    assert "original_documentary_evidence_unavailable" not in codes
 
 
 def test_capture_clock_is_bound_before_it_is_ignored_in_content_digest():

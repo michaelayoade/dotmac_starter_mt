@@ -400,12 +400,15 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
             or mapped_invoice.precision != mapped_receivable.partition.precision
         ):
             block("invoice_partition_binding_mismatch", str(source_id))
-        # The actual V2 observation has no frozen subtotal, tax, FX, party or
-        # documentary snapshots. Total-only equality cannot attest the complete
-        # imported original. Keep this explicitly unavailable until Sub exports
-        # the documentary evidence through its own read-only contract.
-        block("original_documentary_evidence_unavailable", str(source_id))
+        # M8-minimal originals (Phase B decision, 2026-10-26): the V2
+        # observation carries totals only, so an original is attested by the
+        # assembly-aligned evidence that placed it in the manifest plus the
+        # binding checks below (total, document number, issued_at, discharge
+        # and residual equality). Documentary completeness beyond those
+        # bindings is the assembly/Finance attestation recorded outside this
+        # pure reporter; without a supplied original it stays unavailable.
         if mapped_receivable.original is None:
+            block("original_documentary_evidence_unavailable", str(source_id))
             block(
                 "original_documentary_evidence_unavailable", mapping.source_invoice_key
             )

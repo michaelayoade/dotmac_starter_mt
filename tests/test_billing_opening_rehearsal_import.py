@@ -64,7 +64,7 @@ class ExactFixtureVerifier:
 
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
-def test_nonempty_adapter_fixture_import_replay_report_refusal_and_permanent_seal(
+def test_nonempty_adapter_fixture_import_replay_report_reconciliation_and_seal(
     scratch, plane
 ):
     scope, url = noncash._scope_url(scratch, plane)
@@ -113,18 +113,18 @@ def test_nonempty_adapter_fixture_import_replay_report_refusal_and_permanent_sea
             assert preview.cash_residual_minor == 0
             run = replace(run, previews=(preview,))
             report = report_opening_rehearsal(run)
-            # The source V2 projection cannot attest the supplied full original.
-            # Preserve the real report owner's refusal even after qualification
-            # of the synthetic importer command.
-            assert not report.complete_exact_reconciliation
-            assert {block.code for block in report.blockers} == {
-                "original_documentary_evidence_unavailable"
-            }
+            # M8-minimal (Phase B decision 2026-10-26): the supplied original,
+            # bound by total/number/issued_at/discharge/residual checks and an
+            # admissible preview under an exact verifier, attests the
+            # documentary side, so the report reconciles completely.
+            assert report.complete_exact_reconciliation
+            assert report.blockers == ()
             assert report.accepted_manual_holds == assembly.accepted_manual_holds
             assert all(delta.unclassified_delta_minor == 0 for delta in report.deltas)
             runs.append(run)
         comparison = compare_opening_rehearsals(tuple(runs))
-        assert {block.code for block in comparison.blockers} == {"run_blocked"}
+        assert comparison.blockers == ()
+        assert comparison.candidate_evidence_complete
 
         # A typed original and matching balance alone still cannot qualify money.
         assert not preview_opening_account_import_v2(command).admissible
