@@ -160,6 +160,97 @@ def test_probe_names_the_current_source_migration_heads():
     assert learning_head in constants
 
 
+def _probe_migrate_expectations(source: str) -> tuple[set[str], list[str], set[str]]:
+    """Extract (live alembic_version set, upgrade targets, binding targets).
+
+    All three come from the probe's `migrate()` body alone, so a stale or
+    widened literal anywhere else in the file cannot satisfy this check.
+    """
+    tree = ast.parse(source)
+    migrate = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "migrate"
+        ),
+        None,
+    )
+    assert migrate is not None, "probe has no migrate()"
+    calls = sorted(
+        (node for node in ast.walk(migrate) if isinstance(node, ast.Call)),
+        key=lambda node: (node.lineno, node.col_offset),
+    )
+    upgrades: list[str] = []
+    bindings: set[str] = set()
+    live_sets: list[set[str]] = []
+    for call in calls:
+        func = call.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "upgrade"
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "command"
+            and len(call.args) >= 2
+            and isinstance(call.args[1], ast.Constant)
+        ):
+            upgrades.append(str(call.args[1].value))
+        if (
+            isinstance(func, ast.Name)
+            and func.id == "PrerequisiteBinding"
+            and len(call.args) >= 2
+            and isinstance(call.args[1], ast.Constant)
+        ):
+            bindings.add(str(call.args[1].value))
+        if isinstance(func, ast.Name) and func.id == "require" and call.args:
+            condition = call.args[0]
+            names_live_rows = any(
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and "SELECT version_num FROM public.alembic_version" in node.value
+                for node in ast.walk(condition)
+            )
+            if not names_live_rows:
+                continue
+            assert isinstance(condition, ast.Compare), ast.dump(condition)
+            assert len(condition.ops) == 1 and isinstance(condition.ops[0], ast.Eq)
+            assert len(condition.comparators) == 1
+            expected = condition.comparators[0]
+            assert isinstance(expected, ast.Set), ast.dump(expected)
+            live_sets.append(
+                {
+                    str(element.value)
+                    for element in expected.elts
+                    if isinstance(element, ast.Constant)
+                }
+            )
+            assert len(live_sets[-1]) == len(expected.elts)
+    assert len(live_sets) == 1, live_sets
+    return live_sets[0], upgrades, bindings
+
+
+def test_probe_migrate_live_head_and_upgrade_targets_match_bindings():
+    """migrate() must expect the singleton live head its bindings produce.
+
+    The probe binds every Learning prerequisite to the kernel head, so the
+    learning branch's depends_on resolves to that head and Alembic consumes
+    the kernel version row as the branch advances: after upgrade(kernel)
+    then upgrade(learning), alembic_version holds {learning_head} alone.
+    The pair {kernel_head, learning_head} is the graph-heads set, not the
+    live set (PR #923 repair cycle 3 conflated the two).
+    """
+    kernel_head = _source_head(
+        PROJECT_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
+    )
+    learning_head = _source_head(
+        PROJECT_ROOT
+        / "packages/dotmac-learning/src/dotmac_learning/migrations/versions"
+    )
+    live, upgrades, bindings = _probe_migrate_expectations(SCRIPT.read_text())
+    assert bindings == {kernel_head}
+    assert upgrades == [kernel_head, learning_head]
+    assert live == {learning_head}
+
+
 def test_probe_rls_table_count_matches_source_migrations():
     """`count(*)=N` in the probe must equal the migrations' table tally."""
     versions = (

@@ -373,7 +373,7 @@ def migrate(admin, receipt: dict) -> None:
                             sa.text("SELECT version_num FROM public.alembic_version")
                         )
                     )
-                    == {"0030_credential_tenant_key", "lr_0010_question_bank_versions"},
+                    == {"lr_0010_question_bank_versions"},
                     "Live installed head differs",
                 )
                 require(
