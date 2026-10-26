@@ -58,6 +58,7 @@ def test_learning_registration_uses_the_shipped_allocation_and_exact_tables():
             "learning_events",
             "chapters",
             "question_banks",
+            "question_bank_versions",
             "questions",
             "chapter_reads",
             "subtopic_reads",
@@ -84,6 +85,16 @@ def test_learning_registration_uses_the_shipped_allocation_and_exact_tables():
     assert registry.namespaces().declared_platform_tables("mod_learning") == frozenset()
     assert module.audit_actions == (
         "attempt_granted",
+        "question_bank.draft_created",
+        "question_bank.question_upserted",
+        "question_bank.question_deleted",
+        "question_bank.draft_discarded",
+        "question_bank.published",
+        "question_bank.version_retired",
+        "question_bank.activity_repointed",
+        "question_bank.imported",
+        "question_bank.import_refused",
+        "question_bank.exported",
         "announcement.created",
         "scheduling.update_session",
         "success_queue.acknowledge",
@@ -362,7 +373,7 @@ def test_root_migration_locator_reexports_the_canonical_callable():
     assert (versions_dir() / "lr_0001_learning.py").is_file()
 
 
-# Physical index contract from lr_0001 through lr_0006; schema relocation
+# Physical index contract from lr_0001 through lr_0010; schema relocation
 # preserves these names, including the source queue naming exception.
 MIGRATED_INDEXES = {
     "courses": {"ix_courses_tenant_id": (("tenant_id",), False, None)},
@@ -370,6 +381,7 @@ MIGRATED_INDEXES = {
         "ix_activities_tenant_id": (("tenant_id",), False, None),
         "ix_activities_course_id": (("course_id",), False, None),
         "ix_activities_bank_id": (("bank_id",), False, None),
+        "ix_activities_bank_version_id": (("bank_version_id",), False, None),
     },
     "submissions": {
         "ix_submissions_tenant_id": (("tenant_id",), False, None),
@@ -421,10 +433,30 @@ MIGRATED_INDEXES = {
     "question_banks": {
         "ix_question_banks_tenant_id": (("tenant_id",), False, None),
         "ix_question_banks_course_id": (("course_id",), False, None),
+        "ix_question_banks_current_version_id": (
+            ("current_version_id",),
+            False,
+            None,
+        ),
+        "uq_question_banks_natural_key": (
+            ("tenant_id", "course_id", "chapter_number", "kind"),
+            True,
+            None,
+        ),
+    },
+    "question_bank_versions": {
+        "ix_question_bank_versions_tenant_id": (("tenant_id",), False, None),
+        "ix_question_bank_versions_bank_id": (("bank_id",), False, None),
+        "uq_question_bank_versions_one_draft": (
+            ("tenant_id", "bank_id"),
+            True,
+            "state = 'draft'",
+        ),
     },
     "questions": {
         "ix_questions_tenant_id": (("tenant_id",), False, None),
         "ix_questions_bank_id": (("bank_id",), False, None),
+        "ix_questions_bank_version_id": (("bank_version_id",), False, None),
     },
     "chapter_reads": {
         "ix_chapter_reads_tenant_id": (("tenant_id",), False, None),
@@ -491,6 +523,11 @@ MIGRATED_INDEXES = {
         "ix_activity_attempts_tenant_id": (("tenant_id",), False, None),
         "ix_activity_attempts_activity_id": (("activity_id",), False, None),
         "ix_activity_attempts_person_id": (("person_id",), False, None),
+        "ix_activity_attempts_bank_version_id": (
+            ("bank_version_id",),
+            False,
+            None,
+        ),
     },
     "attempt_grants": {
         "ix_attempt_grants_lookup": (
@@ -546,7 +583,7 @@ def test_all_learning_indexes_preserve_migrated_names_columns_uniqueness_and_sco
         *ATTEMPT_MODELS,
         *DELIVERY_MODELS,
     )
-    assert len(models) == len(MIGRATED_INDEXES) == 27
+    assert len(models) == len(MIGRATED_INDEXES) == 28
     assert {model.__table__.name for model in models} == set(MIGRATED_INDEXES)
     for model in models:
         table = model.__table__

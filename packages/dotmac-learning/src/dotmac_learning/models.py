@@ -143,6 +143,7 @@ class Activity(KernelBase, TimestampMixin):
         Index("ix_activities_tenant_id", "tenant_id"),
         Index("ix_activities_course_id", "course_id"),
         Index("ix_activities_bank_id", "bank_id"),
+        Index("ix_activities_bank_version_id", "bank_version_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -151,6 +152,9 @@ class Activity(KernelBase, TimestampMixin):
     chapter_number: Mapped[int | None] = mapped_column(Integer)
     type: Mapped[str] = mapped_column(String(16), nullable=False)
     bank_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    # Published bank version this activity serves (logical reference, like
+    # bank_id); set only by explicit repoint or backfill, never by publish.
+    bank_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     pass_threshold: Mapped[float] = mapped_column(
         Float, nullable=False, server_default="0.0"

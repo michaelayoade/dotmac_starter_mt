@@ -176,6 +176,7 @@ class BankFact:
     chapter_number: int | None
     kind: str
     version: int
+    current_version_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

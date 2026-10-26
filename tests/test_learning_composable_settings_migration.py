@@ -330,7 +330,7 @@ def test_lr_0009_upgrade_backfills_defaults_and_finals(learning_database):
         command.upgrade(cfg, "learning@head")
         with admin.connect() as conn:
             heads = set(conn.scalars(text("SELECT version_num FROM alembic_version")))
-            assert "lr_0009_composable_policies" in heads
+            assert heads == {"lr_0010_question_bank_versions"}
         with app.begin() as conn:
             _scope(conn, tenant)
             assert conn.execute(

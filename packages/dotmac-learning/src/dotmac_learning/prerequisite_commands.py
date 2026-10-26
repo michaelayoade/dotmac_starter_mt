@@ -231,13 +231,22 @@ def reconcile_prerequisites(
                     condition_kind=row.condition_kind,
                     params=json.loads(row.params_json),
                     group_key=row.group_key,
+                    origin="yaml_import",
                 )
             )
             added += 1
-        elif _stored_params_json(current.params) != row.params_json:
+        elif (
+            current.origin == "yaml_import"
+            and _stored_params_json(current.params) != row.params_json
+        ):
+            # App-authored (origin=ui) rows are never rewritten by a file
+            # reconciliation, even when the file declares the same edge.
             current.params = json.loads(row.params_json)
     for key, existing_row in existing.items():
         if key in wanted_keys:
+            continue
+        if existing_row.origin != "yaml_import":
+            # Non-overwriting import: only file-owned rows may be deleted.
             continue
         legacy_only = key[2] == "course_completed" and key[3] == "g0"
         if key[0] in managed_all or (legacy_only and key[0] in scoped):

@@ -28,7 +28,7 @@ FIELDS = {
         "cohort_id course_id status starts_at ends_at pacing_default_open"
     ),
     "course_prerequisites": (
-        "course_id requires_course_id condition_kind params group_key"
+        "course_id requires_course_id condition_kind params group_key origin"
     ),
 }
 NULLABLE = {
@@ -89,7 +89,7 @@ LENGTHS = {
         "employee_ref": 64,
     },
     "tracks": {"slug": 80, "name": 160, "status": 20, "gating_mode": 16},
-    "course_prerequisites": {"condition_kind": 32, "group_key": 32},
+    "course_prerequisites": {"condition_kind": 32, "group_key": 32, "origin": 16},
     "cohort_tracks": {"status": 20},
     "course_offerings": {"status": 20},
 }
@@ -106,10 +106,10 @@ DEFAULTS = {
 }
 
 
-def test_source_65_persisted_fields_and_migrated_contracts():
+def test_source_66_persisted_fields_and_migrated_contracts():
     assert set(PARTICIPATION_TABLES) == set(FIELDS)
     assert len(PARTICIPATION_MODELS) == 7
-    assert sum(len(m.__table__.c) for m in PARTICIPATION_MODELS) == 65
+    assert sum(len(m.__table__.c) for m in PARTICIPATION_MODELS) == 66
     for model in PARTICIPATION_MODELS:
         table = model.__table__
         name = table.name
@@ -142,7 +142,10 @@ def test_source_65_persisted_fields_and_migrated_contracts():
             },
             "tracks": {"ck_tracks_gating_mode"},
             "cohorts": {"ck_cohorts_auto_accept_below_action"},
-            "course_prerequisites": {"ck_course_prerequisites_condition_kind"},
+            "course_prerequisites": {
+                "ck_course_prerequisites_condition_kind",
+                "ck_course_prerequisites_origin",
+            },
         }.get(name, set())
         for field, length in LENGTHS.get(name, {}).items():
             assert table.c[field].type.length == length

@@ -158,9 +158,14 @@ def test_nullable_enrollment_history_and_raw_employee_reference_are_mandatory():
 def test_all_21_tables_and_194_columns_are_closed_and_mandatory():
     assert len(TABLES) == len(set(TABLES)) == 21
     total = 0
+    v2_curriculum_models = tuple(
+        model
+        for model in CURRICULUM_MODELS
+        if model.__tablename__ != "question_bank_versions"
+    )
     for row_type, model in zip(
         V1_ROW_TYPES + V2_ROW_TYPES + ROW_TYPES,
-        TENANT_MODELS + CURRICULUM_MODELS + PARTICIPATION_MODELS,
+        TENANT_MODELS + v2_curriculum_models + PARTICIPATION_MODELS,
         strict=True,
     ):
         row_fields = fields(row_type)

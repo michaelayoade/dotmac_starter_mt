@@ -239,7 +239,14 @@ _A3_S2_COLUMNS: dict[str, dict[str, tuple[str, bool]]] = {
     "cohorts": {"auto_accept_below_action": ("character varying(16)", False)},
     "course_offerings": {"pacing_default_open": ("boolean", False)},
 }
-_A3_COLUMN_GROUPS = (_A3_S1_COLUMNS, _A3_S2_COLUMNS)
+_A3_BANK_COLUMNS: dict[str, dict[str, tuple[str, bool]]] = {
+    "activities": {"bank_version_id": ("uuid", True)},
+    "question_banks": {"current_version_id": ("uuid", True)},
+    "questions": {"bank_version_id": ("uuid", True)},
+    "activity_attempts": {"bank_version_id": ("uuid", True)},
+    "course_prerequisites": {"origin": ("character varying(16)", False)},
+}
+_A3_COLUMN_GROUPS = (_A3_S1_COLUMNS, _A3_S2_COLUMNS, _A3_BANK_COLUMNS)
 _A3_REFUSAL_MESSAGE = (
     "non-default prerequisite policy data is not carried by this "
     "snapshot version; transfer refused (RD-1)"
@@ -291,6 +298,41 @@ _A3_TRACKS = sql_table(
     "tracks",
     sql_column("tenant_id"),
     sql_column("gating_mode"),
+    schema=_SCHEMA,
+)
+_A3_BANK_ACTIVITIES = sql_table(
+    "activities",
+    sql_column("tenant_id"),
+    sql_column("bank_version_id"),
+    schema=_SCHEMA,
+)
+_A3_BANKS = sql_table(
+    "question_banks",
+    sql_column("tenant_id"),
+    sql_column("current_version_id"),
+    schema=_SCHEMA,
+)
+_A3_QUESTIONS = sql_table(
+    "questions",
+    sql_column("tenant_id"),
+    sql_column("bank_version_id"),
+    schema=_SCHEMA,
+)
+_A3_BANK_VERSIONS = sql_table(
+    "question_bank_versions",
+    sql_column("tenant_id"),
+    schema=_SCHEMA,
+)
+_A3_ATTEMPTS = sql_table(
+    "activity_attempts",
+    sql_column("tenant_id"),
+    sql_column("bank_version_id"),
+    schema=_SCHEMA,
+)
+_A3_PREREQ_ORIGINS = sql_table(
+    "course_prerequisites",
+    sql_column("tenant_id"),
+    sql_column("origin"),
     schema=_SCHEMA,
 )
 
@@ -365,6 +407,8 @@ def _refuse_non_default_prerequisite_policy(
     tenant_ids: tuple[UUID, ...],
     *,
     include_participation: bool,
+    include_curriculum: bool = False,
+    include_attempts: bool = False,
 ) -> None:
     """Raise iff any covered row in the tenant extent is non-default.
 
@@ -379,6 +423,11 @@ def _refuse_non_default_prerequisite_policy(
     default is exactly ``false`` — the column server default the frozen
     imports materialize — so any ``is_final=true`` refuses until a
     snapshot version carries the flag.
+
+    The lr_0010 bank group follows the same rule per version coverage:
+    any non-NULL bank-version pin, any question_bank_versions row, or a
+    prerequisite origin other than the yaml_import backfill default
+    refuses until SnapshotV6 carries it.
     """
     checks: list[bool] = []
     if _a3_group_present(scope, "courses", _A3_S1_COLUMNS):
@@ -460,6 +509,73 @@ def _refuse_non_default_prerequisite_policy(
                     _A3_OFFERINGS.c.pacing_default_open.is_not(True),
                 )
             )
+    if _a3_group_present(scope, "activities", _A3_BANK_COLUMNS):
+        checks.append(
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_BANK_ACTIVITIES,
+                _A3_BANK_ACTIVITIES.c.bank_version_id.is_not(None),
+            )
+        )
+    if include_curriculum and _a3_group_present(
+        scope, "question_banks", _A3_BANK_COLUMNS
+    ):
+        checks.append(
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_BANKS,
+                _A3_BANKS.c.current_version_id.is_not(None),
+            )
+        )
+        checks.append(
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_QUESTIONS,
+                _A3_QUESTIONS.c.bank_version_id.is_not(None),
+            )
+        )
+        checks.append(
+            bool(
+                scope.extent_query(
+                    select(
+                        select(1)
+                        .select_from(_A3_BANK_VERSIONS)
+                        .where(
+                            _A3_BANK_VERSIONS.c.tenant_id.in_(
+                                bindparam("tenant_ids", expanding=True)
+                            )
+                        )
+                        .exists()
+                    ),
+                    tenant_ids,
+                ).scalar_one()
+            )
+        )
+    if include_participation and _a3_group_present(
+        scope, "course_prerequisites", _A3_BANK_COLUMNS
+    ):
+        checks.append(
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_PREREQ_ORIGINS,
+                _A3_PREREQ_ORIGINS.c.origin != "yaml_import",
+            )
+        )
+    if include_attempts and _a3_group_present(
+        scope, "activity_attempts", _A3_BANK_COLUMNS
+    ):
+        checks.append(
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_ATTEMPTS,
+                _A3_ATTEMPTS.c.bank_version_id.is_not(None),
+            )
+        )
     if any(checks):
         raise SnapshotValidationError(_A3_REFUSAL_MESSAGE)
 

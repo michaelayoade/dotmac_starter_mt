@@ -22,6 +22,9 @@ from dotmac_learning.transfer_contracts import (
 
 # lr_0008/lr_0009 (RD-1): frozen V1-V5 rows deliberately do not carry the
 # composable-policy columns; transfers refuse non-default values instead.
+# lr_0010 extends the same seam: frozen rows do not carry the bank-version
+# pins or prerequisite origin, and the question_bank_versions table joins
+# only at V6 (which carries every column below).
 A3_UNCARRIED_COLUMNS = {
     "courses": {
         "prerequisite_composition",
@@ -33,12 +36,16 @@ A3_UNCARRIED_COLUMNS = {
         "scoring_policy",
         "is_final",
         "min_attempt_interval_seconds",
+        "bank_version_id",
     },
     "certificates": {"expires_at"},
-    "course_prerequisites": {"condition_kind", "params", "group_key"},
+    "course_prerequisites": {"condition_kind", "params", "group_key", "origin"},
     "tracks": {"gating_mode"},
     "cohorts": {"auto_accept_below_action"},
     "course_offerings": {"pacing_default_open"},
+    "question_banks": {"current_version_id"},
+    "questions": {"bank_version_id"},
+    "activity_attempts": {"bank_version_id"},
 }
 
 

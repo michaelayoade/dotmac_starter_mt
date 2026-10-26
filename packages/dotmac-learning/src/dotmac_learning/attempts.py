@@ -21,7 +21,10 @@ from .attempt_contracts import (
     SelectionQuestion,
 )
 from .attempt_models import ActivityAttempt
+from .bank_lifecycle_contracts import BankLifecycleConflict
+from .curriculum_models import QuestionBankVersion
 from .event_contracts import EventWrite
+from .models import Activity
 from .results import _transaction, _unchanged
 
 _IDS: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
@@ -82,6 +85,55 @@ def _prior_attempts(
     )
 
 
+def _resolve_pin(db: Session, payload: OpenAttemptCommand) -> UUID | None:
+    """Pin precedence: explicit command pin, else the activity's version.
+
+    Fail-closed once any pin is present: the activity must exist, carry
+    a bank, and the pin must resolve in the tenant to a published
+    version of that bank — a ghost, cross-tenant, cross-bank, draft or
+    retired pin serves no new sitting. Only a missing or unpinned
+    activity with no explicit pin keeps the historical NULL pin.
+    """
+    activity = db.scalars(
+        select(Activity).where(
+            Activity.tenant_id == payload.tenant_id,
+            Activity.id == payload.activity_id,
+        )
+    ).first()
+    pin = payload.bank_version_id
+    if pin is None and activity is not None:
+        pin = activity.bank_version_id
+    if pin is None:
+        return None
+    if activity is None:
+        raise BankLifecycleConflict(
+            "a pinned attempt requires its activity to resolve the pin against"
+        )
+    if activity.bank_id is None:
+        raise BankLifecycleConflict(
+            "a pinned attempt requires the activity to carry a bank"
+        )
+    version = db.scalars(
+        select(QuestionBankVersion).where(
+            QuestionBankVersion.tenant_id == payload.tenant_id,
+            QuestionBankVersion.id == pin,
+        )
+    ).first()
+    if version is None:
+        raise BankLifecycleConflict(
+            "the pinned bank version was not found for the tenant"
+        )
+    if version.state != "published":
+        raise BankLifecycleConflict(
+            "the pinned bank version does not serve new sittings"
+        )
+    if version.bank_id != activity.bank_id:
+        raise BankLifecycleConflict(
+            "the pinned bank version belongs to a different bank than the activity"
+        )
+    return pin
+
+
 def open_or_create_attempt(db: Session, payload: OpenAttemptCommand) -> AttemptWrite:
     boundary = _transaction(db)
     payload = payload.model_copy(deep=True)
@@ -115,6 +167,7 @@ def open_or_create_attempt(db: Session, payload: OpenAttemptCommand) -> AttemptW
         chosen = [q.ext_id for q in drawn]
     attempt = ActivityAttempt(
         **scope,
+        bank_version_id=_resolve_pin(db, payload),
         question_ext_ids=chosen,
         started_at=payload.now or datetime.now(UTC),
     )

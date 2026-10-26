@@ -108,6 +108,7 @@ class AdmissionObservation:
     question_count: int | None
     min_attempt_interval_seconds: int
     last_attempt_at: datetime | None
+    bank_version_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

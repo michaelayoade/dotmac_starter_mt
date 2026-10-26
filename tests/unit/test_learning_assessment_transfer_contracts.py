@@ -17,6 +17,7 @@ from dotmac_learning.transfer_contracts import JsonbText, SnapshotValidationErro
 from tests.unit.test_learning_participation_transfer_contracts import (
     TABLES as V3_TABLES,
 )
+from tests.unit.test_learning_transfer_contracts import carried_column_keys
 
 TABLES = (*V3_TABLES, "activity_attempts", "attempt_grants")
 
@@ -33,7 +34,7 @@ def test_v4_adds_all_eighteen_persisted_fields_without_defaults():
         (ActivityAttemptRowV4, AttemptGrantRowV4), ATTEMPT_MODELS, strict=True
     ):
         row_fields = fields(row_type)
-        assert {field.name for field in row_fields} == set(model.__table__.c.keys())
+        assert {field.name for field in row_fields} == carried_column_keys(model)
         assert all(
             field.default is MISSING and field.default_factory is MISSING
             for field in row_fields

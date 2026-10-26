@@ -307,7 +307,11 @@ def verify_snapshot_v4(
     scope = _v1._Scope.capture(connection)
     _qualify(scope, snapshot.tenant_ids)
     _v1._refuse_non_default_prerequisite_policy(
-        scope, snapshot.tenant_ids, include_participation=True
+        scope,
+        snapshot.tenant_ids,
+        include_participation=True,
+        include_curriculum=True,
+        include_attempts=True,
     )
     return _verify(scope, snapshot)
 
@@ -385,7 +389,11 @@ def export_snapshot_v4(
     scope = _v1._Scope.capture(connection)
     _qualify(scope, tenant_ids)
     _v1._refuse_non_default_prerequisite_policy(
-        scope, tenant_ids, include_participation=True
+        scope,
+        tenant_ids,
+        include_participation=True,
+        include_curriculum=True,
+        include_attempts=True,
     )
     base = _v3.export_snapshot_v3(connection, tenant_ids)
     rows = {
@@ -436,7 +444,11 @@ def import_snapshot_v4(
     scope = _v1._Scope.capture(connection)
     _qualify(scope, snapshot.tenant_ids)
     _v1._refuse_non_default_prerequisite_policy(
-        scope, snapshot.tenant_ids, include_participation=True
+        scope,
+        snapshot.tenant_ids,
+        include_participation=True,
+        include_curriculum=True,
+        include_attempts=True,
     )
     _require_empty(scope)
     _preflight(scope, snapshot)

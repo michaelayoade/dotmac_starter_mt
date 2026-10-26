@@ -64,8 +64,15 @@ def empty_snapshot(tenant):
 
 def test_all_135_persisted_columns_are_mandatory_in_v2():
     total = 0
+    v2_curriculum_models = tuple(
+        model
+        for model in CURRICULUM_MODELS
+        if model.__tablename__ != "question_bank_versions"
+    )
     for row_type, model in zip(
-        FIRST_ROW_TYPES + ROW_TYPES, TENANT_MODELS + CURRICULUM_MODELS, strict=True
+        FIRST_ROW_TYPES + ROW_TYPES,
+        TENANT_MODELS + v2_curriculum_models,
+        strict=True,
     ):
         row_fields = fields(row_type)
         assert {field.name for field in row_fields} == carried_column_keys(model)

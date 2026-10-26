@@ -3,6 +3,16 @@
 from uuid import uuid4
 
 import pytest
+from dotmac_learning import (
+    BankAuditContext,
+    CreateBankDraftCommand,
+    ImportBankDocumentAsDraftCommand,
+    LegacyBankWriterRetired,
+    PublishBankVersionCommand,
+    create_bank_draft,
+    import_bank_document_as_draft,
+    publish_bank_version,
+)
 from dotmac_learning.curriculum import (
     CurriculumConflict,
     CurriculumNotFound,
@@ -202,51 +212,115 @@ def test_import_metadata_hash_idempotence_retains_removed_chapters(curriculum_ca
         assert row.title == "Changed" and row.body_md == "" and row.order_index == 1
 
 
-def test_bank_replacement_requested_version_defaults_and_plain_course_reference(
+def _audit(tenant):
+    return BankAuditContext(
+        tenant_id=tenant,
+        actor_type="system",
+        source_application="tests",
+    )
+
+
+def _clean_questions(prefix="q"):
+    """Ten lint-clean questions: 2/5/3 rubric mix, equal-length options."""
+    rubric = ["recall"] * 2 + ["application"] * 5 + ["analysis"] * 3
+    return tuple(
+        BankQuestion(
+            id=f"{prefix}{i}",
+            stem=f"Question {i}?",
+            type="single",
+            rubric_category=rubric[i],
+            options=["aaaa", "bbbb", "cccc", "dddd"],
+            correct=["aaaa"],
+            weight=1,
+        )
+        for i in range(10)
+    )
+
+
+def _import_and_publish(db, tenant, course, doc):
+    report = import_bank_document_as_draft(
+        db,
+        ImportBankDocumentAsDraftCommand(
+            tenant_id=tenant, course_id=course, doc=doc, missing_question_weight=1
+        ),
+        audit_context=_audit(tenant),
+    )
+    assert report.lint_violations == ()
+    result = publish_bank_version(
+        db,
+        PublishBankVersionCommand(tenant_id=tenant, version_id=report.version_id),
+        audit_context=_audit(tenant),
+    )
+    assert result.published
+    return report.bank_id, result.version
+
+
+def test_bank_versions_publish_immutable_history_and_plain_course_reference(
     curriculum_case,
 ):
     engine, (tenant, _) = curriculum_case
     with Session(engine) as db, db.begin():
         _scope(db, tenant)
         course = uuid4()  # source bank course UUID is intentionally not an FK
-        q = BankQuestion(
-            id="old",
-            stem="Question",
-            type="single",
-            rubric_category="recall",
-            competency="networking",
-            weight=1,
-        )
         doc = BankDocument(
-            course="logical", chapter=None, kind="final", version=9, questions=(q,)
+            course="logical",
+            chapter=None,
+            kind="final",
+            version=9,  # ignored: Learning allocates version numbers
+            questions=_clean_questions("old-"),
         )
-        bank = load_bank(
-            db, tenant_id=tenant, course_id=course, doc=doc, missing_question_weight=1
+        bank_id, first = _import_and_publish(db, tenant, course, doc)
+        assert first.version_no == 1
+        old_ids = set(
+            db.scalars(select(Question.id).where(Question.bank_id == bank_id)).all()
         )
-        old_id = db.scalar(select(Question.id).where(Question.bank_id == bank.id))
-        next_q = q.model_copy(update={"id": "new", "category": "safety", "weight": 2})
-        reloaded = load_bank(
+        assert len(old_ids) == 10
+        changed = tuple(
+            q.model_copy(update={"category": "safety", "weight": 2})
+            for q in _clean_questions("new-")
+        )
+        bank_id2, second = _import_and_publish(
             db,
-            tenant_id=tenant,
-            course_id=course,
-            doc=doc.model_copy(update={"version": 2, "questions": (next_q,)}),
-            missing_question_weight=1,
+            tenant,
+            course,
+            doc.model_copy(update={"version": 2, "questions": changed}),
         )
-        assert (reloaded.id, reloaded.version) == (bank.id, 2)
-        assert db.scalar(select(Question).where(Question.id == old_id)) is None
+        assert bank_id2 == bank_id and second.version_no == 2
+        # Published v1 rows survive untouched under their own version.
+        assert (
+            set(
+                db.scalars(
+                    select(Question.id).where(Question.bank_version_id == first.id)
+                ).all()
+            )
+            == old_ids
+        )
         rebuilt = doc_from_db(
-            db, tenant_id=tenant, bank_id=bank.id, course_slug="logical"
+            db, tenant_id=tenant, bank_id=bank_id, course_slug="logical"
         )
         assert rebuilt.version == 2 and rebuilt.policy == {}
-        (item,) = rebuilt.questions
-        assert (
-            item.id,
-            item.category,
-            item.options,
-            item.correct,
-            item.explanation,
-            item.weight,
-        ) == ("new", "safety", [], [], "", 2)
+        assert [q.id for q in rebuilt.questions] == sorted(q.id for q in changed)
+        assert {q.category for q in rebuilt.questions} == {"safety"}
+        assert {q.weight for q in rebuilt.questions} == {2}
+
+
+def test_load_bank_is_a_fail_closed_shim(curriculum_case):
+    engine, (tenant, _) = curriculum_case
+    with Session(engine) as db, db.begin():
+        _scope(db, tenant)
+        doc = BankDocument(course="logical", kind="final", questions=_clean_questions())
+        with pytest.raises(LegacyBankWriterRetired):
+            load_bank(
+                db,
+                tenant_id=tenant,
+                course_id=uuid4(),
+                doc=doc,
+                missing_question_weight=1,
+            )
+        from dotmac_learning.curriculum_models import QuestionBank
+
+        assert db.scalar(select(QuestionBank)) is None
+        assert db.scalar(select(Question)) is None
 
 
 def test_caller_root_rollback_and_pending_host_work_survive_expected_rejections(
@@ -273,14 +347,17 @@ def test_caller_root_rollback_and_pending_host_work_survive_expected_rejections(
             assert db.scalar(
                 text("SELECT current_setting('app.current_tenant')")
             ) == str(tenant)
-            bank = load_bank(
+            draft = create_bank_draft(
                 db,
-                tenant_id=tenant,
-                course_id=course.id,
-                doc=BankDocument(course="new", chapter=1, kind="chapter", questions=()),
-                missing_question_weight=1,
+                CreateBankDraftCommand(
+                    tenant_id=tenant,
+                    course_id=course.id,
+                    chapter_number=1,
+                    kind="chapter",
+                ),
+                audit_context=_audit(tenant),
             )
-            assert bank.id is not None
+            assert draft.id is not None
             db.rollback()  # caller alone owns root outcome
         with db.begin():
             _scope(db, tenant)
@@ -292,7 +369,6 @@ MUTATIONS = (
     "upsert_chapter",
     "delete_chapter",
     "import_manual",
-    "load_bank",
 )
 
 
@@ -332,28 +408,6 @@ def _mutation(db, name, tenant, course, chapter):
                 new_course_certificate_validity_days=None,
                 new_course_prerequisite_composition="all",
             ),
-        )
-    if name == "load_bank":
-        return load_bank(
-            db,
-            tenant_id=tenant,
-            course_id=course,
-            doc=BankDocument(
-                course="guard-base",
-                kind="final",
-                questions=(
-                    BankQuestion(
-                        id="Q1",
-                        stem="Question",
-                        type="single",
-                        rubric_category="recall",
-                        options=["A", "B"],
-                        correct=["A"],
-                        weight=1,
-                    ),
-                ),
-            ),
-            missing_question_weight=1,
         )
     raise AssertionError(name)
 
@@ -459,23 +513,32 @@ def test_numeric_bank_answer_keeps_json_scalar_kind_through_database(
     engine, (tenant, _) = curriculum_case
     with Session(engine) as db, db.begin():
         _scope(db, tenant)
-        doc = BankDocument(
-            course="numeric",
+        from dotmac_learning.curriculum_models import QuestionBank
+
+        bank = QuestionBank(
+            tenant_id=tenant,
+            course_id=uuid4(),
+            chapter_number=None,
             kind="final",
-            questions=(
-                BankQuestion(
-                    id="numeric",
-                    stem="Value?",
-                    type="numeric",
-                    rubric_category="application",
-                    correct=answer,
-                    weight=1,
-                ),
-            ),
+            version=1,
         )
-        bank = load_bank(
-            db, tenant_id=tenant, course_id=uuid4(), doc=doc, missing_question_weight=1
+        db.add(bank)
+        db.flush()
+        db.add(
+            Question(
+                tenant_id=tenant,
+                bank_id=bank.id,
+                ext_id="numeric",
+                stem="Value?",
+                type="numeric",
+                options=[],
+                correct=answer,
+                rubric_category="application",
+                explanation="",
+                weight=1,
+            )
         )
+        db.flush()
     with Session(engine) as db, db.begin():
         _scope(db, tenant)
         rebuilt = doc_from_db(

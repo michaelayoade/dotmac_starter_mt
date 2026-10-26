@@ -10,12 +10,14 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import NoReturn
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .curriculum_models import QuestionBankVersion
 from .models import Activity, Course, Submission
 
 SCORING_POLICIES: tuple[str, ...] = ("best", "latest", "first")
@@ -107,6 +109,7 @@ class ActivityWrite(BaseModel):
     chapter_number: int | None = None
     type: str
     bank_id: UUID | None = None
+    bank_version_id: UUID | None = None
     pass_threshold: float
     max_attempts: int | None = None
     assessment_mode: str
@@ -138,6 +141,7 @@ class ActivityCreate(BaseModel):
     chapter_number: int | None = None
     type: str
     bank_id: UUID | None = None
+    bank_version_id: UUID | None = None
     pass_threshold: float
     max_attempts: int | None = None
     assessment_mode: str
@@ -212,6 +216,7 @@ class ActivityPatch(BaseModel):
     chapter_number: int | None = None
     type: str = "mcq_test"
     bank_id: UUID | None = None
+    bank_version_id: UUID | None = None
     pass_threshold: float = 0.0
     max_attempts: int | None = None
     assessment_mode: str = "graded"
@@ -272,6 +277,7 @@ class ActivityFact:
     scoring_policy: str = "best"
     is_final: bool = False
     min_attempt_interval_seconds: int = 0
+    bank_version_id: UUID | None = None
 
 
 class ReferenceNotFound(ValueError):
@@ -345,8 +351,96 @@ def _assign_activity(row: Activity, values: Iterable[tuple[str, object]]) -> Non
         setattr(row, name, value)
 
 
+def _raise_pin_conflict(message: str) -> NoReturn:
+    # Deferred: bank_lifecycle_contracts imports attempt_contracts,
+    # which imports this module for ActivityFact.
+    from .bank_lifecycle_contracts import BankLifecycleConflict
+
+    raise BankLifecycleConflict(message)
+
+
+def _validate_activity_bank_pin(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    bank_id: UUID | None,
+    bank_version_id: UUID | None,
+) -> None:
+    """A supplied activity pin must be a published version of its bank.
+
+    Mirrors the audited repoint guard so the generic writers can never
+    persist a draft, retired, ghost or cross-bank pin.
+    """
+    if bank_version_id is None:
+        return
+    if bank_id is None:
+        _raise_pin_conflict("an activity bank version pin requires the activity's bank")
+    version = db.scalars(
+        select(QuestionBankVersion).where(
+            QuestionBankVersion.tenant_id == tenant_id,
+            QuestionBankVersion.id == bank_version_id,
+        )
+    ).first()
+    if version is None:
+        _raise_pin_conflict("the pinned bank version was not found for the tenant")
+    if version.state != "published":
+        _raise_pin_conflict("an activity may only serve a published bank version")
+    if version.bank_id != bank_id:
+        _raise_pin_conflict("version belongs to a different bank than the activity")
+
+
+def _guard_activity_bank_pin(
+    db: Session,
+    row: Activity,
+    *,
+    bank_id: UUID | None,
+    bank_version_id: UUID | None,
+) -> None:
+    """Refuse pin movement outside the audited repoint command.
+
+    Restating the current pin is a no-op, but only after the same
+    published + same-bank validation a fresh pin must pass.
+    """
+    if bank_version_id != row.bank_version_id:
+        _raise_pin_conflict(
+            "an activity's bank version pin changes only through "
+            "repoint_activity_bank_version"
+        )
+    if bank_version_id is None:
+        return
+    _validate_activity_bank_pin(
+        db,
+        tenant_id=row.tenant_id,
+        bank_id=bank_id,
+        bank_version_id=bank_version_id,
+    )
+
+
+def _guard_activity_bank_change(row: Activity, supplied: dict[str, object]) -> None:
+    """Refuse a bank change on a pinned activity (CB-1).
+
+    Changing ``bank_id`` alone would leave the existing pin pointing at
+    a version of the previous bank, persisting the cross-bank pin the
+    pin guard exists to prevent. Restating the same bank is a no-op,
+    and bank changes on unpinned activities stay allowed.
+    """
+    if "bank_id" not in supplied or supplied["bank_id"] == row.bank_id:
+        return
+    effective_pin = supplied.get("bank_version_id", row.bank_version_id)
+    if effective_pin is not None:
+        _raise_pin_conflict(
+            "an activity's bank cannot change while a bank version pin is set"
+        )
+
+
 def create_activity_identity(db: Session, payload: ActivityCreate) -> UUID:
     """Flush the entire caller Session; read only the INSERT-generated identity."""
+    _validate_activity_bank_pin(
+        db,
+        tenant_id=payload.tenant_id,
+        bank_id=payload.bank_id,
+        bank_version_id=payload.bank_version_id,
+    )
     row = _add_activity(db, payload.model_dump())
     db.flush()
     return row.id
@@ -386,14 +480,28 @@ def stage_activity_patch(db: Session, payload: ActivityPatch) -> bool:
     )
     if row is None:
         return False
-    _assign_activity(
-        row,
-        payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True).items(),
-    )
+    supplied = payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True)
+    if "bank_version_id" in supplied:
+        # Even trusted staging may not move a pin: that stays exclusive
+        # to the audited repoint command.
+        _guard_activity_bank_pin(
+            db,
+            row,
+            bank_id=supplied.get("bank_id", row.bank_id),
+            bank_version_id=payload.bank_version_id,
+        )
+    _guard_activity_bank_change(row, supplied)
+    _assign_activity(row, supplied.items())
     return True
 
 
 def create_activity(db: Session, payload: ActivityWrite) -> ActivityFact:
+    _validate_activity_bank_pin(
+        db,
+        tenant_id=payload.tenant_id,
+        bank_id=payload.bank_id,
+        bank_version_id=payload.bank_version_id,
+    )
     row = _add_activity(db, payload.model_dump())
     db.flush()
     return _activity_fact(row)
@@ -407,6 +515,12 @@ def update_activity(db: Session, payload: ActivityWrite) -> ActivityFact:
     )
     if row is None:
         raise ReferenceNotFound("activity not found for tenant")
+    _guard_activity_bank_pin(
+        db,
+        row,
+        bank_id=payload.bank_id,
+        bank_version_id=payload.bank_version_id,
+    )
     _refuse_scoring_policy_change(db, row, payload.scoring_policy)
     _assign_activity(row, payload.model_dump(exclude={"id", "tenant_id"}).items())
     db.flush()
@@ -439,6 +553,14 @@ def patch_activity(db: Session, payload: ActivityPatch) -> ActivityFact:
     if row is None:
         raise ReferenceNotFound("activity not found for tenant")
     supplied = payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True)
+    if "bank_version_id" in supplied:
+        _guard_activity_bank_pin(
+            db,
+            row,
+            bank_id=supplied.get("bank_id", row.bank_id),
+            bank_version_id=payload.bank_version_id,
+        )
+    _guard_activity_bank_change(row, supplied)
     if "scoring_policy" in supplied:
         _refuse_scoring_policy_change(db, row, payload.scoring_policy)
     _assign_activity(row, supplied.items())

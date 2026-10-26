@@ -10,14 +10,15 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterable
-from typing import Any, cast
+from typing import cast
 from uuid import UUID
 
 from pydantic import JsonValue
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, SessionTransaction
 
-from .bank_validation import BankDoc, _competency_of
+from .bank_lifecycle_contracts import LegacyBankWriterRetired
+from .bank_validation import BankDoc
 from .bank_validation import lint_bank as _lint_bank
 from .curriculum_contracts import (
     AuthorChapterCommand,
@@ -343,60 +344,36 @@ def load_bank(
     doc: BankDoc | BankDocument,
     missing_question_weight: int,
 ) -> BankFact:
-    """Replace questions in source order, preserving raw decoder failure stages.
+    """Fail-closed legacy shim: the destructive replace writer is retired.
 
-    BankDoc is deliberately unvalidated: defaults, category conversion and weight
-    conversion happen per question, after bank creation or replacement deletion.
+    It previously deleted every Question row of a bank and re-inserted
+    with fresh UUIDs under an author-supplied version, silently changing
+    content under live sittings. Use
+    :func:`dotmac_learning.import_bank_document_as_draft` (draft-only,
+    audited, no Activity writes) and publish explicitly instead. This
+    shim performs no reads or writes, so it cannot mutate published rows.
     """
-    if type(missing_question_weight) is not int or missing_question_weight <= 0:
-        raise ValueError("missing_question_weight must be a positive integer")
-    boundary = _transaction(db)
-    bank = db.scalars(
-        select(QuestionBank).where(
-            QuestionBank.tenant_id == tenant_id,
-            QuestionBank.course_id == course_id,
-            QuestionBank.chapter_number == doc.chapter,
-            QuestionBank.kind == doc.kind,
-        )
-    ).first()
-    if bank is None:
-        bank = QuestionBank(
-            tenant_id=tenant_id,
-            course_id=course_id,
-            chapter_number=doc.chapter,
-            kind=doc.kind,
-            version=doc.version,
-        )
-        db.add(bank)
-        db.flush()
+    raise LegacyBankWriterRetired(
+        "load_bank is retired; import the document as a draft and publish "
+        "a bank version instead"
+    )
+
+
+def _serving_rows(db: Session, bank: QuestionBank) -> list[Question]:
+    """Rows a legacy bank-level reader serves for one bank.
+
+    With a current published version, exactly that version's rows;
+    without one (pre-backfill or frozen-import estate), only the
+    historical NULL-version rows — never a mixture across versions.
+    """
+    statement = select(Question).where(
+        Question.tenant_id == bank.tenant_id, Question.bank_id == bank.id
+    )
+    if bank.current_version_id is not None:
+        statement = statement.where(Question.bank_version_id == bank.current_version_id)
     else:
-        db.execute(delete(Question).where(Question.bank_id == bank.id))
-        bank.version = doc.version
-    for question in doc.questions:
-        values = (
-            cast(dict[str, Any], question)
-            if isinstance(doc, BankDoc)
-            else cast(BankQuestion, question).model_dump()
-        )
-        db.add(
-            Question(
-                tenant_id=tenant_id,
-                bank_id=bank.id,
-                ext_id=values["id"],
-                stem=values["stem"],
-                type=values["type"],
-                options=values.get("options", []),
-                correct=values.get("correct", []),
-                rubric_category=values["rubric_category"],
-                category=_competency_of(values),
-                explanation=values.get("explanation", ""),
-                weight=int(values.get("weight", missing_question_weight)),
-            )
-        )
-    db.flush()
-    result = _bank_fact(bank)
-    _unchanged(db, boundary)
-    return result
+        statement = statement.where(Question.bank_version_id.is_(None))
+    return list(db.scalars(statement.order_by(Question.ext_id)).all())
 
 
 def doc_from_db(
@@ -409,11 +386,7 @@ def doc_from_db(
     ).first()
     if bank is None:
         raise CurriculumNotFound("bank not found for tenant")
-    rows = db.scalars(
-        select(Question)
-        .where(Question.tenant_id == tenant_id, Question.bank_id == bank.id)
-        .order_by(Question.ext_id)
-    ).all()
+    rows = _serving_rows(db, bank)
     return BankDocument(
         course=course_slug,
         chapter=bank.chapter_number,
@@ -446,12 +419,20 @@ def decoded_doc_from_db(
     a second implementation of the rules in SQL. Two implementations of the same
     decision drift the moment a threshold moves; this keeps one.
     """
-    rows = db.scalars(
+    # No bank lookup: the trusted header may carry the current version
+    # pin (an ORM bank row does); without one only historical
+    # NULL-version rows are served, matching _serving_rows.
+    statement = (
         select(Question)
         .where(Question.tenant_id == bank.tenant_id)
         .where(Question.bank_id == bank.id)
-        .order_by(Question.ext_id)
-    ).all()
+    )
+    current_version_id = getattr(bank, "current_version_id", None)
+    if current_version_id is not None:
+        statement = statement.where(Question.bank_version_id == current_version_id)
+    else:
+        statement = statement.where(Question.bank_version_id.is_(None))
+    rows = db.scalars(statement.order_by(Question.ext_id)).all()
     return BankDoc(
         course=course_slug,
         chapter=bank.chapter_number,

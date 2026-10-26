@@ -342,6 +342,10 @@ class CoursePrerequisite(Base, TimestampMixin):
             "'attempt_number_at_least')",
             name="ck_course_prerequisites_condition_kind",
         ),
+        CheckConstraint(
+            "origin IN ('yaml_import', 'ui')",
+            name="ck_course_prerequisites_origin",
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "course_id"],
             ["mod_learning.courses.tenant_id", "mod_learning.courses.id"],
@@ -384,6 +388,14 @@ class CoursePrerequisite(Base, TimestampMixin):
     )
     group_key: Mapped[str] = mapped_column(
         String(32), nullable=False, default="g0", server_default="g0"
+    )
+    # Provenance for the non-overwriting reconciler: only yaml_import rows
+    # may be deleted or rewritten by a curriculum-file reconciliation.
+    # The standing default is fail-closed (ui): lr_0010 backfills rows
+    # that predate the column as yaml_import, and the reconciler stamps
+    # yaml_import explicitly on the rows it creates.
+    origin: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ui", server_default="ui"
     )
 
 
