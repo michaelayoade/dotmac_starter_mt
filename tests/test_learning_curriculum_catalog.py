@@ -139,9 +139,12 @@ INDEX_EXTRA_ORACLE = {
     },
 }
 # The questions -> bank-version FK is RESTRICT (published history cannot
-# be cascade-deleted); every other curriculum FK is CASCADE.
+# be cascade-deleted) and the question_banks current-version FK is
+# NO ACTION (None; lr_0010/ORM declare no ON DELETE clause); every other
+# curriculum FK is CASCADE.
 FK_DELETE_RULE_ORACLE = {
     ("questions", ("tenant_id", "bank_version_id")): "RESTRICT",
+    ("question_banks", ("tenant_id", "current_version_id")): None,
 }
 # PostgreSQL format_type, nullability, default expression. Identity/timestamps
 # are checked separately; these are literal source DDL values, not ORM output.
