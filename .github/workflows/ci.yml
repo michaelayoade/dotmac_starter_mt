@@ -355,7 +355,7 @@ jobs:
                   "identity_provisioning",
               )
           }
-          required.update(['tests.unit.test_learning_admission_enrollment', 'tests.unit.test_learning_delivery_migrations', 'tests.unit.test_learning_delivery_public_surface', 'tests.unit.test_learning_enrollment_initial_state', 'tests.unit.test_learning_invitation_assignment', 'tests.unit.test_learning_participation_models', 'tests.unit.test_learning_public_surface', 'tests.unit.test_learning_scheduling'])
+          required.update(['tests.unit.test_learning_admission_enrollment', 'tests.unit.test_learning_delivery_migrations', 'tests.unit.test_learning_delivery_public_surface', 'tests.unit.test_learning_enrollment_initial_state', 'tests.unit.test_learning_invitation_assignment', 'tests.unit.test_learning_participation_models', 'tests.unit.test_learning_public_surface', 'tests.unit.test_learning_scheduling', 'tests.unit.test_learning_bank_lifecycle', 'tests.unit.test_learning_composable_terms'])
           path = Path("identity-unit.xml")
           cases = list(ET.parse(path).iter("testcase")) if path.exists() else []
           selected = [c for c in cases if any(c.get("classname", "") == m or c.get("classname", "").startswith(m + ".") for m in required)]
@@ -489,7 +489,7 @@ jobs:
                   "identity_provisioning", "identity_storage", "platform_session_provenance",
               )
           }
-          required.update(['tests.test_learning_results', 'tests.test_learning_progress', 'tests.test_learning_completion', 'tests.test_learning_account_selection', 'tests.test_learning_admission_enrollment', 'tests.test_learning_audience_commands', 'tests.test_learning_bulk_role_authority', 'tests.test_learning_catalog_lookups', 'tests.test_learning_catalog_reads', 'tests.test_learning_certificate_read', 'tests.test_learning_cohort_commands', 'tests.test_learning_enrollment_state_migration', 'tests.test_learning_entitlements', 'tests.test_learning_gradebook_reports', 'tests.test_learning_insights', 'tests.test_learning_instructor_cohort_read', 'tests.test_learning_instructor_reads', 'tests.test_learning_invitation_assignment', 'tests.test_learning_learner_dashboard', 'tests.test_learning_participation_catalog', 'tests.test_learning_recipient_relation', 'tests.test_learning_roster_commands', 'tests.test_learning_scheduling', 'tests.test_learning_success_queue', 'tests.test_learning_support_reads', 'tests.test_learning_support_report_reads'])
+          required.update(['tests.test_learning_results', 'tests.test_learning_progress', 'tests.test_learning_completion', 'tests.test_learning_account_selection', 'tests.test_learning_admission_enrollment', 'tests.test_learning_audience_commands', 'tests.test_learning_bulk_role_authority', 'tests.test_learning_catalog_lookups', 'tests.test_learning_catalog_reads', 'tests.test_learning_certificate_read', 'tests.test_learning_cohort_commands', 'tests.test_learning_enrollment_state_migration', 'tests.test_learning_entitlements', 'tests.test_learning_gradebook_reports', 'tests.test_learning_insights', 'tests.test_learning_instructor_cohort_read', 'tests.test_learning_instructor_reads', 'tests.test_learning_invitation_assignment', 'tests.test_learning_learner_dashboard', 'tests.test_learning_participation_catalog', 'tests.test_learning_recipient_relation', 'tests.test_learning_roster_commands', 'tests.test_learning_scheduling', 'tests.test_learning_success_queue', 'tests.test_learning_support_reads', 'tests.test_learning_support_report_reads', 'tests.test_learning_bank_lifecycle', 'tests.test_learning_bank_migration', 'tests.test_learning_bank_transfer_v6', 'tests.test_learning_composable_settings_migration', 'tests.test_learning_prerequisite_conditions'])
           document = ET.parse("identity-integration.xml")
           cases = list(document.iter("testcase"))
           selected = [c for c in cases if any(c.get("classname", "") == m or c.get("classname", "").startswith(m + ".") for m in required)]
@@ -506,7 +506,7 @@ jobs:
           missing = sorted(definitions - collected)
           observations = [p.get("value", "") for p in document.iter("property") if p.get("name") == "genuine_executed_revisions"]
           graph_observed = len(observations) == 1 and all(re.fullmatch(r"[^:;]+:[0-9a-f]{64}", item) for item in observations[0].split(";"))
-          graph_observed = graph_observed and all(name + ":" in observations[0] for name in ("0030_credential_tenant_key", "lr_0006_delivery_support", "lr_0007_enrollment_state_policy", "a001_identity_extensions", "a002_later"))
+          graph_observed = graph_observed and all(name + ":" in observations[0] for name in ("0030_credential_tenant_key", "lr_0006_delivery_support", "lr_0007_enrollment_state_policy", "lr_0008_prerequisite_conditions", "lr_0009_composable_policies", "lr_0010_question_bank_versions", "a001_identity_extensions", "a002_later"))
           refused = [c for c in selected if any(c.find(k) is not None for k in ("skipped", "failure", "error"))]
           unrelated_skips = [c.get("classname", "") + "::" + c.get("name", "") for c in cases if c.find("skipped") is not None and c.get("classname") not in required]
           receipt = {
