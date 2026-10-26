@@ -1,6 +1,130 @@
 # Compatibility — dotmac-learning
 
-## Current source correction — 2026-10-19
+## Current source correction — 2026-10-21 (unreleased successor candidate)
+
+This section governs the current source and supersedes the counts, export
+totals, lineage head and bank-writer semantics stated in the dated sections
+below, which are retained as historical records for their own checkpoints.
+Claims below that do not conflict with this section remain in force.
+
+The candidate is intended as `0.1.0a3` but is **not allocated and not
+published**: every version string in the source still reads `0.1.0a2`, and no
+allocation is made here. Published `0.1.0a1` remains immutable. The declared
+Kernel floor remains `>=0.1.0a106`; no new Kernel API is consumed.
+
+Verified current facts: **28 tables / 298 persisted fields**, **598 root
+exports** (535 at the a2 candidate's close, +2 prerequisite exports, +2 terms
+exports, +59 question-bank/SnapshotV6 exports), lineage `lr_0001_learning`
+through `lr_0010_question_bank_versions` with single head `lr_0010`. Released
+migrations `lr_0001`–`lr_0006` remain byte-for-byte unchanged; `lr_0007`–
+`lr_0010` are additive and unreleased. The stale "533 total" and
+"27-table/260-field" figures in the 2026-10-19 section describe that earlier
+checkpoint only and must not be used for this candidate.
+
+### Composable settings: defaults and prospective-only semantics
+
+Prerequisites, track gating, completion/certificate/scoring/pacing/cooldown
+policies and the learner-visible terms are composable data/inputs; see the
+CHANGELOG candidate section for the full catalog and defaults. Compatibility
+posture:
+
+- At the defaults, behaviour is preserved: prerequisite defaults
+  (`course_completed`/`g0`/`all`) reproduce the prior implicit-ALL access
+  decisions, legacy `requires: []` still parses, `unmet_prerequisites` keeps
+  its `list[UUID]` signature, and every policy/terms default reproduces the
+  prior hardcoded value. One reporting normalization is ratified: when several
+  prerequisites are unmet, the reported first blocker follows the deterministic
+  order `(group_key, condition_kind, requires_course_id, id)`; access booleans
+  are unchanged.
+- Non-default values are opt-in data with prospective-only effect.
+  `completion_fraction` changes apply at the next recompute triggered by a
+  score write, never by rewriting stored completions. `scoring_policy` is
+  read-time over existing scores; `patch_activity`/`update_activity` refuse a
+  policy change once submissions exist, and `stage_activity_patch` remains a
+  documented trusted-import bypass — callers using it accept explicit-act
+  re-derivation. Certificate validity stamps only newly issued certificates;
+  existing certificates are returned unchanged and never gain an expiry
+  retroactively, while `certificate_held` requires an unexpired certificate
+  from this candidate onward. The attempt cooldown (`min_attempt_interval_seconds`)
+  constrains only later admissions; interval `0` disables it completely.
+  Non-default pacing (`pacing_default_open=false`) should be dry-run before
+  use. Exact `(attempt_no, created_at)` ties under `latest`/`first` resolve by
+  `Score.id` identically in projections and analytics; `best` ranking is
+  unchanged.
+- Constructor/API breakage is in-series and exhaustive in the CHANGELOG
+  candidate section (required terms keywords/fields, required
+  `pacing_default_open`/`gating_mode`/`promote_delivery_mode`, the
+  `ManualImportHeader` policy fields, terms-object tightening, and the retired
+  bank writers below). Academy absorbs these at its composition call sites;
+  external consumers must add the required fields — Learning supplies no
+  fallback defaults for them.
+
+### Question-bank record, SnapshotV6, and frozen V1–V5 refusal
+
+The database is now the question-bank system of record. Drafts are created,
+copied, edited and discarded explicitly; `lint_bank_version` reports without
+writing; publish requires a lint-clean draft and an optimistic base-current
+check and never auto-repoints activities; repointing an activity to a published
+version and retiring a version are separate explicit commands. Attempts pin
+the bank version they opened against and open/grade/read through that pin
+(historical NULL pins keep the legacy fallback). YAML import creates or, only
+with the explicit replace flag on an untouched YAML draft, replaces a draft —
+it never overwrites a UI draft, never writes Activity rows, ignores the
+document version field, and is a no-op when the canonical hash already matches.
+Export emits the audited published document. `load_bank` and
+`import_bank_with_activity` raise `LegacyBankWriterRetired` without executing
+SQL; the earlier sections below that describe them as working writers are
+superseded. Reference patch/stage paths refuse to change an activity's pinned
+bank; the explicit repoint command is the only path.
+
+Authorization boundary: Learning performs no role checks internally, as before.
+Bank lifecycle commands require a trusted `BankAuditContext` supplied by the
+product (never inferred from command fields), and audit actions are
+content-free. Restricting publish and export to administrators is an **Academy
+composition responsibility**: Academy must gate those call sites on its own
+authorization and must not expose them to non-admin actors. Answer-key-bearing
+reads (`bank_version_questions`, `published_bank_doc`) are likewise
+product-gated; learner sittings use the key-free `sitting_questions`.
+
+Prerequisite reconciliation records `origin` per row and deletes/rewrites only
+`origin=yaml_import` rows; app-authored (`origin=ui`) rows survive file
+reconciliation untouched.
+
+`LearningSnapshotV6` is the current full storage-transfer protocol (28 tables /
+298 fields, including all composable-policy columns, prerequisite origin and
+bank-version pins). V1–V5 row contracts and scopes (7/14/21/23/27 tables) are
+frozen and unchanged. Because those frozen protocols cannot carry the new
+columns, every V1–V5 export/verify path refuses when a column it does not carry
+holds a non-default value in the selected tenant extent — including every
+`is_final=true` activity (the probe default is exactly `false`) and any
+bank-version pin — rather than silently dropping policy data. The refusal
+message remains byte-stable (`non-default prerequisite policy`) across all
+probed column families, and the import-path probe keeps its precedence before
+the destination-emptiness check. Default-only extents remain transferable
+through V1–V5 exactly as before. Academy's own product-history capture (for
+example applicant bank-version pins held in Academy storage) is outside these
+snapshots and remains an Academy obligation.
+
+**Historical Git exposure of answer keys.** Banks were previously authored as
+Git YAML. Deleting those files does not remediate the exposure, history
+rewriting is not proposed, and no renewed secrecy is claimed for content that
+was in Git: it must be treated as disclosed to everyone with clone/fork access.
+The compatible remediation is to retire exposed banks and replace them with
+newly authored items (entrance/high-stakes first), recording explicit risk
+acceptance where replacement is deferred. No answer content is recorded in
+this document.
+
+### Gates still pending
+
+Shared Kernel/Learning composition on settled main, independent composed
+review of the combined candidate, hosted PostgreSQL migration/full-suite
+execution (including the `lr_0008`–`lr_0010` goldens, the frozen-snapshot
+refusal canaries and prefix-state qualification), the exact installed-pair
+probe, and Academy caller retirement/adoption all remain pending. Source unit
+suites and authored hosted canaries are not hosted qualification, installed
+adoption or rollback evidence, and no consumer is newly adopted by this source.
+
+## Historical source correction — 2026-10-19 (superseded above for current counts/semantics)
 
 Published `0.1.0a1` is immutable. This prepared successor is now allocated
 as `0.1.0a2` (allocated source candidate, not yet published); the former
