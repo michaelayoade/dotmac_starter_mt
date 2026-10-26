@@ -62,8 +62,29 @@ FK_ORACLE = {
     "chapters": {
         (("tenant_id", "course_id"), "mod_learning", "courses", ("tenant_id", "id"))
     },
-    "question_banks": set(),
+    "question_banks": {
+        (
+            ("tenant_id", "current_version_id"),
+            "mod_learning",
+            "question_bank_versions",
+            ("tenant_id", "id"),
+        )
+    },
     "questions": {
+        (
+            ("tenant_id", "bank_id"),
+            "mod_learning",
+            "question_banks",
+            ("tenant_id", "id"),
+        ),
+        (
+            ("tenant_id", "bank_version_id"),
+            "mod_learning",
+            "question_bank_versions",
+            ("tenant_id", "id"),
+        ),
+    },
+    "question_bank_versions": {
         (
             ("tenant_id", "bank_id"),
             "mod_learning",
@@ -85,7 +106,11 @@ FK_ORACLE = {
 UNIQUE_ORACLE = {
     "chapters": {("tenant_id", "course_id", "number")},
     "question_banks": {("tenant_id", "id")},
-    "questions": {("tenant_id", "bank_id", "ext_id")},
+    "questions": {("tenant_id", "bank_version_id", "ext_id")},
+    "question_bank_versions": {
+        ("tenant_id", "id"),
+        ("tenant_id", "bank_id", "version_no"),
+    },
     "chapter_reads": {("tenant_id", "person_id", "chapter_id")},
     "subtopic_reads": {("tenant_id", "person_id", "chapter_id", "subtopic_slug")},
     "chapter_bookmarks": {("tenant_id", "person_id", "chapter_id")},
@@ -93,12 +118,30 @@ UNIQUE_ORACLE = {
 }
 INDEX_ORACLE = {
     "chapters": {"tenant_id", "course_id"},
-    "question_banks": {"tenant_id", "course_id"},
-    "questions": {"tenant_id", "bank_id"},
+    "question_banks": {"tenant_id", "course_id", "current_version_id"},
+    "questions": {"tenant_id", "bank_id", "bank_version_id"},
+    "question_bank_versions": {"tenant_id", "bank_id"},
     "chapter_reads": {"tenant_id", "person_id", "chapter_id"},
     "subtopic_reads": {"tenant_id", "person_id", "chapter_id"},
     "chapter_bookmarks": {"tenant_id", "person_id", "course_id", "chapter_id"},
     "chapter_notes": {"tenant_id", "person_id", "course_id", "chapter_id"},
+}
+# lr_0010 unique indexes that do not follow the ix_<table>_<column> shape.
+INDEX_EXTRA_ORACLE = {
+    "question_banks": {
+        (
+            "uq_question_banks_natural_key",
+            ("tenant_id", "course_id", "chapter_number", "kind"),
+        )
+    },
+    "question_bank_versions": {
+        ("uq_question_bank_versions_one_draft", ("tenant_id", "bank_id"))
+    },
+}
+# The questions -> bank-version FK is RESTRICT (published history cannot
+# be cascade-deleted); every other curriculum FK is CASCADE.
+FK_DELETE_RULE_ORACLE = {
+    ("questions", ("tenant_id", "bank_version_id")): "RESTRICT",
 }
 # PostgreSQL format_type, nullability, default expression. Identity/timestamps
 # are checked separately; these are literal source DDL values, not ORM output.
@@ -115,12 +158,14 @@ COLUMN_ORACLE = {
     },
     "question_banks": {
         "course_id": ("uuid", False, None),
+        "current_version_id": ("uuid", True, None),
         "chapter_number": ("integer", True, None),
         "kind": ("character varying(10)", False, None),
         "version": ("integer", False, "1"),
     },
     "questions": {
         "bank_id": ("uuid", False, None),
+        "bank_version_id": ("uuid", True, None),
         "ext_id": ("character varying(60)", False, None),
         "stem": ("text", False, None),
         "type": ("character varying(12)", False, None),
@@ -130,6 +175,23 @@ COLUMN_ORACLE = {
         "category": ("character varying(40)", True, None),
         "explanation": ("text", False, "''::text"),
         "weight": ("integer", False, "1"),
+    },
+    "question_bank_versions": {
+        "bank_id": ("uuid", False, None),
+        "version_no": ("integer", True, None),
+        "state": ("character varying(10)", False, None),
+        "origin": ("character varying(16)", False, None),
+        "content_hash": ("character varying(64)", False, "''::character varying"),
+        "lint_violations": ("jsonb", False, "'[]'::jsonb"),
+        "base_version_id": ("uuid", True, None),
+        "draft_revision": ("integer", False, "0"),
+        "created_by_actor": ("uuid", True, None),
+        "published_by": ("uuid", True, None),
+        "published_at": ("timestamp with time zone", True, None),
+        "retired_by": ("uuid", True, None),
+        "retired_at": ("timestamp with time zone", True, None),
+        "retire_reason": ("text", True, None),
+        "superseded_by_version_id": ("uuid", True, None),
     },
     "chapter_reads": {
         "person_id": ("uuid", False, None),
@@ -222,13 +284,16 @@ def test_curriculum_real_catalog_matches_immutable_source(learning_database):
             assert set(inspector.get_table_names(schema="mod_learning")) == set(
                 ALL_TABLES
             )
-            for table in TABLES:
+            for table in (*TABLES, "question_bank_versions"):
                 assert not inspector.has_table(table, schema="public")
                 fks = _foreign_keys(conn, table)
                 assert {fk[:4] for fk in fks} == FK_ORACLE[table] | {
                     (("tenant_id",), "public", "tenants", ("id",))
                 }
-                assert all(fk[4] == "CASCADE" for fk in fks)
+                assert all(
+                    fk[4] == FK_DELETE_RULE_ORACLE.get((table, fk[0]), "CASCADE")
+                    for fk in fks
+                )
                 assert {
                     tuple(u["column_names"])
                     for u in inspector.get_unique_constraints(
@@ -239,7 +304,9 @@ def test_curriculum_real_catalog_matches_immutable_source(learning_database):
                     (i["name"], tuple(i["column_names"]))
                     for i in inspector.get_indexes(table, schema="mod_learning")
                     if not i.get("duplicates_constraint")
-                } == {(f"ix_{table}_{c}", (c,)) for c in INDEX_ORACLE[table]}
+                } == {
+                    (f"ix_{table}_{c}", (c,)) for c in INDEX_ORACLE[table]
+                } | INDEX_EXTRA_ORACLE.get(table, set())
                 columns = conn.execute(
                     text(
                         "SELECT a.attname, pg_catalog.format_type(a.atttypid, "
@@ -487,15 +554,53 @@ def test_defaults_json_shape_uniqueness_cascades_and_subtopic_grants(learning_da
                 {"id": uuid.uuid4(), "tenant": tenant, "course": course},
                 "23505",
             )
+            version = uuid.uuid4()
+            conn.execute(
+                text(
+                    "INSERT INTO mod_learning.question_bank_versions "
+                    "(id, tenant_id, bank_id, version_no, state, origin) "
+                    "VALUES (:id, :tenant, :bank, 1, 'published', 'ui')"
+                ),
+                {"id": version, "tenant": tenant, "bank": bank},
+            )
+            conn.execute(
+                text(
+                    "UPDATE mod_learning.questions SET bank_version_id = :v "
+                    "WHERE id = :id"
+                ),
+                {"v": version, "id": question},
+            )
             _refused(
                 conn,
                 (
                     "INSERT INTO mod_learning.questions (id, tenant_id, "
-                    "bank_id, ext_id, stem, type, rubric_category) VALUES "
-                    "(:id, :tenant, :bank, 'Q1', 'x', 'single', 'recall')"
+                    "bank_id, bank_version_id, ext_id, stem, type, "
+                    "rubric_category) VALUES "
+                    "(:id, :tenant, :bank, :version, 'Q1', 'x', 'single', "
+                    "'recall')"
                 ),
-                {"id": uuid.uuid4(), "tenant": tenant, "bank": bank},
+                {
+                    "id": uuid.uuid4(),
+                    "tenant": tenant,
+                    "bank": bank,
+                    "version": version,
+                },
                 "23505",
+            )
+            # Restore the pre-version seed shape for the cascade checks
+            # below (bank deletion cascades its questions).
+            conn.execute(
+                text(
+                    "UPDATE mod_learning.questions SET bank_version_id = NULL "
+                    "WHERE id = :id"
+                ),
+                {"id": question},
+            )
+            conn.execute(
+                text(
+                    "DELETE FROM mod_learning.question_bank_versions " "WHERE id = :id"
+                ),
+                {"id": version},
             )
             for table in TABLES[3:]:
                 conn.execute(

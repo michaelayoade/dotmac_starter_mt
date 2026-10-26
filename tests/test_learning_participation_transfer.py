@@ -6,6 +6,7 @@ cutover proof. The V1 protocol remains explicitly limited to seven tables.
 
 from dataclasses import fields, replace
 from datetime import UTC, datetime, timedelta
+from typing import get_args, get_type_hints
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -272,6 +273,16 @@ def _transfer_column_reader(conn, missing=None):
         DDL("GRANT USAGE ON SCHEMA public, mod_learning TO %(actor)s", context=context)
     )
     conn.execute(DDL("GRANT SELECT ON public.tenants TO %(actor)s", context=context))
+    # RD-1 probe (lr_0010): frozen exports must see whether any
+    # question_bank_versions row exists in the tenant extent; the
+    # exact-column grant below is the probe's only privilege need.
+    conn.execute(
+        DDL(
+            "GRANT SELECT (tenant_id) "
+            "ON mod_learning.question_bank_versions TO %(actor)s",
+            context=context,
+        )
+    )
     for name in TABLES:
         conn.execute(
             DDL(
@@ -1681,11 +1692,23 @@ _INTEGER_EXAMPLES = [
     ("cohorts", "entrance_time_limit_minutes"),
     ("track_courses", "order_index"),
 ]
+# V3 representation probes can only address tables and columns the
+# frozen V3 rows carry: lr_0008-lr_0010 composable-policy and
+# bank-version columns (and the question_bank_versions table itself)
+# join only at V6, so probing them here would construct rows the V3
+# contracts deliberately do not have.
+_V3_ROW_FIELDS = {
+    name: {f.name for f in fields(get_args(hint)[0])}
+    for name, hint in get_type_hints(LearningSnapshotV3).items()
+    if name not in {"version", "tenant_ids"}
+}
 _VARCHAR_COLUMNS = [
     (name, stored.name, stored.type.length)
     for name, relation in RELATIONS.items()
+    if name in _V3_ROW_FIELDS
     for stored in relation.c
-    if isinstance(getattr(stored.type, "length", None), int)
+    if stored.name in _V3_ROW_FIELDS[name]
+    and isinstance(getattr(stored.type, "length", None), int)
 ]
 
 
@@ -1825,6 +1848,14 @@ _RD1_NON_DEFAULTS = (
         "gating_mode",
         "UPDATE mod_learning.tracks"
         " SET gating_mode = 'none' WHERE tenant_id = :tenant",
+    ),
+    (
+        # lr_0010 provenance: yaml_import is the backfill/reconciler
+        # value; the standing default frozen imports materialize is
+        # ui, so yaml_import refuses V1-V5 (RD-1).
+        "prerequisite_origin",
+        "UPDATE mod_learning.course_prerequisites"
+        " SET origin = 'yaml_import' WHERE tenant_id = :tenant",
     ),
 )
 

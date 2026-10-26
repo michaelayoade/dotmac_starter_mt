@@ -284,7 +284,8 @@ _ORDER = (
     "success_queue_entries",
 )
 _BY_NAME = {c.name: c for c in (*_CHANGED_TABLES, *_unchanged_contracts())}
-assert set(_BY_NAME) == set(_ORDER) and len(_ORDER) == 28
+if set(_BY_NAME) != set(_ORDER) or len(_ORDER) != 28:
+    raise RuntimeError("SnapshotV6 table contracts do not match the 28-table order")
 _ALL_TABLES = tuple(_BY_NAME[name] for name in _ORDER)
 
 

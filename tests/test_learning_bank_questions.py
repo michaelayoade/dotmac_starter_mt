@@ -17,8 +17,14 @@ learning_database = results.learning_database
 result_database = results.result_database
 
 
-def _bank(db, tenant, course):
-    bank = QuestionBank(tenant_id=tenant, course_id=course, kind="practice", version=1)
+def _bank(db, tenant, course, *, chapter_number=None):
+    bank = QuestionBank(
+        tenant_id=tenant,
+        course_id=course,
+        chapter_number=chapter_number,
+        kind="practice",
+        version=1,
+    )
     db.add(bank)
     db.flush()
     return bank
@@ -71,7 +77,8 @@ def test_bank_questions_all_types_fields_membership_and_valid_non_mcq_shapes(
     _, app, tenant, _, course, _, _, *_ = result_database
     with scoped(app, tenant) as db:
         bank = _bank(db, tenant, course)
-        other_bank = _bank(db, tenant, course)
+        # lr_0010: banks are unique per (tenant, course, chapter, kind).
+        other_bank = _bank(db, tenant, course, chapter_number=99)
         specs = (
             ("single", ["yes", "no"], ["yes"]),
             ("multi", ["a", "b"], ["a", "b"]),

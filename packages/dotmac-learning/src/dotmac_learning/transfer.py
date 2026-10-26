@@ -426,8 +426,13 @@ def _refuse_non_default_prerequisite_policy(
 
     The lr_0010 bank group follows the same rule per version coverage:
     any non-NULL bank-version pin, any question_bank_versions row, or a
-    prerequisite origin other than the yaml_import backfill default
-    refuses until SnapshotV6 carries it.
+    prerequisite origin other than ``ui`` refuses until SnapshotV6
+    carries it. ``ui`` is the probe default because it is lr_0010's
+    standing server default — exactly what frozen imports materialize —
+    while ``yaml_import`` provenance (the lr_0010 backfill value for
+    pre-existing rows, restamped only by the file reconciler) would be
+    silently rewritten to ``ui`` by a frozen round trip, so it is
+    genuinely non-default data for these snapshot versions.
     """
     checks: list[bool] = []
     if _a3_group_present(scope, "courses", _A3_S1_COLUMNS):
@@ -562,7 +567,7 @@ def _refuse_non_default_prerequisite_policy(
                 scope,
                 tenant_ids,
                 _A3_PREREQ_ORIGINS,
-                _A3_PREREQ_ORIGINS.c.origin != "yaml_import",
+                _A3_PREREQ_ORIGINS.c.origin != "ui",
             )
         )
     if include_attempts and _a3_group_present(

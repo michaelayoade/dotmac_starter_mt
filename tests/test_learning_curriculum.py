@@ -539,10 +539,11 @@ def test_numeric_bank_answer_keeps_json_scalar_kind_through_database(
             )
         )
         db.flush()
+        bank_id = bank.id
     with Session(engine) as db, db.begin():
         _scope(db, tenant)
         rebuilt = doc_from_db(
-            db, tenant_id=tenant, bank_id=bank.id, course_slug="numeric"
+            db, tenant_id=tenant, bank_id=bank_id, course_slug="numeric"
         )
         (stored,) = rebuilt.questions
         assert stored.correct == answer

@@ -123,7 +123,10 @@ def reconcile_prerequisites(
                 wanted[row.identity] = row
         for condition in entry.conditions:
             if condition.kind not in ACTIVITY_SCOPED_KINDS:
-                assert condition.requires is not None
+                if condition.requires is None:
+                    raise PrerequisiteReconciliationError(
+                        f"condition kind {condition.kind!r} requires a course"
+                    )
                 req = condition.requires
                 if req not in courses:
                     missing.append(req)
@@ -134,7 +137,10 @@ def reconcile_prerequisites(
                         )
                     params: dict[str, object] = {}
                     if condition.kind == "course_grade_at_least":
-                        assert condition.min_fraction is not None
+                        if condition.min_fraction is None:
+                            raise PrerequisiteReconciliationError(
+                                "course_grade_at_least requires min_fraction"
+                            )
                         params = {"min_fraction": condition.min_fraction}
                     row = _Wanted(
                         course_id=courses[slug].id,
@@ -145,7 +151,10 @@ def reconcile_prerequisites(
                     )
                     wanted[row.identity] = row
             else:
-                assert condition.activity_id is not None
+                if condition.activity_id is None:
+                    raise PrerequisiteReconciliationError(
+                        f"condition kind {condition.kind!r} requires an activity"
+                    )
                 activity = activities.get(condition.activity_id)
                 if activity is None:
                     raise PrerequisiteReconciliationError(
@@ -154,7 +163,10 @@ def reconcile_prerequisites(
                     )
                 params = {"activity_id": str(condition.activity_id)}
                 if condition.kind == "attempt_number_at_least":
-                    assert condition.min_attempts is not None
+                    if condition.min_attempts is None:
+                        raise PrerequisiteReconciliationError(
+                            "attempt_number_at_least requires min_attempts"
+                        )
                     params["min_attempts"] = condition.min_attempts
                 if slug in courses:
                     row = _Wanted(

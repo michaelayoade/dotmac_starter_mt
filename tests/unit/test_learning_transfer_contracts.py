@@ -401,3 +401,96 @@ def test_a3_s2_column_contract_refuses_type_nullability_and_chain_drift():
     assert not transfer._column_contract_matches(
         "scores", {**expected, "is_final": ("boolean", False)}, expected
     )
+
+
+# RD-1 prerequisite-origin probe direction (PR #923 repair): the probe
+# default must be lr_0010's standing server default ``ui`` — the value
+# frozen imports materialize — so a clean round trip passes, while
+# ``yaml_import`` provenance refuses. Proven against the real guard with
+# a capturing fake scope: no database involved.
+def _rd1_captured_statements(monkeypatch, *, origin_is_non_default: bool):
+    from dotmac_learning import transfer as transfer_module
+
+    captured: list[str] = []
+
+    class _Result:
+        def __init__(self, value):
+            self._value = value
+
+        def scalars(self):
+            return iter(self._value)
+
+        def scalar_one(self):
+            return self._value
+
+    class _FakeScope:
+        def execute(self, statement, parameters=None):
+            # pg_catalog probe: report every a3 column present.
+            return _Result(
+                [
+                    "prerequisite_composition",
+                    "completion_fraction",
+                    "certificate_auto_issue",
+                    "certificate_validity_days",
+                    "scoring_policy",
+                    "is_final",
+                    "min_attempt_interval_seconds",
+                    "expires_at",
+                    "condition_kind",
+                    "params",
+                    "group_key",
+                    "gating_mode",
+                    "auto_accept_below_action",
+                    "pacing_default_open",
+                    "bank_version_id",
+                    "current_version_id",
+                    "origin",
+                    "tenant_id",
+                ]
+            )
+
+        def extent_query(self, statement, tenant_ids):
+            import warnings
+
+            from sqlalchemy.dialects import postgresql
+            from sqlalchemy.exc import SAWarning
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SAWarning)
+                rendered = str(
+                    statement.compile(
+                        dialect=postgresql.dialect(),
+                        compile_kwargs={"literal_binds": True},
+                    )
+                )
+            captured.append(rendered)
+            if "course_prerequisites.origin" in rendered:
+                return _Result(origin_is_non_default)
+            return _Result(False)
+
+    return transfer_module, _FakeScope(), captured
+
+
+def test_rd1_origin_probe_defaults_to_ui_and_refuses_yaml_import(monkeypatch):
+    transfer_module, scope, captured = _rd1_captured_statements(
+        monkeypatch, origin_is_non_default=False
+    )
+    # Clean direction: every probe at its default — nothing raises.
+    transfer_module._refuse_non_default_prerequisite_policy(
+        scope, (uuid4(),), include_participation=True
+    )
+    origin_probes = [s for s in captured if "course_prerequisites.origin" in s]
+    assert len(origin_probes) == 1
+    assert "origin != 'ui'" in origin_probes[0]
+    assert "yaml_import" not in origin_probes[0]
+
+    # Refusal direction: the same probe finding a row (a yaml_import
+    # row is exactly what ``origin != 'ui'`` matches beyond the
+    # standing default) refuses the transfer.
+    transfer_module2, scope2, _ = _rd1_captured_statements(
+        monkeypatch, origin_is_non_default=True
+    )
+    with pytest.raises(SnapshotValidationError, match="RD-1"):
+        transfer_module2._refuse_non_default_prerequisite_policy(
+            scope2, (uuid4(),), include_participation=True
+        )

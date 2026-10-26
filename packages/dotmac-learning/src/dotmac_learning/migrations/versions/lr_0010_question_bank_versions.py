@@ -194,6 +194,25 @@ def upgrade() -> None:
         ["bank_id"],
         schema=_SCHEMA,
     )
+    # Same tenant-isolation posture as every sibling lr table
+    # (lr_0001..lr_0007): forced RLS plus the standing app grants.
+    # Downgrade drops the table, which removes both symmetrically.
+    op.execute(
+        "ALTER TABLE mod_learning.question_bank_versions " "ENABLE ROW LEVEL SECURITY"
+    )
+    op.execute(
+        "ALTER TABLE mod_learning.question_bank_versions " "FORCE ROW LEVEL SECURITY"
+    )
+    op.execute(
+        "CREATE POLICY question_bank_versions_tenant_isolation "
+        "ON mod_learning.question_bank_versions "
+        "USING (tenant_id = public.app_current_tenant_id()) "
+        "WITH CHECK (tenant_id = public.app_current_tenant_id())"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE "
+        "ON mod_learning.question_bank_versions TO app_user, platform_api"
+    )
     op.create_index(
         "uq_question_bank_versions_one_draft",
         "question_bank_versions",

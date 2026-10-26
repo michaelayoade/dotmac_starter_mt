@@ -18,7 +18,6 @@ from tests.test_learning_catalog import (
     _scope,
     _tenant,
 )
-from tests.test_learning_participation_catalog import _cohort
 
 learning_database = learning_catalog.learning_database
 
@@ -95,7 +94,15 @@ def test_schema_only_retirement_preserves_historical_rows_and_catalog(
             people = [_person(conn, tenant) for _ in range(6)]
         with app.begin() as conn:
             _scope(conn, tenant)
-            cohort = _cohort(conn, tenant)
+            cohort = uuid4()
+            conn.execute(
+                text(
+                    "INSERT INTO mod_learning.cohorts (id, tenant_id, "
+                    "name, discipline, status) VALUES (:id, :tenant, "
+                    "'Cohort', 'engineering', 'active')"
+                ),
+                {"id": cohort, "tenant": tenant},
+            )
             for person, role, status in zip(
                 people[:4],
                 ("student", "instructor", "", "界" * 20),

@@ -102,7 +102,12 @@ DEFAULTS = {
     "tracks": {"status": "active", "gating_mode": "previous"},
     "track_courses": {"order_index": "0"},
     "cohort_tracks": {"status": "active"},
-    "course_offerings": {"status": "active"},
+    "course_offerings": {"status": "active", "pacing_default_open": "true"},
+    "course_prerequisites": {
+        "condition_kind": "course_completed",
+        "group_key": "g0",
+        "origin": "ui",
+    },
 }
 
 

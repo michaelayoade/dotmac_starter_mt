@@ -170,7 +170,10 @@ def test_lr_0008_upgrade_backfills_defaults_and_preserves_access(learning_databa
         command.upgrade(cfg, "learning@head")
         with admin.connect() as conn:
             heads = set(conn.scalars(text("SELECT version_num FROM alembic_version")))
-            assert "lr_0008_prerequisite_conditions" in heads
+            # Composed DB: alembic_version also carries the kernel
+            # head; lr_0008 is proven applied by the lr_0010 head
+            # (its chain successor) plus the column checks below.
+            assert "lr_0010_question_bank_versions" in heads
             for table, column in (
                 ("courses", "prerequisite_composition"),
                 ("tracks", "gating_mode"),
@@ -330,7 +333,7 @@ def test_lr_0009_upgrade_backfills_defaults_and_finals(learning_database):
         command.upgrade(cfg, "learning@head")
         with admin.connect() as conn:
             heads = set(conn.scalars(text("SELECT version_num FROM alembic_version")))
-            assert heads == {"lr_0010_question_bank_versions"}
+            assert "lr_0010_question_bank_versions" in heads
         with app.begin() as conn:
             _scope(conn, tenant)
             assert conn.execute(
