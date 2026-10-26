@@ -10,6 +10,7 @@ at PR #907 head 9d92e5c before any wheel check ran.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -105,6 +106,88 @@ def test_bare_relative_root_import_records_the_package_itself(probe, tmp_path):
     )
     document = _expectation(probe, checkout, tmp_path)
     assert document["bindings"]["BankDoc"] == ["dotmac_learning", "BankDoc"]
+
+
+def _probe_string_constants() -> set[str]:
+    tree = ast.parse(SCRIPT.read_text())
+    return {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+
+def _source_head(versions: Path) -> str:
+    revisions: dict[str, object] = {}
+    for path in sorted(versions.glob("*.py")):
+        values: dict[str, object] = {}
+        for node in ast.parse(path.read_text()).body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id in (
+                        "revision",
+                        "down_revision",
+                    ):
+                        values[target.id] = ast.literal_eval(node.value)
+        if "revision" in values:
+            revisions[str(values["revision"])] = values.get("down_revision")
+    referenced: set[str] = set()
+    for down in revisions.values():
+        if isinstance(down, tuple | list):
+            referenced.update(str(item) for item in down if item)
+        elif down:
+            referenced.add(str(down))
+    heads = set(revisions) - referenced
+    assert len(heads) == 1, heads
+    return heads.pop()
+
+
+def test_probe_names_the_current_source_migration_heads():
+    """The hosted probe hardcodes the pair heads; they must track source.
+
+    PR #923 run 40332006063 failed `Installed pair graph head differs`:
+    the probe still named lr_0007 after A3 added lr_0008-lr_0010.
+    """
+    constants = _probe_string_constants()
+    kernel_head = _source_head(
+        PROJECT_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
+    )
+    learning_head = _source_head(
+        PROJECT_ROOT
+        / "packages/dotmac-learning/src/dotmac_learning/migrations/versions"
+    )
+    assert kernel_head in constants
+    assert learning_head in constants
+
+
+def test_probe_rls_table_count_matches_source_migrations():
+    """`count(*)=N` in the probe must equal the migrations' table tally."""
+    versions = (
+        PROJECT_ROOT
+        / "packages/dotmac-learning/src/dotmac_learning/migrations/versions"
+    )
+    tables: set[str] = set()
+    for path in sorted(versions.glob("*.py")):
+        for node in ast.parse(path.read_text()).body:
+            if not (isinstance(node, ast.FunctionDef) and node.name == "upgrade"):
+                continue
+            for call in ast.walk(node):
+                if not (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Attribute)
+                    and call.func.attr in ("create_table", "drop_table")
+                    and call.args
+                    and isinstance(call.args[0], ast.Constant)
+                ):
+                    continue
+                name = str(call.args[0].value)
+                if call.func.attr == "create_table":
+                    tables.add(name)
+                else:
+                    tables.discard(name)
+    assert any(
+        f"count(*)={len(tables)}" in constant for constant in _probe_string_constants()
+    )
 
 
 def test_relative_root_import_escaping_the_package_refuses(probe, tmp_path):

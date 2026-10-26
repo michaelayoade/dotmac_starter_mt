@@ -327,7 +327,7 @@ def migrate(admin, receipt: dict) -> None:
             scripts = ScriptDirectory.from_config(cfg)
             require(
                 set(scripts.get_heads())
-                == {"0030_credential_tenant_key", "lr_0007_enrollment_state_policy"},
+                == {"0030_credential_tenant_key", "lr_0010_question_bank_versions"},
                 "Installed pair graph head differs",
             )
 
@@ -365,7 +365,7 @@ def migrate(admin, receipt: dict) -> None:
                 )
                 cfg.attributes["connection"] = connection
                 command.upgrade(cfg, "0030_credential_tenant_key")
-                command.upgrade(cfg, "lr_0007_enrollment_state_policy")
+                command.upgrade(cfg, "lr_0010_question_bank_versions")
                 require_prerequisites(connection, module.requires)
                 require(
                     set(
@@ -373,13 +373,13 @@ def migrate(admin, receipt: dict) -> None:
                             sa.text("SELECT version_num FROM public.alembic_version")
                         )
                     )
-                    == {"lr_0007_enrollment_state_policy"},
+                    == {"0030_credential_tenant_key", "lr_0010_question_bank_versions"},
                     "Live installed head differs",
                 )
                 require(
                     connection.scalar(
                         sa.text(
-                            "SELECT count(*)=27 AND bool_and(c.relrowsecurity) "
+                            "SELECT count(*)=28 AND bool_and(c.relrowsecurity) "
                             "FROM pg_class c "
                             "JOIN pg_namespace n ON n.oid=c.relnamespace "
                             "WHERE n.nspname='mod_learning' AND c.relkind='r'"
