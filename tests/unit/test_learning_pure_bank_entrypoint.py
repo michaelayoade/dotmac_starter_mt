@@ -159,6 +159,8 @@ def test_same_owner_identity_and_raw_command_values():
             new_activity_assessment_mode="graded",
             new_activity_grading="auto",
             new_activity_weight=1.0,
+            new_activity_scoring_policy="best",
+            new_activity_min_attempt_interval_seconds=0,
         ),
         missing_question_weight=1,
         tenant_id=uuid4(),

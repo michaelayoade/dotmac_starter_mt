@@ -45,6 +45,7 @@ def _setup(db, tenant, person, cohort, courses):
             name="Access",
             course_ids=courses,
             gating_mode="previous",
+            pacing_default_open=True,
         ),
     )
     enrollment = Enrollment(

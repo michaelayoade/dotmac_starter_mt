@@ -9,7 +9,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from .models import Activity, CourseCompletion
+from .models import Activity, Course, CourseCompletion
 from .progress_contracts import (
     CertificateCommand,
     CompletionCommand,
@@ -100,7 +100,16 @@ def recompute_completion(db: Session, payload: CompletionCommand) -> CompletionR
         course_id=payload.course_id,
     )
     passed = sum(1 for score in best.values() if score.passed)
-    is_complete = total > 0 and passed == total
+    # Course policy columns are read inside the handler (RD-2): the command
+    # shape is unchanged. A missing Course row keeps the historical rules
+    # (fraction 1.0, auto-issue on), matching pre-column behavior exactly.
+    course = db.scalars(
+        select(Course).where(
+            Course.tenant_id == payload.tenant_id, Course.id == payload.course_id
+        )
+    ).first()
+    completion_fraction = course.completion_fraction if course is not None else 1.0
+    is_complete = total > 0 and passed / total >= completion_fraction
     first_completion = is_complete and rec.completed_at is None
     rec.pct = passed / total if total else 0.0
     if is_complete:
@@ -112,7 +121,8 @@ def recompute_completion(db: Session, payload: CompletionCommand) -> CompletionR
         rec.completed_at = None
     db.flush()
     certificate = None
-    if first_completion:
+    auto_issue = course.certificate_auto_issue if course is not None else True
+    if first_completion and auto_issue:
         from .certificates import issue_certificate
 
         certificate = issue_certificate(

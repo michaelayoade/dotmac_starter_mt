@@ -1881,3 +1881,84 @@ def test_rd1_other_tenant_non_defaults_do_not_block_clean_tenant_export(
         assert {row.id for row in exported.course_prerequisites} == {
             snapshot.course_prerequisites[0].id
         }
+
+
+# RD-1 Wave 1L (lr_0009) families that join coverage at V3.
+_RD1_S2_V3_NON_DEFAULTS = (
+    (
+        "auto_accept_below_action",
+        "UPDATE mod_learning.cohorts"
+        " SET auto_accept_below_action = 'none' WHERE tenant_id = :tenant",
+    ),
+    (
+        "pacing_default_open",
+        "UPDATE mod_learning.course_offerings"
+        " SET pacing_default_open = false WHERE tenant_id = :tenant",
+    ),
+)
+
+
+@pytest.mark.parametrize("family,statement", _RD1_S2_V3_NON_DEFAULTS)
+def test_rd1_s2_non_defaults_refused_by_v3_export_and_verify(
+    transfer_database, family, statement
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        conn.execute(text(statement), {"tenant": tenants[0]})
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot_v3(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot_v3(conn, snapshot)
+
+
+def test_rd1_s2_scoring_policy_refused_by_v2_export_and_verify(
+    transfer_database,
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        conn.execute(
+            text(
+                "UPDATE mod_learning.activities"
+                " SET scoring_policy = 'first' WHERE tenant_id = :tenant"
+            ),
+            {"tenant": tenants[0]},
+        )
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot_v2(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot_v2(conn, curriculum_snapshot(tenants, people))
+
+
+def test_rd1_s2_other_tenant_non_defaults_do_not_block_clean_export(
+    transfer_database,
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        for _family, statement in _RD1_S2_V3_NON_DEFAULTS:
+            conn.execute(text(statement), {"tenant": tenants[1]})
+        conn.execute(
+            text(
+                "UPDATE mod_learning.courses"
+                " SET completion_fraction = 0.5 WHERE tenant_id = :tenant"
+            ),
+            {"tenant": tenants[1]},
+        )
+        exported = export_snapshot_v3(conn, (tenants[0],))
+        assert {row.id for row in exported.cohorts} == {snapshot.cohorts[0].id}
+        assert {row.id for row in exported.course_offerings} == {
+            snapshot.course_offerings[0].id
+        }

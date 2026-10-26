@@ -5,7 +5,7 @@ gating 'previous') are covered by the pre-existing suites, which must keep
 passing unmodified.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -130,7 +130,7 @@ def test_kinds_composition_and_activity_only_trap(track_case):
             db, tenant, person, a, fraction=0.8, passed=True, attempts=1
         )
 
-        # certificate_held (interim: any issued certificate satisfies).
+        # certificate_held: an unexpired certificate satisfies (HM-04).
         _reconcile(
             db,
             tenant,
@@ -146,17 +146,24 @@ def test_kinds_composition_and_activity_only_trap(track_case):
             ),
         )
         assert course_access_states(db, **kwargs)[b].locked
-        db.add(
-            Certificate(
-                tenant_id=tenant,
-                person_id=person,
-                course_id=a,
-                serial="S1",
-                issued_at=NOW,
-            )
+        certificate = Certificate(
+            tenant_id=tenant,
+            person_id=person,
+            course_id=a,
+            serial="S1",
+            issued_at=NOW,
         )
+        db.add(certificate)
         db.flush()
         assert not course_access_states(db, **kwargs)[b].locked
+        certificate.expires_at = NOW - timedelta(days=1)
+        db.flush()
+        assert course_access_states(db, now=NOW, **kwargs)[b].locked
+        certificate.expires_at = NOW + timedelta(days=1)
+        db.flush()
+        assert not course_access_states(db, now=NOW, **kwargs)[b].locked
+        certificate.expires_at = None
+        db.flush()
 
         # any-composition: grade group fails (0.8 < 0.9); activity group needs
         # BOTH passed and >= 2 attempts.
@@ -234,6 +241,7 @@ def test_track_gating_modes_and_reason_precedence(track_case):
                 name="Seq",
                 course_ids=(a, b, c),
                 gating_mode="none",
+                pacing_default_open=True,
             ),
         )
         db.add(

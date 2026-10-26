@@ -14,7 +14,8 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 FIELDS = {
     "cohorts": (
         "name discipline status delivery_mode entrance_bank_id "
-        "entrance_time_limit_minutes auto_accept_threshold"
+        "entrance_time_limit_minutes auto_accept_threshold "
+        "auto_accept_below_action"
     ),
     "enrollments": (
         "cohort_id person_id track_id role_in_cohort status audience employee_ref "
@@ -23,7 +24,9 @@ FIELDS = {
     "tracks": "slug name status gating_mode",
     "track_courses": "track_id course_id order_index",
     "cohort_tracks": "cohort_id track_id status",
-    "course_offerings": "cohort_id course_id status starts_at ends_at",
+    "course_offerings": (
+        "cohort_id course_id status starts_at ends_at pacing_default_open"
+    ),
     "course_prerequisites": (
         "course_id requires_course_id condition_kind params group_key"
     ),
@@ -72,7 +75,13 @@ INDEXES = {
     "course_prerequisites": {("tenant_id",), ("course_id",), ("requires_course_id",)},
 }
 LENGTHS = {
-    "cohorts": {"name": 120, "discipline": 40, "status": 20, "delivery_mode": 20},
+    "cohorts": {
+        "name": 120,
+        "discipline": 40,
+        "status": 20,
+        "delivery_mode": 20,
+        "auto_accept_below_action": 16,
+    },
     "enrollments": {
         "role_in_cohort": 20,
         "status": 20,
@@ -85,7 +94,11 @@ LENGTHS = {
     "course_offerings": {"status": 20},
 }
 DEFAULTS = {
-    "cohorts": {"status": "active", "delivery_mode": "self_paced"},
+    "cohorts": {
+        "status": "active",
+        "delivery_mode": "self_paced",
+        "auto_accept_below_action": "waitlisted",
+    },
     "tracks": {"status": "active", "gating_mode": "previous"},
     "track_courses": {"order_index": "0"},
     "cohort_tracks": {"status": "active"},
@@ -93,10 +106,10 @@ DEFAULTS = {
 }
 
 
-def test_source_63_persisted_fields_and_migrated_contracts():
+def test_source_65_persisted_fields_and_migrated_contracts():
     assert set(PARTICIPATION_TABLES) == set(FIELDS)
     assert len(PARTICIPATION_MODELS) == 7
-    assert sum(len(m.__table__.c) for m in PARTICIPATION_MODELS) == 63
+    assert sum(len(m.__table__.c) for m in PARTICIPATION_MODELS) == 65
     for model in PARTICIPATION_MODELS:
         table = model.__table__
         name = table.name
@@ -128,6 +141,7 @@ def test_source_63_persisted_fields_and_migrated_contracts():
                 "ck_enrollments_staff_has_employee_ref",
             },
             "tracks": {"ck_tracks_gating_mode"},
+            "cohorts": {"ck_cohorts_auto_accept_below_action"},
             "course_prerequisites": {"ck_course_prerequisites_condition_kind"},
         }.get(name, set())
         for field, length in LENGTHS.get(name, {}).items():

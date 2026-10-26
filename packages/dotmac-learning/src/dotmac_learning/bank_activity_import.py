@@ -72,11 +72,23 @@ def import_bank_with_activity(
                 "assessment_mode": command.terms.new_activity_assessment_mode,
                 "grading": command.terms.new_activity_grading,
                 "weight": command.terms.new_activity_weight,
+                "scoring_policy": command.terms.new_activity_scoring_policy,
+                "is_final": doc.kind == "final",
+                "min_attempt_interval_seconds": (
+                    command.terms.new_activity_min_attempt_interval_seconds
+                ),
             },
         )
     else:
+        # Existing activities keep their scoring policy and cooldown; only
+        # the authored final flag follows the imported bank kind.
         _assign_activity(
-            activity, (("title", title), ("pass_threshold", pass_threshold))
+            activity,
+            (
+                ("title", title),
+                ("pass_threshold", pass_threshold),
+                ("is_final", doc.kind == "final"),
+            ),
         )
 
     applied_policy: list[tuple[str, object]] = []

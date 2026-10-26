@@ -207,13 +207,15 @@ _RELATIONS = {
 }
 _TENANTS = sql_table("tenants", sql_column("id"), schema="public")
 
-# RD-1 seam (a3 Wave 0): lr_0008 added composable-policy columns that the
-# frozen V1-V5 row contracts deliberately do NOT carry. Qualification admits
-# exactly these columns, with pinned type/nullability, as a whole set per
-# table (pre-migration absence also qualifies); any other drift still
-# mismatches. Frozen rows neither read nor write them, so a transfer is
+# RD-1 seam (a3 Waves 0+1L): lr_0008/lr_0009 added composable-policy
+# columns that the frozen V1-V5 row contracts deliberately do NOT carry.
+# Qualification admits exactly these columns, with pinned
+# type/nullability, as a whole set per migration per table (any prefix of
+# the migration chain qualifies; partial sets and other drift still
+# mismatch). Frozen rows neither read nor write them, so a transfer is
 # refused while any covered row in the tenant extent is non-default.
-_A3_EXTRA_COLUMNS: dict[str, dict[str, tuple[str, bool]]] = {
+# The refusal message is kept byte-stable across the a3 column waves.
+_A3_S1_COLUMNS: dict[str, dict[str, tuple[str, bool]]] = {
     "courses": {"prerequisite_composition": ("character varying(8)", False)},
     "course_prerequisites": {
         "condition_kind": ("character varying(32)", False),
@@ -222,6 +224,22 @@ _A3_EXTRA_COLUMNS: dict[str, dict[str, tuple[str, bool]]] = {
     },
     "tracks": {"gating_mode": ("character varying(16)", False)},
 }
+_A3_S2_COLUMNS: dict[str, dict[str, tuple[str, bool]]] = {
+    "courses": {
+        "completion_fraction": ("double precision", False),
+        "certificate_auto_issue": ("boolean", False),
+        "certificate_validity_days": ("integer", True),
+    },
+    "activities": {
+        "scoring_policy": ("character varying(10)", False),
+        "is_final": ("boolean", False),
+        "min_attempt_interval_seconds": ("integer", False),
+    },
+    "certificates": {"expires_at": ("timestamp with time zone", True)},
+    "cohorts": {"auto_accept_below_action": ("character varying(16)", False)},
+    "course_offerings": {"pacing_default_open": ("boolean", False)},
+}
+_A3_COLUMN_GROUPS = (_A3_S1_COLUMNS, _A3_S2_COLUMNS)
 _A3_REFUSAL_MESSAGE = (
     "non-default prerequisite policy data is not carried by this "
     "snapshot version; transfer refused (RD-1)"
@@ -230,6 +248,35 @@ _A3_COURSES = sql_table(
     "courses",
     sql_column("tenant_id"),
     sql_column("prerequisite_composition"),
+    sql_column("completion_fraction"),
+    sql_column("certificate_auto_issue"),
+    sql_column("certificate_validity_days"),
+    schema=_SCHEMA,
+)
+_A3_ACTIVITIES = sql_table(
+    "activities",
+    sql_column("tenant_id"),
+    sql_column("scoring_policy"),
+    sql_column("is_final"),
+    sql_column("min_attempt_interval_seconds"),
+    schema=_SCHEMA,
+)
+_A3_CERTIFICATES = sql_table(
+    "certificates",
+    sql_column("tenant_id"),
+    sql_column("expires_at"),
+    schema=_SCHEMA,
+)
+_A3_COHORTS = sql_table(
+    "cohorts",
+    sql_column("tenant_id"),
+    sql_column("auto_accept_below_action"),
+    schema=_SCHEMA,
+)
+_A3_OFFERINGS = sql_table(
+    "course_offerings",
+    sql_column("tenant_id"),
+    sql_column("pacing_default_open"),
     schema=_SCHEMA,
 )
 _A3_PREREQUISITES = sql_table(
@@ -253,23 +300,34 @@ def _column_contract_matches(
     actual: dict[str, tuple[str, bool]],
     expected: dict[str, tuple[str, bool]],
 ) -> bool:
-    if actual == expected:
+    admitted = dict(expected)
+    if actual == admitted:
         return True
-    extras = _A3_EXTRA_COLUMNS.get(table_name)
+    # Each migration's columns are admitted only as a whole set, in chain
+    # order: a database at any prefix of lr_0008 -> lr_0009 qualifies.
+    for group in _A3_COLUMN_GROUPS:
+        extras = group.get(table_name)
+        if not extras:
+            continue
+        admitted = {**admitted, **extras}
+        if actual == admitted:
+            return True
+    return False
+
+
+def _a3_group_present(
+    scope: _Scope,
+    table_name: str,
+    group: dict[str, dict[str, tuple[str, bool]]],
+) -> bool:
+    """True iff the table carries one migration's full a3 column set.
+
+    Qualification runs first and refuses partial drift, so post-qualify
+    each group is either wholly absent (never probed) or wholly present.
+    """
+    extras = group.get(table_name)
     if not extras:
         return False
-    return actual == {**expected, **extras}
-
-
-def _a3_table_columns_present(scope: _Scope, table_name: str) -> bool:
-    """True iff the table carries its full lr_0008 column set.
-
-    Qualification runs first and refuses partial drift, so post-qualify a
-    table either predates lr_0008 (probe it not at all) or carries every
-    new column (probe it).
-    """
-    extras = _A3_EXTRA_COLUMNS[table_name]
-    names = tuple(extras)
     found = scope.execute(
         "SELECT attname FROM pg_catalog.pg_attribute "
         "WHERE attrelid = CAST(:relation AS regclass) "
@@ -277,7 +335,29 @@ def _a3_table_columns_present(scope: _Scope, table_name: str) -> bool:
         {"relation": f"{_SCHEMA}.{table_name}"},
     ).scalars()
     present = {str(name) for name in found}
-    return all(name in present for name in names)
+    return all(name in present for name in extras)
+
+
+def _non_default_exists(
+    scope: _Scope,
+    tenant_ids: tuple[UUID, ...],
+    relation: TableClause,
+    condition: ColumnElement[bool],
+) -> bool:
+    return bool(
+        scope.extent_query(
+            select(
+                select(1)
+                .select_from(relation)
+                .where(
+                    relation.c.tenant_id.in_(bindparam("tenant_ids", expanding=True))
+                )
+                .where(condition)
+                .exists()
+            ),
+            tenant_ids,
+        ).scalar_one()
+    )
 
 
 def _refuse_non_default_prerequisite_policy(
@@ -291,79 +371,95 @@ def _refuse_non_default_prerequisite_policy(
     Called after qualification from every export/verify (and the
     destination-reading import paths, where the empty destination always
     passes). At defaults nothing raises and snapshot bytes are unchanged.
+
+    Coverage follows each snapshot version's own tables: courses,
+    activities and certificates ride every version (V1+), while
+    course_prerequisites, tracks, cohorts and course_offerings join at
+    V3 (``include_participation``). For ``activities.is_final`` the
+    default is exactly ``false`` — the column server default the frozen
+    imports materialize — so any ``is_final=true`` refuses until a
+    snapshot version carries the flag.
     """
-    candidate_tables: tuple[str, ...] = (
-        ("courses", "course_prerequisites", "tracks")
-        if include_participation
-        else ("courses",)
-    )
-    probe_tables = tuple(
-        name for name in candidate_tables if _a3_table_columns_present(scope, name)
-    )
-    if not probe_tables:
-        return
     checks: list[bool] = []
-    if "courses" in probe_tables:
+    if _a3_group_present(scope, "courses", _A3_S1_COLUMNS):
         checks.append(
-            bool(
-                scope.extent_query(
-                    select(
-                        select(1)
-                        .select_from(_A3_COURSES)
-                        .where(
-                            _A3_COURSES.c.tenant_id.in_(
-                                bindparam("tenant_ids", expanding=True)
-                            )
-                        )
-                        .where(_A3_COURSES.c.prerequisite_composition != "all")
-                        .exists()
-                    ),
-                    tenant_ids,
-                ).scalar_one()
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_COURSES,
+                _A3_COURSES.c.prerequisite_composition != "all",
             )
         )
-    if "course_prerequisites" in probe_tables:
+    if _a3_group_present(scope, "courses", _A3_S2_COLUMNS):
         checks.append(
-            bool(
-                scope.extent_query(
-                    select(
-                        select(1)
-                        .select_from(_A3_PREREQUISITES)
-                        .where(
-                            _A3_PREREQUISITES.c.tenant_id.in_(
-                                bindparam("tenant_ids", expanding=True)
-                            )
-                        )
-                        .where(
-                            (_A3_PREREQUISITES.c.condition_kind != "course_completed")
-                            | (sql_cast(_A3_PREREQUISITES.c.params, Text) != "{}")
-                            | (_A3_PREREQUISITES.c.group_key != "g0")
-                        )
-                        .exists()
-                    ),
-                    tenant_ids,
-                ).scalar_one()
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_COURSES,
+                (_A3_COURSES.c.completion_fraction != 1.0)
+                | (_A3_COURSES.c.certificate_auto_issue.is_not(True))
+                | (_A3_COURSES.c.certificate_validity_days.is_not(None)),
             )
         )
-    if "tracks" in probe_tables:
+    if _a3_group_present(scope, "activities", _A3_S2_COLUMNS):
         checks.append(
-            bool(
-                scope.extent_query(
-                    select(
-                        select(1)
-                        .select_from(_A3_TRACKS)
-                        .where(
-                            _A3_TRACKS.c.tenant_id.in_(
-                                bindparam("tenant_ids", expanding=True)
-                            )
-                        )
-                        .where(_A3_TRACKS.c.gating_mode != "previous")
-                        .exists()
-                    ),
-                    tenant_ids,
-                ).scalar_one()
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_ACTIVITIES,
+                (_A3_ACTIVITIES.c.scoring_policy != "best")
+                | (_A3_ACTIVITIES.c.min_attempt_interval_seconds != 0)
+                | (_A3_ACTIVITIES.c.is_final.is_not(False)),
             )
         )
+    if _a3_group_present(scope, "certificates", _A3_S2_COLUMNS):
+        checks.append(
+            _non_default_exists(
+                scope,
+                tenant_ids,
+                _A3_CERTIFICATES,
+                _A3_CERTIFICATES.c.expires_at.is_not(None),
+            )
+        )
+    if include_participation:
+        if _a3_group_present(scope, "course_prerequisites", _A3_S1_COLUMNS):
+            checks.append(
+                _non_default_exists(
+                    scope,
+                    tenant_ids,
+                    _A3_PREREQUISITES,
+                    (_A3_PREREQUISITES.c.condition_kind != "course_completed")
+                    | (sql_cast(_A3_PREREQUISITES.c.params, Text) != "{}")
+                    | (_A3_PREREQUISITES.c.group_key != "g0"),
+                )
+            )
+        if _a3_group_present(scope, "tracks", _A3_S1_COLUMNS):
+            checks.append(
+                _non_default_exists(
+                    scope,
+                    tenant_ids,
+                    _A3_TRACKS,
+                    _A3_TRACKS.c.gating_mode != "previous",
+                )
+            )
+        if _a3_group_present(scope, "cohorts", _A3_S2_COLUMNS):
+            checks.append(
+                _non_default_exists(
+                    scope,
+                    tenant_ids,
+                    _A3_COHORTS,
+                    _A3_COHORTS.c.auto_accept_below_action != "waitlisted",
+                )
+            )
+        if _a3_group_present(scope, "course_offerings", _A3_S2_COLUMNS):
+            checks.append(
+                _non_default_exists(
+                    scope,
+                    tenant_ids,
+                    _A3_OFFERINGS,
+                    _A3_OFFERINGS.c.pacing_default_open.is_not(True),
+                )
+            )
     if any(checks):
         raise SnapshotValidationError(_A3_REFUSAL_MESSAGE)
 

@@ -1,9 +1,8 @@
-"""Hosted lr_0008 golden: defaults backfill existing rows without drift (S1).
+"""Hosted lr_0008/lr_0009 goldens: defaults backfill rows without drift.
 
-Seeds at lr_0007 with raw SQL (the ORM already carries the lr_0008 columns),
-upgrades, and proves the access states equal the legacy computation while
-every existing row materializes the default condition. The lr_0009 half of
-this file's plan arrives with S2.
+Seeds below each migration with raw SQL (the ORM already carries the new
+columns), upgrades, and proves existing rows materialize the historical
+defaults; the lr_0009 half also pins the is_final heuristic backfill.
 """
 
 import json
@@ -261,6 +260,193 @@ def test_lr_0008_upgrade_backfills_defaults_and_preserves_access(learning_databa
                 )
                 == 0
             )
+        command.upgrade(cfg, "learning@head")
+    finally:
+        app.dispose()
+        admin.dispose()
+
+
+def test_lr_0009_upgrade_backfills_defaults_and_finals(learning_database):
+    from alembic import command
+
+    admin_url, app_url = learning_database
+    admin, app = create_engine(admin_url), create_engine(app_url)
+    cfg = _config()
+    tenant = uuid4()
+    matrix = [(None, 0.7, True), (None, 0.0, False), (1, 0.7, False), (2, 0.0, False)]
+    try:
+        command.downgrade(cfg, "lr_0008_prerequisite_conditions")
+        with admin.begin() as conn:
+            _tenant(conn, tenant)
+            person = _person(conn, tenant)
+        activity_ids = []
+        with app.begin() as conn:
+            _scope(conn, tenant)
+            course_id = _course(conn, tenant)
+            cohort, offering = uuid4(), uuid4()
+            conn.execute(
+                text(
+                    "INSERT INTO mod_learning.cohorts (id, tenant_id, name, discipline)"
+                    " VALUES (:id, :t, 'Cohort', 'engineering')"
+                ),
+                {"id": cohort, "t": tenant},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_learning.course_offerings"
+                    " (id, tenant_id, cohort_id, course_id)"
+                    " VALUES (:id, :t, :cohort, :course)"
+                ),
+                {"id": offering, "t": tenant, "cohort": cohort, "course": course_id},
+            )
+            for chapter, threshold, _want in matrix:
+                act_id = uuid4()
+                activity_ids.append(act_id)
+                conn.execute(
+                    text(
+                        "INSERT INTO mod_learning.activities"
+                        " (id, tenant_id, course_id, chapter_number, type, title,"
+                        " pass_threshold, grading, weight)"
+                        " VALUES (:id, :t, :course, :chapter, 'mcq_test', 'A',"
+                        " :threshold, 'auto', 1.0)"
+                    ),
+                    {
+                        "id": act_id,
+                        "t": tenant,
+                        "course": course_id,
+                        "chapter": chapter,
+                        "threshold": threshold,
+                    },
+                )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_learning.certificates"
+                    " (id, tenant_id, person_id, course_id, serial, issued_at)"
+                    " VALUES (:id, :t, :person, :course, 'CERT-SEED', now())"
+                ),
+                {"id": uuid4(), "t": tenant, "person": person, "course": course_id},
+            )
+
+        command.upgrade(cfg, "learning@head")
+        with admin.connect() as conn:
+            heads = set(conn.scalars(text("SELECT version_num FROM alembic_version")))
+            assert "lr_0009_composable_policies" in heads
+        with app.begin() as conn:
+            _scope(conn, tenant)
+            assert conn.execute(
+                text(
+                    "SELECT completion_fraction, certificate_auto_issue,"
+                    " certificate_validity_days FROM mod_learning.courses"
+                )
+            ).one() == (1.0, True, None)
+            assert conn.execute(
+                text(
+                    "SELECT scoring_policy, min_attempt_interval_seconds"
+                    " FROM mod_learning.activities"
+                    " WHERE id = :id"
+                ),
+                {"id": activity_ids[0]},
+            ).one() == ("best", 0)
+            finals = dict(
+                conn.execute(
+                    text(
+                        "SELECT id, is_final FROM mod_learning.activities"
+                        " WHERE tenant_id = :t"
+                    ),
+                    {"t": tenant},
+                ).all()
+            )
+            for act_id, (_chapter, _threshold, want) in zip(
+                activity_ids, matrix, strict=True
+            ):
+                assert finals[act_id] is want
+            assert (
+                conn.scalar(
+                    text(
+                        "SELECT count(*) FROM mod_learning.activities"
+                        " WHERE is_final <>"
+                        " (chapter_number IS NULL AND pass_threshold > 0)"
+                    )
+                )
+                == 0
+            )
+            assert set(
+                conn.scalars(text("SELECT expires_at FROM mod_learning.certificates"))
+            ) == {None}
+            assert set(
+                conn.scalars(
+                    text(
+                        "SELECT pacing_default_open"
+                        " FROM mod_learning.course_offerings"
+                    )
+                )
+            ) == {True}
+            assert set(
+                conn.scalars(
+                    text("SELECT auto_accept_below_action FROM mod_learning.cohorts")
+                )
+            ) == {"waitlisted"}
+            for statement in (
+                "UPDATE mod_learning.courses SET completion_fraction = 0",
+                "UPDATE mod_learning.courses SET certificate_validity_days = 0",
+                "UPDATE mod_learning.activities SET scoring_policy = 'median'",
+                "UPDATE mod_learning.activities SET min_attempt_interval_seconds = -1",
+                "UPDATE mod_learning.activities"
+                " SET min_attempt_interval_seconds = 2592001",
+                "UPDATE mod_learning.cohorts"
+                " SET auto_accept_below_action = 'rejected'",
+            ):
+                _refused(conn, statement, {}, "23514")
+
+        command.downgrade(cfg, "lr_0008_prerequisite_conditions")
+        with admin.connect() as conn:
+            # All nine lr_0009 columns and their named checks are gone,
+            # while prior-lineage columns survive the downgrade (A-P3-6).
+            added = {
+                "courses": {
+                    "completion_fraction",
+                    "certificate_auto_issue",
+                    "certificate_validity_days",
+                },
+                "activities": {
+                    "scoring_policy",
+                    "is_final",
+                    "min_attempt_interval_seconds",
+                },
+                "certificates": {"expires_at"},
+                "course_offerings": {"pacing_default_open"},
+                "cohorts": {"auto_accept_below_action"},
+            }
+            inspector = inspect(conn)
+            for table, dropped in added.items():
+                remaining = {
+                    col["name"]
+                    for col in inspector.get_columns(table, schema="mod_learning")
+                }
+                assert dropped.isdisjoint(remaining), (table, dropped & remaining)
+                checks = {
+                    chk["name"]
+                    for chk in inspector.get_check_constraints(
+                        table, schema="mod_learning"
+                    )
+                }
+                named = {
+                    "courses": {
+                        "ck_courses_completion_fraction",
+                        "ck_courses_certificate_validity_days",
+                    },
+                    "activities": {
+                        "ck_activities_scoring_policy",
+                        "ck_activities_min_attempt_interval",
+                    },
+                    "cohorts": {"ck_cohorts_auto_accept_below_action"},
+                }.get(table, set())
+                assert named.isdisjoint(checks), (table, named & checks)
+            retained = {
+                col["name"]
+                for col in inspector.get_columns("courses", schema="mod_learning")
+            }
+            assert "prerequisite_composition" in retained
         command.upgrade(cfg, "learning@head")
     finally:
         app.dispose()

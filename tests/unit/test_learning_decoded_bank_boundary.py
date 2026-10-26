@@ -295,4 +295,6 @@ BANK_ACTIVITY_TERMS = BankActivityTerms(
     new_activity_assessment_mode="graded",
     new_activity_grading="auto",
     new_activity_weight=1.0,
+    new_activity_scoring_policy="best",
+    new_activity_min_attempt_interval_seconds=0,
 )

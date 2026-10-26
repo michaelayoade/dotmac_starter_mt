@@ -745,6 +745,8 @@ BANK_ACTIVITY_TERMS = BankActivityTerms(
     new_activity_assessment_mode="graded",
     new_activity_grading="auto",
     new_activity_weight=1.0,
+    new_activity_scoring_policy="best",
+    new_activity_min_attempt_interval_seconds=0,
 )
 
 
@@ -752,8 +754,12 @@ def test_configured_new_activity_terms_and_raw_missing_weight_preserve_update_om
     curriculum_case,
 ):
     engine, (tenant, _) = curriculum_case
-    configured = BankActivityTerms({"chapter": 0.83}, 0.29, "practice", "manual", 4.5)
-    changed = BankActivityTerms({"chapter": 0.41}, 0.11, "exam", "auto", 9.5)
+    configured = BankActivityTerms(
+        {"chapter": 0.83}, 0.29, "practice", "manual", 4.5, "latest", 30
+    )
+    changed = BankActivityTerms(
+        {"chapter": 0.41}, 0.11, "exam", "auto", 9.5, "first", 60
+    )
     doc = BankDoc(
         "bank-course",
         2,
@@ -799,7 +805,10 @@ def test_configured_new_activity_terms_and_raw_missing_weight_preserve_update_om
             activity.assessment_mode,
             activity.grading,
             activity.weight,
-        ) == (0.83, "practice", "manual", 4.5)
+            activity.scoring_policy,
+            activity.min_attempt_interval_seconds,
+            activity.is_final,
+        ) == (0.83, "practice", "manual", 4.5, "latest", 30, False)
         questions = {q.ext_id: q for q in db.scalars(select(Question)).all()}
         assert questions["q"].weight == 7 and questions["explicit"].weight == 2
         assert questions["q"].options == {"tolerance": 0.5}
@@ -820,7 +829,10 @@ def test_configured_new_activity_terms_and_raw_missing_weight_preserve_update_om
             activity.assessment_mode,
             activity.grading,
             activity.weight,
-        ) == (0.41, "practice", "manual", 4.5)
+            activity.scoring_policy,
+            activity.min_attempt_interval_seconds,
+            activity.is_final,
+        ) == (0.41, "practice", "manual", 4.5, "latest", 30, False)
         doc.policy = {"mode": "exam", "pass_threshold": 0.96}
         import_bank_with_activity(
             db,

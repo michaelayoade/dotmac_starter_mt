@@ -16,8 +16,9 @@ from dotmac_learning import attempt_policy
 class _Activity:
     """Only what the entitlement reads."""
 
-    def __init__(self, max_attempts):
+    def __init__(self, max_attempts, min_attempt_interval_seconds=0):
         self.max_attempts = max_attempts
+        self.min_attempt_interval_seconds = min_attempt_interval_seconds
 
 
 def test_uncapped_activity_is_never_exhausted():
@@ -105,7 +106,15 @@ def test_entitlement_with_grants_propagates_reader_failure():
 
 
 def test_for_learner_uses_supplied_session_and_exact_grant_scope(monkeypatch):
-    db = object()
+    class _Db:
+        def __init__(self):
+            self.scalar_calls = 0
+
+        def scalar(self, statement):
+            self.scalar_calls += 1
+            return None
+
+    db = _Db()
     tenant_id, person_id, activity_id = uuid4(), uuid4(), uuid4()
     activity = _Activity(2)
     activity.id = activity_id
@@ -117,9 +126,13 @@ def test_for_learner_uses_supplied_session_and_exact_grant_scope(monkeypatch):
         calls.append((supplied_db, tenant_id, person_id, activity_id))
         return 3
 
-    def entitlement_with_grants(supplied_activity, *, used, reader):
+    def entitlement_with_grants(
+        supplied_activity, *, used, reader, last_attempt_at=None
+    ):
         narrow_calls.append((supplied_activity, used))
-        return narrow_entry(supplied_activity, used=used, reader=reader)
+        return narrow_entry(
+            supplied_activity, used=used, reader=reader, last_attempt_at=last_attempt_at
+        )
 
     monkeypatch.setattr(attempt_policy, "granted_for", granted_for)
     monkeypatch.setattr(
@@ -140,6 +153,14 @@ def test_for_learner_uses_supplied_session_and_exact_grant_scope(monkeypatch):
     assert ent == attempt_policy.Entitlement(used=4, granted=3, limit=5)
     assert ent.remaining == 1
     assert ent.exhausted is False
+    # Interval 0 (the _Activity default) adds no last-attempt query (A-P3-5).
+    assert db.scalar_calls == 0
+    cooling = _Activity(2, min_attempt_interval_seconds=60)
+    cooling.id = activity_id
+    attempt_policy.for_learner(
+        db, tenant_id=tenant_id, person_id=person_id, activity=cooling, used=1
+    )
+    assert db.scalar_calls == 1
 
 
 def test_reveal_feedback_does_not_leak_the_key_before_a_granted_retake():
@@ -305,3 +326,26 @@ def test_audit_context_preserves_both_system_identifier_forms(actor_id):
     assert resolve_audit_actor(
         actor_type=context.actor_type, actor_id=context.actor_id, actor_party_id=None
     ) == ("system", actor_id)
+
+
+def test_cooldown_horizon_is_not_exhaustion():
+    from datetime import UTC, datetime, timedelta
+
+    last = datetime(2026, 1, 1, tzinfo=UTC)
+    cooling = _Activity(3, min_attempt_interval_seconds=3600)
+    ent = attempt_policy.entitlement(cooling, used=1, last_attempt_at=last)
+    assert ent.next_allowed_at == last + timedelta(hours=1)
+    assert ent.exhausted is False and ent.remaining == 2
+    # Interval 0 (the default) never produces a horizon.
+    plain = attempt_policy.entitlement(_Activity(3), used=1, last_attempt_at=last)
+    assert plain.next_allowed_at is None
+    # No previous attempt: nothing to cool down from.
+    first = attempt_policy.entitlement(cooling, used=0)
+    assert first.next_allowed_at is None
+    # A naive last attempt (SQLite round-trip) is read as UTC, so the
+    # horizon is aware whenever set (A-P3-4).
+    naive = attempt_policy.entitlement(
+        cooling, used=1, last_attempt_at=datetime(2026, 1, 1)
+    )
+    assert naive.next_allowed_at == last + timedelta(hours=1)
+    assert naive.next_allowed_at.tzinfo is not None

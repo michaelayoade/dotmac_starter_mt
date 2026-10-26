@@ -131,11 +131,17 @@ def test_first_slice_has_seven_tenant_tables_and_no_product_delivery_state():
         )
         assert {
             c.name for c in table.constraints if isinstance(c, CheckConstraint)
-        } == (
-            {"ck_courses_prerequisite_composition"}
-            if table.name == "courses"
-            else set()
-        )
+        } == {
+            "courses": {
+                "ck_courses_prerequisite_composition",
+                "ck_courses_completion_fraction",
+                "ck_courses_certificate_validity_days",
+            },
+            "activities": {
+                "ck_activities_scoring_policy",
+                "ck_activities_min_attempt_interval",
+            },
+        }.get(table.name, set())
         for name in ("created_at", "updated_at"):
             assert not table.c[name].nullable
             assert table.c[name].type.timezone
@@ -283,6 +289,29 @@ def test_nullable_policy_fields_and_source_defaults_keep_their_meaning():
     assert not composition.nullable
     assert composition.default.arg == "all"
     assert str(composition.server_default.arg) == "all"
+    # Wave 1L policy columns materialize the historical rules at rest.
+    fraction = Course.__table__.c.completion_fraction
+    assert not fraction.nullable
+    assert fraction.default.arg == 1.0
+    assert str(fraction.server_default.arg) == "1.0"
+    auto_issue = Course.__table__.c.certificate_auto_issue
+    assert not auto_issue.nullable
+    assert auto_issue.default.arg is True
+    assert str(auto_issue.server_default.arg) == "true"
+    assert Course.__table__.c.certificate_validity_days.nullable
+    assert Certificate.__table__.c.expires_at.nullable
+    scoring = Activity.__table__.c.scoring_policy
+    assert not scoring.nullable
+    assert scoring.default.arg == "best"
+    assert str(scoring.server_default.arg) == "best"
+    is_final = Activity.__table__.c.is_final
+    assert not is_final.nullable
+    assert is_final.default.arg is False
+    assert str(is_final.server_default.arg) == "false"
+    interval = Activity.__table__.c.min_attempt_interval_seconds
+    assert not interval.nullable
+    assert interval.default.arg == 0
+    assert str(interval.server_default.arg) == "0"
 
 
 def test_json_payload_defaults_are_independent_per_record():

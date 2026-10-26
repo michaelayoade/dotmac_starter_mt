@@ -154,6 +154,8 @@ def test_existing_create_update_and_patch_keep_returns_flushes_and_field_order(
     fact = object()
 
     class AssignmentOnly:
+        scoring_policy = "best"
+
         def __setattr__(self, name, value):
             staged.append((name, value))
 
@@ -225,3 +227,38 @@ def test_private_helpers_keep_raw_values_and_assignment_order(monkeypatch):
         ("pass_threshold", None),
         ("question_count", "raw"),
     ]
+
+
+def test_write_contracts_reject_out_of_range_policy_values():
+    from dotmac_learning.references import CourseWrite
+
+    values = _values()
+    with pytest.raises(ValidationError):
+        ActivityCreate(**values, scoring_policy="median")
+    with pytest.raises(ValidationError):
+        ActivityCreate(**values, min_attempt_interval_seconds=2592001)
+    with pytest.raises(ValidationError):
+        ActivityCreate(**values, min_attempt_interval_seconds=-1)
+    course_values = {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "slug": "s",
+        "title": "t",
+        "discipline": "d",
+        "source_ref": "r",
+        "status": "draft",
+        "listed": True,
+    }
+    for override in (
+        {"completion_fraction": 0},
+        {"completion_fraction": 1.5},
+        {"completion_fraction": float("nan")},
+        {"certificate_validity_days": 0},
+        {"prerequisite_composition": "some"},
+    ):
+        with pytest.raises(ValidationError):
+            CourseWrite(**course_values, **override)
+    ok = CourseWrite(**course_values)
+    assert (ok.completion_fraction, ok.certificate_auto_issue) == (1.0, True)
+    assert ok.certificate_validity_days is None
+    assert ok.prerequisite_composition == "all"

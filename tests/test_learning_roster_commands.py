@@ -81,7 +81,10 @@ def test_roster_cross_tenant_and_authority_scope_isolation(roster_database):
             roster.bulk_enroll(
                 db,
                 BulkEnrollCommand(
-                    tenant_id=other, cohort_id=cohort, emails=["fresh@x"]
+                    tenant_id=other,
+                    cohort_id=cohort,
+                    emails=["fresh@x"],
+                    pacing_default_open=True,
                 ),
                 authority=RosterAuthority(other, True),
                 accounts=AccountPresenceSelection(
@@ -94,7 +97,10 @@ def test_roster_cross_tenant_and_authority_scope_isolation(roster_database):
             roster.bulk_enroll(
                 db,
                 BulkEnrollCommand(
-                    tenant_id=tenant, cohort_id=cohort, emails=["fresh@x"]
+                    tenant_id=tenant,
+                    cohort_id=cohort,
+                    emails=["fresh@x"],
+                    pacing_default_open=True,
                 ),
                 authority=RosterAuthority(other, True),
                 accounts=AccountPresenceSelection(
@@ -139,6 +145,7 @@ def test_bulk_order_dedupe_missing_inactive_account_and_admin_continue(roster_da
                     None,
                     "",
                 ],
+                pacing_default_open=True,
             ),
             authority=RosterAuthority(tenant, False),
             accounts=AccountPresenceSelection(
@@ -152,7 +159,10 @@ def test_bulk_order_dedupe_missing_inactive_account_and_admin_continue(roster_da
         result = roster.bulk_enroll(
             db,
             BulkEnrollCommand(
-                tenant_id=tenant, cohort_id=cohort, emails=["peer@x", "fresh@x"]
+                tenant_id=tenant,
+                cohort_id=cohort,
+                emails=["peer@x", "fresh@x"],
+                pacing_default_open=True,
             ),
             authority=RosterAuthority(tenant, True),
             accounts=AccountPresenceSelection(
@@ -310,7 +320,9 @@ def test_roster_requires_root_before_autoflush_and_preserves_nested_caller_rollb
     roster_database,
 ):
     _, app, tenant, _, cohort, people, _, _ = roster_database
-    command = BulkEnrollCommand(tenant_id=tenant, cohort_id=cohort, emails=["fresh@x"])
+    command = BulkEnrollCommand(
+        tenant_id=tenant, cohort_id=cohort, emails=["fresh@x"], pacing_default_open=True
+    )
     with Session(bind=app) as db:
         with pytest.raises(TransactionChanged):
             roster.bulk_enroll(
@@ -391,6 +403,7 @@ def test_bulk_already_active_nonstudent_can_reassign_track_and_facilitator_clear
                 tenant_id=tenant,
                 cohort_id=cohort,
                 emails=["peer@x"],
+                pacing_default_open=True,
                 track_id=track,
             ),
             authority=RosterAuthority(tenant, False),
@@ -571,7 +584,10 @@ def test_configured_new_state_presence_relation_and_explicit_repeat_activation(
             ),
         )
         command = BulkEnrollCommand(
-            tenant_id=tenant, cohort_id=cohort, emails=("fresh@x", "active@x", "root@x")
+            tenant_id=tenant,
+            cohort_id=cohort,
+            emails=("fresh@x", "active@x", "root@x"),
+            pacing_default_open=True,
         )
         policy = BulkEnrollmentInitialState("mentor-business", "pending-business")
         first = roster.bulk_enroll(

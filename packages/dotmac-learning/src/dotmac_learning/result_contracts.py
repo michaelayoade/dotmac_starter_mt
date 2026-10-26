@@ -106,6 +106,8 @@ class AdmissionObservation:
     assessment_mode: str
     bank_id: UUID | None
     question_count: int | None
+    min_attempt_interval_seconds: int
+    last_attempt_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)

@@ -1955,3 +1955,34 @@ def test_success_queue_scalar_projection_matches_actual_mapped_keys():
         attribute.key == attribute.columns[0].key and len(attribute.columns) == 1
         for attribute in mapper.column_attrs
     )
+
+
+def test_certificate_blocked_excludes_auto_issue_off_courses(result_database):
+    _, app, tenant, person, course, *_ = result_database
+    with scoped(app, tenant) as db:
+        db.add(
+            CourseCompletion(
+                tenant_id=tenant,
+                person_id=person,
+                course_id=course,
+                status="completed",
+                pct=1,
+                completed_at=NOW - timedelta(days=2),
+            )
+        )
+        db.flush()
+        assert (
+            queue._rule_certificate_blocked(
+                db, tenant_id=tenant, person_id=person, now=NOW, grace_hours=6
+            )
+            is not None
+        )
+        row = db.scalar(select(Course).where(Course.id == course))
+        row.certificate_auto_issue = False
+        db.flush()
+        assert (
+            queue._rule_certificate_blocked(
+                db, tenant_id=tenant, person_id=person, now=NOW, grace_hours=6
+            )
+            is None
+        )

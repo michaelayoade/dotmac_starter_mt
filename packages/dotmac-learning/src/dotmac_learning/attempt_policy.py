@@ -29,6 +29,7 @@ implementations drifts as soon as any of them moves.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
@@ -43,6 +44,7 @@ from .attempt_contracts import (
     GrantExtraAttemptCommand,
 )
 from .attempt_models import AttemptGrant
+from .models import Submission
 from .references import ActivityFact
 from .result_contracts import (
     AdmissionDecision,
@@ -54,10 +56,13 @@ from .results import _transaction, _unchanged
 
 
 class ActivityTerms(Protocol):
-    """The activity setting used by entitlement arithmetic."""
+    """The activity settings used by entitlement arithmetic."""
 
     @property
     def max_attempts(self) -> int | None: ...
+
+    @property
+    def min_attempt_interval_seconds(self) -> int: ...
 
 
 class BoundGrantReader(Protocol):
@@ -73,11 +78,16 @@ class Entitlement:
     ``limit`` is None for an uncapped activity, in which case nothing is ever
     exhausted and ``remaining`` is None rather than a large number — callers
     render "unlimited", and a number would invite them to count down from it.
+
+    ``next_allowed_at`` is the cooldown horizon (HM-13): the earliest instant
+    a further attempt may be admitted. It is not exhaustion — attempts may
+    remain while the cooldown is still running.
     """
 
     used: int
     granted: int
     limit: int | None
+    next_allowed_at: datetime | None = None
 
     @property
     def remaining(self) -> int | None:
@@ -122,7 +132,13 @@ def granted_by_activity(
     return {activity_id: int(n or 0) for activity_id, n in rows}
 
 
-def entitlement(activity: ActivityTerms, *, used: int, granted: int = 0) -> Entitlement:
+def entitlement(
+    activity: ActivityTerms,
+    *,
+    used: int,
+    granted: int = 0,
+    last_attempt_at: datetime | None = None,
+) -> Entitlement:
     """The pure part: what the limit is, given the counts.
 
     Separate from the queries so callers that have already batched their counts
@@ -130,14 +146,29 @@ def entitlement(activity: ActivityTerms, *, used: int, granted: int = 0) -> Enti
     going back to the database per activity.
     """
     limit = None if activity.max_attempts is None else activity.max_attempts + granted
-    return Entitlement(used=used, granted=granted, limit=limit)
+    interval = activity.min_attempt_interval_seconds
+    if interval > 0 and last_attempt_at is not None:
+        if last_attempt_at.tzinfo is None:
+            last_attempt_at = last_attempt_at.replace(tzinfo=UTC)
+        next_allowed_at = last_attempt_at + timedelta(seconds=interval)
+    else:
+        next_allowed_at = None
+    return Entitlement(
+        used=used, granted=granted, limit=limit, next_allowed_at=next_allowed_at
+    )
 
 
 def entitlement_with_grants(
-    activity: ActivityTerms, *, used: int, reader: BoundGrantReader
+    activity: ActivityTerms,
+    *,
+    used: int,
+    reader: BoundGrantReader,
+    last_attempt_at: datetime | None = None,
 ) -> Entitlement:
     """Apply the shared arithmetic to terms and one bound grant read."""
-    return entitlement(activity, used=used, granted=reader.total())
+    return entitlement(
+        activity, used=used, granted=reader.total(), last_attempt_at=last_attempt_at
+    )
 
 
 @dataclass(frozen=True)
@@ -159,11 +190,24 @@ class _LearnerGrantReader:
 def for_learner(
     db: Session, *, tenant_id: UUID, person_id: UUID, activity: ActivityFact, used: int
 ) -> Entitlement:
-    """The entitlement, fetching this learner's grants."""
+    """The entitlement, fetching this learner's grants and last attempt."""
     reader = _LearnerGrantReader(
         db, tenant_id=tenant_id, person_id=person_id, activity_id=activity.id
     )
-    return entitlement_with_grants(activity, used=used, reader=reader)
+    last_attempt_at = (
+        db.scalar(
+            select(func.max(Submission.created_at)).where(
+                Submission.tenant_id == tenant_id,
+                Submission.person_id == person_id,
+                Submission.activity_id == activity.id,
+            )
+        )
+        if activity.min_attempt_interval_seconds > 0
+        else None
+    )
+    return entitlement_with_grants(
+        activity, used=used, reader=reader, last_attempt_at=last_attempt_at
+    )
 
 
 def grant_extra_attempt(
@@ -235,9 +279,18 @@ class BoundAttemptPolicy:
         reader = _LearnerGrantReader(
             self.db, self.tenant_id, self.person_id, self.activity_id
         )
-        allowed = not entitlement_with_grants(
-            observation, used=observation.used, reader=reader
-        ).exhausted
+        ent = entitlement_with_grants(
+            observation,
+            used=observation.used,
+            reader=reader,
+            last_attempt_at=observation.last_attempt_at,
+        )
+        allowed = not ent.exhausted
+        if allowed and ent.next_allowed_at is not None:
+            horizon = ent.next_allowed_at
+            if horizon.tzinfo is None:
+                horizon = horizon.replace(tzinfo=UTC)
+            allowed = horizon <= datetime.now(UTC)
         _unchanged(self.db, boundary)
         return AdmissionDecision(allowed=allowed)
 

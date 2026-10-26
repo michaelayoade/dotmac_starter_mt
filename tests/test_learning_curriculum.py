@@ -171,6 +171,10 @@ def test_import_metadata_hash_idempotence_retains_removed_chapters(curriculum_ca
             chapters=(chapter,),
             new_course_status="published",
             new_course_listed=False,
+            new_course_completion_fraction=1.0,
+            new_course_certificate_auto_issue=True,
+            new_course_certificate_validity_days=None,
+            new_course_prerequisite_composition="all",
         )
         first = import_manual(db, command)
         assert (first.version, first.status, first.listed) == (2, "published", False)
@@ -323,6 +327,10 @@ def _mutation(db, name, tenant, course, chapter):
                 chapters=(),
                 new_course_status="published",
                 new_course_listed=False,
+                new_course_completion_fraction=1.0,
+                new_course_certificate_auto_issue=True,
+                new_course_certificate_validity_days=None,
+                new_course_prerequisite_composition="all",
             ),
         )
     if name == "load_bank":

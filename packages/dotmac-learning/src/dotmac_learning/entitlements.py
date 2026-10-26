@@ -11,9 +11,9 @@ decides whether every group (``all``) or one group (``any``) must hold. The
 historical default -- kind ``course_completed``, group ``g0``, composition
 ``all`` -- reproduces the previous implicit-ALL completion check exactly.
 
-Certificate conditions carry an interim meaning until certificate validity
-exists (S2/HM-04): any issued certificate satisfies ``certificate_held`` and
-the optional ``now`` argument is inert for certificates in S1.
+Certificate conditions require an unexpired certificate (HM-04): a
+certificate satisfies ``certificate_held`` iff it exists and its
+``expires_at`` is null or later than the evaluation instant ``now``.
 """
 
 from __future__ import annotations
@@ -156,6 +156,7 @@ class _PersonFacts:
         tenant_id: UUID,
         person_id: UUID,
         conditions: Sequence[_ConditionFact],
+        now: datetime,
     ) -> None:
         self._db = db
         self._tenant_id = tenant_id
@@ -176,6 +177,12 @@ class _PersonFacts:
                     select(Certificate.course_id)
                     .where(Certificate.tenant_id == tenant_id)
                     .where(Certificate.person_id == person_id)
+                    .where(
+                        or_(
+                            Certificate.expires_at.is_(None),
+                            Certificate.expires_at > now,
+                        )
+                    )
                 ).all()
             )
         self._grades: dict[UUID, int] | None = None
@@ -296,8 +303,7 @@ class _PersonFacts:
         if kind == "course_completed":
             return condition.requires_course_id in self.completed
         if kind == "certificate_held":
-            # Interim (S1): any issued certificate satisfies; expiry arrives
-            # with HM-04 and will compare against the evaluation instant.
+            # Only unexpired certificates were loaded (HM-04).
             return bool(
                 self._certified is not None
                 and condition.requires_course_id in self._certified
@@ -428,12 +434,17 @@ def _evaluate_conditions(
     tenant_id: UUID,
     person_id: UUID,
     course_ids: Sequence[UUID],
+    now: datetime | None = None,
 ) -> dict[UUID, list[_ConditionFact]]:
     conditions = _load_conditions(db, tenant_id=tenant_id, course_ids=course_ids)
     if not conditions:
         return {}
     facts = _PersonFacts(
-        db, tenant_id=tenant_id, person_id=person_id, conditions=conditions
+        db,
+        tenant_id=tenant_id,
+        person_id=person_id,
+        conditions=conditions,
+        now=now or datetime.now(UTC),
     )
     compositions = _compositions(db, tenant_id=tenant_id, course_ids=course_ids)
     return _unmet_conditions(conditions, facts, compositions)
@@ -465,10 +476,9 @@ def course_access_states(
     legacy cohort-wide access. Prerequisite conditions then apply on top;
     a track lock reason keeps precedence over a prerequisite reason.
 
-    ``now`` is accepted for evaluation-instant determinism; in S1 it is
-    inert (certificates have no expiry until HM-04).
+    ``now`` is the evaluation instant for certificate expiry (HM-04).
     """
-    _ = now or datetime.now(UTC)
+    now = now or datetime.now(UTC)
     rows = _entitled_course_rows(db, tenant_id=tenant_id, person_id=person_id)
     if not rows:
         return {}
@@ -552,7 +562,7 @@ def course_access_states(
     # the chapter route then 403s (require_course_open checks these).
     entitled_ids = [course_id for course_id, _t, _o, _title in rows]
     unmet = _evaluate_conditions(
-        db, tenant_id=tenant_id, person_id=person_id, course_ids=entitled_ids
+        db, tenant_id=tenant_id, person_id=person_id, course_ids=entitled_ids, now=now
     )
     if unmet:
         missing_title_ids = {
@@ -685,21 +695,21 @@ def unmet_prerequisites(
     behind every unmet course-scoped condition, in declaration order, plus
     the historical track locked-until append. Activity-scoped conditions
     have no course projection; ``require_course_open`` therefore denies on
-    the internal facts, not on this list being empty. ``now`` is inert in
-    S1 (see the certificate interim note in the module docstring).
+    the internal facts, not on this list being empty. ``now`` is the
+    evaluation instant for certificate expiry (HM-04).
     """
-    _ = now or datetime.now(UTC)
+    now = now or datetime.now(UTC)
     unmet = _evaluate_conditions(
-        db, tenant_id=tenant_id, person_id=person_id, course_ids=[course_id]
+        db, tenant_id=tenant_id, person_id=person_id, course_ids=[course_id], now=now
     )
     required = [
         condition.requires_course_id
         for condition in unmet.get(course_id, [])
         if condition.condition_kind in _COURSE_SCOPED_KINDS
     ]
-    state = course_access_states(db, tenant_id=tenant_id, person_id=person_id).get(
-        course_id
-    )
+    state = course_access_states(
+        db, tenant_id=tenant_id, person_id=person_id, now=now
+    ).get(course_id)
     if state is not None and state.locked and state.locked_until_course_id is not None:
         required.append(state.locked_until_course_id)
     if not required:
@@ -750,6 +760,7 @@ def require_course_open(
                 tenant_id=tenant_id,
                 person_id=person_id,
                 course_ids=[course_id],
+                now=now,
             ).get(course_id)
         )
     if locked:

@@ -21,6 +21,7 @@ from dotmac_kernel.models import (
 from dotmac_kernel.namespaces import schema_table_args
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -43,6 +44,10 @@ class Cohort(Base, TimestampMixin):
     __tablename__ = "cohorts"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_cohorts_tenant_id_id"),
+        CheckConstraint(
+            "auto_accept_below_action IN ('waitlisted', 'none')",
+            name="ck_cohorts_auto_accept_below_action",
+        ),
         Index("ix_cohorts_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
@@ -68,6 +73,12 @@ class Cohort(Base, TimestampMixin):
         Integer, nullable=True
     )
     auto_accept_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Below-threshold admission action (HM-16): "waitlisted" is the historical
+    # outcome; "none" leaves the application for a human decision. The
+    # decision itself stays product-owned; Learning only stores the policy.
+    auto_accept_below_action: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="waitlisted", server_default="waitlisted"
+    )
 
 
 class Enrollment(Base, TimestampMixin):
@@ -296,6 +307,11 @@ class CourseOffering(Base, TimestampMixin):
     )
     starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Pacing fallback (HM-11): governs only activities with no
+    # OfferingActivity override row. True is the historical fail-open rule.
+    pacing_default_open: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
 
 
 class CoursePrerequisite(Base, TimestampMixin):

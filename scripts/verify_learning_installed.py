@@ -818,7 +818,10 @@ def vertical(admin_url, user_url, receipt: dict) -> None:
                 refusal = bulk_enroll(
                     db,
                     BulkEnrollCommand(
-                        tenant_id=tenant, cohort_id=cohort.id, emails=(email,)
+                        tenant_id=tenant,
+                        cohort_id=cohort.id,
+                        emails=(email,),
+                        pacing_default_open=True,
                     ),
                     authority=RosterAuthority(tenant, False),
                     accounts=presence,

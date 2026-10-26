@@ -27,6 +27,8 @@ class BankActivityTerms:
     new_activity_assessment_mode: str
     new_activity_grading: str
     new_activity_weight: float
+    new_activity_scoring_policy: str
+    new_activity_min_attempt_interval_seconds: int
 
     def __post_init__(self) -> None:
         thresholds = dict(self.pass_threshold_by_kind)
@@ -43,6 +45,20 @@ class BankActivityTerms:
             or value <= 0
         ):
             raise ValueError("new_activity_weight must be a finite positive number")
+        if self.new_activity_scoring_policy not in ("best", "latest", "first"):
+            raise ValueError(
+                "new_activity_scoring_policy must be best, latest or first"
+            )
+        interval = self.new_activity_min_attempt_interval_seconds
+        if (
+            isinstance(interval, bool)
+            or not isinstance(interval, int)
+            or not 0 <= interval <= 2592000
+        ):
+            raise ValueError(
+                "new_activity_min_attempt_interval_seconds must be "
+                "between 0 and 2592000"
+            )
         for text in (self.new_activity_assessment_mode, self.new_activity_grading):
             if not isinstance(text, str) or not text:
                 raise ValueError(

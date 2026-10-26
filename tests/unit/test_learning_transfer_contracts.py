@@ -20,12 +20,25 @@ from dotmac_learning.transfer_contracts import (
     SubmissionRowV1,
 )
 
-# lr_0008 (RD-1): frozen V1-V5 rows deliberately do not carry the
+# lr_0008/lr_0009 (RD-1): frozen V1-V5 rows deliberately do not carry the
 # composable-policy columns; transfers refuse non-default values instead.
 A3_UNCARRIED_COLUMNS = {
-    "courses": {"prerequisite_composition"},
+    "courses": {
+        "prerequisite_composition",
+        "completion_fraction",
+        "certificate_auto_issue",
+        "certificate_validity_days",
+    },
+    "activities": {
+        "scoring_policy",
+        "is_final",
+        "min_attempt_interval_seconds",
+    },
+    "certificates": {"expires_at"},
     "course_prerequisites": {"condition_kind", "params", "group_key"},
     "tracks": {"gating_mode"},
+    "cohorts": {"auto_accept_below_action"},
+    "course_offerings": {"pacing_default_open"},
 }
 
 
@@ -210,7 +223,7 @@ def test_transfer_uses_closed_core_relations_and_no_formatted_sql_text():
     assert not formatted_sql_nodes('message = f"canonical storage: {name}"')
 
 
-def test_a3_column_contract_admits_only_the_lr_0008_set():
+def test_a3_column_contract_admits_only_the_lr_0008_lr_0009_sets():
     from dotmac_learning import transfer
 
     expected = {"id": ("uuid", False), "tenant_id": ("uuid", False)}
@@ -251,4 +264,133 @@ def test_a3_column_contract_admits_only_the_lr_0008_set():
     # A table without an lr_0008 allowance never admits extras.
     assert not transfer._column_contract_matches(
         "activities", admitted | {"x": ("text", True)}, expected
+    )
+    # lr_0009 sets join only as whole sets, after the lr_0008 set.
+    s2_courses = {
+        "completion_fraction": ("double precision", False),
+        "certificate_auto_issue": ("boolean", False),
+        "certificate_validity_days": ("integer", True),
+    }
+    assert transfer._column_contract_matches(
+        "courses", {**admitted, **s2_courses}, expected
+    )
+    assert not transfer._column_contract_matches(
+        "courses",
+        {**admitted, "completion_fraction": ("double precision", False)},
+        expected,
+    )
+    assert not transfer._column_contract_matches(
+        "activities", {**expected, "is_final": ("boolean", False)}, expected
+    )
+    assert transfer._column_contract_matches(
+        "activities",
+        {
+            **expected,
+            "scoring_policy": ("character varying(10)", False),
+            "is_final": ("boolean", False),
+            "min_attempt_interval_seconds": ("integer", False),
+        },
+        expected,
+    )
+
+
+def test_a3_s2_column_contract_refuses_type_nullability_and_chain_drift():
+    """S2 (lr_0009) matcher drift cases, sealed (S2-RD1-F2).
+
+    Wrong float/timestamp spellings, nullability drift, partial sets and
+    out-of-chain S2-only states all mismatch; only migration-chain
+    prefixes as whole sets per table admit.
+    """
+    from dotmac_learning import transfer
+
+    expected = {"id": ("uuid", False), "tenant_id": ("uuid", False)}
+    s1_courses = {
+        **expected,
+        "prerequisite_composition": ("character varying(8)", False),
+    }
+    s2_courses = {
+        "completion_fraction": ("double precision", False),
+        "certificate_auto_issue": ("boolean", False),
+        "certificate_validity_days": ("integer", True),
+    }
+    # Out of chain: the S2 set without the S1 set never admits.
+    assert not transfer._column_contract_matches(
+        "courses", {**expected, **s2_courses}, expected
+    )
+    full = {**s1_courses, **s2_courses}
+    assert transfer._column_contract_matches("courses", dict(full), expected)
+    # Wrong float spelling ("real" is float4, not the pinned double precision).
+    assert not transfer._column_contract_matches(
+        "courses", {**full, "completion_fraction": ("real", False)}, expected
+    )
+    # Nullability drift in either direction.
+    assert not transfer._column_contract_matches(
+        "courses", {**full, "certificate_validity_days": ("integer", False)}, expected
+    )
+    assert not transfer._column_contract_matches(
+        "courses", {**full, "certificate_auto_issue": ("boolean", True)}, expected
+    )
+    # Certificates: only "timestamp with time zone", nullable, admits.
+    assert transfer._column_contract_matches(
+        "certificates",
+        {**expected, "expires_at": ("timestamp with time zone", True)},
+        expected,
+    )
+    assert not transfer._column_contract_matches(
+        "certificates",
+        {**expected, "expires_at": ("timestamp without time zone", True)},
+        expected,
+    )
+    assert not transfer._column_contract_matches(
+        "certificates",
+        {**expected, "expires_at": ("timestamp with time zone", False)},
+        expected,
+    )
+    # Activities: partial S2 sets and length drift refuse.
+    s2_activities = {
+        "scoring_policy": ("character varying(10)", False),
+        "is_final": ("boolean", False),
+        "min_attempt_interval_seconds": ("integer", False),
+    }
+    for missing in s2_activities:
+        partial = {
+            **expected,
+            **{k: v for k, v in s2_activities.items() if k != missing},
+        }
+        assert not transfer._column_contract_matches(
+            "activities", partial, expected
+        ), missing
+    assert not transfer._column_contract_matches(
+        "activities",
+        {
+            **expected,
+            **s2_activities,
+            "scoring_policy": ("character varying(11)", False),
+        },
+        expected,
+    )
+    # Cohorts/offerings: whole single-column sets with pinned shapes only.
+    assert transfer._column_contract_matches(
+        "cohorts",
+        {**expected, "auto_accept_below_action": ("character varying(16)", False)},
+        expected,
+    )
+    assert not transfer._column_contract_matches(
+        "cohorts",
+        {**expected, "auto_accept_below_action": ("character varying(16)", True)},
+        expected,
+    )
+    assert transfer._column_contract_matches(
+        "course_offerings",
+        {**expected, "pacing_default_open": ("boolean", False)},
+        expected,
+    )
+    assert not transfer._column_contract_matches(
+        "course_offerings",
+        {**expected, "pacing_default_open": ("boolean", True)},
+        expected,
+    )
+    # An S2 column on a table that does not own it never admits.
+    assert not transfer._column_contract_matches(
+        "scores", {**expected, "is_final": ("boolean", False)}, expected
     )

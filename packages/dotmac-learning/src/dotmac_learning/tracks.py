@@ -48,6 +48,7 @@ class CreateTrackCommand(BaseModel):
     name: str
     course_ids: tuple[UUID, ...]
     gating_mode: str
+    pacing_default_open: bool
     positions: dict[UUID, int] = Field(default_factory=dict)
 
     @field_validator("gating_mode")
@@ -64,6 +65,7 @@ class AddTrackCoursesCommand(BaseModel):
     cohort_id: UUID
     track_id: UUID
     course_ids: tuple[UUID, ...]
+    pacing_default_open: bool
     positions: dict[UUID, int] = Field(default_factory=dict)
 
 
@@ -307,7 +309,11 @@ def create_cohort_track(db: Session, payload: CreateTrackCommand) -> TrackFact:
         )
     db.flush()
     ensure_track_offerings(
-        db, tenant_id=tenant_id, cohort_id=cohort_id, track_id=track.id
+        db,
+        tenant_id=tenant_id,
+        cohort_id=cohort_id,
+        track_id=track.id,
+        pacing_default_open=payload.pacing_default_open,
     )
     _unchanged(db, boundary)
     return _track_fact(track)
@@ -373,7 +379,11 @@ def add_courses_to_cohort_track(
         next_order += 1
     db.flush()
     ensure_track_offerings(
-        db, tenant_id=tenant_id, cohort_id=cohort_id, track_id=track_id
+        db,
+        tenant_id=tenant_id,
+        cohort_id=cohort_id,
+        track_id=track_id,
+        pacing_default_open=payload.pacing_default_open,
     )
     track = db.scalars(
         select(Track).where(Track.tenant_id == tenant_id).where(Track.id == track_id)
@@ -449,8 +459,19 @@ def cohort_track_or_404(
 
 
 def ensure_track_offerings(
-    db: Session, *, tenant_id: UUID, cohort_id: UUID, track_id: UUID
+    db: Session,
+    *,
+    tenant_id: UUID,
+    cohort_id: UUID,
+    track_id: UUID,
+    pacing_default_open: bool,
 ) -> None:
+    """Ensure active offerings for the track's courses.
+
+    ``pacing_default_open`` is written only on newly created offerings;
+    an existing offering keeps its stored pacing default (RD-4 threading
+    supplies the creation default, it never restates live policy).
+    """
     boundary = _transaction(db)
     cohort_track_or_404(db, tenant_id=tenant_id, cohort_id=cohort_id, track_id=track_id)
     course_ids = db.scalars(
@@ -472,6 +493,7 @@ def ensure_track_offerings(
                     cohort_id=cohort_id,
                     course_id=course_id,
                     status="active",
+                    pacing_default_open=pacing_default_open,
                 )
             )
         else:
@@ -487,11 +509,16 @@ def assign_enrollment_track(
     cohort_id: UUID,
     person_id: UUID,
     track_id: UUID,
+    pacing_default_open: bool,
 ) -> EnrollmentFact:
     boundary = _transaction(db)
     cohort_track_or_404(db, tenant_id=tenant_id, cohort_id=cohort_id, track_id=track_id)
     ensure_track_offerings(
-        db, tenant_id=tenant_id, cohort_id=cohort_id, track_id=track_id
+        db,
+        tenant_id=tenant_id,
+        cohort_id=cohort_id,
+        track_id=track_id,
+        pacing_default_open=pacing_default_open,
     )
     enrollment = db.scalars(
         select(Enrollment)

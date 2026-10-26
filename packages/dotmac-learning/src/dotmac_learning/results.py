@@ -108,6 +108,13 @@ def _observation(
         )
         or 0
     )
+    last_attempt_at = db.scalar(
+        select(func.max(Submission.created_at)).where(
+            Submission.tenant_id == payload.tenant_id,
+            Submission.person_id == payload.person_id,
+            Submission.activity_id == payload.activity_id,
+        )
+    )
     return AdmissionObservation(
         tenant_id=payload.tenant_id,
         person_id=payload.person_id,
@@ -121,6 +128,8 @@ def _observation(
         assessment_mode=activity.assessment_mode,
         bank_id=activity.bank_id,
         question_count=activity.question_count,
+        min_attempt_interval_seconds=activity.min_attempt_interval_seconds,
+        last_attempt_at=last_attempt_at,
     )
 
 

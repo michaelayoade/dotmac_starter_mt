@@ -10,9 +10,14 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
-from .references import CourseFact
+from .references import (
+    CourseFact,
+    _validate_certificate_validity_days,
+    _validate_completion_fraction,
+    _validate_prerequisite_composition,
+)
 
 
 class CurriculumInput(BaseModel):
@@ -25,6 +30,25 @@ class CourseCreate(CurriculumInput):
     slug: str
     title: str
     discipline: str
+    completion_fraction: float = 1.0
+    certificate_auto_issue: bool = True
+    certificate_validity_days: int | None = None
+    prerequisite_composition: str = "all"
+
+    @field_validator("completion_fraction")
+    @classmethod
+    def validate_completion_fraction(cls, value: float) -> float:
+        return _validate_completion_fraction(value)
+
+    @field_validator("certificate_validity_days")
+    @classmethod
+    def validate_certificate_validity_days(cls, value: int | None) -> int | None:
+        return _validate_certificate_validity_days(value)
+
+    @field_validator("prerequisite_composition")
+    @classmethod
+    def validate_prerequisite_composition(cls, value: str) -> str:
+        return _validate_prerequisite_composition(value)
 
 
 class AuthorChapterCommand(CurriculumInput):
@@ -74,12 +98,31 @@ class ManualImportHeader(CurriculumInput):
     # Used only when the ordered import creates a new course.
     new_course_status: str = Field(strict=True, min_length=1)
     new_course_listed: bool = Field(strict=True)
+    new_course_completion_fraction: float = Field(strict=True)
+    new_course_certificate_auto_issue: bool = Field(strict=True)
+    new_course_certificate_validity_days: int | None = Field(strict=True)
+    new_course_prerequisite_composition: str = Field(strict=True)
     tenant_id: UUID
     slug: str
     # Adapter supplies learner-facing display title (product prefix removed).
     title: str
     discipline: str
     source_ref: str
+
+    @field_validator("new_course_completion_fraction")
+    @classmethod
+    def validate_new_course_completion_fraction(cls, value: float) -> float:
+        return _validate_completion_fraction(value)
+
+    @field_validator("new_course_certificate_validity_days")
+    @classmethod
+    def validate_new_course_validity(cls, value: int | None) -> int | None:
+        return _validate_certificate_validity_days(value)
+
+    @field_validator("new_course_prerequisite_composition")
+    @classmethod
+    def validate_new_course_composition(cls, value: str) -> str:
+        return _validate_prerequisite_composition(value)
 
 
 class ManualImport(ManualImportHeader):

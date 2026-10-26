@@ -107,6 +107,10 @@ def create_course(db: Session, command: CourseCreate) -> CourseFact:
             version=1,
             status="draft",
             listed=command.listed,
+            completion_fraction=command.completion_fraction,
+            certificate_auto_issue=command.certificate_auto_issue,
+            certificate_validity_days=command.certificate_validity_days,
+            prerequisite_composition=command.prerequisite_composition,
         ),
     )
     _unchanged(db, boundary)
@@ -243,6 +247,10 @@ def _write_manual(
             version=1,
             status=command.new_course_status,
             listed=command.new_course_listed,
+            completion_fraction=command.new_course_completion_fraction,
+            certificate_auto_issue=command.new_course_certificate_auto_issue,
+            certificate_validity_days=(command.new_course_certificate_validity_days),
+            prerequisite_composition=command.new_course_prerequisite_composition,
         )
         db.add(course)
         db.flush()
