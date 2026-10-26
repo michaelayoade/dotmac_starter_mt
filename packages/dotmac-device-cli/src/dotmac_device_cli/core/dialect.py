@@ -64,6 +64,7 @@ class ParsedTable:
     explicitly_empty: bool
     declared_total: int | None
     orphan_descriptions: int = 0  # description-table ids with no data row
+    missing_descriptions: int = 0  # data rows with no description-table row
 
 
 class Dialect(Protocol):
