@@ -33,6 +33,7 @@ PRODUCTION_ROOTS = (
 ACCEPTED_ACTOR_TYPES: dict[str, frozenset[str]] = {
     "RepairActor": frozenset({"api_key", "service", "user"}),
     "AttemptAuditContext": frozenset({"api_key", "service", "system", "user"}),
+    "BankAuditContext": frozenset({"api_key", "service", "system", "user"}),
 }
 
 
@@ -145,11 +146,13 @@ def _actor_problem(
 
 def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     calls = _writer_calls()
-    # Five Learning callers: announcement creation, attempt grant, schedule
-    # execution, and the two success-queue actions. Their frozen context earns
-    # its closed vocabulary through the same construction proof as RepairActor.
+    # Six Learning callers: announcement creation, attempt grant, schedule
+    # execution, the two success-queue actions, and question-bank lifecycle
+    # (bank_lifecycle._audit via the frozen BankAuditContext). Their frozen
+    # contexts earn their closed vocabulary through the same construction
+    # proof as RepairActor.
     # Offline identity bootstrap adds one explicit system actor with its evidence ref.
-    assert len(calls) == 27, "the ratchet must change when the caller set changes"
+    assert len(calls) == 28, "the ratchet must change when the caller set changes"
 
     problems = [
         f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}: {problem}"

@@ -16,7 +16,7 @@ from dotmac_learning.participation_models import PARTICIPATION_TABLES
 
 module = ModuleManifest(
     code="learning",
-    version="0.1.0a2",
+    version="0.1.0a2+dev",
     core=False,
     short_code="learning",
     migration_prefix="lr",

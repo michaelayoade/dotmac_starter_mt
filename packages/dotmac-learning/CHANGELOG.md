@@ -3,8 +3,9 @@
 ## Unreleased successor candidate (intended 0.1.0a3, not allocated) — 2026-10-21
 
 This source candidate is **not allocated and not published**: `pyproject.toml`,
-`dotmac_learning.__version__` and the module manifest still read `0.1.0a2`, and
-no version string is changed here. Allocation, publication, hosted PostgreSQL
+`dotmac_learning.__version__` and the module manifest read `0.1.0a2+dev`, the
+PEP 440 local development marker carried until the release track allocates the
+next learning version; the published `0.1.0a2` bytes are unchanged. Allocation, publication, hosted PostgreSQL
 qualification, installed-pair qualification and Academy adoption remain pending
 separate gates. The `0.1.0a2` section below is retained as the historical record
 for that candidate; where its counts or semantics conflict with this section,
