@@ -19,7 +19,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .assessment_reads import attempts_used, reveal_feedback
+from .assessment_reads import FeedbackRevealTerms, attempts_used, reveal_feedback
 from .delivery_models import OfferingActivity
 from .models import Activity, Course, Score, Submission
 from .participation_models import CourseOffering, Enrollment
@@ -105,7 +105,13 @@ def _local_day_end(now: datetime, local_zone: tzinfo) -> datetime:
 
 
 def _graded_rows(
-    db: Session, *, tenant_id: UUID, person_id: UUID, now: datetime, terms: TodoTerms
+    db: Session,
+    *,
+    tenant_id: UUID,
+    person_id: UUID,
+    now: datetime,
+    terms: TodoTerms,
+    feedback_terms: FeedbackRevealTerms,
 ) -> tuple[RecentGradeFact, ...]:
     since = now - timedelta(days=terms.graded_lookback_days)
     rows = db.execute(
@@ -147,7 +153,12 @@ def _graded_rows(
                 _activity_fact(activity),
                 course_title,
                 course_slug,
-                reveal_feedback(activity, passed=score.passed, attempts_used=used),
+                reveal_feedback(
+                    activity,
+                    terms=feedback_terms,
+                    passed=score.passed,
+                    attempts_used=used,
+                ),
             )
         )
     return tuple(out)
@@ -191,6 +202,7 @@ def timeline_for_person(
     person_id: UUID,
     local_zone: tzinfo,
     terms: TodoTerms,
+    feedback_terms: FeedbackRevealTerms,
     join_lead_minutes: int,
     now: datetime | None = None,
 ) -> PersonTimeline:
@@ -224,7 +236,12 @@ def timeline_for_person(
         if join_is_open(entry.session, now=now, lead_minutes=join_lead_minutes)
     )
     graded = _graded_rows(
-        db, tenant_id=tenant_id, person_id=person_id, now=now, terms=terms
+        db,
+        tenant_id=tenant_id,
+        person_id=person_id,
+        now=now,
+        terms=terms,
+        feedback_terms=feedback_terms,
     )
 
     return PersonTimeline(

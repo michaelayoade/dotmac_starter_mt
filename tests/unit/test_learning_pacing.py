@@ -48,6 +48,7 @@ def test_source_or_nullable_inclusive_and_inverted_windows(
         OfferingActivity(release_at=release, due_at=due) for release, due in windows
     ]
     monkeypatch.setattr(pacing, "_applicable_overrides", lambda *args, **kwargs: rows)
+    monkeypatch.setattr(pacing, "_offering_pacing_defaults", lambda *args, **kwargs: [])
     assert pacing.activity_pacing(Mock(), **SCOPE, now=CLOCK) == expected
 
 
@@ -120,3 +121,17 @@ def test_enforcement_success_returns_none_and_query_failures_propagate(monkeypat
     with pytest.raises(RuntimeError) as caught:
         pacing.activity_pacing(Mock(), **SCOPE)
     assert caught.value is failure
+
+
+@pytest.mark.parametrize(
+    "defaults,expected_open",
+    [([], True), ([True], True), ([False], False), ([False, True], True)],
+)
+def test_pacing_default_resolution_without_overrides(
+    monkeypatch, defaults, expected_open
+):
+    monkeypatch.setattr(pacing, "_applicable_overrides", lambda *a, **k: [])
+    monkeypatch.setattr(pacing, "_offering_pacing_defaults", lambda *a, **k: defaults)
+    assert pacing.activity_pacing(Mock(), **SCOPE, now=CLOCK) == PacingFact(
+        expected_open, expected_open, False
+    )

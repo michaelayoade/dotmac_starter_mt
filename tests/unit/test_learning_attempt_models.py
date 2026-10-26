@@ -13,11 +13,14 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 FIELDS = {
     "activity_attempts": (
-        "activity_id person_id question_ext_ids started_at submitted_at"
+        "activity_id person_id bank_version_id question_ext_ids started_at submitted_at"
     ),
     "attempt_grants": "activity_id person_id extra_attempts reason granted_by",
 }
-NULLABLE = {"activity_attempts": {"submitted_at"}, "attempt_grants": {"granted_by"}}
+NULLABLE = {
+    "activity_attempts": {"submitted_at", "bank_version_id"},
+    "attempt_grants": {"granted_by"},
+}
 INDEXES = {
     name: {
         ("tenant_id",),
@@ -27,12 +30,13 @@ INDEXES = {
     }
     for name in FIELDS
 }
+INDEXES["activity_attempts"] = INDEXES["activity_attempts"] | {("bank_version_id",)}
 
 
-def test_exact_eighteen_source_fields_and_logical_identity_references():
+def test_exact_nineteen_source_fields_and_logical_identity_references():
     assert ATTEMPT_MODELS == (ActivityAttempt, AttemptGrant)
     assert ATTEMPT_TABLES == ("activity_attempts", "attempt_grants")
-    assert sum(len(model.__table__.c) for model in ATTEMPT_MODELS) == 18
+    assert sum(len(model.__table__.c) for model in ATTEMPT_MODELS) == 19
     for model in ATTEMPT_MODELS:
         table = model.__table__
         assert table.schema == "mod_learning"

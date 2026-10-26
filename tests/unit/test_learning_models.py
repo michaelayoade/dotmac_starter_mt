@@ -58,6 +58,7 @@ def test_learning_registration_uses_the_shipped_allocation_and_exact_tables():
             "learning_events",
             "chapters",
             "question_banks",
+            "question_bank_versions",
             "questions",
             "chapter_reads",
             "subtopic_reads",
@@ -84,6 +85,16 @@ def test_learning_registration_uses_the_shipped_allocation_and_exact_tables():
     assert registry.namespaces().declared_platform_tables("mod_learning") == frozenset()
     assert module.audit_actions == (
         "attempt_granted",
+        "question_bank.draft_created",
+        "question_bank.question_upserted",
+        "question_bank.question_deleted",
+        "question_bank.draft_discarded",
+        "question_bank.published",
+        "question_bank.version_retired",
+        "question_bank.activity_repointed",
+        "question_bank.imported",
+        "question_bank.import_refused",
+        "question_bank.exported",
         "announcement.created",
         "scheduling.update_session",
         "success_queue.acknowledge",
@@ -129,7 +140,19 @@ def test_first_slice_has_seven_tenant_tables_and_no_product_delivery_state():
             fk.column is Tenant.__table__.c.id and fk.ondelete == "CASCADE"
             for fk in table.c.tenant_id.foreign_keys
         )
-        assert not any(isinstance(c, CheckConstraint) for c in table.constraints)
+        assert {
+            c.name for c in table.constraints if isinstance(c, CheckConstraint)
+        } == {
+            "courses": {
+                "ck_courses_prerequisite_composition",
+                "ck_courses_completion_fraction",
+                "ck_courses_certificate_validity_days",
+            },
+            "activities": {
+                "ck_activities_scoring_policy",
+                "ck_activities_min_attempt_interval",
+            },
+        }.get(table.name, set())
         for name in ("created_at", "updated_at"):
             assert not table.c[name].nullable
             assert table.c[name].type.timezone
@@ -273,6 +296,33 @@ def test_nullable_policy_fields_and_source_defaults_keep_their_meaning():
     # Mirror immutable database defaults for legacy NULL-on-insert staging only.
     assert Activity.__table__.c.pass_threshold.server_default.arg == "0.0"
     assert Activity.__table__.c.assessment_mode.server_default.arg == "graded"
+    composition = Course.__table__.c.prerequisite_composition
+    assert not composition.nullable
+    assert composition.default.arg == "all"
+    assert str(composition.server_default.arg) == "all"
+    # Wave 1L policy columns materialize the historical rules at rest.
+    fraction = Course.__table__.c.completion_fraction
+    assert not fraction.nullable
+    assert fraction.default.arg == 1.0
+    assert str(fraction.server_default.arg) == "1.0"
+    auto_issue = Course.__table__.c.certificate_auto_issue
+    assert not auto_issue.nullable
+    assert auto_issue.default.arg is True
+    assert str(auto_issue.server_default.arg) == "true"
+    assert Course.__table__.c.certificate_validity_days.nullable
+    assert Certificate.__table__.c.expires_at.nullable
+    scoring = Activity.__table__.c.scoring_policy
+    assert not scoring.nullable
+    assert scoring.default.arg == "best"
+    assert str(scoring.server_default.arg) == "best"
+    is_final = Activity.__table__.c.is_final
+    assert not is_final.nullable
+    assert is_final.default.arg is False
+    assert str(is_final.server_default.arg) == "false"
+    interval = Activity.__table__.c.min_attempt_interval_seconds
+    assert not interval.nullable
+    assert interval.default.arg == 0
+    assert str(interval.server_default.arg) == "0"
 
 
 def test_json_payload_defaults_are_independent_per_record():
@@ -323,7 +373,7 @@ def test_root_migration_locator_reexports_the_canonical_callable():
     assert (versions_dir() / "lr_0001_learning.py").is_file()
 
 
-# Physical index contract from lr_0001 through lr_0006; schema relocation
+# Physical index contract from lr_0001 through lr_0010; schema relocation
 # preserves these names, including the source queue naming exception.
 MIGRATED_INDEXES = {
     "courses": {"ix_courses_tenant_id": (("tenant_id",), False, None)},
@@ -331,6 +381,7 @@ MIGRATED_INDEXES = {
         "ix_activities_tenant_id": (("tenant_id",), False, None),
         "ix_activities_course_id": (("course_id",), False, None),
         "ix_activities_bank_id": (("bank_id",), False, None),
+        "ix_activities_bank_version_id": (("bank_version_id",), False, None),
     },
     "submissions": {
         "ix_submissions_tenant_id": (("tenant_id",), False, None),
@@ -382,10 +433,30 @@ MIGRATED_INDEXES = {
     "question_banks": {
         "ix_question_banks_tenant_id": (("tenant_id",), False, None),
         "ix_question_banks_course_id": (("course_id",), False, None),
+        "ix_question_banks_current_version_id": (
+            ("current_version_id",),
+            False,
+            None,
+        ),
+        "uq_question_banks_natural_key": (
+            ("tenant_id", "course_id", "chapter_number", "kind"),
+            True,
+            None,
+        ),
+    },
+    "question_bank_versions": {
+        "ix_question_bank_versions_tenant_id": (("tenant_id",), False, None),
+        "ix_question_bank_versions_bank_id": (("bank_id",), False, None),
+        "uq_question_bank_versions_one_draft": (
+            ("tenant_id", "bank_id"),
+            True,
+            "state = 'draft'",
+        ),
     },
     "questions": {
         "ix_questions_tenant_id": (("tenant_id",), False, None),
         "ix_questions_bank_id": (("bank_id",), False, None),
+        "ix_questions_bank_version_id": (("bank_version_id",), False, None),
     },
     "chapter_reads": {
         "ix_chapter_reads_tenant_id": (("tenant_id",), False, None),
@@ -452,6 +523,11 @@ MIGRATED_INDEXES = {
         "ix_activity_attempts_tenant_id": (("tenant_id",), False, None),
         "ix_activity_attempts_activity_id": (("activity_id",), False, None),
         "ix_activity_attempts_person_id": (("person_id",), False, None),
+        "ix_activity_attempts_bank_version_id": (
+            ("bank_version_id",),
+            False,
+            None,
+        ),
     },
     "attempt_grants": {
         "ix_attempt_grants_lookup": (
@@ -507,7 +583,7 @@ def test_all_learning_indexes_preserve_migrated_names_columns_uniqueness_and_sco
         *ATTEMPT_MODELS,
         *DELIVERY_MODELS,
     )
-    assert len(models) == len(MIGRATED_INDEXES) == 27
+    assert len(models) == len(MIGRATED_INDEXES) == 28
     assert {model.__table__.name for model in models} == set(MIGRATED_INDEXES)
     for model in models:
         table = model.__table__

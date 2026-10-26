@@ -1,5 +1,138 @@
 # Changelog — dotmac-learning
 
+## Unreleased successor candidate (intended 0.1.0a3, not allocated) — 2026-10-21
+
+This source candidate is **not allocated and not published**: `pyproject.toml`,
+`dotmac_learning.__version__` and the module manifest read `0.1.0a2+dev`, the
+PEP 440 local development marker carried until the release track allocates the
+next learning version; the published `0.1.0a2` bytes are unchanged. Allocation, publication, hosted PostgreSQL
+qualification, installed-pair qualification and Academy adoption remain pending
+separate gates. The `0.1.0a2` section below is retained as the historical record
+for that candidate; where its counts or semantics conflict with this section,
+this section governs the current source.
+
+Current source facts (verified from the live tree): **28 tables and 298
+persisted fields** in `mod_learning`, **598 root exports**, migration lineage
+`lr_0001_learning` through `lr_0010_question_bank_versions` (single head
+`lr_0010`), Kernel floor `>=0.1.0a106` unchanged.
+
+### Composable prerequisites, policies and terms (Waves 0 + 1L)
+
+- Prerequisites are composable tenant data, not hardcoded course lists:
+  `CoursePrerequisite` carries a closed `condition_kind` catalog
+  (`course_completed`, `certificate_held`, `course_grade_at_least`,
+  `activity_passed`, `attempt_number_at_least`), typed-validated `params`, and a
+  `group_key`; `Course.prerequisite_composition` is `all|any` across groups with
+  ALL within a group. Defaults (`course_completed` / `g0` / `all`) reproduce the
+  prior implicit-ALL behaviour exactly, and legacy `requires: []` declarations
+  still parse to `course_completed` edges in `g0`/`all`. New exports:
+  `PREREQUISITE_CONDITION_KINDS`, `PrerequisiteConditionDeclaration`.
+  `unmet_prerequisites` keeps its `list[UUID]` shape as a derived projection of
+  unmet course-scoped kinds; `require_course_open` denies on the internal unmet
+  facts, so activity-only conditions still lock. Track gating is data
+  (`Track.gating_mode`: `none|previous|all_previous`, default `previous`),
+  evaluated in the same pass with the prior rule order preserved.
+- Learner-visible policies are columns/terms with behaviour-preserving defaults:
+  `Course.completion_fraction` (default `1.0`, in `(0,1]`), certificate
+  `certificate_auto_issue` (default true) / `certificate_validity_days` (default
+  NULL = never) with `Certificate.expires_at`, `Activity.scoring_policy`
+  (`best|latest|first`, default `best`), `Activity.is_final` (default false,
+  backfilled from the prior heuristic), `Activity.min_attempt_interval_seconds`
+  (default `0`, range `0..2592000`), `CourseOffering.pacing_default_open`
+  (default true) and `Cohort.auto_accept_below_action` (default `waitlisted`).
+- Terms are explicit product-supplied inputs with no owner-side fallback:
+  `FeedbackRevealTerms` (default map practice=immediate,
+  graded=on_pass_or_exhausted, exam=never; `exam -> immediate` is refused as a
+  bank-integrity invariant), `ProgressTrendTerms` (defaults 8/3/0.03),
+  `CohortInsightTerms.half_fraction` (default `0.5`), `SuccessTerms`
+  `enabled_rules`/`severity_by_rule` (defaults: all five rules enabled, current
+  severities), and `CreateSessionCommand.promote_delivery_mode` (pass `True` to
+  preserve the prior self-paced promotion). Learning owns no defaults beyond
+  schema backfill mirrors; Academy Settings supply creation defaults at the
+  composition call sites (Academy work, not in this candidate).
+
+**Prospective-only warnings.** Changing `completion_fraction` writes only the
+course row; stored completions change only when `recompute_completion` next runs
+on a score write (lowering it can then complete a learner and, at the default,
+issue a certificate). `scoring_policy` is read-time: a change affects the next
+projection/recompute over existing scores, so `patch_activity`/`update_activity`
+refuse a policy *change* on an activity with submissions; the raw
+`stage_activity_patch` path is a documented trusted-import bypass of that guard.
+Certificate validity applies only to certificates issued after it is set;
+already-issued certificates are never rewritten and keep `expires_at` NULL.
+The attempt cooldown applies only to admissions evaluated after the interval is
+set above zero. A non-default `pacing_default_open` should be dry-run before
+relying on it. None of these changes silently rewrites stored history at the
+defaults.
+
+### Question-bank system of record and SnapshotV6
+
+- Additive `lr_0010` adds immutable `question_bank_versions`, the bank
+  `current_version` pointer, and version pins on questions, activities and
+  attempts, backfilling a published v1 per existing bank with a canonical
+  content hash and pinning open attempts. The lifecycle is draft
+  (create/copy/upsert/delete/discard) -> lint -> publish (lint-clean only,
+  optimistic base-current check, never auto-repoints activities) -> explicit
+  activity repoint -> retire. Attempts open, grade and read against their
+  pinned bank version, with the historical NULL-version fallback retained for
+  the frozen-import estate. Learner sittings use the key-free
+  `sitting_questions` projection.
+- YAML is now a transport format only: import lands **as a draft** (a UI draft
+  is never overwritten; an untouched YAML draft is replaced only via the
+  explicit replace flag; hash-equal content is a no-op; the document version
+  field is ignored; import writes no Activity rows), and export produces the
+  audited published document. The legacy destructive writers `load_bank` and
+  `import_bank_with_activity` are fail-closed shims that raise
+  `LegacyBankWriterRetired` without executing SQL.
+- Prerequisite reconciliation now records row origin: it deletes or rewrites
+  only `origin=yaml_import` rows and never rewrites app-authored (`origin=ui`)
+  rows.
+- `LearningSnapshotV6` (`export_snapshot_v6`/`import_snapshot_v6`/
+  `verify_snapshot_v6`) is the current full transfer protocol: all 28 tables /
+  298 fields, including every Wave 0/1L column, prerequisite origin and the
+  bank-version pins. Frozen V1–V5 keep their original 7/14/21/23/27-table
+  scopes and row contracts unchanged, and their export/verify paths **refuse**
+  (rather than silently drop) when any column they do not carry holds a
+  non-default value; default-only data remains transferable through them.
+
+**Historical Git exposure.** Question-bank answer keys previously lived in Git
+YAML. That exposure cannot be undone by deleting files, and no renewed secrecy
+is claimed for that historical content: treat it as disclosed to anyone who has
+had clone/fork access. This candidate records no answer content here; the
+remediation is retiring and replacing exposed banks with newly authored items
+(high-stakes banks first), not rewriting Git history.
+
+### Breaking constructor/API changes (in-series, exhaustive)
+
+Existing callers must be updated; there are no compatibility shims:
+
+- `reveal_feedback(..., terms=...)` and `progress_overview(...,
+  progress_trend=..., feedback_terms=...)` gain required keyword arguments;
+  `timeline_for_person` threads the required feedback terms through.
+- Required fields: `SuccessTerms.enabled_rules`/`severity_by_rule`,
+  `CohortInsightTerms.half_fraction`, `BankActivityTerms`
+  `new_activity_scoring_policy`/`new_activity_min_attempt_interval_seconds`,
+  `CreateTrackCommand.gating_mode`, `CreateSessionCommand.promote_delivery_mode`
+  (strict bool), `ManualImportHeader` four `new_course_*` policy fields, and
+  `AdmissionObservation.min_attempt_interval_seconds`/`last_attempt_at`.
+- Required `pacing_default_open` on `CreateTrackCommand`,
+  `AddTrackCoursesCommand`, `BulkEnrollCommand` and
+  `EnsureInvitationEnrollmentCommand`, and as a required keyword on
+  `ensure_track_offerings`/`assign_enrollment_track` (written only when an
+  offering is created).
+- Terms-object tightening: `entitlement()` reads
+  `min_attempt_interval_seconds` unconditionally, so a pre-candidate-shaped
+  terms object raises `AttributeError` instead of being defaulted.
+- `load_bank`/`import_bank_with_activity` raise `LegacyBankWriterRetired`;
+  bank writes go through the draft/import-as-draft lifecycle with a trusted
+  `BankAuditContext`. Changing an activity's pinned bank (including to `None`)
+  through the reference patch/stage paths is refused; use the explicit repoint
+  command.
+- Additive, non-breaking: all new columns carry server defaults; appended
+  defaulted fact fields (`CertificateFact.expires_at`, the `CourseFact`/
+  `ActivityFact`/`TrackFact` policy fields, `Entitlement.next_allowed_at`); the
+  optional `now` keyword on access reads; legacy `requires: []` parsing.
+
 ## 0.1.0a2 — allocated source candidate, not yet published
 
 Current correction, 2026-10-19: `0.1.0a1` was published and remains immutable.

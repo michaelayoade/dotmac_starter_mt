@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from dotmac_learning import (
     ActivityCreate,
+    BankLifecycleConflict,
     create_activity_identity,
     references,
     stage_activity_patch,
@@ -154,6 +155,11 @@ def test_existing_create_update_and_patch_keep_returns_flushes_and_field_order(
     fact = object()
 
     class AssignmentOnly:
+        scoring_policy = "best"
+        # The generic writers refuse pin movement outside the audited
+        # repoint command, so update reads the current pin (unpinned).
+        bank_version_id = None
+
         def __setattr__(self, name, value):
             staged.append((name, value))
 
@@ -225,3 +231,71 @@ def test_private_helpers_keep_raw_values_and_assignment_order(monkeypatch):
         ("pass_threshold", None),
         ("question_count", "raw"),
     ]
+
+
+def test_write_contracts_reject_out_of_range_policy_values():
+    from dotmac_learning.references import CourseWrite
+
+    values = _values()
+    with pytest.raises(ValidationError):
+        ActivityCreate(**values, scoring_policy="median")
+    with pytest.raises(ValidationError):
+        ActivityCreate(**values, min_attempt_interval_seconds=2592001)
+    with pytest.raises(ValidationError):
+        ActivityCreate(**values, min_attempt_interval_seconds=-1)
+    course_values = {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "slug": "s",
+        "title": "t",
+        "discipline": "d",
+        "source_ref": "r",
+        "status": "draft",
+        "listed": True,
+    }
+    for override in (
+        {"completion_fraction": 0},
+        {"completion_fraction": 1.5},
+        {"completion_fraction": float("nan")},
+        {"certificate_validity_days": 0},
+        {"prerequisite_composition": "some"},
+    ):
+        with pytest.raises(ValidationError):
+            CourseWrite(**course_values, **override)
+    ok = CourseWrite(**course_values)
+    assert (ok.completion_fraction, ok.certificate_auto_issue) == (1.0, True)
+    assert ok.certificate_validity_days is None
+    assert ok.prerequisite_composition == "all"
+
+
+def test_patch_and_stage_refuse_bank_change_on_pinned_activity(monkeypatch):
+    # CB-1: supplying bank_id alone must not strand the existing pin on
+    # the previous bank. Restating the same bank is a no-op, and bank
+    # changes on unpinned activities stay allowed.
+    tenant_id, activity_id = uuid4(), uuid4()
+    bank1, bank2, pin = uuid4(), uuid4(), uuid4()
+    monkeypatch.setattr(references, "_activity_fact", lambda row: row)
+
+    def run(operation, *, row_bank, row_pin, new_bank):
+        row = SimpleNamespace(bank_id=row_bank, bank_version_id=row_pin)
+        db = SimpleNamespace(scalar=lambda stmt: row)
+        patch = ActivityPatch(id=activity_id, tenant_id=tenant_id, bank_id=new_bank)
+        return row, operation(db, patch)
+
+    for operation in (references.patch_activity, stage_activity_patch):
+        # Pinned: bank-to-bank and bank-to-None refuse before assignment.
+        for new_bank in (bank2, None):
+            row = SimpleNamespace(bank_id=bank1, bank_version_id=pin)
+            db = SimpleNamespace(scalar=lambda stmt, row=row: row)
+            patch = ActivityPatch(id=activity_id, tenant_id=tenant_id, bank_id=new_bank)
+            with pytest.raises(BankLifecycleConflict):
+                operation(db, patch)
+            assert (row.bank_id, row.bank_version_id) == (bank1, pin)
+        # Pinned: restating the same bank remains a no-op.
+        row, _ = run(operation, row_bank=bank1, row_pin=pin, new_bank=bank1)
+        assert (row.bank_id, row.bank_version_id) == (bank1, pin)
+        # Unpinned: bank changes stay allowed.
+        row, _ = run(operation, row_bank=bank1, row_pin=None, new_bank=bank2)
+        assert (row.bank_id, row.bank_version_id) == (bank2, None)
+        row, _ = run(operation, row_bank=bank1, row_pin=None, new_bank=None)
+        assert (row.bank_id, row.bank_version_id) == (None, None)

@@ -7925,7 +7925,13 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-work-orders": frozenset(),
     "dotmac-ticketing": frozenset(),
     "dotmac-deployment-control": frozenset(),
-    "dotmac-learning": frozenset(),
+    "dotmac-learning": frozenset(
+        {
+            "lr_0008_prerequisite_conditions.py",
+            "lr_0009_composable_policies.py",
+            "lr_0010_question_bank_versions.py",
+        }
+    ),
 }
 
 

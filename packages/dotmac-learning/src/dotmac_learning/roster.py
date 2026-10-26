@@ -216,6 +216,7 @@ def bulk_enroll(
                 tenant_id=command.tenant_id,
                 cohort_id=command.cohort_id,
                 track_id=command.track_id,
+                pacing_default_open=command.pacing_default_open,
             )
     enrolled: list[str] = []
     reactivated: list[str] = []
@@ -264,6 +265,7 @@ def bulk_enroll(
                     cohort_id=command.cohort_id,
                     person_id=person.id,
                     track_id=command.track_id,
+                    pacing_default_open=command.pacing_default_open,
                 )
             reactivated.append(email)
         else:
@@ -276,6 +278,7 @@ def bulk_enroll(
                     cohort_id=command.cohort_id,
                     person_id=person.id,
                     track_id=command.track_id,
+                    pacing_default_open=command.pacing_default_open,
                 )
             already_active.append(email)
     db.flush()
@@ -437,6 +440,7 @@ def ensure_invitation_enrollment(
             tenant_id=command.tenant_id,
             cohort_id=command.cohort_id,
             track_id=command.track_id,
+            pacing_default_open=command.pacing_default_open,
         )
     for course_id in command.selected_course_ids:
         offering = db.scalars(
@@ -453,6 +457,7 @@ def ensure_invitation_enrollment(
                     cohort_id=command.cohort_id,
                     course_id=course_id,
                     status="active",
+                    pacing_default_open=command.pacing_default_open,
                 )
             )
         else:

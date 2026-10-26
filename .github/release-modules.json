@@ -3432,7 +3432,14 @@
           "dotmac_learning/transfer_contracts.py",
           "dotmac_learning_bank_rules/__init__.py",
           "dotmac_learning_bank_rules/py.typed",
-          "dotmac_learning/migrations/versions/lr_0007_enrollment_state_policy.py"
+          "dotmac_learning/migrations/versions/lr_0007_enrollment_state_policy.py",
+          "dotmac_learning/bank_lifecycle.py",
+          "dotmac_learning/bank_lifecycle_contracts.py",
+          "dotmac_learning/bank_transfer.py",
+          "dotmac_learning/bank_transfer_contracts.py",
+          "dotmac_learning/migrations/versions/lr_0008_prerequisite_conditions.py",
+          "dotmac_learning/migrations/versions/lr_0009_composable_policies.py",
+          "dotmac_learning/migrations/versions/lr_0010_question_bank_versions.py"
         ],
         "forbidden_prefixes": [
           "app/",

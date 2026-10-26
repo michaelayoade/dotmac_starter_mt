@@ -5,9 +5,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from dotmac_learning import learner_dashboard
+from dotmac_learning.assessment_reads import FeedbackRevealTerms
 from dotmac_learning.attempt_models import ActivityAttempt, AttemptGrant
 from dotmac_learning.curriculum_models import Chapter, ChapterRead
 from dotmac_learning.delivery_models import ClassSession, OfferingActivity
+from dotmac_learning.insight_contracts import ProgressTrendTerms
 from dotmac_learning.models import (
     Activity,
     Certificate,
@@ -30,6 +32,10 @@ from tests.test_learning_results import scoped
 learning_database = result_tests.learning_database
 result_database = result_tests.result_database
 NOW = datetime(2026, 8, 1, 12, tzinfo=UTC)
+FEEDBACK = FeedbackRevealTerms(
+    {"practice": "immediate", "graded": "on_pass_or_exhausted", "exam": "never"}
+)
+TREND = ProgressTrendTerms(8, 3, 0.03)
 
 
 def seed(db, tenant, person, course, activity):
@@ -208,7 +214,12 @@ def test_every_dashboard_projection_populated_before_non_bypass_wrong_tenant_pro
             == chapters[2].id
         )
         overview = learner_dashboard.progress_overview(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            progress_trend=TREND,
+            feedback_terms=FEEDBACK,
+            now=NOW,
         )
         progress = overview[0]
         assert progress.completion_pct == 50 and progress.grade_pct == 43
@@ -271,7 +282,12 @@ def test_every_dashboard_projection_populated_before_non_bypass_wrong_tenant_pro
         )
         assert (
             learner_dashboard.progress_overview(
-                db, tenant_id=tenant, person_id=person, now=NOW
+                db,
+                tenant_id=tenant,
+                person_id=person,
+                progress_trend=TREND,
+                feedback_terms=FEEDBACK,
+                now=NOW,
             )
             == ()
         )
@@ -372,7 +388,12 @@ def test_soonest_effective_offering_selected_and_card_deadline_includes_passed_w
         assert card.starts_at == other_off.starts_at and card.next_deadline == due
         # Passed activity deadlines still compete for the card's nearest deadline.
         overview = learner_dashboard.progress_overview(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            progress_trend=TREND,
+            feedback_terms=FEEDBACK,
+            now=NOW,
         )[0]
         assert overview.rows[0].passed and overview.rows[0].due_at == due
         assert all(row.activity.id != activity for row in overview.upcoming)
@@ -436,7 +457,12 @@ def test_start_chapter_one_resume_numbers_and_due_now_neither_bucket(
             == 7
         )
         progress = learner_dashboard.progress_overview(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            progress_trend=TREND,
+            feedback_terms=FEEDBACK,
+            now=NOW,
         )[0]
         assert progress.rows[0].due_at == NOW and progress.rows[0].score is None
         assert progress.rows[0].pct is None and not progress.rows[0].feedback_available
@@ -579,7 +605,12 @@ def test_progress_last_eight_scores_unbounded_by_now_and_eligible_certificate_ta
         completion.status = "completed"
         completion.pct = 0.125
         progress = learner_dashboard.progress_overview(
-            db, tenant_id=tenant, person_id=person, now=NOW
+            db,
+            tenant_id=tenant,
+            person_id=person,
+            progress_trend=TREND,
+            feedback_terms=FEEDBACK,
+            now=NOW,
         )[0]
         assert progress.trend_points == (20, 30, 40, 50, 60, 70, 80, 90)
         assert progress.trend == "up" and progress.completion_pct == 12

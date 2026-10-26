@@ -72,7 +72,11 @@ def _bulk(db, data, emails, *, admin=False, track=None, role="instructor"):
     return roster.bulk_enroll(
         db,
         BulkEnrollCommand(
-            tenant_id=tenant, cohort_id=cohort, emails=emails, track_id=track
+            tenant_id=tenant,
+            cohort_id=cohort,
+            emails=emails,
+            pacing_default_open=True,
+            track_id=track,
         ),
         authority=RosterAuthority(tenant, admin),
         accounts=AccountPresenceSelection(

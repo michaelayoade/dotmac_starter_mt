@@ -7,6 +7,7 @@ are simple ID FKs, not tenant composite constraints.
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from dotmac_kernel.models import Base as KernelBase
@@ -14,6 +15,8 @@ from dotmac_kernel.models import Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import schema_table_args
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
+    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -21,6 +24,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -67,8 +71,29 @@ class QuestionBank(KernelBase, TimestampMixin):
     __tablename__ = "question_banks"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_question_banks_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "current_version_id"],
+            [
+                f"{SCHEMA}.question_bank_versions.tenant_id",
+                f"{SCHEMA}.question_bank_versions.id",
+            ],
+            name="fk_question_banks_tenant_current_version",
+            use_alter=True,
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        Index(
+            "uq_question_banks_natural_key",
+            "tenant_id",
+            "course_id",
+            "chapter_number",
+            "kind",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
         Index("ix_question_banks_tenant_id", "tenant_id"),
         Index("ix_question_banks_course_id", "course_id"),
+        Index("ix_question_banks_current_version_id", "current_version_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -80,23 +105,52 @@ class QuestionBank(KernelBase, TimestampMixin):
     course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     chapter_number: Mapped[int | None] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(10), nullable=False)  # chapter|mid|final
+    # Legacy last-published mirror: the version_no most recently
+    # published for this bank (the initial declared 1 before the first
+    # publish). No longer author-controlled, and retiring the current
+    # version does not rewrite it; current_version_id is authoritative.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    current_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
-class Question(KernelBase, TimestampMixin):
-    __tablename__ = "questions"
+class QuestionBankVersion(KernelBase, TimestampMixin):
+    """One immutable published (or single mutable draft) state of a bank."""
+
+    __tablename__ = "question_bank_versions"
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "bank_id", "ext_id", name="uq_questions_bank_ext"
+            "tenant_id", "id", name="uq_question_bank_versions_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "bank_id",
+            "version_no",
+            name="uq_question_bank_versions_bank_no",
+        ),
+        CheckConstraint(
+            "state IN ('draft', 'published', 'retired')",
+            name="ck_question_bank_versions_state",
+        ),
+        CheckConstraint(
+            "origin IN ('ui', 'yaml_import', 'backfill')",
+            name="ck_question_bank_versions_origin",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "bank_id"],
             [f"{SCHEMA}.question_banks.tenant_id", f"{SCHEMA}.question_banks.id"],
             ondelete="CASCADE",
-            name="fk_questions_tenant_bank",
+            name="fk_question_bank_versions_tenant_bank",
         ),
-        Index("ix_questions_tenant_id", "tenant_id"),
-        Index("ix_questions_bank_id", "bank_id"),
+        Index(
+            "uq_question_bank_versions_one_draft",
+            "tenant_id",
+            "bank_id",
+            unique=True,
+            postgresql_where=text("state = 'draft'"),
+            sqlite_where=text("state = 'draft'"),
+        ),
+        Index("ix_question_bank_versions_tenant_id", "tenant_id"),
+        Index("ix_question_bank_versions_bank_id", "bank_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -106,6 +160,72 @@ class Question(KernelBase, TimestampMixin):
         nullable=False,
     )
     bank_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # Allocated by Learning at publish (max+1 under the bank-row lock); a
+    # draft carries NULL so discarded drafts never consume a number.
+    version_no: Mapped[int | None] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(10), nullable=False)
+    origin: Mapped[str] = mapped_column(String(16), nullable=False)
+    content_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default=""
+    )
+    lint_violations: Mapped[list[object]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    base_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    draft_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    created_by_actor: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    published_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retire_reason: Mapped[str | None] = mapped_column(Text)
+    superseded_by_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class Question(KernelBase, TimestampMixin):
+    __tablename__ = "questions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "bank_version_id",
+            "ext_id",
+            name="uq_questions_bank_version_ext",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "bank_id"],
+            [f"{SCHEMA}.question_banks.tenant_id", f"{SCHEMA}.question_banks.id"],
+            ondelete="CASCADE",
+            name="fk_questions_tenant_bank",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "bank_version_id"],
+            [
+                f"{SCHEMA}.question_bank_versions.tenant_id",
+                f"{SCHEMA}.question_bank_versions.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_questions_tenant_bank_version",
+        ),
+        Index("ix_questions_tenant_id", "tenant_id"),
+        Index("ix_questions_bank_id", "bank_id"),
+        Index("ix_questions_bank_version_id", "bank_version_id"),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+    )
+    bank_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # NULL only for pre-lr_0010 rows materialized by frozen V1-V5 imports;
+    # the migration backfills every live row onto its published v1.
+    bank_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     ext_id: Mapped[str] = mapped_column(String(60), nullable=False)
     stem: Mapped[str] = mapped_column(Text, nullable=False)
     type: Mapped[str] = mapped_column(
@@ -279,6 +399,7 @@ class ChapterNote(KernelBase, TimestampMixin):
 CURRICULUM_MODELS = (
     Chapter,
     QuestionBank,
+    QuestionBankVersion,
     Question,
     ChapterRead,
     SubtopicRead,
@@ -292,6 +413,7 @@ __all__ = [
     "CURRICULUM_TABLES",
     "Chapter",
     "QuestionBank",
+    "QuestionBankVersion",
     "Question",
     "ChapterRead",
     "SubtopicRead",

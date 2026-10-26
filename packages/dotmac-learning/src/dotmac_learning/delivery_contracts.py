@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SchedulingBadRequest(ValueError):
@@ -32,6 +32,7 @@ class CreateSessionCommand(DeliveryCommand):
     title: str
     starts_at: datetime
     session_type: str
+    promote_delivery_mode: bool = Field(strict=True)
     ends_at: datetime | None = None
     offering_id: UUID | None = None
     instructor_person_id: UUID | None = None

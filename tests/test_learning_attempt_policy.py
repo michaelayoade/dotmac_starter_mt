@@ -232,6 +232,8 @@ def test_bound_policy_rejects_observation_scope_before_grant_sql(
             assessment_mode="graded",
             bank_id=None,
             question_count=None,
+            min_attempt_interval_seconds=0,
+            last_attempt_at=None,
         )
         with pytest.raises(ValueError, match="scope"):
             policy.evaluate(observation)
@@ -355,3 +357,71 @@ def test_plain_required_zero_count_reaches_owner_after_transaction_and_audit_sco
             )
         assert db.get_transaction() is boundary
         assert db.scalar(select(func.count()).select_from(AttemptGrant)) == 0
+
+
+def test_cooldown_refuses_inside_window_and_admits_after(result_database):
+    from datetime import UTC, datetime, timedelta
+
+    from dotmac_learning.result_contracts import GradedResult
+
+    _, app, tenant, person, _, activity, *_ = result_database
+    with scoped(app, tenant) as db:
+        row = db.scalar(select(Activity).where(Activity.id == activity))
+        row.min_attempt_interval_seconds = 3600
+        db.flush()
+        first = attempt_policy.record_mcq_result_with_attempt_policy(
+            db,
+            MCQResultCommand(
+                tenant_id=tenant,
+                person_id=person,
+                activity_id=activity,
+                answers={"q": "a"},
+                grading=GradedResult(
+                    score=1,
+                    max_score=2,
+                    fraction=0.5,
+                    passed=False,
+                    per_item=[{"ext_id": "q", "correct": True}],
+                ),
+            ),
+        )
+        assert first.submission.attempt_no == 1
+        with pytest.raises(AdmissionRefused):
+            attempt_policy.record_mcq_result_with_attempt_policy(
+                db,
+                MCQResultCommand(
+                    tenant_id=tenant,
+                    person_id=person,
+                    activity_id=activity,
+                    answers={"q": "a"},
+                    grading=GradedResult(
+                        score=1,
+                        max_score=2,
+                        fraction=0.5,
+                        passed=False,
+                        per_item=[{"ext_id": "q", "correct": True}],
+                    ),
+                ),
+            )
+        seeded = db.scalar(
+            select(Submission).where(Submission.id == first.submission.id)
+        )
+        seeded.created_at = datetime.now(UTC) - timedelta(hours=2)
+        db.flush()
+        second = attempt_policy.record_mcq_result_with_attempt_policy(
+            db,
+            MCQResultCommand(
+                tenant_id=tenant,
+                person_id=person,
+                activity_id=activity,
+                answers={"q": "a"},
+                grading=GradedResult(
+                    score=1,
+                    max_score=2,
+                    fraction=0.5,
+                    passed=False,
+                    per_item=[{"ext_id": "q", "correct": True}],
+                ),
+            ),
+        )
+        assert second.submission.attempt_no == 2

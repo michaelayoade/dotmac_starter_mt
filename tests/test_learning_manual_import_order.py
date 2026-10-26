@@ -24,6 +24,10 @@ def _header(tenant, **overrides):
         "source_ref": "v1",
         "new_course_status": "published",
         "new_course_listed": False,
+        "new_course_completion_fraction": 1.0,
+        "new_course_certificate_auto_issue": True,
+        "new_course_certificate_validity_days": None,
+        "new_course_prerequisite_composition": "all",
     }
     values.update(overrides)
     return learning.ManualImportHeader(**values)
@@ -440,6 +444,10 @@ def test_original_tuple_contract_and_refresh_query_unchanged(curriculum_case):
     assert tuple(header.model_fields) == (
         "new_course_status",
         "new_course_listed",
+        "new_course_completion_fraction",
+        "new_course_certificate_auto_issue",
+        "new_course_certificate_validity_days",
+        "new_course_prerequisite_composition",
         "tenant_id",
         "slug",
         "title",
@@ -482,12 +490,22 @@ def test_manual_new_course_policy_does_not_reset_existing_course(curriculum_case
             source_ref="one",
             new_course_status="draft",
             new_course_listed=True,
+            new_course_completion_fraction=0.5,
+            new_course_certificate_auto_issue=False,
+            new_course_certificate_validity_days=90,
+            new_course_prerequisite_composition="any",
         )
         seen = []
 
         def chapters():
             row = db.scalar(select(Course).where(Course.slug == "policy-course"))
             assert (row.title, row.status, row.listed) == ("First", "draft", True)
+            assert (
+                row.completion_fraction,
+                row.certificate_auto_issue,
+                row.certificate_validity_days,
+                row.prerequisite_composition,
+            ) == (0.5, False, 90, "any")
             seen.append(row.id)
             yield from ()
 
@@ -500,10 +518,20 @@ def test_manual_new_course_policy_does_not_reset_existing_course(curriculum_case
                     "title": "Updated",
                     "new_course_status": "published",
                     "new_course_listed": False,
+                    "new_course_completion_fraction": 1.0,
+                    "new_course_certificate_auto_issue": True,
+                    "new_course_certificate_validity_days": None,
+                    "new_course_prerequisite_composition": "all",
                 }
             ),
             chapters=iter(()),
         )
         assert updated.id == created.id and updated.title == "Updated"
         assert (updated.status, updated.listed) == ("draft", True)
+        assert (
+            updated.completion_fraction,
+            updated.certificate_auto_issue,
+            updated.certificate_validity_days,
+            updated.prerequisite_composition,
+        ) == (0.5, False, 90, "any")
         assert db.get_transaction() is boundary

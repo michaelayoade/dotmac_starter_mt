@@ -28,6 +28,9 @@ def test_roster_commands_reject_client_authorization_and_unknown_fields():
             tenant_id=uuid4(), enrollment_id=uuid4(), actor_is_admin=True
         )
     command = BulkEnrollCommand(
-        tenant_id=uuid4(), cohort_id=uuid4(), emails=[None, " A@X ", ""]
+        tenant_id=uuid4(),
+        cohort_id=uuid4(),
+        emails=[None, " A@X ", ""],
+        pacing_default_open=True,
     )
     assert command.emails == (None, " A@X ", "")

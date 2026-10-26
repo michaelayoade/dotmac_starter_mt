@@ -159,6 +159,8 @@ def test_same_owner_identity_and_raw_command_values():
             new_activity_assessment_mode="graded",
             new_activity_grading="auto",
             new_activity_weight=1.0,
+            new_activity_scoring_policy="best",
+            new_activity_min_attempt_interval_seconds=0,
         ),
         missing_question_weight=1,
         tenant_id=uuid4(),
@@ -174,7 +176,7 @@ def test_same_owner_identity_and_raw_command_values():
 
 def test_same_distribution_package_and_pep561_source_declarations():
     poetry = tomllib.loads((PACKAGE / "pyproject.toml").read_text())["tool"]["poetry"]
-    assert poetry["name"] == "dotmac-learning" and poetry["version"] == "0.1.0a2"
+    assert poetry["name"] == "dotmac-learning" and poetry["version"] == "0.1.0a2+dev"
     assert poetry["packages"] == [
         {"include": "dotmac_learning", "from": "src"},
         {"include": "dotmac_learning_bank_rules", "from": "src"},
