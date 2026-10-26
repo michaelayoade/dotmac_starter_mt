@@ -12,6 +12,7 @@ Session. Importing this surface creates no engine.
 
 from dotmac_learning.assessment_contracts import GradingQuestion
 from dotmac_learning.assessment_reads import (
+    FeedbackRevealTerms,
     FeedbackTerms,
     attempts_used,
     attempts_used_by_person,
@@ -515,6 +516,7 @@ from dotmac_learning.insight_contracts import (
     LabFailures,
     LearnerActivity,
     LearnerInsightTerms,
+    ProgressTrendTerms,
 )
 from dotmac_learning.insights import (
     cohort_course_ids,
@@ -760,6 +762,7 @@ __all__ = [
     "BoundAttemptPolicy",
     "record_mcq_result_with_attempt_policy",
     "FeedbackTerms",
+    "FeedbackRevealTerms",
     "questions_for",
     "bank_questions",
     "pending_grading",
@@ -1130,6 +1133,7 @@ __all__ = [
     "AccountPresenceSelection",
     "GradeTrend",
     "GradeTrendTerms",
+    "ProgressTrendTerms",
     "LearnerInsightTerms",
     "CohortInsightTerms",
     "DisciplineScore",

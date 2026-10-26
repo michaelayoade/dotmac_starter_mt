@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Protocol, cast
 from uuid import UUID
 
@@ -14,7 +17,7 @@ from sqlalchemy.orm import Session
 from . import attempt_policy
 from .attempt_contracts import AssessmentQuestion, PendingGradingFact, QuestionFact
 from .curriculum_models import Question
-from .models import Activity, Score, Submission
+from .models import ASSESSMENT_MODES, Activity, Score, Submission
 from .references import _activity_fact
 from .results import _submission_fact
 
@@ -24,6 +27,34 @@ _JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 class FeedbackTerms(attempt_policy.ActivityTerms, Protocol):
     @property
     def assessment_mode(self) -> str: ...
+
+
+_REVEAL_POLICIES = ("immediate", "on_pass_or_exhausted", "never")
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackRevealTerms:
+    """Required per-mode answer-key reveal policy supplied by the product."""
+
+    reveal_by_mode: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reveal_by_mode, Mapping):
+            raise ValueError("reveal_by_mode must be a mapping")
+        copied = dict(self.reveal_by_mode)
+        if set(copied) != set(ASSESSMENT_MODES):
+            raise ValueError(
+                "reveal_by_mode must name exactly the assessment modes "
+                f"{ASSESSMENT_MODES}"
+            )
+        for mode, policy in copied.items():
+            if policy not in _REVEAL_POLICIES:
+                raise ValueError(
+                    f"reveal_by_mode[{mode!r}] must be one of {_REVEAL_POLICIES}"
+                )
+        if copied["exam"] == "immediate":
+            raise ValueError("reveal_by_mode['exam'] may not be 'immediate'")
+        object.__setattr__(self, "reveal_by_mode", MappingProxyType(copied))
 
 
 def questions_for(
@@ -114,14 +145,15 @@ def attempts_used_by_person(
 def reveal_feedback(
     activity: FeedbackTerms,
     *,
+    terms: FeedbackRevealTerms,
     passed: bool,
     attempts_used: int,
     attempts_granted: int = 0,
 ) -> bool:
-    mode = activity.assessment_mode
-    if mode == "practice":
+    policy = terms.reveal_by_mode.get(activity.assessment_mode, "on_pass_or_exhausted")
+    if policy == "immediate":
         return True
-    if mode == "exam":
+    if policy == "never":
         return False
     exhausted = attempt_policy.entitlement(
         activity, used=attempts_used, granted=attempts_granted
@@ -131,6 +163,7 @@ def reveal_feedback(
 
 __all__ = [
     "FeedbackTerms",
+    "FeedbackRevealTerms",
     "questions_for",
     "bank_questions",
     "pending_grading",

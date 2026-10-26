@@ -95,10 +95,12 @@ def create_session(db: Session, payload: CreateSessionCommand) -> ClassSessionFa
         raise SchedulingBadRequest("ends_at must be after starts_at.")
     join_url = _clean_join_url(payload.join_url)
     cohort = _cohort(db, payload.tenant_id, payload.cohort_id)
-    if cohort.delivery_mode == "self_paced":
+    if payload.promote_delivery_mode and cohort.delivery_mode == "self_paced":
         cohort.delivery_mode = "blended"
     row = ClassSession(
-        **payload.model_dump(exclude={"title", "location", "join_url", "notes"}),
+        **payload.model_dump(
+            exclude={"title", "location", "join_url", "notes", "promote_delivery_mode"}
+        ),
         title=payload.title.strip(),
         location=payload.location or None,
         join_url=join_url or None,

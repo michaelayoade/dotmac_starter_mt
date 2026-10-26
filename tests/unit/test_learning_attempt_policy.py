@@ -11,6 +11,11 @@ from uuid import uuid4
 
 import pytest
 from dotmac_learning import attempt_policy
+from dotmac_learning.assessment_reads import FeedbackRevealTerms
+
+FEEDBACK = FeedbackRevealTerms(
+    {"practice": "immediate", "graded": "on_pass_or_exhausted", "exam": "never"}
+)
 
 
 class _Activity:
@@ -177,10 +182,13 @@ def test_reveal_feedback_does_not_leak_the_key_before_a_granted_retake():
     act.assessment_mode = "graded"
 
     # Spent, not passed: the key is shown, which is the point of the mode.
-    assert reveal_feedback(act, passed=False, attempts_used=1) is True
+    assert reveal_feedback(act, terms=FEEDBACK, passed=False, attempts_used=1) is True
     # ...but once a retake is granted, it is no longer spent, and the key closes.
     assert (
-        reveal_feedback(act, passed=False, attempts_used=1, attempts_granted=1) is False
+        reveal_feedback(
+            act, terms=FEEDBACK, passed=False, attempts_used=1, attempts_granted=1
+        )
+        is False
     )
 
 
@@ -202,7 +210,11 @@ def test_feedback_modes_use_original_entitlement(mode, passed, maximum, used, gr
     )
     assert (
         reveal_feedback(
-            act, passed=passed, attempts_used=used, attempts_granted=granted
+            act,
+            terms=FEEDBACK,
+            passed=passed,
+            attempts_used=used,
+            attempts_granted=granted,
         )
         == expected
     )

@@ -42,7 +42,17 @@ from tests.test_learning_results import scoped
 learning_database = result_tests.learning_database
 result_database = result_tests.result_database
 NOW = datetime(2026, 8, 1, 12, tzinfo=UTC)
-TERMS = SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8)
+ALL_RULES = (
+    "inactivity",
+    "overdue_work",
+    "below_passing",
+    "failed_final",
+    "certificate_blocked",
+)
+DEFAULT_SEVERITY = {"failed_final": "high", "certificate_blocked": "medium"}
+TERMS = SuccessTerms(
+    7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+)
 
 
 def population(tenant, *people):
@@ -226,7 +236,9 @@ def test_inactivity_threshold_and_never_active_anchor(result_database, days, sev
             person_id=person,
             enrolled_since=NOW - timedelta(days=days),
             now=NOW,
-            terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+            terms=SuccessTerms(
+                7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+            ),
         )
         if severity is None:
             assert hit is None
@@ -240,7 +252,9 @@ def test_inactivity_threshold_and_never_active_anchor(result_database, days, sev
                 person_id=person,
                 enrolled_since=None,
                 now=NOW,
-                terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+                terms=SuccessTerms(
+                    7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+                ),
             )
             is None
         )
@@ -261,7 +275,9 @@ def test_inactivity_threshold_and_never_active_anchor(result_database, days, sev
                 person_id=person,
                 enrolled_since=NOW - timedelta(days=100),
                 now=NOW,
-                terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+                terms=SuccessTerms(
+                    7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+                ),
             )
             is None
         )
@@ -317,7 +333,9 @@ def test_overdue_strict_time_count_and_day_boundary(
             tenant_id=tenant,
             person_id=person,
             now=NOW,
-            terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+            terms=SuccessTerms(
+                7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+            ),
         )
         if severity is None:
             assert hit is None
@@ -329,7 +347,9 @@ def test_overdue_strict_time_count_and_day_boundary(
                 tenant_id=tenant,
                 person_id=person,
                 now=NOW,
-                terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+                terms=SuccessTerms(
+                    7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+                ),
             )
             assert (
                 after is None if count == 1 else after[0]["overdue_count"] == count - 1
@@ -377,7 +397,9 @@ def test_below_passing_volume_weight_and_severity_boundaries(
             tenant_id=tenant,
             person_id=person,
             course_ids=[course, course],
-            terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+            terms=SuccessTerms(
+                7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+            ),
         )
         if expected is None:
             assert hit is None
@@ -391,6 +413,7 @@ def test_failed_final_uses_best_and_effective_attempt_entitlement(result_databas
     with scoped(app, tenant) as db:
         final = db.get(Activity, activity)
         final.chapter_number = None
+        final.is_final = True
         score(db, tenant, person, activity, attempt=1)
         assert (
             queue._rule_failed_final(
@@ -1030,7 +1053,9 @@ def test_below_passing_equal_worst_retains_input_first(result_database):
             tenant_id=tenant,
             person_id=person,
             course_ids=[alternate.id, course],
-            terms=SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8),
+            terms=SuccessTerms(
+                7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+            ),
         )
         assert hit[0]["course_id"] == str(alternate.id)
 
@@ -1986,3 +2011,75 @@ def test_certificate_blocked_excludes_auto_issue_off_courses(result_database):
             )
             is None
         )
+
+
+def test_failed_final_selector_consumes_is_final_not_the_heuristic(result_database):
+    _, app, tenant, person, course, activity, *_ = result_database
+    with scoped(app, tenant) as db:
+        final = db.get(Activity, activity)
+        # Heuristic-shaped (no chapter, positive threshold) but not flagged:
+        # the S3 selector must not fire.
+        final.chapter_number = None
+        final.is_final = False
+        score(db, tenant, person, activity, attempt=1)
+        score(db, tenant, person, activity, attempt=2)
+        assert (
+            queue._rule_failed_final(
+                db, tenant_id=tenant, person_id=person, course_ids=[course]
+            )
+            is None
+        )
+        # Flagged final inside a chapter: the flag alone selects it.
+        final.chapter_number = 7
+        final.is_final = True
+        db.flush()
+        hit = queue._rule_failed_final(
+            db, tenant_id=tenant, person_id=person, course_ids=[course]
+        )
+        assert hit is not None and hit[1] == "high"
+
+
+def test_sweep_disabled_rule_auto_resolves_and_severity_override_wins(
+    result_database,
+):
+    from dataclasses import replace
+
+    _, app, tenant, person, course, *_ = result_database
+    with scoped(app, tenant) as db:
+        cohort = seed(db, tenant, person, course)
+        stale = entry(db, tenant, person, cohort=cohort)
+        disabled = replace(
+            TERMS,
+            enabled_rules=tuple(r for r in ALL_RULES if r != "inactivity"),
+        )
+        result = queue.sweep(
+            db,
+            tenant_id=tenant,
+            terms=disabled,
+            accounts=population(tenant, person),
+            now=NOW,
+        )
+        assert result.auto_resolved >= 1
+        assert stale.status == "resolved"
+        assert stale.supporting_facts["auto_resolved"] == "rule no longer fires"
+
+        overridden = replace(
+            TERMS,
+            severity_by_rule={**DEFAULT_SEVERITY, "inactivity": "low"},
+        )
+        result = queue.sweep(
+            db,
+            tenant_id=tenant,
+            terms=overridden,
+            accounts=population(tenant, person),
+            now=NOW,
+        )
+        assert result.opened >= 1
+        opened = db.scalars(
+            select(SuccessQueueEntry)
+            .where(SuccessQueueEntry.tenant_id == tenant)
+            .where(SuccessQueueEntry.person_id == person)
+            .where(SuccessQueueEntry.reason_kind == "inactivity")
+            .where(SuccessQueueEntry.status == "open")
+        ).first()
+        assert opened is not None and opened.severity == "low"

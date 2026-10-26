@@ -250,8 +250,7 @@ def _rule_failed_final(
         select(Activity)
         .where(Activity.tenant_id == tenant_id)
         .where(Activity.course_id.in_(course_ids))
-        .where(Activity.chapter_number.is_(None))
-        .where(Activity.pass_threshold > 0)
+        .where(Activity.is_final.is_(True))
     ).all()
     for final in finals:
         best = best_scores_for(
@@ -465,8 +464,9 @@ def sweep(
             ),
         }
         for reason, result in results.items():
-            if result is not None:
+            if result is not None and reason in terms.enabled_rules:
                 facts, severity, action = result
+                severity = terms.severity_by_rule.get(reason, severity)
                 outcome = _upsert(
                     db,
                     tenant_id=tenant_id,
