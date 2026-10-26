@@ -140,6 +140,15 @@ def classify_table(
                 f"{parsed.declared_total}",
                 evidence,
             )
+        # Reverse of the orphan check: a description table that does not
+        # account for a listed ONT must not read as an empty description.
+        # After the trailer checks, so a cut-off table stays TRUNCATED.
+        if parsed.missing_descriptions:
+            return Unreadable(
+                Reason.ROWS_UNPARSED,
+                f"{parsed.missing_descriptions} listed ONT(s) have no description",
+                evidence,
+            )
         return Ok(OntInventory(parsed.rows, False), evidence)
     if parsed.explicitly_empty:
         return Ok(OntInventory((), True), evidence)
