@@ -1,0 +1,10 @@
+{
+  "result": {
+    "status": "ok",
+    "text": "  VERSION : LABOLTV000R000C00\n  PRODUCT : LAB-OLT\n  Uptime is 0 day(s), 0 hour(s), 1 minute(s)"
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "privileged"
+}

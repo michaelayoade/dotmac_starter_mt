@@ -662,3 +662,41 @@ def test_the_module_reaches_no_network_and_reads_no_external_roles() -> None:
             f"{forbidden!r} appears in the binding seam — external authorization "
             "must never be read, stored or mapped here"
         )
+
+
+def test_binding_core_stages_never_enter_unit_of_work_flush_hooks(db, tenant_row):
+    from sqlalchemy import event
+
+    party = _person(db, tenant_row, "core-stages@example.com")
+    hooks = []
+
+    def before(*args):
+        hooks.append("before")
+
+    def after(*args):
+        hooks.append("after")
+
+    event.listen(db, "before_flush", before)
+    event.listen(db, "after_flush_postexec", after)
+    try:
+        binding = _bind(db, tenant_row, party)
+        root = db.get_transaction()
+        result = finalize_external_login(
+            db,
+            tenant=tenant_row,
+            provider_binding=PROVIDER,
+            issuer=ISSUER,
+            subject=SUBJECT,
+        )
+        assert result.binding_id == binding.id
+        record_external_authentication(db, tenant=tenant_row, binding_id=binding.id)
+        disable_external_identity_binding(db, tenant=tenant_row, binding_id=binding.id)
+        first_updated = binding.updated_at
+        disable_external_identity_binding(db, tenant=tenant_row, binding_id=binding.id)
+        assert binding.updated_at == first_updated
+        assert binding.is_active is False
+        assert hooks == []
+        assert db.get_transaction() is root
+    finally:
+        event.remove(db, "before_flush", before)
+        event.remove(db, "after_flush_postexec", after)

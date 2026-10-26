@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "unreadable",
+    "reason": "truncated",
+    "detail": "device declared 3 ONTs, 2 listed"
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "privileged"
+}

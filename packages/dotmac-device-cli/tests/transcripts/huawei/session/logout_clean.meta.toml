@@ -1,0 +1,5 @@
+operation = "logout"
+origin = "hand-authored"
+command = "quit"
+eof_after_answer = true
+covers = ["logout_clean"]

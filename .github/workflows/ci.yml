@@ -244,6 +244,62 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/module_release_provenance.py --base "$BASE_SHA"
 
+      - name: Derive canonical release authority ledger for review
+        run: |
+          preview_root="$(mktemp -d "$RUNNER_TEMP/release-authority-review.XXXXXX")"
+          git archive --format=tar HEAD | tar -x -C "$preview_root"
+          RELEASE_AUTHORITY_PREVIEW_ROOT="$preview_root" python - <<'PYCODE'
+          import base64, hashlib, json, os, subprocess, sys
+          from pathlib import Path
+          archived = Path(os.environ["RELEASE_AUTHORITY_PREVIEW_ROOT"])
+          artifact = Path(os.environ["RUNNER_TEMP"]) / "release-authority-review"
+          artifact.mkdir(parents=True, exist_ok=True)
+          ledger_rel = Path("docs/inventories/release-authority.json")
+          generator_rel = Path("scripts/release_authority.py")
+          original = ledger_rel.read_bytes()
+          baseline_digest = hashlib.sha256(original).hexdigest()
+          if hashlib.sha256((archived / ledger_rel).read_bytes()).hexdigest() != baseline_digest:
+              raise SystemExit("Archived release authority ledger differs from checkout")
+          subprocess.run([sys.executable, str(archived / generator_rel), "write"], cwd=archived, check=True)
+          generated = (archived / ledger_rel).read_bytes()
+          generated_document = json.loads(generated)
+          if set(generated_document) != {"$comment", "schema", "active", "history"}:
+              raise SystemExit("Unexpected canonical release authority ledger envelope")
+          if ledger_rel.read_bytes() != original:
+              raise SystemExit("Review derivation modified the checked-in ledger")
+          (artifact / "release-authority.json").write_bytes(generated)
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          pull_request = event.get("pull_request", {})
+          provenance = {
+              "schema": "dotmac.release_authority.review.v1",
+              "checked_out_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "checked_out_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+              "github_sha": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "event_name": os.environ["GITHUB_EVENT_NAME"],
+              "pull_request_head_sha": pull_request.get("head", {}).get("sha"),
+              "pull_request_base_sha": pull_request.get("base", {}).get("sha"),
+              "generator_path": str(generator_rel),
+              "generator_sha256": hashlib.sha256((archived / generator_rel).read_bytes()).hexdigest(),
+              "baseline_ledger_sha256": baseline_digest,
+              "generated_ledger_path": str(ledger_rel),
+              "generated_ledger_sha256": hashlib.sha256(generated).hexdigest(),
+              "checked_in_ledger_unchanged": True,
+          }
+          provenance_bytes = (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode()
+          (artifact / "provenance.json").write_bytes(provenance_bytes)
+          # The framed payloads contain only the tracked path/digest ledger and its CI provenance.
+          print("DOTMAC_RELEASE_AUTHORITY_REVIEW_V1:" + base64.b64encode(generated).decode())
+          print("DOTMAC_RELEASE_AUTHORITY_PROVENANCE_V1:" + base64.b64encode(provenance_bytes).decode())
+          PYCODE
+      - name: Retain canonical release authority review artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-authority-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-authority-review/
+          if-no-files-found: error
+
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -279,7 +335,65 @@ jobs:
       # clobbered.
       - run: '[ -d .venv ] || python -m venv .venv'
       - run: poetry install
-      - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term
+      - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term --junitxml=identity-unit.xml
+        id: identity_unit
+      - name: Require eight Kernel identity and all changed Learning unit modules
+        id: identity_unit_collection
+        if: always()
+        env:
+          UNIT_OUTCOME: ${{ steps.identity_unit.outcome }}
+        run: |
+          python - <<'PYCODE'
+          import ast, json, os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          required = {
+              "tests.unit.test_" + name for name in (
+                  "audit_connection_writer", "authenticated_account_password_change",
+                  "credential_account_reset", "credential_assignment", "identity_history",
+                  "identity_history_composed_heads", "identity_history_verification",
+                  "identity_provisioning",
+              )
+          }
+          required.update(['tests.unit.test_learning_admission_enrollment', 'tests.unit.test_learning_delivery_migrations', 'tests.unit.test_learning_delivery_public_surface', 'tests.unit.test_learning_enrollment_initial_state', 'tests.unit.test_learning_invitation_assignment', 'tests.unit.test_learning_participation_models', 'tests.unit.test_learning_public_surface', 'tests.unit.test_learning_scheduling'])
+          path = Path("identity-unit.xml")
+          cases = list(ET.parse(path).iter("testcase")) if path.exists() else []
+          selected = [c for c in cases if any(c.get("classname", "") == m or c.get("classname", "").startswith(m + ".") for m in required)]
+          seen = {m for m in required if any(c.get("classname", "") == m or c.get("classname", "").startswith(m + ".") for c in selected)}
+          definitions = set()
+          for module in required:
+              module_source = Path(*module.split(".")).with_suffix(".py")
+              for node in ast.parse(module_source.read_text()).body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                      definitions.add((module, node.name))
+                  elif isinstance(node, ast.ClassDef):
+                      definitions.update((module + "." + node.name, n.name) for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_"))
+          collected = {(c.get("classname", ""), c.get("name", "").split("[", 1)[0]) for c in selected}
+          missing = sorted(definitions - collected)
+          refused = [c for c in selected if any(c.find(k) is not None for k in ("skipped", "failure", "error"))]
+          receipt = {
+              "status": "passed" if os.environ["UNIT_OUTCOME"] == "success" and seen == required and not missing and not refused else "failed",
+              "unit_outcome": os.environ["UNIT_OUTCOME"],
+              "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "source_sha": os.environ["GITHUB_SHA"],
+              "required_modules": sorted(required), "collected_modules": sorted(seen),
+              "missing_definitions": missing,
+              "required_nodes": [c.get("classname", "") + "::" + c.get("name", "") for c in selected],
+              "unrelated_skips": [c.get("classname", "") + "::" + c.get("name", "") for c in cases if c not in selected and c.find("skipped") is not None],
+          }
+          Path("identity-unit-collection.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          if receipt["status"] != "passed":
+              raise SystemExit("Required identity unit collection/pass evidence incomplete")
+          PYCODE
+      - name: Retain full unit and separate identity collection evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kernel-identity-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            identity-unit.xml
+            identity-unit-collection.json
+
 
   integration:
     runs-on: ubuntu-latest
@@ -296,6 +410,15 @@ jobs:
     # localhost-only CI database) is the actual source of the Postgres
     # container instead.
     env:
+      COMPOSE_PROJECT_NAME: starter-identity-${{ github.run_id }}-${{ github.run_attempt }}
+      IDENTITY_REFERENCE_DB_NAME: starter_identity_reference_${{ github.run_id }}_${{ github.run_attempt }}
+      IDENTITY_REFERENCE_DATABASE_URL: postgresql+psycopg://app_admin@localhost:5433/starter_identity_reference_${{ github.run_id }}_${{ github.run_attempt }}
+      IDENTITY_GRAPH_DB_NAME: starter_identity_graph_${{ github.run_id }}_${{ github.run_attempt }}
+      LEARNING_PAIR_DB_NAME: starter_learning_pair_${{ github.run_id }}_${{ github.run_attempt }}
+      LEARNING_BASE_SHA: "2376d6cfa86b0578bc36b711c467995af6c5d24b"
+      IDENTITY_INSTALLED_DB_NAME: starter_identity_installed_${{ github.run_id }}_${{ github.run_attempt }}
+      IDENTITY_GRAPH_DATABASE_URL: postgresql+psycopg://app_admin@localhost:5433/starter_identity_graph_${{ github.run_id }}_${{ github.run_attempt }}
+      IDENTITY_INSTALLED_DATABASE_URL: postgresql+psycopg://app_admin@localhost:5433/starter_identity_installed_${{ github.run_id }}_${{ github.run_attempt }}
       TEST_DB_PORT: "5433"
       TEST_DB_HOST: localhost
       TEST_DB_NAME: starter_test
@@ -333,9 +456,173 @@ jobs:
       - run: '[ -d .venv ] || python -m venv .venv'
       - run: poetry install
       - run: make test-db-up
-      - run: make test-integration
-      - run: make test-db-down
+        id: identity_shared_prepare
+      - run: make test-identity-reference-db-create
+        id: identity_reference_create
+      - name: Migrate actual four-lineage reference as its owner
+        id: identity_reference_migrate
+        run: |
+          set -o pipefail
+          make test-identity-reference-db-migrate 2>&1 | tee identity-reference-migrations.log
+      - run: make test-identity-graph-db-create
+        id: identity_graph_create
+      - name: Prove bootstrap cancellation and custody before the full integration suite
+        id: identity_bootstrap_preflight
+        run: |
+          PYTEST_ADDOPTS='-k "test_actual_postgresql_owner_denial_cancellation_and_custody or test_safe_exception_stage_excludes_material_and_bounds_chains"' \
+            make test-integration INTEGRATION_JUNIT=identity-bootstrap-preflight.xml
+      - name: Full ordinary integration suite including identity graph
+        id: identity_integration
+        run: make test-integration
+      - name: Require Kernel identity and Learning integration nodes without required skips
+        id: identity_collection
         if: always()
+        run: |
+          python - <<'PYCODE'
+          import ast, json, re
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          required = {
+              "tests.test_" + name for name in (
+                  "audit_connection_writer", "credential_tenant_key", "identity_history",
+                  "identity_history_composed_graph", "identity_history_verification",
+                  "identity_provisioning", "identity_storage", "platform_session_provenance",
+              )
+          }
+          required.update(['tests.test_learning_results', 'tests.test_learning_progress', 'tests.test_learning_completion', 'tests.test_learning_account_selection', 'tests.test_learning_admission_enrollment', 'tests.test_learning_audience_commands', 'tests.test_learning_bulk_role_authority', 'tests.test_learning_catalog_lookups', 'tests.test_learning_catalog_reads', 'tests.test_learning_certificate_read', 'tests.test_learning_cohort_commands', 'tests.test_learning_enrollment_state_migration', 'tests.test_learning_entitlements', 'tests.test_learning_gradebook_reports', 'tests.test_learning_insights', 'tests.test_learning_instructor_cohort_read', 'tests.test_learning_instructor_reads', 'tests.test_learning_invitation_assignment', 'tests.test_learning_learner_dashboard', 'tests.test_learning_participation_catalog', 'tests.test_learning_recipient_relation', 'tests.test_learning_roster_commands', 'tests.test_learning_scheduling', 'tests.test_learning_success_queue', 'tests.test_learning_support_reads', 'tests.test_learning_support_report_reads'])
+          document = ET.parse("identity-integration.xml")
+          cases = list(document.iter("testcase"))
+          selected = [c for c in cases if any(c.get("classname", "") == m or c.get("classname", "").startswith(m + ".") for m in required)]
+          seen = {m for m in required if any(c.get("classname", "") == m or c.get("classname", "").startswith(m + ".") for c in selected)}
+          definitions = set()
+          for module in required:
+              path = Path(*module.split(".")).with_suffix(".py")
+              for node in ast.parse(path.read_text()).body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                      definitions.add((module, node.name))
+                  elif isinstance(node, ast.ClassDef):
+                      definitions.update((module + "." + node.name, n.name) for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_"))
+          collected = {(c.get("classname", ""), c.get("name", "").split("[", 1)[0]) for c in selected}
+          missing = sorted(definitions - collected)
+          observations = [p.get("value", "") for p in document.iter("property") if p.get("name") == "genuine_executed_revisions"]
+          graph_observed = len(observations) == 1 and all(re.fullmatch(r"[^:;]+:[0-9a-f]{64}", item) for item in observations[0].split(";"))
+          graph_observed = graph_observed and all(name + ":" in observations[0] for name in ("0030_credential_tenant_key", "lr_0006_delivery_support", "lr_0007_enrollment_state_policy", "a001_identity_extensions", "a002_later"))
+          refused = [c for c in selected if any(c.find(k) is not None for k in ("skipped", "failure", "error"))]
+          unrelated_skips = [c.get("classname", "") + "::" + c.get("name", "") for c in cases if c.find("skipped") is not None and c.get("classname") not in required]
+          receipt = {
+              "status": "passed" if seen == required and not missing and not refused and graph_observed else "failed",
+              "required_modules": sorted(required), "collected_modules": sorted(seen),
+              "required_nodes": [c.get("classname", "") + "::" + c.get("name", "") for c in selected],
+              "unrelated_skips": unrelated_skips, "missing_definitions": missing,
+              "genuine_graph_revision_observation": graph_observed,
+          }
+          Path("identity-collection.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          if receipt["status"] != "passed":
+              raise SystemExit("Required identity collection/pass evidence incomplete")
+          PYCODE
+      - run: make test-identity-installed-db-create
+        id: identity_installed_create
+      - name: Build and exercise exact candidate wheel outside checkout
+        id: identity_installed
+        env:
+          IDENTITY_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          probe_dir=$(mktemp -d "$RUNNER_TEMP/kernel-identity.XXXXXXXX")
+          echo "IDENTITY_PROBE_DIR=$probe_dir" >> "$GITHUB_ENV"
+          export IDENTITY_EXPECTED_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("packages/dotmac-kernel/pyproject.toml", "rb"))["tool"]["poetry"]["version"])')
+          echo "IDENTITY_EXPECTED_VERSION=$IDENTITY_EXPECTED_VERSION" >> "$GITHUB_ENV"
+          poetry -C "$GITHUB_WORKSPACE/packages/dotmac-kernel" build -f wheel
+          shopt -s nullglob
+          wheels=(packages/dotmac-kernel/dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          cp "${wheels[0]}" "$probe_dir/"
+          cp scripts/verify_kernel_identity_installed.py "$probe_dir/probe.py"
+          wheel="$probe_dir/$(basename "${wheels[0]}")"
+          export IDENTITY_WHEEL_PATH="$wheel"
+          export IDENTITY_WHEEL_SHA256=$(sha256sum "$wheel" | cut -d ' ' -f 1)
+          echo "IDENTITY_WHEEL_PATH=$IDENTITY_WHEEL_PATH" >> "$GITHUB_ENV"
+          echo "IDENTITY_WHEEL_SHA256=$IDENTITY_WHEEL_SHA256" >> "$GITHUB_ENV"
+          export IDENTITY_INSTALLED_RECEIPT="$probe_dir/installed-identity.json"
+          python -m venv "$probe_dir/venv"
+          "$probe_dir/venv/bin/python" -m pip install "$wheel" alembic 'psycopg[binary]'
+          cd "$probe_dir"
+          env -u PYTHONPATH "$probe_dir/venv/bin/python" -I "$probe_dir/probe.py"
+      - run: make test-learning-pair-db-create
+        id: learning_pair_create
+      - name: Build Learning once and exercise the exact installed pair
+        id: learning_installed
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          probe_dir=$(mktemp -d "$RUNNER_TEMP/learning-pair.XXXXXXXX")
+          echo "LEARNING_PROBE_DIR=$probe_dir" >> "$GITHUB_ENV"
+          export LEARNING_EXPECTATION_PATH="$probe_dir/source-expectation.json"
+          python scripts/verify_learning_installed.py --write-expectation "$LEARNING_EXPECTATION_PATH" --checkout "$GITHUB_WORKSPACE"
+          test -f "$IDENTITY_WHEEL_PATH"
+          test "$(sha256sum "$IDENTITY_WHEEL_PATH" | cut -d ' ' -f 1)" = "$IDENTITY_WHEEL_SHA256"
+          poetry -C "$GITHUB_WORKSPACE/packages/dotmac-learning" build -f wheel
+          poetry run python scripts/release_module.py inspect dotmac-learning --dist packages/dotmac-learning/dist
+          shopt -s nullglob
+          wheels=(packages/dotmac-learning/dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          cp "${wheels[0]}" "$probe_dir/"
+          cp scripts/verify_learning_installed.py "$probe_dir/probe.py"
+          export LEARNING_WHEEL_PATH="$probe_dir/$(basename "${wheels[0]}")"
+          export LEARNING_WHEEL_SHA256=$(sha256sum "$LEARNING_WHEEL_PATH" | cut -d ' ' -f 1)
+          export LEARNING_INSTALLED_RECEIPT="$probe_dir/installed-learning-pair.json"
+          python -m venv "$probe_dir/venv"
+          "$probe_dir/venv/bin/python" -m pip install "$IDENTITY_WHEEL_PATH" "$LEARNING_WHEEL_PATH" alembic 'psycopg[binary]'
+          cd "$probe_dir"
+          env -u PYTHONPATH "$probe_dir/venv/bin/python" -I "$probe_dir/probe.py"
+      - name: Tear down all run-owned database volumes
+        id: identity_cleanup
+        if: always()
+        run: make test-db-down
+      - name: Record separate qualification and cleanup outcomes
+        if: always()
+        env:
+          SHARED_PREPARE_OUTCOME: ${{ steps.identity_shared_prepare.outcome }}
+          REFERENCE_CREATE_OUTCOME: ${{ steps.identity_reference_create.outcome }}
+          REFERENCE_MIGRATE_OUTCOME: ${{ steps.identity_reference_migrate.outcome }}
+          GRAPH_CREATE_OUTCOME: ${{ steps.identity_graph_create.outcome }}
+          INSTALLED_CREATE_OUTCOME: ${{ steps.identity_installed_create.outcome }}
+          INTEGRATION_OUTCOME: ${{ steps.identity_integration.outcome }}
+          COLLECTION_OUTCOME: ${{ steps.identity_collection.outcome }}
+          INSTALLED_OUTCOME: ${{ steps.identity_installed.outcome }}
+          LEARNING_CREATE_OUTCOME: ${{ steps.learning_pair_create.outcome }}
+          LEARNING_INSTALLED_OUTCOME: ${{ steps.learning_installed.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.identity_cleanup.outcome }}
+        run: |
+          python - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          keys = ("SHARED_PREPARE_OUTCOME", "REFERENCE_CREATE_OUTCOME", "REFERENCE_MIGRATE_OUTCOME", "GRAPH_CREATE_OUTCOME", "INSTALLED_CREATE_OUTCOME", "INTEGRATION_OUTCOME", "COLLECTION_OUTCOME", "INSTALLED_OUTCOME", "LEARNING_CREATE_OUTCOME", "LEARNING_INSTALLED_OUTCOME", "CLEANUP_OUTCOME")
+          status = {k: os.environ[k] for k in keys}
+          status.update(run_id=os.environ["GITHUB_RUN_ID"], run_attempt=os.environ["GITHUB_RUN_ATTEMPT"], source_sha=os.environ["GITHUB_SHA"])
+          membership = Path("identity-membership-cleanup.json")
+          status["MEMBERSHIP_CLEANUP"] = json.loads(membership.read_text()) if membership.exists() else {"status": "not_observed"}
+          Path("identity-status.json").write_text(json.dumps(status, indent=2) + "\n")
+          if any(status[k] != "success" for k in keys) or status["MEMBERSHIP_CLEANUP"]["status"] != "success":
+              raise SystemExit("Identity preparation, qualification or cleanup incomplete")
+          PYCODE
+      - name: Retain candidate-only identity evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kernel-identity-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            identity-integration.xml
+            identity-bootstrap-preflight.xml
+            identity-collection.json
+            identity-status.json
+            identity-membership-cleanup.json
+            identity-reference-catalog.json
+            identity-reference-migrations.log
+            ${{ env.IDENTITY_PROBE_DIR }}/installed-identity.json
+            ${{ env.LEARNING_PROBE_DIR }}/installed-learning-pair.json
+            ${{ env.LEARNING_PROBE_DIR }}/source-expectation.json
 
   consumer-boot:
     runs-on: ubuntu-latest

@@ -16,16 +16,20 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import tracks
+from .account_contracts import AccountPresenceSelection
 from .participation_contracts import (
     ActivateEnrollmentCommand,
     ActivationResult,
+    AdmissionEnrollmentInitialState,
     AssignFacilitatorCommand,
     BulkEnrollCommand,
+    BulkEnrollmentInitialState,
     BulkEnrollResult,
     EnrollmentFact,
     EnsureAdmissionEnrollmentCommand,
     EnsureInvitationEnrollmentCommand,
     FacilitatorEligibility,
+    InvitationEnrollmentInitialState,
     InvitationEnrollmentResult,
     InvitationEnrollmentRolePolicy,
     ParticipationBadRequest,
@@ -170,18 +174,49 @@ def _normalize_emails(emails: tuple[str | None, ...]) -> tuple[str, ...]:
 
 
 def bulk_enroll(
-    db: Session, command: BulkEnrollCommand, *, authority: RosterAuthority
+    db: Session,
+    command: BulkEnrollCommand,
+    *,
+    authority: RosterAuthority,
+    accounts: AccountPresenceSelection,
+    initial_state: BulkEnrollmentInitialState,
 ) -> BulkEnrollResult:
+    if type(initial_state) is not BulkEnrollmentInitialState:
+        raise TypeError("initial_state must be BulkEnrollmentInitialState")
+    initial_state = BulkEnrollmentInitialState(
+        role_in_cohort=initial_state.role_in_cohort, status=initial_state.status
+    )
+    if type(accounts) is not AccountPresenceSelection:
+        raise TypeError("accounts must be AccountPresenceSelection")
+    # Frozen wrappers may have been tampered with; validate raw relation fields
+    # through the canonical public constructor before any Session handoff.
+    accounts = AccountPresenceSelection(
+        tenant_id=accounts.tenant_id, person_ids=accounts.person_ids
+    )
+    if accounts.tenant_id != command.tenant_id:
+        raise ParticipationForbidden("account presence selection does not cover tenant")
     boundary = _transaction(db)
     _authority(command.tenant_id, authority)
     _cohort(db, command.tenant_id, command.cohort_id)
+    new_role_requires_admin = (
+        initial_state.role_in_cohort != "student" and not authority.actor_is_admin
+    )
     if command.track_id is not None:
-        tracks.ensure_track_offerings(
-            db,
-            tenant_id=command.tenant_id,
-            cohort_id=command.cohort_id,
-            track_id=command.track_id,
-        )
+        # Preserve bad-track priority without creating offerings for denied rows.
+        if new_role_requires_admin:
+            tracks.cohort_track_or_404(
+                db,
+                tenant_id=command.tenant_id,
+                cohort_id=command.cohort_id,
+                track_id=command.track_id,
+            )
+        else:
+            tracks.ensure_track_offerings(
+                db,
+                tenant_id=command.tenant_id,
+                cohort_id=command.cohort_id,
+                track_id=command.track_id,
+            )
     enrolled: list[str] = []
     reactivated: list[str] = []
     already_active: list[str] = []
@@ -194,6 +229,7 @@ def bulk_enroll(
             .where(
                 Party.tenant_id == command.tenant_id,
                 func.lower(func.btrim(Party.email)) == email,
+                Party.id.in_(accounts.person_ids),
             )
         ).first()
         if person is None:
@@ -201,14 +237,17 @@ def bulk_enroll(
             continue
         row = _enrollment(db, command.tenant_id, command.cohort_id, person.id)
         if row is None:
+            if new_role_requires_admin:
+                admin_required.append(email)
+                continue
             db.add(
                 Enrollment(
                     tenant_id=command.tenant_id,
                     cohort_id=command.cohort_id,
                     person_id=person.id,
                     track_id=command.track_id,
-                    role_in_cohort="student",
-                    status="active",
+                    role_in_cohort=initial_state.role_in_cohort,
+                    status=initial_state.status,
                 )
             )
             enrolled.append(email)
@@ -228,7 +267,9 @@ def bulk_enroll(
                 )
             reactivated.append(email)
         else:
-            if command.track_id is not None and row.track_id != command.track_id:
+            if command.track_id is not None and (
+                new_role_requires_admin or row.track_id != command.track_id
+            ):
                 tracks.assign_enrollment_track(
                     db,
                     tenant_id=command.tenant_id,
@@ -303,15 +344,27 @@ def set_roster_state(
 
 
 def ensure_admission_enrollment(
-    db: Session, command: EnsureAdmissionEnrollmentCommand
+    db: Session,
+    command: EnsureAdmissionEnrollmentCommand,
+    *,
+    initial_state: AdmissionEnrollmentInitialState,
 ) -> EnrollmentFact:
     """Apply the source admission enrollment intent in the caller transaction.
 
     The trusted product caller has already authorized admission, validated its
     applicant/intake/cohort state and resolved a genuine Kernel person. Existing
     enrollment state is preserved: only a changed track is written. Source SQL
-    autoflush remains; the unchanged-track path has no explicit flush.
+    autoflush remains; the unchanged-track path has no explicit flush. The
+    required product policy snapshot supplies role/status only for a new row.
     """
+    if type(initial_state) is not AdmissionEnrollmentInitialState:
+        raise TypeError("initial_state must be AdmissionEnrollmentInitialState")
+    # Revalidate raw fields through the canonical constructor before DB handoff.
+    # Frozen instances can still have been tampered with via object.__setattr__.
+    initial_state = AdmissionEnrollmentInitialState(
+        role_in_cohort=initial_state.role_in_cohort,
+        status=initial_state.status,
+    )
     boundary = _transaction(db)
     row = _enrollment(db, command.tenant_id, command.cohort_id, command.person_id)
     if row is None:
@@ -320,8 +373,8 @@ def ensure_admission_enrollment(
             cohort_id=command.cohort_id,
             person_id=command.person_id,
             track_id=command.track_id,
-            role_in_cohort="student",
-            status="active",
+            role_in_cohort=initial_state.role_in_cohort,
+            status=initial_state.status,
         )
         db.add(row)
         db.flush()
@@ -339,6 +392,7 @@ def ensure_invitation_enrollment(
     *,
     authority: RosterAuthority,
     role_policy: InvitationEnrollmentRolePolicy,
+    initial_state: InvitationEnrollmentInitialState,
 ) -> InvitationEnrollmentResult:
     """Apply Academy's invitation assignment in the caller's transaction.
 
@@ -349,6 +403,9 @@ def ensure_invitation_enrollment(
     The caller must roll back failures. Source queries retain caller autoflush;
     only the existing track owner explicitly flushes, when a track is supplied.
     """
+    if type(initial_state) is not InvitationEnrollmentInitialState:
+        raise TypeError("initial_state must be InvitationEnrollmentInitialState")
+    initial_state = InvitationEnrollmentInitialState(status=initial_state.status)
     boundary = _transaction(db)
     _authority(command.tenant_id, authority)
     member_role = role_policy.member_role(command.global_role)
@@ -363,7 +420,7 @@ def ensure_invitation_enrollment(
             cohort_id=command.cohort_id,
             person_id=command.person_id,
             role_in_cohort=member_role,
-            status="active",
+            status=initial_state.status,
         )
         db.add(row)
     else:

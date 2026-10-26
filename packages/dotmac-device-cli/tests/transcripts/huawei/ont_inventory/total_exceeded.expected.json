@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "unreadable",
+    "reason": "rows_unparsed",
+    "detail": "3 rows listed, device declared 2"
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "privileged"
+}

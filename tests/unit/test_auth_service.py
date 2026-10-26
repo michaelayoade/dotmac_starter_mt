@@ -259,3 +259,214 @@ def test_register_open_policy_grants_no_role(db: Session, tenant_row: Tenant) ->
         .where(PartyRoleGrant.tenant_id == tenant_row.id)
     )
     assert grants == 0
+
+
+def test_logout_revokes_exact_real_session_idempotently_and_refreshes_cached_row(
+    db, tenant_row
+):
+    from dotmac_kernel.models import AuthSession
+    from dotmac_kernel.security import hash_token
+
+    _open_registration(db, tenant_row)
+    auth_service.register(
+        db,
+        tenant_row,
+        RegisterRequest(
+            email="logout@example.com",
+            password=PASSWORD,
+            first_name="Logout",
+            last_name="Canary",
+        ),
+    )
+    one = auth_service.login(
+        db, tenant_row, LoginRequest(email="logout@example.com", password=PASSWORD)
+    ).access_token
+    two = auth_service.login(
+        db, tenant_row, LoginRequest(email="logout@example.com", password=PASSWORD)
+    ).access_token
+    first = db.scalar(
+        select(AuthSession).where(AuthSession.token_hash == hash_token(one))
+    )
+    second = db.scalar(
+        select(AuthSession).where(AuthSession.token_hash == hash_token(two))
+    )
+    root = db.get_transaction()
+    auth_service.web_logout(db, tenant_row, one)
+    stamped = first.revoked_at
+    assert stamped is not None
+    assert second.revoked_at is None
+    auth_service.web_logout(db, tenant_row, one)
+    auth_service.web_logout(db, tenant_row, None)
+    assert first.revoked_at == stamped
+    assert second.revoked_at is None
+    assert db.get_transaction() is root
+
+
+@pytest.mark.parametrize("pending_kind", ("new", "dirty", "deleted"))
+@pytest.mark.parametrize("command", ("login", "logout"))
+def test_reference_auth_pending_refusal_preserves_history_and_does_no_io(
+    db, tenant_row, pending_kind, command
+):
+    from dotmac_kernel.transactions import ConflictSavepointProtocolError
+    from sqlalchemy import event
+    from sqlalchemy import inspect as sa_inspect
+
+    _open_registration(db, tenant_row)
+    view = auth_service.register(
+        db,
+        tenant_row,
+        RegisterRequest(
+            email="pending@example.com",
+            password=PASSWORD,
+            first_name="Pending",
+            last_name="Canary",
+        ),
+    )
+    token = auth_service.login(
+        db, tenant_row, LoginRequest(email="pending@example.com", password=PASSWORD)
+    ).access_token
+    party = db.get(Party, view.id)
+    connection, root = db.connection(), db.get_transaction()
+    if pending_kind == "new":
+        pending = Party(
+            tenant_id=tenant_row.id,
+            party_type=PartyType.person,
+            display_name="Caller pending",
+        )
+        db.add(pending)
+    elif pending_kind == "dirty":
+        pending = party
+        pending.display_name = "Caller pending"
+    else:
+        pending = party
+        db.delete(pending)
+    before = (tuple(db.new), tuple(db.dirty), tuple(db.deleted))
+    history = sa_inspect(pending).attrs.display_name.history
+    calls = []
+
+    def observe(*args):
+        calls.append(1)
+
+    event.listen(connection, "before_cursor_execute", observe)
+    try:
+        with pytest.raises(ConflictSavepointProtocolError, match="clean pending state"):
+            if command == "login":
+                auth_service.login(
+                    db,
+                    tenant_row,
+                    LoginRequest(email="pending@example.com", password=PASSWORD),
+                )
+            else:
+                auth_service.web_logout(db, tenant_row, token)
+        assert calls == []
+        assert (tuple(db.new), tuple(db.dirty), tuple(db.deleted)) == before
+        assert sa_inspect(pending).attrs.display_name.history == history
+        assert db.get_transaction() is root
+    finally:
+        event.remove(connection, "before_cursor_execute", observe)
+
+
+@pytest.mark.parametrize(
+    "phase", ("open", "query", "write", "flush", "release", "cancel")
+)
+def test_reference_login_callback_and_cancel_preserve_prior_root_work(
+    db, tenant_row, phase
+):
+    from dotmac_kernel.models import AuthSession
+    from dotmac_kernel.transactions import ConflictSavepointProtocolError
+    from sqlalchemy import event
+
+    class Cancelled(BaseException):
+        pass
+
+    _open_registration(db, tenant_row)
+    view = auth_service.register(
+        db,
+        tenant_row,
+        RegisterRequest(
+            email="callback@example.com",
+            password=PASSWORD,
+            first_name="Callback",
+            last_name="Canary",
+        ),
+    )
+    root, connection = db.get_transaction(), db.connection()
+    pending = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Hook pending",
+    )
+    invoked = []
+
+    def inject():
+        invoked.append(1)
+        if phase == "cancel":
+            raise Cancelled()
+        db.add(pending)
+        if phase == "flush":
+            with pytest.raises(ConflictSavepointProtocolError):
+                db.flush()
+            db.expunge(pending)
+
+    if phase == "cancel":
+        # An exit exception raised inside cursor execution invalidates the
+        # connection by SQLAlchemy design (is_exit_exception), after which
+        # no savepoint rollback can preserve the root; raise at the ORM
+        # execute boundary so cancellation itself is what is exercised.
+        target, name = db, "do_orm_execute"
+
+        def listener(state):
+            if not invoked and state.is_insert:
+                inject()
+                raise AssertionError("unreachable: inject cancels")
+            return None
+
+    elif phase == "open":
+        target, name = db, "after_transaction_create"
+
+        def listener(session, transaction):
+            if transaction.nested:
+                inject()
+    elif phase == "release":
+        target, name = db, "before_commit"
+
+        def listener(session):
+            inject()
+    else:
+        target, name = connection, "after_cursor_execute"
+
+        def listener(conn, cursor, statement, parameters, context, executemany):
+            compiled = context.compiled
+            if compiled is None:
+                return
+            is_read = getattr(compiled.statement, "is_select", False)
+            if not invoked and (
+                (phase == "write" and context.isinsert)
+                or (phase in ("query", "flush") and is_read)
+            ):
+                inject()
+
+    event.listen(target, name, listener)
+    try:
+        with pytest.raises(
+            Cancelled if phase == "cancel" else ConflictSavepointProtocolError
+        ):
+            auth_service.login(
+                db,
+                tenant_row,
+                LoginRequest(email="callback@example.com", password=PASSWORD),
+            )
+    finally:
+        event.remove(target, name, listener)
+    assert invoked == [1]
+    assert db.get_transaction() is root
+    assert db.scalar(select(Party.id).where(Party.id == view.id)) == view.id
+    assert (
+        db.scalar(
+            select(func.count())
+            .select_from(AuthSession)
+            .where(AuthSession.party_id == view.id)
+        )
+        == 0
+    )
+    assert not db.new and not db.dirty and not db.deleted

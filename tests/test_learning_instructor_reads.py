@@ -65,19 +65,33 @@ def instructor_data(result_database):
         db.flush()
         db.add_all(
             [
-                Enrollment(tenant_id=tenant, cohort_id=cohort.id, person_id=person),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort.id,
+                    person_id=person,
+                    role_in_cohort="student",
+                    status="active",
+                ),
                 Enrollment(
                     tenant_id=tenant,
                     cohort_id=cohort.id,
                     person_id=waitlisted,
                     status="waitlisted",
+                    role_in_cohort="student",
                 ),
-                Enrollment(tenant_id=tenant, cohort_id=cohort.id, person_id=suspended),
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort.id,
+                    person_id=suspended,
+                    role_in_cohort="student",
+                    status="active",
+                ),
                 Enrollment(
                     tenant_id=tenant,
                     cohort_id=cohort.id,
                     person_id=instructor,
                     role_in_cohort="instructor",
+                    status="active",
                 ),
             ]
         )
@@ -410,7 +424,15 @@ def test_populated_summary_workspace_authoring_results_and_actual_rls(instructor
         own = Cohort(tenant_id=other, name="B", discipline="test")
         db.add(own)
         db.flush()
-        db.add(Enrollment(tenant_id=other, cohort_id=own.id, person_id=other_person))
+        db.add(
+            Enrollment(
+                tenant_id=other,
+                cohort_id=own.id,
+                person_id=other_person,
+                role_in_cohort="student",
+                status="active",
+            )
+        )
         assert (
             reads.cohorts_summary(
                 db,

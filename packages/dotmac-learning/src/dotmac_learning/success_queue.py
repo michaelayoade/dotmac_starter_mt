@@ -11,8 +11,9 @@ from uuid import UUID, uuid4
 from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.models import Party, PartyPerson
 from pydantic import JsonValue
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, inspect, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import UnaryExpression
 
 from . import attempt_policy
@@ -42,12 +43,14 @@ from .success_contracts import (
     QueueFact,
     QueueListFact,
     SegmentDeliveryProtocol,
+    SegmentMessageEffect,
     SegmentMessageFact,
     SegmentMessageResult,
     SuccessBadRequest,
     SuccessNotFound,
     SuccessPersonFact,
     SuccessTerms,
+    SuccessTransitionEffect,
     SweepResult,
 )
 
@@ -502,13 +505,21 @@ def sweep(
 
 
 def _get_entry(db: Session, tenant_id: UUID, entry_id: UUID) -> SuccessQueueEntry:
-    entry = db.scalars(
-        select(SuccessQueueEntry)
+    result = db.execute(
+        select(SuccessQueueEntry, *SuccessQueueEntry.__table__.c)
         .where(SuccessQueueEntry.tenant_id == tenant_id)
         .where(SuccessQueueEntry.id == entry_id)
+        .with_for_update()
     ).first()
-    if entry is None:
+    if result is None:
         raise SuccessNotFound("queue entry not found")
+    entry = cast(SuccessQueueEntry, result[0])
+    untouched = inspect(entry).unmodified
+    for column, fresh_value in zip(
+        SuccessQueueEntry.__table__.columns, result[1:], strict=True
+    ):
+        if column.key in untouched:
+            set_committed_value(entry, column.key, fresh_value)
     return entry
 
 
@@ -522,6 +533,49 @@ def transition(
     audit_context: AttemptAuditContext,
     assigned_to: UUID | None = None,
 ) -> QueueFact:
+    return _transition(
+        db,
+        tenant_id=tenant_id,
+        entry_id=entry_id,
+        action=action,
+        actor_person_id=actor_person_id,
+        audit_context=audit_context,
+        assigned_to=assigned_to,
+    ).entry
+
+
+def transition_with_receipt(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    entry_id: UUID,
+    action: str,
+    actor_person_id: UUID,
+    audit_context: AttemptAuditContext,
+    assigned_to: UUID | None = None,
+) -> SuccessTransitionEffect:
+    """Return the observed entry and audit UUID after the existing guards."""
+    return _transition(
+        db,
+        tenant_id=tenant_id,
+        entry_id=entry_id,
+        action=action,
+        actor_person_id=actor_person_id,
+        audit_context=audit_context,
+        assigned_to=assigned_to,
+    )
+
+
+def _transition(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    entry_id: UUID,
+    action: str,
+    actor_person_id: UUID,
+    audit_context: AttemptAuditContext,
+    assigned_to: UUID | None = None,
+) -> SuccessTransitionEffect:
     boundary = _transaction(db)
     if audit_context.tenant_id != tenant_id:
         raise ValueError("Audit context tenant scope does not match the command.")
@@ -539,7 +593,7 @@ def transition(
         entry.resolved_by = actor_person_id
     else:
         raise SuccessBadRequest(f"invalid transition {action!r} from {entry.status!r}")
-    write_audit_event(
+    audit_event = write_audit_event(
         db,
         tenant_id=tenant_id,
         actor_type=audit_context.actor_type,
@@ -554,7 +608,7 @@ def transition(
     )
     db.flush()
     _unchanged(db, boundary)
-    return _fact(entry)
+    return SuccessTransitionEffect(_fact(entry), audit_event.id)
 
 
 def list_entries(
@@ -701,6 +755,70 @@ def message_segment(
     now: datetime | None = None,
 ) -> SegmentMessageResult:
     """Sequential required product delivery, then required audit and flush."""
+    return _message_segment(
+        db,
+        tenant_id=tenant_id,
+        cohort_id=cohort_id,
+        segment=segment,
+        subject=subject,
+        body=body,
+        actor_person_id=actor_person_id,
+        terms=terms,
+        accounts=accounts,
+        audit_context=audit_context,
+        delivery=delivery,
+        now=now,
+    ).result
+
+
+def message_segment_with_receipt(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    cohort_id: UUID,
+    segment: str,
+    subject: str,
+    body: str,
+    actor_person_id: UUID,
+    terms: SuccessTerms,
+    accounts: ActiveAccountSelection,
+    audit_context: AttemptAuditContext,
+    delivery: SegmentDeliveryProtocol,
+    now: datetime | None = None,
+) -> SegmentMessageEffect:
+    """Return the observed delivery result and actual audit UUID."""
+    return _message_segment(
+        db,
+        tenant_id=tenant_id,
+        cohort_id=cohort_id,
+        segment=segment,
+        subject=subject,
+        body=body,
+        actor_person_id=actor_person_id,
+        terms=terms,
+        accounts=accounts,
+        audit_context=audit_context,
+        delivery=delivery,
+        now=now,
+    )
+
+
+def _message_segment(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    cohort_id: UUID,
+    segment: str,
+    subject: str,
+    body: str,
+    actor_person_id: UUID,
+    terms: SuccessTerms,
+    accounts: ActiveAccountSelection,
+    audit_context: AttemptAuditContext,
+    delivery: SegmentDeliveryProtocol,
+    now: datetime | None = None,
+) -> SegmentMessageEffect:
+    """Sequential required product delivery, then required audit and flush."""
     boundary = _transaction(db)
     if audit_context.tenant_id != tenant_id:
         raise ValueError("Audit context tenant scope does not match the command.")
@@ -724,7 +842,7 @@ def message_segment(
     for person in members:
         delivery(db, person, message, action_id)
         _unchanged(db, boundary)
-    write_audit_event(
+    audit_event = write_audit_event(
         db,
         tenant_id=tenant_id,
         actor_type=audit_context.actor_type,
@@ -744,7 +862,9 @@ def message_segment(
     )
     db.flush()
     _unchanged(db, boundary)
-    return SegmentMessageResult(len(members), action_id)
+    return SegmentMessageEffect(
+        SegmentMessageResult(len(members), action_id), audit_event.id
+    )
 
 
 __all__ = [
@@ -753,7 +873,9 @@ __all__ = [
     "severity_order",
     "sweep",
     "transition",
+    "transition_with_receipt",
     "list_entries",
     "segment_members",
     "message_segment",
+    "message_segment_with_receipt",
 ]

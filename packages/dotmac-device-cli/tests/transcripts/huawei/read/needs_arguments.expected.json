@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "unreadable",
+    "reason": "needs_arguments",
+    "detail": "needs arguments: { ontid<U><0,127> }:"
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "dirty"
+}

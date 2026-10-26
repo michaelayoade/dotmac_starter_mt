@@ -3431,7 +3431,8 @@
           "dotmac_learning/transfer.py",
           "dotmac_learning/transfer_contracts.py",
           "dotmac_learning_bank_rules/__init__.py",
-          "dotmac_learning_bank_rules/py.typed"
+          "dotmac_learning_bank_rules/py.typed",
+          "dotmac_learning/migrations/versions/lr_0007_enrollment_state_policy.py"
         ],
         "forbidden_prefixes": [
           "app/",

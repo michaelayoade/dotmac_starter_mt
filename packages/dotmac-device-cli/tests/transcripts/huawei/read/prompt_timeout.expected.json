@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "unreadable",
+    "reason": "prompt_timeout",
+    "detail": "output ended before the prompt"
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "dirty"
+}

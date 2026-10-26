@@ -1,5 +1,39 @@
 # Compatibility — dotmac-learning
 
+## Current source correction — 2026-10-19
+
+Published `0.1.0a1` is immutable. This prepared successor is now allocated
+as `0.1.0a2` (allocated source candidate, not yet published); the former
+`+dev` source-qualification marker allocated nothing.
+The actual declared published Kernel floor is `>=0.1.0a106`, including the
+Learning namespace allocation. The older initial-declaration and floor statements
+below are historical and are superseded by this dated correction.
+
+The source retains the complete 27-table/260-field domain and 520 prior root
+exports, adding 13 for 533 total. New reads are `catalog_course_by_slug`,
+`catalog_chapter_by_number`, `account_cohort_names`, `get_certificate` and
+`instructor_cohort_by_id`. Admission, bulk and invitation enrollment commands
+require their frozen product-supplied initial-state snapshots; bulk additionally
+requires a genuine tenant-bound `AccountPresenceSelection`. Presence includes
+inactive accounts and supplies no authorization. Role/status creation values
+have no fallback, and existing-row facts and authority checks are preserved.
+
+`SessionUpdate.audit_event_id` is a required UUID-or-None field.
+`SuccessTransitionEffect` and `SegmentMessageEffect`, returned by
+`transition_success_entry_with_receipt` and `message_segment_with_receipt`,
+carry the single operation's actual audit UUID alongside its observed result.
+Legacy result APIs retain their shapes. Caller transaction ownership is unchanged.
+Additive unreleased `lr_0007` removes only Enrollment role/status schema defaults;
+released `lr_0001` through `lr_0006` remain byte-for-byte unchanged.
+
+Shared Kernel/Learning composition, independent composed review, hosted migration
+and full-suite qualification, and the exact installed candidate pair remain
+pending. Academy caller retirement, Settings-owned policy binding, lab/identity
+qualification and ERP integration remain separate adoption gates. No consumer is
+newly adopted by this source preparation.
+
+## Historical source notes
+
 The initial source declaration is `0.1.0a1`; it is not a publication claim.
 Its minimum Kernel dependency remains unset until a published Kernel containing
 the accepted learning namespace allocation is verified. Kernel `0.1.0a105`
@@ -289,3 +323,23 @@ are written, not executed locally. Academy's retained legacy admin fixture and
 public-boundary observations do not qualify installed canonical Activity to
 product LabTemplate/Kernel identity assembly. That end-to-end qualification
 remains a release/adoption gate.
+
+
+### 2026-10-19: pending caller scalars and current clean SQL values
+
+The scheduling update, Success Queue transition lookup and certificate record
+read use one ORM entity plus its table scalar projection from the same SQL row.
+Scheduling and Success Queue retain their row locks. After ordinary caller
+autoflush, only untouched scalar keys are assigned their current SQL values
+with public SQLAlchemy committed-value assignment. Caller-touched fields retain
+their values and history, including equal assignments, nulls and pending keys.
+Clean stale fields refresh even when another field on the target is pending.
+Missing SQL rows keep their existing not-found/None behavior.
+
+Caller transaction, savepoint, validation, explicit flush and actual Kernel audit
+ownership remain with the existing owners. No refresh, early flush, transaction
+boundary, fallback attachment or result-level idempotence API is introduced.
+The dependency floor is exactly the published Kernel >=0.1.0a106; the unchanged
+Learning successor identity is allocated as 0.1.0a2, not yet published. This is a
+source-only repair with authored PostgreSQL canaries. Independent source review,
+combined-source hosted qualification and the exact installed pair remain required.

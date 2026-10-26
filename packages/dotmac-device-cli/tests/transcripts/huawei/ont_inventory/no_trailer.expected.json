@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "unreadable",
+    "reason": "truncated",
+    "detail": "rows listed but no total trailer"
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "privileged"
+}

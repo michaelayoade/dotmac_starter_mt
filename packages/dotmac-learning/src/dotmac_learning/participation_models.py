@@ -127,12 +127,8 @@ class Enrollment(Base, TimestampMixin):
     cohort_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     track_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    role_in_cohort: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="student", server_default="student"
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="active", server_default="active"
-    )
+    role_in_cohort: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
     audience: Mapped[str | None] = mapped_column(String(20), nullable=True)
     employee_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     access_ends_at: Mapped[datetime | None] = mapped_column(

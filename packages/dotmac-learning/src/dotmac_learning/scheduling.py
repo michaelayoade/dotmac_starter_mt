@@ -11,8 +11,9 @@ from datetime import datetime
 from uuid import UUID
 
 from dotmac_kernel.audit import write_audit_event
-from sqlalchemy import Select, select
+from sqlalchemy import Select, inspect, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from .attempt_contracts import AttemptAuditContext
 from .delivery_contracts import (
@@ -150,7 +151,23 @@ def update_session(
     boundary = _transaction(db)
     if audit_context.tenant_id != payload.tenant_id:
         raise SchedulingBadRequest("Audit context belongs to another tenant.")
-    row = _session(db, payload.tenant_id, payload.session_id)
+    result = db.execute(
+        select(ClassSession, *ClassSession.__table__.c)
+        .where(
+            ClassSession.tenant_id == payload.tenant_id,
+            ClassSession.id == payload.session_id,
+        )
+        .with_for_update()
+    ).first()
+    if result is None:
+        raise SchedulingNotFound("Session not found.")
+    row = result[0]
+    untouched = inspect(row).unmodified
+    for column, fresh_value in zip(
+        ClassSession.__table__.columns, result[1:], strict=True
+    ):
+        if column.key in untouched:
+            set_committed_value(row, column.key, fresh_value)
     supplied = payload.model_fields_set
     if "session_type" in supplied and payload.session_type not in _TYPES:
         raise SchedulingBadRequest(f"Unknown session type: {payload.session_type}")
@@ -193,8 +210,9 @@ def update_session(
         raise SchedulingBadRequest("ends_at must be after starts_at.")
     db.flush()
     _unchanged(db, boundary)
+    audit_event_id = None
     if changes:
-        write_audit_event(
+        event = write_audit_event(
             db,
             tenant_id=payload.tenant_id,
             actor_type=audit_context.actor_type,
@@ -213,7 +231,8 @@ def update_session(
             },
         )
         _unchanged(db, boundary)
-    return SessionUpdate(_fact(row), tuple(changes))
+        audit_event_id = event.id
+    return SessionUpdate(_fact(row), tuple(changes), audit_event_id)
 
 
 def cancel_session(db: Session, payload: CancelSessionCommand) -> ClassSessionFact:

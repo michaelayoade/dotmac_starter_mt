@@ -6,10 +6,12 @@ from uuid import uuid4
 import pytest
 from dotmac_kernel.models import Party
 from dotmac_learning import roster
+from dotmac_learning.account_contracts import AccountPresenceSelection
 from dotmac_learning.participation_contracts import (
     ActivateEnrollmentCommand,
     AssignFacilitatorCommand,
     BulkEnrollCommand,
+    BulkEnrollmentInitialState,
     FacilitatorEligibility,
     ParticipationBadRequest,
     ParticipationForbidden,
@@ -82,6 +84,10 @@ def test_roster_cross_tenant_and_authority_scope_isolation(roster_database):
                     tenant_id=other, cohort_id=cohort, emails=["fresh@x"]
                 ),
                 authority=RosterAuthority(other, True),
+                accounts=AccountPresenceSelection(
+                    other, select(Party.id).where(Party.tenant_id == other)
+                ),
+                initial_state=BulkEnrollmentInitialState("student", "active"),
             )
     with scoped(app, tenant) as db:
         with pytest.raises(ParticipationForbidden):
@@ -91,6 +97,10 @@ def test_roster_cross_tenant_and_authority_scope_isolation(roster_database):
                     tenant_id=tenant, cohort_id=cohort, emails=["fresh@x"]
                 ),
                 authority=RosterAuthority(other, True),
+                accounts=AccountPresenceSelection(
+                    other, select(Party.id).where(Party.tenant_id == other)
+                ),
+                initial_state=BulkEnrollmentInitialState("student", "active"),
             )
         assert (
             db.scalar(select(Enrollment).where(Enrollment.person_id == people[1]))
@@ -131,6 +141,10 @@ def test_bulk_order_dedupe_missing_inactive_account_and_admin_continue(roster_da
                 ],
             ),
             authority=RosterAuthority(tenant, False),
+            accounts=AccountPresenceSelection(
+                tenant, select(Party.id).where(Party.tenant_id == tenant)
+            ),
+            initial_state=BulkEnrollmentInitialState("student", "active"),
         )
         assert result.admin_required == ("peer@x",)
         assert result.enrolled == ("fresh@x",)
@@ -141,6 +155,10 @@ def test_bulk_order_dedupe_missing_inactive_account_and_admin_continue(roster_da
                 tenant_id=tenant, cohort_id=cohort, emails=["peer@x", "fresh@x"]
             ),
             authority=RosterAuthority(tenant, True),
+            accounts=AccountPresenceSelection(
+                tenant, select(Party.id).where(Party.tenant_id == tenant)
+            ),
+            initial_state=BulkEnrollmentInitialState("student", "active"),
         )
         assert result.reactivated == ("peer@x",)
         assert result.already_active == ("fresh@x",)
@@ -295,12 +313,28 @@ def test_roster_requires_root_before_autoflush_and_preserves_nested_caller_rollb
     command = BulkEnrollCommand(tenant_id=tenant, cohort_id=cohort, emails=["fresh@x"])
     with Session(bind=app) as db:
         with pytest.raises(TransactionChanged):
-            roster.bulk_enroll(db, command, authority=RosterAuthority(tenant, True))
+            roster.bulk_enroll(
+                db,
+                command,
+                authority=RosterAuthority(tenant, True),
+                accounts=AccountPresenceSelection(
+                    tenant, select(Party.id).where(Party.tenant_id == tenant)
+                ),
+                initial_state=BulkEnrollmentInitialState("student", "active"),
+            )
         assert db.get_transaction() is None
     with scoped(app, tenant) as db:
         root = db.get_transaction()
         with db.begin_nested() as nested:
-            roster.bulk_enroll(db, command, authority=RosterAuthority(tenant, True))
+            roster.bulk_enroll(
+                db,
+                command,
+                authority=RosterAuthority(tenant, True),
+                accounts=AccountPresenceSelection(
+                    tenant, select(Party.id).where(Party.tenant_id == tenant)
+                ),
+                initial_state=BulkEnrollmentInitialState("student", "active"),
+            )
             assert (
                 db.get_transaction() is root and db.get_nested_transaction() is nested
             )
@@ -309,9 +343,25 @@ def test_roster_requires_root_before_autoflush_and_preserves_nested_caller_rollb
             db.scalar(select(Enrollment).where(Enrollment.person_id == people[1]))
             is None
         )
-        db.add(Enrollment(tenant_id=tenant, cohort_id=uuid4(), person_id=people[0]))
+        db.add(
+            Enrollment(
+                tenant_id=tenant,
+                cohort_id=uuid4(),
+                person_id=people[0],
+                role_in_cohort="student",
+                status="active",
+            )
+        )
         with pytest.raises(IntegrityError):
-            roster.bulk_enroll(db, command, authority=RosterAuthority(tenant, True))
+            roster.bulk_enroll(
+                db,
+                command,
+                authority=RosterAuthority(tenant, True),
+                accounts=AccountPresenceSelection(
+                    tenant, select(Party.id).where(Party.tenant_id == tenant)
+                ),
+                initial_state=BulkEnrollmentInitialState("student", "active"),
+            )
         assert not root.is_active
         db.rollback()
 
@@ -344,6 +394,10 @@ def test_bulk_already_active_nonstudent_can_reassign_track_and_facilitator_clear
                 track_id=track,
             ),
             authority=RosterAuthority(tenant, False),
+            accounts=AccountPresenceSelection(
+                tenant, select(Party.id).where(Party.tenant_id == tenant)
+            ),
+            initial_state=BulkEnrollmentInitialState("student", "active"),
         )
         assert result.already_active == ("peer@x",)
         assert row.track_id == track
@@ -388,7 +442,11 @@ def test_activation_loaded_helper_does_not_flush_and_id_wrapper_autoflushes(
     _, app, tenant, _, cohort, people, _, _ = roster_database
     with scoped(app, tenant) as db:
         row = Enrollment(
-            tenant_id=tenant, cohort_id=cohort, person_id=people[0], status="dropped"
+            tenant_id=tenant,
+            cohort_id=cohort,
+            person_id=people[0],
+            status="dropped",
+            role_in_cohort="student",
         )
         db.add(row)
         db.flush()
@@ -493,3 +551,49 @@ def test_facilitator_account_observation_is_required_without_default():
     assert observed["account_is_active"].default is MISSING
     with pytest.raises(TypeError):
         FacilitatorEligibility(uuid4(), uuid4(), True)
+
+
+def test_configured_new_state_presence_relation_and_explicit_repeat_activation(
+    roster_database,
+):
+    _, app, tenant, _, cohort, people, _, root_only = roster_database
+    with scoped(app, tenant) as db:
+        # Presence is product-owned and deliberately includes an inactive account.
+        db.execute(
+            Party.__table__.update()
+            .where(Party.id == people[1])
+            .values(is_active=False)
+        )
+        accounts = AccountPresenceSelection(
+            tenant,
+            select(Party.id).where(
+                Party.tenant_id == tenant, Party.id.in_([people[1], root_only])
+            ),
+        )
+        command = BulkEnrollCommand(
+            tenant_id=tenant, cohort_id=cohort, emails=("fresh@x", "active@x", "root@x")
+        )
+        policy = BulkEnrollmentInitialState("mentor-business", "pending-business")
+        first = roster.bulk_enroll(
+            db,
+            command,
+            authority=RosterAuthority(tenant, True),
+            accounts=accounts,
+            initial_state=policy,
+        )
+        assert first.enrolled == ("fresh@x",)
+        assert first.not_found == ("active@x", "root@x")
+        row = db.scalar(select(Enrollment).where(Enrollment.person_id == people[1]))
+        assert (row.role_in_cohort, row.status) == (
+            "mentor-business",
+            "pending-business",
+        )
+        second = roster.bulk_enroll(
+            db,
+            command,
+            authority=RosterAuthority(tenant, True),
+            accounts=accounts,
+            initial_state=BulkEnrollmentInitialState("new-role", "new-status"),
+        )
+        assert second.reactivated == ("fresh@x",)
+        assert (row.role_in_cohort, row.status) == ("mentor-business", "active")

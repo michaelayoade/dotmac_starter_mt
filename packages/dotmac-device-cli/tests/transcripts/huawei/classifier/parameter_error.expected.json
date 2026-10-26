@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "unreadable",
+    "reason": "parameter_error",
+    "detail": "Failure: Parameter error"
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "privileged"
+}

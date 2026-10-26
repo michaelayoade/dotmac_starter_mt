@@ -102,6 +102,7 @@ def seed(db, tenant, person, *, status="active"):
             person_id=person,
             status=status,
             created_at=NOW - timedelta(days=30),
+            role_in_cohort="student",
         )
     )
     db.flush()
@@ -446,3 +447,61 @@ def test_composed_message_preserves_autoflush_and_required_writer_rollback(
             select(Enrollment.created_at).where(Enrollment.cohort_id == cohort)
         ) == NOW - timedelta(days=30)
         assert db.scalars(selection(tenant).active_person_ids).all() == [person]
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_receipt_delivery_composes_product_account_selection_on_caller_session(
+    account_database, monkeypatch, active
+):
+    from dotmac_kernel import audit_actions
+    from dotmac_kernel.audit import AuditEvent
+    from dotmac_learning.manifest import module
+    from dotmac_learning.success_contracts import SegmentMessageEffect
+
+    from tests.test_learning_success_queue import TERMS
+
+    monkeypatch.setattr(
+        audit_actions,
+        "_active_registry",
+        audit_actions.AuditActionRegistry.from_manifests([module]),
+    )
+    _, app, tenant, person, *_ = account_database
+    with scoped(app, tenant) as db:
+        cohort = seed(db, tenant, person)
+        db.execute(
+            ACCOUNTS.update()
+            .where(ACCOUNTS.c.person_id == person)
+            .values(status="active" if active else "suspended")
+        )
+        db.get(Party, person).is_active = False
+        root = db.get_transaction()
+        delivered = []
+
+        def deliver(caller, recipient, message, action_id):
+            assert caller is db and caller.get_transaction() is root
+            assert caller.get_nested_transaction() is None
+            delivered.append(recipient.id)
+
+        with statements(app) as seen:
+            effect = queue.message_segment_with_receipt(
+                db,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                segment="inactive",
+                subject="Subject",
+                body="Body",
+                actor_person_id=person,
+                terms=TERMS,
+                accounts=selection(tenant),
+                audit_context=AttemptAuditContext(tenant, "system", "academy"),
+                delivery=deliver,
+                now=NOW,
+            )
+        assert type(effect) is SegmentMessageEffect
+        assert delivered == ([person] if active else [])
+        assert effect.result.recipients == int(active)
+        (composed,) = composed_rosters(seen)
+        assert "public.learning_test_product_accounts" in composed
+        audit = db.get(AuditEvent, effect.audit_event_id)
+        assert audit is not None and audit.details["recipients"] == int(active)
+        assert db.get_transaction() is root

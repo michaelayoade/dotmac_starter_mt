@@ -1,0 +1,25 @@
+# Firmware layer: MA5800-X2 V100R019. Unverified: no lab receipt, no write template.
+# Paging-off stays "unsupported": the evidence conflicts (an older note says a
+# temporary screen-length command works; a later production run echoed it with its
+# spaces stripped and answered "Unknown command"). A lab decides.
+# The per-port 'all' command form is an inference from the detail form; confirm in a lab.
+
+[layer]
+id = "huawei-ma5800-x2-v100r019"
+kind = "firmware"
+
+[profile]
+firmware_patterns = ["^V100R019"]   # exact R019 only; R02x needs its own layer and evidence
+verification = { status = "unverified", receipt_sha256 = "" }
+
+[operations]
+version = true
+list_onts = true
+
+[templates.read]
+running_config = { cmd = "display saved-configuration", max_seconds = 300 }
+
+[quirks]
+continuation_cr = { text = "'{ <cr>||<K> }:' is offered after the per-port 'all' query; Enter is sent only because <cr> is offered", transcripts = ["ont_inventory/continuation_cr"] }
+privilege_as_syntax = { text = "a low-privilege user gets the command echoed with spaces stripped and 'Unknown command'; classify insufficient_privilege, not syntax", transcripts = ["classifier/stripped_space_privilege"] }
+pager_redraw_ansi = { text = "the pager marker is erased with a cursor-back sequence and the next row follows on the same line", transcripts = ["ont_inventory/pager_redraw"] }

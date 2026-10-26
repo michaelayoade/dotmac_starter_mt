@@ -106,7 +106,14 @@ def _track(conn, tenant):
 
 def _enrollment(conn, tenant, cohort, person, track=None):
     return _row(
-        conn, "enrollments", tenant, cohort_id=cohort, person_id=person, track_id=track
+        conn,
+        "enrollments",
+        tenant,
+        cohort_id=cohort,
+        person_id=person,
+        track_id=track,
+        role_in_cohort="student",
+        status="active",
     )
 
 
@@ -142,8 +149,9 @@ def test_participation_tenant_isolation_and_identity_translation_refusals(
                     conn,
                     (
                         "INSERT INTO mod_learning.enrollments (id, tenant_id, "
-                        "cohort_id, person_id) VALUES (:id, :tenant, :cohort, "
-                        ":person)"
+                        "cohort_id, person_id, role_in_cohort, status)"
+                        " VALUES (:id, :tenant, :cohort, "
+                        ":person, 'student', 'active')"
                     ),
                     {
                         "id": uuid.uuid4(),
@@ -184,7 +192,15 @@ def test_participation_tenant_isolation_and_identity_translation_refusals(
                 )
             cohort_b = _cohort(conn, tenant_b)
             for table, fields in (
-                ("enrollments", {"cohort_id": cohort, "person_id": person_b}),
+                (
+                    "enrollments",
+                    {
+                        "cohort_id": cohort,
+                        "person_id": person_b,
+                        "role_in_cohort": "student",
+                        "status": "active",
+                    },
+                ),
                 ("cohort_tracks", {"cohort_id": cohort_b, "track_id": track}),
                 ("track_courses", {"track_id": track, "course_id": course}),
                 ("course_offerings", {"cohort_id": cohort_b, "course_id": course}),
@@ -198,10 +214,8 @@ def test_participation_tenant_isolation_and_identity_translation_refusals(
                 assert getattr(caught.value.orig, "sqlstate", None) == "23503"
             _refused(
                 conn,
-                (
-                    "INSERT INTO mod_learning.cohorts (id, tenant_id, name, "
-                    "discipline) VALUES (:id, :tenant, 'cross', 'x')"
-                ),
+                "INSERT INTO mod_learning.cohorts (id, tenant_id, name, "
+                "discipline) VALUES (:id, :tenant, 'cross', 'x')",
                 {"id": uuid.uuid4(), "tenant": tenant_a},
                 "42501",
             )
@@ -372,7 +386,9 @@ def test_null_track_no_action_membership_source_checks_defaults_and_updates(
                 conn,
                 (
                     "INSERT INTO mod_learning.enrollments (id, tenant_id, cohort_id, "
-                    "person_id) VALUES (:id, :tenant, :cohort, :person)"
+                    "person_id, role_in_cohort, status) VALUES (:i"
+                    "d, :tenant, :cohort, :person, 'student', 'act"
+                    "ive')"
                 ),
                 {
                     "id": uuid.uuid4(),
@@ -453,6 +469,9 @@ def test_actual_migrated_catalog_source_contract_and_identity_translation(
                     assert (
                         columns[field]["default"].split("::")[0].strip("'") == expected
                     )
+                if table == "enrollments":
+                    assert columns["role_in_cohort"]["default"] is None
+                    assert columns["status"]["default"] is None
                 assert columns["id"]["default"] is None
                 for field in ("created_at", "updated_at"):
                     assert columns[field]["default"] == "now()"

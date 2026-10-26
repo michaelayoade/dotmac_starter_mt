@@ -158,9 +158,10 @@ def test_the_real_repo_composes() -> None:
     # 36 -> 37: `ts_0003_tenant_audit`, the DDL-free tenant-audit prerequisite
     # assertion on the installed Template Studio lineage. Learning is not
     # installed in this reference assembly and adds no revision here.
+    # 37 -> 38 (unreleased): `0030_credential_tenant_key` on the kernel lineage.
     # The "deliberately" is the point — this number is not maintenance overhead,
     # it is the reason a migration cannot be added without somebody noticing.
-    assert len(report.revisions) == 37
+    assert len(report.revisions) == 38
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 

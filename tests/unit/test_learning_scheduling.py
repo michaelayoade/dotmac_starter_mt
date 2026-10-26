@@ -1,6 +1,6 @@
 """Pure scheduling boundary canaries, authored before the service port."""
 
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import MISSING, FrozenInstanceError, fields, replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -9,6 +9,7 @@ from dotmac_learning.delivery_contracts import (
     ClassSessionFact,
     CreateSessionCommand,
     SchedulingBadRequest,
+    SessionUpdate,
     UpdateSessionCommand,
 )
 from dotmac_learning.scheduling import _clean_join_url, join_is_open
@@ -122,3 +123,22 @@ def test_update_payload_preserves_omission_explicit_null_and_free_vocabulary():
             starts_at=NOW,
             authorize=True,
         )
+
+
+def test_session_update_requires_explicit_audit_receipt_and_keeps_field_order():
+    assert [field.name for field in fields(SessionUpdate)] == [
+        "session",
+        "changes",
+        "audit_event_id",
+    ]
+    receipt = fields(SessionUpdate)[-1]
+    assert receipt.default is MISSING and receipt.default_factory is MISSING
+    with pytest.raises(TypeError):
+        SessionUpdate(fact(), ())
+    unchanged = SessionUpdate(fact(), (), None)
+    assert unchanged.audit_event_id is None
+    event_id = uuid4()
+    changed = SessionUpdate(fact(), (), event_id)
+    assert changed.audit_event_id == event_id
+    with pytest.raises(FrozenInstanceError):
+        changed.audit_event_id = None

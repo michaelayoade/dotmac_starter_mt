@@ -8,6 +8,7 @@ from dotmac_learning import roster
 from dotmac_learning.participation_contracts import (
     ActivationResult,
     EnsureInvitationEnrollmentCommand,
+    InvitationEnrollmentInitialState,
     InvitationEnrollmentResult,
     ParticipationBadRequest,
     ParticipationForbidden,
@@ -91,6 +92,7 @@ def test_installed_policy_controls_custom_product_role(
         command,
         authority=RosterAuthority(command.tenant_id, False),
         role_policy=policy,
+        initial_state=InvitationEnrollmentInitialState("active"),
     )
     assert policy.calls == ["configured-guide"]
     assert result.member_role == configured_role
@@ -109,6 +111,7 @@ def test_product_can_configure_familiar_global_labels_as_students(
         command,
         authority=RosterAuthority(command.tenant_id, False),
         role_policy=policy,
+        initial_state=InvitationEnrollmentInitialState("active"),
     )
     assert policy.calls == [global_role]
     assert result.member_role == staged[0].role_in_cohort == "student"
@@ -133,6 +136,7 @@ def test_invalid_policy_role_refuses_before_query_or_mutation(
             command,
             authority=RosterAuthority(command.tenant_id, False),
             role_policy=policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
     assert policy.calls == [command.global_role]
     assert staged == []
@@ -145,6 +149,7 @@ def test_policy_is_required_without_a_default(staged_invitation):
             db,
             command,
             authority=RosterAuthority(command.tenant_id, False),
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
     assert staged == []
 
@@ -158,6 +163,7 @@ def test_authority_refusal_precedes_installed_policy(staged_invitation):
             command,
             authority=RosterAuthority(uuid4(), True),
             role_policy=policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
     assert policy.calls == []
     assert staged == []
@@ -177,6 +183,7 @@ def test_transaction_refusal_precedes_installed_policy(staged_invitation, monkey
             command,
             authority=RosterAuthority(command.tenant_id, False),
             role_policy=policy,
+            initial_state=InvitationEnrollmentInitialState("active"),
         )
     assert policy.calls == []
     assert staged == []

@@ -204,6 +204,122 @@ MAPPED: Final[tuple[Facility, ...]] = (
 #: An empty set means "no module calls this today", which is a claim worth
 #: holding: it is how the next caller becomes a visible diff.
 FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
+    "identity_provisioning:bootstrap_tenant": (
+        "Offline bootstrap writes canonical tenant/person/RBAC/credential/audit rows "
+        "under an issued platform root and installed policy. No declared "
+        "prerequisite supplies that combined authority/storage contract; the local "
+        "catalog revalidator is not a module prerequisite. No installable module "
+        "calls this entrypoint today; freeze the empty set until a real prerequisite "
+        "binds any proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:find_party_exact_email": (
+        "Reads Party email by exact equality. party_person_catalog.v1 supplies "
+        "identity references and SELECT, but does not declare the email lookup "
+        "contract. No installable module calls this entrypoint today; freeze the "
+        "empty set until a real prerequisite binds any proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:find_party_normalized_email": (
+        "Reads Party email with caller-supplied normalization. "
+        "party_person_catalog.v1 does not declare the email lookup contract or "
+        "normalization semantics. No installable module calls this entrypoint today; "
+        "freeze the empty set until a real prerequisite binds any proposed module "
+        "adoption.",
+        frozenset(),
+    ),
+    "identity_storage:lock_parties": (
+        "Locks tenant-qualified Party rows in UUID order. party_person_catalog.v1 "
+        "declares SELECT references, not the row-lock privileges and caller-owned "
+        "locking contract. No installable module calls this entrypoint today; freeze "
+        "the empty set until a real prerequisite binds any proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:lock_person": (
+        "Locks the tenant-qualified PartyPerson subtype. party_person_catalog.v1 "
+        "declares SELECT references, not the row-lock privileges and caller-owned "
+        "locking contract. No installable module calls this entrypoint today; freeze "
+        "the empty set until a real prerequisite binds any proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:lock_roles": (
+        "Locks the tenant role catalog. No declared prerequisite supplies canonical "
+        "roles or their locking contract. No installable module calls this "
+        "entrypoint today; freeze the empty set until a real prerequisite binds any "
+        "proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:lock_grants": (
+        "Locks tenant PartyRoleGrant rows under caller-held Party locks. No declared "
+        "prerequisite supplies canonical grants or that locking contract. No "
+        "installable module calls this entrypoint today; freeze the empty set until "
+        "a real prerequisite binds any proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:credential_member_ids": (
+        "Locks complete tenant account credential membership and returns IDs only. "
+        "No declared prerequisite supplies user_credentials or membership-lock "
+        "participation; observations confer no issuance authority. No installable "
+        "module calls this entrypoint today; freeze the empty set until a real "
+        "prerequisite binds any proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:create_person": (
+        "Flushes canonical Party and PartyPerson rows. party_person_catalog.v1 "
+        "supplies SELECT references, not insertion privileges or caller-owned "
+        "authorization and rollback. No installable module calls this entrypoint "
+        "today; freeze the empty set until a real prerequisite binds any proposed "
+        "module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:provision_missing_roles": (
+        "Extends the freshly locked canonical role catalog with caller-decided "
+        "names. No declared prerequisite supplies Role writes and the required "
+        "catalog-lock contract. No installable module calls this entrypoint today; "
+        "freeze the empty set until a real prerequisite binds any proposed module "
+        "adoption.",
+        frozenset(),
+    ),
+    "identity_storage:ensure_grant": (
+        "Reads and inserts a canonical PartyRoleGrant under a caller-held Party "
+        "lock. No declared prerequisite supplies grant writes or role admission "
+        "authority. No installable module calls this entrypoint today; freeze the "
+        "empty set until a real prerequisite binds any proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:remove_grants": (
+        "Deletes an exact detached tenant/Party GrantFact cohort in the caller's "
+        "active conflict SAVEPOINT, with clean ORM state and caller-held locks. "
+        "No declared prerequisite supplies canonical grant DELETE privileges or "
+        "the caller authority/locking contract. No installable module calls it "
+        "in this source inventory; freeze that exact empty caller set.",
+        frozenset(),
+    ),
+    "identity_storage:revoke_party_sessions": (
+        "Updates only the explicit tenant/Party AuthSession cohort in the caller's "
+        "active conflict SAVEPOINT. None/all and tuple/exact are selectors, not "
+        "authority. No declared prerequisite supplies session UPDATE privileges "
+        "or the caller authority/locking contract. Reference app auth logout is "
+        "an assembly caller, not an installable module; the module caller set "
+        "is empty in this source inventory and remains frozen exactly.",
+        frozenset(),
+    ),
+    "identity_storage:delete_person": (
+        "Deletes exactly the tenant-bound person Party, relying on incoming owner FK "
+        "policy. party_person_catalog.v1 supplies SELECT references, not deletion "
+        "privileges, proof or retention/rollback authority. No installable module "
+        "calls this entrypoint today; freeze the empty set until a real prerequisite "
+        "binds any proposed module adoption.",
+        frozenset(),
+    ),
+    "identity_storage:create_tenant": (
+        "Flushes a canonical Tenant from caller-decided values. "
+        "tenant_scope_catalog.v1 supplies a reference catalog shape, not offline "
+        "bootstrap insertion privileges or authority. No installable module calls "
+        "this entrypoint today; freeze the empty set until a real prerequisite binds "
+        "any proposed module adoption.",
+        frozenset(),
+    ),
     "settings_resolver:resolve_value": (
         "SETTINGS — ruled NOT a prerequisite (Michael, 2026-08-16). "
         "`domain_settings` is one table serving both scopes through a nullable "

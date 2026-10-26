@@ -2235,6 +2235,102 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # fleet pins one, so an in-place edit to any file here reaches more
     # databases this repository cannot inspect than every module lineage
     # combined.
+    "dotmac-kernel-v0.1.0a107": (
+        "dotmac-kernel",
+        "8c12998b57a31b5cf4a3e296d092460f97e638ba",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+            "20260824_0028_machine_attribution.py": (
+                "baa27e0134ae97ac5b6f10c7d0f47e391187589fa8a7cb8ee70f81eaa8b3e01c"
+            ),
+            "20261017_0029_audit_history_shape.py": (
+                "142f59aab75517a1f4ca19fc614a4877fbf80e81fcf372351cb547245e86cb20"
+            ),
+            "20261017_0030_credential_tenant_key.py": (
+                "053b6a7e15df5da43e185e84e921878ab8f93d8503fee825c24cacff3a8cc9a0"
+            ),
+        },
+    ),
     "dotmac-kernel-v0.1.0a106": (
         "dotmac-kernel",
         "df25af5000a4897cb187f5d3f916a70ee2579a0e",
@@ -7562,6 +7658,33 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-learning ──
+    "dotmac-learning-v0.1.0a2": (
+        "dotmac-learning",
+        "456ef45efbdfb25b63d2ed9e0b768043a51f5539",
+        {
+            "lr_0001_learning.py": (
+                "b40ad7cb692f386ef03faf0d093b46e5684b5bf6e6d282a9808672cb7e1a561d"
+            ),
+            "lr_0002_curriculum_reading.py": (
+                "98ddf64623110fead8893d3fdef3c6f06fb3959b5e6a7728d5117bfb74a02ac2"
+            ),
+            "lr_0003_participation.py": (
+                "0093a5d4c26e11be769ccc42cc859f667662c20abd269249da59d3ab91d92267"
+            ),
+            "lr_0004_assessment.py": (
+                "935fb0d36466d2f3df56101580b5ad12b5f5c1c85700dc405abd60c08840cb47"
+            ),
+            "lr_0005_tenant_audit.py": (
+                "75accabeeae531a40882cbffa2a5b8b7da95d884f07bcda950143f8bf3dfd4d7"
+            ),
+            "lr_0006_delivery_support.py": (
+                "742ee17b76d33f431b5928ca9617802e1014784d786395db8b092b8190541448"
+            ),
+            "lr_0007_enrollment_state_policy.py": (
+                "72332fffa888469d48f0975ba71c22658785af4e3c7df4f1d5cdd83723346bf3"
+            ),
+        },
+    ),
     "dotmac-learning-v0.1.0a1": (
         "dotmac-learning",
         "f674acc9e3235ac1b82bc10c37ba021191730a5b",
@@ -7757,6 +7880,8 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-inbox": frozenset(
         {"ib_0002_supplied_identity.py", "ib_0003_transport_refs.py"}
     ),
+    # Tenant-qualified credential key remains editable until a verified published
+    # tag carries this revision and its digest is recorded above.
     "dotmac-kernel": frozenset(),
     "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
     "dotmac-analytics": frozenset(),

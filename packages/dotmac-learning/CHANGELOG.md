@@ -1,5 +1,30 @@
 # Changelog — dotmac-learning
 
+## 0.1.0a2 — allocated source candidate, not yet published
+
+Current correction, 2026-10-19: `0.1.0a1` was published and remains immutable.
+The numbered section below records historical preparation notes; its former
+"Unreleased" and publication-pending statements are superseded here.
+This successor is now allocated as `0.1.0a2` (formerly the `+dev`
+source-qualification marker, which allocated nothing) and retains the
+actual published Kernel floor `>=0.1.0a106`. Publication remains a separate
+release dispatch; no tag or index entry is claimed by this allocation.
+
+- Preserve the full 27-table/260-field domain and all 520 existing root exports;
+  add five reads: course by slug, chapter by number, account cohort names,
+  certificate lookup and instructor cohort lookup.
+- Require product-supplied admission/bulk/invitation initial-state snapshots and
+  a genuine tenant-bound account-presence relation for bulk enrollment; preserve
+  existing authority and existing-row facts.
+- Add required `SessionUpdate.audit_event_id` and success transition/segment
+  message effect receipts carrying actual audit UUIDs from one execution.
+- Prepare additive `lr_0007` to remove Enrollment role/status defaults; retain
+  all six released migrations unchanged.
+
+Shared composition, independent composed review, hosted source/migration suites
+and exact installed-pair qualification remain pending. Academy caller retirement
+and adoption are not claimed.
+
 ## 0.1.0a1 — Unreleased
 
 - Prepare the Academy-derived seven-table result, progress, completion,

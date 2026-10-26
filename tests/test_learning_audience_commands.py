@@ -25,7 +25,15 @@ roster_database = roster_tests.roster_database
 def test_audience_cross_tenant_isolation(roster_database):
     _, app, tenant, other, cohort, people, _, _ = roster_database
     with scoped(app, tenant) as db:
-        db.add(Enrollment(tenant_id=tenant, cohort_id=cohort, person_id=people[0]))
+        db.add(
+            Enrollment(
+                tenant_id=tenant,
+                cohort_id=cohort,
+                person_id=people[0],
+                role_in_cohort="student",
+                status="active",
+            )
+        )
     with scoped(app, other) as db:
         result = audience.classify_from_roster(
             db,
@@ -52,7 +60,15 @@ def test_explicit_roster_last_collision_reference_bytes_and_no_domain_guess(
     _, app, tenant, _, cohort, people, _, _ = roster_database
     with scoped(app, tenant) as db:
         for person in people:
-            db.add(Enrollment(tenant_id=tenant, cohort_id=cohort, person_id=person))
+            db.add(
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort,
+                    person_id=person,
+                    role_in_cohort="student",
+                    status="active",
+                )
+            )
         result = audience.classify_from_roster(
             db,
             ClassifyRosterCommand(
@@ -114,7 +130,15 @@ def test_audience_active_student_only_distinct_per_group_and_queue_source_order(
         second, third = _cohort(conn, tenant), _cohort(conn, tenant)
     with scoped(app, tenant) as db:
         for person in queued_people:
-            db.add(Enrollment(tenant_id=tenant, cohort_id=cohort, person_id=person))
+            db.add(
+                Enrollment(
+                    tenant_id=tenant,
+                    cohort_id=cohort,
+                    person_id=person,
+                    role_in_cohort="student",
+                    status="active",
+                )
+            )
         db.execute(
             Party.__table__.update()
             .where(Party.id == people[0])
@@ -137,6 +161,8 @@ def test_audience_active_student_only_distinct_per_group_and_queue_source_order(
                     person_id=people[0],
                     audience=aud,
                     employee_ref=ref,
+                    role_in_cohort="student",
+                    status="active",
                 )
             )
         db.add(
@@ -145,6 +171,7 @@ def test_audience_active_student_only_distinct_per_group_and_queue_source_order(
                 cohort_id=cohort,
                 person_id=people[1],
                 role_in_cohort="instructor",
+                status="active",
             )
         )
         db.add(
@@ -153,6 +180,7 @@ def test_audience_active_student_only_distinct_per_group_and_queue_source_order(
                 cohort_id=cohort,
                 person_id=people[2],
                 status="dropped",
+                role_in_cohort="student",
             )
         )
         db.flush()
@@ -182,7 +210,15 @@ def test_audience_transaction_precheck_autoflush_failure_and_caller_rollback(
             audience.classify_from_roster(db, command)
         assert db.get_transaction() is None
     with scoped(app, tenant) as db:
-        db.add(Enrollment(tenant_id=tenant, cohort_id=cohort, person_id=people[0]))
+        db.add(
+            Enrollment(
+                tenant_id=tenant,
+                cohort_id=cohort,
+                person_id=people[0],
+                role_in_cohort="student",
+                status="active",
+            )
+        )
     with scoped(app, tenant) as db:
         root = db.get_transaction()
         with db.begin_nested() as nested:
@@ -192,7 +228,15 @@ def test_audience_transaction_precheck_autoflush_failure_and_caller_rollback(
             )
             nested.rollback()
         assert db.scalar(select(Enrollment.audience)) is None
-        db.add(Enrollment(tenant_id=tenant, cohort_id=uuid4(), person_id=people[1]))
+        db.add(
+            Enrollment(
+                tenant_id=tenant,
+                cohort_id=uuid4(),
+                person_id=people[1],
+                role_in_cohort="student",
+                status="active",
+            )
+        )
         with pytest.raises(IntegrityError):
             audience.classify_from_roster(db, command)
         assert not root.is_active

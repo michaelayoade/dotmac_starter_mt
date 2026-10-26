@@ -209,6 +209,11 @@ dotmac-sales = { path = "packages/dotmac-sales", develop = true }
 # Stateless semantic projection and rendering for immutable issued-document
 # facts. It is installed for verification here, but not composed or releasable.
 dotmac-document-rendering = { path = "packages/dotmac-document-rendering", develop = true }
+# Stateless device CLI knowledge and dialogue logic (ADR-0077): layered
+# capability profiles, a dialect interface, the prompt/pager/confirmation state
+# machine over an injected channel, and limiter policy over an injected lock
+# store. Installed for verification here; no transport, credential or I/O.
+dotmac-device-cli = { path = "packages/dotmac-device-cli", develop = true }
 dotmac-fulfillment = { path = "packages/dotmac-fulfillment", develop = true }
 dotmac-learning = { path = "packages/dotmac-learning", develop = true }
 fastapi = "^0.115"
@@ -375,6 +380,7 @@ module = [
     "dotmac_web_analytics.*",
     "dotmac_sales.*",
     "dotmac_document_rendering.*",
+    "dotmac_device_cli.*",
     "dotmac_forms.*",
     "dotmac_workflow_runtime.*",
     "dotmac_fulfillment.*",
@@ -522,6 +528,7 @@ root_packages = [
     "dotmac_web_analytics",
     "dotmac_sales",
     "dotmac_document_rendering",
+    "dotmac_device_cli",
     "dotmac_forms",
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
@@ -553,6 +560,25 @@ name = "The assembly and the kernel must not import the deployment foundation"
 type = "forbidden"
 source_modules = ["app", "dotmac_kernel"]
 forbidden_modules = ["dotmac_deployment_foundation"]
+
+[[tool.importlinter.contracts]]
+# ADR-0077. Device knowledge and dialogue logic run over a channel the HOST
+# injects: the package opens no connection, holds no credential and has no
+# database, web framework or tenant. It is CALLED, not installed (no manifest, no
+# `mod_*` namespace, no lineage), so it is filed with the facilities, not the
+# modules. External-library bans (socket, ssl, paramiko, sqlalchemy, httpx, ...)
+# are enforced by AST in tests/architecture/test_device_cli_package.py, because
+# this configuration does not analyse external packages.
+name = "The device CLI must not import the kernel, the UI or the assembly"
+type = "forbidden"
+source_modules = ["dotmac_device_cli"]
+forbidden_modules = ["app", "dotmac_kernel", "dotmac_ui"]
+
+[[tool.importlinter.contracts]]
+name = "The assembly and the kernel must not import the device CLI"
+type = "forbidden"
+source_modules = ["app", "dotmac_kernel"]
+forbidden_modules = ["dotmac_device_cli"]
 
 [[tool.importlinter.contracts]]
 name = "Kernel must not import the assembly"
@@ -807,6 +833,7 @@ modules = [
     "dotmac_web_analytics",
     "dotmac_sales",
     "dotmac_document_rendering",
+    "dotmac_device_cli",
     "dotmac_forms",
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",

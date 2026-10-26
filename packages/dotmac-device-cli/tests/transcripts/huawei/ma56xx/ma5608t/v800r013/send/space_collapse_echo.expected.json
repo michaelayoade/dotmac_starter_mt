@@ -1,0 +1,11 @@
+{
+  "result": {
+    "status": "unreadable",
+    "reason": "unknown_command",
+    "detail": "% Unknown command, the error locates at '^' [echo_mismatch]"
+  },
+  "sent": [
+    "display ont info 0 2 1 all\n"
+  ],
+  "final_state": "privileged"
+}

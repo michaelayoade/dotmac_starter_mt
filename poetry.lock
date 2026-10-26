@@ -1022,6 +1022,20 @@ type = "directory"
 url = "packages/dotmac-deployment-foundation"
 
 [[package]]
+name = "dotmac-device-cli"
+version = "0.1.0a1"
+description = "Stateless device CLI knowledge and dialogue logic (capability profiles, prompt/pager/confirmation state machine, response classification, parsers, limiter policy). No transport, credentials or I/O."
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-device-cli"
+
+[[package]]
 name = "dotmac-document-rendering"
 version = "0.1.0a2"
 description = "Deterministic issued-document projection and rendering from immutable facts"
@@ -1330,7 +1344,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a106"
+version = "0.1.0a107"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1357,7 +1371,7 @@ url = "packages/dotmac-kernel"
 
 [[package]]
 name = "dotmac-learning"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Reusable tenant learning results, progress, completion and certificates"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -4453,4 +4467,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "bb06f9b7bf2ec67d2b69804c9d07e6734ffd2bea1f99dd566177ba451d7a8b88"
+content-hash = "bbb758880e898eb2cba7aa9db196d2b2837418aa90973600e9e81aba5068e0ad"

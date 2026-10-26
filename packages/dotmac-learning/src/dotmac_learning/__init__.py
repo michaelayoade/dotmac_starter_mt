@@ -72,7 +72,11 @@ from dotmac_learning.audience import (
     staff_person_ids,
     unclassified,
 )
-from dotmac_learning.certificates import CertificateNotEligible, issue_certificate
+from dotmac_learning.certificates import (
+    CertificateNotEligible,
+    get_certificate,
+    issue_certificate,
+)
 from dotmac_learning.cohort_contracts import (
     CreateCohortCommand,
     RemoveFacilitatorCommand,
@@ -308,6 +312,7 @@ from dotmac_learning.result_contracts import (
     AttemptAdmissionPolicy,
     GradedResult,
     LabResultCommand,
+    LabResultRead,
     MCQResultCommand,
     OverrideScoreCommand,
     ResultBadRequest,
@@ -318,6 +323,7 @@ from dotmac_learning.result_contracts import (
 )
 from dotmac_learning.results import (
     override_score,
+    read_lab_result,
     record_lab_result,
     record_mcq_result,
     submit_mcq_activity,
@@ -371,10 +377,13 @@ from dotmac_learning.transfer_contracts import (
     VerificationObservation,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 
-from dotmac_learning.account_contracts import ActiveAccountSelection
+from dotmac_learning.account_contracts import (
+    AccountPresenceSelection,
+    ActiveAccountSelection,
+)
 from dotmac_learning.agenda import (
     upcoming_for_person as upcoming_agenda,
 )
@@ -421,7 +430,10 @@ from dotmac_learning.catalog_contracts import (
     CourseStructure,
 )
 from dotmac_learning.catalog_reads import (
+    account_cohort_names,
     all_courses,
+    catalog_chapter_by_number,
+    catalog_course_by_slug,
     course_completion,
     course_structure,
     my_courses,
@@ -537,6 +549,7 @@ from dotmac_learning.instructor_reads import (
     authorable_courses,
     authoring_chapters,
 )
+from dotmac_learning.instructor_reads import cohort_by_id as instructor_cohort_by_id
 from dotmac_learning.instructor_reads import cohort_choices as instructor_cohort_choices
 from dotmac_learning.instructor_reads import cohort_exists as instructor_cohort_exists
 from dotmac_learning.instructor_reads import (
@@ -563,8 +576,11 @@ from dotmac_learning.pacing_contracts import (
     PacingForbidden,
 )
 from dotmac_learning.participation_contracts import (
+    AdmissionEnrollmentInitialState,
+    BulkEnrollmentInitialState,
     EnsureAdmissionEnrollmentCommand,
     EnsureInvitationEnrollmentCommand,
+    InvitationEnrollmentInitialState,
     InvitationEnrollmentResult,
     InvitationEnrollmentRolePolicy,
 )
@@ -635,18 +651,21 @@ from dotmac_learning.success_contracts import (
     QueueFact,
     QueueListFact,
     SegmentDeliveryProtocol,
+    SegmentMessageEffect,
     SegmentMessageFact,
     SegmentMessageResult,
     SuccessBadRequest,
     SuccessNotFound,
     SuccessPersonFact,
     SuccessTerms,
+    SuccessTransitionEffect,
     SweepResult,
 )
 from dotmac_learning.success_queue import (
     SEGMENT_KEYS,
     SEGMENTS_DEFERRED,
     message_segment,
+    message_segment_with_receipt,
     segment_members,
 )
 from dotmac_learning.success_queue import (
@@ -657,6 +676,9 @@ from dotmac_learning.success_queue import (
 )
 from dotmac_learning.success_queue import (
     transition as transition_success_entry,
+)
+from dotmac_learning.success_queue import (
+    transition_with_receipt as transition_success_entry_with_receipt,
 )
 from dotmac_learning.support_contracts import (
     AtRiskCourse,
@@ -1076,8 +1098,11 @@ __all__ = [
     "CourseStructure",
     "my_courses",
     "all_courses",
+    "catalog_chapter_by_number",
+    "catalog_course_by_slug",
     "course_completion",
     "course_structure",
+    "account_cohort_names",
     "SuccessBadRequest",
     "SuccessNotFound",
     "SuccessTerms",
@@ -1087,15 +1112,20 @@ __all__ = [
     "SegmentMessageFact",
     "SweepResult",
     "SegmentMessageResult",
+    "SegmentMessageEffect",
+    "SuccessTransitionEffect",
     "SegmentDeliveryProtocol",
     "sweep_success_queue",
     "transition_success_entry",
+    "transition_success_entry_with_receipt",
     "list_success_entries",
     "segment_members",
     "message_segment",
+    "message_segment_with_receipt",
     "SEGMENT_KEYS",
     "SEGMENTS_DEFERRED",
     "ActiveAccountSelection",
+    "AccountPresenceSelection",
     "GradeTrend",
     "GradeTrendTerms",
     "LearnerInsightTerms",
@@ -1192,6 +1222,9 @@ __all__ = [
     "cohort_roster_progress",
     "queue_summary",
     "ensure_admission_enrollment",
+    "AdmissionEnrollmentInitialState",
+    "BulkEnrollmentInitialState",
+    "InvitationEnrollmentInitialState",
     "EnsureAdmissionEnrollmentCommand",
     "has_other_passing_score",
     "PrerequisiteDeclaration",
@@ -1224,4 +1257,8 @@ __all__ = [
     "propose_balance",
     "BankDocumentHeader",
     "decoded_doc_from_db",
+    "get_certificate",
+    "instructor_cohort_by_id",
+    "LabResultRead",
+    "read_lab_result",
 ]
