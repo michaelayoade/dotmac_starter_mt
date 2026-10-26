@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 import pytest
+from dotmac_kernel import audit_actions
 from dotmac_learning import (
     BankAuditContext,
     CreateBankDraftCommand,
@@ -33,6 +34,7 @@ from dotmac_learning.curriculum_contracts import (
     ManualImport,
 )
 from dotmac_learning.curriculum_models import Chapter, Question
+from dotmac_learning.manifest import module
 from dotmac_learning.models import Course
 from dotmac_learning.result_contracts import TransactionChanged
 from sqlalchemy import create_engine, event, select, text
@@ -45,6 +47,15 @@ from tests.test_learning_catalog import (
 )
 
 learning_database = learning_catalog_fixtures.learning_database
+
+
+@pytest.fixture(autouse=True)
+def declared_audit(monkeypatch):
+    monkeypatch.setattr(
+        audit_actions,
+        "_active_registry",
+        audit_actions.AuditActionRegistry.from_manifests([module]),
+    )
 
 
 @pytest.fixture

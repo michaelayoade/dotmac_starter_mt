@@ -8,8 +8,10 @@ from uuid import uuid4
 
 import dotmac_learning as learning
 import pytest
+from dotmac_kernel import audit_actions
 from dotmac_kernel.audit import AuditEvent
 from dotmac_learning.curriculum_models import Question, QuestionBank
+from dotmac_learning.manifest import module
 from dotmac_learning.models import Activity, Course
 from dotmac_learning.participation_models import CoursePrerequisite
 from sqlalchemy import create_engine, func, select, text
@@ -19,6 +21,15 @@ from tests import test_learning_curriculum as curriculum_fixtures
 from tests.test_learning_catalog import _person, _scope, _tenant
 
 learning_database = curriculum_fixtures.learning_database
+
+
+@pytest.fixture(autouse=True)
+def declared_audit(monkeypatch):
+    monkeypatch.setattr(
+        audit_actions,
+        "_active_registry",
+        audit_actions.AuditActionRegistry.from_manifests([module]),
+    )
 
 
 @pytest.fixture

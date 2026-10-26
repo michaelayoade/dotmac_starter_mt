@@ -2,8 +2,10 @@
 
 import dotmac_learning as learning
 import pytest
+from dotmac_kernel import audit_actions
 from dotmac_learning.bank_activity_contracts import BankActivityTerms
 from dotmac_learning.curriculum_models import Question
+from dotmac_learning.manifest import module
 from dotmac_learning.models import Activity
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -13,6 +15,15 @@ from tests.test_learning_catalog import _scope
 
 learning_database = curriculum.learning_database
 curriculum_case = curriculum.curriculum_case
+
+
+@pytest.fixture(autouse=True)
+def declared_audit(monkeypatch):
+    monkeypatch.setattr(
+        audit_actions,
+        "_active_registry",
+        audit_actions.AuditActionRegistry.from_manifests([module]),
+    )
 
 
 def _document():

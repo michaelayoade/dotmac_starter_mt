@@ -9,6 +9,7 @@ never writes an Activity row (the pass-mark regression guard below).
 from uuid import uuid4
 
 import pytest
+from dotmac_kernel import audit_actions
 from dotmac_learning import (
     BankAuditContext,
     BankImportRefused,
@@ -30,6 +31,7 @@ from dotmac_learning.curriculum_contracts import (
     CourseCreate,
 )
 from dotmac_learning.curriculum_models import Question, QuestionBank
+from dotmac_learning.manifest import module
 from dotmac_learning.models import Activity
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
@@ -39,6 +41,16 @@ from tests.test_learning_catalog import _scope
 
 learning_database = curriculum_fixtures.learning_database
 curriculum_case = curriculum_fixtures.curriculum_case
+
+
+@pytest.fixture(autouse=True)
+def declared_audit(monkeypatch):
+    monkeypatch.setattr(
+        audit_actions,
+        "_active_registry",
+        audit_actions.AuditActionRegistry.from_manifests([module]),
+    )
+
 
 BANK_ACTIVITY_TERMS = BankActivityTerms(
     pass_threshold_by_kind={"chapter": 0.0, "mid": 0.60, "final": 0.70},
