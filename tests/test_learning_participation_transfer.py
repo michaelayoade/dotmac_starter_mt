@@ -1793,3 +1793,91 @@ def test_v3_varchar_character_capacity_preserves_multibyte_text_and_trailing_spa
         assert import_snapshot_v3(conn, snapshot).verification.matched
         assert _keyed(export_snapshot_v3(conn, tenants)) == _keyed(snapshot)
         assert verify_snapshot_v3(conn, snapshot).matched
+
+
+# RD-1 refusal coverage (authored for the hosted PG gate). Non-defaults are
+# seeded by raw SQL UPDATEs after the standard fixture import because the
+# authoring APIs land in S2; the defaults path stays byte-compatible and is
+# covered by the roundtrip canaries above.
+_RD1_NON_DEFAULTS = (
+    (
+        "composition",
+        "UPDATE mod_learning.courses"
+        " SET prerequisite_composition = 'any' WHERE tenant_id = :tenant",
+    ),
+    (
+        "condition_kind",
+        "UPDATE mod_learning.course_prerequisites"
+        " SET condition_kind = 'certificate_held' WHERE tenant_id = :tenant",
+    ),
+    (
+        "params",
+        "UPDATE mod_learning.course_prerequisites"
+        " SET params = '{\"min_fraction\": 0.5}'::jsonb"
+        " WHERE tenant_id = :tenant",
+    ),
+    (
+        "group_key",
+        "UPDATE mod_learning.course_prerequisites"
+        " SET group_key = 'g1' WHERE tenant_id = :tenant",
+    ),
+    (
+        "gating_mode",
+        "UPDATE mod_learning.tracks"
+        " SET gating_mode = 'none' WHERE tenant_id = :tenant",
+    ),
+)
+
+
+@pytest.mark.parametrize("family,statement", _RD1_NON_DEFAULTS)
+def test_rd1_non_defaults_refused_by_v3_export_and_verify(
+    transfer_database, family, statement
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        conn.execute(text(statement), {"tenant": tenants[0]})
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot_v3(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot_v3(conn, snapshot)
+
+
+def test_rd1_non_default_composition_refused_by_v2_export_and_verify(
+    transfer_database,
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        conn.execute(text(_RD1_NON_DEFAULTS[0][1]), {"tenant": tenants[0]})
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot_v2(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot_v2(conn, curriculum_snapshot(tenants, people))
+
+
+def test_rd1_other_tenant_non_defaults_do_not_block_clean_tenant_export(
+    transfer_database,
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        for _family, statement in _RD1_NON_DEFAULTS:
+            conn.execute(text(statement), {"tenant": tenants[1]})
+        exported = export_snapshot_v3(conn, (tenants[0],))
+        assert {row.id for row in exported.courses} == {snapshot.courses[0].id}
+        assert {row.id for row in exported.tracks} == {snapshot.tracks[0].id}
+        assert {row.id for row in exported.course_prerequisites} == {
+            snapshot.course_prerequisites[0].id
+        }

@@ -75,6 +75,7 @@ def track_case(learning_database):
 
 
 def _create(db, tenant, cohort, courses, **kw):
+    kw.setdefault("gating_mode", "previous")
     return create_cohort_track(
         db,
         CreateTrackCommand(
@@ -301,6 +302,7 @@ def test_track_commands_forbid_unknown_fields():
             cohort_id=uuid4(),
             name="Track",
             course_ids=(),
+            gating_mode="previous",
             arbitrary=True,
         )
 
@@ -388,3 +390,27 @@ def test_every_track_mutator_refuses_missing_caller_transaction_before_sql(
         with pytest.raises(TransactionChanged):
             calls[operation]()
         assert db.get_transaction() is None
+
+
+def test_create_track_requires_closed_gating_mode():
+    with pytest.raises(ValidationError):
+        CreateTrackCommand(
+            tenant_id=uuid4(), cohort_id=uuid4(), name="Track", course_ids=()
+        )
+    with pytest.raises(ValidationError):
+        CreateTrackCommand(
+            tenant_id=uuid4(),
+            cohort_id=uuid4(),
+            name="Track",
+            course_ids=(),
+            gating_mode="sometimes",
+        )
+    for mode in ("none", "previous", "all_previous"):
+        command = CreateTrackCommand(
+            tenant_id=uuid4(),
+            cohort_id=uuid4(),
+            name="Track",
+            course_ids=(),
+            gating_mode=mode,
+        )
+        assert command.gating_mode == mode

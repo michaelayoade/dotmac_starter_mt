@@ -16,6 +16,7 @@ from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -79,6 +80,10 @@ class Course(KernelBase, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("tenant_id", "slug", name="uq_courses_tenant_slug"),
         UniqueConstraint("tenant_id", "id", name="uq_courses_tenant_id_id"),
+        CheckConstraint(
+            "prerequisite_composition IN ('all', 'any')",
+            name="ck_courses_prerequisite_composition",
+        ),
         Index("ix_courses_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
@@ -96,6 +101,11 @@ class Course(KernelBase, TimestampMixin):
     # catalog projection. Internal material (instructor guide, entrance shells,
     # internal disciplines) stays unlisted regardless of publish status.
     listed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # Prerequisite condition-group composition (HM-01): "all" requires every
+    # group satisfied (the historical implicit rule), "any" requires one.
+    prerequisite_composition: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="all", server_default="all"
+    )
 
 
 class Activity(KernelBase, TimestampMixin):

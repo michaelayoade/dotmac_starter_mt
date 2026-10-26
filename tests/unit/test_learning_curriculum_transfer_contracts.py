@@ -24,7 +24,10 @@ from dotmac_learning.transfer_contracts import (
     SnapshotValidationError,
 )
 
-from tests.unit.test_learning_transfer_contracts import ROW_TYPES as FIRST_ROW_TYPES
+from tests.unit.test_learning_transfer_contracts import (
+    ROW_TYPES as FIRST_ROW_TYPES,
+)
+from tests.unit.test_learning_transfer_contracts import carried_column_keys
 
 ROW_TYPES = (
     ChapterRowV2,
@@ -65,7 +68,7 @@ def test_all_135_persisted_columns_are_mandatory_in_v2():
         FIRST_ROW_TYPES + ROW_TYPES, TENANT_MODELS + CURRICULUM_MODELS, strict=True
     ):
         row_fields = fields(row_type)
-        assert {field.name for field in row_fields} == set(model.__table__.c.keys())
+        assert {field.name for field in row_fields} == carried_column_keys(model)
         assert all(
             field.default is MISSING and field.default_factory is MISSING
             for field in row_fields

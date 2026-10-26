@@ -20,11 +20,13 @@ FIELDS = {
         "cohort_id person_id track_id role_in_cohort status audience employee_ref "
         "access_ends_at"
     ),
-    "tracks": "slug name status",
+    "tracks": "slug name status gating_mode",
     "track_courses": "track_id course_id order_index",
     "cohort_tracks": "cohort_id track_id status",
     "course_offerings": "cohort_id course_id status starts_at ends_at",
-    "course_prerequisites": "course_id requires_course_id",
+    "course_prerequisites": (
+        "course_id requires_course_id condition_kind params group_key"
+    ),
 }
 NULLABLE = {
     "cohorts": {
@@ -44,7 +46,13 @@ UNIQUES = {
     "course_offerings": {("tenant_id", "id"), ("tenant_id", "cohort_id", "course_id")},
     "course_prerequisites": {
         ("tenant_id", "id"),
-        ("tenant_id", "course_id", "requires_course_id"),
+        (
+            "tenant_id",
+            "course_id",
+            "requires_course_id",
+            "condition_kind",
+            "group_key",
+        ),
     },
 }
 INDEXES = {
@@ -71,23 +79,24 @@ LENGTHS = {
         "audience": 20,
         "employee_ref": 64,
     },
-    "tracks": {"slug": 80, "name": 160, "status": 20},
+    "tracks": {"slug": 80, "name": 160, "status": 20, "gating_mode": 16},
+    "course_prerequisites": {"condition_kind": 32, "group_key": 32},
     "cohort_tracks": {"status": 20},
     "course_offerings": {"status": 20},
 }
 DEFAULTS = {
     "cohorts": {"status": "active", "delivery_mode": "self_paced"},
-    "tracks": {"status": "active"},
+    "tracks": {"status": "active", "gating_mode": "previous"},
     "track_courses": {"order_index": "0"},
     "cohort_tracks": {"status": "active"},
     "course_offerings": {"status": "active"},
 }
 
 
-def test_source_59_persisted_fields_and_migrated_contracts():
+def test_source_63_persisted_fields_and_migrated_contracts():
     assert set(PARTICIPATION_TABLES) == set(FIELDS)
     assert len(PARTICIPATION_MODELS) == 7
-    assert sum(len(m.__table__.c) for m in PARTICIPATION_MODELS) == 59
+    assert sum(len(m.__table__.c) for m in PARTICIPATION_MODELS) == 63
     for model in PARTICIPATION_MODELS:
         table = model.__table__
         name = table.name
@@ -113,11 +122,14 @@ def test_source_59_persisted_fields_and_migrated_contracts():
         } == UNIQUES[name]
         assert {
             c.name for c in table.constraints if isinstance(c, CheckConstraint)
-        } == (
-            {"ck_enrollments_audience", "ck_enrollments_staff_has_employee_ref"}
-            if name == "enrollments"
-            else set()
-        )
+        } == {
+            "enrollments": {
+                "ck_enrollments_audience",
+                "ck_enrollments_staff_has_employee_ref",
+            },
+            "tracks": {"ck_tracks_gating_mode"},
+            "course_prerequisites": {"ck_course_prerequisites_condition_kind"},
+        }.get(name, set())
         for field, length in LENGTHS.get(name, {}).items():
             assert table.c[field].type.length == length
         for field, value in DEFAULTS.get(name, {}).items():
@@ -156,3 +168,19 @@ def test_enrollment_state_requires_explicit_orm_and_server_facts():
         assert column.default is None
         assert column.server_default is None
         assert column.nullable is False
+
+
+def test_prerequisite_condition_defaults_materialize_legacy_rows():
+    table = next(
+        m.__table__
+        for m in PARTICIPATION_MODELS
+        if m.__tablename__ == "course_prerequisites"
+    )
+    assert table.c.condition_kind.default.arg == "course_completed"
+    assert str(table.c.condition_kind.server_default.arg) == "course_completed"
+    assert table.c.group_key.default.arg == "g0"
+    assert str(table.c.group_key.server_default.arg) == "g0"
+    assert table.c.params.default.arg(None) == {}
+    assert table.c.params.default.arg(None) is not table.c.params.default.arg(None)
+    assert str(table.c.params.server_default.arg) == "'{}'"
+    assert not table.c.params.nullable

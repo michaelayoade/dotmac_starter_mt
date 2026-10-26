@@ -25,6 +25,7 @@ from tests.unit.test_learning_curriculum_transfer_contracts import (
 )
 from tests.unit.test_learning_curriculum_transfer_contracts import TABLES as V2_TABLES
 from tests.unit.test_learning_transfer_contracts import ROW_TYPES as V1_ROW_TYPES
+from tests.unit.test_learning_transfer_contracts import carried_column_keys
 
 ROW_TYPES = (
     CohortRowV3,
@@ -57,7 +58,7 @@ def test_v3_adds_all_59_persisted_fields_without_defaults():
     total = 0
     for row_type, model in zip(ROW_TYPES, PARTICIPATION_MODELS, strict=True):
         row_fields = fields(row_type)
-        assert {field.name for field in row_fields} == set(model.__table__.c.keys())
+        assert {field.name for field in row_fields} == carried_column_keys(model)
         assert all(
             field.default is MISSING and field.default_factory is MISSING
             for field in row_fields
@@ -163,7 +164,7 @@ def test_all_21_tables_and_194_columns_are_closed_and_mandatory():
         strict=True,
     ):
         row_fields = fields(row_type)
-        assert {field.name for field in row_fields} == set(model.__table__.c.keys())
+        assert {field.name for field in row_fields} == carried_column_keys(model)
         assert all(
             field.default is MISSING and field.default_factory is MISSING
             for field in row_fields

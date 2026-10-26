@@ -945,3 +945,35 @@ def test_timestamp_preflight_does_not_deduplicate_distinct_dst_fold_instants(
             assert inserts == []
         finally:
             event.remove(conn, "before_cursor_execute", distort)
+
+
+def test_rd1_non_default_composition_refused_by_v1_export_and_verify(
+    transfer_database,
+):
+    """RD-1: non-default prerequisite policy refuses V1 export and verify.
+
+    Authored for the hosted PG gate. The non-default is seeded by a raw
+    SQL UPDATE after the standard fixture import because the authoring
+    APIs land in S2; the defaults path stays byte-compatible and is
+    covered by the roundtrip canaries above.
+    """
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot(conn, snapshot)
+        conn.execute(
+            text(
+                "UPDATE mod_learning.courses"
+                " SET prerequisite_composition = 'any'"
+                " WHERE tenant_id = :tenant"
+            ),
+            {"tenant": tenants[0]},
+        )
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot(conn, snapshot)

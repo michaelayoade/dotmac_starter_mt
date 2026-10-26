@@ -20,6 +20,21 @@ from dotmac_learning.transfer_contracts import (
     SubmissionRowV1,
 )
 
+# lr_0008 (RD-1): frozen V1-V5 rows deliberately do not carry the
+# composable-policy columns; transfers refuse non-default values instead.
+A3_UNCARRIED_COLUMNS = {
+    "courses": {"prerequisite_composition"},
+    "course_prerequisites": {"condition_kind", "params", "group_key"},
+    "tracks": {"gating_mode"},
+}
+
+
+def carried_column_keys(model):
+    return set(model.__table__.c.keys()) - A3_UNCARRIED_COLUMNS.get(
+        model.__tablename__, set()
+    )
+
+
 ROW_TYPES = (
     CourseRowV1,
     ActivityRowV1,
@@ -47,9 +62,7 @@ def empty_snapshot(tenant):
 
 def test_every_persisted_field_is_mandatory_including_nullable_history():
     for row_type, model in zip(ROW_TYPES, TENANT_MODELS, strict=True):
-        assert {field.name for field in fields(row_type)} == set(
-            model.__table__.c.keys()
-        )
+        assert {field.name for field in fields(row_type)} == carried_column_keys(model)
         assert all(
             field.default is MISSING and field.default_factory is MISSING
             for field in fields(row_type)
@@ -150,7 +163,7 @@ def test_transfer_uses_closed_core_relations_and_no_formatted_sql_text():
         relation = contract.clause
         assert relation.name == model.__table__.name
         assert relation.schema == model.__table__.schema
-        assert set(relation.c.keys()) == set(model.__table__.c.keys())
+        assert set(relation.c.keys()) == carried_column_keys(model)
         for column in contract.columns:
             projection = transfer._export_column(contract, column)
             assert isinstance(projection, ColumnElement)
@@ -195,3 +208,47 @@ def test_transfer_uses_closed_core_relations_and_no_formatted_sql_text():
     )
     assert formatted_sql_nodes(planted_tree)
     assert not formatted_sql_nodes('message = f"canonical storage: {name}"')
+
+
+def test_a3_column_contract_admits_only_the_lr_0008_set():
+    from dotmac_learning import transfer
+
+    expected = {"id": ("uuid", False), "tenant_id": ("uuid", False)}
+    assert transfer._column_contract_matches("courses", dict(expected), expected)
+    admitted = {
+        **expected,
+        "prerequisite_composition": ("character varying(8)", False),
+    }
+    assert transfer._column_contract_matches("courses", admitted, expected)
+    # Wrong type, wrong nullability, partial set and unknown extras refuse.
+    assert not transfer._column_contract_matches(
+        "courses",
+        {**expected, "prerequisite_composition": ("character varying(9)", False)},
+        expected,
+    )
+    assert not transfer._column_contract_matches(
+        "courses",
+        {**expected, "prerequisite_composition": ("character varying(8)", True)},
+        expected,
+    )
+    assert not transfer._column_contract_matches(
+        "courses", {**admitted, "other": ("text", True)}, expected
+    )
+    assert not transfer._column_contract_matches(
+        "course_prerequisites",
+        {**expected, "condition_kind": ("character varying(32)", False)},
+        expected,
+    )
+    full_prereq = {
+        **expected,
+        "condition_kind": ("character varying(32)", False),
+        "params": ("jsonb", False),
+        "group_key": ("character varying(32)", False),
+    }
+    assert transfer._column_contract_matches(
+        "course_prerequisites", full_prereq, expected
+    )
+    # A table without an lr_0008 allowance never admits extras.
+    assert not transfer._column_contract_matches(
+        "activities", admitted | {"x": ("text", True)}, expected
+    )

@@ -207,6 +207,166 @@ _RELATIONS = {
 }
 _TENANTS = sql_table("tenants", sql_column("id"), schema="public")
 
+# RD-1 seam (a3 Wave 0): lr_0008 added composable-policy columns that the
+# frozen V1-V5 row contracts deliberately do NOT carry. Qualification admits
+# exactly these columns, with pinned type/nullability, as a whole set per
+# table (pre-migration absence also qualifies); any other drift still
+# mismatches. Frozen rows neither read nor write them, so a transfer is
+# refused while any covered row in the tenant extent is non-default.
+_A3_EXTRA_COLUMNS: dict[str, dict[str, tuple[str, bool]]] = {
+    "courses": {"prerequisite_composition": ("character varying(8)", False)},
+    "course_prerequisites": {
+        "condition_kind": ("character varying(32)", False),
+        "params": ("jsonb", False),
+        "group_key": ("character varying(32)", False),
+    },
+    "tracks": {"gating_mode": ("character varying(16)", False)},
+}
+_A3_REFUSAL_MESSAGE = (
+    "non-default prerequisite policy data is not carried by this "
+    "snapshot version; transfer refused (RD-1)"
+)
+_A3_COURSES = sql_table(
+    "courses",
+    sql_column("tenant_id"),
+    sql_column("prerequisite_composition"),
+    schema=_SCHEMA,
+)
+_A3_PREREQUISITES = sql_table(
+    "course_prerequisites",
+    sql_column("tenant_id"),
+    sql_column("condition_kind"),
+    sql_column("params"),
+    sql_column("group_key"),
+    schema=_SCHEMA,
+)
+_A3_TRACKS = sql_table(
+    "tracks",
+    sql_column("tenant_id"),
+    sql_column("gating_mode"),
+    schema=_SCHEMA,
+)
+
+
+def _column_contract_matches(
+    table_name: str,
+    actual: dict[str, tuple[str, bool]],
+    expected: dict[str, tuple[str, bool]],
+) -> bool:
+    if actual == expected:
+        return True
+    extras = _A3_EXTRA_COLUMNS.get(table_name)
+    if not extras:
+        return False
+    return actual == {**expected, **extras}
+
+
+def _a3_table_columns_present(scope: _Scope, table_name: str) -> bool:
+    """True iff the table carries its full lr_0008 column set.
+
+    Qualification runs first and refuses partial drift, so post-qualify a
+    table either predates lr_0008 (probe it not at all) or carries every
+    new column (probe it).
+    """
+    extras = _A3_EXTRA_COLUMNS[table_name]
+    names = tuple(extras)
+    found = scope.execute(
+        "SELECT attname FROM pg_catalog.pg_attribute "
+        "WHERE attrelid = CAST(:relation AS regclass) "
+        "AND attnum > 0 AND NOT attisdropped",
+        {"relation": f"{_SCHEMA}.{table_name}"},
+    ).scalars()
+    present = {str(name) for name in found}
+    return all(name in present for name in names)
+
+
+def _refuse_non_default_prerequisite_policy(
+    scope: _Scope,
+    tenant_ids: tuple[UUID, ...],
+    *,
+    include_participation: bool,
+) -> None:
+    """Raise iff any covered row in the tenant extent is non-default.
+
+    Called after qualification from every export/verify (and the
+    destination-reading import paths, where the empty destination always
+    passes). At defaults nothing raises and snapshot bytes are unchanged.
+    """
+    candidate_tables: tuple[str, ...] = (
+        ("courses", "course_prerequisites", "tracks")
+        if include_participation
+        else ("courses",)
+    )
+    probe_tables = tuple(
+        name for name in candidate_tables if _a3_table_columns_present(scope, name)
+    )
+    if not probe_tables:
+        return
+    checks: list[bool] = []
+    if "courses" in probe_tables:
+        checks.append(
+            bool(
+                scope.extent_query(
+                    select(
+                        select(1)
+                        .select_from(_A3_COURSES)
+                        .where(
+                            _A3_COURSES.c.tenant_id.in_(
+                                bindparam("tenant_ids", expanding=True)
+                            )
+                        )
+                        .where(_A3_COURSES.c.prerequisite_composition != "all")
+                        .exists()
+                    ),
+                    tenant_ids,
+                ).scalar_one()
+            )
+        )
+    if "course_prerequisites" in probe_tables:
+        checks.append(
+            bool(
+                scope.extent_query(
+                    select(
+                        select(1)
+                        .select_from(_A3_PREREQUISITES)
+                        .where(
+                            _A3_PREREQUISITES.c.tenant_id.in_(
+                                bindparam("tenant_ids", expanding=True)
+                            )
+                        )
+                        .where(
+                            (_A3_PREREQUISITES.c.condition_kind != "course_completed")
+                            | (sql_cast(_A3_PREREQUISITES.c.params, Text) != "{}")
+                            | (_A3_PREREQUISITES.c.group_key != "g0")
+                        )
+                        .exists()
+                    ),
+                    tenant_ids,
+                ).scalar_one()
+            )
+        )
+    if "tracks" in probe_tables:
+        checks.append(
+            bool(
+                scope.extent_query(
+                    select(
+                        select(1)
+                        .select_from(_A3_TRACKS)
+                        .where(
+                            _A3_TRACKS.c.tenant_id.in_(
+                                bindparam("tenant_ids", expanding=True)
+                            )
+                        )
+                        .where(_A3_TRACKS.c.gating_mode != "previous")
+                        .exists()
+                    ),
+                    tenant_ids,
+                ).scalar_one()
+            )
+        )
+    if any(checks):
+        raise SnapshotValidationError(_A3_REFUSAL_MESSAGE)
+
 
 @dataclass(frozen=True, slots=True)
 class _Scope:
@@ -327,7 +487,7 @@ def _qualify(scope: _Scope, tenant_ids: tuple[UUID, ...]) -> None:
         expected = {
             column.name: (column.pg_type, column.nullable) for column in table.columns
         }
-        if actual != expected:
+        if not _column_contract_matches(table.name, actual, expected):
             raise TransferConnectionError(
                 f"canonical column contract mismatch: {table.qualified}"
             )
@@ -486,6 +646,9 @@ def export_snapshot(
     validate_tenant_extent(tenant_ids)
     scope = _Scope.capture(connection)
     _qualify(scope, tenant_ids)
+    _refuse_non_default_prerequisite_policy(
+        scope, tenant_ids, include_participation=False
+    )
     rows = {table.name: _read_rows(scope, table, tenant_ids) for table in _TABLES}
     snapshot = LearningSnapshotV1(
         version=1,
@@ -601,6 +764,9 @@ def verify_snapshot(
     _validate_snapshot(snapshot)
     scope = _Scope.capture(connection)
     _qualify(scope, snapshot.tenant_ids)
+    _refuse_non_default_prerequisite_policy(
+        scope, snapshot.tenant_ids, include_participation=False
+    )
     return _verify(scope, snapshot, entire_store=False)
 
 
@@ -617,6 +783,9 @@ def import_snapshot(
     _validate_snapshot(snapshot)
     scope = _Scope.capture(connection)
     _qualify(scope, snapshot.tenant_ids)
+    _refuse_non_default_prerequisite_policy(
+        scope, snapshot.tenant_ids, include_participation=False
+    )
     for table in _TABLES:
         if scope.execute(
             select(select(1).select_from(table.clause).exists())

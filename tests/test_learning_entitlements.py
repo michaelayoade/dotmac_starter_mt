@@ -40,7 +40,11 @@ def _setup(db, tenant, person, cohort, courses):
     track = create_cohort_track(
         db,
         CreateTrackCommand(
-            tenant_id=tenant, cohort_id=cohort, name="Access", course_ids=courses
+            tenant_id=tenant,
+            cohort_id=cohort,
+            name="Access",
+            course_ids=courses,
+            gating_mode="previous",
         ),
     )
     enrollment = Enrollment(
@@ -225,3 +229,37 @@ def test_require_open_window_before_prerequisites_and_preserves_source_details(
             == "Complete the previous course to unlock this course."
         )
         require_course_open(db, **{**kwargs, "course_id": a})
+
+
+def test_require_open_state_none_opens_without_unmet_and_locked_denies(
+    track_case, monkeypatch
+):
+    """CORE-1 parent semantics: a state-None open course opens; locked denies."""
+    engine, tenant, _, person, cohort, courses, _ = track_case
+    with Session(engine) as db, db.begin():
+        _scope(db, tenant)
+        _setup(db, tenant, person, cohort, courses[:2])
+        a, b = courses[:2]
+        kwargs = {"tenant_id": tenant, "person_id": person}
+        # Locked-deny: b is track-locked behind the incomplete a.
+        with pytest.raises(CourseAccessDenied):
+            require_course_open(db, course_id=b, **kwargs)
+
+        # State-None (an open course with no access-state row, e.g. offered
+        # outside the person's track) opens while no prerequisite is unmet,
+        # and still denies once one is unmet. The empty state lookup is
+        # simulated; prerequisite evaluation itself stays genuine.
+        def no_states(*args, **kw):
+            return {}
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                "dotmac_learning.entitlements.course_access_states", no_states
+            )
+            require_course_open(db, course_id=a, **kwargs)
+            db.add(
+                CoursePrerequisite(tenant_id=tenant, course_id=a, requires_course_id=b)
+            )
+            db.flush()
+            with pytest.raises(CourseAccessDenied):
+                require_course_open(db, course_id=a, **kwargs)

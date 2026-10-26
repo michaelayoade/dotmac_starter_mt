@@ -586,6 +586,8 @@ from dotmac_learning.participation_contracts import (
 )
 from dotmac_learning.prerequisite_commands import reconcile_prerequisites
 from dotmac_learning.prerequisite_contracts import (
+    PREREQUISITE_CONDITION_KINDS,
+    PrerequisiteConditionDeclaration,
     PrerequisiteDeclaration,
     PrerequisiteReconciliationError,
     PrerequisiteReconciliationResult,
@@ -1227,6 +1229,8 @@ __all__ = [
     "InvitationEnrollmentInitialState",
     "EnsureAdmissionEnrollmentCommand",
     "has_other_passing_score",
+    "PREREQUISITE_CONDITION_KINDS",
+    "PrerequisiteConditionDeclaration",
     "PrerequisiteDeclaration",
     "ReconcilePrerequisitesCommand",
     "PrerequisiteReconciliationResult",

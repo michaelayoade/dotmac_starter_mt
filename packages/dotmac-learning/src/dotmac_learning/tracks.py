@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,8 @@ from .participation_models import (
 from .references import CourseFact, _course_fact
 from .results import _transaction, _unchanged
 
+TRACK_GATING_MODES: tuple[str, ...] = ("none", "previous", "all_previous")
+
 
 class CreateTrackCommand(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -45,7 +47,15 @@ class CreateTrackCommand(BaseModel):
     cohort_id: UUID
     name: str
     course_ids: tuple[UUID, ...]
+    gating_mode: str
     positions: dict[UUID, int] = Field(default_factory=dict)
+
+    @field_validator("gating_mode")
+    @classmethod
+    def validate_gating_mode(cls, value: str) -> str:
+        if value not in TRACK_GATING_MODES:
+            raise ValueError(f"unknown track gating mode: {value!r}")
+        return value
 
 
 class AddTrackCoursesCommand(BaseModel):
@@ -73,6 +83,7 @@ class TrackFact:
     status: str
     created_at: datetime
     updated_at: datetime
+    gating_mode: str = "previous"
 
 
 @dataclass(frozen=True)
@@ -276,6 +287,7 @@ def create_cohort_track(db: Session, payload: CreateTrackCommand) -> TrackFact:
         tenant_id=tenant_id,
         slug=_unique_track_slug(db, tenant_id=tenant_id, name=clean_name),
         name=clean_name,
+        gating_mode=payload.gating_mode,
     )
     db.add(track)
     db.flush()
@@ -569,6 +581,7 @@ def ensure_default_track_for_cohort(
         tenant_id=tenant_id,
         slug=_unique_track_slug(db, tenant_id=tenant_id, name=name),
         name=name,
+        gating_mode="previous",
     )
     db.add(track)
     db.flush()

@@ -129,7 +129,13 @@ def test_first_slice_has_seven_tenant_tables_and_no_product_delivery_state():
             fk.column is Tenant.__table__.c.id and fk.ondelete == "CASCADE"
             for fk in table.c.tenant_id.foreign_keys
         )
-        assert not any(isinstance(c, CheckConstraint) for c in table.constraints)
+        assert {
+            c.name for c in table.constraints if isinstance(c, CheckConstraint)
+        } == (
+            {"ck_courses_prerequisite_composition"}
+            if table.name == "courses"
+            else set()
+        )
         for name in ("created_at", "updated_at"):
             assert not table.c[name].nullable
             assert table.c[name].type.timezone
@@ -273,6 +279,10 @@ def test_nullable_policy_fields_and_source_defaults_keep_their_meaning():
     # Mirror immutable database defaults for legacy NULL-on-insert staging only.
     assert Activity.__table__.c.pass_threshold.server_default.arg == "0.0"
     assert Activity.__table__.c.assessment_mode.server_default.arg == "graded"
+    composition = Course.__table__.c.prerequisite_composition
+    assert not composition.nullable
+    assert composition.default.arg == "all"
+    assert str(composition.server_default.arg) == "all"
 
 
 def test_json_payload_defaults_are_independent_per_record():
