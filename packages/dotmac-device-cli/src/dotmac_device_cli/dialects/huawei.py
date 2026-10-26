@@ -118,6 +118,14 @@ class HuaweiDialect:
                 )
             )
         descriptions, orphans = _join_descriptions(desc_part, rows)
+        # A present-but-blank description row is a key with "" (legal); no key
+        # at all means the device printed a description table that does not
+        # account for this ONT, which must not read as an empty description.
+        missing = (
+            sum(1 for r in rows if r.ref.native not in descriptions)
+            if split is not None
+            else 0
+        )
         rows = [
             replace(r, description=descriptions.get(r.ref.native, "")) for r in rows
         ]
@@ -129,6 +137,7 @@ class HuaweiDialect:
             explicitly_empty=bool(_EMPTY.search(clean)),
             declared_total=int(total.group(1)) if total else None,
             orphan_descriptions=orphans,
+            missing_descriptions=missing,
         )
 
 

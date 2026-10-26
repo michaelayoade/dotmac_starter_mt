@@ -72,11 +72,52 @@ def test_the_trailer_count_is_a_completeness_check() -> None:
     assert isinstance(fewer, Unreadable) and fewer.reason is Reason.TRUNCATED
     more = classify_table(D.parse_ont_table(_two_tables("", total="1")), EV)
     assert isinstance(more, Unreadable) and more.reason is Reason.ROWS_UNPARSED
-    exact = classify_table(D.parse_ont_table(_two_tables("", total="2")), EV)
+    both = (
+        "  0/ 2/1       0   CUSTOMER_03_zone_Zone_1_authd_20240101\r\n"
+        "  0/ 2/1       1   CUSTOMER_04_zone_Zone_1_authd_20240101\r\n"
+    )
+    exact = classify_table(D.parse_ont_table(_two_tables(both, total="2")), EV)
     assert not isinstance(exact, Unreadable)
     no_trailer = _two_tables("").split("  -------------\r\n  In port")[0]
     cut = classify_table(D.parse_ont_table(no_trailer), EV)
     assert isinstance(cut, Unreadable) and cut.reason is Reason.TRUNCATED
+
+
+def test_an_ont_missing_from_the_description_table_is_unreadable() -> None:
+    only_first = "  0/ 2/1       0   CUSTOMER_03_zone_Zone_1_authd_20240101\r\n"
+    table = D.parse_ont_table(_two_tables(only_first))
+    assert table.missing_descriptions == 1
+    out = classify_table(table, EV)
+    assert isinstance(out, Unreadable) and out.reason is Reason.ROWS_UNPARSED
+
+
+def test_a_blank_description_row_is_present_not_missing() -> None:
+    desc = (
+        "  0/ 2/1       0   CUSTOMER_03_zone_Zone_1_authd_20240101\r\n"
+        "  0/ 2/1       1\r\n"
+    )
+    table = D.parse_ont_table(_two_tables(desc))
+    assert table.missing_descriptions == 0
+    assert [r.description for r in table.rows] == [
+        "CUSTOMER_03_zone_Zone_1_authd_20240101",
+        "",
+    ]
+    out = classify_table(table, EV)
+    assert not isinstance(out, Unreadable)
+
+
+def test_no_description_table_at_all_counts_nothing_missing() -> None:
+    row = "  0/2/1    {n}  {sn}  active  online  normal  match  no\r\n"
+    raw = (
+        "  F/S/P   ONT         SN         Control     Run      Config"
+        "   Match    Protect\r\n"
+        + row.format(n=0, sn=SN)
+        + row.format(n=1, sn="4857544300000002")
+        + "  In port 0/2/1, the total of ONTs are: 2, online: 2\r\n"
+    )
+    table = D.parse_ont_table(raw)
+    assert table.missing_descriptions == 0
+    assert not isinstance(classify_table(table, EV), Unreadable)
 
 
 def test_empty_text_is_unreadable_never_an_empty_list() -> None:

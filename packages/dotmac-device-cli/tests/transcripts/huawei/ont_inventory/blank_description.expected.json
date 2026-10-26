@@ -1,0 +1,30 @@
+{
+  "result": {
+    "status": "ok",
+    "explicitly_empty": false,
+    "entries": [
+      {
+        "ref": "0/2/1 0",
+        "serial": "4857544300000001",
+        "admin_state": "active",
+        "run_state": "online",
+        "config_state": "normal",
+        "match_state": "match",
+        "description": "CUSTOMER_01_zone_Zone_1_authd_20240101"
+      },
+      {
+        "ref": "0/2/1 1",
+        "serial": "4857544300000002",
+        "admin_state": "active",
+        "run_state": "offline",
+        "config_state": "initial",
+        "match_state": "initial",
+        "description": ""
+      }
+    ]
+  },
+  "sent": [
+    "{command}\n"
+  ],
+  "final_state": "privileged"
+}

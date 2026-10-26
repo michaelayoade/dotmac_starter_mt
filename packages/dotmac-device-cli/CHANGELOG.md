@@ -16,7 +16,9 @@ First source slice (ADR-0077). Nothing is published, pinned or adopted.
 - Dialogue state machine over an injected channel: prompt/mode detection,
   pager answering, `<cr>` continuation, confirmation allow-list, clean logout.
 - Response classifier and `display ont info <port> all` parser (spaced F/S/P,
-  ANSI, pager lines); absence is a value, never a silent empty.
+  ANSI, pager lines); absence is a value, never a silent empty. A listed ONT
+  with no row in a printed description table is `rows_unparsed`, not an
+  empty description (a present-but-blank description row stays `Ok`).
 - Limiter policy over an abstract `LockStore`; lock keys byte-identical to Sub's.
 - Profile registry with `resolve()` by configured vendor/model/firmware and
   `detect()` that reports a mismatch and never switches profile.
