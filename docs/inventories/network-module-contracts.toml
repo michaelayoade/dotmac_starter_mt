@@ -95,6 +95,7 @@ events = ["AccessProjectionChanged", "AuthenticationObserved", "SessionStarted",
 
 [[modules]]
 name = "dotmac-pon-access"
+adoption_cohort = "withdrawn-retained-in-sub"
 package = "dotmac-pon-access"
 contract_module = "dotmac_pon_access.contracts"
 returns_orm_instances = false
