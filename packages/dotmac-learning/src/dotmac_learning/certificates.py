@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import inspect, select
@@ -12,7 +12,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 from .completion import lock_existing_completion
 from .event_contracts import EventWrite
 from .events import emit
-from .models import Certificate
+from .models import Certificate, Course
 from .progress_contracts import CertificateCommand, CertificateFact, CertificateIssue
 
 
@@ -34,6 +34,7 @@ def _fact(cert: Certificate) -> CertificateFact:
         issued_at=cert.issued_at,
         created_at=cert.created_at,
         updated_at=cert.updated_at,
+        expires_at=cert.expires_at,
     )
 
 
@@ -85,12 +86,26 @@ def issue_certificate(db: Session, payload: CertificateCommand) -> CertificateIs
         raise CertificateNotEligible(
             "course not completed; certificate cannot be issued"
         )
+    issued_at = payload.now or datetime.now(UTC)
+    # Validity is read from the Course row inside the handler (RD-2) and
+    # applies only to certificates issued now; existing rows keep their
+    # stored expiry (the early return above never rewrites it).
+    validity_days = db.scalar(
+        select(Course.certificate_validity_days).where(
+            Course.tenant_id == payload.tenant_id, Course.id == payload.course_id
+        )
+    )
     cert = Certificate(
         tenant_id=payload.tenant_id,
         person_id=payload.person_id,
         course_id=payload.course_id,
         serial=_serial(),
-        issued_at=payload.now or datetime.now(UTC),
+        issued_at=issued_at,
+        expires_at=(
+            issued_at + timedelta(days=validity_days)
+            if validity_days is not None
+            else None
+        ),
     )
     db.add(cert)
     # Required consequence: never hide insertion/flush failure in a savepoint.

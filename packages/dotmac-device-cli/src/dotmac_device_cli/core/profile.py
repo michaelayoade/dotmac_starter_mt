@@ -659,3 +659,40 @@ def render(template: Template, profile: Profile, **params: object) -> str:
     line = template.command.format(**{k: _check_param(k, v) for k, v in params.items()})
     check_line(line, max_length=profile.send.max_line_length)
     return line
+
+
+__all__ = [
+    "CAPABILITIES",
+    "FAMILIES",
+    "KNOWN_PARAMS",
+    "LOGOUT_STATES",
+    "MARKER_IDS",
+    "OPERATIONS",
+    "PAGER_ANSWERS",
+    "STRIP_KINDS",
+    "UNSUPPORTED",
+    "VERIFICATION_STATUSES",
+    "CommandRejected",
+    "Confirmation",
+    "ContinuationPolicy",
+    "Detect",
+    "Limits",
+    "LogoutPolicy",
+    "NoProfile",
+    "Paging",
+    "Privilege",
+    "Profile",
+    "ProfileError",
+    "Prompts",
+    "Quirk",
+    "SendPolicy",
+    "SshPolicy",
+    "Template",
+    "Verification",
+    "check_line",
+    "compile_regex",
+    "load_profile",
+    "load_profile_document",
+    "placeholders",
+    "render",
+]

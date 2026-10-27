@@ -13,6 +13,8 @@ import ast
 import tomllib
 from pathlib import Path
 
+import dotmac_device_cli
+
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "packages" / "dotmac-device-cli"
 SOURCE = PACKAGE / "src" / "dotmac_device_cli"
@@ -148,3 +150,38 @@ def test_the_package_carries_no_estate_literals() -> None:
                 path,
                 m.group(0),
             )
+
+
+def test_the_version_matches_the_distribution() -> None:
+    declared = tomllib.loads((PACKAGE / "pyproject.toml").read_text())["tool"][
+        "poetry"
+    ]["version"]
+    assert dotmac_device_cli.__version__ == declared, (
+        f"__version__ is {dotmac_device_cli.__version__!r} but pyproject declares "
+        f"{declared!r} — bump BOTH. (This is the drift that went unnoticed in "
+        "four other packages because only the kernel had this test.)"
+    )
+
+
+def test_the_manifest_modules_import_and_declare_all() -> None:
+    import importlib
+
+    assert not (
+        dotmac_device_cli.SUPPORTED_MODULES & dotmac_device_cli.INTERNAL_MODULES
+    )
+    for name in dotmac_device_cli.SUPPORTED_MODULES:
+        module = importlib.import_module(name)
+        assert getattr(module, "__all__", None), f"{name} declares no __all__"
+
+
+def test_every_advertised_top_level_name_resolves() -> None:
+    # The source-tree half of `scripts/release_adapter.py`'s installed-wheel
+    # smoke, which asserts the same against the built artifact.
+    missing = [
+        name
+        for name in dotmac_device_cli.__all__
+        if not hasattr(dotmac_device_cli, name)
+    ]
+    assert not missing, f"__all__ names absent from the package: {missing}"
+    assert "SUPPORTED_MODULES" in dotmac_device_cli.__all__
+    assert "INTERNAL_MODULES" in dotmac_device_cli.__all__

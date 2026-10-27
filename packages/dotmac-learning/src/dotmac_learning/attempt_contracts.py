@@ -35,6 +35,8 @@ class OpenAttemptCommand(AttemptCommand):
     count: int
     now: datetime | None = None
     questions: tuple[SelectionQuestion, ...] | None = None
+    # Explicit pin; when omitted the activity's bank_version_id is pinned.
+    bank_version_id: UUID | None = None
 
 
 class CloseAttemptCommand(AttemptCommand):
@@ -90,6 +92,7 @@ class AttemptFact:
     submitted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    bank_version_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,3 +163,4 @@ class QuestionFact:
     weight: int
     created_at: datetime
     updated_at: datetime
+    bank_version_id: UUID | None = None

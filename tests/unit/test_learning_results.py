@@ -21,6 +21,8 @@ def test_admission_observation_is_frozen_and_has_no_transaction_capability():
         assessment_mode="graded",
         bank_id=None,
         question_count=None,
+        min_attempt_interval_seconds=0,
+        last_attempt_at=None,
     )
     with pytest.raises(FrozenInstanceError):
         observation.used = 0

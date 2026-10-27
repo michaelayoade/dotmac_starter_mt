@@ -121,6 +121,7 @@ def test_update_payload_preserves_omission_explicit_null_and_free_vocabulary():
             cohort_id=uuid4(),
             title="Class",
             starts_at=NOW,
+            promote_delivery_mode=True,
             authorize=True,
         )
 

@@ -14,6 +14,7 @@ from dotmac_learning.curriculum_models import (
     ChapterRead,
     Question,
     QuestionBank,
+    QuestionBankVersion,
     SubtopicRead,
 )
 from dotmac_learning.models import Activity
@@ -22,6 +23,7 @@ from sqlalchemy import UniqueConstraint
 MODELS = {
     "chapters": Chapter,
     "question_banks": QuestionBank,
+    "question_bank_versions": QuestionBankVersion,
     "questions": Question,
     "chapter_reads": ChapterRead,
     "subtopic_reads": SubtopicRead,
@@ -40,9 +42,33 @@ FIELDS = {
         "source_hash",
         "order_index",
     },
-    "question_banks": {"course_id", "chapter_number", "kind", "version"},
+    "question_banks": {
+        "course_id",
+        "chapter_number",
+        "kind",
+        "version",
+        "current_version_id",
+    },
+    "question_bank_versions": {
+        "bank_id",
+        "version_no",
+        "state",
+        "origin",
+        "content_hash",
+        "lint_violations",
+        "base_version_id",
+        "draft_revision",
+        "created_by_actor",
+        "published_by",
+        "published_at",
+        "retired_by",
+        "retired_at",
+        "retire_reason",
+        "superseded_by_version_id",
+    },
     "questions": {
         "bank_id",
+        "bank_version_id",
         "ext_id",
         "stem",
         "type",
@@ -61,7 +87,11 @@ FIELDS = {
 UNIQUES = {
     "chapters": {("tenant_id", "course_id", "number")},
     "question_banks": {("tenant_id", "id")},
-    "questions": {("tenant_id", "bank_id", "ext_id")},
+    "question_bank_versions": {
+        ("tenant_id", "id"),
+        ("tenant_id", "bank_id", "version_no"),
+    },
+    "questions": {("tenant_id", "bank_version_id", "ext_id")},
     "chapter_reads": {("tenant_id", "person_id", "chapter_id")},
     "subtopic_reads": {("tenant_id", "person_id", "chapter_id", "subtopic_slug")},
     "chapter_bookmarks": {("tenant_id", "person_id", "chapter_id")},
@@ -69,8 +99,9 @@ UNIQUES = {
 }
 INDEXES = {
     "chapters": {"tenant_id", "course_id"},
-    "question_banks": {"tenant_id", "course_id"},
-    "questions": {"tenant_id", "bank_id"},
+    "question_banks": {"tenant_id", "course_id", "current_version_id"},
+    "question_bank_versions": {"tenant_id", "bank_id"},
+    "questions": {"tenant_id", "bank_id", "bank_version_id"},
     "chapter_reads": {"tenant_id", "person_id", "chapter_id"},
     "subtopic_reads": {"tenant_id", "person_id", "chapter_id"},
     "chapter_bookmarks": {"tenant_id", "person_id", "course_id", "chapter_id"},
@@ -90,8 +121,19 @@ def test_exact_curriculum_metadata_and_kernel_tenancy():
             "updated_at",
         }
         assert {c.name for c in table.c if c.nullable} == {
-            "question_banks": {"chapter_number"},
-            "questions": {"category"},
+            "question_banks": {"chapter_number", "current_version_id"},
+            "question_bank_versions": {
+                "version_no",
+                "base_version_id",
+                "created_by_actor",
+                "published_by",
+                "published_at",
+                "retired_by",
+                "retired_at",
+                "retire_reason",
+                "superseded_by_version_id",
+            },
+            "questions": {"category", "bank_version_id"},
         }.get(name, set())
         assert table.c.id.primary_key
         assert table.c.id.default is not None
@@ -110,7 +152,10 @@ def test_exact_curriculum_metadata_and_kernel_tenancy():
         } == UNIQUES[name]
         assert {tuple(c.name for c in ix.columns) for ix in table.indexes} == {
             (c,) for c in INDEXES[name]
-        }
+        } | {
+            "question_banks": {("tenant_id", "course_id", "chapter_number", "kind")},
+            "question_bank_versions": {("tenant_id", "bank_id")},
+        }.get(name, set())
 
 
 @pytest.mark.parametrize(
@@ -151,13 +196,18 @@ def test_no_inferred_person_bank_or_activity_edges():
     assert not QuestionBank.__table__.c.course_id.foreign_keys
     assert not Activity.__table__.c.course_id.foreign_keys
     assert not Activity.__table__.c.bank_id.foreign_keys
+    assert not Activity.__table__.c.bank_version_id.foreign_keys
     assert "chapter_id" not in Activity.__table__.c
     assert "chapter_number" in Activity.__table__.c
     assert {
         len(m.__table__.foreign_key_constraints)
-        for m in (Chapter, Question, ChapterRead, SubtopicRead)
+        for m in (Chapter, ChapterRead, SubtopicRead)
     } == {2}
-    assert len(QuestionBank.__table__.foreign_key_constraints) == 1
+    # lr_0010: questions also reference their bank version; banks
+    # reference their current version (deferred, use_alter cycle).
+    assert len(Question.__table__.foreign_key_constraints) == 3
+    assert len(QuestionBank.__table__.foreign_key_constraints) == 2
+    assert len(QuestionBankVersion.__table__.foreign_key_constraints) == 2
     assert (
         len(ChapterBookmark.__table__.foreign_key_constraints)
         == len(ChapterNote.__table__.foreign_key_constraints)

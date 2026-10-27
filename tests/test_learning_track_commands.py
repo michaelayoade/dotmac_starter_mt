@@ -75,6 +75,8 @@ def track_case(learning_database):
 
 
 def _create(db, tenant, cohort, courses, **kw):
+    kw.setdefault("gating_mode", "previous")
+    kw.setdefault("pacing_default_open", True)
     return create_cohort_track(
         db,
         CreateTrackCommand(
@@ -119,6 +121,7 @@ def test_dedupe_position_ties_dense_create_gapped_add_exact_reorder(track_case):
                 cohort_id=cohort,
                 track_id=track.id,
                 course_ids=(b, d, d),
+                pacing_default_open=True,
             ),
         )
         assert (
@@ -183,7 +186,11 @@ def test_draft_zero_activity_live_warning_and_status_asymmetry(track_case):
         assert default_track_for_cohort(db, tenant_id=tenant, cohort_id=cohort) is None
         with pytest.raises(ParticipationNotFound):
             ensure_track_offerings(
-                db, tenant_id=tenant, cohort_id=cohort, track_id=track.id
+                db,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                track_id=track.id,
+                pacing_default_open=True,
             )
 
 
@@ -209,6 +216,7 @@ def test_assignment_refusal_keeps_source_flushed_offerings_until_caller_rollback
                 cohort_id=cohort,
                 person_id=person,
                 track_id=track.id,
+                pacing_default_open=True,
             )
         assert (
             offering.status == "active"
@@ -301,6 +309,8 @@ def test_track_commands_forbid_unknown_fields():
             cohort_id=uuid4(),
             name="Track",
             course_ids=(),
+            gating_mode="previous",
+            pacing_default_open=True,
             arbitrary=True,
         )
 
@@ -360,6 +370,7 @@ def test_every_track_mutator_refuses_missing_caller_transaction_before_sql(
                     cohort_id=cohort,
                     track_id=track_id,
                     course_ids=courses[:1],
+                    pacing_default_open=True,
                 ),
             ),
             "reorder": lambda: reorder_track_courses(
@@ -369,7 +380,11 @@ def test_every_track_mutator_refuses_missing_caller_transaction_before_sql(
                 ),
             ),
             "ensure": lambda: ensure_track_offerings(
-                db, tenant_id=tenant, cohort_id=cohort, track_id=track_id
+                db,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                track_id=track_id,
+                pacing_default_open=True,
             ),
             "assign": lambda: assign_enrollment_track(
                 db,
@@ -377,6 +392,7 @@ def test_every_track_mutator_refuses_missing_caller_transaction_before_sql(
                 cohort_id=cohort,
                 person_id=person,
                 track_id=track_id,
+                pacing_default_open=True,
             ),
             "clear": lambda: clear_enrollment_track(
                 db, tenant_id=tenant, cohort_id=cohort, person_id=person
@@ -388,3 +404,33 @@ def test_every_track_mutator_refuses_missing_caller_transaction_before_sql(
         with pytest.raises(TransactionChanged):
             calls[operation]()
         assert db.get_transaction() is None
+
+
+def test_create_track_requires_closed_gating_mode():
+    with pytest.raises(ValidationError):
+        CreateTrackCommand(
+            tenant_id=uuid4(),
+            cohort_id=uuid4(),
+            name="Track",
+            course_ids=(),
+            pacing_default_open=True,
+        )
+    with pytest.raises(ValidationError):
+        CreateTrackCommand(
+            tenant_id=uuid4(),
+            cohort_id=uuid4(),
+            name="Track",
+            course_ids=(),
+            gating_mode="sometimes",
+            pacing_default_open=True,
+        )
+    for mode in ("none", "previous", "all_previous"):
+        command = CreateTrackCommand(
+            tenant_id=uuid4(),
+            cohort_id=uuid4(),
+            name="Track",
+            course_ids=(),
+            gating_mode=mode,
+            pacing_default_open=True,
+        )
+        assert command.gating_mode == mode

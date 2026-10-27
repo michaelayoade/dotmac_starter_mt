@@ -35,6 +35,20 @@ class GradeTrendTerms:
 
 
 @dataclass(frozen=True, slots=True)
+class ProgressTrendTerms:
+    sample_limit: int
+    min_samples: int
+    min_delta_fraction: float
+
+    def __post_init__(self) -> None:
+        _integer("sample_limit", self.sample_limit, 2)
+        _integer("min_samples", self.min_samples, 2)
+        if self.sample_limit < self.min_samples:
+            raise ValueError("sample_limit must be >= min_samples")
+        _fraction("min_delta_fraction", self.min_delta_fraction)
+
+
+@dataclass(frozen=True, slots=True)
 class LearnerInsightTerms:
     chart_weeks: int
     velocity_weeks: int
@@ -52,10 +66,12 @@ class LearnerInsightTerms:
 class CohortInsightTerms:
     active_window_days: int
     comparison_prior_weeks: int
+    half_fraction: float
 
     def __post_init__(self) -> None:
         _integer("active_window_days", self.active_window_days)
         _integer("comparison_prior_weeks", self.comparison_prior_weeks, 1)
+        _fraction("half_fraction", self.half_fraction)
 
 
 @dataclass(frozen=True, slots=True)

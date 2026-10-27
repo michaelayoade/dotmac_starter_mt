@@ -109,3 +109,15 @@ def registered_dialects() -> Mapping[str, Dialect]:
     from dotmac_device_cli import dialects  # noqa: F401
 
     return dict(_DIALECTS)
+
+
+__all__ = [
+    "Dialect",
+    "OntRef",
+    "OntRow",
+    "ParsedTable",
+    "RefError",
+    "dialect_for",
+    "register_dialect",
+    "registered_dialects",
+]

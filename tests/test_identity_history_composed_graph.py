@@ -144,6 +144,12 @@ def test_real_installed_kernel_learning_and_partial_assembly_replay(
                 assert applied[-1][0] == "lr_0006_delivery_support"
                 command.upgrade(cfg, "lr_0007_enrollment_state_policy")
                 assert applied[-1][0] == "lr_0007_enrollment_state_policy"
+                command.upgrade(cfg, "lr_0008_prerequisite_conditions")
+                assert applied[-1][0] == "lr_0008_prerequisite_conditions"
+                command.upgrade(cfg, "lr_0009_composable_policies")
+                assert applied[-1][0] == "lr_0009_composable_policies"
+                command.upgrade(cfg, "lr_0010_question_bank_versions")
+                assert applied[-1][0] == "lr_0010_question_bank_versions"
                 expected_applied = {
                     script.revision for script in scripts.walk_revisions()
                 } - {"a002_later"}
