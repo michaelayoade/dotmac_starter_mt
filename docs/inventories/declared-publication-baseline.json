@@ -143,8 +143,8 @@
       "state": "declared-unpublished"
     },
     "dotmac-learning": {
-      "declared": "0.1.0a2+dev",
-      "reason": "UNPUBLISHED SUCCESSOR SOURCE UNDER A PEP 440 LOCAL DEVELOPMENT MARKER. Published 0.1.0a2 remains immutable and unchanged; the a3 recomposed source (composable prerequisite conditions lr_0008, composable policies lr_0009, question-bank versions lr_0010, 28 tables, 598 root exports) declares 0.1.0a2+dev because the published-source drift gate forbids shipping changed src/ under the tagged 0.1.0a2 identity before allocation. The marker is carried only until the release track allocates the next learning version (intended 0.1.0a3, not allocated here); no publication, tag or Academy adoption is claimed. Remove this row only through the authorized release-record transition for the allocated successor, never by editing the declared version down to 0.1.0a2.",
+      "declared": "0.1.0a3",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET RELEASED. Published 0.1.0a2 remains immutable and unchanged. The a3 recomposed source (composable prerequisite conditions lr_0008, composable policies lr_0009, versioned question banks lr_0010/SnapshotV6, 28 tables, 598 root exports) merged in PR #923 at cc4e5120 with hosted exact-head and resulting-main CI green, and is now allocated as 0.1.0a3 for a separate release dispatch (formerly the 0.1.0a2+dev development marker, which allocated nothing). Exact installed Kernel/Learning pair qualification remains required; the declared Kernel floor stays >=0.1.0a106 (published 0.1.0a107 satisfies it). No publication, tag, Academy adoption, backfill or writer retirement is claimed. Remove this row only through the authorized release-record transition for the allocated successor.",
       "state": "declared-unpublished"
     },
     "dotmac-platform-health": {

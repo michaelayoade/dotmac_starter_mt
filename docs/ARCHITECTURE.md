@@ -2788,9 +2788,13 @@ write:
 
 ### Learning assessment, delivery and read continuation (prepared source)
 
-2026-10-19 source amendment: Learning declares `0.1.0a2` (allocated successor,
-not yet published); published a1
-and its six released migrations remain immutable. Forward unreleased
+2026-10-26 allocation: Learning declares `0.1.0a3` (allocated successor,
+not yet published); published `0.1.0a2` and its released migrations remain
+immutable. The a3 source — composable prerequisite conditions `lr_0008`,
+composable policies `lr_0009`, versioned question banks `lr_0010`/SnapshotV6 —
+merged in PR #923 at `cc4e5120` with hosted exact-head and resulting-main
+CI green; the declared Kernel floor stays `>=0.1.0a106` (published
+`0.1.0a107` satisfies it). Forward unreleased
 `lr_0007_enrollment_state_policy` removes the Enrollment role/status
 schema defaults. Callers supply explicit state snapshots; product
 settings remain the policy owner. The combined hosted graph must execute actual

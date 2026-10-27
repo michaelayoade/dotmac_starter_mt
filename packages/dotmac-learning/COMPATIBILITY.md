@@ -7,10 +7,14 @@ totals, lineage head and bank-writer semantics stated in the dated sections
 below, which are retained as historical records for their own checkpoints.
 Claims below that do not conflict with this section remain in force.
 
-The candidate is intended as `0.1.0a3` but is **not allocated and not
-published**: every version string in the source still reads `0.1.0a2`, and no
-allocation is made here. Published `0.1.0a1` remains immutable. The declared
-Kernel floor remains `>=0.1.0a106`; no new Kernel API is consumed.
+The candidate is now allocated as `0.1.0a3` (allocated source candidate,
+**not yet published**): the three synced version surfaces move from the
+former `0.1.0a2+dev` development marker, which allocated nothing, to the
+bare successor `0.1.0a3`. Published `0.1.0a2` remains immutable. The source
+merged in PR #923 at `cc4e5120` with hosted exact-head and resulting-main
+CI green. The declared Kernel floor remains `>=0.1.0a106` (the published
+Kernel `0.1.0a107` satisfies it); no new Kernel API is consumed. Publication,
+Academy adoption, backfill and writer retirement are not claimed.
 
 Verified current facts: **28 tables / 298 persisted fields**, **598 root
 exports** (535 at the a2 candidate's close, +2 prerequisite exports, +2 terms

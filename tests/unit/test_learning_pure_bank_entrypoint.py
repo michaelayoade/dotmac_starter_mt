@@ -176,7 +176,7 @@ def test_same_owner_identity_and_raw_command_values():
 
 def test_same_distribution_package_and_pep561_source_declarations():
     poetry = tomllib.loads((PACKAGE / "pyproject.toml").read_text())["tool"]["poetry"]
-    assert poetry["name"] == "dotmac-learning" and poetry["version"] == "0.1.0a2+dev"
+    assert poetry["name"] == "dotmac-learning" and poetry["version"] == "0.1.0a3"
     assert poetry["packages"] == [
         {"include": "dotmac_learning", "from": "src"},
         {"include": "dotmac_learning_bank_rules", "from": "src"},

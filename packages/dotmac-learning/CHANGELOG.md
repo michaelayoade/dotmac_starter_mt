@@ -1,12 +1,17 @@
 # Changelog — dotmac-learning
 
-## Unreleased successor candidate (intended 0.1.0a3, not allocated) — 2026-10-21
+## 0.1.0a3 — allocated source candidate, not yet published
 
-This source candidate is **not allocated and not published**: `pyproject.toml`,
-`dotmac_learning.__version__` and the module manifest read `0.1.0a2+dev`, the
-PEP 440 local development marker carried until the release track allocates the
-next learning version; the published `0.1.0a2` bytes are unchanged. Allocation, publication, hosted PostgreSQL
-qualification, installed-pair qualification and Academy adoption remain pending
+This successor source is now allocated as `0.1.0a3`: `pyproject.toml`,
+`dotmac_learning.__version__` and the module manifest move from the
+`0.1.0a2+dev` PEP 440 local development marker (which allocated nothing) to
+the bare successor `0.1.0a3`; the published `0.1.0a2` remains immutable and
+unchanged. The source below — composable prerequisite conditions `lr_0008`,
+composable policies `lr_0009`, versioned question banks `lr_0010` with
+SnapshotV6 — merged in PR #923 at `cc4e5120` with hosted exact-head and
+resulting-main CI green. Publication remains a separate release dispatch; no
+tag, index entry, Academy adoption, backfill or writer retirement is claimed.
+Exact installed-pair qualification and Academy adoption remain pending
 separate gates. The `0.1.0a2` section below is retained as the historical record
 for that candidate; where its counts or semantics conflict with this section,
 this section governs the current source.
