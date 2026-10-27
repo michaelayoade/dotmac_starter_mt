@@ -240,3 +240,61 @@ def test_read_autobegin_allowed_and_source_autoflush_failure_propagates(
             pacing.activity_pacing(db, **_criteria(tenant, person, course, activity))
         assert not root.is_active
         db.rollback()  # Caller, rather than the read owner, restores the Session.
+
+
+def test_pacing_default_closed_locks_only_activities_without_override_rows(
+    result_database,
+):
+    _, app, tenant, person, course, activity, *_ = result_database
+    with scoped(app, tenant) as db:
+        cohort, _enrollment, offering, _row = _offering(
+            db,
+            tenant,
+            person,
+            course,
+            activity,
+            release_at=None,
+            due_at=None,
+        )
+        offering.pacing_default_open = False
+        db.flush()
+        # An override row exists for this activity: it wins over the default.
+        assert pacing.activity_pacing(
+            db, **_criteria(tenant, person, course, activity)
+        ) == PacingFact(True, True, True)
+        other_activity = uuid4()
+        db.add(
+            Activity(
+                id=other_activity,
+                tenant_id=tenant,
+                course_id=course,
+                type="mcq_test",
+                title="No override",
+                grading="auto",
+                weight=1.0,
+            )
+        )
+        db.flush()
+        assert pacing.activity_pacing(
+            db, **_criteria(tenant, person, course, other_activity)
+        ) == PacingFact(False, False, False)
+        # HM-11 dry-run: count (offering, activity) pairs with no override
+        # row before any operator flips the default closed.
+        uncovered = db.scalar(
+            text(
+                "SELECT count(*) FROM mod_learning.course_offerings o "
+                "JOIN mod_learning.activities a "
+                "ON a.tenant_id = o.tenant_id AND a.course_id = o.course_id "
+                "WHERE o.tenant_id = :tenant AND o.id = :offering "
+                "AND NOT EXISTS (SELECT 1 FROM mod_learning.offering_activities oa "
+                "WHERE oa.offering_id = o.id AND oa.activity_id = a.id "
+                "AND oa.tenant_id = o.tenant_id)"
+            ),
+            {"tenant": tenant, "offering": offering.id},
+        )
+        assert uncovered == 1
+        offering.pacing_default_open = True
+        db.flush()
+        assert pacing.activity_pacing(
+            db, **_criteria(tenant, person, course, other_activity)
+        ) == PacingFact(True, True, False)

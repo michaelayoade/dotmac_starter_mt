@@ -15,7 +15,17 @@ from dotmac_learning.insight_contracts import (
 )
 from dotmac_learning.success_contracts import SuccessTerms
 
-LEGACY = SuccessTerms(7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8)
+ALL_RULES = (
+    "inactivity",
+    "overdue_work",
+    "below_passing",
+    "failed_final",
+    "certificate_blocked",
+)
+DEFAULT_SEVERITY = {"failed_final": "high", "certificate_blocked": "medium"}
+LEGACY = SuccessTerms(
+    7, 60, 6, 2, 3, 7, 5, 2, 0.20, 0.5, 0.8, ALL_RULES, DEFAULT_SEVERITY
+)
 NOW = datetime(2026, 10, 18, tzinfo=UTC)
 
 
@@ -71,7 +81,7 @@ def test_terms_are_required_frozen_and_zero_values_are_preserved():
         zero.inactive_days = 9
     assert LearnerInsightTerms(0, 0, 0, GradeTrendTerms(2, 2, 0)).chart_weeks == 0
     with pytest.raises(ValueError):
-        CohortInsightTerms(0, 0)
+        CohortInsightTerms(0, 0, 0.5)
 
 
 def test_configured_trend_and_resume_threshold_preserve_exact_operators():

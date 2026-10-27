@@ -92,7 +92,7 @@ def test_analysis_best_per_person_strict_fraction_and_actual_rls(result_database
         # encountered maximum from the exact unordered source query.
         pairs = db.execute(analytics._activity_scores_query(tenant, activity)).all()
         expected = {}
-        for pid, row in pairs:
+        for pid, _attempt_no, row in pairs:
             if pid not in expected or row.fraction > expected[pid].fraction:
                 expected[pid] = row
         actual = analytics._best_scores_for_activity(
@@ -178,3 +178,26 @@ def test_analysis_best_per_person_strict_fraction_and_actual_rls(result_database
             ("own", 1, 1, 1),
         )
         assert analytics.item_analysis(db, tenant_id=tenant, activity_id=aid) == ()
+
+
+def test_analysis_follows_latest_scoring_policy(result_database):
+    _, app, tenant, person, course, activity, *_ = result_database
+    with scoped(app, tenant) as db:
+        from dotmac_learning.models import Activity
+        from sqlalchemy import select
+
+        row = db.scalar(select(Activity).where(Activity.id == activity))
+        row.scoring_policy = "latest"
+        db.flush()
+        append(db, tenant, person, activity, 1, 0.9, [{"id": "q", "correct": True}])
+        append(db, tenant, person, activity, 2, 0.4, [{"id": "q", "correct": False}])
+        rows = analytics._best_scores_for_activity(
+            db, tenant_id=tenant, activity_id=activity
+        )
+        assert len(rows) == 1 and rows[0].fraction == 0.4
+        assert (
+            best_scores_for(db, tenant_id=tenant, person_id=person, course_id=course)[
+                activity
+            ].fraction
+            == 0.4
+        )

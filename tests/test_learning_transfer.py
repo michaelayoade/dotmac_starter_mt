@@ -945,3 +945,134 @@ def test_timestamp_preflight_does_not_deduplicate_distinct_dst_fold_instants(
             assert inserts == []
         finally:
             event.remove(conn, "before_cursor_execute", distort)
+
+
+def test_rd1_non_default_composition_refused_by_v1_export_and_verify(
+    transfer_database,
+):
+    """RD-1: non-default prerequisite policy refuses V1 export and verify.
+
+    Authored for the hosted PG gate. The non-default is seeded by a raw
+    SQL UPDATE after the standard fixture import because the authoring
+    APIs land in S2; the defaults path stays byte-compatible and is
+    covered by the roundtrip canaries above.
+    """
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot(conn, snapshot)
+        conn.execute(
+            text(
+                "UPDATE mod_learning.courses"
+                " SET prerequisite_composition = 'any'"
+                " WHERE tenant_id = :tenant"
+            ),
+            {"tenant": tenants[0]},
+        )
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot(conn, snapshot)
+
+
+# RD-1 Wave 1L (lr_0009) families covered by every snapshot version.
+_RD1_S2_V1_NON_DEFAULTS = (
+    (
+        "completion_fraction",
+        "UPDATE mod_learning.courses"
+        " SET completion_fraction = 0.5 WHERE tenant_id = :tenant",
+    ),
+    (
+        "certificate_auto_issue",
+        "UPDATE mod_learning.courses"
+        " SET certificate_auto_issue = false WHERE tenant_id = :tenant",
+    ),
+    (
+        "certificate_validity_days",
+        "UPDATE mod_learning.courses"
+        " SET certificate_validity_days = 30 WHERE tenant_id = :tenant",
+    ),
+    (
+        "scoring_policy",
+        "UPDATE mod_learning.activities"
+        " SET scoring_policy = 'latest' WHERE tenant_id = :tenant",
+    ),
+    (
+        "min_attempt_interval_seconds",
+        "UPDATE mod_learning.activities"
+        " SET min_attempt_interval_seconds = 60 WHERE tenant_id = :tenant",
+    ),
+    (
+        "is_final_true",
+        "UPDATE mod_learning.activities"
+        " SET is_final = true WHERE tenant_id = :tenant",
+    ),
+    (
+        "certificate_expires_at",
+        "UPDATE mod_learning.certificates"
+        " SET expires_at = issued_at WHERE tenant_id = :tenant",
+    ),
+)
+
+
+@pytest.mark.parametrize("family,statement", _RD1_S2_V1_NON_DEFAULTS)
+def test_rd1_s2_non_defaults_refused_by_v1_export_and_verify(
+    transfer_database, family, statement
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot(conn, snapshot)
+        conn.execute(text(statement), {"tenant": tenants[0]})
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot(conn, snapshot)
+
+
+def test_rd1_migrated_final_refuses_until_snapshot_v6(transfer_database):
+    """is_final=true refuses V1-V5 however it was materialized (RD-1).
+
+    The probe default is exactly false, matching the column server
+    default frozen imports materialize; a migrated final (no chapter,
+    threshold>0, is_final=true from the lr_0009 backfill) is therefore
+    non-default data and refuses, while creation-default false on the
+    same shape remains transferable.
+    """
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot(conn, snapshot)
+        conn.execute(
+            text(
+                "UPDATE mod_learning.activities"
+                " SET pass_threshold = 0.5, is_final = true"
+                " WHERE tenant_id = :tenant"
+            ),
+            {"tenant": tenants[0]},
+        )
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot(conn, (tenants[0],))
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot(conn, snapshot)
+        conn.execute(
+            text(
+                "UPDATE mod_learning.activities SET is_final = false"
+                " WHERE tenant_id = :tenant"
+            ),
+            {"tenant": tenants[0]},
+        )
+        exported = export_snapshot(conn, (tenants[0],))
+        assert {row.id for row in exported.activities} == {snapshot.activities[0].id}

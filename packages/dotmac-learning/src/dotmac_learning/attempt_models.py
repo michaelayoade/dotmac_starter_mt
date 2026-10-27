@@ -48,6 +48,7 @@ class ActivityAttempt(Base, TimestampMixin):
         Index("ix_activity_attempts_tenant_id", "tenant_id"),
         Index("ix_activity_attempts_activity_id", "activity_id"),
         Index("ix_activity_attempts_person_id", "person_id"),
+        Index("ix_activity_attempts_bank_version_id", "bank_version_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -58,6 +59,8 @@ class ActivityAttempt(Base, TimestampMixin):
     )
     activity_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     person_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # Bank version pinned when the sitting opened; NULL on historical rows.
+    bank_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     question_ext_ids: Mapped[list[object]] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"),
         nullable=False,

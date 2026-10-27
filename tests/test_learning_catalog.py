@@ -47,6 +47,7 @@ ALL_TABLES = (
     *TABLES,
     "chapters",
     "question_banks",
+    "question_bank_versions",
     "questions",
     "chapter_reads",
     "subtopic_reads",
@@ -532,17 +533,18 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
                 }
                 assert columns["tenant_id"]["nullable"] is False
                 nullable = {
-                    "courses": set(),
+                    "courses": {"certificate_validity_days"},
                     "activities": {
                         "chapter_number",
                         "bank_id",
+                        "bank_version_id",
                         "max_attempts",
                         "question_count",
                     },
                     "submissions": set(),
                     "scores": {"override_reason"},
                     "course_completions": {"completed_at"},
-                    "certificates": set(),
+                    "certificates": {"expires_at"},
                     "learning_events": {"course_id", "subject_id"},
                 }
                 assert {
@@ -575,7 +577,12 @@ def test_fresh_catalog_constraints_defaults_indexes_and_grants(
                 } == uniques[table]
                 indexed = {
                     "courses": ("tenant_id",),
-                    "activities": ("tenant_id", "course_id", "bank_id"),
+                    "activities": (
+                        "tenant_id",
+                        "course_id",
+                        "bank_id",
+                        "bank_version_id",
+                    ),
                     "submissions": ("tenant_id", "activity_id", "person_id"),
                     "scores": ("tenant_id", "submission_id"),
                     "course_completions": ("tenant_id", "person_id", "course_id"),

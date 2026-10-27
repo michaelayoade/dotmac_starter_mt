@@ -108,6 +108,13 @@ def _observation(
         )
         or 0
     )
+    last_attempt_at = db.scalar(
+        select(func.max(Submission.created_at)).where(
+            Submission.tenant_id == payload.tenant_id,
+            Submission.person_id == payload.person_id,
+            Submission.activity_id == payload.activity_id,
+        )
+    )
     return AdmissionObservation(
         tenant_id=payload.tenant_id,
         person_id=payload.person_id,
@@ -121,6 +128,9 @@ def _observation(
         assessment_mode=activity.assessment_mode,
         bank_id=activity.bank_id,
         question_count=activity.question_count,
+        min_attempt_interval_seconds=activity.min_attempt_interval_seconds,
+        last_attempt_at=last_attempt_at,
+        bank_version_id=activity.bank_version_id,
     )
 
 
@@ -383,14 +393,31 @@ def submit_mcq_activity(db: Session, payload: SubmitMCQCommand) -> ResultWrite:
         ),
         boundary,
     )
+    # Grade against the sitting's pinned bank version when one exists:
+    # the open attempt's pin wins, then the activity's serving version,
+    # then the historical bank-level read for unpinned estate.
+    from .attempt_models import ActivityAttempt
+
+    open_attempt = db.scalars(
+        select(ActivityAttempt)
+        .where(ActivityAttempt.tenant_id == observation.tenant_id)
+        .where(ActivityAttempt.activity_id == observation.activity_id)
+        .where(ActivityAttempt.person_id == payload.person_id)
+        .where(ActivityAttempt.submitted_at.is_(None))
+        .order_by(ActivityAttempt.started_at.desc())
+    ).first()
+    pin = open_attempt.bank_version_id if open_attempt is not None else None
+    if pin is None:
+        pin = observation.bank_version_id
     questions = (
         questions_for(
             db,
             tenant_id=observation.tenant_id,
             bank_id=observation.bank_id,
             only_ext_ids=payload.only_ext_ids,
+            bank_version_id=pin,
         )
-        if observation.bank_id is not None
+        if observation.bank_id is not None or pin is not None
         else []
     )
     sub, emitted = _append_submission(

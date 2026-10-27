@@ -25,7 +25,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import attempt_policy, scheduling
-from .assessment_reads import attempts_used_by_person, reveal_feedback
+from .assessment_reads import (
+    FeedbackRevealTerms,
+    attempts_used_by_person,
+    reveal_feedback,
+)
 from .attempt_models import ActivityAttempt
 from .curriculum import _fact as _chapter_fact
 from .curriculum_contracts import ChapterFact
@@ -49,6 +53,7 @@ from .delivery_contracts import ClassSessionFact
 from .delivery_models import OfferingActivity
 from .entitlements import CourseAccessState, course_access_states, visible_course_ids
 from .gradebook import grade_from
+from .insight_contracts import ProgressTrendTerms
 from .models import Activity, Certificate, Course, CourseCompletion, Score, Submission
 from .participation_models import CourseOffering, Enrollment
 from .progress_contracts import CertificateFact, CompletionFact, ScoreFact
@@ -627,15 +632,15 @@ def course_cards(
     )
 
 
-def _trend(points: list[int]) -> Trend:
-    if len(points) < 3:
+def _trend(points: list[int], terms: ProgressTrendTerms) -> Trend:
+    if len(points) < terms.min_samples:
         return "flat"
     half = len(points) // 2
     earlier = sum(points[:half]) / half
     later = sum(points[half:]) / (len(points) - half)
-    if later - earlier > 3:
+    if later - earlier > terms.min_delta_fraction * 100:
         return "up"
-    if earlier - later > 3:
+    if earlier - later > terms.min_delta_fraction * 100:
         return "down"
     return "flat"
 
@@ -648,7 +653,13 @@ def _due_key(row: ProgressActivity) -> datetime:
 
 
 def progress_overview(
-    db: Session, *, tenant_id: UUID, person_id: UUID, now: datetime | None = None
+    db: Session,
+    *,
+    tenant_id: UUID,
+    person_id: UUID,
+    progress_trend: ProgressTrendTerms,
+    feedback_terms: FeedbackRevealTerms,
+    now: datetime | None = None,
 ) -> tuple[CourseProgress, ...]:
     """The rich per-course progress projection for /progress."""
     now = now or datetime.now(UTC)
@@ -742,6 +753,7 @@ def progress_overview(
                 score is not None
                 and reveal_feedback(
                     a,
+                    terms=feedback_terms,
                     passed=score.passed,
                     attempts_used=used,
                     attempts_granted=ent.granted,
@@ -755,7 +767,9 @@ def progress_overview(
             elif due is not None and due > now and not is_passed:
                 upcoming.append(row)
 
-        score_points = trend_by_course.get(course.id, [])[-8:]
+        score_points = trend_by_course.get(course.id, [])[
+            -progress_trend.sample_limit :
+        ]
 
         completion = completions.get(course.id)
         certificate = certificates.get(course.id)
@@ -775,7 +789,7 @@ def progress_overview(
                 tuple(sorted(upcoming, key=_due_key)),
                 tuple(overdue),
                 tuple(score_points),
-                _trend(score_points),
+                _trend(score_points, progress_trend),
                 ProgressCertificate(
                     "issued"
                     if certificate is not None

@@ -62,7 +62,7 @@ def expectation(checkout: Path, destination: Path) -> None:
                 if isinstance(target, ast.Name) and target.id == "__version__":
                     version = ast.literal_eval(node.value)
     require(
-        exports is not None and len(exports) == len(set(exports)) == 535,
+        exports is not None and len(exports) == len(set(exports)) == 598,
         "Source Learning export extent differs",
     )
     require(
@@ -224,7 +224,7 @@ def installed_packages(expected: dict, receipt: dict) -> None:
         wheels[distribution] = {"sha256": wheel_digest, "version": version}
     receipt.update(
         wheels=wheels,
-        learning_exports=535,
+        learning_exports=598,
         kernel_exports=281,
         owner_binding_sha256=hashlib.sha256(
             json.dumps(expected["bindings"], sort_keys=True).encode()
@@ -327,7 +327,7 @@ def migrate(admin, receipt: dict) -> None:
             scripts = ScriptDirectory.from_config(cfg)
             require(
                 set(scripts.get_heads())
-                == {"0030_credential_tenant_key", "lr_0007_enrollment_state_policy"},
+                == {"0030_credential_tenant_key", "lr_0010_question_bank_versions"},
                 "Installed pair graph head differs",
             )
 
@@ -365,7 +365,7 @@ def migrate(admin, receipt: dict) -> None:
                 )
                 cfg.attributes["connection"] = connection
                 command.upgrade(cfg, "0030_credential_tenant_key")
-                command.upgrade(cfg, "lr_0007_enrollment_state_policy")
+                command.upgrade(cfg, "lr_0010_question_bank_versions")
                 require_prerequisites(connection, module.requires)
                 require(
                     set(
@@ -373,13 +373,13 @@ def migrate(admin, receipt: dict) -> None:
                             sa.text("SELECT version_num FROM public.alembic_version")
                         )
                     )
-                    == {"lr_0007_enrollment_state_policy"},
+                    == {"lr_0010_question_bank_versions"},
                     "Live installed head differs",
                 )
                 require(
                     connection.scalar(
                         sa.text(
-                            "SELECT count(*)=27 AND bool_and(c.relrowsecurity) "
+                            "SELECT count(*)=28 AND bool_and(c.relrowsecurity) "
                             "FROM pg_class c "
                             "JOIN pg_namespace n ON n.oid=c.relnamespace "
                             "WHERE n.nspname='mod_learning' AND c.relkind='r'"
@@ -818,7 +818,10 @@ def vertical(admin_url, user_url, receipt: dict) -> None:
                 refusal = bulk_enroll(
                     db,
                     BulkEnrollCommand(
-                        tenant_id=tenant, cohort_id=cohort.id, emails=(email,)
+                        tenant_id=tenant,
+                        cohort_id=cohort.id,
+                        emails=(email,),
+                        pacing_default_open=True,
                     ),
                     authority=RosterAuthority(tenant, False),
                     accounts=presence,

@@ -3,12 +3,16 @@
 Starter owns this reusable learning domain. The initial slice covers activity
 results, best-result projections, course progress, completion, certificate
 issuance and learning events, including course/activity reference persistence.
-A further source slice adds curriculum lifecycle, question-bank validation and
-replacement, chapter/subtopic reading and learner annotations. The participation
+A further source slice adds curriculum lifecycle, question-bank validation,
+chapter/subtopic reading and learner annotations (bank writing itself is now
+the versioned lifecycle described below). The participation
 slice adds enrolment/audience, tracks and course access, alongside the existing
 pure exam-engine/grader port. The prepared continuation adds attempt policy and
 persistence, scheduling, pacing, announcements, support queues and learning
-read projections, covering 27 tables and 260 persisted fields. Academy is the
+read projections. The current unreleased successor candidate (intended
+0.1.0a3, not allocated; version strings still read 0.1.0a2) adds composable
+prerequisite/policy settings and the question-bank system of record, covering
+28 tables and 298 persisted fields with 598 root exports. Academy is the
 intended first adopter.
 
 This is prepared source, pending hosted qualification and publication. Academy
@@ -18,9 +22,9 @@ ownership, migration and retirement gates.
 The package uses the caller's SQLAlchemy Session and transaction. Commands retain
 source staging/flush behavior; the application boundary commits or rolls back. Compose its `module` manifest
 and `versions_dir()` lineage, bind the three declared Kernel prerequisites, and
-use genuine Kernel tenant, Party and PartyPerson records. The prepared manifest owns 27 tables in `mod_learning` and the independent
+use genuine Kernel tenant, Party and PartyPerson records. The prepared manifest owns 28 tables in `mod_learning` and the independent
 `learning` Alembic branch, from `lr_0001_learning` through
-`lr_0007_enrollment_state_policy`. `lr_0005_tenant_audit` verifies the existing Kernel
+`lr_0010_question_bank_versions`. `lr_0005_tenant_audit` verifies the existing Kernel
 audit catalog without copying its provider or writer. Promotion requires the new
 Kernel audit API to be published, a proven dependency floor and the additional
 audit prerequisite declaration. These release gates remain outstanding. The
@@ -123,11 +127,19 @@ owner. Remaining direct Academy learning writers and domain reads must delegate
 to qualified released APIs before thin-assembly retirement.
 
 
-`LearningSnapshotV4` covers 23 tables and 212 fields; V5 covers the full 27 tables
+`LearningSnapshotV4` covers 23 tables and 212 fields; V5 covers 27 tables
 and 260 fields. Each version preflights its complete extent before delegating
 inserts to its predecessor and independently verifies current fields, keys and
 deletes. V1–V3 retain their original scopes. Package-store observations remain
 uncommitted and do not establish populated Academy rollback safety.
+
+`LearningSnapshotV6` is the current full protocol: all 28 tables and 298
+fields, including the composable-policy columns, prerequisite origin and
+question-bank version pins, via `export_snapshot_v6`, `import_snapshot_v6` and
+`verify_snapshot_v6`. Frozen V1–V5 keep their original scopes and row
+contracts, and their export/verify paths refuse — rather than silently
+dropping data — when a column they do not carry holds a non-default value;
+default-only extents still transfer through them unchanged.
 
 Prepared read APIs cover grades, transcripts, item analysis, catalog, agenda,
 timeline, insights, learner dashboards, instructor workspaces, legacy support,
@@ -195,6 +207,59 @@ rows or change constraints, indexes, RLS or grants. Its downgrade restores histo
 schema defaults only and does not recover or erase post-upgrade accepted facts.
 Hosted PostgreSQL qualification is required; this source capsule has no runtime claim.
 
+
+## Composable prerequisites, policies and terms
+
+Course prerequisites are tenant data rows evaluated by one Learning evaluator:
+a closed condition-kind catalog (`course_completed`, `certificate_held`,
+`course_grade_at_least`, `activity_passed`, `attempt_number_at_least`) with
+typed-validated parameters and group keys, composed `all|any` across groups
+(ALL within a group). The defaults (`course_completed`, group `g0`,
+composition `all`) reproduce the prior behaviour exactly, and legacy
+`requires: []` declarations still parse. Track gating
+(`none|previous|all_previous`, default `previous`) is evaluated in the same
+pass. Reconciliation records each row's origin and rewrites only
+`origin=yaml_import` rows; app-authored rows are never rewritten by a file
+reconcile.
+
+Learner-visible policies are data or explicit terms inputs, each defaulting to
+the prior hardcoded behaviour: completion fraction `1.0`, certificate
+auto-issue on with no expiry, scoring policy `best`, attempt cooldown `0`,
+pacing default open, feedback reveal practice=immediate /
+graded=on_pass_or_exhausted / exam=never (`exam -> immediate` is refused),
+progress-trend 8/3/0.03, cohort half-fraction `0.5`, and all five success rules
+enabled at their current severities. Learning supplies no fallback for the new
+required terms/command fields (see COMPATIBILITY.md for the exhaustive
+breaking list); the product composes them from its Settings at each call site.
+Policy changes are prospective only: completion-fraction and certificate
+validity never rewrite stored completions or issued certificates, a scoring
+policy change is refused once submissions exist (the raw staging path is a
+documented trusted-import bypass), and cooldowns constrain only later
+admissions.
+
+## Question-bank system of record
+
+Question banks are versioned in the database. Authors work on drafts
+(create/copy/upsert/delete/discard), lint them with `lint_bank_version`, and
+publish a lint-clean draft as an immutable version; publishing never
+auto-repoints activities, so moving an activity to a new version and retiring
+an old version are explicit commands. Attempts pin the bank version they
+opened against and are graded and read through that pin. YAML is a transport
+format only: import lands as a draft (never overwriting a UI draft, replacing
+an untouched YAML draft only via the explicit flag, writing no Activity rows)
+and export emits the audited published document. The former destructive
+writers `load_bank` and `import_bank_with_activity` now raise
+`LegacyBankWriterRetired` without executing SQL. Learner sittings use the
+key-free `sitting_questions` projection. Learning checks no roles internally:
+commands take a trusted `BankAuditContext`, and restricting publish/export to
+administrators is the adopting product's composition responsibility.
+
+Answer keys historically lived in Git YAML; that exposure cannot be undone by
+deletion and no renewed secrecy is claimed for it. Treat historically
+committed bank content as disclosed, and retire/replace exposed banks with
+newly authored items rather than rewriting history. Hosted PostgreSQL
+qualification, the exact installed pair, and Academy adoption/caller
+retirement for all of the above remain pending gates.
 
 Bulk creation of a non-student enrollment requires admin authority, including
 when product policy configures the instructor role. Refused new members appear

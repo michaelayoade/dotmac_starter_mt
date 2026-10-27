@@ -45,6 +45,27 @@ def _applicable_overrides(
     )
 
 
+def _offering_pacing_defaults(
+    db: Session, *, tenant_id: UUID, person_id: UUID, course_id: UUID
+) -> list[bool]:
+    """Pacing defaults across the person's active offerings for the course."""
+    return list(
+        db.scalars(
+            select(CourseOffering.pacing_default_open)
+            .join(
+                Enrollment,
+                (Enrollment.cohort_id == CourseOffering.cohort_id)
+                & (Enrollment.tenant_id == CourseOffering.tenant_id),
+            )
+            .where(CourseOffering.tenant_id == tenant_id)
+            .where(CourseOffering.course_id == course_id)
+            .where(CourseOffering.status == "active")
+            .where(Enrollment.person_id == person_id)
+            .where(Enrollment.status == "active")
+        ).all()
+    )
+
+
 def activity_pacing(
     db: Session,
     *,
@@ -64,7 +85,17 @@ def activity_pacing(
         activity_id=activity_id,
     )
     if not overrides:
-        return PacingFact(readable=True, submittable=True, has_override=False)
+        defaults = _offering_pacing_defaults(
+            db, tenant_id=tenant_id, person_id=person_id, course_id=course_id
+        )
+        # No applicable offering keeps the historical open result: entitlement
+        # is decided by other owners, not by pacing.
+        open_by_default = True if not defaults else any(defaults)
+        return PacingFact(
+            readable=open_by_default,
+            submittable=open_by_default,
+            has_override=False,
+        )
 
     readable = False
     submittable = False
