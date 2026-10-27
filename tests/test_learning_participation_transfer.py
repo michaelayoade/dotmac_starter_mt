@@ -6,6 +6,7 @@ cutover proof. The V1 protocol remains explicitly limited to seven tables.
 
 from dataclasses import fields, replace
 from datetime import UTC, datetime, timedelta
+from typing import get_args, get_type_hints
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -272,6 +273,16 @@ def _transfer_column_reader(conn, missing=None):
         DDL("GRANT USAGE ON SCHEMA public, mod_learning TO %(actor)s", context=context)
     )
     conn.execute(DDL("GRANT SELECT ON public.tenants TO %(actor)s", context=context))
+    # RD-1 probe (lr_0010): frozen exports must see whether any
+    # question_bank_versions row exists in the tenant extent; the
+    # exact-column grant below is the probe's only privilege need.
+    conn.execute(
+        DDL(
+            "GRANT SELECT (tenant_id) "
+            "ON mod_learning.question_bank_versions TO %(actor)s",
+            context=context,
+        )
+    )
     for name in TABLES:
         conn.execute(
             DDL(
@@ -1681,11 +1692,23 @@ _INTEGER_EXAMPLES = [
     ("cohorts", "entrance_time_limit_minutes"),
     ("track_courses", "order_index"),
 ]
+# V3 representation probes can only address tables and columns the
+# frozen V3 rows carry: lr_0008-lr_0010 composable-policy and
+# bank-version columns (and the question_bank_versions table itself)
+# join only at V6, so probing them here would construct rows the V3
+# contracts deliberately do not have.
+_V3_ROW_FIELDS = {
+    name: {f.name for f in fields(get_args(hint)[0])}
+    for name, hint in get_type_hints(LearningSnapshotV3).items()
+    if name not in {"version", "tenant_ids"}
+}
 _VARCHAR_COLUMNS = [
     (name, stored.name, stored.type.length)
     for name, relation in RELATIONS.items()
+    if name in _V3_ROW_FIELDS
     for stored in relation.c
-    if isinstance(getattr(stored.type, "length", None), int)
+    if stored.name in _V3_ROW_FIELDS[name]
+    and isinstance(getattr(stored.type, "length", None), int)
 ]
 
 
@@ -1793,3 +1816,180 @@ def test_v3_varchar_character_capacity_preserves_multibyte_text_and_trailing_spa
         assert import_snapshot_v3(conn, snapshot).verification.matched
         assert _keyed(export_snapshot_v3(conn, tenants)) == _keyed(snapshot)
         assert verify_snapshot_v3(conn, snapshot).matched
+
+
+# RD-1 refusal coverage (authored for the hosted PG gate). Non-defaults are
+# seeded by raw SQL UPDATEs after the standard fixture import because the
+# authoring APIs land in S2; the defaults path stays byte-compatible and is
+# covered by the roundtrip canaries above.
+_RD1_NON_DEFAULTS = (
+    (
+        "composition",
+        "UPDATE mod_learning.courses"
+        " SET prerequisite_composition = 'any' WHERE tenant_id = :tenant",
+    ),
+    (
+        "condition_kind",
+        "UPDATE mod_learning.course_prerequisites"
+        " SET condition_kind = 'certificate_held' WHERE tenant_id = :tenant",
+    ),
+    (
+        "params",
+        "UPDATE mod_learning.course_prerequisites"
+        " SET params = '{\"min_fraction\": 0.5}'::jsonb"
+        " WHERE tenant_id = :tenant",
+    ),
+    (
+        "group_key",
+        "UPDATE mod_learning.course_prerequisites"
+        " SET group_key = 'g1' WHERE tenant_id = :tenant",
+    ),
+    (
+        "gating_mode",
+        "UPDATE mod_learning.tracks"
+        " SET gating_mode = 'none' WHERE tenant_id = :tenant",
+    ),
+    (
+        # lr_0010 provenance: yaml_import is the backfill/reconciler
+        # value; the standing default frozen imports materialize is
+        # ui, so yaml_import refuses V1-V5 (RD-1).
+        "prerequisite_origin",
+        "UPDATE mod_learning.course_prerequisites"
+        " SET origin = 'yaml_import' WHERE tenant_id = :tenant",
+    ),
+)
+
+
+@pytest.mark.parametrize("family,statement", _RD1_NON_DEFAULTS)
+def test_rd1_non_defaults_refused_by_v3_export_and_verify(
+    transfer_database, family, statement
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        conn.execute(text(statement), {"tenant": tenants[0]})
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot_v3(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot_v3(conn, snapshot)
+
+
+def test_rd1_non_default_composition_refused_by_v2_export_and_verify(
+    transfer_database,
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        conn.execute(text(_RD1_NON_DEFAULTS[0][1]), {"tenant": tenants[0]})
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot_v2(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot_v2(conn, curriculum_snapshot(tenants, people))
+
+
+def test_rd1_other_tenant_non_defaults_do_not_block_clean_tenant_export(
+    transfer_database,
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        for _family, statement in _RD1_NON_DEFAULTS:
+            conn.execute(text(statement), {"tenant": tenants[1]})
+        exported = export_snapshot_v3(conn, (tenants[0],))
+        assert {row.id for row in exported.courses} == {snapshot.courses[0].id}
+        assert {row.id for row in exported.tracks} == {snapshot.tracks[0].id}
+        assert {row.id for row in exported.course_prerequisites} == {
+            snapshot.course_prerequisites[0].id
+        }
+
+
+# RD-1 Wave 1L (lr_0009) families that join coverage at V3.
+_RD1_S2_V3_NON_DEFAULTS = (
+    (
+        "auto_accept_below_action",
+        "UPDATE mod_learning.cohorts"
+        " SET auto_accept_below_action = 'none' WHERE tenant_id = :tenant",
+    ),
+    (
+        "pacing_default_open",
+        "UPDATE mod_learning.course_offerings"
+        " SET pacing_default_open = false WHERE tenant_id = :tenant",
+    ),
+)
+
+
+@pytest.mark.parametrize("family,statement", _RD1_S2_V3_NON_DEFAULTS)
+def test_rd1_s2_non_defaults_refused_by_v3_export_and_verify(
+    transfer_database, family, statement
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        conn.execute(text(statement), {"tenant": tenants[0]})
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot_v3(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot_v3(conn, snapshot)
+
+
+def test_rd1_s2_scoring_policy_refused_by_v2_export_and_verify(
+    transfer_database,
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        conn.execute(
+            text(
+                "UPDATE mod_learning.activities"
+                " SET scoring_policy = 'first' WHERE tenant_id = :tenant"
+            ),
+            {"tenant": tenants[0]},
+        )
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            export_snapshot_v2(conn, tenants)
+        with pytest.raises(
+            SnapshotValidationError, match="non-default prerequisite policy"
+        ):
+            verify_snapshot_v2(conn, curriculum_snapshot(tenants, people))
+
+
+def test_rd1_s2_other_tenant_non_defaults_do_not_block_clean_export(
+    transfer_database,
+):
+    owner, _app, tenants, people = transfer_database
+    snapshot = _snapshot(tenants, people)
+    with owner.begin() as conn:
+        import_snapshot_v3(conn, snapshot)
+        for _family, statement in _RD1_S2_V3_NON_DEFAULTS:
+            conn.execute(text(statement), {"tenant": tenants[1]})
+        conn.execute(
+            text(
+                "UPDATE mod_learning.courses"
+                " SET completion_fraction = 0.5 WHERE tenant_id = :tenant"
+            ),
+            {"tenant": tenants[1]},
+        )
+        exported = export_snapshot_v3(conn, (tenants[0],))
+        assert {row.id for row in exported.cohorts} == {snapshot.cohorts[0].id}
+        assert {row.id for row in exported.course_offerings} == {
+            snapshot.course_offerings[0].id
+        }

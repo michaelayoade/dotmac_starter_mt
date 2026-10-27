@@ -68,6 +68,7 @@ class CertificateFact:
     issued_at: datetime
     created_at: datetime
     updated_at: datetime
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)

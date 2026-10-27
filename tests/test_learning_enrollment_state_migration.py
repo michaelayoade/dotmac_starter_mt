@@ -18,7 +18,6 @@ from tests.test_learning_catalog import (
     _scope,
     _tenant,
 )
-from tests.test_learning_participation_catalog import _cohort
 
 learning_database = learning_catalog.learning_database
 
@@ -95,7 +94,15 @@ def test_schema_only_retirement_preserves_historical_rows_and_catalog(
             people = [_person(conn, tenant) for _ in range(6)]
         with app.begin() as conn:
             _scope(conn, tenant)
-            cohort = _cohort(conn, tenant)
+            cohort = uuid4()
+            conn.execute(
+                text(
+                    "INSERT INTO mod_learning.cohorts (id, tenant_id, "
+                    "name, discipline, status) VALUES (:id, :tenant, "
+                    "'Cohort', 'engineering', 'active')"
+                ),
+                {"id": cohort, "tenant": tenant},
+            )
             for person, role, status in zip(
                 people[:4],
                 ("student", "instructor", "", "界" * 20),
@@ -136,7 +143,10 @@ def test_schema_only_retirement_preserves_historical_rows_and_catalog(
             assert columns["role_in_cohort"]["default"] is None
             assert columns["status"]["default"] is None
             heads = set(conn.scalars(text("SELECT version_num FROM alembic_version")))
-            assert "lr_0007_enrollment_state_policy" in heads
+            # Composed DB: alembic_version also carries the kernel
+            # head; lr_0007 is proven applied by the lr_0010 head
+            # descending from it (and by the retired defaults above).
+            assert "lr_0010_question_bank_versions" in heads
             assert "lr_0006_delivery_support" not in heads
         with app.begin() as conn:
             _scope(conn, tenant)

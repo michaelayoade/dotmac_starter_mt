@@ -1390,7 +1390,7 @@ url = "packages/dotmac-kernel"
 
 [[package]]
 name = "dotmac-learning"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Reusable tenant learning results, progress, completion and certificates"
 optional = false
 python-versions = ">=3.11,<3.14"

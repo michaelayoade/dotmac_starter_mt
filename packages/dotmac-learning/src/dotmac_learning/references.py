@@ -6,16 +6,66 @@ curriculum existence/authorization decision is invented by these commands.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import NoReturn
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Activity, Course
+from .curriculum_models import QuestionBankVersion
+from .models import Activity, Course, Submission
+
+SCORING_POLICIES: tuple[str, ...] = ("best", "latest", "first")
+MAX_ATTEMPT_INTERVAL_SECONDS = 2592000
+
+
+def _validate_completion_fraction(value: float) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or not 0 < value <= 1
+    ):
+        raise ValueError("completion_fraction must be a finite fraction in (0, 1]")
+    return float(value)
+
+
+def _validate_certificate_validity_days(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("certificate_validity_days must be null or at least 1")
+    return value
+
+
+def _validate_prerequisite_composition(value: str) -> str:
+    if value not in ("all", "any"):
+        raise ValueError(f"unknown prerequisite composition: {value!r}")
+    return value
+
+
+def _validate_scoring_policy(value: str) -> str:
+    if value not in SCORING_POLICIES:
+        raise ValueError(f"unknown scoring policy: {value!r}")
+    return value
+
+
+def _validate_min_attempt_interval(value: int) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= MAX_ATTEMPT_INTERVAL_SECONDS
+    ):
+        raise ValueError(
+            "min_attempt_interval_seconds must be between 0 and "
+            f"{MAX_ATTEMPT_INTERVAL_SECONDS}"
+        )
+    return value
 
 
 class CourseWrite(BaseModel):
@@ -29,6 +79,25 @@ class CourseWrite(BaseModel):
     version: int = 1
     status: str
     listed: bool
+    completion_fraction: float = 1.0
+    certificate_auto_issue: bool = True
+    certificate_validity_days: int | None = None
+    prerequisite_composition: str = "all"
+
+    @field_validator("completion_fraction")
+    @classmethod
+    def validate_completion_fraction(cls, value: float) -> float:
+        return _validate_completion_fraction(value)
+
+    @field_validator("certificate_validity_days")
+    @classmethod
+    def validate_certificate_validity_days(cls, value: int | None) -> int | None:
+        return _validate_certificate_validity_days(value)
+
+    @field_validator("prerequisite_composition")
+    @classmethod
+    def validate_prerequisite_composition(cls, value: str) -> str:
+        return _validate_prerequisite_composition(value)
 
 
 class ActivityWrite(BaseModel):
@@ -40,12 +109,26 @@ class ActivityWrite(BaseModel):
     chapter_number: int | None = None
     type: str
     bank_id: UUID | None = None
+    bank_version_id: UUID | None = None
     pass_threshold: float
     max_attempts: int | None = None
     assessment_mode: str
     grading: str
     weight: float
     question_count: int | None = None
+    scoring_policy: str = "best"
+    is_final: bool = False
+    min_attempt_interval_seconds: int = 0
+
+    @field_validator("scoring_policy")
+    @classmethod
+    def validate_scoring_policy(cls, value: str) -> str:
+        return _validate_scoring_policy(value)
+
+    @field_validator("min_attempt_interval_seconds")
+    @classmethod
+    def validate_min_attempt_interval_seconds(cls, value: int) -> int:
+        return _validate_min_attempt_interval(value)
 
 
 class ActivityCreate(BaseModel):
@@ -58,12 +141,26 @@ class ActivityCreate(BaseModel):
     chapter_number: int | None = None
     type: str
     bank_id: UUID | None = None
+    bank_version_id: UUID | None = None
     pass_threshold: float
     max_attempts: int | None = None
     assessment_mode: str
     grading: str
     weight: float
     question_count: int | None = None
+    scoring_policy: str = "best"
+    is_final: bool = False
+    min_attempt_interval_seconds: int = 0
+
+    @field_validator("scoring_policy")
+    @classmethod
+    def validate_scoring_policy(cls, value: str) -> str:
+        return _validate_scoring_policy(value)
+
+    @field_validator("min_attempt_interval_seconds")
+    @classmethod
+    def validate_min_attempt_interval_seconds(cls, value: int) -> int:
+        return _validate_min_attempt_interval(value)
 
 
 class CoursePatch(BaseModel):
@@ -83,6 +180,25 @@ class CoursePatch(BaseModel):
     version: int = 1
     status: str = "published"
     listed: bool = False
+    completion_fraction: float = 1.0
+    certificate_auto_issue: bool = True
+    certificate_validity_days: int | None = None
+    prerequisite_composition: str = "all"
+
+    @field_validator("completion_fraction")
+    @classmethod
+    def validate_completion_fraction(cls, value: float) -> float:
+        return _validate_completion_fraction(value)
+
+    @field_validator("certificate_validity_days")
+    @classmethod
+    def validate_certificate_validity_days(cls, value: int | None) -> int | None:
+        return _validate_certificate_validity_days(value)
+
+    @field_validator("prerequisite_composition")
+    @classmethod
+    def validate_prerequisite_composition(cls, value: str) -> str:
+        return _validate_prerequisite_composition(value)
 
 
 class ActivityPatch(BaseModel):
@@ -100,12 +216,26 @@ class ActivityPatch(BaseModel):
     chapter_number: int | None = None
     type: str = "mcq_test"
     bank_id: UUID | None = None
+    bank_version_id: UUID | None = None
     pass_threshold: float = 0.0
     max_attempts: int | None = None
     assessment_mode: str = "graded"
     grading: str = "auto"
     weight: float = 1.0
     question_count: int | None = None
+    scoring_policy: str = "best"
+    is_final: bool = False
+    min_attempt_interval_seconds: int = 0
+
+    @field_validator("scoring_policy")
+    @classmethod
+    def validate_scoring_policy(cls, value: str) -> str:
+        return _validate_scoring_policy(value)
+
+    @field_validator("min_attempt_interval_seconds")
+    @classmethod
+    def validate_min_attempt_interval_seconds(cls, value: int) -> int:
+        return _validate_min_attempt_interval(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +251,10 @@ class CourseFact:
     listed: bool
     created_at: datetime
     updated_at: datetime
+    completion_fraction: float = 1.0
+    certificate_auto_issue: bool = True
+    certificate_validity_days: int | None = None
+    prerequisite_composition: str = "all"
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +274,10 @@ class ActivityFact:
     question_count: int | None
     created_at: datetime
     updated_at: datetime
+    scoring_policy: str = "best"
+    is_final: bool = False
+    min_attempt_interval_seconds: int = 0
+    bank_version_id: UUID | None = None
 
 
 class ReferenceNotFound(ValueError):
@@ -213,15 +351,128 @@ def _assign_activity(row: Activity, values: Iterable[tuple[str, object]]) -> Non
         setattr(row, name, value)
 
 
+def _raise_pin_conflict(message: str) -> NoReturn:
+    # Deferred: bank_lifecycle_contracts imports attempt_contracts,
+    # which imports this module for ActivityFact.
+    from .bank_lifecycle_contracts import BankLifecycleConflict
+
+    raise BankLifecycleConflict(message)
+
+
+def _validate_activity_bank_pin(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    bank_id: UUID | None,
+    bank_version_id: UUID | None,
+) -> None:
+    """A supplied activity pin must be a published version of its bank.
+
+    Mirrors the audited repoint guard so the generic writers can never
+    persist a draft, retired, ghost or cross-bank pin.
+    """
+    if bank_version_id is None:
+        return
+    if bank_id is None:
+        _raise_pin_conflict("an activity bank version pin requires the activity's bank")
+    version = db.scalars(
+        select(QuestionBankVersion).where(
+            QuestionBankVersion.tenant_id == tenant_id,
+            QuestionBankVersion.id == bank_version_id,
+        )
+    ).first()
+    if version is None:
+        _raise_pin_conflict("the pinned bank version was not found for the tenant")
+    if version.state != "published":
+        _raise_pin_conflict("an activity may only serve a published bank version")
+    if version.bank_id != bank_id:
+        _raise_pin_conflict("version belongs to a different bank than the activity")
+
+
+def _guard_activity_bank_pin(
+    db: Session,
+    row: Activity,
+    *,
+    bank_id: UUID | None,
+    bank_version_id: UUID | None,
+) -> None:
+    """Refuse pin movement outside the audited repoint command.
+
+    Restating the current pin is a no-op, but only after the same
+    published + same-bank validation a fresh pin must pass.
+    """
+    if bank_version_id != row.bank_version_id:
+        _raise_pin_conflict(
+            "an activity's bank version pin changes only through "
+            "repoint_activity_bank_version"
+        )
+    if bank_version_id is None:
+        return
+    _validate_activity_bank_pin(
+        db,
+        tenant_id=row.tenant_id,
+        bank_id=bank_id,
+        bank_version_id=bank_version_id,
+    )
+
+
+def _guard_activity_bank_change(row: Activity, supplied: dict[str, object]) -> None:
+    """Refuse a bank change on a pinned activity (CB-1).
+
+    Changing ``bank_id`` alone would leave the existing pin pointing at
+    a version of the previous bank, persisting the cross-bank pin the
+    pin guard exists to prevent. Restating the same bank is a no-op,
+    and bank changes on unpinned activities stay allowed.
+    """
+    if "bank_id" not in supplied or supplied["bank_id"] == row.bank_id:
+        return
+    effective_pin = supplied.get("bank_version_id", row.bank_version_id)
+    if effective_pin is not None:
+        _raise_pin_conflict(
+            "an activity's bank cannot change while a bank version pin is set"
+        )
+
+
 def create_activity_identity(db: Session, payload: ActivityCreate) -> UUID:
     """Flush the entire caller Session; read only the INSERT-generated identity."""
+    _validate_activity_bank_pin(
+        db,
+        tenant_id=payload.tenant_id,
+        bank_id=payload.bank_id,
+        bank_version_id=payload.bank_version_id,
+    )
     row = _add_activity(db, payload.model_dump())
     db.flush()
     return row.id
 
 
+def _refuse_scoring_policy_change(db: Session, row: Activity, new_policy: str) -> None:
+    """Refuse a scoring-policy CHANGE once submissions exist (RD-3).
+
+    Projections are read-time, so changing the policy would silently
+    re-derive every existing learner's winning score. Authoring a policy
+    before any submission, or re-stating the current policy, is allowed.
+    """
+    if new_policy == row.scoring_policy:
+        return
+    submitted = db.scalar(
+        select(Submission.id).where(
+            Submission.tenant_id == row.tenant_id,
+            Submission.activity_id == row.id,
+        )
+    )
+    if submitted is not None:
+        raise ValueError("scoring_policy cannot change on an activity with submissions")
+
+
 def stage_activity_patch(db: Session, payload: ActivityPatch) -> bool:
-    """Stage supplied fields, tolerate missing rows, and avoid fact projection."""
+    """Stage supplied fields, tolerate missing rows, and avoid fact projection.
+
+    Trusted-import path: unlike :func:`patch_activity`, this raw staging
+    helper does NOT apply the scoring-policy prospective guard (RD-3).
+    Only callers that own the import decision may use it to restate a
+    policy on an activity that already has submissions.
+    """
     row = db.scalar(
         select(Activity).where(
             Activity.tenant_id == payload.tenant_id, Activity.id == payload.id
@@ -229,14 +480,28 @@ def stage_activity_patch(db: Session, payload: ActivityPatch) -> bool:
     )
     if row is None:
         return False
-    _assign_activity(
-        row,
-        payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True).items(),
-    )
+    supplied = payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True)
+    if "bank_version_id" in supplied:
+        # Even trusted staging may not move a pin: that stays exclusive
+        # to the audited repoint command.
+        _guard_activity_bank_pin(
+            db,
+            row,
+            bank_id=supplied.get("bank_id", row.bank_id),
+            bank_version_id=payload.bank_version_id,
+        )
+    _guard_activity_bank_change(row, supplied)
+    _assign_activity(row, supplied.items())
     return True
 
 
 def create_activity(db: Session, payload: ActivityWrite) -> ActivityFact:
+    _validate_activity_bank_pin(
+        db,
+        tenant_id=payload.tenant_id,
+        bank_id=payload.bank_id,
+        bank_version_id=payload.bank_version_id,
+    )
     row = _add_activity(db, payload.model_dump())
     db.flush()
     return _activity_fact(row)
@@ -250,6 +515,13 @@ def update_activity(db: Session, payload: ActivityWrite) -> ActivityFact:
     )
     if row is None:
         raise ReferenceNotFound("activity not found for tenant")
+    _guard_activity_bank_pin(
+        db,
+        row,
+        bank_id=payload.bank_id,
+        bank_version_id=payload.bank_version_id,
+    )
+    _refuse_scoring_policy_change(db, row, payload.scoring_policy)
     _assign_activity(row, payload.model_dump(exclude={"id", "tenant_id"}).items())
     db.flush()
     return _activity_fact(row)
@@ -280,8 +552,16 @@ def patch_activity(db: Session, payload: ActivityPatch) -> ActivityFact:
     )
     if row is None:
         raise ReferenceNotFound("activity not found for tenant")
-    _assign_activity(
-        row,
-        payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True).items(),
-    )
+    supplied = payload.model_dump(exclude={"id", "tenant_id"}, exclude_unset=True)
+    if "bank_version_id" in supplied:
+        _guard_activity_bank_pin(
+            db,
+            row,
+            bank_id=supplied.get("bank_id", row.bank_id),
+            bank_version_id=payload.bank_version_id,
+        )
+    _guard_activity_bank_change(row, supplied)
+    if "scoring_policy" in supplied:
+        _refuse_scoring_policy_change(db, row, payload.scoring_policy)
+    _assign_activity(row, supplied.items())
     return _activity_fact(row)

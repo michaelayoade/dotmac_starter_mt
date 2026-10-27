@@ -100,6 +100,7 @@ def create(db, tenant, cohort, **values):
                     "title": "  Class  ",
                     "starts_at": NOW,
                     "session_type": "live_class",
+                    "promote_delivery_mode": True,
                     "ends_at": NOW + timedelta(hours=1),
                     "join_url": " https://example.test/join ",
                 }
@@ -1046,3 +1047,18 @@ def test_scheduling_scalar_projection_matches_actual_mapped_keys():
         attribute.key == attribute.columns[0].key and len(attribute.columns) == 1
         for attribute in mapper.column_attrs
     )
+
+
+def test_create_session_without_promotion_leaves_self_paced(scheduling_database):
+    _, app, tenant, _, cohort, *_ = scheduling_database
+    with scoped(app, tenant) as db:
+        create(db, tenant, cohort, promote_delivery_mode=False)
+        assert (
+            db.scalar(select(Cohort.delivery_mode).where(Cohort.id == cohort))
+            == "self_paced"
+        )
+        create(db, tenant, cohort)
+        assert (
+            db.scalar(select(Cohort.delivery_mode).where(Cohort.id == cohort))
+            == "blended"
+        )

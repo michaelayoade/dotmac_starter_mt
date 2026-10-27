@@ -349,3 +349,34 @@ def test_reference_create_keeps_explicit_zero_weight_and_out_of_range_threshold(
         )
         assert updated.pass_threshold == created.pass_threshold
         assert updated.weight == created.weight
+
+
+def test_scoring_policy_change_refused_once_submissions_exist(reference_database):
+    app, tenant, _other, _course, activity, _bank = reference_database
+    from dotmac_learning.models import Submission
+    from dotmac_learning.references import stage_activity_patch
+
+    with Session(bind=app) as db, db.begin():
+        _scope(db.connection(), tenant)
+        patch_activity(
+            db, ActivityPatch(id=activity, tenant_id=tenant, scoring_policy="latest")
+        )
+        db.add(
+            Submission(
+                tenant_id=tenant,
+                activity_id=activity,
+                person_id=uuid4(),
+                attempt_no=1,
+                answers={},
+            )
+        )
+        db.flush()
+        with pytest.raises(ValueError, match="scoring_policy cannot change"):
+            patch_activity(
+                db,
+                ActivityPatch(id=activity, tenant_id=tenant, scoring_policy="first"),
+            )
+        # Trusted-import staging deliberately bypasses the guard (RD-3).
+        assert stage_activity_patch(
+            db, ActivityPatch(id=activity, tenant_id=tenant, scoring_policy="first")
+        )

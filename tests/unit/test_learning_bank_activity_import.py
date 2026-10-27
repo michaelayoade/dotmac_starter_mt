@@ -59,4 +59,25 @@ BANK_ACTIVITY_TERMS = BankActivityTerms(
     new_activity_assessment_mode="graded",
     new_activity_grading="auto",
     new_activity_weight=1.0,
+    new_activity_scoring_policy="best",
+    new_activity_min_attempt_interval_seconds=0,
 )
+
+
+def test_bank_terms_reject_unknown_policy_and_out_of_range_cooldown():
+    base = {
+        "pass_threshold_by_kind": {},
+        "fallback_pass_threshold": 0.0,
+        "new_activity_assessment_mode": "graded",
+        "new_activity_grading": "auto",
+        "new_activity_weight": 1.0,
+        "new_activity_scoring_policy": "best",
+        "new_activity_min_attempt_interval_seconds": 0,
+    }
+    with pytest.raises(ValueError, match="scoring_policy"):
+        BankActivityTerms(**{**base, "new_activity_scoring_policy": "median"})
+    for bad in (-1, 2592001, True):
+        with pytest.raises(ValueError, match="min_attempt_interval"):
+            BankActivityTerms(
+                **{**base, "new_activity_min_attempt_interval_seconds": bad}
+            )

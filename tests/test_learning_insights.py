@@ -246,7 +246,7 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
             tenant_id=tenant,
             cohort_id=cohort,
             now=NOW,
-            terms=CohortInsightTerms(7, 4),
+            terms=CohortInsightTerms(7, 4, 0.5),
         )
         assert (overview.learners, overview.active, overview.inactive) == (1, 1, 0)
         assert (overview.submitted, overview.overdue, overview.not_attempted) == (
@@ -292,7 +292,7 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
             tenant_id=tenant,
             cohort_id=cohort,
             now=NOW,
-            terms=CohortInsightTerms(7, 4),
+            terms=CohortInsightTerms(7, 4, 0.5),
         )
         assert hidden.learners == hidden.submitted == hidden.overdue == 0
         assert hidden.avg_score_pct is None and hidden.lab_failures == ()
@@ -321,7 +321,7 @@ def test_all_populated_projections_and_nonbypass_rls(populated):
                 tenant_id=other,
                 cohort_id=own.id,
                 now=NOW,
-                terms=CohortInsightTerms(7, 4),
+                terms=CohortInsightTerms(7, 4, 0.5),
             ).active
             == 1
         )
@@ -434,7 +434,7 @@ def test_blocker_exact_deadline_and_attempt_grants(populated):
                 tenant_id=tenant,
                 cohort_id=cohort,
                 now=NOW,
-                terms=CohortInsightTerms(7, 4),
+                terms=CohortInsightTerms(7, 4, 0.5),
             ).overdue
             == 1
         )
@@ -490,7 +490,7 @@ def test_trend_latest_ten_and_comparison_all_statuses_stable_name_sort(result_da
                 tenant_id=tenant,
                 cohort_id=r.cohort.id,
                 now=NOW,
-                terms=CohortInsightTerms(7, 4),
+                terms=CohortInsightTerms(7, 4, 0.5),
             )
             assert ov.avg_score_pct is None
             assert ov.lab_failures == ()
@@ -501,7 +501,7 @@ def test_configured_insight_windows_keep_real_rls_and_transaction(populated):
     fixture, cohort, _, _ = populated
     _, app, tenant, person, _, _, other, *_ = fixture
     learner_terms = LearnerInsightTerms(3, 2, 11, GradeTrendTerms(2, 2, 0.25))
-    cohort_terms = CohortInsightTerms(0, 1)
+    cohort_terms = CohortInsightTerms(0, 1, 0.5)
     with scoped(app, tenant) as db:
         root = db.get_transaction()
         learner = insights.learner_activity(
@@ -528,3 +528,20 @@ def test_configured_insight_windows_keep_real_rls_and_transaction(populated):
         )
         assert hidden.learners == hidden.active == hidden.week_events == 0
         assert hidden.prior_week_avg == 0
+
+
+def test_cohort_half_fraction_shift_cases(populated):
+    fixture, cohort, _, _ = populated
+    _, app, tenant, *_ = fixture
+    with scoped(app, tenant) as db:
+        # Populated fixture: 2 of 4 activities passed, so the learner sits
+        # exactly at the 0.5 boundary.
+        for fraction, expected in ((0.25, 1), (0.5, 1), (0.75, 0)):
+            overview = insights.cohort_overview(
+                db,
+                tenant_id=tenant,
+                cohort_id=cohort,
+                now=NOW,
+                terms=CohortInsightTerms(7, 4, fraction),
+            )
+            assert overview.funnel.half == expected

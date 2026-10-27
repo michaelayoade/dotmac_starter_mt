@@ -48,6 +48,7 @@ LEARNING_TABLES = frozenset(
         "class_sessions",
         "announcements",
         "success_queue_entries",
+        "question_bank_versions",
     }
 )
 REGISTRY_CODES = {
@@ -173,7 +174,7 @@ def check_registration(module, registry, namespace_type):
     if not tables or len(tables) != len(module.tables):
         raise ValueError("empty or duplicate declared tables")
     if module.code == "learning" and (tables != LEARNING_TABLES or platform):
-        raise ValueError("Learning must declare exactly its current 27 tenant tables")
+        raise ValueError("Learning must declare exactly its current 28 tenant tables")
     if namespaces.declared_tables(expected[1]) != tables | platform:
         raise ValueError("registered table catalog differs from manifest")
     if namespaces.declared_platform_tables(expected[1]) != platform:

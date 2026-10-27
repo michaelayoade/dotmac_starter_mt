@@ -509,3 +509,44 @@ def test_required_policy_terms_keep_public_owner_identity():
         "MIN_DURATION_SECONDS",
     ):
         assert not hasattr(learning, name)
+
+
+def test_bank_lifecycle_and_v6_have_public_owners():
+    from dotmac_learning import (
+        bank_lifecycle,
+        bank_lifecycle_contracts,
+        bank_transfer,
+        bank_transfer_contracts,
+    )
+
+    for name in (
+        "create_bank_draft",
+        "upsert_draft_question",
+        "delete_draft_question",
+        "discard_draft",
+        "lint_bank_version",
+        "publish_bank_version",
+        "retire_bank_version",
+        "repoint_activity_bank_version",
+        "import_bank_document_as_draft",
+        "export_bank_version",
+        "published_bank_doc",
+        "bank_version_questions",
+        "bank_version_history",
+        "sitting_questions",
+        "canonical_content_hash",
+    ):
+        assert learning.__all__.count(name) == 1
+        assert getattr(learning, name) is getattr(bank_lifecycle, name)
+    for name in (
+        "BankAuditContext",
+        "BankVersionFact",
+        "CreateBankDraftCommand",
+        "LegacyBankWriterRetired",
+        "SittingQuestion",
+    ):
+        assert getattr(learning, name) is getattr(bank_lifecycle_contracts, name)
+    for name in ("export_snapshot_v6", "import_snapshot_v6", "verify_snapshot_v6"):
+        assert getattr(learning, name) is getattr(bank_transfer, name)
+    for name in ("LearningSnapshotV6", "QuestionBankVersionRowV6"):
+        assert getattr(learning, name) is getattr(bank_transfer_contracts, name)
