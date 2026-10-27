@@ -51,6 +51,22 @@ ISP_ONLY_MODULES = {
 WITHDRAWN_MODULES = {"dotmac-pon-access"}
 WITHDRAWN_COHORT = "withdrawn-retained-in-sub"
 SUITE_COHORT = "network-suite-v1"
+#: Adoption waves under network-suite-v1 (ADR-0038 amendment of 2026-10-26,
+#: ruled by Michael 2026-10-26/27, in force on merge). W1 is IPAM alone
+#: as the smallest closed writer set; W2 is thin inventory plus
+#: network-access together; W3 is the
+#: remainder. Only these exact wave assignments are permitted: any other
+#: single-module early adoption still fails.
+WAVE_COHORTS = {
+    "dotmac-ipam": "network-suite-v1-wave-1",
+    "dotmac-network-inventory": "network-suite-v1-wave-2",
+    "dotmac-network-access": "network-suite-v1-wave-2",
+    "dotmac-network-observability": "network-suite-v1-wave-3",
+    "dotmac-network-topology": "network-suite-v1-wave-3",
+    "dotmac-network-assurance": "network-suite-v1-wave-3",
+    "dotmac-network-control": "network-suite-v1-wave-3",
+    "dotmac-fiber-plant": "network-suite-v1-wave-3",
+}
 REUSED_FOUNDATIONS = {"dotmac-inventory", "dotmac-assets"}
 
 
@@ -102,8 +118,9 @@ def _validate_ledger(ledger: dict[str, Any]) -> None:
         problems,
     )
     _require(
-        ledger.get("adoption_strategy") == "single-coordinated-sub-cutover",
-        "Sub must adopt the complete suite through one coordinated cutover",
+        ledger.get("adoption_strategy") == "ordered-wave-sub-cutovers",
+        "Sub must adopt the suite in the ordered ADR-0038 waves "
+        "(W1 IPAM, W2 inventory+access, W3 remainder)",
         problems,
     )
     _require(
@@ -212,8 +229,8 @@ def _validate_ledger(ledger: dict[str, Any]) -> None:
             )
         else:
             _require(
-                module.get("adoption_cohort") == SUITE_COHORT,
-                f"{name} must remain in the single network-suite adoption cohort",
+                module.get("adoption_cohort") == WAVE_COHORTS.get(name),
+                f"{name} must remain in its named network-suite adoption wave",
                 problems,
             )
         _require(
@@ -265,6 +282,27 @@ def _validate_ledger(ledger: dict[str, Any]) -> None:
                     f"{name} must follow {predecessor}",
                     problems,
                 )
+
+    wave_1 = {
+        module["name"]
+        for module in modules
+        if module.get("adoption_cohort") == "network-suite-v1-wave-1"
+    }
+    _require(
+        wave_1 == {"dotmac-ipam"},
+        "only dotmac-ipam may be adopted in wave 1",
+        problems,
+    )
+    wave_2 = {
+        module["name"]
+        for module in modules
+        if module.get("adoption_cohort") == "network-suite-v1-wave-2"
+    }
+    _require(
+        wave_2 == {"dotmac-network-inventory", "dotmac-network-access"},
+        "wave 2 is thin network-inventory plus network-access together",
+        problems,
+    )
 
     cloud_candidates = {
         module["name"] for module in modules if module.get("cloud_candidate") is True
@@ -368,7 +406,9 @@ def test_complete_suite_contract_ledger_is_typed_and_orm_free() -> None:
     assert set(contracts) == EXPECTED_MODULES
     for package, contract in contracts.items():
         assert contract["package"] == package
-        expected_cohort = WITHDRAWN_COHORT if package in WITHDRAWN_MODULES else None
+        expected_cohort = (
+            WITHDRAWN_COHORT if package in WITHDRAWN_MODULES else WAVE_COHORTS[package]
+        )
         assert contract.get("adoption_cohort") == expected_cohort
         assert contract["contract_module"].endswith(".contracts")
         assert contract["returns_orm_instances"] is False
@@ -416,6 +456,30 @@ def test_detector_rejects_incremental_sub_adoption() -> None:
         _validate_ledger(ledger)
 
 
+def test_detector_rejects_any_other_module_joining_wave_1() -> None:
+    ledger = copy.deepcopy(_load_ledger())
+    _module_map(ledger)["dotmac-network-topology"]["adoption_cohort"] = (
+        "network-suite-v1-wave-1"
+    )
+    with pytest.raises(NetworkDecompositionError):
+        _validate_ledger(ledger)
+
+
+def test_detector_rejects_splitting_or_shrinking_wave_2() -> None:
+    for module in ("dotmac-network-inventory", "dotmac-network-access"):
+        ledger = copy.deepcopy(_load_ledger())
+        _module_map(ledger)[module]["adoption_cohort"] = "network-suite-v1-wave-3"
+        with pytest.raises(NetworkDecompositionError):
+            _validate_ledger(ledger)
+
+
+def test_detector_rejects_moving_ipam_out_of_wave_1() -> None:
+    ledger = copy.deepcopy(_load_ledger())
+    _module_map(ledger)["dotmac-ipam"]["adoption_cohort"] = SUITE_COHORT
+    with pytest.raises(NetworkDecompositionError):
+        _validate_ledger(ledger)
+
+
 def test_detector_rejects_a_second_stock_or_asset_owner() -> None:
     ledger = copy.deepcopy(_load_ledger())
     network_inventory = _module_map(ledger)["dotmac-network-inventory"]
@@ -432,7 +496,7 @@ def test_detector_rejects_withdrawing_any_other_module() -> None:
 
 
 def test_detector_rejects_readmitting_or_unrecording_the_withdrawn_module() -> None:
-    for value in (SUITE_COHORT, "ipam-early"):
+    for value in (SUITE_COHORT, "network-suite-v1-wave-1", "ipam-early"):
         ledger = copy.deepcopy(_load_ledger())
         _module_map(ledger)["dotmac-pon-access"]["adoption_cohort"] = value
         with pytest.raises(NetworkDecompositionError):

@@ -1,6 +1,8 @@
 # ADR-0038: Network capabilities are built as one bounded suite before Sub adoption
 
-- Status: Accepted (amended 2026-10-19: `dotmac-pon-access` withdrawn from network-suite-v1)
+- Status: Accepted (amended 2026-10-19: `dotmac-pon-access` withdrawn from
+  network-suite-v1; wave amendment below ruled by Michael on 2026-10-26/27 —
+  in force on merge of this amendment)
 - Date: 2026-08-18
 - Deciders: Michael
 - Supersedes: none
@@ -327,3 +329,143 @@ writer is enforced per state instead.
   architecture canaries change in the same review, as section 1 requires. The
   withdrawal is scoped to this one module; every other module keeps all of its
   existing checks.
+
+## Amendment 2026-10-26: suite adoption becomes ordered waves
+
+> **Status of this amendment: ruled by Michael on 2026-10-26/27 ("as
+> recommended", decisions N1–N12, with the refinements recorded below);
+> in force on merge.** Decider: Michael. Clauses below are tagged
+> `(N1)`–`(N12)` after the 2026-10-26 network cutover plan decision each
+> records. N1 is complete: the `dotmac-pon-access` withdrawal merged as
+> #908 (`c4d0fe3c`). N10 was ruled separately as Sub-operations work and
+> carries no clause in this amendment.
+
+The pon-access withdrawal (2026-10-19, merged) is unaffected by this
+amendment: `dotmac-pon-access` stays withdrawn, frozen at `audit-complete`,
+never adopted, and is in no wave.
+
+- **Waves replace the single suite cutover (N3).** The eight
+  remaining suite modules are adopted in Sub in three ordered waves, each
+  wave all-or-nothing for its own members:
+  - **W1 — `dotmac-ipam` alone**, as a `0.2.0a1` extraction re-cut from
+    current Sub (N2). IPAM is the smallest closed writer set:
+    its hard couplings (shared transaction, foreign keys, shared
+    invariants) close inside IPAM alone. No other module moves a writer
+    before or with W1. The re-cut supersedes extending the `0.1.0a1`
+    template: `0.1.0a1` is recorded must-not-install, and its tag and
+    lineage stay untouched.
+  - **W2 — thin `dotmac-network-inventory` plus `dotmac-network-access`
+    together (N3, N8).** Thin inventory means sites plus NAS
+    identity only; device/interface/port/VLAN scope is W3. The two move
+    together because access references NAS identity and the NAS↔pool
+    binding check needs the NAS's site; splitting them leaves the NAS row
+    half-moved. No W2 writer flip before the W1 contract (legacy IP tables
+    dropped) or an explicit contrary ruling by Michael.
+  - **W3 — the remainder, as suite proof (N3):**
+    `dotmac-network-observability`, `dotmac-network-topology`,
+    `dotmac-network-assurance`, `dotmac-network-control`,
+    `dotmac-fiber-plant`, and the deferred inventory device/interface/VLAN
+    scope. W3 keeps its own plan and gates; `dotmac-fiber-plant` adoption
+    additionally still waits for the sealed CRM-to-Sub outside-plant
+    consolidation (section 3, unchanged). Packages already released ahead
+    of W3 transfer no writer authority by publication alone.
+- **Superseded text (history retained above, read subject to this
+  amendment once merged).** Section 2's "the eight suite modules remain
+  `audit-complete` until the composed suite is exact-pinned, migrated,
+  shadow-verified and enabled in Sub" and "a failure in one module's
+  adoption gate blocks the coordinated suite cutover"; section 3's "no
+  completed package is composed into Sub early merely because another
+  package is still under construction" and "only then is the complete
+  suite adopted in one Sub release"; the Consequences bullet "Sub adopts
+  the complete network suite through one coordinated cutover"; and the
+  Alternatives-rejected entry "Adopt modules in Sub one by one as soon as
+  they are built" — that rejection still holds for ad-hoc single-module
+  adoption. What this amendment permits is only the three closed waves
+  above, in order. Every other single-module early adoption remains
+  forbidden and canaried as such.
+- **Per-wave gates (every wave, no gate dropped).** A wave's writer flip
+  requires, in order: (1) each member released from protected Starter main
+  and exact-pinned by Sub; (2) the wave's production pre-clean cohorts
+  recounted at zero on a fresh read (gate values are fresh recounts, never
+  carried-forward counts); (3) backfill/copy with content-digest parity
+  proven inside the copy transaction; (4) the reverse (rollback) script
+  rehearsed green on a staging restore before the switch, with a
+  per-wave rollback window of 14 days from the last clean post-flip
+  digest (a sev-1 incident restarts that clock) and legacy-table drops
+  as separate Michael-triggered acts after a clean window — the switch
+  and the contract (legacy drops) never land in the same release (N12);
+  (5) a single-writer flip
+  (no dual-write at any point); and (6) sealed retirement of every
+  displaced local writer, proven by the zero-writer ratchets. The
+  composed-suite migration gate, cross-tenant isolation canaries, parity
+  replay, drift reconciliation and no-sibling-import proof of section 3
+  apply per wave to that wave's members, and again to the composed whole
+  in W3.
+- **Dossier states become per-wave.** A module stays `audit-complete`
+  until its own wave's cutover is complete (exact-pinned, migrated,
+  shadow/digest-verified and enabled in Sub, displaced writers sealed and
+  retired); it then becomes `adopted` on its own evidence, without
+  waiting for later waves. `reuse-proven` is unchanged. This replaces the
+  suite-wide reading of `adopted` in section 2. A failure in one module's
+  gate blocks its wave, and any later wave that depends on it; it does not
+  retroactively un-adopt an earlier completed wave.
+- **Device-cli is not a wave.** `dotmac-device-cli` (ADR-0077, stateless
+  protocol adapter: no lineage, no state, no writer) runs on its own
+  track. Its Sub read swap must be shipped and closed before the W1
+  writer freeze, and must never land in the W1 release or freeze window.
+  It is a closed-before-freeze precondition of the W1 switch only; it
+  gates no package build.
+- **Boundary clauses carried by this amendment (each ruled by Michael
+  on 2026-10-26/27):**
+  - Pools are site-scoped (one site per customer pool); IPAM holds no NAS
+    reference; NAS↔pool bindings are explicit network-access facts and a
+    cross-site binding is refused (N6). The adjudication list is the 24
+    multi-NAS pools (18 with an active NAS); single-site resolution of
+    that list needs the network team's written sign-off, and any
+    genuinely cross-site pool is a named, flagged exception — none is
+    copied silently.
+  - Same-database Sub readers may import-swap to module `read_models`
+    during a wave, under a flush guard and a counted shrink-only reader
+    inventory, while writes remain command-only; a W3 conversion review
+    covers the readers that remain. Immutable snapshots remain the
+    cross-assembly contract (N4: explicit widening of the snapshots-only
+    rule in section 1 and the contract ledger).
+  - FreeRADIUS SQL transport stays in Sub through W2 (N11: explicit
+    temporary widening of section 6; deletion trigger is an Integrator
+    RADIUS transport).
+  - NAS credentials are copy-preserved to OpenBao (no rotation as part
+    of a move) as a decoupled minimum and a G-W2 precondition only
+    (N7): one OpenBao path per NAS, read by Sub via its existing
+    identity; secret values are never module state and never land in
+    module tables. The fallback, if that path cannot be met, is secrets
+    remaining in a Sub side-table as recorded debt. W2 inventory ships
+    sites-plus-NAS identity only either way (N8).
+  - `subscriptions.ipv4_address` remains a same-transaction Sub
+    projection through W1 and becomes display-only after W2 (N5). The
+    G-W1 pre-clean zero for that column is defined on the
+    servable-plus-active scope, not on every non-terminal row. Historic
+    non-terminal column conflicts are handled by a separate audited,
+    per-group-approved column-clearing pass: the column is set to NULL
+    where it differs from the subscription's own active primary address
+    on a non-servable subscription, assignments are untouched, and
+    reactivation re-projects the column. The interim database
+    constraint — the column is NULL or equal to the subscription's own
+    active primary — lands only after that pass and after the interim
+    single column writer is in place.
+  - Retention release stays shadow-only through the W1 contract (N9).
+    The 1,514-item retention disposition is link-don't-release: the 45
+    items with exactly one active candidate link via owner reconcile,
+    approved per group; the ~1,432 retaining-subscriber items link to
+    the unique retaining subscription whose column matches the address,
+    and no address is freed while its subscription retains it; the 36
+    terminal-only items are released via the retention owner only after
+    shadow and no-session proof.
+- **Ledger and canary.** The disposition ledger, contract ledger,
+  extraction dossiers' `first_cutover` text and the architecture canaries
+  change in the same review, as section 1 requires: `dotmac-ipam` moves
+  to cohort `network-suite-v1-wave-1`, `dotmac-network-inventory` and
+  `dotmac-network-access` to `network-suite-v1-wave-2`, the five W3
+  modules to `network-suite-v1-wave-3`, and `dotmac-pon-access` stays
+  `withdrawn-retained-in-sub`. The canaries enforce exactly that wave map:
+  any other module in wave 1, any module outside its named wave, and any
+  unrecorded early-adoption cohort still fails.
