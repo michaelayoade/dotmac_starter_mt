@@ -156,3 +156,15 @@ def classify_table(
         # A header with no rows and no empty marker is what a cut-off read looks like.
         return Unreadable(Reason.TRUNCATED, "table header but no rows", evidence)
     return Unreadable(Reason.UNRECOGNIZED_RESPONSE, "not an ONT table", evidence)
+
+
+__all__ = [
+    "ANSI",
+    "MARKER_PRIORITY",
+    "Classified",
+    "Kind",
+    "OntInventory",
+    "classify_response",
+    "classify_table",
+    "clean_text",
+]

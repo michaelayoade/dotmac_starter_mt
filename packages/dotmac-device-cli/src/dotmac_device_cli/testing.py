@@ -174,3 +174,11 @@ class InMemoryLockStore:
                 del self._b._exclusive[key]
             for owners in self._b._shared.values():
                 owners.discard(self._owner)
+
+
+__all__ = [
+    "FakeClock",
+    "InMemoryLockBackend",
+    "InMemoryLockStore",
+    "ReplayChannel",
+]

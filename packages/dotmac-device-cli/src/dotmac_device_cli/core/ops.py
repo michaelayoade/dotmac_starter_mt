@@ -114,3 +114,12 @@ def service_ports(session: CliSession, ont: OntRef) -> Outcome:
     return Unsupported(
         "service_ports", session.profile.id, "no parser shipped in 0.1.0a1"
     )
+
+
+__all__ = [
+    "Outcome",
+    "list_onts",
+    "ont_detail",
+    "service_ports",
+    "version",
+]
