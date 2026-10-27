@@ -57,6 +57,13 @@ local_copy_retirement = "At the suite cutover, delete Sub's local writers/reader
 next_action = "Keep release disabled until the integration version carrying SPI 1.7 and ig_0017 is tagged, the assembly secret-fetch endpoint is live, and shadow parity is green. Then enable release by reviewed diff."
 
 [[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "153cc04a9e08fd7936f7e91d37e694ad932bead3"
+evidence_paths = ["pyproject.toml"]
+
+[[product_writers]]
 product = "dotmac_sub"
 writer_state = "legacy_writer"
 retirement_required = true

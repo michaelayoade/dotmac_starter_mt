@@ -217,6 +217,11 @@ def downgrade() -> None:
     # Durable submitted work is not downgraded away silently: an operation a
     # product issued and the engine has not finished is evidence, and a
     # downgrade that dropped it would make "did the plan land?" unanswerable.
+    # Declared fleet targets are likewise refused — but an EMPTY declaration
+    # (deny-all) loses nothing by dropping the column, because no endpoint
+    # was ever reachable through it; after a re-upgrade it reads back as the
+    # pre-declaration NULL, which refuses activation until redeclared. The
+    # guard therefore fires only on a non-empty target list.
     op.execute(
         "DO $$ BEGIN "
         "IF EXISTS (SELECT 1 FROM mod_intg.provision_operations) THEN "
@@ -224,7 +229,9 @@ def downgrade() -> None:
         "operations exist'; "
         "END IF; "
         "IF EXISTS (SELECT 1 FROM mod_intg.connector_config_revisions "
-        "WHERE network_targets_json IS NOT NULL) THEN "
+        "WHERE network_targets_json IS NOT NULL "
+        "AND jsonb_typeof(network_targets_json) = 'array' "
+        "AND jsonb_array_length(network_targets_json) > 0) THEN "
         "RAISE EXCEPTION 'ig_0017 downgrade refuses while network targets "
         "are declared'; "
         "END IF; END $$;"

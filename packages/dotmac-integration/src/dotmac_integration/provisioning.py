@@ -328,21 +328,23 @@ def submit_provision_operation(
     submitted = tuple(steps)
     if not submitted:
         raise ProvisionError("a provision plan requires at least one step")
-    # Rebuilding the request validates step keys, dependencies and the plan
-    # hash with the SPI's own rules before anything is stored.
     plan_hash = provision_plan_hash(submitted)
-    ProvisionPlanRequest(
-        capability_id="validation.only.v1",
-        command_id=command,
-        plan_hash=plan_hash,
-        steps=submitted,
-    )
 
     binding = db.get(CapabilityBinding, capability_binding_id)
     if binding is None:
         raise ProvisionUnavailable(
             f"capability binding {capability_binding_id} does not exist"
         )
+    # Rebuilding the request under the binding's own capability validates
+    # step keys, dependencies and the plan hash with the SPI's rules before
+    # anything is stored. The id comes from the binding, never from here:
+    # the module hosts the vocabulary and must not enumerate it.
+    ProvisionPlanRequest(
+        capability_id=binding.capability_id,
+        command_id=command,
+        plan_hash=plan_hash,
+        steps=submitted,
+    )
     installation = db.get(ConnectorInstallation, binding.installation_id)
     if installation is None:  # pragma: no cover - FK integrity
         raise ProvisionUnavailable(f"binding {binding.id} has no installation")
@@ -408,7 +410,7 @@ def submit_provision_operation(
         )
         for index, step in enumerate(submitted)
     ]
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
     from sqlalchemy.exc import IntegrityError
 
     try:
@@ -901,7 +903,7 @@ def invoke_provision(
             )
         step = prepared.step
         if step is None:  # non-plan kinds always carry a step
-            raise RuntimeError('prepared non-plan unit without a step')
+            raise RuntimeError("prepared non-plan unit without a step")
         if prepared.kind == "apply":
             return apply_provisioning(
                 plugin,
@@ -1130,7 +1132,7 @@ def settle_provision(
         return operation
 
     if prepared.step_id is None:
-        raise RuntimeError('prepared non-plan unit without a step id')
+        raise RuntimeError("prepared non-plan unit without a step id")
     state, next_action, finished = _step_settlement(prepared.kind, result)
     values = {
         "state": state,

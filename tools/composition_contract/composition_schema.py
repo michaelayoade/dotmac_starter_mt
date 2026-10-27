@@ -913,6 +913,10 @@ class PackageClassification(str, Enum):
     #: Canonical capability-schema bytes and digests; calls nothing, owns no
     #: rows — no manifest, no lineage.
     STATELESS_CONTRACT_CATALOGUE = "stateless-contract-catalogue"
+    #: An adapter whose provider interface is a provider-owned database
+    #: (ADR-0074): a database client is its transport, but it owns no
+    #: schema and no lineage — no manifest, no lineage, like the adapter.
+    STATELESS_SQL_ADAPTER = "stateless-sql-adapter"
 
     @property
     def module_registration_applies(self) -> bool:
