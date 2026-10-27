@@ -55,7 +55,9 @@ def test_exact_type_and_tamper_revalidation_before_any_database_handoff(
     authority = RosterAuthority(tenant, True)
     if kind == "bulk":
         factory = BulkEnrollmentInitialState
-        command = BulkEnrollCommand(tenant_id=tenant, cohort_id=uuid4(), emails=())
+        command = BulkEnrollCommand(
+            tenant_id=tenant, cohort_id=uuid4(), emails=(), pacing_default_open=True
+        )
         owner = roster.bulk_enroll
         values = {"role_in_cohort": "student", "status": "active"}
         kwargs = {
@@ -69,6 +71,7 @@ def test_exact_type_and_tamper_revalidation_before_any_database_handoff(
             cohort_id=uuid4(),
             person_id=uuid4(),
             global_role="learner",
+            pacing_default_open=True,
         )
         owner = roster.ensure_invitation_enrollment
         values = {"status": "active"}
@@ -108,7 +111,9 @@ def test_exact_type_and_tamper_revalidation_before_any_database_handoff(
 
 def test_presence_is_required_distinct_and_tenant_bound_before_db(monkeypatch):
     tenant = uuid4()
-    command = BulkEnrollCommand(tenant_id=tenant, cohort_id=uuid4(), emails=())
+    command = BulkEnrollCommand(
+        tenant_id=tenant, cohort_id=uuid4(), emails=(), pacing_default_open=True
+    )
     kwargs = {
         "authority": RosterAuthority(tenant, True),
         "initial_state": BulkEnrollmentInitialState("student", "active"),
@@ -167,7 +172,9 @@ def test_presence_constructor_and_tamper_revalidation_refuse_before_db(
     with pytest.raises(error, match=detail):
         roster.bulk_enroll(
             None,
-            BulkEnrollCommand(tenant_id=tenant, cohort_id=uuid4(), emails=()),
+            BulkEnrollCommand(
+                tenant_id=tenant, cohort_id=uuid4(), emails=(), pacing_default_open=True
+            ),
             authority=RosterAuthority(tenant, True),
             accounts=accounts,
             initial_state=BulkEnrollmentInitialState("student", "active"),
@@ -188,7 +195,12 @@ def test_presence_subclass_wrapper_cannot_skip_validation_or_reach_db(monkeypatc
         with pytest.raises(TypeError, match="accounts"):
             roster.bulk_enroll(
                 None,
-                BulkEnrollCommand(tenant_id=tenant, cohort_id=uuid4(), emails=()),
+                BulkEnrollCommand(
+                    tenant_id=tenant,
+                    cohort_id=uuid4(),
+                    emails=(),
+                    pacing_default_open=True,
+                ),
                 authority=RosterAuthority(tenant, True),
                 accounts=Bypass(tenant, relation),
                 initial_state=BulkEnrollmentInitialState("student", "active"),
@@ -206,7 +218,9 @@ def test_presence_tampered_tenant_refuses_before_db(monkeypatch):
     with pytest.raises(ParticipationForbidden, match="presence selection"):
         roster.bulk_enroll(
             None,
-            BulkEnrollCommand(tenant_id=tenant, cohort_id=uuid4(), emails=()),
+            BulkEnrollCommand(
+                tenant_id=tenant, cohort_id=uuid4(), emails=(), pacing_default_open=True
+            ),
             authority=RosterAuthority(tenant, True),
             accounts=accounts,
             initial_state=BulkEnrollmentInitialState("student", "active"),
@@ -231,7 +245,9 @@ def test_canonical_uuid_select_is_accepted_before_transaction_handoff(monkeypatc
     with pytest.raises(ReachedTransaction):
         roster.bulk_enroll(
             marker,
-            BulkEnrollCommand(tenant_id=tenant, cohort_id=uuid4(), emails=()),
+            BulkEnrollCommand(
+                tenant_id=tenant, cohort_id=uuid4(), emails=(), pacing_default_open=True
+            ),
             authority=RosterAuthority(tenant, True),
             accounts=accounts,
             initial_state=BulkEnrollmentInitialState("student", "active"),

@@ -333,3 +333,16 @@ def publication_violations(text: str) -> list[str]:
         if m.group(1) != "lab-olt":
             out.append(f"hostname other than lab-olt: {m.group(1)}")
     return out
+
+
+__all__ = [
+    "REQUIRED_COVERS",
+    "Case",
+    "chain_dirs",
+    "conformance_violations",
+    "load_cases",
+    "prompt_violations",
+    "publication_violations",
+    "ref_violations",
+    "replay_case",
+]

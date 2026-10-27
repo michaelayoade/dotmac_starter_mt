@@ -99,7 +99,7 @@ def test_learning_literal_matches_all_current_source_tables():
                 for target in node.targets
             ):
                 actual.add(ast.literal_eval(node.value))
-    assert len(expected) == 27
+    assert len(expected) == 28
     assert actual == expected
 
 

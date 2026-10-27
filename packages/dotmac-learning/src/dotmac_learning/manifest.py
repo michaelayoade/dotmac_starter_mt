@@ -16,7 +16,7 @@ from dotmac_learning.participation_models import PARTICIPATION_TABLES
 
 module = ModuleManifest(
     code="learning",
-    version="0.1.0a2",
+    version="0.1.0a3",
     core=False,
     short_code="learning",
     migration_prefix="lr",
@@ -31,6 +31,16 @@ module = ModuleManifest(
     platform_tables=(),
     audit_actions=(
         "attempt_granted",
+        "question_bank.draft_created",
+        "question_bank.question_upserted",
+        "question_bank.question_deleted",
+        "question_bank.draft_discarded",
+        "question_bank.published",
+        "question_bank.version_retired",
+        "question_bank.activity_repointed",
+        "question_bank.imported",
+        "question_bank.import_refused",
+        "question_bank.exported",
         "announcement.created",
         "scheduling.update_session",
         "success_queue.acknowledge",

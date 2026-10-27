@@ -193,6 +193,16 @@ def _transfer_column_reader(conn, missing=None):
         DDL("GRANT USAGE ON SCHEMA public, mod_learning TO %(actor)s", context=context)
     )
     conn.execute(DDL("GRANT SELECT ON public.tenants TO %(actor)s", context=context))
+    # RD-1 probe (lr_0010): frozen exports must see whether any
+    # question_bank_versions row exists in the tenant extent; the
+    # exact-column grant below is the probe's only privilege need.
+    conn.execute(
+        DDL(
+            "GRANT SELECT (tenant_id) "
+            "ON mod_learning.question_bank_versions TO %(actor)s",
+            context=context,
+        )
+    )
     for name in TABLES:
         conn.execute(
             DDL(

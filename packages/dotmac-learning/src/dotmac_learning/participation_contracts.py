@@ -57,6 +57,7 @@ class ActivateEnrollmentCommand(ParticipationCommand):
 class BulkEnrollCommand(ParticipationCommand):
     cohort_id: UUID
     emails: tuple[str | None, ...]
+    pacing_default_open: bool
     track_id: UUID | None = None
 
 
@@ -228,6 +229,7 @@ class EnsureInvitationEnrollmentCommand(ParticipationCommand):
     cohort_id: UUID
     person_id: UUID
     global_role: str
+    pacing_default_open: bool
     track_id: UUID | None = None
     selected_course_ids: tuple[UUID, ...] = ()
 

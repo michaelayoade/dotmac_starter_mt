@@ -499,11 +499,18 @@ def test_actual_migrated_catalog_source_contract_and_identity_translation(
                         table, schema="mod_learning"
                     )
                 }
-                assert checks == (
-                    {"ck_enrollments_audience", "ck_enrollments_staff_has_employee_ref"}
-                    if table == "enrollments"
-                    else set()
-                )
+                assert checks == {
+                    "enrollments": {
+                        "ck_enrollments_audience",
+                        "ck_enrollments_staff_has_employee_ref",
+                    },
+                    "cohorts": {"ck_cohorts_auto_accept_below_action"},
+                    "tracks": {"ck_tracks_gating_mode"},
+                    "course_prerequisites": {
+                        "ck_course_prerequisites_condition_kind",
+                        "ck_course_prerequisites_origin",
+                    },
+                }.get(table, set())
                 for role in ("app_user", "platform_api"):
                     for privilege in (
                         "SELECT",
@@ -526,7 +533,7 @@ def test_actual_migrated_catalog_source_contract_and_identity_translation(
                                 "privilege": privilege,
                             },
                         ) == (privilege in {"SELECT", "INSERT", "UPDATE", "DELETE"})
-            assert total == 59
+            assert total == 66
             source_edges = {
                 "cohorts": set(),
                 "tracks": set(),

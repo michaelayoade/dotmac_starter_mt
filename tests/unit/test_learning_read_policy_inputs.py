@@ -15,7 +15,12 @@ from dotmac_learning import (
     support_report_reads,
     todo,
 )
+from dotmac_learning.assessment_reads import FeedbackRevealTerms
 from dotmac_learning.todo_contracts import TodoTerms
+
+FEEDBACK = FeedbackRevealTerms(
+    {"practice": "immediate", "graded": "on_pass_or_exhausted", "exam": "never"}
+)
 
 NOW = datetime(2026, 10, 18, 12, tzinfo=UTC)
 
@@ -124,12 +129,21 @@ def test_compound_timeline_forwards_join_and_configured_deadline_buckets(
 
     def rows(actual_db, **values):
         assert actual_db is db
-        assert values == {
-            "tenant_id": tenant,
-            "person_id": person,
-            "now": NOW,
-            "terms": terms,
-        }
+        assert values in (
+            {
+                "tenant_id": tenant,
+                "person_id": person,
+                "now": NOW,
+                "terms": terms,
+            },
+            {
+                "tenant_id": tenant,
+                "person_id": person,
+                "now": NOW,
+                "terms": terms,
+                "feedback_terms": FEEDBACK,
+            },
+        )
         calls.append(values)
         return ()
 
@@ -142,6 +156,7 @@ def test_compound_timeline_forwards_join_and_configured_deadline_buckets(
         local_zone=UTC,
         now=NOW,
         terms=terms,
+        feedback_terms=FEEDBACK,
         join_lead_minutes=4,
     )
     assert result.next_7 == deadlines[:1]
@@ -212,7 +227,12 @@ def test_graded_lookback_and_cap_are_actual_query_inputs():
 
     assert (
         todo._graded_rows(
-            Database(), tenant_id=uuid4(), person_id=uuid4(), now=NOW, terms=terms
+            Database(),
+            tenant_id=uuid4(),
+            person_id=uuid4(),
+            now=NOW,
+            terms=terms,
+            feedback_terms=FEEDBACK,
         )
         == ()
     )
@@ -258,9 +278,10 @@ def test_configured_course_window_includes_exact_horizon_and_keeps_order():
                 "person_id": uuid4(),
                 "local_zone": UTC,
                 "terms": TodoTerms(3, 2, 11, 2, 5),
+                "feedback_terms": FEEDBACK,
                 "join_lead_minutes": 4,
             },
-            ("terms", "join_lead_minutes"),
+            ("terms", "feedback_terms", "join_lead_minutes"),
         ),
         (
             agenda.upcoming_for_person,

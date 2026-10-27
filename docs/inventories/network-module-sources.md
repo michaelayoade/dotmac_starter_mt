@@ -193,6 +193,17 @@ safe engineering sequence, never a runtime package dependency.
 > "withdrawn-retained-in-sub"`). OLT/ONT/PON and ACS/TR-069 authority stays in
 > Sub under the single-writer rule. See the amendment in ADR-0038.
 
+> **Amendment 2026-10-26 (ruled by Michael on 2026-10-26/27; in force on
+> merge):** adoption
+> of the remaining eight modules is ordered in waves — W1 `dotmac-ipam`
+> alone, W2 thin `dotmac-network-inventory` (sites + NAS identity) plus
+> `dotmac-network-access`, W3 the remainder as suite proof — instead of one
+> coordinated Sub cutover. The "adopt the entire suite in one coordinated
+> Sub cutover", "not an incremental adoption sequence" and "cut over the
+> complete suite in Sub" sentences above are read subject to that amendment;
+> every other single-module early adoption remains forbidden. See the
+> wave amendment in ADR-0038.
+
 The full present-day table/service families, representative source paths,
 parity tests, exclusions, entry gates, and retirement gates are in
 `docs/inventories/network-module-dispositions.toml`. That file is checked by

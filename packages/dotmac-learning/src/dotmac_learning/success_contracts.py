@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
@@ -37,6 +39,8 @@ class SuccessTerms:
     below_passing_min_weight_fraction: float
     below_passing_high_grade_factor: float
     almost_complete_fraction: float
+    enabled_rules: tuple[str, ...]
+    severity_by_rule: Mapping[str, str]
 
     def __post_init__(self) -> None:
         for name in (
@@ -68,6 +72,29 @@ class SuccessTerms:
                 or not 0 <= value <= 1
             ):
                 raise ValueError(f"{name} must be a finite fraction in [0, 1]")
+        rules = (
+            "inactivity",
+            "overdue_work",
+            "below_passing",
+            "failed_final",
+            "certificate_blocked",
+        )
+        if type(self.enabled_rules) is not tuple or any(
+            type(rule) is not str for rule in self.enabled_rules
+        ):
+            raise ValueError("enabled_rules must be a tuple of rule names")
+        if len(set(self.enabled_rules)) != len(self.enabled_rules):
+            raise ValueError("enabled_rules must not contain duplicates")
+        if not set(self.enabled_rules) <= set(rules):
+            raise ValueError(f"enabled_rules must be a subset of {rules}")
+        if not isinstance(self.severity_by_rule, Mapping):
+            raise ValueError("severity_by_rule must be a mapping")
+        severities = dict(self.severity_by_rule)
+        if not set(severities) <= set(rules):
+            raise ValueError(f"severity_by_rule keys must be a subset of {rules}")
+        if any(value not in ("high", "medium", "low") for value in severities.values()):
+            raise ValueError("severity_by_rule values must be high, medium or low")
+        object.__setattr__(self, "severity_by_rule", MappingProxyType(severities))
 
 
 @dataclass(frozen=True, slots=True)

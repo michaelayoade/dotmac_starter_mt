@@ -447,3 +447,161 @@ def test_projection_preserves_unconstrained_historical_json(
             db, tenant_id=tenant, person_id=person, course_id=course
         )[a.id]
         assert fact.per_item == json.loads(historical_json)
+
+
+def _set_course_policy(db, tenant, course, **values):
+    from dotmac_learning.models import Course
+
+    row = db.scalar(
+        select(Course).where(Course.tenant_id == tenant, Course.id == course)
+    )
+    for name, value in values.items():
+        setattr(row, name, value)
+    db.flush()
+    return row
+
+
+def test_completion_fraction_half_and_prospective_change(progress_case):
+    engine, tenant, person, course = progress_case
+    at = datetime(2026, 1, 1, tzinfo=UTC)
+    command = CompletionCommand(
+        tenant_id=tenant, person_id=person, course_id=course, now=at
+    )
+    with Session(engine) as db, db.begin():
+        _scope(db, tenant)
+        _set_course_policy(db, tenant, course, completion_fraction=0.5)
+        first = _activity(db, tenant, course)
+        second = _activity(db, tenant, course)
+        _score(db, tenant, person, first, fraction=1.0, passed=True, at=at)
+        result = recompute_completion(db, command)
+        assert result.completion.status == "completed"
+        assert result.first_completion and result.certificate is not None
+        # Changing the fraction writes only the course row: the stored
+        # completion is untouched until the next recompute.
+        _set_course_policy(db, tenant, course, completion_fraction=1.0)
+        stored = db.scalar(select(CourseCompletion))
+        assert stored.status == "completed" and stored.pct == 0.5
+        result = recompute_completion(db, command)
+        assert result.completion.status == "in_progress"
+        _score(db, tenant, person, second, fraction=1.0, passed=True, at=at)
+        assert recompute_completion(db, command).completion.status == "completed"
+
+
+def test_certificate_auto_issue_off_and_validity_expiry(progress_case):
+    engine, tenant, person, course = progress_case
+    at = datetime(2026, 1, 1, tzinfo=UTC)
+    command = CompletionCommand(
+        tenant_id=tenant, person_id=person, course_id=course, now=at
+    )
+    with Session(engine) as db, db.begin():
+        _scope(db, tenant)
+        _set_course_policy(db, tenant, course, certificate_auto_issue=False)
+        only = _activity(db, tenant, course)
+        _score(db, tenant, person, only, fraction=1.0, passed=True, at=at)
+        result = recompute_completion(db, command)
+        assert result.first_completion and result.certificate is None
+        assert db.scalar(select(func.count()).select_from(Certificate)) == 0
+        # Explicit issuance still works and stamps the validity window.
+        _set_course_policy(db, tenant, course, certificate_validity_days=30)
+        issued = issue_certificate(
+            db,
+            CertificateCommand(
+                tenant_id=tenant, person_id=person, course_id=course, now=at
+            ),
+        )
+        assert issued.created
+        assert issued.certificate.expires_at == at + timedelta(days=30)
+        again = issue_certificate(
+            db,
+            CertificateCommand(
+                tenant_id=tenant,
+                person_id=person,
+                course_id=course,
+                now=at + timedelta(days=5),
+            ),
+        )
+        assert not again.created
+        assert again.certificate.expires_at == at + timedelta(days=30)
+
+
+@pytest.mark.parametrize("policy", ["latest", "first"])
+def test_scoring_policy_exact_tie_breaks_by_score_id(progress_case, policy):
+    """Exact (attempt_no, created_at) ties resolve by Score.id in both owners.
+
+    Latest keeps the larger score id and first the smaller one, in the
+    grade projections and in item analytics alike (A-P3-1).
+    """
+    from dotmac_learning import analytics
+
+    engine, tenant, person, course = progress_case
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    with Session(engine) as db, db.begin():
+        _scope(db, tenant)
+        act = _activity(db, tenant, course)
+        act.scoring_policy = policy
+        db.flush()
+        # One submission, two scores (the auto + override shape): the
+        # attempt is unique per learner, so an exact tie lives here.
+        low = _score(
+            db, tenant, person, act, attempt=1, fraction=0.9, passed=True, at=base
+        )
+        high = Score(
+            tenant_id=tenant,
+            submission_id=low.submission_id,
+            score=0.1,
+            max_score=1,
+            fraction=0.1,
+            passed=False,
+            source="override",
+            created_at=base,
+        )
+        db.add(high)
+        db.flush()
+        by_id = {low.id: low, high.id: high}
+        want = by_id[max(by_id) if policy == "latest" else min(by_id)]
+        projected = best_scores_for(
+            db, tenant_id=tenant, person_id=person, course_id=course
+        )
+        assert projected[act.id].id == want.id
+        rows = analytics._best_scores_for_activity(
+            db, tenant_id=tenant, activity_id=act.id
+        )
+        assert [row.id for row in rows] == [want.id]
+
+
+@pytest.mark.parametrize(
+    "policy,want", [("best", 0.9), ("latest", 0.4), ("first", 0.6)]
+)
+def test_scoring_policy_selection(progress_case, policy, want):
+    engine, tenant, person, course = progress_case
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    with Session(engine) as db, db.begin():
+        _scope(db, tenant)
+        act = _activity(db, tenant, course)
+        act.scoring_policy = policy
+        db.flush()
+        _score(db, tenant, person, act, attempt=1, fraction=0.6, passed=True, at=base)
+        _score(
+            db,
+            tenant,
+            person,
+            act,
+            attempt=2,
+            fraction=0.9,
+            passed=True,
+            at=base + timedelta(hours=1),
+        )
+        _score(
+            db,
+            tenant,
+            person,
+            act,
+            attempt=3,
+            fraction=0.4,
+            passed=False,
+            at=base + timedelta(hours=2),
+        )
+        projected = best_scores_for(
+            db, tenant_id=tenant, person_id=person, course_id=course
+        )
+        assert projected[act.id].fraction == want

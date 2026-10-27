@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Protocol, cast
 from uuid import UUID
 
@@ -13,8 +16,8 @@ from sqlalchemy.orm import Session
 
 from . import attempt_policy
 from .attempt_contracts import AssessmentQuestion, PendingGradingFact, QuestionFact
-from .curriculum_models import Question
-from .models import Activity, Score, Submission
+from .curriculum_models import Question, QuestionBank
+from .models import ASSESSMENT_MODES, Activity, Score, Submission
 from .references import _activity_fact
 from .results import _submission_fact
 
@@ -26,18 +29,95 @@ class FeedbackTerms(attempt_policy.ActivityTerms, Protocol):
     def assessment_mode(self) -> str: ...
 
 
+_REVEAL_POLICIES = ("immediate", "on_pass_or_exhausted", "never")
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackRevealTerms:
+    """Required per-mode answer-key reveal policy supplied by the product."""
+
+    reveal_by_mode: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reveal_by_mode, Mapping):
+            raise ValueError("reveal_by_mode must be a mapping")
+        copied = dict(self.reveal_by_mode)
+        if set(copied) != set(ASSESSMENT_MODES):
+            raise ValueError(
+                "reveal_by_mode must name exactly the assessment modes "
+                f"{ASSESSMENT_MODES}"
+            )
+        for mode, policy in copied.items():
+            if policy not in _REVEAL_POLICIES:
+                raise ValueError(
+                    f"reveal_by_mode[{mode!r}] must be one of {_REVEAL_POLICIES}"
+                )
+        if copied["exam"] == "immediate":
+            raise ValueError("reveal_by_mode['exam'] may not be 'immediate'")
+        object.__setattr__(self, "reveal_by_mode", MappingProxyType(copied))
+
+
+def _scoped_rows(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    bank_id: UUID | None,
+    bank_version_id: UUID | None,
+) -> list[Question]:
+    """Resolve the exact question set for a grading/serving read.
+
+    An explicit version pin wins. Otherwise a bank with a current
+    published version serves exactly that version; a bank without one
+    (historical/frozen-import estate) serves only its NULL-version
+    rows. Rows from several versions are never mixed.
+    """
+    if bank_version_id is not None:
+        pinned = (
+            select(Question)
+            .where(Question.tenant_id == tenant_id)
+            .where(Question.bank_version_id == bank_version_id)
+        )
+        if bank_id is not None:
+            # A pin never widens the read across banks: when the caller
+            # also names the bank, only that bank's pinned rows serve.
+            pinned = pinned.where(Question.bank_id == bank_id)
+        return list(db.scalars(pinned).all())
+    if bank_id is None:
+        return list(
+            db.scalars(
+                select(Question)
+                .where(Question.tenant_id == tenant_id)
+                .where(Question.bank_id == bank_id)
+            ).all()
+        )
+    bank = db.scalars(
+        select(QuestionBank).where(
+            QuestionBank.tenant_id == tenant_id, QuestionBank.id == bank_id
+        )
+    ).first()
+    statement = (
+        select(Question)
+        .where(Question.tenant_id == tenant_id)
+        .where(Question.bank_id == bank_id)
+    )
+    if bank is not None and bank.current_version_id is not None:
+        statement = statement.where(Question.bank_version_id == bank.current_version_id)
+    elif bank is not None:
+        statement = statement.where(Question.bank_version_id.is_(None))
+    return list(db.scalars(statement).all())
+
+
 def questions_for(
     db: Session,
     *,
     tenant_id: UUID,
     bank_id: UUID | None,
     only_ext_ids: list[str] | None = None,
+    bank_version_id: UUID | None = None,
 ) -> list[AssessmentQuestion]:
-    rows = db.scalars(
-        select(Question)
-        .where(Question.tenant_id == tenant_id)
-        .where(Question.bank_id == bank_id)
-    ).all()
+    rows = _scoped_rows(
+        db, tenant_id=tenant_id, bank_id=bank_id, bank_version_id=bank_version_id
+    )
     if only_ext_ids is not None:
         keep = set(only_ext_ids)
         rows = [q for q in rows if q.ext_id in keep]
@@ -114,14 +194,15 @@ def attempts_used_by_person(
 def reveal_feedback(
     activity: FeedbackTerms,
     *,
+    terms: FeedbackRevealTerms,
     passed: bool,
     attempts_used: int,
     attempts_granted: int = 0,
 ) -> bool:
-    mode = activity.assessment_mode
-    if mode == "practice":
+    policy = terms.reveal_by_mode.get(activity.assessment_mode, "on_pass_or_exhausted")
+    if policy == "immediate":
         return True
-    if mode == "exam":
+    if policy == "never":
         return False
     exhausted = attempt_policy.entitlement(
         activity, used=attempts_used, granted=attempts_granted
@@ -131,6 +212,7 @@ def reveal_feedback(
 
 __all__ = [
     "FeedbackTerms",
+    "FeedbackRevealTerms",
     "questions_for",
     "bank_questions",
     "pending_grading",
@@ -172,18 +254,22 @@ def has_other_passing_score(
 
 
 def bank_questions(
-    db: Session, *, tenant_id: UUID, bank_id: UUID | None
+    db: Session,
+    *,
+    tenant_id: UUID,
+    bank_id: UUID | None,
+    bank_version_id: UUID | None = None,
 ) -> tuple[QuestionFact, ...]:
-    """Read all stored bank questions without authoring or feedback policy.
+    """Read serving bank questions without authoring or feedback policy.
 
     The caller retains answer-key disclosure policy and ordinary Session query
-    behavior. Missing and None bank IDs match no rows, without a bank lookup.
+    behavior. Missing and None bank IDs match no rows. Without an explicit
+    version pin the read serves the bank's current published version (or
+    its historical NULL-version rows when it has none).
     """
-    rows = db.scalars(
-        select(Question)
-        .where(Question.tenant_id == tenant_id)
-        .where(Question.bank_id == bank_id)
-    ).all()
+    rows = _scoped_rows(
+        db, tenant_id=tenant_id, bank_id=bank_id, bank_version_id=bank_version_id
+    )
     return tuple(
         QuestionFact(
             id=q.id,
@@ -200,6 +286,7 @@ def bank_questions(
             weight=q.weight,
             created_at=q.created_at,
             updated_at=q.updated_at,
+            bank_version_id=q.bank_version_id,
         )
         for q in rows
     )

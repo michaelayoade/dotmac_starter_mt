@@ -4,11 +4,13 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from dotmac_learning.curriculum_contracts import ChapterFact
+from dotmac_learning.insight_contracts import ProgressTrendTerms
 from dotmac_learning.learner_dashboard import _next_deadline_from, _resume_from, _trend
 from dotmac_learning.progress_contracts import ScoreFact
 from dotmac_learning.references import ActivityFact
 
 NOW = datetime(2026, 8, 1, tzinfo=UTC)
+TREND = ProgressTrendTerms(8, 3, 0.03)
 
 
 def chapter(number):
@@ -65,11 +67,11 @@ def test_resume_checks_all_activities_and_reads_wraps_after_touch():
 
 
 def test_trend_half_split_strict_three_point_threshold_and_short_flat():
-    assert _trend([0, 100]) == "flat"
-    assert _trend([0, 3, 3]) == "flat"
-    assert _trend([0, 3, 4]) == "up"
-    assert _trend([4, 0, 1]) == "down"
-    assert _trend([4, 1, 1]) == "flat"
+    assert _trend([0, 100], TREND) == "flat"
+    assert _trend([0, 3, 3], TREND) == "flat"
+    assert _trend([0, 3, 4], TREND) == "up"
+    assert _trend([4, 0, 1], TREND) == "down"
+    assert _trend([4, 1, 1], TREND) == "flat"
 
 
 def test_next_deadline_excludes_now_and_keeps_passed_activity_due_candidates():

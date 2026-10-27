@@ -16,6 +16,7 @@ from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -79,6 +80,18 @@ class Course(KernelBase, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("tenant_id", "slug", name="uq_courses_tenant_slug"),
         UniqueConstraint("tenant_id", "id", name="uq_courses_tenant_id_id"),
+        CheckConstraint(
+            "prerequisite_composition IN ('all', 'any')",
+            name="ck_courses_prerequisite_composition",
+        ),
+        CheckConstraint(
+            "completion_fraction > 0 AND completion_fraction <= 1",
+            name="ck_courses_completion_fraction",
+        ),
+        CheckConstraint(
+            "certificate_validity_days IS NULL OR certificate_validity_days >= 1",
+            name="ck_courses_certificate_validity_days",
+        ),
         Index("ix_courses_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
@@ -96,15 +109,41 @@ class Course(KernelBase, TimestampMixin):
     # catalog projection. Internal material (instructor guide, entrance shells,
     # internal disciplines) stays unlisted regardless of publish status.
     listed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # Prerequisite condition-group composition (HM-01): "all" requires every
+    # group satisfied (the historical implicit rule), "any" requires one.
+    prerequisite_composition: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="all", server_default="all"
+    )
+    # Completion threshold (HM-03): fraction of activities that must pass.
+    # The historical rule is 1.0 (every activity); read inside recompute.
+    completion_fraction: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1.0, server_default="1.0"
+    )
+    # Certificate policy (HM-04): auto-issue on first completion, and the
+    # validity window stamped at issue time (NULL validity = never expires).
+    certificate_auto_issue: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    certificate_validity_days: Mapped[int | None] = mapped_column(Integer)
 
 
 class Activity(KernelBase, TimestampMixin):
     __tablename__ = "activities"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_activities_tenant_id_id"),
+        CheckConstraint(
+            "scoring_policy IN ('best', 'latest', 'first')",
+            name="ck_activities_scoring_policy",
+        ),
+        CheckConstraint(
+            "min_attempt_interval_seconds >= 0 "
+            "AND min_attempt_interval_seconds <= 2592000",
+            name="ck_activities_min_attempt_interval",
+        ),
         Index("ix_activities_tenant_id", "tenant_id"),
         Index("ix_activities_course_id", "course_id"),
         Index("ix_activities_bank_id", "bank_id"),
+        Index("ix_activities_bank_version_id", "bank_version_id"),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -113,12 +152,29 @@ class Activity(KernelBase, TimestampMixin):
     chapter_number: Mapped[int | None] = mapped_column(Integer)
     type: Mapped[str] = mapped_column(String(16), nullable=False)
     bank_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    # Published bank version this activity serves (logical reference, like
+    # bank_id); set only by explicit repoint or backfill, never by publish.
+    bank_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     pass_threshold: Mapped[float] = mapped_column(
         Float, nullable=False, server_default="0.0"
     )
     # Assessment policy (Slice 4). Null = unlimited attempts.
     max_attempts: Mapped[int | None] = mapped_column(Integer)
+    # Winning-score selection (HM-06): "best" is the historical rule,
+    # "latest"/"first" pick by (attempt_no, score time). Read at projection.
+    scoring_policy: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="best", server_default="best"
+    )
+    # Authored final flag (HM-10). lr_0009 backfills it from the historical
+    # heuristic (chapter_number IS NULL AND pass_threshold > 0).
+    is_final: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Minimum seconds between attempts (HM-13); 0 disables the cooldown.
+    min_attempt_interval_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     # Assessment mode bundles the scoring + answer-reveal policy by purpose:
     #   practice — best-of, immediate feedback (formative)
     #   graded   — best-of, answers withheld until pass or attempts exhausted
@@ -197,9 +253,10 @@ class Score(KernelBase, TimestampMixin):
 class CourseCompletion(KernelBase, TimestampMixin):
     """A learner's completion state for a course.
 
-    ``pct`` is the fraction of the course's activities with a passing best score.
+    ``pct`` is the fraction of the course's activities with a passing score.
     ``status`` flips to ``completed`` (and stamps ``completed_at`` once) when pct
-    reaches 1.0. Recomputed whenever a score is written for the person/course.
+    reaches the course's completion fraction (1.0 historically). Recomputed
+    whenever a score is written for the person/course.
     """
 
     __tablename__ = "course_completions"
@@ -271,6 +328,8 @@ class Certificate(KernelBase, TimestampMixin):
     course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     serial: Mapped[str] = mapped_column(String(32), nullable=False)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Expiry stamped at issue from the course validity (HM-04); NULL = never.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LearningEvent(KernelBase, TimestampMixin):

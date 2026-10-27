@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from dotmac_learning import agenda, todo
+from dotmac_learning.assessment_reads import FeedbackRevealTerms
 from dotmac_learning.attempt_models import AttemptGrant
 from dotmac_learning.delivery_models import ClassSession, OfferingActivity
 from dotmac_learning.models import Activity, Score, Submission
@@ -18,6 +19,9 @@ from tests.test_learning_results import scoped
 learning_database = result_tests.learning_database
 result_database = result_tests.result_database
 NOW = datetime(2026, 8, 1, 12, tzinfo=UTC)
+FEEDBACK = FeedbackRevealTerms(
+    {"practice": "immediate", "graded": "on_pass_or_exhausted", "exam": "never"}
+)
 
 
 def seed(db, tenant, person, course, activity, *, role="student", status="active"):
@@ -97,6 +101,7 @@ def test_non_bypass_wrong_scope_and_detached_deadline(result_database):
             now=NOW,
             local_zone=UTC,
             terms=TodoTerms(14, 10, 30, 7, 30),
+            feedback_terms=FEEDBACK,
             join_lead_minutes=60,
         )
         assert len(positive.next_7) == 1
@@ -143,6 +148,7 @@ def test_non_bypass_wrong_scope_and_detached_deadline(result_database):
             now=NOW,
             local_zone=UTC,
             terms=TodoTerms(14, 10, 30, 7, 30),
+            feedback_terms=FEEDBACK,
             join_lead_minutes=60,
         )
         assert (
@@ -172,6 +178,7 @@ def test_student_deadlines_any_role_windows_and_exact_buckets(result_database):
             now=NOW,
             local_zone=UTC,
             terms=TodoTerms(14, 10, 30, 7, 30),
+            feedback_terms=FEEDBACK,
             join_lead_minutes=60,
         )
         assert [(w.kind, w.at) for w in timeline.course_windows] == [
@@ -196,6 +203,7 @@ def test_student_deadlines_any_role_windows_and_exact_buckets(result_database):
                 now=NOW,
                 local_zone=UTC,
                 terms=TodoTerms(14, 10, 30, 7, 30),
+                feedback_terms=FEEDBACK,
                 join_lead_minutes=60,
             )
             assert len(getattr(timeline, bucket)) == 1
@@ -207,6 +215,7 @@ def test_student_deadlines_any_role_windows_and_exact_buckets(result_database):
             now=NOW,
             local_zone=UTC,
             terms=TodoTerms(14, 10, 30, 7, 30),
+            feedback_terms=FEEDBACK,
             join_lead_minutes=60,
         )
         assert timeline.next_30 == ()
@@ -288,6 +297,7 @@ def test_agenda_other_cohort_offering_and_inactive_session_membership(result_dat
                 now=NOW,
                 local_zone=UTC,
                 terms=TodoTerms(14, 10, 30, 7, 30),
+                feedback_terms=FEEDBACK,
                 join_lead_minutes=60,
             ).sessions
             == ()
@@ -333,6 +343,7 @@ def test_any_passing_score_removes_deadline_and_recent_limit_precedes_feedback(
             now=NOW,
             local_zone=UTC,
             terms=TodoTerms(14, 10, 30, 7, 30),
+            feedback_terms=FEEDBACK,
             join_lead_minutes=60,
         )
         assert len(timeline.graded) == 10 and timeline.feedback == ()
@@ -379,6 +390,7 @@ def test_any_passing_score_removes_deadline_and_recent_limit_precedes_feedback(
                 now=NOW,
                 local_zone=UTC,
                 terms=TodoTerms(14, 10, 30, 7, 30),
+                feedback_terms=FEEDBACK,
                 join_lead_minutes=60,
             ).feedback
             == ()
@@ -401,6 +413,7 @@ def test_any_passing_score_removes_deadline_and_recent_limit_precedes_feedback(
             now=NOW,
             local_zone=UTC,
             terms=TodoTerms(14, 10, 30, 7, 30),
+            feedback_terms=FEEDBACK,
             join_lead_minutes=60,
         )
         assert len(timeline.feedback) == 10
@@ -440,6 +453,7 @@ def test_strict_agenda_now_stable_category_ties_and_window_horizon(result_databa
             now=NOW,
             local_zone=UTC,
             terms=TodoTerms(14, 10, 30, 7, 30),
+            feedback_terms=FEEDBACK,
             join_lead_minutes=60,
         )
         assert [w.kind for w in timeline.course_windows] == ["opens", "closes"]
@@ -452,6 +466,7 @@ def test_strict_agenda_now_stable_category_ties_and_window_horizon(result_databa
                 now=NOW,
                 local_zone=UTC,
                 terms=TodoTerms(14, 10, 30, 7, 30),
+                feedback_terms=FEEDBACK,
                 join_lead_minutes=60,
             ).course_windows
             == ()
@@ -516,6 +531,7 @@ def test_recent_lookback_inclusive_and_read_does_not_require_explicit_begin(
             now=NOW,
             local_zone=UTC,
             terms=TodoTerms(14, 10, 30, 7, 30),
+            feedback_terms=FEEDBACK,
             join_lead_minutes=60,
         )
         assert len(timeline.graded) == 1 and timeline.feedback == timeline.graded
@@ -549,6 +565,7 @@ def test_configured_timeline_horizons_join_boundary_and_agenda_cap(result_databa
             local_zone=UTC,
             now=NOW,
             terms=terms,
+            feedback_terms=FEEDBACK,
             join_lead_minutes=4,
         )
         assert timeline.next_7 == ()
@@ -576,6 +593,7 @@ def test_configured_timeline_horizons_join_boundary_and_agenda_cap(result_databa
             local_zone=UTC,
             now=NOW,
             terms=terms,
+            feedback_terms=FEEDBACK,
             join_lead_minutes=4,
         )
         assert changed.joinable == frozenset()
@@ -597,6 +615,7 @@ def test_configured_timeline_horizons_join_boundary_and_agenda_cap(result_databa
                 local_zone=UTC,
                 now=NOW,
                 terms=terms,
+                feedback_terms=FEEDBACK,
                 join_lead_minutes=4,
             ).sessions
             == ()

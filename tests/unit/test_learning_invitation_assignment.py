@@ -25,6 +25,7 @@ def test_invitation_command_preserves_course_order_duplicates_and_open_product_r
         cohort_id=uuid4(),
         person_id=uuid4(),
         global_role="product-observer",
+        pacing_default_open=True,
         selected_course_ids=[course, other, course],
     )
     assert command.selected_course_ids == (course, other, course)
@@ -77,6 +78,7 @@ def staged_invitation(monkeypatch):
         cohort_id=uuid4(),
         person_id=uuid4(),
         global_role="configured-guide",
+        pacing_default_open=True,
     )
     return db, command, staged
 

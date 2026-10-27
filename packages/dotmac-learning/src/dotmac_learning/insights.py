@@ -390,7 +390,7 @@ def cohort_overview(
         if total_activities:
             not_attempted += max(total_activities - len(best), 0)
             passed = sum(1 for s in best.values() if s.passed)
-            if passed >= total_activities / 2:
+            if passed >= total_activities * terms.half_fraction:
                 half.add(person_id)
         overdue += sum(
             1 for aid in overdue_activity_ids if aid not in best or not best[aid].passed

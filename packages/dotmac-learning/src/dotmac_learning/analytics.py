@@ -1,8 +1,12 @@
 """Source item analysis in the caller's transaction, without grading or writes.
 
-Each person's first maximum-fraction row wins; pass, provenance and recency do
-not break ties. SQL encounter order is intentionally unspecified. No activity
-lookup, enrollment, availability or source filter is added to the source query.
+Under the default ``best`` scoring policy each person's first
+maximum-fraction row wins; pass, provenance and recency do not break ties.
+SQL encounter order is intentionally unspecified. Under ``latest``/``first``
+(HM-06) the same per-activity policy as the grade projections selects by
+(attempt_no, score time, score id), so item analysis cannot disagree
+with grades even on an exact (attempt_no, score time) tie.
+No enrollment, availability or source filter is added to the source query.
 """
 
 from __future__ import annotations
@@ -16,16 +20,16 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from .analytics_contracts import ItemAnalysis, ItemIdentifier
-from .models import Score, Submission
+from .models import Activity, Score, Submission
 from .progress_contracts import ScoreFact
 from .reports import _fraction_winner
 
 
 def _activity_scores_query(
     tenant_id: UUID, activity_id: UUID
-) -> Select[tuple[UUID, Score]]:
+) -> Select[tuple[UUID, int, Score]]:
     return (
-        select(Submission.person_id, Score)
+        select(Submission.person_id, Submission.attempt_no, Score)
         .join(
             Score,
             (Score.submission_id == Submission.id)
@@ -39,12 +43,33 @@ def _activity_scores_query(
 def _best_scores_for_activity(
     db: Session, *, tenant_id: UUID, activity_id: UUID
 ) -> list[Score]:
+    # The policy lookup is the one activity read HM-06 requires; a missing
+    # activity keeps the historical best rule (and yields no rows anyway).
+    policy = (
+        db.scalar(
+            select(Activity.scoring_policy).where(
+                Activity.tenant_id == tenant_id, Activity.id == activity_id
+            )
+        )
+        or "best"
+    )
     rows = db.execute(_activity_scores_query(tenant_id, activity_id)).all()
-    best: dict[UUID, Score] = {}
-    for person_id, score in rows:
-        cur = best.get(person_id)
-        best[person_id] = _fraction_winner(cur, score)
-    return list(best.values())
+    if policy not in ("latest", "first"):
+        best: dict[UUID, Score] = {}
+        for person_id, _attempt_no, score in rows:
+            cur = best.get(person_id)
+            best[person_id] = _fraction_winner(cur, score)
+        return list(best.values())
+    per_person: dict[UUID, list[tuple[int, Score]]] = {}
+    for person_id, attempt_no, score in rows:
+        per_person.setdefault(person_id, []).append((attempt_no, score))
+    picker = max if policy == "latest" else min
+    return [
+        picker(entries, key=lambda entry: (entry[0], entry[1].created_at, entry[1].id))[
+            1
+        ]
+        for entries in per_person.values()
+    ]
 
 
 def _analysis_from(scores: Iterable[Score | ScoreFact]) -> tuple[ItemAnalysis, ...]:

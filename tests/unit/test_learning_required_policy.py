@@ -116,7 +116,7 @@ def test_configured_validity_tracks_paper_and_preserves_no_mcq_fallback():
 
 def test_bank_activity_terms_copy_and_freeze_caller_mapping():
     source = {"final": 0.91}
-    terms = BankActivityTerms(source, 0.27, "practice", "manual", 2.5)
+    terms = BankActivityTerms(source, 0.27, "practice", "manual", 2.5, "best", 0)
     source["final"] = 0.1
     assert terms.pass_threshold_by_kind["final"] == 0.91
     assert (

@@ -197,3 +197,13 @@ def _layer(
     if not file.is_file():
         raise ProfileError(f"{'/'.join(path)}: missing {name}")
     return parse_layer(file.read_text(encoding="utf-8"), kind=kind, path=path)
+
+
+__all__ = [
+    "KINDS",
+    "Layer",
+    "discover",
+    "merge",
+    "parse_layer",
+    "resolve_chain",
+]

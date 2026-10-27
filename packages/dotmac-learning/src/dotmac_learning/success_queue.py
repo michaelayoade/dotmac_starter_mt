@@ -250,8 +250,7 @@ def _rule_failed_final(
         select(Activity)
         .where(Activity.tenant_id == tenant_id)
         .where(Activity.course_id.in_(course_ids))
-        .where(Activity.chapter_number.is_(None))
-        .where(Activity.pass_threshold > 0)
+        .where(Activity.is_final.is_(True))
     ).all()
     for final in finals:
         best = best_scores_for(
@@ -316,6 +315,10 @@ def _rule_certificate_blocked(
         if cert is not None:
             continue
         course = db.get(Course, comp.course_id)
+        # A course that opted out of auto-issue (HM-04) is not blocked:
+        # no certificate is ever expected for it.
+        if course is not None and not course.certificate_auto_issue:
+            continue
         facts: dict[str, JsonValue] = {
             "course_id": str(comp.course_id),
             "course_title": course.title if course else "",
@@ -461,8 +464,9 @@ def sweep(
             ),
         }
         for reason, result in results.items():
-            if result is not None:
+            if result is not None and reason in terms.enabled_rules:
                 facts, severity, action = result
+                severity = terms.severity_by_rule.get(reason, severity)
                 outcome = _upsert(
                     db,
                     tenant_id=tenant_id,

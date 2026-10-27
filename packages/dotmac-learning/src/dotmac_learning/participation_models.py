@@ -20,6 +20,8 @@ from dotmac_kernel.models import (
 )
 from dotmac_kernel.namespaces import schema_table_args
 from sqlalchemy import (
+    JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -29,7 +31,9 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,6 +44,10 @@ class Cohort(Base, TimestampMixin):
     __tablename__ = "cohorts"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_cohorts_tenant_id_id"),
+        CheckConstraint(
+            "auto_accept_below_action IN ('waitlisted', 'none')",
+            name="ck_cohorts_auto_accept_below_action",
+        ),
         Index("ix_cohorts_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
@@ -65,6 +73,12 @@ class Cohort(Base, TimestampMixin):
         Integer, nullable=True
     )
     auto_accept_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Below-threshold admission action (HM-16): "waitlisted" is the historical
+    # outcome; "none" leaves the application for a human decision. The
+    # decision itself stays product-owned; Learning only stores the policy.
+    auto_accept_below_action: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="waitlisted", server_default="waitlisted"
+    )
 
 
 class Enrollment(Base, TimestampMixin):
@@ -143,6 +157,10 @@ class Track(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("tenant_id", "slug", name="uq_tracks_tenant_slug"),
         UniqueConstraint("tenant_id", "id", name="uq_tracks_tenant_id_id"),
+        CheckConstraint(
+            "gating_mode IN ('none', 'previous', 'all_previous')",
+            name="ck_tracks_gating_mode",
+        ),
         Index("ix_tracks_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
@@ -156,6 +174,12 @@ class Track(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
+    )
+    # Track-order gating (HM-02): "previous" is the historical rule (unlock
+    # after the immediately previous course), "all_previous" requires every
+    # predecessor, "none" disables track-order locking entirely.
+    gating_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="previous", server_default="previous"
     )
 
 
@@ -283,10 +307,21 @@ class CourseOffering(Base, TimestampMixin):
     )
     starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Pacing fallback (HM-11): governs only activities with no
+    # OfferingActivity override row. True is the historical fail-open rule.
+    pacing_default_open: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
 
 
 class CoursePrerequisite(Base, TimestampMixin):
-    """``course_id`` requires ``requires_course_id`` to be completed first."""
+    """One prerequisite condition on ``course_id`` (HM-01).
+
+    The historical row shape is the default condition: kind
+    ``course_completed`` with empty params in group ``g0``, meaning
+    ``requires_course_id`` must be completed first. ``params`` is validated
+    typed at the command boundary; storage is JSONB like Submission.answers.
+    """
 
     __tablename__ = "course_prerequisites"
     __table_args__ = (
@@ -297,7 +332,19 @@ class CoursePrerequisite(Base, TimestampMixin):
             "tenant_id",
             "course_id",
             "requires_course_id",
+            "condition_kind",
+            "group_key",
             name="uq_course_prerequisites_pair",
+        ),
+        CheckConstraint(
+            "condition_kind IN ('course_completed', 'certificate_held', "
+            "'course_grade_at_least', 'activity_passed', "
+            "'attempt_number_at_least')",
+            name="ck_course_prerequisites_condition_kind",
+        ),
+        CheckConstraint(
+            "origin IN ('yaml_import', 'ui')",
+            name="ck_course_prerequisites_origin",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "course_id"],
@@ -325,6 +372,30 @@ class CoursePrerequisite(Base, TimestampMixin):
     course_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     requires_course_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), nullable=False
+    )
+    condition_kind: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="course_completed",
+        server_default="course_completed",
+    )
+    params: Mapped[dict[str, object]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+        # PostgreSQL supplies the implicit cast; the migration uses explicit ::jsonb.
+        server_default=text("'{}'"),
+    )
+    group_key: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="g0", server_default="g0"
+    )
+    # Provenance for the non-overwriting reconciler: only yaml_import rows
+    # may be deleted or rewritten by a curriculum-file reconciliation.
+    # The standing default is fail-closed (ui): lr_0010 backfills rows
+    # that predate the column as yaml_import, and the reconciler stamps
+    # yaml_import explicitly on the rows it creates.
+    origin: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ui", server_default="ui"
     )
 
 

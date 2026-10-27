@@ -74,3 +74,13 @@ class Unsupported:
     operation: str
     profile_id: str
     detail: str
+
+
+__all__ = [
+    "Evidence",
+    "Ok",
+    "OutcomeUnknown",
+    "Reason",
+    "Unreadable",
+    "Unsupported",
+]

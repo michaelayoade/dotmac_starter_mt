@@ -14,17 +14,22 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 FIELDS = {
     "cohorts": (
         "name discipline status delivery_mode entrance_bank_id "
-        "entrance_time_limit_minutes auto_accept_threshold"
+        "entrance_time_limit_minutes auto_accept_threshold "
+        "auto_accept_below_action"
     ),
     "enrollments": (
         "cohort_id person_id track_id role_in_cohort status audience employee_ref "
         "access_ends_at"
     ),
-    "tracks": "slug name status",
+    "tracks": "slug name status gating_mode",
     "track_courses": "track_id course_id order_index",
     "cohort_tracks": "cohort_id track_id status",
-    "course_offerings": "cohort_id course_id status starts_at ends_at",
-    "course_prerequisites": "course_id requires_course_id",
+    "course_offerings": (
+        "cohort_id course_id status starts_at ends_at pacing_default_open"
+    ),
+    "course_prerequisites": (
+        "course_id requires_course_id condition_kind params group_key origin"
+    ),
 }
 NULLABLE = {
     "cohorts": {
@@ -44,7 +49,13 @@ UNIQUES = {
     "course_offerings": {("tenant_id", "id"), ("tenant_id", "cohort_id", "course_id")},
     "course_prerequisites": {
         ("tenant_id", "id"),
-        ("tenant_id", "course_id", "requires_course_id"),
+        (
+            "tenant_id",
+            "course_id",
+            "requires_course_id",
+            "condition_kind",
+            "group_key",
+        ),
     },
 }
 INDEXES = {
@@ -64,30 +75,46 @@ INDEXES = {
     "course_prerequisites": {("tenant_id",), ("course_id",), ("requires_course_id",)},
 }
 LENGTHS = {
-    "cohorts": {"name": 120, "discipline": 40, "status": 20, "delivery_mode": 20},
+    "cohorts": {
+        "name": 120,
+        "discipline": 40,
+        "status": 20,
+        "delivery_mode": 20,
+        "auto_accept_below_action": 16,
+    },
     "enrollments": {
         "role_in_cohort": 20,
         "status": 20,
         "audience": 20,
         "employee_ref": 64,
     },
-    "tracks": {"slug": 80, "name": 160, "status": 20},
+    "tracks": {"slug": 80, "name": 160, "status": 20, "gating_mode": 16},
+    "course_prerequisites": {"condition_kind": 32, "group_key": 32, "origin": 16},
     "cohort_tracks": {"status": 20},
     "course_offerings": {"status": 20},
 }
 DEFAULTS = {
-    "cohorts": {"status": "active", "delivery_mode": "self_paced"},
-    "tracks": {"status": "active"},
+    "cohorts": {
+        "status": "active",
+        "delivery_mode": "self_paced",
+        "auto_accept_below_action": "waitlisted",
+    },
+    "tracks": {"status": "active", "gating_mode": "previous"},
     "track_courses": {"order_index": "0"},
     "cohort_tracks": {"status": "active"},
-    "course_offerings": {"status": "active"},
+    "course_offerings": {"status": "active", "pacing_default_open": "true"},
+    "course_prerequisites": {
+        "condition_kind": "course_completed",
+        "group_key": "g0",
+        "origin": "ui",
+    },
 }
 
 
-def test_source_59_persisted_fields_and_migrated_contracts():
+def test_source_66_persisted_fields_and_migrated_contracts():
     assert set(PARTICIPATION_TABLES) == set(FIELDS)
     assert len(PARTICIPATION_MODELS) == 7
-    assert sum(len(m.__table__.c) for m in PARTICIPATION_MODELS) == 59
+    assert sum(len(m.__table__.c) for m in PARTICIPATION_MODELS) == 66
     for model in PARTICIPATION_MODELS:
         table = model.__table__
         name = table.name
@@ -113,11 +140,18 @@ def test_source_59_persisted_fields_and_migrated_contracts():
         } == UNIQUES[name]
         assert {
             c.name for c in table.constraints if isinstance(c, CheckConstraint)
-        } == (
-            {"ck_enrollments_audience", "ck_enrollments_staff_has_employee_ref"}
-            if name == "enrollments"
-            else set()
-        )
+        } == {
+            "enrollments": {
+                "ck_enrollments_audience",
+                "ck_enrollments_staff_has_employee_ref",
+            },
+            "tracks": {"ck_tracks_gating_mode"},
+            "cohorts": {"ck_cohorts_auto_accept_below_action"},
+            "course_prerequisites": {
+                "ck_course_prerequisites_condition_kind",
+                "ck_course_prerequisites_origin",
+            },
+        }.get(name, set())
         for field, length in LENGTHS.get(name, {}).items():
             assert table.c[field].type.length == length
         for field, value in DEFAULTS.get(name, {}).items():
@@ -156,3 +190,19 @@ def test_enrollment_state_requires_explicit_orm_and_server_facts():
         assert column.default is None
         assert column.server_default is None
         assert column.nullable is False
+
+
+def test_prerequisite_condition_defaults_materialize_legacy_rows():
+    table = next(
+        m.__table__
+        for m in PARTICIPATION_MODELS
+        if m.__tablename__ == "course_prerequisites"
+    )
+    assert table.c.condition_kind.default.arg == "course_completed"
+    assert str(table.c.condition_kind.server_default.arg) == "course_completed"
+    assert table.c.group_key.default.arg == "g0"
+    assert str(table.c.group_key.server_default.arg) == "g0"
+    assert table.c.params.default.arg(None) == {}
+    assert table.c.params.default.arg(None) is not table.c.params.default.arg(None)
+    assert str(table.c.params.server_default.arg) == "'{}'"
+    assert not table.c.params.nullable

@@ -20,7 +20,7 @@ candidate_consumers = ["dotmac_sub"]
 inventory_evidence = [
   "docs/inventories/rust-computation-sources.md","docs/inventories/network-module-sources.md", "docs/inventories/network-module-dispositions.toml", "docs/inventories/network-module-contracts.toml", "docs/adr/0038-network-capabilities-decompose-sub-first.md"]
 composition_boundary = "Sub is the primary code source; CRM is conflict/retirement evidence, not a co-owner. Products correlate projects/work orders opaquely. No sibling/provider imports or cross-module FKs."
-first_cutover = "dotmac_sub in the single network-suite-v1 cutover, blocked until CRM outside-plant authority is consolidated into Sub."
+first_cutover = "dotmac_sub in wave 3 of network-suite-v1 (suite remainder), blocked until CRM outside-plant authority is consolidated into Sub. (ADR-0038 wave amendment, ruled by Michael 2026-10-26/27; in force on merge.)"
 shadow_and_drift = "Compare the complete Sub/CRM cohort, then backfill and compare structure, strand, splice, termination, continuity and accepted-change digests."
 local_copy_retirement = "CRM's outside-plant tables/writers and Sub's local plant owner are retired after sealed suite cutover and rollback window."
 next_action = "2026-10-16: the 0.2.0a1 private-native successor was qualified and released through the existing protected module lane; canonical publication and registry-verification evidence is recorded in docs/inventories/module-release-verifications.json. Preserve prior immutable release identities. Publication transfers no product data or writer authority. Adoption remains within ADR-0038's coordinated network-suite cutover and requires CRM outside-plant consolidation, Sub IPAM one-writer cutover, shadow proof and legacy-writer retirement."

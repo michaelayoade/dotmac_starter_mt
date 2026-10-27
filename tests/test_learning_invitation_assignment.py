@@ -74,6 +74,7 @@ def command(data, **values):
         cohort_id=cohort,
         person_id=people[0],
         global_role="student",
+        pacing_default_open=values.pop("pacing_default_open", True),
         **values,
     )
 
