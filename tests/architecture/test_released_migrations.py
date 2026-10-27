@@ -7658,6 +7658,42 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-learning ──
+    "dotmac-learning-v0.1.0a3": (
+        "dotmac-learning",
+        "7f8f1e6646e531154450370e51dbede46723cc60",
+        {
+            "lr_0001_learning.py": (
+                "b40ad7cb692f386ef03faf0d093b46e5684b5bf6e6d282a9808672cb7e1a561d"
+            ),
+            "lr_0002_curriculum_reading.py": (
+                "98ddf64623110fead8893d3fdef3c6f06fb3959b5e6a7728d5117bfb74a02ac2"
+            ),
+            "lr_0003_participation.py": (
+                "0093a5d4c26e11be769ccc42cc859f667662c20abd269249da59d3ab91d92267"
+            ),
+            "lr_0004_assessment.py": (
+                "935fb0d36466d2f3df56101580b5ad12b5f5c1c85700dc405abd60c08840cb47"
+            ),
+            "lr_0005_tenant_audit.py": (
+                "75accabeeae531a40882cbffa2a5b8b7da95d884f07bcda950143f8bf3dfd4d7"
+            ),
+            "lr_0006_delivery_support.py": (
+                "742ee17b76d33f431b5928ca9617802e1014784d786395db8b092b8190541448"
+            ),
+            "lr_0007_enrollment_state_policy.py": (
+                "72332fffa888469d48f0975ba71c22658785af4e3c7df4f1d5cdd83723346bf3"
+            ),
+            "lr_0008_prerequisite_conditions.py": (
+                "72cb0425ad9c9488f84c2678b4b7161faa94bcf93e30009c4133000acebbb964"
+            ),
+            "lr_0009_composable_policies.py": (
+                "003e635cb07181158e2e2aa47e95f8c38e5a090c4877add7100cd00ef6423c9e"
+            ),
+            "lr_0010_question_bank_versions.py": (
+                "331f08e12e424c3e6c4c61da08003ee06bfd20a2fb82d959e091399c7d81aed0"
+            ),
+        },
+    ),
     "dotmac-learning-v0.1.0a2": (
         "dotmac-learning",
         "456ef45efbdfb25b63d2ed9e0b768043a51f5539",
@@ -7925,13 +7961,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-work-orders": frozenset(),
     "dotmac-ticketing": frozenset(),
     "dotmac-deployment-control": frozenset(),
-    "dotmac-learning": frozenset(
-        {
-            "lr_0008_prerequisite_conditions.py",
-            "lr_0009_composable_policies.py",
-            "lr_0010_question_bank_versions.py",
-        }
-    ),
+    "dotmac-learning": frozenset(),
 }
 
 
