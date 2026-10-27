@@ -13,6 +13,8 @@ from dotmac_integration.spi import (
     CapabilityDeclaration,
     ConnectorManifest,
     EgressDeclaration,
+    FleetPortRange,
+    FleetTargetDeclaration,
     SecretBindingDeclaration,
     SpiRange,
 )
@@ -111,6 +113,34 @@ def test_an_empty_registry_and_explicit_empty_manifest_both_deny_egress() -> Non
     assert empty.egress_hosts == ()
     assert explicit.egress_hosts == ()
     assert empty.digest != explicit.digest
+
+
+def test_fleet_ceiling_is_projected_into_policy() -> None:
+    manifest = ConnectorManifest(
+        connector_key="fleet_connector",
+        version="1.0.0",
+        spi_range=SpiRange.parse(">=1.7,<2.0"),
+        capabilities=(CapabilityDeclaration(capability_id="example.observe.v1"),),
+        secret_bindings=(),
+        egress=EgressDeclaration(),
+        fleet_targets=FleetTargetDeclaration(
+            port_ranges=(FleetPortRange("udp", 3799, 3799),)
+        ),
+    )
+    policy = derive_runtime_policy(
+        ConnectorRegistry((fake_plugin(manifest_=manifest),))
+    )
+    assert policy.fleet_port_ranges == (("fleet_connector", "udp", 3799, 3799),)
+    assert policy.connectors[0].fleet_port_ranges == (
+        FleetPortRange("udp", 3799, 3799),
+    )
+
+
+def test_a_connector_without_fleet_declaration_projects_deny_all() -> None:
+    policy = derive_runtime_policy(
+        ConnectorRegistry((fake_plugin(manifest_=_manifest("one_connector")),))
+    )
+    assert policy.fleet_port_ranges == ()
 
 
 def test_policy_digest_changes_when_a_manifest_boundary_changes() -> None:

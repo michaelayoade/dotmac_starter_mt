@@ -26,14 +26,19 @@ from dotmac_integration import (
     DeliveryAttempt,
     EgressDeclaration,
     ExecutionPolicy,
+    FleetPortRange,
+    FleetTargetDeclaration,
     LifecycleError,
     LostClaim,
+    NetworkTarget,
+    NetworkTargetError,
     Outcome,
     OutcomeStatus,
     SecretValueError,
     add_binding,
     adopt_manifest,
     create_draft,
+    current_network_targets,
     disable,
     enable,
     enqueue_delivery,
@@ -116,6 +121,7 @@ def _schema_registry():
         ),
         secret_bindings=(),
         egress=EgressDeclaration(),
+        fleet_targets=FleetTargetDeclaration(),
     )
     return fake_registry(plugins=[fake_plugin(manifest_=manifest)])
 
@@ -681,6 +687,105 @@ def test_the_service_surface_the_routes_would_call_is_complete(
     disable(db, installation, reason="paused")
     assert binding.state == "disabled"
     assert installation.state == "disabled"
+
+
+# ── Fleet network targets (SPI 1.7) ─────────────────────────────────────────
+
+
+def _fleet_registry(port: int = 3799):
+    manifest = ConnectorManifest(
+        connector_key="conformance_fake",
+        version="1.0.0",
+        spi_range=fake_manifest().spi_range,
+        capabilities=(CapabilityDeclaration(capability_id=FAKE_CAPABILITY),),
+        secret_bindings=(),
+        egress=EgressDeclaration(),
+        fleet_targets=FleetTargetDeclaration(
+            port_ranges=(FleetPortRange("udp", port, port),)
+        ),
+    )
+    return fake_registry(plugins=[fake_plugin(manifest_=manifest)])
+
+
+def test_network_targets_are_validated_covered_and_readable(
+    db: Session,
+) -> None:
+    registry = _fleet_registry()
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    target = NetworkTarget("10.20.0.0/16", "udp", 3799, 3799)
+    revision, is_new = put_config_revision(
+        db, installation, registry=registry, config={}, network_targets=[target]
+    )
+    assert is_new
+    assert current_network_targets(db, installation) == (target,)
+
+    # Targets are part of configuration identity.
+    again, is_new_again = put_config_revision(
+        db, installation, registry=registry, config={}, network_targets=[target]
+    )
+    assert not is_new_again and again.id == revision.id
+    changed, is_new_changed = put_config_revision(
+        db, installation, registry=registry, config={}, network_targets=[]
+    )
+    assert is_new_changed and changed.revision == 2
+    assert current_network_targets(db, installation) == ()
+
+
+def test_network_targets_exceeding_the_ceiling_are_refused_before_write(
+    db: Session, registry
+) -> None:
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    # The conformance fake declares an empty ceiling: deny-all.
+    with pytest.raises(NetworkTargetError, match="deny-all"):
+        put_config_revision(
+            db,
+            installation,
+            registry=registry,
+            config={},
+            network_targets=[NetworkTarget("10.20.0.0/16", "udp", 3799, 3799)],
+        )
+    assert current_network_targets(db, installation) == ()
+
+
+def test_adoption_is_blocked_when_the_new_ceiling_strands_targets(
+    db: Session,
+) -> None:
+    wide = _fleet_registry(port=3799)
+    installation = create_draft(
+        db, registry=wide, connector_key="conformance_fake", name="primary"
+    )
+    put_config_revision(
+        db,
+        installation,
+        registry=wide,
+        config={},
+        network_targets=[NetworkTarget("10.20.0.0/16", "udp", 3799, 3799)],
+    )
+    # Simulate the connector being replaced by a release whose manifest is a
+    # historical pin for the old digest but whose new ceiling moved ports.
+    old_manifest = wide.get("conformance_fake")
+    narrow_manifest = ConnectorManifest(
+        connector_key="conformance_fake",
+        version="2.0.0",
+        spi_range=fake_manifest().spi_range,
+        capabilities=(CapabilityDeclaration(capability_id=FAKE_CAPABILITY),),
+        secret_bindings=(),
+        egress=EgressDeclaration(),
+        fleet_targets=FleetTargetDeclaration(
+            port_ranges=(FleetPortRange("udp", 1812, 1813),)
+        ),
+    )
+    plugin = fake_plugin(manifest_=narrow_manifest, historical=(old_manifest,))
+    narrow = fake_registry(plugins=[plugin])
+    preview = preview_adoption(db, installation, registry=narrow)
+    assert preview.network_targets_blocked
+    assert preview.blocked
+    with pytest.raises(LifecycleError, match="fleet network targets"):
+        adopt_manifest(db, installation, registry=narrow)
 
 
 def test_an_installation_name_is_unique_per_connector(db: Session, registry) -> None:

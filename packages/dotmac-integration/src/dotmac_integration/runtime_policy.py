@@ -17,7 +17,7 @@ import hashlib
 from dataclasses import dataclass
 
 from dotmac_integration.discovery import ConnectorRegistry
-from dotmac_integration.spi import SecretBindingDeclaration
+from dotmac_integration.spi import FleetPortRange, SecretBindingDeclaration
 
 __all__ = [
     "ConnectorRuntimePolicy",
@@ -39,6 +39,10 @@ class ConnectorRuntimePolicy:
     manifest_digest: str
     secret_bindings: tuple[SecretBindingDeclaration, ...]
     egress_hosts: tuple[str, ...]
+    #: The SPI 1.7 fleet ceiling. Empty covers both "declared no fleet
+    #: traffic" and pre-1.7 manifests — in policy both read as deny-all;
+    #: the manifest digest distinguishes them where that matters.
+    fleet_port_ranges: tuple[FleetPortRange, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +78,23 @@ class RuntimePolicy:
                 )
                 for connector in self.connectors
                 for binding in connector.secret_bindings
+            )
+        )
+
+    @property
+    def fleet_port_ranges(self) -> tuple[tuple[str, str, int, int], ...]:
+        """Connector key, protocol and port span for every declared ceiling."""
+
+        return tuple(
+            sorted(
+                (
+                    connector.connector_key,
+                    port_range.protocol,
+                    port_range.first_port,
+                    port_range.last_port,
+                )
+                for connector in self.connectors
+                for port_range in connector.fleet_port_ranges
             )
         )
 
@@ -114,6 +135,16 @@ def derive_runtime_policy(registry: ConnectorRegistry) -> RuntimePolicy:
                     sorted(secret_bindings, key=lambda item: item.name)
                 ),
                 egress_hosts=tuple(sorted(egress.hosts)),
+                fleet_port_ranges=tuple(
+                    sorted(
+                        (
+                            manifest.fleet_targets.port_ranges
+                            if manifest.fleet_targets
+                            else ()
+                        ),
+                        key=lambda item: (item.protocol, item.first_port),
+                    )
+                ),
             )
         )
     return RuntimePolicy(tuple(projected))

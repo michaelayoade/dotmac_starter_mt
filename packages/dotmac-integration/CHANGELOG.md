@@ -1,5 +1,26 @@
 # Changelog — dotmac-integration
 
+## Unreleased — durable PROVISION runtime and SPI 1.7 fleet targets
+
+- Adds **SPI 1.7** (`CURRENT_SPI_VERSION` becomes 1.7 on this branch, still
+  unpublished): manifest-declared fleet-target ceilings
+  (`FleetPortRange`/`FleetTargetDeclaration`), installation-scoped
+  `NetworkTarget` narrowing validated at configuration-revision write and at
+  manifest adoption, engine-delivered bound targets in handler config, and the
+  `require_network_target` pre-I/O refusal (ADR-0074). Pre-1.7 manifests keep
+  their digests.
+- Adds the durable provisioning engine `dotmac_integration.provisioning` and
+  migration `ig_0017`: `provision_operations`/`provision_step_attempts` with
+  leases, per-step idempotency keys, dependency-gated claims and claim-guarded
+  settlement; an unknown-outcome apply is only ever followed by `observe`, and
+  `secret_fetch_refused` settles to reconciliation, never retry (ADR-0076).
+  Step inputs are refused before any row exists when they carry secret
+  material, via the new `validate_no_secret_material` (identifier-shaped
+  names — credential ids, secret versions, fingerprints — still cross).
+- Adds nullable `connector_config_revisions.network_targets_json` (covered by
+  the revision digest when declared; NULL predates the declaration) and
+  projects fleet ceilings in `derive_runtime_policy`.
+
 ## Unreleased — held-key product-query authentication
 
 - Extract Integrator's authenticator from

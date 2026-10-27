@@ -1839,7 +1839,10 @@
           "dotmac_integration/migrations/versions/ig_0013_delivery_result.py",
           "dotmac_integration/migrations/versions/ig_0014_polling_evidence.py",
           "dotmac_integration/migrations/versions/ig_0015_descriptor_contract.py",
-          "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py"
+          "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py",
+          "dotmac_integration/migrations/versions/ig_0017_provisioning.py",
+          "dotmac_integration/provisioning.py",
+          "dotmac_integration/provision_contract.py"
         ],
         "forbidden_prefixes": [
           "app/",
