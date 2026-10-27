@@ -20,7 +20,7 @@ candidate_consumers = ["dotmac_sub"]
 inventory_evidence = [
   "docs/inventories/rust-computation-sources.md","docs/inventories/network-module-sources.md", "docs/inventories/network-module-dispositions.toml", "docs/inventories/network-module-contracts.toml", "docs/adr/0038-network-capabilities-decompose-sub-first.md"]
 composition_boundary = "Typed opaque inputs cross owners; paths are local rebuildable projections. No sibling imports, product models, cross-module FKs or provider I/O."
-first_cutover = "dotmac_sub in the single network-suite-v1 cutover."
+first_cutover = "dotmac_sub in wave 3 of network-suite-v1 (suite remainder). (ADR-0038 wave amendment, ruled by Michael 2026-10-26/27; in force on merge.)"
 shadow_and_drift = "Backfill declarations/observations and compare resolved paths, reachability and coverage-gap digests against Sub."
 local_copy_retirement = "Sub removes topology writers/projections after the sealed suite cutover; customer impact decisions remain in Sub."
 next_action = "2026-10-16: the 0.2.0a1 private-native successor was qualified and released through the existing protected module lane; canonical publication and registry-verification evidence is recorded in docs/inventories/module-release-verifications.json. Preserve prior immutable release identities. Publication transfers no product data or writer authority. Adoption remains within ADR-0038's coordinated network-suite cutover and requires CRM OSP consolidation, Sub IPAM one-writer cutover, shadow proof and local-writer retirement."

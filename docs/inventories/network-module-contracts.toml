@@ -3,10 +3,11 @@ contract_date = "2026-08-19"
 adoption_cohort = "network-suite-v1"
 decision = "docs/adr/0038-network-capabilities-decompose-sub-first.md"
 dispositions = "docs/inventories/network-module-dispositions.toml"
-rule = "Each package publishes immutable commands, queries, snapshots, and events. Public services return snapshots/results, never ORM instances. Cross-owner identity is opaque and no module imports a sibling."
+rule = "Each package publishes immutable commands, queries, snapshots, and events. Public services return snapshots/results, never ORM instances. Cross-owner identity is opaque and no module imports a sibling. Ruled widening (ADR-0038 wave amendment, Michael 2026-10-26/27, N4): same-database Sub readers may import-swap to module read_models during a wave under a flush guard and a counted shrink-only reader inventory, with a W3 conversion review; writes remain command-only and snapshots remain the cross-assembly contract."
 
 [[modules]]
 name = "dotmac-ipam"
+adoption_cohort = "network-suite-v1-wave-1"
 package = "dotmac-ipam"
 contract_module = "dotmac_ipam.contracts"
 returns_orm_instances = false
@@ -18,6 +19,7 @@ events = ["AddressReserved", "AddressAssigned", "AssignmentReleased", "Assignmen
 
 [[modules]]
 name = "dotmac-network-inventory"
+adoption_cohort = "network-suite-v1-wave-2"
 package = "dotmac-network-inventory"
 contract_module = "dotmac_network_inventory.contracts"
 returns_orm_instances = false
@@ -29,6 +31,7 @@ events = ["NodeAdmitted", "NodeArchived", "InterfaceChanged", "VlanAttachmentCha
 
 [[modules]]
 name = "dotmac-network-observability"
+adoption_cohort = "network-suite-v1-wave-3"
 package = "dotmac-network-observability"
 contract_module = "dotmac_network_observability.contracts"
 returns_orm_instances = false
@@ -40,6 +43,7 @@ events = ["ObservationRecorded", "HealthChanged", "AlertEvidenceOpened", "AlertE
 
 [[modules]]
 name = "dotmac-network-topology"
+adoption_cohort = "network-suite-v1-wave-3"
 package = "dotmac-network-topology"
 contract_module = "dotmac_network_topology.contracts"
 returns_orm_instances = false
@@ -51,6 +55,7 @@ events = ["LinkDeclared", "LinkWithdrawn", "ObservedLinkRecorded", "PathChanged"
 
 [[modules]]
 name = "dotmac-network-assurance"
+adoption_cohort = "network-suite-v1-wave-3"
 package = "dotmac-network-assurance"
 contract_module = "dotmac_network_assurance.contracts"
 returns_orm_instances = false
@@ -62,6 +67,7 @@ events = ["IncidentOpened", "IncidentChanged", "IncidentResolved", "ImpactClassi
 
 [[modules]]
 name = "dotmac-network-control"
+adoption_cohort = "network-suite-v1-wave-3"
 package = "dotmac-network-control"
 contract_module = "dotmac_network_control.contracts"
 returns_orm_instances = false
@@ -73,6 +79,7 @@ events = ["CommandRequested", "CommandReady", "CommandCompleted", "CommandFailed
 
 [[modules]]
 name = "dotmac-fiber-plant"
+adoption_cohort = "network-suite-v1-wave-3"
 package = "dotmac-fiber-plant"
 contract_module = "dotmac_fiber_plant.contracts"
 returns_orm_instances = false
@@ -84,6 +91,7 @@ events = ["StructureRegistered", "SpliceRecorded", "FiberChangeAccepted", "Conti
 
 [[modules]]
 name = "dotmac-network-access"
+adoption_cohort = "network-suite-v1-wave-2"
 package = "dotmac-network-access"
 contract_module = "dotmac_network_access.contracts"
 returns_orm_instances = false
