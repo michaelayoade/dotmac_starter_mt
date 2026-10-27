@@ -170,3 +170,5 @@ def _join_descriptions(
 
 
 register_dialect(HuaweiDialect())
+
+__all__ = ["NAME", "HuaweiDialect", "normalize"]

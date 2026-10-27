@@ -279,3 +279,26 @@ def acquire_slot(
         with contextlib.suppress(Exception):
             store.close()  # closing releases every lock this store holds
         raise
+
+
+__all__ = [
+    "BUSY_PREFIX",
+    "LOGIN_FAILED_PREFIX",
+    "DeviceBusy",
+    "LimiterConfig",
+    "LockStore",
+    "Priority",
+    "SlotLease",
+    "StoreFactory",
+    "acquire_slot",
+    "busy_message",
+    "intent_key",
+    "is_auth_rejected_message",
+    "is_busy_message",
+    "is_login_failed_message",
+    "is_login_refusal_message",
+    "login_failed_message",
+    "slot_key",
+    "slot_order",
+    "wait_budget",
+]

@@ -23,3 +23,6 @@ First source slice (ADR-0077). Nothing is published, pinned or adopted.
 - Profile registry with `resolve()` by configured vendor/model/firmware and
   `detect()` that reports a mismatch and never switches profile.
 - Conformance suite, test doubles, publication guard and a synthetic corpus.
+- Public-surface manifest (`SUPPORTED_MODULES`/`INTERNAL_MODULES`), shaped like
+  `dotmac-auth-oidc`'s, with an `__all__` on every supported submodule. The
+  adapter release smoke imports each supported module from the installed wheel.

@@ -92,3 +92,11 @@ class ProfileRegistry:
 def builtin_registry() -> ProfileRegistry:
     """The profiles shipped inside the package."""
     return ProfileRegistry(discover(resources.files("dotmac_device_cli") / "profiles"))
+
+
+__all__ = [
+    "DetectOutcome",
+    "Detection",
+    "ProfileRegistry",
+    "builtin_registry",
+]
