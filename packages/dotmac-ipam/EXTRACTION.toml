@@ -36,10 +36,10 @@ inventory_evidence = [
   "docs/adr/0038-network-capabilities-decompose-sub-first.md",
 ]
 composition_boundary = "Each adopter installs the tenant-only ipam lineage locally. Products hold opaque subject correlations and call typed commands/queries; no sibling module or product ORM is imported and no cross-module FK exists."
-first_cutover = "dotmac_sub as part of the single network-suite-v1 cutover; no IPAM-only early adoption is permitted."
+first_cutover = "dotmac_sub in wave 1 of network-suite-v1: dotmac-ipam alone as the smallest closed writer set (ADR-0038 wave amendment, ruled by Michael 2026-10-26/27; in force on merge)."
 shadow_and_drift = "Backfill exact address/pool/assignment state, replay Sub lifecycle parity tests, compare full typed digests and collision outcomes, and prove repair is idempotent. Live exact-service and duplicate-login parity remain an adoption gate."
-local_copy_retirement = "After the sealed suite cutover and rollback window, Sub removes local IPAM tables/writers and product adapters use only the pinned module surface. Subscriber/service correlation remains product-owned."
-next_action = "Finish the complete suite implementation and Observer canaries. Do not publish or adopt before the coordinated Sub gate has live IP parity evidence."
+local_copy_retirement = "After the sealed wave-1 cutover and rollback window, Sub removes local IPAM tables/writers and product adapters use only the pinned module surface. Subscriber/service correlation remains product-owned."
+next_action = "Re-cut as 0.2.0a1 extraction from current Sub (0.1.0a1 is must-not-install; its tag and lineage stay untouched) and pass the wave-1 gate (release and exact pin, pre-clean recount at zero, backfill/digest parity, staged rollback rehearsal, single-writer flip, writer retirement). Do not adopt before the wave-1 Sub gate has live IP parity evidence. (ADR-0038 wave amendment, ruled by Michael 2026-10-26/27; in force on merge.)"
 [[product_writers]]
 product = "dotmac_erp"
 writer_state = "inventory_only"

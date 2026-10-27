@@ -59,3 +59,5 @@ class ZteDialect:
 
 
 register_dialect(ZteDialect())
+
+__all__ = ["NAME", "ZteDialect"]

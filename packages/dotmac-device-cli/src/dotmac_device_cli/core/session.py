@@ -401,3 +401,12 @@ class CliSession:
             if "(y/n)" in plain.lower() or _CLEAN_PROMPT.search(plain):
                 return text, False
         return text, False
+
+
+__all__ = [
+    "CliSession",
+    "EventSink",
+    "LogoutResult",
+    "State",
+    "state_for_prompt_line",
+]
