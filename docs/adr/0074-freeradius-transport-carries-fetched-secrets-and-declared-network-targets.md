@@ -157,3 +157,25 @@ avoided — so it is paid once, now, in the release that already has to happen.
 **Per-release NAS hostnames in the manifest.** Fleet membership changes would
 require a connector release, and IP literals are invalid egress hosts by
 design. It neither scales nor preserves the declaration's meaning.
+
+## Amendment (2026-10-27): the connector's classification
+
+The governed dossier vocabulary had no word for this connector.
+`stateless-protocol-adapter` bans persistence imports outright, because for
+every existing adapter a database client would mean owning rows. Here the
+database is the provider's interface — the FreeRADIUS SQL schema is the
+protocol, in the way an HTTP API is other adapters' protocol — so the ban
+refused the transport itself.
+
+Following the `stateless-contract-catalogue` precedent (a new word only
+where a real property differs), this change introduces
+`stateless-sql-adapter`: the adapter's first three properties unchanged
+(called not installed, no lineage, no namespace), with the fourth narrowed
+to the distinction that matters — a database *client* is transport, a
+lineage tool (`alembic`) stays banned because it would mean owning the
+schema on the other end of the connection. The connector release lane
+publishes the variant by name in its conformance policy
+(`also_classifications`), the allocation gate exempts it (its rows live in
+the provider's schema), and the validator proves the narrowed property
+bites in both directions: the real connector passes its own checker and is
+still refused by the plain adapter checker.

@@ -162,6 +162,7 @@
     ],
     "entry_point_group": "dotmac_integration.connectors",
     "classification": "stateless-protocol-adapter",
+    "also_classifications": ["stateless-sql-adapter"],
     "package_dir_prefix": "packages/dotmac-connector-"
   },
   "connectors": {

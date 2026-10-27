@@ -161,7 +161,7 @@ def render_projection(
         },
     ]
     ipv4 = _one(grouped, "framed_ipv4_address")
-    if ipv4 and ipv4 != "0.0.0.0":  # noqa: S104 — IP-string compare, not a bind
+    if ipv4 and ipv4 != "0.0.0.0":  # noqa: S104 # nosec B104 -- IP-string compare, not a bind
         reply_rows.append(
             {
                 "username": username,

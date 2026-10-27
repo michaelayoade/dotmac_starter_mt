@@ -252,11 +252,17 @@ def resolve(distribution: str, *, tags: set[str] | None = None) -> dict:
     dossier = tomllib.loads(dossier_path.read_text(encoding="utf-8"))
     declared = dossier.get("classification")
     expected = policy["conformance"]["classification"]
-    if declared != expected:
+    # The lane also publishes the one governed variant whose provider
+    # interface is a database (`stateless-sql-adapter`, ADR-0074): same
+    # floor, same conformance kit, differing only in that a database client
+    # is its transport. Named in policy, never inferred.
+    accepted = {expected, *policy["conformance"].get("also_classifications", [])}
+    if declared not in accepted:
         raise ReleaseRefused(
             f"{distribution}: EXTRACTION.toml declares classification "
-            f"{declared!r}, but this lane publishes only {expected!r}. Releasing "
-            "it here would skip the checks its own classification requires."
+            f"{declared!r}, but this lane publishes only {sorted(accepted)}. "
+            "Releasing it here would skip the checks its own classification "
+            "requires."
         )
 
     _refuse_unpublished_floor(

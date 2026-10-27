@@ -900,7 +900,8 @@ def invoke_provision(
                 evidence=dict(plan_result.evidence),
             )
         step = prepared.step
-        assert step is not None  # non-plan kinds always carry a step
+        if step is None:  # non-plan kinds always carry a step
+            raise RuntimeError('prepared non-plan unit without a step')
         if prepared.kind == "apply":
             return apply_provisioning(
                 plugin,
@@ -1128,7 +1129,8 @@ def settle_provision(
         db.refresh(operation)
         return operation
 
-    assert prepared.step_id is not None
+    if prepared.step_id is None:
+        raise RuntimeError('prepared non-plan unit without a step id')
     state, next_action, finished = _step_settlement(prepared.kind, result)
     values = {
         "state": state,

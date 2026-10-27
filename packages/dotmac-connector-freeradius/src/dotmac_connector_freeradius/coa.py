@@ -72,7 +72,7 @@ class UdpCoaPort:
         encoded = _encode_attributes(attributes)
         header = struct.pack("!BBH", _DISCONNECT_REQUEST, identifier, 20 + len(encoded))
         # RFC 2865/5176 authenticators are MD5 by specification.
-        authenticator = hashlib.md5(  # noqa: S324
+        authenticator = hashlib.md5(  # noqa: S324 # nosec B324 -- RFC 2865/5176 authenticators are MD5 by specification; the protocol offers no stronger option
             header + b"\x00" * 16 + encoded + secret_bytes
         ).digest()
         packet = header + authenticator + encoded
@@ -93,7 +93,7 @@ class UdpCoaPort:
         if response_id != identifier or length > len(response):
             return CoaOutcome(outcome="unanswered")
         response = response[:length]
-        expected = hashlib.md5(  # noqa: S324
+        expected = hashlib.md5(  # noqa: S324 # nosec B324 -- RFC 2865/5176 authenticators are MD5 by specification; the protocol offers no stronger option
             response[:4] + authenticator + response[20:] + secret_bytes
         ).digest()
         if expected != response[4:20]:

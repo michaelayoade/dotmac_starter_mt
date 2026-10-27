@@ -82,10 +82,24 @@ VALID_CLASSIFICATIONS = {
     # amendment; the connector lane's "profile, not a classification" ruling
     # stands where the properties really are identical).
     "stateless-contract-catalogue",
+    # An adapter whose external protocol IS a provider-owned database: the
+    # FreeRADIUS SQL schema is the interface, in the way an HTTP API is the
+    # interface for the adapters above. It shares the adapter's first three
+    # properties (called not installed, no lineage, no namespace) and differs
+    # on the fourth: speaking SQL to the provider requires a database CLIENT,
+    # which `PERSISTENCE_ROOTS` bans outright for the adapter word. One word
+    # covering both would have to PERMIT the persistence import everywhere,
+    # and an ordinary adapter that quietly grew its own tables would then be
+    # caught by nothing. What stays banned here is `alembic` — a lineage
+    # tool means owning a schema, and owning a schema is the stateful shape
+    # however the rows are reached (ADR-0074; the catalogue amendment's
+    # reasoning, applied to persistence reach instead of network reach).
+    "stateless-sql-adapter",
 }
 
 STATELESS_ADAPTER = "stateless-protocol-adapter"
 CONTRACT_CATALOGUE = "stateless-contract-catalogue"
+SQL_ADAPTER = "stateless-sql-adapter"
 
 # Import roots that mean "this package reaches off-box after all". An adapter
 # is ALLOWED these; a contract catalogue is not.
@@ -276,7 +290,10 @@ def _reference_problems(field: str, references: list[Any]) -> list[str]:
 
 
 def stateless_package_violations(
-    package_dir: Path, *, label: str = "stateless adapter"
+    package_dir: Path,
+    *,
+    label: str = "stateless adapter",
+    persistence_roots: frozenset[str] = PERSISTENCE_ROOTS,
 ) -> list[str]:
     """The four properties a STATELESS classification has to MEAN.
 
@@ -342,7 +359,7 @@ def stateless_package_violations(
                 continue
             for name in names:
                 root = name.split(".")[0]
-                if root in PERSISTENCE_ROOTS:
+                if root in persistence_roots:
                     problems.append(
                         f"{rel}:{node.lineno} imports {root!r} — a {label} "
                         "that grew persistence has become a module without "
@@ -413,6 +430,33 @@ def contract_catalogue_violations(package_dir: Path) -> list[str]:
                         "belongs in that lane, where the network is expected"
                     )
     return problems
+
+
+#: The one persistence root that stays banned for an SQL adapter: a client
+#: speaks to the provider's schema, a lineage tool OWNS one.
+SQL_ADAPTER_BANNED_ROOTS = frozenset({"alembic"})
+
+
+def sql_adapter_violations(package_dir: Path) -> list[str]:
+    """What `stateless-sql-adapter` has to MEAN.
+
+    The adapter's first three properties unchanged — called not installed,
+    no lineage declarations or migrations tree, no namespace allocation —
+    with the fourth narrowed to the distinction that earns the separate
+    word: a database CLIENT (`sqlalchemy`, `psycopg`) is this adapter's
+    provider transport, exactly as `httpx` is an HTTP adapter's, while
+    `alembic` remains banned because carrying a lineage tool means owning
+    the schema on the other end of the connection.
+
+    Checked on the DECLARED classification rather than on lane membership,
+    so an unlisted SQL adapter is governed exactly as much as an
+    allowlisted one.
+    """
+    return stateless_package_violations(
+        package_dir,
+        label="SQL adapter",
+        persistence_roots=SQL_ADAPTER_BANNED_ROOTS,
+    )
 
 
 def _ledger_allocates(distribution: str) -> bool:
@@ -770,6 +814,8 @@ def _validate_dossier(
         problems.extend(stateless_package_violations(package_dir))
     if classification == CONTRACT_CATALOGUE and package_dir is not None:
         problems.extend(contract_catalogue_violations(package_dir))
+    if classification == SQL_ADAPTER and package_dir is not None:
+        problems.extend(sql_adapter_violations(package_dir))
 
     source_mode = dossier.get("source_mode")
     if source_mode not in VALID_SOURCE_MODES:
@@ -2642,4 +2688,60 @@ def test_no_package_claims_the_catalogue_classification_yet() -> None:
     assert claimed == [], (
         f"{claimed} now claim the catalogue classification — delete this test "
         "and assert the real sweep instead"
+    )
+
+
+# --- `stateless-sql-adapter`: the narrowed fourth property ------------------
+#
+# Same ADR-0018 obligation as the catalogue section: prove the narrowed
+# property bites, prove it does NOT reach the classification it was carved
+# out of, and prove it against the real package that earned the word.
+
+
+@pytest.mark.parametrize("root", ["sqlalchemy", "psycopg", "asyncpg"])
+def test_a_conforming_sql_adapter_may_speak_sql(tmp_path: Path, root: str) -> None:
+    """The negative control: a database client is this adapter's transport."""
+    package = _synthetic_adapter(tmp_path, body=f"import {root}\n")
+    assert sql_adapter_violations(package) == []
+
+
+def test_an_sql_adapter_with_a_lineage_tool_is_caught(tmp_path: Path) -> None:
+    package = _synthetic_adapter(tmp_path, body="import alembic\n")
+    problems = sql_adapter_violations(package)
+    assert any("alembic" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize("root", ["sqlalchemy", "psycopg", "asyncpg"])
+def test_the_same_import_is_refused_in_a_plain_ADAPTER(
+    tmp_path: Path, root: str
+) -> None:
+    """The discriminator, stated as a test.
+
+    If the persistence ban relaxed for both words, the SQL adapter would be
+    a profile rather than a classification and an ordinary adapter that grew
+    its own tables would be caught by nothing.
+    """
+    package = _synthetic_adapter(tmp_path, body=f"import {root}\n")
+    assert stateless_package_violations(package), (
+        "the plain adapter checker accepted a persistence client — the "
+        "narrowed fourth property leaked into the adapter word"
+    )
+
+
+def test_the_real_sql_adapter_passes_its_own_checker_only() -> None:
+    """A synthetic proof can be tuned until it passes; a real package cannot.
+
+    `dotmac-connector-freeradius` is the package that earned the word: its
+    provider interface is the FreeRADIUS SQL schema. It must pass the SQL
+    adapter checker and must STILL be refused by the plain adapter checker,
+    which is what stops the new word from becoming a quieter spelling of
+    the old one.
+    """
+    package = PACKAGES_DIR / "dotmac-connector-freeradius"
+    dossier = _load_toml(package / "EXTRACTION.toml")
+    assert dossier["classification"] == SQL_ADAPTER
+    assert sql_adapter_violations(package) == []
+    assert stateless_package_violations(package), (
+        "the real SQL adapter passed the plain adapter checker — the "
+        "persistence ban is not being enforced"
     )

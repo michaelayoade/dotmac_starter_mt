@@ -1,16 +1,24 @@
 schema_version = 1
 package = "dotmac-connector-freeradius"
-classification = "stateless-protocol-adapter"
-status = "built-unreleased"
+classification = "stateless-sql-adapter"
+status = "audit-complete"
 source_mode = "greenfield-after-inventory"
 
 owner = "FreeRADIUS SQL transport: incumbent-exact rendering of one login's radcheck/radreply/radusergroup rows, advisory-locked delete-and-insert with read-back verification, radpostauth/radacct observation polling, and RFC 5176 CoA/Disconnect to fleet NAS endpoints inside declared network targets."
 
 contract = "Implement dotmac-integration SPI >=1.7,<2.0 for connector key freeradius. Serve network.access_projection.v1 and network.session_disconnect.v1 in PROVISION and network.access_observation.v1 in POLL, claiming Sub's three published contract digests exactly. A projection step carries identifiers, credential id and secret version only; the secret is fetched once per enabled apply through an assembly-bound single-use fetch and used in memory only. Refused fetches settle terminal with secret_fetch_refused; unknown-outcome applies are observed, never blindly re-applied. Disconnect endpoints are refused before I/O when outside the installation's bound fleet targets. Own no database schema, access decision, credential, session state, retry or checkpoint engine."
 
-source_repositories = ["dotmac_starter_mt", "dotmac_sub"]
+# Both products were inventoried for a RADIUS transport: Sub holds the only
+# one (radius_population and its planner/enforcement neighbours, below);
+# ERP at the recorded revision contains no FreeRADIUS, radcheck or radacct
+# code. The connector is therefore greenfield against Sub's inventoried
+# behaviour, rendered row-for-row, not a second implementation beside an
+# ERP one.
+source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub"]
 
 source_revisions = [
+  "dotmac_starter_mt:c4d0fe3c8e8954b57c86f168b0e49929d3ad095e",
+  "dotmac_erp:153cc04a9e08fd7936f7e91d37e694ad932bead3",
   "dotmac_sub:1abba5686d3a95170cd094a58bcb9b8fe22cda9a",
 ]
 

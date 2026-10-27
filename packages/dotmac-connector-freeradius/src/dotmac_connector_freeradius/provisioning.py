@@ -288,7 +288,7 @@ class FreeRadiusProvisioningHandler:
                 step_input,
                 config=config.render,
                 # Presence-masked by rows_match; the value is never compared.
-                cleartext_secret="x",  # noqa: S106 — presence sentinel, not a secret
+                cleartext_secret="x",  # noqa: S106 # nosec B106 -- presence sentinel, not a secret
             )
         except RenderRefused:
             return _result(ProvisionResultStatus.TERMINAL, error_code="render_refused")
