@@ -214,11 +214,12 @@ def test_the_verification_did_not_land_in_a_released_revision() -> None:
 
 
 def test_the_floor_is_the_highest_prerequisite_release() -> None:
-    """a68 publishes the audit prerequisite after the a66 ledger name."""
+    """a68 published the audit prerequisite; the PROVISION runtime's
+    engine-free transaction surface (a98) is now the highest prerequisite."""
     manifest = tomllib.loads(
         (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
-    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a68"
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a98"
 
 
 def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
@@ -228,7 +229,7 @@ def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
     entry = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]["dotmac-integration"]
-    assert entry["kernel_floor"] == "0.1.0a68"
+    assert entry["kernel_floor"] == "0.1.0a98"
     required = set(entry["wheel_contents"]["required"])
     on_disk = {
         f"dotmac_integration/migrations/versions/{path.name}"
