@@ -313,7 +313,11 @@ CAPABILITY_RAISED_FLOORS = {
     # a66/a67 because neither knows the audit effect. That is the correct trade
     # — every one of those installs on a kernel whose ledger it silently
     # requires and cannot state.
-    "dotmac-integration": ("0.1.0a68", "0.1.0a58"),
+    # Raised again by the PROVISION runtime (ADR-0074): submit settles a
+    # durable plan under `dotmac_kernel.transactions.conflict_savepoint`,
+    # the public engine-free transaction surface first published in a98.
+    # a58 stays as the allocation coordinate; capability outranks it.
+    "dotmac-integration": ("0.1.0a98", "0.1.0a58"),
     # Entitlement allocation held a56 through `0.1.0a1`..`0.1.0a4`, all four
     # PUBLISHED, and that a56 was `platform_tables` (ADR-0023) rather than its
     # a45 ledger row. `0.1.0a5` declares `idempotency_ledger.v1`, the a66 name
