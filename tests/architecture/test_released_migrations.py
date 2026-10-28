@@ -7862,7 +7862,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: example. The release lane does not wait for an open branch, which is why
 #: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-numbering": frozenset(),
+    "dotmac-numbering": frozenset({"nu_0002_replacement_domains.py"}),
     # `ap_0003` records approved-decision withdrawals; still editable until
     # `dotmac-approvals` 0.1.0a7 is tagged.
     "dotmac-approvals": frozenset(),

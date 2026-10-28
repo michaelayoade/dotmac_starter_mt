@@ -441,15 +441,30 @@ class _ClaimColumns:
 
     @declared_attr
     def partition_key(cls) -> Mapped[str]:
-        return mapped_column(String(128, collation="C"), nullable=False)
+        return mapped_column(
+            String(128, collation="C").with_variant(
+                String(128, collation="BINARY"), "sqlite"
+            ),
+            nullable=False,
+        )
 
     @declared_attr
     def formatted_number(cls) -> Mapped[str]:
-        return mapped_column(String(255, collation="C"), nullable=False)
+        return mapped_column(
+            String(255, collation="C").with_variant(
+                String(255, collation="BINARY"), "sqlite"
+            ),
+            nullable=False,
+        )
 
     @declared_attr
     def document_reference(cls) -> Mapped[str]:
-        return mapped_column(String(255, collation="C"), nullable=False)
+        return mapped_column(
+            String(255, collation="C").with_variant(
+                String(255, collation="BINARY"), "sqlite"
+            ),
+            nullable=False,
+        )
 
     @declared_attr
     def series_code(cls) -> Mapped[str]:
