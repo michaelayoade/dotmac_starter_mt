@@ -12,8 +12,8 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a18`; `0.1.0a19` is proposed and
-unpublished.** Releases a2–a4 implement SPI 1.1;
+**Released: `0.1.0a1` through `0.1.0a20` (latest, 2026-10-28).**
+Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
 which is the authority on what has and has not shipped. a8 adds indexed,
@@ -42,10 +42,17 @@ authoring either contract.
 **Released `0.1.0a18`:** it adds SPI 1.5's provider-neutral
 plan/apply/observe/cancel contract and SPI 1.6's bounded synchronous REQUEST
 contract. Its exact release and receipt are recorded in
-module-release-verifications 116–135. The proposed, unpublished `0.1.0a19`
-adds receipt-origin metadata that preserves legacy unknown origin without
-backfill, changes no existing wire contract, and makes no cash-qualification
-claim. Do not exact-pin a19.
+module-release-verifications 116–135. `0.1.0a19` (published 2026-10-17,
+tagged `dotmac-integration-v0.1.0a19`) adds receipt-origin metadata that
+preserves legacy unknown origin without backfill, changes no existing wire
+contract, and makes no cash-qualification claim. Released `0.1.0a20` adds SPI
+1.7 fleet network targets and the durable PROVISION runtime
+(`ig_0017_provisioning`, ADR-0074), with kernel floor `>=0.1.0a98`.
+Tag `dotmac-integration-v0.1.0a20` binds protected main
+`7a9bfbef6a24070bea97b4490d7e6074de714552` to
+[release run `40716733852`](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/40716733852).
+a20 is the latest published version and may be exact-pinned. Publication makes
+no live-provider qualification, activation or consumer-adoption claim.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to
@@ -85,7 +92,9 @@ not declared never gets its workers started. Both used to pass.
 For `PROVISION`, the owning product supplies an ordered plan and its canonical
 hash. The connector may validate and execute that plan but the Integrator
 refuses any returned plan that inserts, removes, reorders or rewrites a step.
-The current slice deliberately stops at that call boundary.
+The durable engine records operations and step attempts, claims work under
+leases, and settles each result in the caller's transaction. Unknown-outcome
+applies are reconciled through `observe`.
 
 For `REQUEST`, a domain-owned capability id selects one operation. Its existing
 `command_schema` bounds input and `observation_schema` bounds normalized output;

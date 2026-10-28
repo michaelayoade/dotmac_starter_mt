@@ -54,7 +54,7 @@ shadow_and_drift = "For every login in a full sweep, compare the connector's ren
 
 local_copy_retirement = "At the suite cutover, delete Sub's local writers/readers (radius_population, direct radacct import tasks, enforcement CoA) in the same change that flips the single writer; Sub retains commercial decisions, credential ownership and composition over dotmac-network-access."
 
-next_action = "Keep release disabled until the integration version carrying SPI 1.7 and ig_0017 is tagged, the assembly secret-fetch endpoint is live, and shadow parity is green. Then enable release by reviewed diff."
+next_action = "Supply-only publication: after dotmac-integration-v0.1.0a20 carrying SPI 1.7 and ig_0017 is tagged, use the protected connector release workflow for 0.1.0a1 and merge its release record, then exact-pin it in dotmac_integrator. Publication and pinning authorize no activation. Before enabled applies the assembly single-use secret-fetch endpoint must be live; live FreeRADIUS/NAS shadow parity remains required before the separately authorized network-suite-v1 single-writer flip and incumbent retirement. Enumerate TEST_RADIUS_* logins and retire them at cutover."
 
 [[product_writers]]
 product = "dotmac_erp"

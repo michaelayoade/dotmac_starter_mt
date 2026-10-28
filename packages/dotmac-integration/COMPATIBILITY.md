@@ -8,8 +8,9 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | `0.1.0a1` through **`0.1.0a18`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention, a15 adds typed outbound repair and runtime safety, and a16 adds the domain-owned payload gate plus durable polling evidence, and a17 adds product-port descriptor v3, carrying the domain's payload contract or dated grace separately from the product wire without changing SPI 1.4 |
-| Declared, unpublished | `0.1.0a19` preserves unknown legacy receipt origin without backfill and adds shared held-key product authentication without changing the SPI. It changes no existing wire contract and makes no cash-qualification claim; do not exact-pin it |
+| Released | `0.1.0a1` through **`0.1.0a20`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention, a15 adds typed outbound repair and runtime safety, and a16 adds the domain-owned payload gate plus durable polling evidence, and a17 adds product-port descriptor v3, carrying the domain's payload contract or dated grace separately from the product wire without changing SPI 1.4 |
+| Latest, pinnable | `0.1.0a20`, released 2026-10-28, adds **SPI 1.7** fleet network targets and the durable PROVISION runtime (`ig_0017_provisioning`), and raises the kernel floor to `>=0.1.0a98`. Tag `dotmac-integration-v0.1.0a20` binds protected main `7a9bfbef6a24070bea97b4490d7e6074de714552` to [release run `40716733852`](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/40716733852). Publication makes no live-provider qualification, activation or consumer-adoption claim. |
+| Prior release | `0.1.0a19` preserves unknown legacy receipt origin without backfill and adds shared held-key product authentication without changing the SPI. |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
@@ -150,13 +151,12 @@ The POLL mode is executed by `prepare_poll` -> `invoke_poll` ->
 the normalized batch and next cursor then commit together. This is package
 machinery rather than a new SPI shape in a11. Released a18 sets
 `CURRENT_SPI_VERSION` to 1.6 for additive provisioning and
-synchronous request contracts. Proposed a19 adds receipt-origin persistence
+synchronous request contracts. Released a19 adds receipt-origin persistence
 metadata and shared held-key product-query authentication without changing the
-wire contract, and — on the provisioning runtime branch, still unpublished —
-SPI 1.7 fleet-target declarations plus the durable provisioning engine
-described below. `CURRENT_SPI_VERSION` is therefore 1.7 on that branch; a
-connector with an honest `<1.7,>=1.5` range is unaffected until the version
-carrying 1.7 is tagged.
+wire contract. Released a20 adds SPI 1.7 fleet-target declarations plus the
+durable provisioning engine described below. `CURRENT_SPI_VERSION` is 1.7;
+a connector whose range excludes 1.7 is refused by the existing compatibility
+gate when composed with a20.
 
 ## The ingress contract
 
@@ -314,7 +314,7 @@ outbox and the poll loop alike.
 ## Provisioning durability is an ENGINE contract; fleet targets are an SPI one
 
 The durable provisioning runtime (`dotmac_integration.provisioning`, migration
-`ig_0017`) is to `PROVISION` what `poll_schedule` is to `POLL`: package
+`ig_0017_provisioning`) is to `PROVISION` what `poll_schedule` is to `POLL`: package
 machinery a connector never sees. `ProvisioningHandler` keeps its four SPI 1.5
 methods and result shapes; what returns is now settled against leased,
 idempotency-keyed step rows by `submit_provision_operation` ->
