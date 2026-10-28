@@ -804,7 +804,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a19"
+dotmac-integration = ">=0.1.0a20"
 httpx = ">=0.27,<1.0"
 sqlalchemy = ">=2.0,<3.0"
 

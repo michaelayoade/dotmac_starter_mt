@@ -113,6 +113,20 @@
         ]
       }
     },
+    "dotmac-connector-freeradius": {
+      "0.1.0a1": {
+        "tag": "dotmac-connector-freeradius-v0.1.0a1",
+        "peeled_commit": "e9c1be690cfd58c64ae75a07a9a58d46d18743ba",
+        "release_run": "40758463088",
+        "manifest_digest": "bb882943699ece781ebd83df147e755b02c9214861c05076ef8281b98cf3817b",
+        "spi_range": ">=1.7,<2.0",
+        "capabilities": [
+          "network.access_observation.v1",
+          "network.access_projection.v1",
+          "network.session_disconnect.v1"
+        ]
+      }
+    },
     "dotmac-connector-linkedin": {
       "0.1.0a1": {
         "tag": "dotmac-connector-linkedin-v0.1.0a1",

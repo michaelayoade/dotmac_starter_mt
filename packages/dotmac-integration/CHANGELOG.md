@@ -1,12 +1,15 @@
 # Changelog — dotmac-integration
 
-## 0.1.0a20 — allocated, unreleased: durable PROVISION runtime and SPI 1.7 fleet targets
+## 0.1.0a20 — released 2026-10-28: durable PROVISION runtime and SPI 1.7 fleet targets
 
-Allocated 2026-10-28 for the source merged in PR #930 (ADR-0074). This
-allocation makes no publication claim; `0.1.0a19` remains the latest
-published version until the a20 release run records its verification.
+Released from protected main `7a9bfbef6a24070bea97b4490d7e6074de714552` after the
+serialized allocation in PR #931. Tag `dotmac-integration-v0.1.0a20` binds that
+revision to [release run `40716733852`](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/40716733852).
+This is the latest published version and may be exact-pinned. The kernel floor
+is `>=0.1.0a98`. Publication establishes package supply; it makes no live-provider
+qualification, activation or consumer-adoption claim.
 
-- Adds **SPI 1.7** (`CURRENT_SPI_VERSION` becomes 1.7, still unpublished):
+- Adds **SPI 1.7** (`CURRENT_SPI_VERSION` becomes 1.7):
   manifest-declared fleet-target ceilings
   (`FleetPortRange`/`FleetTargetDeclaration`), installation-scoped
   `NetworkTarget` narrowing validated at configuration-revision write and at
@@ -14,8 +17,8 @@ published version until the a20 release run records its verification.
   `require_network_target` pre-I/O refusal (ADR-0074). Pre-1.7 manifests keep
   their digests.
 - Adds the durable provisioning engine `dotmac_integration.provisioning` and
-  migration `ig_0017`: `provision_operations`/`provision_step_attempts` with
-  leases, per-step idempotency keys, dependency-gated claims and claim-guarded
+  migration `ig_0017_provisioning`: `provision_operations`/`provision_step_attempts`
+  with leases, per-step idempotency keys, dependency-gated claims and claim-guarded
   settlement; an unknown-outcome apply is only ever followed by `observe`, and
   `secret_fetch_refused` settles to reconciliation, never retry (ADR-0076).
   Step inputs are refused before any row exists when they carry secret
@@ -25,7 +28,7 @@ published version until the a20 release run records its verification.
   the revision digest when declared; NULL predates the declaration) and
   projects fleet ceilings in `derive_runtime_policy`.
 
-## Unreleased — held-key product-query authentication
+## Held-key product-query authentication — released in 0.1.0a19
 
 - Extract Integrator's authenticator from
   `ff6796aaa0d063b2d30327748e64627f0bccb394`,
@@ -35,13 +38,17 @@ published version until the a20 release run records its verification.
   held-material lookup and preserves the existing comparison, last-match,
   exact-scope and immutable-principal behavior.
 - Port the source authentication tests with traversal, precedence, rotation
-  and exception-propagation cases. Hosted validation and released-wheel
-  consumer cutover remain pending. This adds no health receiver, health-source
+  and exception-propagation cases. Released-wheel consumer cutover remains a
+  separate adoption gate. This adds no health receiver, health-source
   binding, dependency, migration or connector SPI change.
 
 ## Release state — read this before pinning
 
-**Nineteen versions have been released. Pin `0.1.0a19`.** The a19 publication
+**Twenty versions have been released. Pin `0.1.0a20`.** The a20 publication
+is tagged `dotmac-integration-v0.1.0a20` from protected main
+`7a9bfbef6a24070bea97b4490d7e6074de714552` by
+[release run `40716733852`](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/40716733852).
+Its automated release record carries the verification evidence. The a19 publication
 is tagged `dotmac-integration-v0.1.0a19` and recorded in
 module-release-verifications. The a18 publication
 is recorded by release verification records 116–135, including its exact tag
@@ -53,7 +60,7 @@ revision `dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e`. Released migration
 digests remain recorded in `tests/architecture/test_released_migrations.py`'s
 `RELEASED_TAGS`.
 
-`0.1.0a19` is the latest published version. `0.1.0a16` adds domain-owned
+`0.1.0a20` is the latest published version. `0.1.0a16` adds domain-owned
 payload contracts and durably stores a validated normalized result in
 `ig_0013`, and adds durable polling attempt/failure/backoff evidence with a
 bounded keyset selection in `ig_0014`.
