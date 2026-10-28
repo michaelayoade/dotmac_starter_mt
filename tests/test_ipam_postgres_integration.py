@@ -443,7 +443,7 @@ def test_two_workers_allocating_for_one_service_get_one_assignment(
     from alembic import command
 
     with _database(monkeypatch) as db:
-        command.upgrade(db.config, "ip_0003_outbox_relay")
+        command.upgrade(db.config, "ip_0002_extracted")
         tenant = _tenant(db.superuser_url)
         (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/28")])
         subscription, subscriber = uuid.uuid4(), uuid.uuid4()
