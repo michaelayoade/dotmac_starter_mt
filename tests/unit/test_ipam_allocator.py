@@ -34,7 +34,6 @@ from dotmac_ipam import (
     allocate_address,
     allocate_management_address,
     assign_address,
-    command_scope,
     mark_primary,
     move_assignment,
     release_assignment,
@@ -43,6 +42,7 @@ from dotmac_ipam import (
     update_pool,
     upsert_routed_prefix,
 )
+from dotmac_ipam.guard import _command_scope as command_scope
 from dotmac_ipam.models import IPAssignment, IPv4Address
 from sqlalchemy import select
 

@@ -66,9 +66,7 @@ from dotmac_ipam.contracts import (
 )
 from dotmac_ipam.guard import (
     IpamWriteOutsideCommand,
-    command_scope,
     flush_guard_installed,
-    in_command_scope,
     install_flush_guard,
 )
 from dotmac_ipam.manifest import module
@@ -200,12 +198,10 @@ __all__ = [
     "assign_address",
     "audit_consistency",
     "check_address_available",
-    "command_scope",
     "create_pool",
     "delegated_prefix_for",
     "events",
     "flush_guard_installed",
-    "in_command_scope",
     "install_flush_guard",
     "live_pool_counts",
     "lookup_address",

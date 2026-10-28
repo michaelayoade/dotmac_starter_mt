@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 from dotmac_ipam import (
     IpamWriteOutsideCommand,
-    command_scope,
     flush_guard_installed,
-    in_command_scope,
     install_flush_guard,
     module,
     read_models,
 )
 from dotmac_ipam import models as ipam_models
+from dotmac_ipam.guard import _command_scope as command_scope
+from dotmac_ipam.guard import in_command_scope
 from dotmac_ipam.models import IpPool, IPv4Address
 from sqlalchemy import inspect, select
 
@@ -247,3 +247,41 @@ def test_event_payloads_are_checked_against_the_typed_schema() -> None:
             payload={"a": 1},
         )
         db.flush()
+
+
+def test_command_scope_is_not_a_public_export() -> None:
+    import dotmac_ipam
+
+    assert not hasattr(dotmac_ipam, "command_scope")
+    assert "command_scope" not in dotmac_ipam.__all__
+    assert "in_command_scope" not in dotmac_ipam.__all__
+
+
+def test_bulk_dml_outside_a_command_is_refused() -> None:
+    from dotmac_ipam.models import IPAssignment
+    from sqlalchemy import delete, insert, update
+
+    db = make_session()
+    tenant = seed_tenant(db)
+    pool = seed_pool(db, tenant)
+    seed_v4(db, tenant, pool, "192.0.2.10")
+    db.commit()
+    with pytest.raises(IpamWriteOutsideCommand):
+        db.execute(update(IPv4Address).values(notes="x"))
+    with pytest.raises(IpamWriteOutsideCommand):
+        db.execute(delete(IPv4Address))
+    with pytest.raises(IpamWriteOutsideCommand):
+        db.execute(insert(IPAssignment).values(tenant_id=tenant))
+    with pytest.raises(IpamWriteOutsideCommand):
+        db.execute(insert(IPv4Address.__table__).values(tenant_id=tenant))
+    with pytest.raises(IpamWriteOutsideCommand):
+        db.bulk_insert_mappings(IPv4Address, [{"tenant_id": tenant}])
+    with pytest.raises(IpamWriteOutsideCommand):
+        db.bulk_save_objects([IPv4Address(tenant_id=tenant, address="192.0.2.99")])
+    db.rollback()
+    assert db.scalar(select(IPv4Address).limit(1)).notes is None
+    # inside a scope the same statements are permitted
+    with command_scope():
+        db.execute(update(IPv4Address).values(notes="ok"))
+    # reads and non-module tables are unaffected
+    assert db.scalar(select(IPv4Address.notes)) == "ok"

@@ -37,7 +37,6 @@ from dotmac_ipam import (
     assign_address,
     audit_consistency,
     check_address_available,
-    command_scope,
     create_pool,
     delegated_prefix_for,
     events,
@@ -59,6 +58,7 @@ from dotmac_ipam import (
     upsert_routed_prefix,
     utilization,
 )
+from dotmac_ipam.guard import _command_scope as command_scope
 from dotmac_ipam.models import (
     IPAssignment,
     IpPool,

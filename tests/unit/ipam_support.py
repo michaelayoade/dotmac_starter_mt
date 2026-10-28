@@ -15,9 +15,9 @@ from dotmac_ipam import (
     AddressFamily,
     CreatePool,
     PoolPurpose,
-    command_scope,
     create_pool,
 )
+from dotmac_ipam.guard import _command_scope as command_scope
 from dotmac_ipam.models import (
     ALL_MODELS,
     IpPool,

@@ -14,7 +14,8 @@ from contextvars import ContextVar
 from functools import wraps
 from typing import Any, ParamSpec, TypeVar
 
-from sqlalchemy import event
+from sqlalchemy import Delete, Insert, Update, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from dotmac_ipam.models import ALL_MODELS
@@ -32,7 +33,7 @@ class IpamWriteOutsideCommand(RuntimeError):
 
 
 @contextmanager
-def command_scope() -> Iterator[None]:
+def _command_scope() -> Iterator[None]:
     token = _depth.set(_depth.get() + 1)
     try:
         yield
@@ -52,7 +53,7 @@ def command(function: Callable[_P, _R]) -> Callable[_P, _R]:
 
     @wraps(function)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        with command_scope():
+        with _command_scope():
             result = function(*args, **kwargs)
             session = kwargs.get("db", args[0] if args else None)
             if isinstance(session, Session):
@@ -84,12 +85,70 @@ def _refuse_foreign_writes(
         )
 
 
+def _guarded_tables() -> frozenset[Any]:
+    return frozenset(model.__table__ for model in _GUARDED)
+
+
+def _refuse_dml_outside_command(clauseelement: Any) -> None:
+    """Refuse INSERT/UPDATE/DELETE on a module table outside a command scope."""
+    if in_command_scope():
+        return
+    if isinstance(clauseelement, Insert | Update | Delete):
+        table = getattr(clauseelement, "table", None)
+        if table in _guarded_tables():
+            raise IpamWriteOutsideCommand(
+                "dotmac_ipam rows may only be written by module commands; "
+                f"refused {type(clauseelement).__name__} on {table.name}"
+            )
+
+
+def _orm_execute_guard(execute_state: Any) -> None:
+    if execute_state.is_insert or execute_state.is_update or execute_state.is_delete:
+        _refuse_dml_outside_command(execute_state.statement)
+
+
+def _engine_execute_guard(
+    conn: Any, clauseelement: Any, multiparams: Any, params: Any, execution_options: Any
+) -> None:
+    _refuse_dml_outside_command(clauseelement)
+
+
+def _guard_legacy_bulk(name: str) -> None:
+    original = getattr(Session, name)
+
+    @wraps(original)
+    def guarded(self: Session, objects_or_mapper: Any, *args: Any, **kw: Any) -> Any:
+        mapper = objects_or_mapper if name.endswith("_mappings") else None
+        targets = [mapper] if mapper is not None else list(objects_or_mapper)
+        for target in targets:
+            cls = getattr(target, "class_", type(target))
+            if (
+                isinstance(cls, type)
+                and issubclass(cls, _GUARDED)
+                and not in_command_scope()
+            ):
+                raise IpamWriteOutsideCommand(
+                    f"dotmac_ipam rows may only be written by module commands; "
+                    f"refused Session.{name} on {cls.__name__}"
+                )
+        return original(self, objects_or_mapper, *args, **kw)
+
+    setattr(Session, name, guarded)
+
+
 def install_flush_guard() -> bool:
     """Install the guard on ``Session`` (idempotent). Returns True when added."""
     global _installed
     if _installed:
         return False
     event.listen(Session, "before_flush", _refuse_foreign_writes)
+    # ORM bulk DML (db.execute(update/delete/insert(...))) bypasses the flush.
+    event.listen(Session, "do_orm_execute", _orm_execute_guard)
+    # Core DML on a module table (connection.execute(insert(table))).
+    event.listen(Engine, "before_execute", _engine_execute_guard)
+    # Legacy bulk_* Session APIs bypass both.
+    for legacy in ("bulk_insert_mappings", "bulk_update_mappings", "bulk_save_objects"):
+        _guard_legacy_bulk(legacy)
     _installed = True
     return True
 
@@ -103,8 +162,6 @@ install_flush_guard()
 __all__ = [
     "IpamWriteOutsideCommand",
     "command",
-    "command_scope",
     "flush_guard_installed",
-    "in_command_scope",
     "install_flush_guard",
 ]

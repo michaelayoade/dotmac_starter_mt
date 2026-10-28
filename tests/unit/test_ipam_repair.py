@@ -27,7 +27,6 @@ from dotmac_ipam import (
     apply_repair,
     apply_unlink,
     assign_address,
-    command_scope,
     events,
     preview_ipv6_link,
     preview_repair,
@@ -35,6 +34,7 @@ from dotmac_ipam import (
     reserve_address,
     upsert_routed_prefix,
 )
+from dotmac_ipam.guard import _command_scope as command_scope
 from dotmac_ipam.models import IPAssignment, IPv4Address, IPv6Address
 from sqlalchemy import select
 
