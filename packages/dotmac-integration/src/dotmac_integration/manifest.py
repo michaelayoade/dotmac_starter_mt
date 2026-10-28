@@ -44,7 +44,7 @@ from dotmac_integration.shadow import SHADOW_PLATFORM_TABLES
 
 module = ModuleManifest(
     code="integration",
-    version="0.1.0a19",
+    version="0.1.0a20",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="intg",
