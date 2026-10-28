@@ -27,6 +27,19 @@ from dotmac_numbering.models import (
     SeriesCounter,
     SeriesRepair,
 )
+from dotmac_numbering.replacement import (
+    RESERVE_SCOPE,
+    CollisionDomain,
+    NumberCollision,
+    NumberReservation,
+    PeriodState,
+    SeriesDefinition,
+    create_series,
+    enroll_series,
+    read_period_state,
+    read_series,
+    reserve_number,
+)
 from dotmac_numbering.service import (
     ALLOCATE_SCOPE,
     MAX_DIGITS,
@@ -43,9 +56,20 @@ from dotmac_numbering.service import (
     preview,
 )
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 __all__ = [
+    "RESERVE_SCOPE",
+    "CollisionDomain",
+    "NumberCollision",
+    "NumberReservation",
+    "PeriodState",
+    "SeriesDefinition",
+    "create_series",
+    "enroll_series",
+    "read_period_state",
+    "read_series",
+    "reserve_number",
     "ALLOCATE_SCOPE",
     "IMMUTABLE_TABLES",
     "MAX_DIGITS",

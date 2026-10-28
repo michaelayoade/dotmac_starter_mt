@@ -24,6 +24,9 @@ from dotmac_numbering.manifest import module
 
 MODULE_ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = MODULE_ROOT / "migrations/versions/nu_0001_numbering.py"
+REPLACEMENT_MIGRATION = (
+    MODULE_ROOT / "migrations/versions/nu_0002_replacement_domains.py"
+)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-numbering"
 
@@ -65,6 +68,8 @@ def test_platform_tables_carry_no_tenant_column() -> None:
         models.PlatformSeriesCounter,
         models.PlatformAllocationReceipt,
         models.PlatformSeriesRepair,
+        models.PlatformNumberDomain,
+        models.PlatformNumberClaim,
     ):
         assert "tenant_id" not in model.__table__.c, (
             f"{model.__name__} has a tenant column; the platform plane is "
@@ -79,6 +84,8 @@ def test_every_tenant_table_has_a_not_null_tenant_and_composite_identity() -> No
         models.SeriesCounter,
         models.AllocationReceipt,
         models.SeriesRepair,
+        models.NumberDomain,
+        models.NumberClaim,
     ):
         column = model.__table__.c["tenant_id"]
         assert column.nullable is False
@@ -100,14 +107,24 @@ def test_no_foreign_key_crosses_the_planes() -> None:
         models.PlatformSeriesCounter,
         models.PlatformAllocationReceipt,
         models.PlatformSeriesRepair,
+        models.NumberDomain,
+        models.NumberClaim,
+        models.PlatformNumberDomain,
+        models.PlatformNumberClaim,
     ):
         for fk in model.__table__.foreign_keys:
             target = str(fk.target_fullname)
             # SQLAlchemy renders this unqualified: `tenants.id`, not
             # `public.tenants.id`.
-            assert target.startswith("tenants."), (
-                f"{model.__name__} points at {target}; the only permitted edge "
-                "is the tenant catalogue, and no edge may cross the planes"
+            tenant_plane = model.__table__.name in module.tables
+            tables = module.tables if tenant_plane else module.platform_tables
+            local_targets = tuple(f"{models.SCHEMA}.{table}." for table in tables)
+            allowed_targets = (
+                ("tenants.", *local_targets) if tenant_plane else local_targets
+            )
+            assert target.startswith(allowed_targets), (
+                f"{model.__name__} points at {target}; only the tenant catalogue "
+                "and declared tables on the same plane are permitted"
             )
 
 
@@ -334,7 +351,9 @@ def test_append_only_tables_carry_no_updated_at() -> None:
 
 def test_the_migration_makes_append_only_structural() -> None:
     """Grants and a trigger, not a service promise."""
-    migration = MIGRATION.read_text(encoding="utf-8")
+    migration = "\n".join(
+        path.read_text(encoding="utf-8") for path in (MIGRATION, REPLACEMENT_MIGRATION)
+    )
     assert "BEFORE UPDATE OR DELETE" in migration
     assert "refuse_mutation" in migration
     # The grant is emitted from a template over the append-only tuples, so
@@ -431,6 +450,7 @@ def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     assert entry["import_name"] == "dotmac_numbering"
     assert entry["kernel_floor"] == "0.1.0a66"
     assert MIGRATION.name in " ".join(entry["wheel_contents"]["required"])
+    assert REPLACEMENT_MIGRATION.name in " ".join(entry["wheel_contents"]["required"])
 
 
 def test_the_pinned_kernel_floor_is_the_release_that_named_the_ledger() -> None:

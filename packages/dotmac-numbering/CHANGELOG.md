@@ -2,34 +2,32 @@
 
 All notable changes to the `dotmac-numbering` distribution.
 
-## UNRELEASED — 0.1.0a3 proposal
+## UNRELEASED — 0.1.0a4
 
-Proposed successor for the accepted source, pending source and release
-authorization. This version has not been built or published. It is held while
-the Kernel a105 release proceeds; integration and release require review and
-Michael's authorization.
+- Extend the existing numbering owner with strict immutable creation and
+  explicit enrollment of existing series, immutable collision domains and
+  exact-string claims across replacement codes, caller-transaction historical
+  and external reservations, and immutable configuration/period read DTOs.
+- Add `nu_0002_replacement_domains` for selected tenant/platform planes;
+  preserve released `nu_0001_numbering` bytes and unenrolled caller behavior.
+- Keep kernel idempotency as the replay owner and preserve legacy allocation
+  fingerprints. Enrollment/replacement does not authorize an ERP or Sub switch.
+- New canaries are authored for hosted CI. This candidate is not published or
+  accepted by consumers; PostgreSQL proof and release/consumer gates remain due.
 
-### Changed since the published 0.1.0a2 source
+## 0.1.0a3
+
+Retained release tag `dotmac-numbering-v0.1.0a3` carries
+`ModuleReleaseTagEvidence.v1`, peeled source
+`62ecb6b0e198ba08bef9a096037194a9dfca4da0`, verification run `39010380319`.
+This corrects the earlier proposal-only description; the local evidence does
+not replace a fresh registry check for a new adopter.
 
 - Typed service queries and explicit tenant/platform series construction;
   an unknown scope is refused before creating a series.
-- Strict validation of idempotency allocation results: formatted number,
-  period key and reference date must be strings, and the value must be an
-  integer rather than a boolean or a coerced value. Invalid result types raise
-  `invalid_allocation_result`.
-- Extraction provenance records have advanced since the a2 release.
-
-### Proposed release identity
-
-- Declare `0.1.0a3` as a new candidate for the modern release provenance lane.
-  It includes the accepted source changes above and is not identical to the
-  retained a2 artifact. The legacy a2 tag and evidence remain historical facts;
-  they do not attest this successor.
-- Public API and Kernel floor remain unchanged at `>=0.1.0a66`. No runtime
-  algorithm or migration changes are introduced by this proposal.
-- A new build, publication, install-back verification, canonical tag evidence
-  and accepted release record are still required before consumers can adopt
-  a3 as a published release.
+- Strict validation of idempotency allocation results rather than coercing
+  malformed result values. Kernel floor remains `>=0.1.0a66`.
+- No migration or allocation algorithm change relative to a2.
 
 ## 0.1.0a2 — 2026-08-15
 

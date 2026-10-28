@@ -2240,7 +2240,8 @@
           "dotmac_numbering/py.typed",
           "dotmac_numbering/manifest.py",
           "dotmac_numbering/migrations/__init__.py",
-          "dotmac_numbering/migrations/versions/nu_0001_numbering.py"
+          "dotmac_numbering/migrations/versions/nu_0001_numbering.py",
+          "dotmac_numbering/migrations/versions/nu_0002_replacement_domains.py"
         ],
         "forbidden_prefixes": [
           "app/",

@@ -4,12 +4,73 @@ Concurrency-safe allocation and formatting of **explicitly configured** document
 series, on separate tenant and platform planes, with one immutable receipt per
 allocation.
 
-`0.1.0a3` is an unpublished successor proposal, held pending review and
-Michael's source/release authorization after the Kernel a105 release. It
-includes accepted source changes since the published a2 artifact and requires
-a new build and modern release provenance; it must not be treated as available
-for adoption. The public API and Kernel floor (`>=0.1.0a66`) are unchanged.
-See [the unreleased changelog](CHANGELOG.md).
+`0.1.0a4` is an unpublished replacement-contract candidate. The retained a3
+release tag carries its own source/artifact evidence; this candidate does not
+reissue it. Hosted CI, publication/install-back verification, and consumer
+acceptance remain separate gates. Kernel floor remains `>=0.1.0a66`.
+See [the changelog](CHANGELOG.md) and the
+[source audit](../../docs/inventories/numbering-replacement-sources-2026-10-28.md).
+
+## Replacement contracts (a4 candidate)
+
+The existing allocator is extended, not replaced. `create_series` creates an
+identity frozen before first issuance, including its default start value and
+collision domain. `enroll_series` freezes an existing series only if its
+configuration still equals the caller's exact observed configuration under
+lock; it changes neither its rendering nor counters. A new format requires a
+new code. A code is not printed unless the configured formatter includes it,
+so a different code alone does not prevent a collision.
+
+`CollisionDomain(code, partitioned=False)` defines exact-string uniqueness
+across replacement codes. A partitioned domain requires a stable partition
+identity; an unpartitioned domain uses no caller partition. Domains are
+immutable within a scope, so two series cannot give the same domain conflicting
+partition policies. The implementation uses PostgreSQL `C` collation with no
+normalization. A product must verify that this equals its real document
+constraint's semantics before enrollment; different collation/normalization
+semantics are not silently treated as covered.
+
+For an enrolled series, `allocate` requires a stable `document_reference` and,
+for partitioned domains, `partition_key`. It inserts the exact rendered claim
+and the allocation receipt in the same caller transaction. Claims uniquely
+bind domain/partition/string and domain/partition/document identity, across
+series codes. `NumberCollision` refuses another claim without skipping values,
+rewinding counters, or consuming a committed number. Kernel idempotency remains
+the sole replay owner, including concurrent same-key conflict handling.
+
+`reserve_number` enrolls a `historical` or `external` exact string, stable
+`document_reference` and nonempty `provenance`, without allocating or creating
+a normal allocation receipt. Unknown numeric grammar can still reserve its
+exact string. An identical durable claim may be reconciled under another
+command key; changing its number/document/provenance is refused. Neither
+reservations nor series enrollment attest census completeness: products must
+inventory all past numbers and future external writers before switching.
+
+`read_series` returns an immutable `SeriesDefinition`. `read_period_state`
+returns the period's next counter value, whether a counter exists, and its last
+actual allocation separately. Repairs can move the counter beyond the last
+receipt; counter-minus-one must not be displayed as last number used. Reads
+suppress autoflush and return stored scalar state, not a pending ORM edit.
+
+Unenrolled legacy series retain their existing configuration/allocation
+behavior and original request fingerprints. Old exact replays remain valid
+after enrollment; a new enrolled allocation cannot omit document identity.
+The product still needs outer business-command replay that resolves its active
+binding only on first execution. A module allocation key alone cannot replay
+a complete document command across a changed active series.
+
+`nu_0002_replacement_domains` adds the selected tenant/platform domain and
+claim tables plus strict-series metadata, forced tenant RLS, platform isolation,
+append-only enforcement and same-plane identity links. Released `nu_0001`
+bytes are unchanged. Downgrade must refuse destruction of immutable claims or
+strict enrollment state; rolling an active consumer back is a forward binding
+transition preserving issued evidence, not a schema rewind.
+
+This package does not decide active business-series bindings, business dates,
+configuration-change permissions, document column limits, gap policy or the
+operational cutover seal. Products derive domain/partition identity from trusted
+business policy, never a client-selected namespace. No example or source
+change authorizes production enrollment, counter repair or a writer switch.
 
 ## What it owns
 
@@ -51,17 +112,17 @@ possible and both are coherent: allocate-then-configure (history now exists, so
 the reconfiguration is refused) or configure-then-allocate (the number uses the
 new format).
 
-## What may change after a series has allocated
+## Legacy unenrolled configuration behavior
 
-**Identity-shaping fields freeze**: prefix, suffix, separator, digit width,
+**For legacy unenrolled series, identity-shaping fields freeze after history**: prefix, suffix, separator, digit width,
 year and month inclusion, year width, reset policy. Changing one could
 re-render a number already issued, so the service refuses the transition and a
 database trigger refuses it again — the online roles can write the
 configuration tables directly, so a rule living only in Python is one a psql
 session walks straight past.
 
-**`start_value` stays mutable, because it is a prospective seed and not part of
-the rendered identity.** It seeds the counter of a period when that period
+**For legacy unenrolled series, `start_value` stays mutable because it is a
+prospective seed, not part of the rendered identity.** It seeds the counter of a period when that period
 first opens, and it can never move a counter that already exists. So raising it:
 
 - leaves an already-open period exactly where it is;

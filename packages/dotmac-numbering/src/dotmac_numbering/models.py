@@ -47,9 +47,11 @@ from dotmac_kernel.models import Base, Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -119,6 +121,16 @@ class _SeriesColumns:
     @declared_attr
     def start_value(cls) -> Mapped[int]:
         return mapped_column(BigInteger, nullable=False, default=1)
+
+    @declared_attr
+    def strict_identity(cls) -> Mapped[bool]:
+        return mapped_column(
+            Boolean, nullable=False, default=False, server_default="false"
+        )
+
+    @declared_attr
+    def domain_code(cls) -> Mapped[str | None]:
+        return mapped_column(String(80))
 
 
 class _CounterColumns:
@@ -241,6 +253,20 @@ class NumberSeries(Base, _SeriesColumns, TimestampMixin):
         UniqueConstraint(
             "tenant_id", "series_code", name="uq_number_series_tenant_code"
         ),
+        UniqueConstraint(
+            "tenant_id",
+            "series_code",
+            "domain_code",
+            name="uq_number_series_domain_identity",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "domain_code"],
+            [
+                f"{SCHEMA}.number_domains.tenant_id",
+                f"{SCHEMA}.number_domains.domain_code",
+            ],
+            name="fk_number_series_domain",
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -333,6 +359,16 @@ class PlatformNumberSeries(Base, _SeriesColumns, TimestampMixin):
     __tablename__ = "platform_number_series"
     __table_args__ = (
         UniqueConstraint("series_code", name="uq_platform_number_series_code"),
+        UniqueConstraint(
+            "series_code",
+            "domain_code",
+            name="uq_platform_number_series_domain_identity",
+        ),
+        ForeignKeyConstraint(
+            ["domain_code"],
+            [f"{SCHEMA}.platform_number_domains.domain_code"],
+            name="fk_platform_number_series_domain",
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -388,13 +424,159 @@ class PlatformSeriesRepair(Base, _RepairColumns):
     id: Mapped[UUID] = uuid_pk()
 
 
+class _DomainColumns:
+    @declared_attr
+    def domain_code(cls) -> Mapped[str]:
+        return mapped_column(String(80), nullable=False)
+
+    @declared_attr
+    def partitioned(cls) -> Mapped[bool]:
+        return mapped_column(Boolean, nullable=False)
+
+
+class _ClaimColumns:
+    @declared_attr
+    def domain_code(cls) -> Mapped[str]:
+        return mapped_column(String(80), nullable=False)
+
+    @declared_attr
+    def partition_key(cls) -> Mapped[str]:
+        return mapped_column(String(128, collation="C"), nullable=False)
+
+    @declared_attr
+    def formatted_number(cls) -> Mapped[str]:
+        return mapped_column(String(255, collation="C"), nullable=False)
+
+    @declared_attr
+    def document_reference(cls) -> Mapped[str]:
+        return mapped_column(String(255, collation="C"), nullable=False)
+
+    @declared_attr
+    def series_code(cls) -> Mapped[str]:
+        return mapped_column(String(80), nullable=False)
+
+    @declared_attr
+    def origin(cls) -> Mapped[str]:
+        return mapped_column(String(16), nullable=False)
+
+    @declared_attr
+    def provenance(cls) -> Mapped[str]:
+        return mapped_column(Text, nullable=False)
+
+    @declared_attr
+    def claimed_at(cls) -> Mapped[datetime]:
+        return mapped_column(
+            DateTime(timezone=True), nullable=False, server_default=func.now()
+        )
+
+
+class NumberDomain(Base, _DomainColumns):
+    __tablename__ = "number_domains"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "domain_code", name="uq_number_domains_code"),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+
+
+class PlatformNumberDomain(Base, _DomainColumns):
+    __tablename__ = "platform_number_domains"
+    __table_args__ = (
+        UniqueConstraint("domain_code", name="uq_platform_number_domains_code"),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+
+
+class NumberClaim(Base, _ClaimColumns):
+    __tablename__ = "number_claims"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "domain_code",
+            "partition_key",
+            "formatted_number",
+            name="uq_number_claims_rendered",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "domain_code",
+            "partition_key",
+            "document_reference",
+            name="uq_number_claims_document",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "domain_code"],
+            [
+                f"{SCHEMA}.number_domains.tenant_id",
+                f"{SCHEMA}.number_domains.domain_code",
+            ],
+            name="fk_number_claims_domain",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "series_code", "domain_code"],
+            [
+                f"{SCHEMA}.number_series.tenant_id",
+                f"{SCHEMA}.number_series.series_code",
+                f"{SCHEMA}.number_series.domain_code",
+            ],
+            name="fk_number_claims_series",
+        ),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+
+
+class PlatformNumberClaim(Base, _ClaimColumns):
+    __tablename__ = "platform_number_claims"
+    __table_args__ = (
+        UniqueConstraint(
+            "domain_code",
+            "partition_key",
+            "formatted_number",
+            name="uq_platform_number_claims_rendered",
+        ),
+        UniqueConstraint(
+            "domain_code",
+            "partition_key",
+            "document_reference",
+            name="uq_platform_number_claims_document",
+        ),
+        ForeignKeyConstraint(
+            ["domain_code"],
+            [f"{SCHEMA}.platform_number_domains.domain_code"],
+            name="fk_platform_number_claims_domain",
+        ),
+        ForeignKeyConstraint(
+            ["series_code", "domain_code"],
+            [
+                f"{SCHEMA}.platform_number_series.series_code",
+                f"{SCHEMA}.platform_number_series.domain_code",
+            ],
+            name="fk_platform_number_claims_series",
+        ),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+
+
 TENANT_TABLES: tuple[str, ...] = (
+    "number_domains",
+    "number_claims",
     "number_series",
     "series_counters",
     "allocation_receipts",
     "series_repairs",
 )
 PLATFORM_TABLES: tuple[str, ...] = (
+    "platform_number_domains",
+    "platform_number_claims",
     "platform_number_series",
     "platform_series_counters",
     "platform_allocation_receipts",
@@ -404,6 +586,10 @@ PLATFORM_TABLES: tuple[str, ...] = (
 #: The append-only tables. Named once so the migration, the service and the
 #: canaries cannot disagree about which rows may never change.
 IMMUTABLE_TABLES: tuple[str, ...] = (
+    "number_domains",
+    "number_claims",
+    "platform_number_domains",
+    "platform_number_claims",
     "allocation_receipts",
     "series_repairs",
     "platform_allocation_receipts",
@@ -417,6 +603,10 @@ __all__ = [
     "RESET_POLICIES",
     "SCHEMA",
     "TENANT_TABLES",
+    "NumberDomain",
+    "PlatformNumberDomain",
+    "NumberClaim",
+    "PlatformNumberClaim",
     "AllocationReceipt",
     "NumberSeries",
     "PlatformAllocationReceipt",
