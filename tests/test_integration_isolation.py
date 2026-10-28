@@ -837,7 +837,8 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     """Every kind of change the lineage makes, accounted for.
 
     `ig_0003` and `ig_0005` add COLUMNS to existing tables; `ig_0004` and
-    `ig_0006` and `ig_0010` add exactly one table each. Asserted from both sides
+    `ig_0006` and `ig_0010` add exactly one table each, and `ig_0017` adds the
+    two PROVISION runtime tables (plus a column). Asserted from both sides
     — the declaration says ten and the live schema holds exactly those ten — plus
     the ADR-0023 contract, which either a new column or a new table could break
     by carrying a tenant scope.
@@ -851,7 +852,9 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     from dotmac_kernel.migrations.catalog import audit_live_schemas
     from dotmac_kernel.namespaces import NamespaceRegistry
 
-    assert len(module.platform_tables) == 12
+    assert len(module.platform_tables) == 14
+    assert "provision_operations" in module.platform_tables
+    assert "provision_step_attempts" in module.platform_tables
     assert "capability_destination_revisions" in module.platform_tables
     assert "receipt_legal_holds" in module.platform_tables
     assert "delivery_legal_holds" in module.platform_tables

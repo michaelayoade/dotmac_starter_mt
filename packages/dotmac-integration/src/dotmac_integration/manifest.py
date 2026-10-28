@@ -38,6 +38,7 @@ from dotmac_kernel.prerequisites import (
 
 from dotmac_integration.models import PLATFORM_TABLES
 from dotmac_integration.poll_schedule import POLL_SCHEDULE_PLATFORM_TABLES
+from dotmac_integration.provisioning import PROVISION_PLATFORM_TABLES
 from dotmac_integration.retention import RETENTION_PLATFORM_TABLES
 from dotmac_integration.shadow import SHADOW_PLATFORM_TABLES
 
@@ -63,6 +64,7 @@ module = ModuleManifest(
         + RETENTION_PLATFORM_TABLES
         + SHADOW_PLATFORM_TABLES
         + POLL_SCHEDULE_PLATFORM_TABLES
+        + PROVISION_PLATFORM_TABLES
     ),
     # ── Logical database prerequisites ──────────────────────────────────────
     # THREE effects this module needs that none of its own migrations create.

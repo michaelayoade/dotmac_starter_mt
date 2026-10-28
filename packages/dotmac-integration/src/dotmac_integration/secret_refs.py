@@ -44,6 +44,7 @@ __all__ = [
     "SECRET_REFERENCE_SCHEMES",
     "SecretValueError",
     "validate_config_revision",
+    "validate_no_secret_material",
     "validate_secret_refs",
 ]
 
@@ -134,4 +135,55 @@ def validate_config_revision(
             "Put a '<scheme>://<id>' reference here, or move it to secret_refs "
             "— a configuration revision is immutable and ends up in every "
             "backup"
+        )
+
+
+#: Name suffixes that identify or version a secret without carrying it. A
+#: payload may name `credential_id`, `secret_version` or `secret_fingerprint`
+#: (ADR-0076 §8 carries exactly those), while `password`, `api_key` or a
+#: nested `{"password": {"value": …}}` remains material and is refused.
+_IDENTIFIER_SUFFIXES: Final[tuple[str, ...]] = (
+    "_id",
+    "_ref",
+    "_refs",
+    "_version",
+    "_fingerprint",
+    "_digest",
+    "_name",
+    "_kind",
+    "_type",
+)
+
+
+def validate_no_secret_material(
+    payload: dict[str, object], *, what: str = "payload"
+) -> None:
+    """Refuse secret MATERIAL in a payload that may name secrets by identity.
+
+    The companion to `validate_config_revision` for command payloads (a
+    provision step input is the first consumer): any path segment naming
+    secret material refuses a literal beneath it, while identifier-shaped
+    names — the credential's id, its secret version, its keyed fingerprint —
+    cross freely, because naming a secret is not carrying one.
+    """
+    for path, value in _walk(payload or {}):
+        segments = [
+            segment.lower()
+            for segment in re.split(r"[.\[\]]+", path)
+            if segment and not segment.isdigit()
+        ]
+        material = any(
+            any(hint in segment for hint in _SECRET_NAME_HINTS)
+            and not segment.endswith(_IDENTIFIER_SUFFIXES)
+            for segment in segments
+        )
+        if not material:
+            continue
+        if _is_reference(value):
+            continue
+        raise SecretValueError(
+            f"{what}.{path} names secret material but holds a literal. "
+            "Carry the credential's identifier and version instead — the "
+            "secret itself crosses only through its owner's fetch "
+            "(ADR-0076 §7), never in a payload"
         )

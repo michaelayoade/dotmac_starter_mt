@@ -7866,7 +7866,10 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ap_0003` records approved-decision withdrawals; still editable until
     # `dotmac-approvals` 0.1.0a7 is tagged.
     "dotmac-approvals": frozenset(),
-    "dotmac-integration": frozenset(),
+    # `ig_0017` adds the durable PROVISION runtime tables and the SPI 1.7
+    # fleet-target revision column; still editable until the protected
+    # release tags the integration version that carries it.
+    "dotmac-integration": frozenset({"ig_0017_provisioning.py"}),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),

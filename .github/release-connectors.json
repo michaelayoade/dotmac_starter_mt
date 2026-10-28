@@ -162,9 +162,64 @@
     ],
     "entry_point_group": "dotmac_integration.connectors",
     "classification": "stateless-protocol-adapter",
+    "also_classifications": ["stateless-sql-adapter"],
     "package_dir_prefix": "packages/dotmac-connector-"
   },
   "connectors": {
+    "dotmac-connector-freeradius": {
+      "$comment": [
+        "FreeRADIUS SQL projection (radcheck/radreply/radusergroup),",
+        "radpostauth/radacct observation polling and RFC 5176 CoA/Disconnect",
+        "over SPI 1.7 (PROVISION + POLL). It serves Sub's three published",
+        "network.* capability contracts and claims their exact digests; it",
+        "owns no rows, no credential material beyond one in-memory fetch per",
+        "apply (ADR-0076 section 7), and no access decision.",
+        "",
+        "HELD BACK, deliberately: `release_enabled` is false. It requires",
+        "SPI 1.7 and the durable provisioning runtime (migration",
+        "ig_0017), which are unpublished on the integration provisioning",
+        "branch, and it has not been proven against a live FreeRADIUS/NAS",
+        "pair. Release only after the integration version carrying SPI 1.7",
+        "is tagged and the shadow comparison against Sub's incumbent",
+        "writer is green. The assembly-bound secret-fetch transport is",
+        "likewise unbound; the shipped default refuses loudly."
+      ],
+      "package_dir": "packages/dotmac-connector-freeradius",
+      "release_enabled": false,
+      "import_name": "dotmac_connector_freeradius",
+      "plugin_attr": "PLUGIN",
+      "connector_key": "freeradius",
+      "spi_range": ">=1.7,<2.0",
+      "integration_floor": "0.1.0a19",
+      "tag_prefix": "dotmac-connector-freeradius-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_connector_freeradius/__init__.py",
+          "dotmac_connector_freeradius/coa.py",
+          "dotmac_connector_freeradius/config.py",
+          "dotmac_connector_freeradius/database.py",
+          "dotmac_connector_freeradius/fetch.py",
+          "dotmac_connector_freeradius/plugin.py",
+          "dotmac_connector_freeradius/polling.py",
+          "dotmac_connector_freeradius/ports.py",
+          "dotmac_connector_freeradius/provisioning.py",
+          "dotmac_connector_freeradius/render.py",
+          "dotmac_connector_freeradius/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-integration",
+          "httpx",
+          "python",
+          "sqlalchemy"
+        ]
+      }
+    },
     "dotmac-connector-flutterwave": {
       "$comment": [
         "Flutterwave API v4 authentication, settlement ingress and paged",

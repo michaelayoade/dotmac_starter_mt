@@ -13,6 +13,7 @@ from dotmac_integration.spi import (
     CapabilityDeclaration,
     ConnectorManifest,
     EgressDeclaration,
+    FleetTargetDeclaration,
     InvalidManifestError,
     SecretBindingDeclaration,
     SpiRange,
@@ -31,6 +32,7 @@ def _current_manifest(**overrides: object) -> ConnectorManifest:
         "capabilities": (CAPABILITY,),
         "secret_bindings": (),
         "egress": EgressDeclaration(),
+        "fleet_targets": FleetTargetDeclaration(),
     }
     values.update(overrides)
     return ConnectorManifest(**values)  # type: ignore[arg-type]

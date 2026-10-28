@@ -1,0 +1,71 @@
+schema_version = 1
+package = "dotmac-connector-freeradius"
+classification = "stateless-sql-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "FreeRADIUS SQL transport: incumbent-exact rendering of one login's radcheck/radreply/radusergroup rows, advisory-locked delete-and-insert with read-back verification, radpostauth/radacct observation polling, and RFC 5176 CoA/Disconnect to fleet NAS endpoints inside declared network targets."
+
+contract = "Implement dotmac-integration SPI >=1.7,<2.0 for connector key freeradius. Serve network.access_projection.v1 and network.session_disconnect.v1 in PROVISION and network.access_observation.v1 in POLL, claiming Sub's three published contract digests exactly. A projection step carries identifiers, credential id and secret version only; the secret is fetched once per enabled apply through an assembly-bound single-use fetch and used in memory only. Refused fetches settle terminal with secret_fetch_refused; unknown-outcome applies are observed, never blindly re-applied. Disconnect endpoints are refused before I/O when outside the installation's bound fleet targets. Own no database schema, access decision, credential, session state, retry or checkpoint engine."
+
+# Both products were inventoried for a RADIUS transport: Sub holds the only
+# one (radius_population and its planner/enforcement neighbours, below);
+# ERP at the recorded revision contains no FreeRADIUS, radcheck or radacct
+# code. The connector is therefore greenfield against Sub's inventoried
+# behaviour, rendered row-for-row, not a second implementation beside an
+# ERP one.
+source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub"]
+
+source_revisions = [
+  "dotmac_starter_mt:c4d0fe3c8e8954b57c86f168b0e49929d3ad095e",
+  "dotmac_erp:153cc04a9e08fd7936f7e91d37e694ad932bead3",
+  "dotmac_sub:1abba5686d3a95170cd094a58bcb9b8fe22cda9a",
+]
+
+source_paths = [
+  "dotmac_sub:app/services/radius_population.py",
+  "dotmac_sub:app/services/radius_projection_planner.py",
+  "dotmac_sub:app/services/enforcement.py",
+  "dotmac_sub:app/services/radius_probe.py",
+  "dotmac_sub:app/services/integrations/network_capability_contracts.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:packages/dotmac-connector-freeradius/tests/test_connector.py",
+  "dotmac_starter_mt:packages/dotmac-connector-freeradius/tests/test_render.py",
+  "dotmac_starter_mt:packages/dotmac-connector-freeradius/tests/test_provisioning.py",
+  "dotmac_starter_mt:packages/dotmac-connector-freeradius/tests/test_polling.py",
+  "dotmac_starter_mt:packages/dotmac-connector-freeradius/tests/test_database.py",
+  "dotmac_starter_mt:packages/dotmac-connector-freeradius/tests/test_coa.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator", "dotmac_sub"]
+
+inventory_evidence = [
+  "docs/adr/0038-network-capabilities-decompose-sub-first.md",
+  "docs/adr/0074-freeradius-transport-carries-fetched-secrets-and-declared-network-targets.md",
+  "docs/adr/0076-service-access-credentials-have-one-owner-bound-to-the-service-instance.md",
+]
+
+first_cutover = "Inside the single network-suite-v1 Sub cutover (ADR-0038): after the SPI 1.7 integration release is tagged and this connector is released and exact-pinned in dotmac_integrator, shadow the connector against Sub's incumbent writer to row parity, then flip the single writer. This dossier does not authorize activation."
+
+shadow_and_drift = "For every login in a full sweep, compare the connector's rendered rows against the incumbent writer's rows byte-for-byte (password by presence), and its observed fingerprints against Sub's expected fingerprints. Test-access (TEST_RADIUS_*) logins are a named expected difference in v1 and must be enumerated, not silently absorbed."
+
+local_copy_retirement = "At the suite cutover, delete Sub's local writers/readers (radius_population, direct radacct import tasks, enforcement CoA) in the same change that flips the single writer; Sub retains commercial decisions, credential ownership and composition over dotmac-network-access."
+
+next_action = "Keep release disabled until the integration version carrying SPI 1.7 and ig_0017 is tagged, the assembly secret-fetch endpoint is live, and shadow parity is green. Then enable release by reviewed diff."
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "153cc04a9e08fd7936f7e91d37e694ad932bead3"
+evidence_paths = ["pyproject.toml"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "1abba5686d3a95170cd094a58bcb9b8fe22cda9a"
+evidence_paths = ["app/services/radius_population.py", "app/services/enforcement.py", "app/tasks/usage.py"]

@@ -151,8 +151,12 @@ the normalized batch and next cursor then commit together. This is package
 machinery rather than a new SPI shape in a11. Released a18 sets
 `CURRENT_SPI_VERSION` to 1.6 for additive provisioning and
 synchronous request contracts. Proposed a19 adds receipt-origin persistence
-metadata and shared held-key product-query authentication; neither changes the
-existing wire contract or SPI.
+metadata and shared held-key product-query authentication without changing the
+wire contract, and — on the provisioning runtime branch, still unpublished —
+SPI 1.7 fleet-target declarations plus the durable provisioning engine
+described below. `CURRENT_SPI_VERSION` is therefore 1.7 on that branch; a
+connector with an honest `<1.7,>=1.5` range is unaffected until the version
+carrying 1.7 is tagged.
 
 ## The ingress contract
 
@@ -306,6 +310,41 @@ would be a second claim over a row that already has a stronger one.
 Backoff is not redefined here — `poll_backoff_seconds` delegates to
 `retry.retry_delay_seconds`, which stays the one owner of the curve for the
 outbox and the poll loop alike.
+
+## Provisioning durability is an ENGINE contract; fleet targets are an SPI one
+
+The durable provisioning runtime (`dotmac_integration.provisioning`, migration
+`ig_0017`) is to `PROVISION` what `poll_schedule` is to `POLL`: package
+machinery a connector never sees. `ProvisioningHandler` keeps its four SPI 1.5
+methods and result shapes; what returns is now settled against leased,
+idempotency-keyed step rows by `submit_provision_operation` ->
+`prepare_provision` -> `invoke_provision` -> `settle_provision`, so a plan
+survives a worker death. Two settlements are SPI-visible in effect and worth
+knowing as an author: an apply whose outcome is unknown (handler raised,
+lease expired mid-call, or an `AMBIGUOUS` result) is only ever followed by
+`observe`, never by a blind re-apply; and a result carrying the closed
+`secret_fetch_refused` error code settles to reconciliation, never retry —
+ADR-0076 allows one secret fetch per projection request, so a refused fetch
+is a product-side reissue, not a retry.
+
+SPI 1.7 is the one genuinely new author-facing surface here, and it is about
+*where a connector may send packets*, not what it implements. The manifest
+declares a fleet ceiling (`FleetTargetDeclaration`: protocols and port ranges,
+nothing else — a manifest still may not name IP literals). Each
+installation's configuration revision narrows that ceiling to concrete CIDRs
+(`NetworkTarget`), validated against the ceiling before the revision is
+written and again at manifest adoption. The engine delivers the bound targets
+to the handler inside config under the reserved `_network_targets` key —
+overwriting any same-named config entry, because a connector must never be
+handed targets its operator did not bind — and `spi.bound_network_targets`
+reads them back. Before any fleet I/O the connector calls
+`spi.require_network_target`, which refuses outside endpoints before a packet
+exists; nothing declared means deny-all, exactly as with egress hosts. A
+manifest that omits the declaration keeps its pre-1.7 digest — the field is
+appended to the digest material only when present, the SPI 1.4 precedent — so
+existing installation pins are untouched. A connector targeting SPI >=1.7
+must declare its ceiling explicitly, including the explicit "no fleet
+traffic" of an empty declaration.
 
 ## Product-port descriptor v3 carries the domain contract
 

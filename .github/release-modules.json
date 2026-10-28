@@ -1807,7 +1807,7 @@
       "package_dir": "packages/dotmac-integration",
       "import_name": "dotmac_integration",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a68",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_intg",
       "tag_prefix": "dotmac-integration-v",
       "wheel_contents": {
@@ -1839,7 +1839,10 @@
           "dotmac_integration/migrations/versions/ig_0013_delivery_result.py",
           "dotmac_integration/migrations/versions/ig_0014_polling_evidence.py",
           "dotmac_integration/migrations/versions/ig_0015_descriptor_contract.py",
-          "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py"
+          "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py",
+          "dotmac_integration/migrations/versions/ig_0017_provisioning.py",
+          "dotmac_integration/provisioning.py",
+          "dotmac_integration/provision_contract.py"
         ],
         "forbidden_prefixes": [
           "app/",

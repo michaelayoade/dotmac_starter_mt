@@ -32,6 +32,8 @@ working tree and never inferred from the layout:
   is genuinely stateless (declares no `short_code`/`migration_prefix`), which
   is a module that owns no namespace and therefore needs no allocation.
 - `stateless-protocol-adapter` (connectors, OIDC) — allowed with no row.
+- `stateless-sql-adapter` (the FreeRADIUS connector) — allowed with no row.
+  Its rows live in the provider's schema; it owns no namespace to allocate.
 - `stateless-contract-catalogue` (owner contract catalogues) — allowed with no
   row. It is data, not an adapter: it holds canonical schema bytes and digests
   and reaches no provider at all, so it owns no namespace to allocate.
@@ -123,6 +125,7 @@ EXEMPT_CLASSIFICATIONS = frozenset(
     {
         "stateless-protocol-adapter",
         "stateless-contract-catalogue",
+        "stateless-sql-adapter",
         "presentation-foundation",
         "universal-facility",
     }

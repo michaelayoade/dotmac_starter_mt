@@ -87,6 +87,11 @@
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
     },
+    "dotmac-connector-freeradius": {
+      "declared": "0.1.0a1",
+      "reason": "NEW CONNECTOR, NEVER PUBLISHED. Declared by the Integrator FreeRADIUS transport slice (ADR-0074): SPI 1.7 PROVISION/POLL over the FreeRADIUS SQL schema plus CoA-Disconnect against installation-bound fleet targets, built for Sub's network-suite-v1 adoption of dotmac-network-access. release_enabled stays false in .github/release-connectors.json until dotmac-integration publishes SPI 1.7 (the connector's floor); remove this row only when the connector release workflow installs, verifies and tags 0.1.0a1, and never merge an Integrator pin before that tag exists.",
+      "state": "never-published"
+    },
     "dotmac-connector-meta-social": {
       "declared": "0.1.0a2",
       "reason": "DECLARED BY THE OUTBOUND MESSAGING SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-meta-social-v0.1.0a1 -> c1921f6c4b9360c8b0005bddbf85e04e86d29a73), and messaging.send.v1, the per-capability modes, three additional secret bindings, two Graph egress hosts and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 ingress manifest is preserved as INGRESS_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an Integrator pin before that tag exists.",

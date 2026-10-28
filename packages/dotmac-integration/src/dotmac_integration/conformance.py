@@ -53,6 +53,7 @@ from dotmac_integration.spi import (
     Diagnostic,
     DispatchRequest,
     EgressDeclaration,
+    FleetTargetDeclaration,
     InboundEvent,
     IngressHandler,
     IngressRequest,
@@ -190,6 +191,7 @@ def fake_manifest(
         ),
         secret_bindings=(),
         egress=EgressDeclaration(),
+        fleet_targets=FleetTargetDeclaration(),
     )
 
 

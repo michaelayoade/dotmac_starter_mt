@@ -662,6 +662,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
     """Release-enabled entries resolve; held-back and neighbouring ones refuse."""
     assert set(_policy()["connectors"]) == {
         "dotmac-connector-flutterwave",
+        "dotmac-connector-freeradius",
         "dotmac-connector-linkedin",
         "dotmac-connector-meta-social",
         "dotmac-connector-mono",

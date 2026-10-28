@@ -195,6 +195,14 @@ class ConnectorConfigRevision(Base):
     schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
 
     config_json: Mapped[dict[str, object]] = mapped_column(_JSON, nullable=False)
+    #: Installation-scoped fleet targets (SPI 1.7, ig_0017), in the canonical
+    #: `spi.network_targets_to_json` form and covered by `config_digest` when
+    #: declared. NULL means the revision predates the declaration; an empty
+    #: list is an explicit deny-all. Validated against the pinned manifest's
+    #: fleet ceiling before the revision is written (`lifecycle`).
+    network_targets_json: Mapped[list[object] | None] = mapped_column(
+        _JSON, nullable=True
+    )
     #: Secret REFERENCES only — never values. `dotmac_integration.secret_refs`
     #: refuses anything that looks like material rather than a pointer.
     secret_refs: Mapped[dict[str, object]] = mapped_column(_JSON, nullable=False)

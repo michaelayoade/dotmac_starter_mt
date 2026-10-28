@@ -39,8 +39,8 @@ from dotmac_integration.spi import (
 )
 
 
-def test_spi_1_6_preserves_provision_and_adds_one_closed_request_mode() -> None:
-    assert CURRENT_SPI_VERSION == SpiVersion(1, 6)
+def test_spi_1_7_preserves_provision_and_request_modes() -> None:
+    assert CURRENT_SPI_VERSION == SpiVersion(1, 7)
     assert set(ConnectorMode) == {
         ConnectorMode.INGRESS,
         ConnectorMode.POLL,

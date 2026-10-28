@@ -61,6 +61,7 @@ retries after a timeout.
 from __future__ import annotations
 
 import secrets as _secrets
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -80,7 +81,12 @@ from dotmac_integration.spi import (
     ConnectorManifest,
     ConnectorMode,
     ConnectorPlugin,
+    NetworkTarget,
+    NetworkTargetError,
     accepts_manifest_digest,
+    network_targets_from_json,
+    network_targets_to_json,
+    validate_network_targets,
 )
 
 __all__ = [
@@ -92,6 +98,7 @@ __all__ = [
     "add_binding",
     "adopt_manifest",
     "create_draft",
+    "current_network_targets",
     "disable",
     "enable",
     "mint_ingress_endpoint",
@@ -255,6 +262,22 @@ def create_draft(
     return installation
 
 
+def current_network_targets(
+    db: Any, installation: ConnectorInstallation
+) -> tuple[NetworkTarget, ...]:
+    """The fleet targets bound by the installation's current revision.
+
+    No current revision, or a revision that predates the SPI 1.7 column,
+    means no bound targets — deny-all, never "unknown".
+    """
+    if installation.current_config_revision_id is None:
+        return ()
+    revision = db.get(ConnectorConfigRevision, installation.current_config_revision_id)
+    if revision is None:
+        return ()
+    return network_targets_from_json(revision.network_targets_json)
+
+
 def put_config_revision(
     db: Any,
     installation: ConnectorInstallation,
@@ -262,6 +285,7 @@ def put_config_revision(
     registry: ConnectorRegistry,
     config: dict[str, object],
     secret_refs: dict[str, object] | None = None,
+    network_targets: Iterable[NetworkTarget] | None = None,
     schema_version: str = "1",
     actor: str | None = None,
 ) -> tuple[ConnectorConfigRevision, bool]:
@@ -271,6 +295,11 @@ def put_config_revision(
     existing revision rather than minting another. Without that, every
     reconcile inflates the history until "when did this last change?" stops
     being answerable — which is the question an incident asks.
+
+    ``network_targets=None`` keeps the pre-1.7 digest and stores NULL;
+    passing a (possibly empty) set declares this revision's fleet targets,
+    covers them by the digest, and validates them against the pinned
+    manifest's fleet ceiling before anything is written.
     """
     from sqlalchemy import func, select
 
@@ -296,13 +325,22 @@ def put_config_revision(
             "configuration does not match the bound capability schema(s): "
             + ",".join(schema_errors)
         )
-    digest = payload_digest(
-        {
-            "config": config,
-            "secret_refs": refs,
-            "schema_version": normalized_schema_version,
-        }
-    )
+    targets_json: list[dict[str, object]] | None = None
+    if network_targets is not None:
+        validated_targets = validate_network_targets(
+            manifest.fleet_targets, network_targets
+        )
+        targets_json = network_targets_to_json(validated_targets)
+    digest_material: dict[str, object] = {
+        "config": config,
+        "secret_refs": refs,
+        "schema_version": normalized_schema_version,
+    }
+    if targets_json is not None:
+        # Only when declared, so a pre-1.7 configuration resubmitted after
+        # the upgrade still digests to its existing revision.
+        digest_material["network_targets"] = targets_json
+    digest = payload_digest(digest_material)
 
     existing = db.execute(
         select(ConnectorConfigRevision).where(
@@ -330,6 +368,7 @@ def put_config_revision(
         revision=int(highest or 0) + 1,
         schema_version=normalized_schema_version,
         config_json=config,
+        network_targets_json=targets_json,
         secret_refs=refs,
         config_digest=digest,
         validation_status="pending",
@@ -1045,10 +1084,14 @@ class AdoptionPreview:
     #: adoption would strand them, so it is refused rather than applied.
     dropped_capabilities: tuple[str, ...]
     honours_current_pin: bool
+    #: The current revision's fleet targets exceed the NEW manifest's
+    #: ceiling. Adoption would leave bound targets the connector may no
+    #: longer declare, so it is refused until a narrower revision is written.
+    network_targets_blocked: bool = False
 
     @property
     def blocked(self) -> bool:
-        return bool(self.dropped_capabilities)
+        return bool(self.dropped_capabilities) or self.network_targets_blocked
 
 
 def preview_adoption(
@@ -1074,6 +1117,13 @@ def preview_adoption(
         .scalars()
         .all()
     )
+    try:
+        validate_network_targets(
+            target.fleet_targets, current_network_targets(db, installation)
+        )
+        targets_blocked = False
+    except NetworkTargetError:
+        targets_blocked = True
     return AdoptionPreview(
         installation_id=installation.id,
         installed_digest=installation.manifest_digest,
@@ -1083,6 +1133,7 @@ def preview_adoption(
         honours_current_pin=accepts_manifest_digest(
             plugin, installation.manifest_digest
         ),
+        network_targets_blocked=targets_blocked,
     )
 
 
@@ -1104,6 +1155,12 @@ def adopt_manifest(
     implements — an integration that reports healthy and cannot run.
     """
     preview = preview_adoption(db, installation, registry=registry)
+    if preview.network_targets_blocked:
+        raise LifecycleError(
+            f"adopting {preview.target_digest[:12]} would strand bound "
+            "fleet network targets outside its declared ceiling; write a "
+            "narrower configuration revision first"
+        )
     if preview.blocked:
         raise LifecycleError(
             f"adopting {preview.target_digest[:12]} would strand bound "

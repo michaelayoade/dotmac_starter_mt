@@ -116,11 +116,31 @@ Request input is validated against the owning domain's ``command_schema`` and a
 successful observation against its ``observation_schema`` by the invocation
 boundary. An opaque installation id gives a process-global connector a stable
 session-isolation key without exposing product, tenant or provider identity.
+
+## SPI 1.7 declares fleet network targets (ADR-0074)
+
+SPI 1.3's egress declaration names exact provider DNS hosts. Fleet transports
+— RADIUS CoA/Disconnect now, SNMP and RouterOS under ADR-0038 § 6 later —
+address a changing fleet of IP endpoints, which a manifest cannot enumerate
+and an IP literal may not be an egress host. SPI 1.7 therefore splits the
+declaration in two: the manifest declares the CEILING
+(:class:`FleetTargetDeclaration`, the protocols and port ranges the connector
+may ever use against fleet endpoints), and each installation's configuration
+revision narrows it to concrete CIDRs (:class:`NetworkTarget`), validated
+against the ceiling before the revision can be written, bound or activated.
+Absence of a declaration is deny-all for fleet traffic, exactly as the empty
+egress tuple is deny-all for provider hosts; the egress declaration itself is
+unchanged. A connector checks every fleet endpoint with
+:func:`require_network_target` before any I/O — the engine cannot interpret
+arbitrary step input to find "the address", so the refusal lives in this
+module, is shared by every fleet connector, and is exercised by conformance
+behind a counting fake transport.
 """
 
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import re
@@ -147,6 +167,8 @@ __all__ = [
     "Diagnostic",
     "DispatchRequest",
     "EgressDeclaration",
+    "FleetPortRange",
+    "FleetTargetDeclaration",
     "InboundDisposition",
     "InboundEvent",
     "IngressHandler",
@@ -157,6 +179,8 @@ __all__ = [
     "ModeContract",
     "ModeContractError",
     "ModeNotDeclaredError",
+    "NetworkTarget",
+    "NetworkTargetError",
     "PollHandler",
     "PollPlugin",
     "ProvisionContractError",
@@ -185,6 +209,12 @@ __all__ = [
     "canonical_digest",
     "require_capability_mode",
     "require_mode",
+    "NETWORK_TARGETS_CONFIG_KEY",
+    "bound_network_targets",
+    "network_targets_from_json",
+    "network_targets_to_json",
+    "require_network_target",
+    "validate_network_targets",
     "verify_plugin_modes",
 ]
 
@@ -263,6 +293,15 @@ class ProvisionContractError(ValueError):
 
 class QueryContractError(ValueError):
     """A synchronous query request or result violates the neutral SPI."""
+
+
+class NetworkTargetError(ValueError):
+    """A fleet network target is malformed or outside its declaration.
+
+    Raised BEFORE any fleet I/O — at configuration-revision validation when a
+    narrowing exceeds the manifest ceiling, and at the connector's
+    pre-flight check when a concrete endpoint is outside the bound targets.
+    """
 
 
 _KEY_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{1,118}$")
@@ -347,7 +386,11 @@ class SpiVersion:
 # in order to protect a compatibility promise nothing ever consumed. SPI 1.2
 # then added verification evidence without changing the handler protocols. SPI
 # 1.3 adds deployment declarations while keeping every handler protocol intact.
-CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 6)
+# 1.4 maps capabilities to modes; 1.5 adds provisioning operations; 1.6 adds
+# synchronous requests; 1.7 adds fleet network-target declarations. Each is
+# additive in the same sense: a connector built against an earlier minor with
+# an honest closed range keeps discovering, conforming and being invoked.
+CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 7)
 
 
 @dataclass(frozen=True, slots=True)
@@ -520,6 +563,238 @@ class EgressDeclaration:
             seen.add(host)
 
 
+#: The fleet protocols a declaration may name. Closed and validated by value
+#: rather than an enum a connector could extend: a protocol the fleet
+#: machinery does not know how to bound is not declarable.
+_FLEET_PROTOCOLS: Final[frozenset[str]] = frozenset({"tcp", "udp"})
+
+
+def _require_port_range(
+    protocol: str, first_port: int, last_port: int, *, error: type[ValueError]
+) -> None:
+    if protocol not in _FLEET_PROTOCOLS:
+        raise error(
+            f"fleet protocol {protocol!r} must be one of {sorted(_FLEET_PROTOCOLS)}"
+        )
+    for label, port in (("first_port", first_port), ("last_port", last_port)):
+        if not isinstance(port, int) or isinstance(port, bool):
+            raise error(f"fleet {label} {port!r} must be an integer port")
+    if not 1 <= first_port <= last_port <= 65535:
+        raise error(
+            f"fleet port range {first_port}-{last_port} must satisfy "
+            "1 <= first_port <= last_port <= 65535"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FleetPortRange:
+    """One protocol/port span in a manifest's fleet-target ceiling."""
+
+    protocol: str
+    first_port: int
+    last_port: int
+
+    def __post_init__(self) -> None:
+        _require_port_range(
+            self.protocol, self.first_port, self.last_port, error=InvalidManifestError
+        )
+
+    def covers(self, protocol: str, first_port: int, last_port: int) -> bool:
+        return (
+            self.protocol == protocol
+            and self.first_port <= first_port
+            and last_port <= self.last_port
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FleetTargetDeclaration:
+    """The fleet ceiling a connector declares in its manifest (SPI 1.7).
+
+    The manifest cannot enumerate fleet addresses — the fleet changes without
+    a connector release, and an IP literal may not be an egress host — so it
+    declares only the protocols and port ranges the connector may EVER use
+    against fleet endpoints. Installations narrow that ceiling to concrete
+    CIDRs (:class:`NetworkTarget`). An empty ``port_ranges`` tuple is the
+    explicit "no fleet traffic" declaration, distinct from omitting the
+    field on a pre-1.7 manifest.
+    """
+
+    port_ranges: tuple[FleetPortRange, ...] = ()
+
+    def __post_init__(self) -> None:
+        seen: set[FleetPortRange] = set()
+        for port_range in self.port_ranges:
+            if port_range in seen:
+                raise InvalidManifestError(
+                    f"fleet port range {port_range.protocol}:"
+                    f"{port_range.first_port}-{port_range.last_port} is declared twice"
+                )
+            seen.add(port_range)
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkTarget:
+    """One installation-scoped fleet target: a CIDR plus protocol/ports.
+
+    ``cidr`` must carry an explicit prefix and is stored canonicalised, so
+    two spellings of one network are one target. Host bits set is refused
+    (strict network parsing): ``10.0.0.1/24`` is an operator mistake, not a
+    network.
+    """
+
+    cidr: str
+    protocol: str
+    first_port: int
+    last_port: int
+
+    def __post_init__(self) -> None:
+        _require_port_range(
+            self.protocol, self.first_port, self.last_port, error=NetworkTargetError
+        )
+        if "/" not in self.cidr:
+            raise NetworkTargetError(
+                f"network target {self.cidr!r} must be a CIDR with an explicit "
+                "prefix, e.g. '10.20.0.0/16'"
+            )
+        try:
+            network = ipaddress.ip_network(self.cidr, strict=True)
+        except ValueError:
+            raise NetworkTargetError(
+                f"network target {self.cidr!r} is not a strict CIDR network"
+            ) from None
+        object.__setattr__(self, "cidr", str(network))
+
+    @property
+    def network(self) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
+        return ipaddress.ip_network(self.cidr)
+
+
+def validate_network_targets(
+    declaration: FleetTargetDeclaration | None,
+    targets: Iterable[NetworkTarget],
+) -> tuple[NetworkTarget, ...]:
+    """Refuse installation targets that exceed the manifest ceiling.
+
+    Called before a configuration revision is written, bound or activated —
+    never at first use. Returns the targets as a tuple so the caller stores
+    exactly what was validated.
+    """
+    validated = tuple(targets)
+    if not validated:
+        return validated
+    if declaration is None or not declaration.port_ranges:
+        raise NetworkTargetError(
+            "network targets are declared but the connector manifest declares "
+            "no fleet-target ceiling; fleet traffic is deny-all"
+        )
+    for target in validated:
+        if not any(
+            port_range.covers(target.protocol, target.first_port, target.last_port)
+            for port_range in declaration.port_ranges
+        ):
+            raise NetworkTargetError(
+                f"network target {target.cidr} {target.protocol}:"
+                f"{target.first_port}-{target.last_port} exceeds the connector's "
+                "declared fleet-target ceiling"
+            )
+    return validated
+
+
+def require_network_target(
+    targets: Iterable[NetworkTarget],
+    *,
+    address: str,
+    port: int,
+    protocol: str,
+) -> NetworkTarget:
+    """The pre-I/O refusal: ``address:port/protocol`` must be a bound target.
+
+    A connector calls this immediately before any fleet I/O and lets the
+    refusal propagate. There is deliberately no "allow when undeclared"
+    branch: no bound targets means no fleet traffic.
+    """
+    try:
+        endpoint = ipaddress.ip_address(address)
+    except ValueError:
+        raise NetworkTargetError(
+            f"fleet endpoint address {address!r} is not an IP address"
+        ) from None
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise NetworkTargetError(f"fleet endpoint port {port!r} is not a valid port")
+    for target in targets:
+        if (
+            target.protocol == protocol
+            and target.first_port <= port <= target.last_port
+            and endpoint in target.network
+        ):
+            return target
+    raise NetworkTargetError(
+        f"fleet endpoint {address}:{port}/{protocol} is outside the bound "
+        "network targets; refusing before I/O"
+    )
+
+
+#: The reserved config key under which the engine delivers an installation's
+#: bound fleet targets to a handler at invoke time. Engine-owned: a
+#: configuration revision never carries it (targets are revision fields, not
+#: config), and the engine overwrites any same-named config entry so a
+#: connector cannot be handed targets its operator never bound.
+NETWORK_TARGETS_CONFIG_KEY: Final = "_network_targets"
+
+
+def bound_network_targets(config: Mapping[str, object]) -> tuple[NetworkTarget, ...]:
+    """Read the engine-delivered bound targets out of a handler config."""
+    return network_targets_from_json(config.get(NETWORK_TARGETS_CONFIG_KEY))
+
+
+def network_targets_to_json(
+    targets: Iterable[NetworkTarget],
+) -> list[dict[str, object]]:
+    """The canonical persisted form of bound targets, order-independent."""
+    return [
+        {
+            "cidr": target.cidr,
+            "protocol": target.protocol,
+            "first_port": target.first_port,
+            "last_port": target.last_port,
+        }
+        for target in sorted(
+            targets, key=lambda item: (item.cidr, item.protocol, item.first_port)
+        )
+    ]
+
+
+def network_targets_from_json(value: object) -> tuple[NetworkTarget, ...]:
+    """Parse the persisted form back, refusing anything but its exact shape."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise NetworkTargetError("persisted network targets must be a list")
+    targets: list[NetworkTarget] = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {
+            "cidr",
+            "protocol",
+            "first_port",
+            "last_port",
+        }:
+            raise NetworkTargetError(
+                "persisted network target entries must carry exactly cidr, "
+                "protocol, first_port and last_port"
+            )
+        cidr, protocol = item["cidr"], item["protocol"]
+        first_port, last_port = item["first_port"], item["last_port"]
+        if not isinstance(cidr, str) or not isinstance(protocol, str):
+            raise NetworkTargetError(
+                "persisted network target cidr/protocol must be strings"
+            )
+        if not isinstance(first_port, int) or not isinstance(last_port, int):
+            raise NetworkTargetError("persisted network target ports must be integers")
+        targets.append(NetworkTarget(cidr, protocol, first_port, last_port))
+    return tuple(targets)
+
+
 @dataclass(frozen=True, slots=True)
 class ConnectorManifest:
     """What one connector distribution publishes about itself."""
@@ -534,6 +809,10 @@ class ConnectorManifest:
     # indistinguishable from an omitted policy.
     secret_bindings: tuple[SecretBindingDeclaration, ...] | None = None
     egress: EgressDeclaration | None = None
+    # ``None`` means a pre-1.7 manifest: no fleet ceiling was declarable, so
+    # fleet traffic is deny-all for that connector. An explicit declaration
+    # with empty port ranges is the current contract's "no fleet traffic".
+    fleet_targets: FleetTargetDeclaration | None = None
 
     def __post_init__(self) -> None:
         if not _KEY_RE.fullmatch(self.connector_key):
@@ -562,6 +841,16 @@ class ConnectorManifest:
             raise InvalidManifestError(
                 f"connector {self.connector_key!r} targets SPI >=1.3 but omits "
                 "its runtime boundaries"
+            )
+        if self.fleet_targets is not None and not self.declares_runtime_boundaries:
+            raise InvalidManifestError(
+                f"connector {self.connector_key!r} declares fleet targets "
+                "without its SPI 1.3 runtime boundaries"
+            )
+        if self.spi_range.minimum >= SpiVersion(1, 7) and self.fleet_targets is None:
+            raise InvalidManifestError(
+                f"connector {self.connector_key!r} targets SPI >=1.7 but omits "
+                "its fleet-target declaration"
             )
         secret_names: set[str] = set()
         for binding in self.secret_bindings or ():
@@ -647,6 +936,21 @@ class ConnectorManifest:
                     + ",".join(sorted((self.egress or EgressDeclaration()).hosts)),
                 )
             )
+        if self.fleet_targets is not None:
+            # Appended only when declared, so every pre-1.7 manifest keeps
+            # the digest its installations are pinned to. The ceiling is
+            # reviewable contract: widening it installs differently.
+            fields.append(
+                "fleet="
+                + ",".join(
+                    f"{port_range.protocol}:"
+                    f"{port_range.first_port}-{port_range.last_port}"
+                    for port_range in sorted(
+                        self.fleet_targets.port_ranges,
+                        key=lambda item: (item.protocol, item.first_port),
+                    )
+                )
+            )
         material = "|".join(fields)
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
@@ -655,6 +959,12 @@ class ConnectorManifest:
         """Whether omission has been retired in favour of explicit deny-all."""
 
         return self.secret_bindings is not None and self.egress is not None
+
+    @property
+    def declares_fleet_targets(self) -> bool:
+        """Whether this manifest declares an SPI 1.7 fleet-target ceiling."""
+
+        return self.fleet_targets is not None
 
     @property
     def capability_ids(self) -> frozenset[str]:

@@ -44,6 +44,13 @@ CLASSIFICATION_LABELS: Final = {
     # one. That is the property the separate word buys, and it is what the
     # contract release lane enforces (ADR-0006, 2026-08-26 amendment).
     "stateless-contract-catalogue": "stateless contract catalogue",
+    # An adapter whose provider interface is a database the PROVIDER owns
+    # (the FreeRADIUS SQL schema). It is called, not installed, exactly like
+    # the protocol adapter above, so the catalogue renders `n/a` for its
+    # persistence plane too — the rows it writes are the provider's, in the
+    # provider's schema, and a lineage tool (`alembic`) stays refused
+    # because that would mean owning the schema (ADR-0074).
+    "stateless-sql-adapter": "stateless SQL adapter",
 }
 DEDICATED_RELEASE_WORKFLOWS: Final = {
     "dotmac-kernel": ".github/workflows/release-kernel.yml",
@@ -440,7 +447,10 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
                     f"{distribution}: connector package_dir disagrees with "
                     f"{expected_dir}"
                 )
-            if classification != "stateless-protocol-adapter":
+            if classification not in {
+                "stateless-protocol-adapter",
+                "stateless-sql-adapter",
+            }:
                 raise CatalogError(
                     f"{distribution}: listed in the connector allowlist but "
                     f"classified {classification!r}"
