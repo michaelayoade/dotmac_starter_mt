@@ -141,25 +141,32 @@ def _auth_oidc_entry() -> dict:
 # ── The door is shut ─────────────────────────────────────────────────────────
 
 
-def test_the_lane_is_open_for_exactly_the_adapter_the_pilot_earned() -> None:
+def test_the_lane_is_open_for_exactly_the_reviewed_adapters() -> None:
     """This test used to assert the allowlist was EMPTY, and its docstring said
     to delete that assertion deliberately when an adapter was legitimately
-    added. This is that deliberate replacement, 2026-08-15.
+    added. The 2026-08-15 replacement pinned exactly `dotmac-auth-oidc`; this
+    is the next deliberate replacement, adding `dotmac-device-cli`.
 
-    What earned it: `dotmac_workspace` PR #2 ran the ceremony against a shared,
-    atomic PostgreSQL store, bound the callback to the browser, and drove a
-    change back into the package (starter PR #194) so a request-bound store
-    could be supplied at all. A green CI run was never the bar; a real consumer
-    was.
+    What earned the first entry: `dotmac_workspace` PR #2 ran the ceremony
+    against a shared, atomic PostgreSQL store, bound the callback to the
+    browser, and drove a change back into the package (starter PR #194) so a
+    request-bound store could be supplied at all. A green CI run was never the
+    bar; a real consumer was.
+
+    `dotmac-device-cli` is listed to publish 0.1.0a1 ahead of its first
+    cutover (the Dotmac Sub read swap, ADR-0077): publication is not
+    adoption, and `EXTRACTION.toml` still lists no contract consumers. The
+    package is standard-library only and its dossier declares the governed
+    classification, which `resolve` checks rather than trusts.
 
     The assertion inverts rather than disappears. An empty allowlist is now
     also a failure: it would mean the entry was reverted without the decision
     being re-argued, and this lane's whole doctrine is that listing and
     de-listing are both reviewed diffs.
     """
-    assert set(_adapters()) == {"dotmac-auth-oidc"}, (
-        "the adapter allowlist changed. Adding one requires a pilot consumer "
-        "that actually ran; removing one requires saying why the published "
+    assert set(_adapters()) == {"dotmac-auth-oidc", "dotmac-device-cli"}, (
+        "the adapter allowlist changed. Adding one is a reviewed decision "
+        "recorded here; removing one requires saying why the published "
         "artifact should stop being reproducible from this repository."
     )
 

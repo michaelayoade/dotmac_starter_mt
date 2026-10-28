@@ -78,6 +78,7 @@ on:
         type: choice
         options:
           - dotmac-auth-oidc
+          - dotmac-device-cli
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
