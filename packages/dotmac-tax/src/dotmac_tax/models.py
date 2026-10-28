@@ -9,6 +9,7 @@ from uuid import UUID
 from dotmac_kernel.models import Base, Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Date,
@@ -160,7 +161,8 @@ class TaxRule(Base):
             "calculation_sequence > 0", name="ck_tax_rules_calculation_sequence"
         ),
         CheckConstraint(
-            "calculation_base_code IN ('source_amount','source_plus_prior_tax')",
+            "calculation_base_code IN "
+            "('source_amount','source_plus_prior_tax','source_plus_dependency_tax')",
             name="ck_tax_rules_calculation_base",
         ),
         Index(
@@ -199,6 +201,15 @@ class TaxRule(Base):
     calculation_base_code: Mapped[str] = mapped_column(String(32), nullable=False)
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+
+    dependency_jurisdiction_id: Mapped[UUID | None] = mapped_column(Uuid())
+    dependency_fact_kind: Mapped[str | None] = mapped_column(String(100))
+    dependency_recognition_basis_code: Mapped[str | None] = mapped_column(String(100))
+    dependency_transaction_side: Mapped[str | None] = mapped_column(String(20))
+    dependency_selection: Mapped[str | None] = mapped_column(String(24))
+    dependency_codes: Mapped[list[TaxRuleDependencyCode]] = relationship(
+        cascade="all, delete-orphan", order_by="TaxRuleDependencyCode.tax_code_id"
     )
 
     bands: Mapped[list[TaxRuleBand]] = relationship(
@@ -420,7 +431,8 @@ class TaxDeterminationSet(Base):
             "(result_seal_state = 'building' AND result_fingerprint IS NULL) OR "
             "(result_seal_state = 'sealed' "
             "AND length(result_fingerprint) = 68 "
-            "AND substr(result_fingerprint, 1, 4) = 'rv1:')",
+            "AND ((contract_version = 1 AND substr(result_fingerprint, 1, 4) = 'rv1:') "
+            "OR (contract_version = 2 AND substr(result_fingerprint, 1, 4) = 'rv2:')))",
             name="ck_tax_determination_sets_result_seal",
         ),
         Index(
@@ -461,6 +473,20 @@ class TaxDeterminationSet(Base):
     place_ref: Mapped[str | None] = mapped_column(String(240))
     determined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+
+    contract_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    commercial_source_ref: Mapped[str | None] = mapped_column(String(240))
+    commercial_source_version: Mapped[str | None] = mapped_column(String(100))
+    prior_sets: Mapped[list[TaxDeterminationPriorSet]] = relationship(
+        foreign_keys=(
+            "[TaxDeterminationPriorSet.tenant_id, "
+            "TaxDeterminationPriorSet.determination_set_id]"
+        ),
+        cascade="all, delete-orphan",
+        order_by="TaxDeterminationPriorSet.prior_set_id",
     )
 
     components: Mapped[list[TaxDetermination]] = relationship(
@@ -560,7 +586,8 @@ class TaxDetermination(Base):
             name="ck_tax_determinations_treatment",
         ),
         CheckConstraint(
-            "calculation_base_code IN ('source_amount','source_plus_prior_tax')",
+            "calculation_base_code IN "
+            "('source_amount','source_plus_prior_tax','source_plus_dependency_tax')",
             name="ck_tax_determinations_calculation_base",
         ),
         Index(
@@ -608,6 +635,18 @@ class TaxDetermination(Base):
     counterparty_ref: Mapped[str | None] = mapped_column(String(240))
     determined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+
+    selected_dependency_policy: Mapped[dict[str, object] | None] = mapped_column(
+        JSON(none_as_null=True)
+    )
+    dependency_components: Mapped[list[TaxDeterminationDependency]] = relationship(
+        foreign_keys=(
+            "[TaxDeterminationDependency.tenant_id, "
+            "TaxDeterminationDependency.determination_id]"
+        ),
+        cascade="all, delete-orphan",
+        order_by="TaxDeterminationDependency.component_sequence",
     )
 
     determination_set: Mapped[TaxDeterminationSet | None] = relationship(
@@ -979,12 +1018,136 @@ class TaxReturnEvent(Base):
     )
 
 
+class TaxRuleDependencyCode(Base):
+    __tablename__ = "tax_rule_dependency_codes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "rule_id"],
+            [f"{SCHEMA}.tax_rules.tenant_id", f"{SCHEMA}.tax_rules.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "tax_code_id"],
+            [f"{SCHEMA}.tax_codes.tenant_id", f"{SCHEMA}.tax_codes.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), primary_key=True
+    )
+    rule_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    tax_code_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+
+
+class TaxDeterminationPriorSet(Base):
+    __tablename__ = "tax_determination_prior_sets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "determination_set_id"],
+            [
+                f"{SCHEMA}.tax_determination_sets.tenant_id",
+                f"{SCHEMA}.tax_determination_sets.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "prior_set_id"],
+            [
+                f"{SCHEMA}.tax_determination_sets.tenant_id",
+                f"{SCHEMA}.tax_determination_sets.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "determination_set_id <> prior_set_id", name="ck_tax_prior_sets_distinct"
+        ),
+        schema_table_args(SCHEMA),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), primary_key=True
+    )
+    determination_set_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    prior_set_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    source_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+
+
+class TaxDeterminationDependency(Base):
+    __tablename__ = "tax_determination_dependencies"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "determination_id"],
+            [
+                f"{SCHEMA}.tax_determinations.tenant_id",
+                f"{SCHEMA}.tax_determinations.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "prior_determination_id"],
+            [
+                f"{SCHEMA}.tax_determinations.tenant_id",
+                f"{SCHEMA}.tax_determinations.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "prior_set_id"],
+            [
+                f"{SCHEMA}.tax_determination_sets.tenant_id",
+                f"{SCHEMA}.tax_determination_sets.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "tax_code_id"],
+            [f"{SCHEMA}.tax_codes.tenant_id", f"{SCHEMA}.tax_codes.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "rule_id"],
+            [f"{SCHEMA}.tax_rules.tenant_id", f"{SCHEMA}.tax_rules.id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "determination_id",
+            "component_sequence",
+            name="uq_tax_dependency_sequence",
+        ),
+        CheckConstraint(
+            "tax_amount >= 0 AND rule_version > 0 AND component_sequence > 0",
+            name="ck_tax_dependency_amount_version",
+        ),
+        schema_table_args(SCHEMA),
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), primary_key=True
+    )
+    determination_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    prior_determination_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    prior_set_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    tax_code_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    rule_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    rule_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    component_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    tax_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 TENANT_MODELS = (
     TaxAuthority,
     TaxJurisdiction,
     TaxCode,
     TaxRule,
     TaxRuleBand,
+    TaxRuleDependencyCode,
+    TaxDeterminationPriorSet,
+    TaxDeterminationDependency,
     TaxRuleSupersession,
     TaxSubjectClassification,
     TaxDeterminationSet,
@@ -1018,6 +1181,9 @@ __all__ = [
     "TaxReturnEvent",
     "TaxRule",
     "TaxRuleBand",
+    "TaxRuleDependencyCode",
+    "TaxDeterminationPriorSet",
+    "TaxDeterminationDependency",
     "TaxRuleSupersession",
     "TaxSubjectClassification",
 ]

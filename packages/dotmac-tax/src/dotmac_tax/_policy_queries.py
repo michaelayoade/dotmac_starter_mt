@@ -14,7 +14,8 @@ import base64
 import binascii
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields
+from typing import cast
 from uuid import UUID
 
 from dotmac_kernel.money import Currency
@@ -27,11 +28,14 @@ from dotmac_tax._policy_query_contracts import (
     ListTaxCodesV1,
     ListTaxJurisdictionsV1,
     ListTaxRuleHistoryV1,
+    ListTaxRuleHistoryV2,
     TaxAuthorityPageV1,
     TaxCodePageV1,
     TaxJurisdictionPageV1,
     TaxRuleHistoryEntryV1,
+    TaxRuleHistoryEntryV2,
     TaxRuleHistoryPageV1,
+    TaxRuleHistoryPageV2,
     TaxRuleHistorySupersessionV1,
 )
 from dotmac_tax.contracts import (
@@ -40,6 +44,7 @@ from dotmac_tax.contracts import (
     TaxJurisdictionV1,
     TaxRuleBandV1,
     TaxRuleV1,
+    TaxRuleV2,
 )
 from dotmac_tax.models import (
     TaxAuthority,
@@ -50,6 +55,7 @@ from dotmac_tax.models import (
     TaxRuleSupersession,
 )
 from dotmac_tax.service import (
+    TaxConflict,
     TaxNotFound,
     TaxRuleViolation,
     _exact_policy_money,
@@ -269,8 +275,15 @@ def list_tax_codes(
 
 
 def _rule(
-    db: Session, *, tenant_id: UUID, row: RowMapping, currency: Currency
+    db: Session,
+    *,
+    tenant_id: UUID,
+    row: RowMapping,
+    currency: Currency,
+    _v2: bool = False,
 ) -> TaxRuleV1:
+    if not _v2 and row["dependency_selection"] is not None:
+        raise TaxConflict("dependency rule requires V2 rule history")
     bands = db.execute(
         select(TaxRuleBand.__table__)
         .where(
@@ -279,7 +292,7 @@ def _rule(
         )
         .order_by(TaxRuleBand.sequence)
     ).mappings()
-    return TaxRuleV1(
+    common = TaxRuleV1(
         tenant_id=row["tenant_id"],
         rule_id=row["id"],
         tax_code_id=row["tax_code_id"],
@@ -315,6 +328,22 @@ def _rule(
         ),
     )
 
+    if _v2:
+        from dotmac_tax._dependencies import rule_policy
+
+        policy_row = db.scalar(
+            select(TaxRule).where(
+                TaxRule.tenant_id == tenant_id, TaxRule.id == row["id"]
+            )
+        )
+        if policy_row is None:
+            raise TaxConflict("tax rule history row disappeared")
+        return TaxRuleV2(
+            **{field.name: getattr(common, field.name) for field in fields(TaxRuleV1)},
+            dependency_policy=rule_policy(policy_row),
+        )
+    return common
+
 
 def _supersession(row: RowMapping) -> TaxRuleHistorySupersessionV1:
     return TaxRuleHistorySupersessionV1(
@@ -339,6 +368,7 @@ def list_tax_rule_history(
     *,
     tenant_id: UUID,
     request: ListTaxRuleHistoryV1,
+    _v2: bool = False,
 ) -> TaxRuleHistoryPageV1:
     """Read every immutable version of one tenant-local code and outgoing edges.
 
@@ -386,13 +416,30 @@ def list_tax_rule_history(
                 )
             ).mappings():
                 edges[edge["predecessor_rule_id"]] = _supersession(edge)
-        return TaxRuleHistoryPageV1(
+        page_type: type[TaxRuleHistoryPageV1] = (
+            TaxRuleHistoryPageV2 if _v2 else TaxRuleHistoryPageV1
+        )
+        entry_type: type[TaxRuleHistoryEntryV1] = (
+            TaxRuleHistoryEntryV2 if _v2 else TaxRuleHistoryEntryV1
+        )
+        return page_type(
             tuple(
-                TaxRuleHistoryEntryV1(
-                    rule=_rule(db, tenant_id=tenant_id, row=row, currency=currency),
+                entry_type(
+                    rule=_rule(
+                        db, tenant_id=tenant_id, row=row, currency=currency, _v2=_v2
+                    ),
                     supersession=edges.get(row["id"]),
                 )
                 for row in rows
             ),
             cursor,
         )
+
+
+def list_tax_rule_history_v2(
+    db: Session, *, tenant_id: UUID, request: ListTaxRuleHistoryV2
+) -> TaxRuleHistoryPageV2:
+    return cast(
+        TaxRuleHistoryPageV2,
+        list_tax_rule_history(db, tenant_id=tenant_id, request=request, _v2=True),
+    )

@@ -105,3 +105,14 @@ authority evidence.
 
 The implementation branch's kernel allocation is provisional and must be
 rebased/renumbered against concurrent alpha-train allocations before integration.
+
+## Cross-purpose dependency successor (unpublished a7)
+
+Tax owns the configured dependency signature and all-prior or explicit-code
+selection. Applications submit the original commercial identity and immutable
+complete prior-set references; they never pre-add prior tax to a commercial base.
+V2 determination seals bind exact prior and selected component snapshots. V1
+meaning is unchanged. Billing must adopt a new evidence version before Sub can
+issue dependency-bearing invoices. Existing a6 release, independent review, hosted
+migration/concurrency qualification and exact consumer pins remain gates; this
+source candidate is not publication or writer cutover evidence.

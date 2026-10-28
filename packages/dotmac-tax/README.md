@@ -93,3 +93,38 @@ rules after tx_0004, because they do not perform the required publication
 transition. Drain old tax-policy writers before migration and resume them only
 with a5. Public a4 service signatures and immutable `TaxRuleV1` remain available
 in a5; this is source API compatibility, not old-binary write compatibility.
+
+
+The unpublished a7 source adds `TaxFactV2(fact, commercial_source, prior_results)`
+and `determine_tax_set_v2`. `commercial_source` identifies the original commercial
+source independently of each purpose's determination source identity. Prior
+references carry exact result identities and expected fingerprints, never amounts.
+Only complete, verified V2 results from the same tenant and authority, commercial
+source/version, date, original source amount/currency, recognition basis and
+counterparty/supply/place references can supply a dependency.
+
+`TaxRuleInputV2.dependency_policy` authors a required prior fact signature and
+selects `all_prior` or an explicit tuple of tax code identities. Its calculation
+base must be `source_plus_dependency_tax`. Exactly one referenced complete result
+must match the signature, and every selected code must exist, including explicit
+zero components. Tax adds only the selected prior tax to the original source for
+this component's base. The new purpose's tax total contains its own components;
+prior tax is never added again to that total or to statutory report aggregation.
+External dependency bases cannot combine with `source_plus_prior_tax` or inclusive
+components. Existing basis meanings remain unchanged.
+
+`TaxDeterminationSetV2` retains commercial identity, every supplied prior reference,
+and ordered V2 components carrying selected policy and exact prior component
+snapshots. Its separate `rv2:` seal covers all common and V2 evidence. Exact replay
+precedes current policy selection; neither prior nor current historical evidence
+is rewritten. V1 readers refuse V2 results and dependency rules. Legacy V1 results
+cannot be assigned an invented commercial binding.
+
+`ensure_tax_rule_v2_in_transaction` and `supersede_tax_rule_v2` flush through the
+existing publication owner. `ListTaxRuleHistoryV2` / `list_tax_rule_history_v2`
+retain bounded cursor pagination, and `preview_tax_policy_v2` uses the same current
+persisted policy and dependency validation without storing financial evidence.
+The additive tx_0005 migration is a maintenance boundary for dependency writers:
+a6 writers cannot determine a dependency rule as a V1 source-only result. Downgrade
+refuses any populated V2 policy or evidence. This source is not publication,
+installation, policy activation or product adoption evidence.

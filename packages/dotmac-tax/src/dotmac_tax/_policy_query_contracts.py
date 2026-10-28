@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from uuid import UUID
 
-from dotmac_tax.contracts import TaxAuthorityV1, TaxCodeV1, TaxJurisdictionV1, TaxRuleV1
+from dotmac_tax.contracts import (
+    TaxAuthorityV1,
+    TaxCodeV1,
+    TaxJurisdictionV1,
+    TaxRuleV1,
+    TaxRuleV2,
+)
 
 
 def _optional_text(value: str | None, label: str, maximum: int) -> None:
@@ -133,3 +139,18 @@ class TaxRuleHistoryEntryV1:
 class TaxRuleHistoryPageV1:
     items: tuple[TaxRuleHistoryEntryV1, ...]
     next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ListTaxRuleHistoryV2(ListTaxRuleHistoryV1):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleHistoryEntryV2(TaxRuleHistoryEntryV1):
+    rule: TaxRuleV2
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleHistoryPageV2(TaxRuleHistoryPageV1):
+    items: tuple[TaxRuleHistoryEntryV2, ...]

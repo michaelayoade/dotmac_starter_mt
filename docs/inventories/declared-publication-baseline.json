@@ -158,8 +158,8 @@
       "state": "never-published"
     },
     "dotmac-tax": {
-      "declared": "0.1.0a6",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adopter baseline. Candidate a6 includes a5 immutable rule supersession, sealed rule/band membership, bounded policy history and advisory preview; a6 adds caller-transaction exact catalog/rule authoring without internal savepoint completion, reusing Tax validation and replay comparators. The Sub owner must roll back and retry whole commands on unique insert contention. Sub policy UI requires a verified published successor and real owner/permission binding; no unpublished pin, financial writer or production authority is activated. Remove only through the exact authorized release record.",
+      "declared": "0.1.0a7",
+      "reason": "ALLOCATED DEVELOPMENT SUCCESSOR, NOT YET PUBLISHED. Existing a6 source must first complete its independent protected-main release, verified install-back and truthful release record before a7 source integration. a7 adds explicit cross-purpose dependency policy, commercial source identity, sealed prior-set references and exact selected component evidence through additive V2 contracts and tx_0005; V1 calculations and seals remain unchanged. Source review and hosted migrated-PostgreSQL qualification are pending. Billing evidence and product authoring/issuance consumers require separately versioned adoption; no unpublished pin or financial authority switch. Remove only through the exact authorized a7 release record.",
       "state": "declared-unpublished"
     },
     "dotmac-usage": {

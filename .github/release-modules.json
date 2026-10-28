@@ -3147,6 +3147,8 @@
           "dotmac_tax/migrations/versions/tx_0002_multi_tax.py",
           "dotmac_tax/migrations/versions/tx_0003_result_fingerprint.py",
           "dotmac_tax/migrations/versions/tx_0004_rule_supersession.py",
+          "dotmac_tax/migrations/versions/tx_0005_tax_dependencies.py",
+          "dotmac_tax/_dependencies.py",
           "dotmac_tax/models.py",
           "dotmac_tax/service.py"
         ],

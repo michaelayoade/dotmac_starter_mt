@@ -7961,7 +7961,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
-    "dotmac-tax": frozenset({"tx_0004_rule_supersession.py"}),
+    "dotmac-tax": frozenset(
+        {"tx_0004_rule_supersession.py", "tx_0005_tax_dependencies.py"}
+    ),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
     "dotmac-fx-policy": frozenset(),
