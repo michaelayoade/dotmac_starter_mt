@@ -14,7 +14,8 @@ from typing import Any
 from uuid import UUID
 
 from dotmac_kernel.transactions import conflict_savepoint
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, cast, or_, select
+from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -199,6 +200,15 @@ def _active_exists(db: Session, tenant_id: UUID, column: Any, address_id: UUID) 
     )
 
 
+def _numeric_order(db: Session) -> Any:
+    """Numeric (inet) ordering in SQL on PostgreSQL, so the candidate window is
+    the numerically lowest rows. SQLite (unit fixtures) has no inet and falls
+    back to string order; the Python sort below makes the final pick numeric."""
+    if db.get_bind().dialect.name == "postgresql":
+        return cast(IPv4Address.address, INET)
+    return IPv4Address.address
+
+
 def _pick_materialised_v4(
     db: Session,
     tenant_id: UUID,
@@ -223,7 +233,7 @@ def _pick_materialised_v4(
             IPv4Address.pool_id == pool.id,
             IPAssignment.id.is_(None),
         )
-        .order_by(IPv4Address.address)
+        .order_by(_numeric_order(db))
         .limit(CANDIDATE_ROW_CAP)
     ).all()
     candidates = [

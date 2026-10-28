@@ -204,15 +204,37 @@ def test_the_refusal_fails_closed_for_a_role_that_cannot_bypass_rls(
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
+        # A NOBYPASSRLS role that DOES hold UPDATE/DELETE on the template tables,
+        # so the LOCK succeeds and the refusal is decided by row_security alone.
+        role = f"ipam_nb_{uuid.uuid4().hex[:8]}"
         engine = create_engine(db.superuser_url)
         with engine.connect() as connection:
-            trans = connection.begin()
-            connection.execute(text("SET LOCAL ROLE app_user"))
-            ctx = MigrationContext.configure(connection)
-            with Operations.context(ctx), pytest.raises(DBAPIError):
-                module._refuse_if_template_rows("upgrade")
-            trans.rollback()
-        engine.dispose()
+            connection.execute(text(f"CREATE ROLE {role} LOGIN NOBYPASSRLS"))
+            connection.execute(text(f"GRANT USAGE ON SCHEMA mod_ipam TO {role}"))
+            connection.execute(
+                text(
+                    "GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA mod_ipam "
+                    f"TO {role}"
+                )
+            )
+            connection.commit()
+        try:
+            with engine.connect() as connection:
+                trans = connection.begin()
+                connection.execute(text(f"SET LOCAL ROLE {role}"))
+                ctx = MigrationContext.configure(connection)
+                with (
+                    Operations.context(ctx),
+                    pytest.raises(DBAPIError, match="row-level security"),
+                ):
+                    module._refuse_if_template_rows("upgrade")
+                trans.rollback()
+        finally:
+            with engine.connect() as connection:
+                connection.execute(text(f"DROP OWNED BY {role}"))
+                connection.execute(text(f"DROP ROLE {role}"))
+                connection.commit()
+            engine.dispose()
 
 
 def _seed_estate(
@@ -411,3 +433,60 @@ def test_bulk_dml_outside_a_command_is_refused_on_postgres(monkeypatch) -> None:
                 session.execute(insert(IPv4Address.__table__).values(tenant_id=tenant))
             session.rollback()
         engine.dispose()
+
+
+def test_two_workers_allocating_for_one_service_get_one_assignment(
+    monkeypatch,
+) -> None:
+    from dotmac_ipam import AllocateAddress, allocate_address
+
+    from alembic import command
+
+    with _database(monkeypatch) as db:
+        command.upgrade(db.config, "ip_0003_outbox_relay")
+        tenant = _tenant(db.superuser_url)
+        (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/28")])
+        subscription, subscriber = uuid.uuid4(), uuid.uuid4()
+        barrier = threading.Barrier(2)
+        results: list[str] = []
+        errors: list[BaseException] = []
+
+        def run() -> None:
+            engine = create_engine(db.app_url)
+            try:
+                with Session(engine) as session:
+                    session.execute(
+                        text("SELECT set_config('app.current_tenant', :t, true)"),
+                        {"t": str(tenant)},
+                    )
+                    barrier.wait(timeout=30)
+                    snap = allocate_address(
+                        session,
+                        tenant_id=tenant,
+                        command=AllocateAddress((pool,), subscription, subscriber),
+                    )
+                    session.commit()
+                    results.append(snap.address)
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                engine.dispose()
+
+        threads = [threading.Thread(target=run) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        assert not errors, errors
+        assert len(results) == 2 and results[0] == results[1]
+        admin = create_engine(db.admin_url)
+        with admin.connect() as c:
+            count = c.execute(
+                text(
+                    "SELECT count(*) FROM mod_ipam.ip_assignments "
+                    "WHERE subscription_id = :s AND is_active"
+                ),
+                {"s": subscription},
+            ).scalar()
+        admin.dispose()
+        assert count == 1

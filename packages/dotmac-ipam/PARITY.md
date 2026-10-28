@@ -9,7 +9,7 @@ product keeps it (G10), not that it is dropped.
 
 | # | Class | Sub | dotmac-ipam 0.2.0a1 | Test |
 |---|---|---|---|---|
-| D1 | Lowest-free ordering | `ORDER BY address` on the string column: `10.0.0.10` sorts before `10.0.0.2` | Numeric order (candidates fetched, sorted by integer value, then locked with SKIP LOCKED one at a time) | `test_lowest_free_is_numeric_not_string_order` |
+| D1 | Lowest-free ordering | `ORDER BY address` on the string column: `10.0.0.10` sorts before `10.0.0.2` | Numeric order: on PostgreSQL the candidate window (5000 rows) is ordered by `inet` in SQL, then sorted by integer value and locked with SKIP LOCKED one at a time. SQLite unit fixtures fall back to string order for the window only; the final pick is still numeric | `test_lowest_free_is_numeric_not_string_order` |
 | D2 | Network/broadcast, gateway | materialised rows could be handed out; no gateway check | never allocated unless `allow_network_broadcast`; pool gateway never allocated | `test_gateway_is_never_allocated`, `test_network_and_broadcast_only_when_the_pool_opts_in` |
 | D3 | Reuse | any inactive row immediately reusable | caller-supplied cool-down window (same subject exempt) | `test_cooldown_*` |
 | D4 | Occupancy | IPAM rows only; Sub read sessions/served column inside the allocator | typed `occupied` argument | `test_occupied_addresses_held_by_others_are_skipped` |
