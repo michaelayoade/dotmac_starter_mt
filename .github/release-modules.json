@@ -1898,22 +1898,33 @@
       "$comment": [
         "Tenant address-space allocation and assignment (ADR-0038).",
         "Subscriber and service consequences stay in the adopting product.",
-        "Kernel a82 allocates mod_ipam / ip / ipam; a83 ships it."
+        "Kernel a82 allocates mod_ipam / ip / ipam; a83 ships it.",
+        "0.2.0a1 is the extraction re-cut from Sub (ip_0002_extracted); 0.1.0a1 must not be installed."
       ],
       "package_dir": "packages/dotmac-ipam",
       "import_name": "dotmac_ipam",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a83",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_ipam",
       "tag_prefix": "dotmac-ipam-v",
       "wheel_contents": {
         "required": [
           "dotmac_ipam/py.typed",
+          "dotmac_ipam/_common.py",
+          "dotmac_ipam/allocator.py",
           "dotmac_ipam/contracts.py",
+          "dotmac_ipam/errors.py",
+          "dotmac_ipam/guard.py",
           "dotmac_ipam/manifest.py",
           "dotmac_ipam/migrations/__init__.py",
           "dotmac_ipam/migrations/versions/ip_0001_ipam.py",
+          "dotmac_ipam/migrations/versions/ip_0002_extracted.py",
           "dotmac_ipam/models.py",
+          "dotmac_ipam/pools.py",
+          "dotmac_ipam/prefixes.py",
+          "dotmac_ipam/queries.py",
+          "dotmac_ipam/read_models.py",
+          "dotmac_ipam/repair.py",
           "dotmac_ipam/service.py"
         ],
         "forbidden_prefixes": [

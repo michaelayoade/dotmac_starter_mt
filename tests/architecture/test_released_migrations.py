@@ -7936,7 +7936,10 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-fiber-plant": frozenset(),
     "dotmac-finance": frozenset(),
     "dotmac-inventory": frozenset(),
-    "dotmac-ipam": frozenset(),
+    # `ip_0002_extracted` is the additive 0.2.0a1 extraction revision (refuses
+    # to run over any 0.1 template row). Still editable: no released tag
+    # carries it yet; `ip_0001_ipam.py` stays byte-frozen by the 0.1.0a1 entry.
+    "dotmac-ipam": frozenset({"ip_0002_extracted.py"}),
     "dotmac-licensing": frozenset(),
     "dotmac-media-observations": frozenset(),
     "dotmac-network-access": frozenset(),

@@ -12,10 +12,10 @@ package = "dotmac-ipam"
 contract_module = "dotmac_ipam.contracts"
 returns_orm_instances = false
 uses_opaque_cross_owner_refs = true
-commands = ["CreateAddressSpace", "CreatePool", "ReserveAddress", "AssignAddress", "ReleaseAssignment", "RecordUtilization", "RepairAssignment"]
-queries = ["AddressLookup", "AssignmentLookup", "UtilizationQuery"]
-snapshots = ["AddressSpaceSnapshot", "PoolSnapshot", "AddressSnapshot", "AssignmentSnapshot", "UtilizationSnapshot", "RepairReport"]
-events = ["AddressReserved", "AddressAssigned", "AssignmentReleased", "AssignmentRepaired"]
+commands = ["CreatePool", "UpdatePool", "AddBlock", "RetireBlock", "ReserveAddress", "AllocateAddress", "AssignAddress", "ReleaseAssignment", "ReleaseForSubject", "MoveAssignment", "MarkPrimary", "AllocateManagementAddress", "SweepExpired", "ApplyRepair", "ApplyIPv6Link", "ApplyUnlink", "AllocateDelegatedPrefix", "ReleaseDelegatedPrefix", "UpsertRoutedPrefix", "RetireRoutedPrefix", "RecordUtilization", "PruneUtilization"]
+queries = ["AssignmentLookup"]
+snapshots = ["PoolSnapshot", "BlockSnapshot", "AddressSnapshot", "AssignmentSnapshot", "DelegatedPrefixSnapshot", "RoutedPrefixSnapshot", "UtilizationSnapshot", "RepairPreview", "LinkPreview", "UnlinkPreview", "RepairOutcome", "LinkOutcome", "UnlinkOutcome", "AvailabilityResult", "AmbiguousPrimary", "ConsistencyReport", "EventRecord"]
+events = ["AddressAssigned", "AssignmentReleased", "AssignmentMoved", "PrimaryChanged", "AssignmentRepaired", "PrefixDelegated", "RoutedPrefixChanged"]
 
 [[modules]]
 name = "dotmac-network-inventory"

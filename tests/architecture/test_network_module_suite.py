@@ -63,6 +63,14 @@ MODULES = {
 }
 
 
+#: Opaque product-identity columns a module may CARRY (as plain UUIDs, never
+#: foreign keys). Ruled for the 0.2.0a1 extraction re-cut (N2): Sub's own column
+#: names are kept so readers only swap imports. The structural invariant this
+#: kit protects is "no foreign key to product tables", asserted below for these
+#: columns; every other module still bans the names outright.
+OPAQUE_PRODUCT_COLUMNS = {"dotmac-ipam": {"subscriber_id", "subscription_id"}}
+
+
 def _contracts() -> dict[str, dict[str, object]]:
     with CONTRACT_LEDGER.open("rb") as stream:
         ledger = tomllib.load(stream)
@@ -122,10 +130,16 @@ def test_suite_has_no_product_foreign_keys_or_sibling_provider_imports() -> None
         "routeros_api",
         "pysnmp",
     }
-    for _, (root, _, _, _) in MODULES.items():
+    for distribution, (root, _, _, _) in MODULES.items():
         models = importlib.import_module(f"{root}.models")
+        opaque = OPAQUE_PRODUCT_COLUMNS.get(distribution, set())
         for model in models.ALL_MODELS:
-            assert not (set(model.__table__.columns.keys()) & forbidden_columns)
+            columns = model.__table__.columns
+            assert not (set(columns.keys()) & (forbidden_columns - opaque))
+            for name in opaque & set(columns.keys()):
+                assert (
+                    not columns[name].foreign_keys
+                ), f"{model.__tablename__}.{name} is opaque and must carry no FK"
             for constraint in model.__table__.foreign_key_constraints:
                 local_tables = {item.column.table.name for item in constraint.elements}
                 if local_tables & set(models.TENANT_TABLES):
@@ -159,10 +173,14 @@ def test_every_lineage_exists_and_declares_forced_rls() -> None:
                 if (path / "src" / root).exists()
             )
         versions = package_root / "src" / root / "migrations" / "versions"
-        migrations = tuple(versions.glob(f"{prefix}_*.py"))
-        assert len(migrations) == 1, f"{root} needs one lineage root"
-        text = migrations[0].read_text(encoding="utf-8")
-        assert f'branch_labels = ("{owner_name}",)' in text
+        migrations = tuple(sorted(versions.glob(f"{prefix}_*.py")))
+        texts = [path.read_text(encoding="utf-8") for path in migrations]
+        # One lineage ROOT; a successor revision (e.g. ip_0002_extracted) chains
+        # to it with `down_revision` and carries no label of its own.
+        roots = [text for text in texts if "down_revision = None" in text]
+        assert len(roots) == 1, f"{root} needs one lineage root"
+        assert f'branch_labels = ("{owner_name}",)' in roots[0]
+        text = "\n".join(texts)
         schema = module_schema(short_code)
         assert f"ALTER TABLE {schema}." in text
         assert "ENABLE ROW LEVEL SECURITY" in text
