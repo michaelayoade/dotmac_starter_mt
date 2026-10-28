@@ -89,7 +89,7 @@
     },
     "dotmac-connector-freeradius": {
       "declared": "0.1.0a1",
-      "reason": "NEW CONNECTOR, NEVER PUBLISHED. Declared by the Integrator FreeRADIUS transport slice (ADR-0074): SPI 1.7 PROVISION/POLL over the FreeRADIUS SQL schema plus CoA-Disconnect against installation-bound fleet targets, built for Sub's network-suite-v1 adoption of dotmac-network-access. release_enabled stays false in .github/release-connectors.json until dotmac-integration publishes SPI 1.7 (the connector's floor); remove this row only when the connector release workflow installs, verifies and tags 0.1.0a1, and never merge an Integrator pin before that tag exists.",
+      "reason": "NEW CONNECTOR, NEVER PUBLISHED. Declared by the Integrator FreeRADIUS transport slice (ADR-0074): SPI 1.7 PROVISION/POLL over the FreeRADIUS SQL schema plus CoA-Disconnect against installation-bound fleet targets, built for Sub's network-suite-v1 adoption of dotmac-network-access. Supply-only release eligibility in .github/release-connectors.json requires the published dotmac-integration-v0.1.0a20 floor (SPI 1.7 and ig_0017); it is not a publication or activation claim. Retain this row until the connector workflow installs, verifies and tags 0.1.0a1 and its release record removes the row. Never merge an Integrator pin before that tag exists. Live shadow parity, assembly single-use secret-fetch binding and single-writer cutover with incumbent retirement remain separate activation gates.",
       "state": "never-published"
     },
     "dotmac-connector-meta-social": {
