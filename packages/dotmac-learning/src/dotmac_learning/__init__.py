@@ -146,11 +146,13 @@ from dotmac_learning.certificates import (
     issue_certificate,
 )
 from dotmac_learning.cohort_contracts import (
+    CohortIntakePatch,
     CreateCohortCommand,
     RemoveFacilitatorCommand,
 )
 from dotmac_learning.cohorts import (
     create_cohort,
+    patch_cohort_intake,
     remove_facilitator,
 )
 from dotmac_learning.completion import get_completion, recompute_completion
@@ -445,7 +447,7 @@ from dotmac_learning.transfer_contracts import (
     VerificationObservation,
 )
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 
 from dotmac_learning.account_contracts import (
@@ -799,6 +801,8 @@ from .curriculum_contracts import BankDocumentHeader
 __all__ = [
     "active_student_person_ids_select",
     "attempts_used_by_person",
+    "CohortIntakePatch",
+    "patch_cohort_intake",
     "CreateCohortCommand",
     "RemoveFacilitatorCommand",
     "create_cohort",

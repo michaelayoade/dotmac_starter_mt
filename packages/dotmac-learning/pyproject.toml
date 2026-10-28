@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-learning"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Reusable tenant learning results, progress, completion and certificates"
 authors = ["DotMac"]
 readme = "README.md"

@@ -1,5 +1,26 @@
 # Compatibility — dotmac-learning
 
+## Current source correction — 2026-10-28 (allocated a4 source candidate)
+
+Published 0.1.0a3 remains immutable: peeled tag 7f8f1e6646e531154450370e51dbede46723cc60, release run 40484794529, wheel SHA256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c.
+The older allocation-era sections below are historical; their a3-unpublished
+and lr_0007-lr_0010-unreleased statements do not describe current publication.
+
+The a4 candidate adds only `CohortIntakePatch` and `patch_cohort_intake` to the
+public API (600 root exports). Existing APIs, 28 tables, 298 fields, Kernel
+floor `>=0.1.0a106`, schema, migration branch and all released migrations are
+unchanged. All three nullable patch fields distinguish omission from explicit
+`None`. Units remain minutes; the CLI converts supplied zero to `None` and
+omits the field when its option is absent. The new owner refuses selected
+nonnull missing/foreign-tenant bank IDs before assignments, intentionally
+tightening legacy raw UUID assignment. It adds no bank version/state decision,
+foreign key, lock, commit or ending flush. Standard lookup autoflush is retained.
+Product policy and authorization remain required; this DTO proves neither.
+
+This source allocation is not a published, installable or adopted a4. See
+[the source/release dossier](../../docs/inventories/learning-cohort-intake-successor-2026-10-28.md) for the exact
+consumer mapping and remaining gates.
+
 ## Current source correction — 2026-10-21 (unreleased successor candidate)
 
 This section governs the current source and supersedes the counts, export

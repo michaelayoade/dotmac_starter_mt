@@ -1,5 +1,25 @@
 # Changelog — dotmac-learning
 
+## 0.1.0a4 — allocated source candidate, not yet published
+
+Add `CohortIntakePatch` and `patch_cohort_intake` for the two existing Academy
+CLI cohort intake writes. Stage only selected bank UUID, time-limit minutes and
+auto-accept threshold; explicit null clears and omission preserves. Missing or
+cross-tenant cohorts and selected nonnull bank references refuse before any
+patch assignment. Operator authorization, bank suitability, numeric policy,
+messages and transaction completion remain product responsibilities. Existing
+lookup autoflush remains; no explicit flush, commit or new transaction is added.
+
+The three package version surfaces and workspace lock entry now declare a4.
+The source has 600 root exports; storage, prerequisites and all migration bytes
+are unchanged. Ten new tests are authored and unexecuted locally. Hosted
+qualification, publication, installation and Academy caller retirement remain
+separate gates. See [the dossier](../../docs/inventories/learning-cohort-intake-successor-2026-10-28.md).
+
+Published 0.1.0a3 remains immutable: peeled tag 7f8f1e6646e531154450370e51dbede46723cc60, release run 40484794529, wheel SHA256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c.
+Allocation-era notes below are historical; their publication-pending language
+is superseded by that positive a3 publication record, without rewriting history.
+
 ## 0.1.0a3 — allocated source candidate, not yet published
 
 This successor source is now allocated as `0.1.0a3`: `pyproject.toml`,

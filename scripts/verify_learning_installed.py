@@ -62,7 +62,7 @@ def expectation(checkout: Path, destination: Path) -> None:
                 if isinstance(target, ast.Name) and target.id == "__version__":
                     version = ast.literal_eval(node.value)
     require(
-        exports is not None and len(exports) == len(set(exports)) == 598,
+        exports is not None and len(exports) == len(set(exports)) == 600,
         "Source Learning export extent differs",
     )
     require(
@@ -224,7 +224,7 @@ def installed_packages(expected: dict, receipt: dict) -> None:
         wheels[distribution] = {"sha256": wheel_digest, "version": version}
     receipt.update(
         wheels=wheels,
-        learning_exports=598,
+        learning_exports=600,
         kernel_exports=281,
         owner_binding_sha256=hashlib.sha256(
             json.dumps(expected["bindings"], sort_keys=True).encode()

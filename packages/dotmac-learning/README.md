@@ -9,25 +9,28 @@ the versioned lifecycle described below). The participation
 slice adds enrolment/audience, tracks and course access, alongside the existing
 pure exam-engine/grader port. The prepared continuation adds attempt policy and
 persistence, scheduling, pacing, announcements, support queues and learning
-read projections. The current unreleased successor candidate (intended
-0.1.0a3, not allocated; version strings still read 0.1.0a2) adds composable
-prerequisite/policy settings and the question-bank system of record, covering
-28 tables and 298 persisted fields with 598 root exports. Academy is the
-intended first adopter.
+read projections. The current allocated `0.1.0a4` source successor adds the
+typed cohort intake patch to the published a3 contract: 28 tables, 298 persisted
+fields and 600 root exports. Academy is the candidate consumer; no a4 adoption
+is claimed.
 
-This is prepared source, pending hosted qualification and publication. Academy
-has not adopted this module. See `EXTRACTION.toml` for source provenance,
+Published 0.1.0a3 remains immutable: peeled tag 7f8f1e6646e531154450370e51dbede46723cc60, release run 40484794529, wheel SHA256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c.
+The a4 successor is not yet published. See the
+[intake successor dossier](../../docs/inventories/learning-cohort-intake-successor-2026-10-28.md) for source evidence,
+compatibility and release/adoption gates.
+
+This successor is prepared source, pending hosted qualification and publication.
+Academy has not adopted this successor. See `EXTRACTION.toml` for source provenance,
 ownership, migration and retirement gates.
 
 The package uses the caller's SQLAlchemy Session and transaction. Commands retain
 source staging/flush behavior; the application boundary commits or rolls back. Compose its `module` manifest
-and `versions_dir()` lineage, bind the three declared Kernel prerequisites, and
+and `versions_dir()` lineage, bind the four declared Kernel prerequisites, and
 use genuine Kernel tenant, Party and PartyPerson records. The prepared manifest owns 28 tables in `mod_learning` and the independent
 `learning` Alembic branch, from `lr_0001_learning` through
 `lr_0010_question_bank_versions`. `lr_0005_tenant_audit` verifies the existing Kernel
-audit catalog without copying its provider or writer. Promotion requires the new
-Kernel audit API to be published, a proven dependency floor and the additional
-audit prerequisite declaration. These release gates remain outstanding. The
+audit catalog without copying its provider or writer. The declared Kernel floor remains `>=0.1.0a106`; published Kernel a107
+satisfies it. The a4 intake patch consumes no new Kernel API. The
 package creates no runtime engine or session.
 
 The main command paths are `record_mcq_result`, `record_lab_result`,
