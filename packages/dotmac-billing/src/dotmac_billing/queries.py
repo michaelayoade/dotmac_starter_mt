@@ -20,6 +20,7 @@ from dotmac_billing._opening_values import cash_decimal_context
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
     DOCUMENT_FACT_V2_CONTRACT,
+    DOCUMENT_FACT_V3_CONTRACT,
     AccountingFactV1,
     BillingAccountObservationV1,
     CurrentCashCreditDrawV1,
@@ -31,11 +32,13 @@ from dotmac_billing.contracts import (
     GetCurrentSettlementAllocationV1,
     GetInvoiceDocumentFactV1,
     InvoiceDocumentFactV2,
+    InvoiceDocumentFactV3,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
     ReceivablePositionV2,
     StoredInvoiceDocumentFactV1,
     StoredInvoiceDocumentFactV2,
+    StoredInvoiceDocumentFactV3,
     WithholdingDischargeEffectV1,
 )
 from dotmac_billing.errors import BillingRuleViolation
@@ -318,12 +321,24 @@ def get_invoice_document_fact_v2(
     db: Session, *, scope: Scope, request: GetInvoiceDocumentFactV1
 ) -> StoredInvoiceDocumentFactV1 | StoredInvoiceDocumentFactV2:
     """Read original V1 or V2 evidence, including full V2 Tax for rendering."""
-    return _get_invoice_document_fact(db, scope=scope, request=request, v2=True)
+    return cast(
+        StoredInvoiceDocumentFactV1 | StoredInvoiceDocumentFactV2,
+        _get_invoice_document_fact(db, scope=scope, request=request, v2=True),
+    )
 
 
 def _get_invoice_document_fact(
-    db: Session, *, scope: Scope, request: GetInvoiceDocumentFactV1, v2: bool
-) -> StoredInvoiceDocumentFactV1 | StoredInvoiceDocumentFactV2:
+    db: Session,
+    *,
+    scope: Scope,
+    request: GetInvoiceDocumentFactV1,
+    v2: bool,
+    v3: bool = False,
+) -> (
+    StoredInvoiceDocumentFactV1
+    | StoredInvoiceDocumentFactV2
+    | StoredInvoiceDocumentFactV3
+):
     """Read an exact version without consulting live documents or ORM state.
 
     The caller owns the transaction. In particular, dirty objects in its identity
@@ -352,7 +367,9 @@ def _get_invoice_document_fact(
             "the exact invoice document fact version is unavailable",
         )
     supported = (
-        (DOCUMENT_FACT_CONTRACT, DOCUMENT_FACT_V2_CONTRACT)
+        (DOCUMENT_FACT_CONTRACT, DOCUMENT_FACT_V2_CONTRACT, DOCUMENT_FACT_V3_CONTRACT)
+        if v3
+        else (DOCUMENT_FACT_CONTRACT, DOCUMENT_FACT_V2_CONTRACT)
         if v2
         else (DOCUMENT_FACT_CONTRACT,)
     )
@@ -388,7 +405,8 @@ def _get_invoice_document_fact(
             "stored invoice document fact presentation digest disagrees",
         )
     stored_v2 = row["contract_version"] == DOCUMENT_FACT_V2_CONTRACT
-    fact = decode_invoice_document_fact(payload, v2=stored_v2)
+    stored_v3 = row["contract_version"] == DOCUMENT_FACT_V3_CONTRACT
+    fact = decode_invoice_document_fact(payload, v2=stored_v2, v3=stored_v3)
     if (
         fact.scope != scope
         or fact.invoice_id != row["document_id"]
@@ -397,6 +415,13 @@ def _get_invoice_document_fact(
         raise BillingRuleViolation(
             "document_fact_corrupt",
             "stored invoice document fact envelope disagrees with its payload",
+        )
+    if stored_v3:
+        return StoredInvoiceDocumentFactV3(
+            fact_id=row["id"],
+            contract_version="billing.invoice.document.fact.v3",
+            recorded_at=row["created_at"],
+            fact=cast(InvoiceDocumentFactV3, fact),
         )
     if stored_v2:
         return StoredInvoiceDocumentFactV2(
@@ -414,6 +439,7 @@ def _get_invoice_document_fact(
 
 
 __all__ = [
+    "get_invoice_document_fact_v3",
     "get_accounting_fact_v1",
     "get_allocation_accounting_fact_v1",
     "get_billing_account_observation",
@@ -1243,3 +1269,16 @@ def get_current_receivable_position(
         return CurrentReceivablePositionV1(
             scope, request.billing_account_id, currency, version, position
         )
+
+
+def get_invoice_document_fact_v3(
+    db: Session, *, scope: Scope, request: GetInvoiceDocumentFactV1
+) -> (
+    StoredInvoiceDocumentFactV1
+    | StoredInvoiceDocumentFactV2
+    | StoredInvoiceDocumentFactV3
+):
+    """Read exact original V1/V2/V3 facts, including dependency-aware Tax evidence."""
+    return _get_invoice_document_fact(
+        db, scope=scope, request=request, v2=True, v3=True
+    )

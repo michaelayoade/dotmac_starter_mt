@@ -17,9 +17,16 @@ from uuid import UUID
 
 from dotmac_kernel.money import Currency, Money, MoneyError
 
-from dotmac_billing.contracts import InvoiceDocumentFactV1, InvoiceDocumentFactV2
+from dotmac_billing.contracts import (
+    InvoiceDocumentFactV1,
+    InvoiceDocumentFactV2,
+    InvoiceDocumentFactV3,
+)
 from dotmac_billing.errors import BillingRuleViolation
-from dotmac_billing.tax_evidence import validate_invoice_tax_evidence
+from dotmac_billing.tax_dependency_evidence import (
+    validate_commercial_source_binding,
+    validate_invoice_tax_evidence_versioned,
+)
 
 
 def _object(value: object, names: set[str]) -> dict[str, object]:
@@ -169,19 +176,33 @@ def _decode(value: object, schema: Any) -> Any:
 
 
 def decode_invoice_document_fact(
-    payload: object, *, v2: bool = False
-) -> InvoiceDocumentFactV1 | InvoiceDocumentFactV2:
+    payload: object, *, v2: bool = False, v3: bool = False
+) -> InvoiceDocumentFactV1 | InvoiceDocumentFactV2 | InvoiceDocumentFactV3:
     """Decode only stored V1 evidence, with no defaults or lossy coercions."""
     try:
         fact = cast(
-            InvoiceDocumentFactV1 | InvoiceDocumentFactV2,
-            _decode(payload, InvoiceDocumentFactV2 if v2 else InvoiceDocumentFactV1),
+            InvoiceDocumentFactV1 | InvoiceDocumentFactV2 | InvoiceDocumentFactV3,
+            _decode(
+                payload,
+                InvoiceDocumentFactV3
+                if v3
+                else InvoiceDocumentFactV2
+                if v2
+                else InvoiceDocumentFactV1,
+            ),
         )
-        if isinstance(fact, InvoiceDocumentFactV2):
+        if isinstance(fact, InvoiceDocumentFactV2 | InvoiceDocumentFactV3):
             if fact.tax_snapshots:
                 raise ValueError("V2 fact cannot mix detailed and V1 tax evidence")
-            validate_invoice_tax_evidence(
-                fact.tax_evidence, scope=fact.scope, tax_amount=fact.tax_total
+            validate_invoice_tax_evidence_versioned(
+                fact.tax_evidence,
+                scope=fact.scope,
+                tax_amount=fact.tax_total,
+                v2=isinstance(fact, InvoiceDocumentFactV3),
+            )
+        if isinstance(fact, InvoiceDocumentFactV3):
+            validate_commercial_source_binding(
+                fact.tax_evidence, commercial_sources=fact.commercial_sources
             )
         if fact.fact_version < 1 or not 0 <= fact.minor_units <= 6:
             raise ValueError("invalid stored fact version or minor units")

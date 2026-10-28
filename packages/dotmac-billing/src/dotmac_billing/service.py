@@ -58,8 +58,10 @@ from dotmac_billing.commands import (
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
     DOCUMENT_FACT_V2_CONTRACT,
+    DOCUMENT_FACT_V3_CONTRACT,
     AcceptRatedObligationV1,
     AcceptRatedObligationV2,
+    AcceptRatedObligationV3,
     AcceptSettlementV1,
     AccountingAllocationEffectV1,
     AccountingEffectV1,
@@ -74,6 +76,7 @@ from dotmac_billing.contracts import (
     FinancialState,
     InvoiceDocumentFactV1,
     InvoiceDocumentFactV2,
+    InvoiceDocumentFactV3,
     InvoiceLineFactV1,
     IssuedRatedInvoiceV1,
     IssueRatedInvoiceV1,
@@ -94,6 +97,7 @@ from dotmac_billing.contracts import (
     ServicePeriodEvidenceV1,
     ServicePeriodStatus,
     WithholdingDischargeEffectV1,
+    WithholdingTaxEvidenceV2,
     _non_cash_identity,
     _withholding_money,
 )
@@ -208,9 +212,14 @@ from dotmac_billing.queries import (
     get_non_cash_credit_grant,
     get_withholding_discharge,
 )
+from dotmac_billing.tax_dependency_evidence import (
+    InvoiceTaxEvidenceV2,
+    TaxCommercialSourceEvidenceV1,
+    validate_commercial_source_binding,
+    validate_invoice_tax_evidence_versioned,
+)
 from dotmac_billing.tax_evidence import (
     InvoiceTaxEvidenceV1,
-    validate_invoice_tax_evidence,
 )
 
 _AccountingEffectKind = Literal[
@@ -584,15 +593,22 @@ def _rated_obligation_natural_key(command: AcceptRatedObligationV1) -> str:
 def _require_rated_tax_evidence(
     command: AcceptRatedObligationV1, *, scope: Scope
 ) -> None:
-    if isinstance(command, AcceptRatedObligationV2):
+    if isinstance(command, AcceptRatedObligationV2 | AcceptRatedObligationV3):
         if command.tax_snapshots:
             raise BillingRuleViolation(
                 "tax_evidence_mixed",
                 "V2 requires detailed Tax evidence without V1 snapshots",
             )
         try:
-            validate_invoice_tax_evidence(
-                command.tax_evidence, scope=scope, tax_amount=command.tax_amount
+            if isinstance(command, AcceptRatedObligationV3):
+                validate_commercial_source_binding(
+                    command.tax_evidence, commercial_sources=command.commercial_sources
+                )
+            validate_invoice_tax_evidence_versioned(
+                command.tax_evidence,
+                scope=scope,
+                tax_amount=command.tax_amount,
+                v2=isinstance(command, AcceptRatedObligationV3),
             )
         except (ValueError, TypeError) as exc:
             raise BillingRuleViolation("tax_evidence_invalid", str(exc)) from exc
@@ -704,7 +720,17 @@ def accept_rated_obligation(
                     "rated_at": command.rated_at,
                     "price_version_id": command.price_version_id,
                     "supersedes_obligation_id": command.supersedes_obligation_id,
-                    "tax_evidence": _wire_value(command.tax_evidence)
+                    "tax_evidence": [
+                        {
+                            "contract_version": "billing.tax.evidence.v2",
+                            "commercial_sources": _wire_value(
+                                command.commercial_sources
+                            ),
+                            "evidence": _wire_value(command.tax_evidence),
+                        }
+                    ]
+                    if isinstance(command, AcceptRatedObligationV3)
+                    else _wire_value(command.tax_evidence)
                     if isinstance(command, AcceptRatedObligationV2)
                     else None,
                 },
@@ -1488,15 +1514,51 @@ def _receivable_exposure(
     )
 
 
+def _is_dependency_evidence_payload(payload: object) -> bool:
+    return (
+        isinstance(payload, list)
+        and len(payload) == 1
+        and isinstance(payload[0], dict)
+        and "contract_version" in payload[0]
+    )
+
+
 def _decode_tax_evidence(
     payload: object, *, scope: Scope, tax_amount: Money
-) -> tuple[InvoiceTaxEvidenceV1, ...]:
+) -> tuple[InvoiceTaxEvidenceV1, ...] | tuple[InvoiceTaxEvidenceV2, ...]:
     try:
+        is_v2 = _is_dependency_evidence_payload(payload)
+        commercial_sources: tuple[TaxCommercialSourceEvidenceV1, ...] = ()
+        if is_v2:
+            assert isinstance(payload, list) and isinstance(payload[0], dict)
+            if (
+                set(payload[0])
+                != {"contract_version", "evidence", "commercial_sources"}
+                or payload[0]["contract_version"] != "billing.tax.evidence.v2"
+            ):
+                raise ValueError("unsupported Tax evidence envelope")
+            commercial_sources = _decode(
+                payload[0]["commercial_sources"],
+                tuple[TaxCommercialSourceEvidenceV1, ...],
+            )
+            payload = payload[0]["evidence"]
         evidence = cast(
-            tuple[InvoiceTaxEvidenceV1, ...],
-            _decode(payload, tuple[InvoiceTaxEvidenceV1, ...]),
+            tuple[InvoiceTaxEvidenceV1, ...] | tuple[InvoiceTaxEvidenceV2, ...],
+            _decode(
+                payload,
+                tuple[InvoiceTaxEvidenceV2, ...]
+                if is_v2
+                else tuple[InvoiceTaxEvidenceV1, ...],
+            ),
         )
-        validate_invoice_tax_evidence(evidence, scope=scope, tax_amount=tax_amount)
+        validate_invoice_tax_evidence_versioned(
+            evidence, scope=scope, tax_amount=tax_amount, v2=is_v2
+        )
+        if is_v2:
+            validate_commercial_source_binding(
+                cast(tuple[InvoiceTaxEvidenceV2, ...], evidence),
+                commercial_sources=commercial_sources,
+            )
         return evidence
     except (ValueError, TypeError, DecimalException) as exc:
         raise BillingRuleViolation(
@@ -2635,8 +2697,11 @@ def _document_fact(
         correlation_id=correlation_id,
         presentation_model_digest="",
     )
-    detailed: list[InvoiceTaxEvidenceV1] = []
+    detailed: list[InvoiceTaxEvidenceV1 | InvoiceTaxEvidenceV2] = []
     has_detailed = False
+    has_dependency_evidence = False
+    has_legacy_detailed = False
+    commercial_sources: list[TaxCommercialSourceEvidenceV1] = []
     for line in lines:
         if line.obligation_id is None:
             continue
@@ -2645,6 +2710,10 @@ def _document_fact(
         )
         if obligation.tax_evidence is not None:
             has_detailed = True
+            if _is_dependency_evidence_payload(obligation.tax_evidence):
+                has_dependency_evidence = True
+            else:
+                has_legacy_detailed = True
             detailed.extend(
                 _decode_tax_evidence(
                     obligation.tax_evidence,
@@ -2656,23 +2725,59 @@ def _document_fact(
                     ),
                 )
             )
+            if _is_dependency_evidence_payload(obligation.tax_evidence):
+                commercial_sources.extend(
+                    _decode(
+                        obligation.tax_evidence[0]["commercial_sources"],
+                        tuple[TaxCommercialSourceEvidenceV1, ...],
+                    )
+                )
     if has_detailed:
         if tax_facts:
             raise BillingRuleViolation(
                 "tax_evidence_mixed", "one document cannot mix V1 and V2 Tax evidence"
             )
-        validate_invoice_tax_evidence(
-            tuple(detailed), scope=scope, tax_amount=provisional.tax_total
+        if has_dependency_evidence and has_legacy_detailed:
+            raise BillingRuleViolation(
+                "tax_evidence_mixed", "one document cannot mix Tax evidence versions"
+            )
+        validate_invoice_tax_evidence_versioned(
+            tuple(detailed),
+            scope=scope,
+            tax_amount=provisional.tax_total,
+            v2=has_dependency_evidence,
         )
-        provisional = InvoiceDocumentFactV2(
-            **{
-                field.name: getattr(provisional, field.name)
-                for field in fields(InvoiceDocumentFactV1)
-            },
-            tax_evidence=tuple(detailed),
-        )
+        common_fields = {
+            field.name: getattr(provisional, field.name)
+            for field in fields(InvoiceDocumentFactV1)
+        }
+        if has_dependency_evidence:
+            combined_evidence = cast(tuple[InvoiceTaxEvidenceV2, ...], tuple(detailed))
+            combined_sources = tuple(dict.fromkeys(commercial_sources))
+            try:
+                validate_commercial_source_binding(
+                    combined_evidence, commercial_sources=combined_sources
+                )
+            except (ValueError, TypeError) as exc:
+                raise BillingRuleViolation(
+                    "tax_commercial_source_mismatch", str(exc)
+                ) from exc
+            provisional = InvoiceDocumentFactV3(
+                **common_fields,
+                tax_evidence=combined_evidence,
+                commercial_sources=combined_sources,
+            )
+        else:
+            provisional = InvoiceDocumentFactV2(
+                **common_fields,
+                tax_evidence=cast(tuple[InvoiceTaxEvidenceV1, ...], tuple(detailed)),
+            )
     fact_contract = (
-        DOCUMENT_FACT_V2_CONTRACT if has_detailed else DOCUMENT_FACT_CONTRACT
+        DOCUMENT_FACT_V3_CONTRACT
+        if isinstance(provisional, InvoiceDocumentFactV3)
+        else DOCUMENT_FACT_V2_CONTRACT
+        if has_detailed
+        else DOCUMENT_FACT_CONTRACT
     )
     semantic_payload = _jsonable(provisional)
     semantic_payload.pop("presentation_model_digest")
@@ -2695,7 +2800,15 @@ def _document_fact(
     )
     db.add(fact)
     db.flush()
-    if has_detailed:
+    if isinstance(provisional, InvoiceDocumentFactV3):
+        _emit(
+            db,
+            scope=scope,
+            event_type=DOCUMENT_FACT_V3_CONTRACT,
+            payload={"fact_id": str(fact_id), **payload},
+            correlation_id=correlation_id,
+        )
+    elif has_detailed:
         _emit(
             db,
             scope=scope,
@@ -3666,6 +3779,8 @@ def _require_withholding_command(
         raise TypeError("withholding requires an explicit scope")
     _require_scope_matches(routed=scope, declared=command.scope)
     evidence = command.tax_evidence
+    if isinstance(evidence, WithholdingTaxEvidenceV2):
+        evidence.__post_init__()
     _require_scope_matches(routed=scope, declared=evidence.scope)
     if (
         evidence.document_id != command.document_id

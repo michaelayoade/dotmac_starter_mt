@@ -78,8 +78,8 @@
       "state": "never-published"
     },
     "dotmac-billing": {
-      "declared": "0.1.0a9",
-      "reason": "DECLARED LOSSLESS TAX EVIDENCE SUCCESSOR, NOT PUBLISHED. a9 adds bi_0012_tax_evidence and additive V2 invoice contracts while retaining V1 history and released a8 migration bytes. Hosted predecessor/current-schema acceptance, reviewed source and separately authorized publication/install-back/tag/record precede dependent Sub exact pin and policy activation. Expected WHT is display evidence only; no discharge, VAT recognition or production cutover. Remove only with verified a9 publication record.",
+      "declared": "0.1.0a10",
+      "reason": "ALLOCATED DEPENDENCY EVIDENCE SUCCESSOR, UNPUBLISHED. a9 source PR940 must first complete exact protected-main release, registry install-back, tag and truthful record. a10 preserves complete public Tax V2 dependency lineage through explicit per-line commercial source identities, V3 rated/original invoice facts and withholding V2 evidence. Tax owns sealed calculation and opaque owner fingerprints; Billing freezes all copied public content and validates observable identity/amount/graph invariants without sibling imports or hidden seal-preimage reconstruction. No released migration is changed and no new DDL is required. Source static review passed; authored PostgreSQL canaries and full hosted CI remain due. Tax a7 source/release and verified exact consumer pins precede product use. Remove only with exact authorized a10 publication record.",
       "state": "declared-unpublished"
     },
     "dotmac-collections": {

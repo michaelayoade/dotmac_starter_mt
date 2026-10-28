@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, localcontext
-from typing import Literal
+from typing import ClassVar, Literal
 from uuid import UUID
 
 from dotmac_kernel.cache import Scope, TenantScope
@@ -165,6 +165,8 @@ class TaxDeterminationComponentEvidenceV1:
 
 @dataclass(frozen=True, slots=True)
 class TaxDeterminationSetEvidenceV1:
+    _fingerprint_prefix: ClassVar[str] = "rv1:"
+    _component_type: ClassVar[type] = TaxDeterminationComponentEvidenceV1
     tenant_id: UUID
     determination_set_id: UUID
     jurisdiction_id: UUID
@@ -210,7 +212,10 @@ class TaxDeterminationSetEvidenceV1:
                 raise ValueError("Tax set requires source and recognition evidence")
         if (
             re.fullmatch(r"[0-9a-f]{64}", self.source_fingerprint) is None
-            or re.fullmatch(r"rv1:[0-9a-f]{64}", self.result_fingerprint) is None
+            or re.fullmatch(
+                self._fingerprint_prefix + r"[0-9a-f]{64}", self.result_fingerprint
+            )
+            is None
         ):
             raise ValueError("Tax set requires source and sealed result fingerprints")
         if (
@@ -234,8 +239,7 @@ class TaxDeterminationSetEvidenceV1:
             raise ValueError("Tax set currency differs")
         object.__setattr__(self, "components", tuple(self.components))
         if any(
-            not isinstance(component, TaxDeterminationComponentEvidenceV1)
-            for component in self.components
+            type(component) is not self._component_type for component in self.components
         ):
             raise ValueError("Tax set requires typed components")
         for reference in (self.counterparty_ref, self.supply_ref, self.place_ref):
@@ -247,7 +251,7 @@ class TaxDeterminationSetEvidenceV1:
         ):
             raise ValueError("Tax component identities must be unique")
         for component in self.components:
-            if not isinstance(component, TaxDeterminationComponentEvidenceV1):
+            if type(component) is not self._component_type:
                 raise ValueError("Tax set requires typed components")
             component.__post_init__()
             if (
@@ -277,10 +281,14 @@ class InvoiceTaxEvidenceV1:
     determination: TaxDeterminationSetEvidenceV1
 
     def __post_init__(self) -> None:
-        if self.purpose not in (
-            "invoice_tax",
-            "expected_withholding",
-        ) or not isinstance(self.determination, TaxDeterminationSetEvidenceV1):
+        if (
+            self.purpose
+            not in (
+                "invoice_tax",
+                "expected_withholding",
+            )
+            or type(self.determination) is not TaxDeterminationSetEvidenceV1
+        ):
             raise ValueError(
                 "Invoice Tax evidence requires explicit purpose and typed determination"
             )

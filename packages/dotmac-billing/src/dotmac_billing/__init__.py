@@ -20,6 +20,7 @@ from dotmac_billing.commands import (
 from dotmac_billing.contracts import (
     AcceptRatedObligationV1,
     AcceptRatedObligationV2,
+    AcceptRatedObligationV3,
     AcceptSettlementV1,
     AccountingAllocationEffectV1,
     AccountingEffectV1,
@@ -44,10 +45,12 @@ from dotmac_billing.contracts import (
     GetInvoiceDocumentFactV1,
     InvoiceDocumentFactV1,
     InvoiceDocumentFactV2,
+    InvoiceDocumentFactV3,
     InvoiceLineFactV1,
     IssuedRatedInvoiceV1,
     IssueRatedInvoiceV1,
     IssueRatedInvoiceV2,
+    IssueRatedInvoiceV3,
     NonCashCreditClassificationV1,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
@@ -72,9 +75,11 @@ from dotmac_billing.contracts import (
     SettlementFundingLane,
     StoredInvoiceDocumentFactV1,
     StoredInvoiceDocumentFactV2,
+    StoredInvoiceDocumentFactV3,
     WithholdingCertificateObservationV1,
     WithholdingDischargeEffectV1,
     WithholdingTaxEvidenceV1,
+    WithholdingTaxEvidenceV2,
     WithholdingTaxLineV1,
 )
 from dotmac_billing.earmark_authority import (
@@ -262,6 +267,7 @@ from dotmac_billing.queries import (
     get_current_settlement_allocation,
     get_invoice_document_fact,
     get_invoice_document_fact_v2,
+    get_invoice_document_fact_v3,
     get_non_cash_credit_effect,
     get_non_cash_credit_grant,
     get_receivable_position_v2,
@@ -269,8 +275,18 @@ from dotmac_billing.queries import (
 )
 from dotmac_billing.service import issue_rated_invoice
 
-__version__ = "0.1.0a9"
+__version__ = "0.1.0a10"
 
+from dotmac_billing.tax_dependency_evidence import (
+    InvoiceTaxEvidenceV2,
+    TaxBaseDependencyPolicyEvidenceV1,
+    TaxCommercialSourceEvidenceV1,
+    TaxDependencyComponentEvidenceV1,
+    TaxDeterminationComponentEvidenceV2,
+    TaxDeterminationSetEvidenceV2,
+    TaxFactSignatureEvidenceV1,
+    TaxPriorResultReferenceEvidenceV1,
+)
 from dotmac_billing.tax_evidence import (
     InvoiceTaxEvidenceV1,
     TaxDeterminationComponentEvidenceV1,
@@ -279,6 +295,20 @@ from dotmac_billing.tax_evidence import (
 )
 
 __all__ = [
+    "InvoiceTaxEvidenceV2",
+    "TaxCommercialSourceEvidenceV1",
+    "TaxFactSignatureEvidenceV1",
+    "TaxBaseDependencyPolicyEvidenceV1",
+    "TaxPriorResultReferenceEvidenceV1",
+    "TaxDependencyComponentEvidenceV1",
+    "TaxDeterminationComponentEvidenceV2",
+    "TaxDeterminationSetEvidenceV2",
+    "AcceptRatedObligationV3",
+    "InvoiceDocumentFactV3",
+    "IssueRatedInvoiceV3",
+    "StoredInvoiceDocumentFactV3",
+    "WithholdingTaxEvidenceV2",
+    "get_invoice_document_fact_v3",
     "get_accounting_fact_v1",
     "get_allocation_accounting_fact_v1",
     "ConfirmedSettlementObservationV1",

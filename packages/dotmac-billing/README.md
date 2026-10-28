@@ -84,7 +84,7 @@ the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
 The historical first release candidate is `0.1.0a1`; the current unreleased
-development successor is `0.1.0a9` and requires
+development successor is `0.1.0a10` and requires
 `dotmac-kernel>=0.1.0a105` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.
@@ -337,3 +337,39 @@ V1 accounting fact and verifies its original payload, posting group and effect
 rows. Linked reversals leave the original fact readable. Assemblies can bind
 receipts to the original allocation without using mutable current capacity;
 this read authorizes no new financial movement.
+
+
+Dependency-aware Tax evidence uses `InvoiceTaxEvidenceV2` with complete public
+`TaxDeterminationSetEvidenceV2` results, including original commercial identity,
+complete prior references, selected dependency policies and component snapshots.
+Each wrapper retains its complete transitive prior results in
+`prior_determinations`; these audit results are not charged again. Assemblies must
+map evidence from trusted Tax public reads, which verify Tax's stored seals.
+Billing checks observable source/signature/currency/scope/reference bindings and
+arithmetic consistency, preserves Tax source fingerprints and `rv2:` result seals
+as opaque owner evidence, and binds every copied field in its own immutable
+original-fact digest and replay identity. The public DTO deliberately omits
+hidden Tax storage seal preimages; Billing does not verify those preimages or
+select policy, calculate rates, or reconstruct Tax source fingerprints.
+
+`AcceptRatedObligationV3` requires explicit typed `commercial_sources`: the unique
+exact set of principal Tax wrapper commercial identities, with no missing or
+surplus entries. Empty evidence uses `()`. Each wrapper and its complete prior
+lineage retains one original commercial identity and amount. Distinct line
+amounts retain distinct original source identities; the assembly supplies the
+original line source shared across its Tax purposes. Billing does not translate
+its opaque `source_fact_id` namespace into Tax identities. The set is retained in
+obligation JSON and original `InvoiceDocumentFactV3`, and participates in both
+replay digests. Multiline facts retain the union of their line source identities.
+Legacy V1 wrappers/sets reject successor sets/components before persistence;
+valid legacy evidence keeps its original format.
+`AcceptRatedObligationV3` / `IssueRatedInvoiceV3` write original
+`InvoiceDocumentFactV3`; `get_invoice_document_fact_v3` reads V1/V2/V3, while
+older readers retain their previous supported versions. `WithholdingTaxEvidenceV2`
+binds an exact retained V2 component and lineage to the existing discharge owner.
+Expected withholding alone remains presentation evidence and creates no discharge.
+Nonempty Tax V2 evidence currently requires tenant scope, matching Tax's public
+contract. Empty V3 evidence and legacy facts remain supported in both Billing
+planes. V3 uses a versioned array envelope in bi12's existing immutable JSON
+column, including for empty evidence; no DDL or historical reinterpretation is
+needed. Billing a9 must be verified and released before integrating a10.

@@ -2,6 +2,23 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a10 — UNRELEASED
+
+- Retain complete public Tax V2 dependency evidence and opaque `rv2:` seals,
+  original commercial identity, prior references and selected component snapshots.
+  Trusted Tax public reads verify owner seals; Billing validates observable
+  bindings and includes all copied fields in its original-fact digest and replay.
+- Add rated V3 authoring/original facts and a V3 reader retaining V1/V2 support.
+  Explicit unique `commercial_sources` exactly match principal wrapper identities,
+  retaining distinct original line amounts and identities through obligation JSON,
+  multiline original facts and both replay identities. Reject successor
+  sets/components at legacy evidence boundaries before persistence.
+  Add lossless V2 withholding lineage to the existing discharge owner.
+- Reuse immutable bi12 JSON with an explicit versioned array envelope; no DDL.
+  Prior audit results are not added to charged invoice tax. Legacy readers,
+  evidence and all migration bytes remain unchanged. Tax V2 remains tenant-only.
+- Requires verified a9 publication before integration; no publication is claimed.
+
 ## 0.1.0a9 — UNRELEASED
 
 - Add V2 rated invoice authoring and original document facts carrying complete
