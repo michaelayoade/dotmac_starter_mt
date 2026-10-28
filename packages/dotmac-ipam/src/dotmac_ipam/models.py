@@ -350,7 +350,7 @@ class IpPoolUtilizationSnapshot(Base):
         ForeignKeyConstraint(
             ["tenant_id", "pool_id"],
             [f"{SCHEMA}.ip_pools.tenant_id", f"{SCHEMA}.ip_pools.id"],
-            ondelete="CASCADE",
+            ondelete="RESTRICT",
             name="fk_ip_pool_util_snap_pool",
         ),
         Index("ix_ip_pool_util_snap_pool_time", "tenant_id", "pool_id", "captured_at"),

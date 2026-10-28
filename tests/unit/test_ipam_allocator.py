@@ -681,3 +681,19 @@ def test_commands_never_cross_tenants(env) -> None:
     pool = seed_pool(db, other, cidr="192.0.2.0/28")
     with pytest.raises(IpamError, match="pool not found"):
         alloc(db, tenant, [pool])
+
+
+def test_parity_doc_declares_the_ordering_difference_and_every_sub_file() -> None:
+    from pathlib import Path
+
+    import dotmac_ipam
+
+    doc = (Path(dotmac_ipam.__file__).parents[2] / "PARITY.md").read_text()
+    assert "Numeric order" in doc and "string column" in doc
+    for sub_file in (
+        "test_ip_assignment_repair.py",
+        "test_ipv6_pd_allocator.py",
+        "test_ip_consistency_audit.py",
+        "test_ipv4_on_demand_allocator.py",
+    ):
+        assert sub_file in doc

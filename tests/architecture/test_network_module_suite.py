@@ -174,17 +174,76 @@ def test_every_lineage_exists_and_declares_forced_rls() -> None:
             )
         versions = package_root / "src" / root / "migrations" / "versions"
         migrations = tuple(sorted(versions.glob(f"{prefix}_*.py")))
-        texts = [path.read_text(encoding="utf-8") for path in migrations]
-        # One lineage ROOT; a successor revision (e.g. ip_0002_extracted) chains
-        # to it with `down_revision` and carries no label of its own.
-        roots = [text for text in texts if "down_revision = None" in text]
-        assert len(roots) == 1, f"{root} needs one lineage root"
-        assert f'branch_labels = ("{owner_name}",)' in roots[0]
-        text = "\n".join(texts)
         schema = module_schema(short_code)
-        assert f"ALTER TABLE {schema}." in text
-        assert "ENABLE ROW LEVEL SECURITY" in text
-        assert "FORCE ROW LEVEL SECURITY" in text
+        links: dict[str, str | None] = {}
+        for path in migrations:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            facts = _revision_facts(tree)
+            assert facts["revision"], f"{path.name} declares no revision"
+            assert facts["revision"] not in links, f"{path.name} repeats a revision"
+            links[facts["revision"]] = facts["down_revision"]
+            if facts["down_revision"] is None:
+                assert facts["branch_labels"] == (owner_name,), path.name
+            _assert_forced_rls_per_created_table(path, tree, schema)
+        # One LINEAR chain: a single root, no fork, every revision reachable.
+        roots = [r for r, down in links.items() if down is None]
+        assert len(roots) == 1, f"{root} needs one lineage root"
+        children = [down for down in links.values() if down is not None]
+        assert len(children) == len(set(children)), f"{root} lineage forks"
+        assert set(children) <= set(links), f"{root} chains to a foreign revision"
+        reached, current = [], roots[0]
+        successors = {down: rev for rev, down in links.items() if down is not None}
+        while current:
+            reached.append(current)
+            current = successors.get(current)
+        assert set(reached) == set(links), f"{root} has an unreachable revision"
+
+
+def _revision_facts(tree: ast.Module) -> dict[str, object]:
+    facts: dict[str, object] = {
+        "revision": None,
+        "down_revision": "unset",
+        "branch_labels": None,
+    }
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name) and target.id in facts:
+                facts[target.id] = ast.literal_eval(node.value)
+    assert facts["down_revision"] != "unset", "migration declares no down_revision"
+    return facts
+
+
+def _assert_forced_rls_per_created_table(
+    path: Path, tree: ast.Module, schema: str
+) -> None:
+    """Each table a revision creates is ENABLEd and FORCEd for RLS in that file."""
+    created = [
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "create_table"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+    ]
+    if not created:
+        return
+    text = path.read_text(encoding="utf-8")
+    assert f"ALTER TABLE {schema}." in text, path.name
+    assert "ENABLE ROW LEVEL SECURITY" in text, path.name
+    assert "FORCE ROW LEVEL SECURITY" in text, path.name
+    constants = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    for table in created:
+        # named again outside create_table (the RLS loop's table tuple) or in an
+        # explicit ALTER literal
+        mentions = constants.count(table)
+        literal = any(f"ALTER TABLE {schema}.{table} " in value for value in constants)
+        assert mentions >= 2 or literal, f"{path.name}: {table} not RLS-enforced"
 
 
 def test_services_are_flush_only_and_return_no_orm_annotations() -> None:

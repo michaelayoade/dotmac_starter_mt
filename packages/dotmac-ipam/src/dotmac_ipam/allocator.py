@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from dotmac_kernel.transactions import conflict_savepoint
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -135,19 +135,21 @@ def _cooled_address_ids(
         if family == c.IPV6
         else IPAssignment.ipv4_address_id
     )
-    rows = db.execute(
-        select(column, IPAssignment.subscription_id, IPAssignment.released_at).where(
-            IPAssignment.tenant_id == tenant_id,
-            IPAssignment.is_active.is_(False),
-            IPAssignment.released_at.is_not(None),
-            column.is_not(None),
+    return set(
+        db.scalars(
+            select(column).where(
+                IPAssignment.tenant_id == tenant_id,
+                IPAssignment.is_active.is_(False),
+                IPAssignment.released_at.is_not(None),
+                IPAssignment.released_at >= cutoff,
+                column.is_not(None),
+                or_(
+                    IPAssignment.subscription_id.is_(None),
+                    IPAssignment.subscription_id != subscription_id,
+                ),
+            )
         )
-    ).all()
-    return {
-        address_id
-        for address_id, owner, released_at in rows
-        if c.aware(released_at) >= cutoff and owner != subscription_id
-    }
+    )
 
 
 def _excluded_literal(
@@ -481,6 +483,21 @@ def allocate_address(
     if not command.pool_ids:
         raise IpamError("at least one pool is required", code="ipam.pool_required")
 
+    # Lock every pool in sorted id order (no lock-order deadlock between
+    # concurrent callers with overlapping pool lists), THEN look for the
+    # service's existing assignment, so a concurrent allocation for the same
+    # service that committed while we waited is seen rather than duplicated.
+    by_id: dict[UUID, IpPool] = {}
+    for pool_id in sorted(set(command.pool_ids), key=str):
+        pool = c.get_pool(db, tenant_id, pool_id, lock=True)
+        if not c.pool_is_service_pool(pool, family):
+            raise IpamError(
+                f"pool {pool.name!r} is not an active customer {family} pool",
+                code="ipam.pool_not_allocatable",
+            )
+        by_id[pool_id] = pool
+    pools = [by_id[pool_id] for pool_id in command.pool_ids]
+
     # Idempotent: an exact-service active assignment of this family is the answer.
     existing = db.scalar(
         select(IPAssignment)
@@ -492,19 +509,10 @@ def allocate_address(
         )
         .order_by(IPAssignment.is_primary.desc(), IPAssignment.id)
         .limit(1)
+        .execution_options(populate_existing=True)
     )
     if existing is not None:
         return _snapshot(db, tenant_id, existing)
-
-    pools: list[IpPool] = []
-    for pool_id in command.pool_ids:
-        pool = c.get_pool(db, tenant_id, pool_id, lock=True)
-        if not c.pool_is_service_pool(pool, family):
-            raise IpamError(
-                f"pool {pool.name!r} is not an active customer {family} pool",
-                code="ipam.pool_not_allocatable",
-            )
-        pools.append(pool)
 
     holder = str(sub_id)
     other_occupied = c.occupied_by_others(command.occupied, holder)

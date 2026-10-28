@@ -12,6 +12,12 @@ tag, lineage and `ip_0001` bytes stay untouched).
   `ip_assignments`, `subscriber_additional_routes`, `ipv6_delegated_prefixes`,
   `ip_pool_utilization_snapshots`) with `tenant_id`, `(tenant_id, id)` keys,
   composite intra-module foreign keys and forced RLS. `ipam_events` is kept.
+- Utilization snapshots keep append-only semantics (a deliberate difference from
+  Sub, which allowed updates and cascade deletes): grants are SELECT, INSERT,
+  DELETE (DELETE only for retention pruning), a refuse-UPDATE trigger, and the
+  pool foreign key is ON DELETE RESTRICT.
+- Template-row refusal fails closed under forced RLS (`SET LOCAL row_security =
+  off`, bounded `lock_timeout`/`statement_timeout`, as bi_0004/bi_0008).
 - Product identities stay opaque UUIDs under Sub's column names; `ont_unit_id`
   became `device_ref`; pools gain `site_ref`, `purpose`, `allow_network_broadcast`;
   assignments gain `released_at` / `release_reason`.

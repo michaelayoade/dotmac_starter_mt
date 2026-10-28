@@ -106,10 +106,22 @@ def _grant(table: str, privileges: str) -> None:
     op.execute(f"GRANT {privileges} ON mod_ipam.{table} TO platform_api;")
 
 
+def _lock_and_see_all_rows(tables: tuple[str, ...]) -> None:
+    """Bounded exclusive locks, then RLS off so FORCE RLS cannot hide rows.
+
+    Under forced RLS an unprivileged migration role would see zero rows and the
+    refusal would silently pass (fail open); ``row_security = off`` makes a
+    role that cannot bypass RLS ERROR instead (fail closed). Same shape as
+    bi_0004 / bi_0008."""
+    op.execute("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '60s';")
+    for table in tables:
+        op.execute(f"LOCK TABLE mod_ipam.{table} IN ACCESS EXCLUSIVE MODE;")
+    op.execute("SET LOCAL row_security = off;")
+
+
 def _refuse_if_template_rows(action: str) -> None:
     bind = op.get_bind()
-    for table in _TEMPLATE_DROP_ORDER:
-        op.execute(f"LOCK TABLE mod_ipam.{table} IN ACCESS EXCLUSIVE MODE;")
+    _lock_and_see_all_rows(_TEMPLATE_DROP_ORDER)
     for table in _TEMPLATE_DROP_ORDER:
         if bind.scalar(
             sa.text(f"SELECT EXISTS (SELECT 1 FROM mod_ipam.{table})")  # noqa: S608  # nosec B608 - constant table tuple
@@ -122,8 +134,7 @@ def _refuse_if_template_rows(action: str) -> None:
 
 def _refuse_if_extracted_rows() -> None:
     bind = op.get_bind()
-    for table in reversed(_NEW_TABLES):
-        op.execute(f"LOCK TABLE mod_ipam.{table} IN ACCESS EXCLUSIVE MODE;")
+    _lock_and_see_all_rows(tuple(reversed(_NEW_TABLES)))
     for table in _NEW_TABLES:
         if bind.scalar(
             sa.text(f"SELECT EXISTS (SELECT 1 FROM mod_ipam.{table})")  # noqa: S608  # nosec B608 - constant table tuple
@@ -428,7 +439,7 @@ def upgrade() -> None:
         sa.Column("available", sa.Integer(), nullable=False),
         sa.Column("percent", sa.Integer(), nullable=False),
         _tenant_fk("fk_ip_pool_utilization_snapshots_tenant"),
-        _pool_fk("ip_pool_util_snap", ondelete="CASCADE"),
+        _pool_fk("ip_pool_util_snap"),
         sa.UniqueConstraint(
             "tenant_id", "id", name="uq_ip_pool_utilization_snapshots_tenant_id_id"
         ),
@@ -441,15 +452,35 @@ def upgrade() -> None:
         schema=_SCHEMA,
     )
 
+    # Utilization snapshots stay append-only evidence: no UPDATE grant, a
+    # refuse-UPDATE trigger, and the pool FK is RESTRICT. DELETE stays granted
+    # only for retention pruning.
+    op.execute(
+        "CREATE FUNCTION mod_ipam.refuse_snapshot_update() RETURNS trigger "
+        "LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION "
+        "'IPAM utilization snapshots are append-only' USING ERRCODE = '55000'; "
+        "END; $$;"
+    )
+    op.execute(
+        "CREATE TRIGGER ip_pool_utilization_snapshots_no_update BEFORE UPDATE "
+        "ON mod_ipam.ip_pool_utilization_snapshots FOR EACH ROW "
+        "EXECUTE FUNCTION mod_ipam.refuse_snapshot_update();"
+    )
     for table in _NEW_TABLES:
         _enforce_rls(table)
-        _grant(table, "SELECT, INSERT, UPDATE, DELETE")
+        _grant(
+            table,
+            "SELECT, INSERT, DELETE"
+            if table == "ip_pool_utilization_snapshots"
+            else "SELECT, INSERT, UPDATE, DELETE",
+        )
 
 
 def downgrade() -> None:
     _refuse_if_extracted_rows()
     for table in reversed(_NEW_TABLES):
         op.drop_table(table, schema=_SCHEMA)
+    op.execute("DROP FUNCTION mod_ipam.refuse_snapshot_update();")
 
     # Recreate the 0.1 template shape (DDL copied from ip_0001, unmodified).
     op.create_table(
