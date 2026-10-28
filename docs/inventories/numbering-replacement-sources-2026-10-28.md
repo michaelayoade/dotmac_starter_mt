@@ -17,6 +17,12 @@ was unavailable. These are local Git facts, not a claim that remote main has
 not moved or that a newer release cannot exist. Refresh owner before PR/release:
 the numbering implementation coordinator.
 
+Before PR submission the GitHub connector revalidated remote main at
+`7a9bfbef6a24070bea97b4490d7e6074de714552`. Its only change since the Starter
+input above is the independent Integration a20 allocation; the numbering source
+is unchanged. The PR incorporates that main change, preserving both its lock
+and publication-baseline entries. Shell Git transport remains unavailable.
+
 ## Reuse decision
 
 Extend `packages/dotmac-numbering`, not a new module or ERP-side allocator.

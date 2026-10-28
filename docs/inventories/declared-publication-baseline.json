@@ -142,6 +142,11 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-integration": {
+      "declared": "0.1.0a20",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET PUBLISHED. 0.1.0a20 was allocated 2026-10-28 for the SPI 1.7 fleet network targets and durable PROVISION runtime (ig_0017, ADR-0074) merged in PR #930 under the published a19 identity; published 0.1.0a19 remains immutable. This gap is NOT to be repaired by editing the version down. Remove this row in the a20 release-record change after the protected release-module run tags dotmac-integration-v0.1.0a20 from the exact merged revision and records its verification; allocation is not publication.",
+      "state": "declared-unpublished"
+    },
     "dotmac-numbering": {
       "declared": "0.1.0a4",
       "reason": "ALLOCATED IMPLEMENTATION CANDIDATE, NOT PUBLISHED. a3 remains retained under dotmac-numbering-v0.1.0a3 with exact source/artifact release evidence. a4 extends the existing owner with strict creation/enrollment, cross-series collision domains/claims, read DTOs and additive nu_0002; released nu_0001 bytes remain unchanged. Hosted CI, independent review, exact publication and adopter acceptance are separate gates. ERP keeps its released pin until that publication is verified. Remove this row only with the oracle-backed a4 release record; this candidate authorizes no enrollment, backfill, repair or production switch.",
