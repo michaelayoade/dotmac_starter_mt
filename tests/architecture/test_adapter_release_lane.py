@@ -534,3 +534,14 @@ def test_the_module_workflow_still_registers_through_the_namespace_registry() ->
     source = _executable(MODULE_WORKFLOW)
     assert "release_module.py verify-wheel" in source
     assert "release_module.py verify-registry" in source
+
+
+def test_the_adapter_lane_records_with_no_lineage() -> None:
+    """An adapter has no migrations and no lineage, so its post-release record
+    is opened with ``--no-lineage``. Passing ``--package-dir`` makes the writer
+    refuse "UNREADABLE lineage" and turns main red (run 40649115142)."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    start = text.index("scripts/open_release_record_pr.sh")
+    call = text[start:]
+    assert "--no-lineage" in call
+    assert "--package-dir" not in call
