@@ -90,6 +90,7 @@ from dotmac_tax.service import (
     generate_statutory_report,
     get_tax_authority,
     get_tax_code,
+    get_tax_determination_set_v2,
     get_tax_jurisdiction,
     get_tax_rule,
     get_tax_subject_classification,
@@ -109,6 +110,7 @@ from dotmac_tax.service import (
 __version__ = "0.1.0a7"
 
 __all__ = [
+    "get_tax_determination_set_v2",
     "ListTaxRuleHistoryV2",
     "TaxRuleHistoryEntryV2",
     "TaxRuleHistoryPageV2",

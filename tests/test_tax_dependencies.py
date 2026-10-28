@@ -33,6 +33,7 @@ from dotmac_tax import (
     determine_tax_set_v2,
     ensure_tax_rule_v2_in_transaction,
     generate_statutory_report,
+    get_tax_determination_set_v2,
     get_tax_rule,
     list_tax_rule_history,
     list_tax_rule_history_v2,
@@ -1157,3 +1158,57 @@ def test_app_role_seal_explicitly_requires_every_selected_code(dependency_databa
             """),
                 {"tenant": tenant_id, "id": identity, "fingerprint": "rv2:" + "0" * 64},
             )
+
+
+def test_public_v2_result_getter_is_scoped_historical_and_read_only(
+    dependency_database,
+):
+    engine, (tenant_id, other_tenant), _ = dependency_database
+    with _session(engine, tenant_id) as session:
+        source, prior, _, _, _, _ = _fixture(session, tenant_id)
+        legacy = determine_tax_set(
+            session,
+            tenant_id=tenant_id,
+            fact=replace(source.fact, source_ref="legacy:read"),
+            determined_at=helpers.NOW,
+        )
+        session.commit()
+    with _session(engine, tenant_id) as session:
+        with owner_helpers.participant_guard(session):
+            assert (
+                get_tax_determination_set_v2(
+                    session, tenant_id=tenant_id, determination_set_id=prior.id
+                )
+                == prior
+            )
+        for identity in (uuid4(), legacy.id):
+            with pytest.raises(TaxNotFound):
+                get_tax_determination_set_v2(
+                    session, tenant_id=tenant_id, determination_set_id=identity
+                )
+    for field, changed in (
+        ("result_fingerprint", "rv2:" + "0" * 64),
+        ("source_fingerprint", "0" * 64),
+        ("result_seal_state", "building"),
+    ):
+        with _session(engine, tenant_id) as session:
+            # Autoflush is enabled deliberately: the getter must suppress it.
+            row = session.get(TaxDeterminationSet, prior.id)
+            session.autoflush = True
+            setattr(row, field, changed)
+            with owner_helpers.participant_guard(session), pytest.raises(TaxConflict):
+                get_tax_determination_set_v2(
+                    session, tenant_id=tenant_id, determination_set_id=prior.id
+                )
+            session.rollback()
+    with _session(engine, tenant_id) as session:
+        assert (
+            get_tax_determination_set_v2(
+                session, tenant_id=tenant_id, determination_set_id=prior.id
+            )
+            == prior
+        )
+    with _session(engine, other_tenant) as session, pytest.raises(TaxNotFound):
+        get_tax_determination_set_v2(
+            session, tenant_id=other_tenant, determination_set_id=prior.id
+        )

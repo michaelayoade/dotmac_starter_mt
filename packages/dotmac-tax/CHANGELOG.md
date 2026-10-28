@@ -15,6 +15,8 @@
 - Add V2 flush-only rule authoring, supersession, bounded history and advisory
   preview. External dependencies combined with local compounding or inclusive
   taxation are explicitly unsupported.
+- Add exact tenant-scoped get_tax_determination_set_v2 for sealed historical
+  dependency selection, with no mutable policy admission or autoflush.
 - Hosted CI qualification and a6 publication precede release/adoption.
 
 

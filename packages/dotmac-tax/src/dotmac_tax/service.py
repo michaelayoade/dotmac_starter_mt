@@ -3445,6 +3445,41 @@ def supersede_tax_rule_v2(
     )
 
 
+def get_tax_determination_set_v2(
+    db: Session, *, tenant_id: UUID, determination_set_id: UUID
+) -> TaxDeterminationSetV2:
+    """Read one tenant-local sealed V2 result without mutable policy admission.
+
+    The caller owns the session and transaction. The owner verifies immutable
+    result content, including its bound source fingerprint, without recalculation.
+    V1 or unsealed evidence cannot be promoted to a V2 dependency reference.
+    """
+    if not isinstance(tenant_id, UUID) or not isinstance(determination_set_id, UUID):
+        raise TaxRuleViolation(
+            "tax result reads require UUID tenant and set identities"
+        )
+    with db.no_autoflush:
+        row = db.scalar(
+            select(TaxDeterminationSet).where(
+                TaxDeterminationSet.tenant_id == tenant_id,
+                TaxDeterminationSet.id == determination_set_id,
+                TaxDeterminationSet.contract_version == 2,
+            )
+        )
+        if row is None:
+            raise TaxNotFound("V2 tax determination set not found")
+        source_fingerprint = row.source_fingerprint
+        if (
+            not isinstance(source_fingerprint, str)
+            or len(source_fingerprint) != 64
+            or any(
+                character not in "0123456789abcdef" for character in source_fingerprint
+            )
+        ):
+            raise TaxConflict("persisted determination source fingerprint is invalid")
+        return cast(TaxDeterminationSetV2, _determination_set_contract(row, _v2=True))
+
+
 def determine_tax_set_v2(
     db: Session, *, tenant_id: UUID, fact: TaxFactV2, determined_at: datetime
 ) -> TaxDeterminationSetV2:
@@ -3577,6 +3612,7 @@ def preview_tax_policy_v2(
 
 
 __all__ += [
+    "get_tax_determination_set_v2",
     "determine_tax_set_v2",
     "preview_tax_policy_v2",
     "ensure_tax_rule_v2_in_transaction",

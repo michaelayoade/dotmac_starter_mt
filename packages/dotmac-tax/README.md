@@ -128,3 +128,8 @@ The additive tx_0005 migration is a maintenance boundary for dependency writers:
 a6 writers cannot determine a dependency rule as a V1 source-only result. Downgrade
 refuses any populated V2 policy or evidence. This source is not publication,
 installation, policy activation or product adoption evidence.
+
+`get_tax_determination_set_v2` resolves one exact tenant-scoped sealed result
+for guided dependency selection. It verifies the original result seal and its
+bound source fingerprint without consulting current policy or creating evidence.
+Missing, V1, unsealed or corrupt results refuse; no result scan is exposed.
