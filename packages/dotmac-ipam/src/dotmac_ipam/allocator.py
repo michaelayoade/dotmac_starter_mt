@@ -629,15 +629,26 @@ def _prepare_explicit(
         if family == c.IPV4
         else IPAssignment.ipv6_address_id
     )
+    # Discover the pool without an address lock. Writers taking both locks
+    # take the pool first; locking the address first deadlocks reservations.
+    effective_pool_id = pool_id
+    if effective_pool_id is None:
+        effective_pool_id = db.scalar(
+            select(model.pool_id).where(
+                model.tenant_id == tenant_id, model.address == value
+            )
+        )
+    if effective_pool_id is None:
+        raise IpamError("a pool is required for an address outside inventory")
+    pool = c.get_pool(db, tenant_id, effective_pool_id, lock=True)
+    # Re-read after waiting for the pool: another writer may have reserved,
+    # inserted or moved the row. Refresh identity-map state as well.
     row = db.scalar(
         select(model)
         .where(model.tenant_id == tenant_id, model.address == value)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
-    effective_pool_id = pool_id or (row.pool_id if row is not None else None)
-    if effective_pool_id is None:
-        raise IpamError("a pool is required for an address outside inventory")
-    pool = c.get_pool(db, tenant_id, effective_pool_id, lock=True)
     if row is not None and row.pool_id not in (None, pool.id):
         raise IpamConflict("address belongs to another pool", code="ipam.wrong_pool")
     if not c.pool_is_service_pool(pool, family):

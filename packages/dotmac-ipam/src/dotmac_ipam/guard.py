@@ -53,9 +53,12 @@ def command(function: Callable[_P, _R]) -> Callable[_P, _R]:
 
     @wraps(function)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        session = kwargs.get("db", args[0] if args else None)
+        if isinstance(session, Session) and not in_command_scope():
+            # Never adopt pending caller writes into the command's authority.
+            _refuse_foreign_writes(session, None, None)
         with _command_scope():
             result = function(*args, **kwargs)
-            session = kwargs.get("db", args[0] if args else None)
             if isinstance(session, Session):
                 session.flush()
             return result

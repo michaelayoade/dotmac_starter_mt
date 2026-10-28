@@ -155,23 +155,23 @@ def update_pool(db: Session, *, tenant_id: UUID, command: UpdatePool) -> PoolSna
                 code="ipam.site_immutable",
             )
     _validate_site(purpose, site_ref)
-    for attr in (
-        "name",
-        "gateway",
-        "dns_primary",
-        "dns_secondary",
-        "is_active",
-        "allow_network_broadcast",
-        "delegation_prefix_length",
-        "notes",
-    ):
-        value = getattr(command, attr)
-        if value is not None:
-            setattr(row, attr, value)
-    row.purpose = purpose
-    row.site_ref = site_ref
     try:
         with conflict_savepoint(db):
+            for attr in (
+                "name",
+                "gateway",
+                "dns_primary",
+                "dns_secondary",
+                "is_active",
+                "allow_network_broadcast",
+                "delegation_prefix_length",
+                "notes",
+            ):
+                value = getattr(command, attr)
+                if value is not None:
+                    setattr(row, attr, value)
+            row.purpose = purpose
+            row.site_ref = site_ref
             db.flush()
             c.event(
                 db,

@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from dotmac_ipam import (
     IpamWriteOutsideCommand,
+    SweepExpired,
     flush_guard_installed,
     install_flush_guard,
     module,
     read_models,
+    sweep_expired,
 )
 from dotmac_ipam import models as ipam_models
 from dotmac_ipam.guard import _command_scope as command_scope
-from dotmac_ipam.guard import in_command_scope
+from dotmac_ipam.guard import command, in_command_scope
 from dotmac_ipam.models import IpPool, IPv4Address
 from sqlalchemy import inspect, select
 
@@ -285,3 +289,46 @@ def test_bulk_dml_outside_a_command_is_refused() -> None:
         db.execute(update(IPv4Address).values(notes="ok"))
     # reads and non-module tables are unaffected
     assert db.scalar(select(IPv4Address.notes)) == "ok"
+
+
+@pytest.mark.parametrize("mutation", ["insert", "update", "delete"])
+@pytest.mark.parametrize("keyword_db", [False, True])
+def test_noop_command_refuses_pending_caller_writes(mutation, keyword_db) -> None:
+    with make_session() as db:
+        tenant = seed_tenant(db)
+        pool = seed_pool(db, tenant)
+        seed_v4(db, tenant, pool, "192.0.2.10")
+        db.commit()
+        row = db.scalar(select(IPv4Address))
+        if mutation == "insert":
+            db.add(IPv4Address(tenant_id=tenant, pool_id=pool, address="192.0.2.11"))
+        elif mutation == "update":
+            row.notes = "caller mutation"
+        else:
+            db.delete(row)
+        kwargs = {"tenant_id": tenant, "command": SweepExpired(datetime.now(UTC))}
+        with pytest.raises(IpamWriteOutsideCommand, match="IPv4Address"):
+            if keyword_db:
+                sweep_expired(db=db, **kwargs)
+            else:
+                sweep_expired(db, **kwargs)
+        assert not in_command_scope()
+        db.rollback()
+        rows = db.scalars(select(IPv4Address)).all()
+        assert len(rows) == 1 and rows[0].notes is None
+
+
+def test_nested_command_accepts_writes_owned_by_outer_command() -> None:
+    @command
+    def outer(db, *, tenant, pool):
+        db.add(IPv4Address(tenant_id=tenant, pool_id=pool, address="192.0.2.11"))
+        return sweep_expired(
+            db, tenant_id=tenant, command=SweepExpired(datetime.now(UTC))
+        )
+
+    with make_session() as db:
+        tenant = seed_tenant(db)
+        pool = seed_pool(db, tenant)
+        assert outer(db, tenant=tenant, pool=pool) == 0
+        assert db.scalar(select(IPv4Address.address)) == "192.0.2.11"
+        assert not in_command_scope()

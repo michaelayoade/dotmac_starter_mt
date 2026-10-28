@@ -490,3 +490,190 @@ def test_two_workers_allocating_for_one_service_get_one_assignment(
             ).scalar()
         admin.dispose()
         assert count == 1
+
+
+@pytest.mark.parametrize("operation", ["assign", "assign_inferred", "repair"])
+def test_explicit_assignment_and_reservation_lock_pool_before_address(
+    monkeypatch, operation
+) -> None:
+    from dotmac_ipam import (
+        ApplyRepair,
+        AssignAddress,
+        IpamConflict,
+        RepairFacts,
+        ReserveAddress,
+        StalePreview,
+        apply_repair,
+        assign_address,
+        preview_repair,
+        reserve_address,
+    )
+    from dotmac_ipam.models import IPv4Address
+    from sqlalchemy import event, select
+
+    from alembic import command
+
+    with _database(monkeypatch) as db:
+        command.upgrade(db.config, "ip_0002_extracted")
+        tenant = _tenant(db.superuser_url)
+        (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/28")])
+        admin = create_engine(db.admin_url)
+        # A released, materialised address is assignable and reservable.
+        with admin.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO mod_ipam.ipv4_addresses "
+                    "(id, tenant_id, pool_id, address, is_reserved) "
+                    "VALUES (:i, :t, :p, '192.0.2.1', false)"
+                ),
+                {"i": uuid.uuid4(), "t": tenant, "p": pool},
+            )
+        admin.dispose()
+        pool_held = threading.Event()
+        assignment_waiting = threading.Event()
+        errors: list[BaseException] = []
+        outcomes: list[str] = []
+        reservation_engine = create_engine(db.app_url)
+        assignment_engine = create_engine(db.app_url)
+
+        def pool_lock(statement: str) -> bool:
+            return "mod_ipam.ip_pools" in statement and "FOR UPDATE" in statement
+
+        @event.listens_for(reservation_engine, "after_cursor_execute")
+        def hold_pool(conn, cursor, statement, parameters, context, executemany):
+            if pool_lock(statement):
+                pool_held.set()
+                assert assignment_waiting.wait(15), "assignment never requested pool"
+
+        @event.listens_for(assignment_engine, "before_cursor_execute")
+        def attempting_pool(conn, cursor, statement, parameters, context, executemany):
+            if pool_lock(statement):
+                assignment_waiting.set()
+
+        def run(reserving: bool) -> None:
+            engine = reservation_engine if reserving else assignment_engine
+            try:
+                with Session(engine) as session:
+                    session.execute(
+                        text("SELECT set_config('app.current_tenant', :t, true)"),
+                        {"t": str(tenant)},
+                    )
+                    session.execute(text("SET LOCAL statement_timeout = '20s'"))
+                    if reserving:
+                        reserve_address(
+                            session,
+                            tenant_id=tenant,
+                            command=ReserveAddress(pool, "192.0.2.1"),
+                        )
+                        session.commit()
+                        outcomes.append("reserved")
+                    else:
+                        assert pool_held.wait(15), "reservation never locked pool"
+                        # Hold an identity-map copy from before the reservation.
+                        address = session.scalar(select(IPv4Address))
+                        assert address is not None and not address.is_reserved
+                        subscription, subscriber = uuid.uuid4(), uuid.uuid4()
+                        if operation == "repair":
+                            facts = RepairFacts()
+                            preview = preview_repair(
+                                session,
+                                tenant_id=tenant,
+                                subscription_id=subscription,
+                                subscriber_id=subscriber,
+                                desired_address_id=address.id,
+                                facts=facts,
+                            )
+                            assert preview.applicable
+                            with pytest.raises(StalePreview):
+                                apply_repair(
+                                    session,
+                                    tenant_id=tenant,
+                                    command=ApplyRepair(
+                                        subscription_id=subscription,
+                                        subscriber_id=subscriber,
+                                        desired_address_id=address.id,
+                                        deactivate_assignment_ids=(),
+                                        preview_fingerprint=preview.fingerprint,
+                                        idempotency_key="concurrent-reservation",
+                                        facts=facts,
+                                    ),
+                                )
+                        else:
+                            with pytest.raises(IpamConflict, match="reserved or held"):
+                                assign_address(
+                                    session,
+                                    tenant_id=tenant,
+                                    command=AssignAddress(
+                                        address="192.0.2.1",
+                                        pool_id=None
+                                        if operation == "assign_inferred"
+                                        else pool,
+                                        subscription_id=subscription,
+                                        subscriber_id=subscriber,
+                                    ),
+                                )
+                        outcomes.append("assignment refused")
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=run, args=(value,)) for value in (True, False)
+        ]
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=45)
+            assert not any(t.is_alive() for t in threads), "pool/address deadlock"
+            assert not errors, errors
+            assert sorted(outcomes) == ["assignment refused", "reserved"]
+        finally:
+            reservation_engine.dispose()
+            assignment_engine.dispose()
+
+
+def test_duplicate_pool_rename_keeps_outer_work_and_tenant_context(monkeypatch) -> None:
+    from dotmac_ipam import IpamConflict, UpdatePool, update_pool
+
+    from alembic import command
+
+    with _database(monkeypatch) as db:
+        command.upgrade(db.config, "ip_0002_extracted")
+        tenant = _tenant(db.superuser_url)
+        first, _second = _seed_estate(
+            db, tenant, [("first", "192.0.2.0/28"), ("second", "198.51.100.0/28")]
+        )
+        engine = create_engine(db.app_url)
+        marker = uuid.uuid4()
+        with Session(engine) as session:
+            session.execute(
+                text("SELECT set_config('app.current_tenant', :t, true)"),
+                {"t": str(tenant)},
+            )
+            # Caller-owned work in the same transaction, outside module tables.
+            session.execute(text("CREATE TEMP TABLE caller_work (id uuid, name text)"))
+            session.execute(
+                text("INSERT INTO caller_work VALUES (:i, 'outer work')"),
+                {"i": marker},
+            )
+            with pytest.raises(IpamConflict, match="pool name already exists"):
+                update_pool(
+                    session, tenant_id=tenant, command=UpdatePool(first, name="second")
+                )
+            assert session.is_active
+            assert session.scalar(
+                text("SELECT current_setting('app.current_tenant')")
+            ) == str(tenant)
+            assert (
+                session.scalar(
+                    text("SELECT name FROM caller_work WHERE id = :i"), {"i": marker}
+                )
+                == "outer work"
+            )
+            update_pool(
+                session,
+                tenant_id=tenant,
+                command=UpdatePool(first, notes="after conflict"),
+            )
+            session.commit()
+        engine.dispose()

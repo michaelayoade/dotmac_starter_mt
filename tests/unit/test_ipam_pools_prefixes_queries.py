@@ -630,3 +630,24 @@ def test_events_are_ordered_evidence(env) -> None:
     # assign promoted the primary (PrimaryChanged); re-marking it changes nothing
     assert sorted(e.event_type for e in got) == ["AddressAssigned", "PrimaryChanged"]
     assert all(e.payload for e in got)
+
+
+def test_duplicate_pool_rename_preserves_outer_work(env) -> None:
+    from dotmac_kernel.models import Tenant
+
+    db, tenant = env
+    first = seed_pool(db, tenant, name="first", cidr="192.0.2.0/25")
+    seed_pool(db, tenant, name="second", cidr="192.0.2.128/25")
+    db.commit()
+    tenant_row = db.get(Tenant, tenant)
+    tenant_row.name = "outer work"
+    with pytest.raises(IpamConflict, match="pool name already exists"):
+        update_pool(db, tenant_id=tenant, command=UpdatePool(first, name="second"))
+    assert db.is_active
+    assert db.get(IpPool, first).name == "first"
+    assert tenant_row.name == "outer work"
+    update_pool(db, tenant_id=tenant, command=UpdatePool(first, notes="after conflict"))
+    db.commit()
+    db.expire_all()
+    assert db.get(Tenant, tenant).name == "outer work"
+    assert db.get(IpPool, first).notes == "after conflict"

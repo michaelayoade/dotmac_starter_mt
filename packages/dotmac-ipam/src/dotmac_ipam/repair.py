@@ -379,6 +379,16 @@ def apply_repair(
     desired_address = None
     desired_pool = None
     if command.desired_address_id is not None:
+        # Match allocation/reservation order: discover pool, lock pool, then
+        # refresh-lock address. A moved target requires a new preview.
+        observed_pool_id = db.scalar(
+            select(IPv4Address.pool_id).where(
+                IPv4Address.tenant_id == tenant_id,
+                IPv4Address.id == command.desired_address_id,
+            )
+        )
+        if observed_pool_id is not None:
+            desired_pool = c.get_pool(db, tenant_id, observed_pool_id, lock=True)
         desired_address = db.scalar(
             select(IPv4Address)
             .where(
@@ -386,9 +396,10 @@ def apply_repair(
                 IPv4Address.id == command.desired_address_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        if desired_address is not None and desired_address.pool_id is not None:
-            desired_pool = c.get_pool(db, tenant_id, desired_address.pool_id, lock=True)
+        if desired_address is not None and desired_address.pool_id != observed_pool_id:
+            raise StalePreview("IPAM target pool changed after preview; preview again")
     lock_filter = IPAssignment.subscriber_id == command.subscriber_id
     if command.desired_address_id is not None:
         lock_filter = or_(
