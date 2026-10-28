@@ -1546,7 +1546,7 @@ map is
 | `dotmac-response-obligations` | Response-time targets, running clocks, itemised paused time and breach observations against an opaque subject | Sub SLA clock behavior; ERP read-time targets and CRM copy are demand |
 | `dotmac-party` | Party business capacities, capacity relationships, memberships, reachability evidence and external-reference provenance | Sub Party-context behavior; kernel Party retains identity |
 | `dotmac-payables` | Supplier invoices/credits, recognized liabilities and payment-obligation lifecycle | ERP AP behavior |
-| `dotmac-payroll` | Component policy, immutable structures, calculation evidence and employee/external liabilities | ERP payroll behavior |
+| `dotmac-payroll` | Component policy, immutable structures, calculation evidence, derived run totals/payment-total parity and employee/external liabilities | ERP payroll behavior; scalar totals extracted from ERP PR #761 |
 | `dotmac-procurement` | Requisitions, sourcing, supplier offers, awards and purchase commitments | ERP procurement behavior |
 | `dotmac-projects` | Project/task identity and lifecycle, hierarchy, dependencies, templates, schedule constraints and assignments | Sub project/task behavior |
 | `dotmac-records` | Record declarations, retention schedules/triggers, legal holds, preservation/custody and disposition authority | Greenfield after the exact fleet inventory |
@@ -1594,7 +1594,7 @@ authorize and translate typed facts but never maintain a parallel writer.
 | Conversations, messages and read cursors | `dotmac_inbox.service`; products own subject/workforce links and consequences, while Integrator owns transport evidence. |
 | Party capacities, relationships, memberships, contact evidence and external references | `dotmac_party.service`; kernel Party remains the identity owner and authorization consumes facts without treating them as grants. |
 | Supplier documents, credits, liabilities and obligations | `dotmac_payables.service`; Procurement, suppliers, Approvals, Tax, Accounting and Treasury remain independent owners. |
-| Payroll components, structures, calculations, liabilities and settlement coverage | `dotmac_payroll.service`; People, Tax, Banking and Accounting are ports, not imported models or alternate writers. |
+| Payroll components, structures, calculations, liabilities and settlement coverage | `dotmac_payroll.service`; `read_payroll_run_totals` reads persisted same-tenant scalars after flush and delegates exact aggregation to `dotmac_payroll.totals`. The pure totals/payment-parity contract is independently consumable without transferring stateful run authority. People, Tax, Banking and Accounting are ports, not imported models or alternate writers. |
 | Requisitions, sourcing, bids, awards, commitments and receipt projection | `dotmac_procurement.service`; Approvals decides quorum, Inventory owns stock/receipts and Payables consumes approved commitment facts. |
 | Project/task/template/dependency/assignment structure and lifecycle | `dotmac_projects.service`; products own project subjects plus finance, workforce, work-order and customer consequences. |
 | Record declarations, schedules, holds, preservation, custody and disposition | `dotmac_records.service`; source domains retain meaning, Files performs physical deletion, Approvals decides verdicts and Timers schedules review. |
