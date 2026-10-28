@@ -263,8 +263,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
+          # An adapter is stateless (no migrations, no lineage; ADR-0006
+          # 2026-08-14 amendment), so the record says so rather than naming a
+          # package dir the writer would refuse as an unreadable lineage.
           bash scripts/open_release_record_pr.sh \
             --distribution "${{ inputs.adapter }}" \
             --version "${{ inputs.version }}" \
             --tag "${{ needs.build.outputs.tag }}" \
-            --package-dir "${{ needs.build.outputs.package_dir }}"
+            --no-lineage
