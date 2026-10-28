@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 13858)
-Total output lines: 957
-
 # Changelog — dotmac-integration
 
 ## 0.1.0a20 — allocated, unreleased: durable PROVISION runtime and SPI 1.7 fleet targets
@@ -399,7 +396,137 @@ exact revision `bd8d2262c26f62041cc22a813916066b9af85c7f`.
   nothing. A command whose stored request was redacted by the retention sweep,
   lost, or no longer digests to what was recorded is refused by name rather
   than retried into a live effect.
-- Adds oldest-first, pa…1858 tokens truncated…released 2026-08-22
+- Adds oldest-first, page-bounded dead-letter and ambiguous inspection carrying
+  what was attempted, the binding and installation it was attempted against,
+  the typed provider evidence, the connector's classification, the legal-hold
+  state and whether the request is still verifiable. Derived at read time;
+  no status column and no new table.
+- Resolves an INDETERMINATE attempt against provider evidence in three phases
+  with no session held across the probe. A `landed` verdict closes the command
+  as delivered without re-dispatching it, only a provider-proven `not_landed`
+  returns it to the queue (and still only with verifiable request evidence),
+  and `unknown` leaves it ambiguous with a module-owned marker rather than
+  blindly retrying or blindly failing it. Replaying an ambiguous command
+  through the operator path is refused and pointed at reconciliation.
+- Declares one new audit action, `integration.delivery.reconciled`, carrying
+  the verdict, the previous and resulting state and typed provider evidence.
+  Connector-authored probe text is returned to the caller and persisted
+  nowhere. Requeueing keeps its existing single writer,
+  `integration.delivery.replayed`.
+- `INTEGRATION_DEAD_LETTER_PAGE_SIZE` is the new configuration knob (default
+  100, bounded at 1000). No schema change: the reconciliation trail is the
+  fleet's one platform audit ledger, and the four-state outcome vocabulary
+  stays `retry.OutcomeStatus`.
+### Connector quarantine, a dispatch kill switch and one admission owner
+
+- Adds `admission`, the single authority for "may this worker dispatch right
+  now?". It carries a closed set of reasons, and `dispatch.prepare` consults it
+  BEFORE claiming, so a refusal never strands a leased row.
+- `dispatch.DispatchNotAdmitted` is a third, distinct answer beside `None` (no
+  claim, contention) and `DispatchUnavailable` (a misconfiguration, alert).
+  A deliberate halt no longer reads as a broken configuration.
+- Quarantine is scoped to the INSTALLATION and enforced at dispatch: every
+  capability it serves stops, other installations of the same connector and the
+  same capability are untouched. It removes no queued delivery, breaks no lease
+  and rewrites no retry schedule.
+- Adds `lifecycle.release_quarantine`, the explicit exit. It lands in
+  `disabled`, never `enabled`, so leaving containment cannot skip `enable`'s
+  live connection check. Both directions write a declared platform audit event
+  recording the previous state, the reason and the actor.
+- Adds `ExecutionPolicy.dispatch_enabled`, the deployment-wide kill switch. It
+  refuses admission with no database access at all and leaves every durable row
+  exactly as it found it.
+
+### Provider rate limits and backpressure
+
+- A TERMINAL outcome carrying a configured transient HTTP status (429, 503,
+  502, 504, 500, 408, 425) is reclassified RETRYABLE. The engine branches on the
+  typed `provider_status_code` only, never on a connector's `error_code`, and
+  never promotes `RECONCILIATION_REQUIRED`. Attempt exhaustion still applies.
+- Adds `retry.parse_retry_after`, which reads both RFC 7231 forms
+  (delta-seconds and HTTP-date) so every connector does not reimplement it.
+  An unusable header falls back to the curve instead of failing the outcome.
+- An observed throttle delays that installation's other queued deliveries
+  through one bounded UPDATE in the settle transaction — it only ever moves
+  `next_attempt_at` forward, never touches in-flight or settled rows, and never
+  reaches another installation. The pause is a schedule, never a sleep, so no
+  session is held across provider I/O.
+- Adds `ExecutionPolicy.max_in_flight_per_installation`, the backpressure that
+  applies before a provider complains.
+
+### Operational metrics
+
+- Adds `operations.dispatch_metrics`: queue depth, oldest queued age, end-to-end
+  dispatch latency over a configured window, retry counts, failure counts,
+  expired leases, unprocessed receipts and quarantined installations.
+- Derived at read time beside `health_report`, for the same reason — a stored
+  gauge is a second writer over facts the ledgers already hold.
+- `operations.METRIC_NAMES` is the stable, language-neutral naming contract.
+  The module produces the numbers and introduces no metrics client: the
+  exporter stays with the composing assembly.
+
+### Configuration
+
+- Every threshold added here is a validated `ExecutionPolicy` field with a
+  documented default that reproduces the previous behaviour. Construction
+  refuses a zero concurrency ceiling and refuses a throttling status that is not
+  also retryable — which would delay the queue while dead-lettering the delivery
+  that discovered the limit.
+
+## 0.1.0a14 — released 2026-08-24
+
+Published, installed back from the private index, registered and tagged from
+exact protected-main revision `70459efd` by release run `32693378851`.
+
+### Outbound delivery evidence and content retention
+
+- Adds typed `provider_reference` and `provider_status_code` outcome fields and
+  persists them atomically with the claimed attempt. Arbitrary provider response
+  bodies remain unrepresentable.
+- Adds `delivery_legal_holds` and a bounded, oldest-first redaction sweep for
+  delivered outbox payloads. Deduplication keys, payload digests, state and
+  provider evidence survive redaction; replayable and reconciliation-required
+  deliveries are refused by name.
+- Adds migration `ig_0012_delivery_evidence` on the platform plane.
+- Adds SPI 1.4's optional per-capability mode mapping. Legacy declarations keep
+  the 1.0–1.3 meaning; multi-mode connectors no longer have to pretend every
+  factory serves every capability.
+
+## 0.1.0a13 — unreleased
+
+### Generic product-observation delivery
+
+- Adds `ProductObservationSource`, derived during the claim transaction from
+  the module-owned installation and binding rather than from connector payload.
+- Exposes that one derivation through `resolve_product_observation_source`, so
+  read-only shadow projection does not reimplement module persistence in its
+  composing assembly.
+- Adds `product_observation_document`, a provider- and product-neutral
+  ProductObservation v1 projection whose addressing comes only from the
+  authenticated product descriptor and whose observation remains product-owned.
+- Covers source provenance in the request fingerprint, so the same delivery
+  identity cannot silently move between installations or connector packages.
+- Accepts product-port descriptor v2 alongside v1. Unknown descriptor versions
+  still fail closed; connector SPI remains 1.3.
+
+## 0.1.0a12 — released 2026-08-22
+
+Published, installed back from the private index, registered and tagged from
+exact protected-main revision `9f59d02b` by release run `32587960069`.
+
+### Capability-wide product-port reconciliation
+
+- Adds a module-owned query for every durable binding carrying one capability;
+  it deliberately includes configured and disabled bindings because routing is
+  a prerequisite for activation, not a consequence of it.
+- Projects one authenticated product-port descriptor onto that complete set in
+  the caller's transaction, so independently installed connectors implementing
+  the same capability cannot leave one binding addressable and another
+  accumulating undeliverable receipts.
+- Refuses an empty binding set instead of reporting a vacuous successful
+  reconciliation. The operation remains digest-idempotent for the whole set.
+
+## 0.1.0a11 — released 2026-08-22
 
 ### Executable polling engine
 
