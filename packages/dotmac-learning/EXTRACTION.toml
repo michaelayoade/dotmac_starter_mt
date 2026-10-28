@@ -2,7 +2,7 @@
 # 0.1.0a4 is an allocated SOURCE candidate, not published/installed/adopted.
 # Published 0.1.0a3 remains immutable: peeled tag 7f8f1e6646e531154450370e51dbede46723cc60, release run 40484794529, wheel SHA256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c.
 # 600 root exports; unchanged 28 tables / 298 fields and lr_0001..lr_0010.
-# Intake source revalidation is Academy bde50c940192714cdb0608652e94417199565f64.
+# Intake source revalidation is Academy ecf76b5e2a6384b56c9302557dcbcfb5d053ff82.
 # Earlier source_revisions and the dated allocation notes remain historical.
 # See docs/inventories/learning-cohort-intake-successor-2026-10-28.md.
 #
@@ -59,7 +59,7 @@ source_revisions = [
 # Effective accepted Academy audit; initial source_revisions remain immutable.
 # PR177 correction at 61f69194d6591c6a2d13472a5e38c3a5ecf34454 is retained in next_action.
 # Previous Academy revalidation: 0968881fc40ad86b3abfea2fc40044dd2dbf47c9.
-revalidation_revisions = ["dotmac_academy_app:bde50c940192714cdb0608652e94417199565f64"]
+revalidation_revisions = ["dotmac_academy_app:ecf76b5e2a6384b56c9302557dcbcfb5d053ff82"]
 source_paths = [
   "dotmac_academy_app:app/models/course.py",
   "dotmac_academy_app:app/models/assessment.py",
@@ -272,7 +272,7 @@ next_action = "2026-10-28: qualify the allocated 0.1.0a4 intake successor on hos
 product = "dotmac_academy_app"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "bde50c940192714cdb0608652e94417199565f64"
+revision = "ecf76b5e2a6384b56c9302557dcbcfb5d053ff82"
 evidence_paths = ["app/cli.py", "app/models/cohort.py", "app/models/assessment.py", "app/services/assessment.py", "app/services/lab_lifecycle.py", "app/services/completion.py", "app/services/certificates.py", "app/services/entitlements.py"]
 
 [[product_writers]]
