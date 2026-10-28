@@ -1,9 +1,13 @@
 # Changelog — dotmac-integration
 
-## Unreleased — durable PROVISION runtime and SPI 1.7 fleet targets
+## 0.1.0a20 — allocated, unreleased: durable PROVISION runtime and SPI 1.7 fleet targets
 
-- Adds **SPI 1.7** (`CURRENT_SPI_VERSION` becomes 1.7 on this branch, still
-  unpublished): manifest-declared fleet-target ceilings
+Allocated 2026-10-28 for the source merged in PR #930 (ADR-0074). This
+allocation makes no publication claim; `0.1.0a19` remains the latest
+published version until the a20 release run records its verification.
+
+- Adds **SPI 1.7** (`CURRENT_SPI_VERSION` becomes 1.7, still unpublished):
+  manifest-declared fleet-target ceilings
   (`FleetPortRange`/`FleetTargetDeclaration`), installation-scoped
   `NetworkTarget` narrowing validated at configuration-revision write and at
   manifest adoption, engine-delivered bound targets in handler config, and the
@@ -37,7 +41,9 @@
 
 ## Release state — read this before pinning
 
-**Eighteen versions have been released. Pin `0.1.0a18`.** The a18 publication
+**Nineteen versions have been released. Pin `0.1.0a19`.** The a19 publication
+is tagged `dotmac-integration-v0.1.0a19` and recorded in
+module-release-verifications. The a18 publication
 is recorded by release verification records 116–135, including its exact tag
 and receipt. a17 was published, installed back from the private index,
 registered and tagged from exact revision
@@ -130,6 +136,9 @@ its exact released migration digests remain frozen. The current source proposes
 `0.1.0a19` for receipt-origin metadata that preserves legacy unknown origin.
 It performs no backfill, changes no existing wire contract, and makes no
 cash-qualification claim. a19 remains unpublished and must not be exact-pinned.
+
+(Subsequent history: a19 was published 2026-10-17, tagged
+`dotmac-integration-v0.1.0a19`; the heading below is retained as written.)
 
 ## 0.1.0a19 — unreleased
 

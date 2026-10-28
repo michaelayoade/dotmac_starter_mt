@@ -12,8 +12,8 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a18`; `0.1.0a19` is proposed and
-unpublished.** Releases a2–a4 implement SPI 1.1;
+**Released: `0.1.0a1` through `0.1.0a19`; `0.1.0a20` is allocated
+(2026-10-28) and unpublished.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
 which is the authority on what has and has not shipped. a8 adds indexed,
@@ -42,10 +42,13 @@ authoring either contract.
 **Released `0.1.0a18`:** it adds SPI 1.5's provider-neutral
 plan/apply/observe/cancel contract and SPI 1.6's bounded synchronous REQUEST
 contract. Its exact release and receipt are recorded in
-module-release-verifications 116–135. The proposed, unpublished `0.1.0a19`
-adds receipt-origin metadata that preserves legacy unknown origin without
-backfill, changes no existing wire contract, and makes no cash-qualification
-claim. Do not exact-pin a19.
+module-release-verifications 116–135. `0.1.0a19` (published 2026-10-17,
+tagged `dotmac-integration-v0.1.0a19`) adds receipt-origin metadata that
+preserves legacy unknown origin without backfill, changes no existing wire
+contract, and makes no cash-qualification claim. The allocated, unpublished
+`0.1.0a20` adds SPI 1.7 fleet network targets and the durable PROVISION
+runtime (`ig_0017`, ADR-0074). Do not exact-pin a20 until its release run
+records verification.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to

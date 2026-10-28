@@ -147,6 +147,11 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-integration": {
+      "declared": "0.1.0a20",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET PUBLISHED. 0.1.0a20 was allocated 2026-10-28 for the SPI 1.7 fleet network targets and durable PROVISION runtime (ig_0017, ADR-0074) merged in PR #930 under the published a19 identity; published 0.1.0a19 remains immutable and must not be edited down. Remove this row in the a20 release-record change after the protected release-module run tags dotmac-integration-v0.1.0a20 from the exact merged revision and records its verification; allocation is not publication.",
+      "state": "declared-unpublished"
+    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",
