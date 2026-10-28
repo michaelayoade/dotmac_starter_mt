@@ -23,7 +23,8 @@ def _minor_units(amount: Decimal, currency: Currency) -> int:
     sign, digits, exponent = amount.as_tuple()
     # Finite Decimal exponents are integers; do not use context-sensitive
     # quantize/scaleb/add here: aggregation must never silently round.
-    assert isinstance(exponent, int)
+    if not isinstance(exponent, int):
+        raise PayrollTotalsViolation("payroll amounts must be finite decimals")
     coefficient = 0
     for digit in digits:
         coefficient = coefficient * 10 + digit
