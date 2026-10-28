@@ -98,7 +98,7 @@ def _refuse_dml_outside_command(clauseelement: Any) -> None:
         if table in _guarded_tables():
             raise IpamWriteOutsideCommand(
                 "dotmac_ipam rows may only be written by module commands; "
-                f"refused {type(clauseelement).__name__} on {table.name}"
+                f"refused {type(clauseelement).__name__} on {getattr(table, "name", table)}"
             )
 
 
