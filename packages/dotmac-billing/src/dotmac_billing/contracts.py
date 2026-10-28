@@ -17,12 +17,14 @@ from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.money import Currency, Money
 
 from dotmac_billing.errors import BillingRuleViolation
+from dotmac_billing.tax_evidence import InvoiceTaxEvidenceV1
 
 OBLIGATION_ACCEPT_CONTRACT = "billing.obligation.accept.v1"
 SETTLEMENT_CONTRACT = "billing.settlement.accept.v1"
 RECEIVABLE_POSITION_CONTRACT = "billing.receivable.position.v1"
 RECEIVABLE_EXPOSURE_CONTRACT = "billing.receivable.exposure.v1"
 DOCUMENT_FACT_CONTRACT = "billing.invoice.document.fact.v1"
+DOCUMENT_FACT_V2_CONTRACT = "billing.invoice.document.fact.v2"
 ACCOUNTING_FACT_CONTRACT = "billing.accounting.fact.v1"
 ARTIFACT_COMMAND_CONTRACT = "billing.document.artifact.record.v1"
 ARTIFACT_REPAIR_CONTRACT = "billing.document.artifact.repair.v1"
@@ -250,6 +252,20 @@ class AcceptRatedObligationV1:
     supersedes_obligation_id: UUID | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AcceptRatedObligationV2(AcceptRatedObligationV1):
+    """Accept lossless Tax-authored evidence instead of lossy rate snapshots.
+
+    Expected withholding never changes pre-tax, tax, total or receivable amounts.
+    V2 does not mix detailed evidence with V1 tax snapshots.
+    """
+
+    tax_evidence: tuple[InvoiceTaxEvidenceV1, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tax_evidence", tuple(self.tax_evidence))
+
+
 class ObligationSourceRegistry(Protocol):
     """Assembly-supplied registry of uniquely declared obligation sources."""
 
@@ -289,6 +305,11 @@ class IssueRatedInvoiceV1:
     actor_ref: str
     correlation_id: str
     party_tax_identities: tuple[PartyTaxIdentitySnapshotV1, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class IssueRatedInvoiceV2(IssueRatedInvoiceV1):
+    obligation: AcceptRatedObligationV2
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,6 +387,30 @@ class InvoiceDocumentFactV1:
     source_authority: Literal["internal", "provider_owned", "external_finance"]
     correlation_id: str
     presentation_model_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceDocumentFactV2(InvoiceDocumentFactV1):
+    tax_evidence: tuple[InvoiceTaxEvidenceV1, ...]
+
+    @property
+    def expected_withholding(self) -> Money:
+        """Original expected display deduction; never proof of discharge."""
+        from decimal import localcontext
+
+        with localcontext() as context:
+            context.prec = 60
+            return Money(
+                sum(
+                    (
+                        item.determination.tax_amount.amount
+                        for item in self.tax_evidence
+                        if item.purpose == "expected_withholding"
+                    ),
+                    Decimal(0),
+                ),
+                Currency(self.currency, self.minor_units),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -591,6 +636,14 @@ class StoredInvoiceDocumentFactV1:
     contract_version: Literal["billing.invoice.document.fact.v1"]
     recorded_at: datetime
     fact: InvoiceDocumentFactV1
+
+
+@dataclass(frozen=True, slots=True)
+class StoredInvoiceDocumentFactV2:
+    fact_id: UUID
+    contract_version: Literal["billing.invoice.document.fact.v2"]
+    recorded_at: datetime
+    fact: InvoiceDocumentFactV2
 
 
 @dataclass(frozen=True, slots=True)
@@ -1354,6 +1407,11 @@ __all__ = [
     "ARTIFACT_COMMAND_CONTRACT",
     "ARTIFACT_REPAIR_CONTRACT",
     "DOCUMENT_FACT_CONTRACT",
+    "DOCUMENT_FACT_V2_CONTRACT",
+    "AcceptRatedObligationV2",
+    "IssueRatedInvoiceV2",
+    "InvoiceDocumentFactV2",
+    "StoredInvoiceDocumentFactV2",
     "OBLIGATION_ACCEPT_CONTRACT",
     "RECEIVABLE_EXPOSURE_CONTRACT",
     "RECEIVABLE_POSITION_CONTRACT",

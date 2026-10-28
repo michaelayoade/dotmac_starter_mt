@@ -77,6 +77,11 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-billing": {
+      "declared": "0.1.0a9",
+      "reason": "DECLARED LOSSLESS TAX EVIDENCE SUCCESSOR, NOT PUBLISHED. a9 adds bi_0012_tax_evidence and additive V2 invoice contracts while retaining V1 history and released a8 migration bytes. Hosted predecessor/current-schema acceptance, reviewed source and separately authorized publication/install-back/tag/record precede dependent Sub exact pin and policy activation. Expected WHT is display evidence only; no discharge, VAT recognition or production cutover. Remove only with verified a9 publication record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-collections": {
       "declared": "0.1.0a2",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 proposes a fresh modern-provenance build under a new version; runtime behavior, public API and migrations remain unchanged from the published a1 source, and the Kernel floor remains >=0.1.0a89. The legacy a1 release is not reissued or relabeled. Hold pending root review and Michael's source/release authorization, acceptance of the Kernel a105 publication record on main, and a refreshed tag/census check before integration. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due; this proposal does not switch product authority. Remove this row only with the verified a2 publication record.",

@@ -18,6 +18,7 @@ from dotmac_billing._document_facts import _decode, decode_invoice_document_fact
 from dotmac_billing._opening_values import cash_decimal_context
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
+    DOCUMENT_FACT_V2_CONTRACT,
     BillingAccountObservationV1,
     CurrentCashCreditDrawV1,
     CurrentReceivablePositionV1,
@@ -27,10 +28,12 @@ from dotmac_billing.contracts import (
     GetCurrentReceivablePositionV1,
     GetCurrentSettlementAllocationV1,
     GetInvoiceDocumentFactV1,
+    InvoiceDocumentFactV2,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
     ReceivablePositionV2,
     StoredInvoiceDocumentFactV1,
+    StoredInvoiceDocumentFactV2,
     WithholdingDischargeEffectV1,
 )
 from dotmac_billing.errors import BillingRuleViolation
@@ -98,6 +101,22 @@ def get_billing_account_observation(
 def get_invoice_document_fact(
     db: Session, *, scope: Scope, request: GetInvoiceDocumentFactV1
 ) -> StoredInvoiceDocumentFactV1:
+    return cast(
+        StoredInvoiceDocumentFactV1,
+        _get_invoice_document_fact(db, scope=scope, request=request, v2=False),
+    )
+
+
+def get_invoice_document_fact_v2(
+    db: Session, *, scope: Scope, request: GetInvoiceDocumentFactV1
+) -> StoredInvoiceDocumentFactV1 | StoredInvoiceDocumentFactV2:
+    """Read original V1 or V2 evidence, including full V2 Tax for rendering."""
+    return _get_invoice_document_fact(db, scope=scope, request=request, v2=True)
+
+
+def _get_invoice_document_fact(
+    db: Session, *, scope: Scope, request: GetInvoiceDocumentFactV1, v2: bool
+) -> StoredInvoiceDocumentFactV1 | StoredInvoiceDocumentFactV2:
     """Read an exact version without consulting live documents or ORM state.
 
     The caller owns the transaction. In particular, dirty objects in its identity
@@ -125,7 +144,12 @@ def get_invoice_document_fact(
             "document_fact_not_found",
             "the exact invoice document fact version is unavailable",
         )
-    if row["contract_version"] != DOCUMENT_FACT_CONTRACT:
+    supported = (
+        (DOCUMENT_FACT_CONTRACT, DOCUMENT_FACT_V2_CONTRACT)
+        if v2
+        else (DOCUMENT_FACT_CONTRACT,)
+    )
+    if row["contract_version"] not in supported:
         raise BillingRuleViolation(
             "document_fact_contract_unsupported",
             "stored invoice document fact contract is unsupported",
@@ -156,7 +180,8 @@ def get_invoice_document_fact(
             "document_fact_digest_mismatch",
             "stored invoice document fact presentation digest disagrees",
         )
-    fact = decode_invoice_document_fact(payload)
+    stored_v2 = row["contract_version"] == DOCUMENT_FACT_V2_CONTRACT
+    fact = decode_invoice_document_fact(payload, v2=stored_v2)
     if (
         fact.scope != scope
         or fact.invoice_id != row["document_id"]
@@ -165,6 +190,13 @@ def get_invoice_document_fact(
         raise BillingRuleViolation(
             "document_fact_corrupt",
             "stored invoice document fact envelope disagrees with its payload",
+        )
+    if stored_v2:
+        return StoredInvoiceDocumentFactV2(
+            fact_id=row["id"],
+            contract_version="billing.invoice.document.fact.v2",
+            recorded_at=row["created_at"],
+            fact=cast(InvoiceDocumentFactV2, fact),
         )
     return StoredInvoiceDocumentFactV1(
         fact_id=row["id"],
@@ -183,6 +215,7 @@ __all__ = [
     "get_non_cash_credit_grant",
     "get_non_cash_credit_effect",
     "get_invoice_document_fact",
+    "get_invoice_document_fact_v2",
     "get_withholding_discharge",
 ]
 

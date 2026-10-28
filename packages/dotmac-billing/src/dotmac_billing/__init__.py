@@ -19,6 +19,7 @@ from dotmac_billing.commands import (
 )
 from dotmac_billing.contracts import (
     AcceptRatedObligationV1,
+    AcceptRatedObligationV2,
     AcceptSettlementV1,
     AccountingAllocationEffectV1,
     AccountingEffectV1,
@@ -42,9 +43,11 @@ from dotmac_billing.contracts import (
     GetCurrentSettlementAllocationV1,
     GetInvoiceDocumentFactV1,
     InvoiceDocumentFactV1,
+    InvoiceDocumentFactV2,
     InvoiceLineFactV1,
     IssuedRatedInvoiceV1,
     IssueRatedInvoiceV1,
+    IssueRatedInvoiceV2,
     NonCashCreditClassificationV1,
     NonCashCreditEffectV1,
     NonCashCreditGrantV1,
@@ -68,6 +71,7 @@ from dotmac_billing.contracts import (
     ServicePeriodStatus,
     SettlementFundingLane,
     StoredInvoiceDocumentFactV1,
+    StoredInvoiceDocumentFactV2,
     WithholdingCertificateObservationV1,
     WithholdingDischargeEffectV1,
     WithholdingTaxEvidenceV1,
@@ -255,6 +259,7 @@ from dotmac_billing.queries import (
     get_current_receivable_position,
     get_current_settlement_allocation,
     get_invoice_document_fact,
+    get_invoice_document_fact_v2,
     get_non_cash_credit_effect,
     get_non_cash_credit_grant,
     get_receivable_position_v2,
@@ -262,7 +267,14 @@ from dotmac_billing.queries import (
 )
 from dotmac_billing.service import issue_rated_invoice
 
-__version__ = "0.1.0a8"
+__version__ = "0.1.0a9"
+
+from dotmac_billing.tax_evidence import (
+    InvoiceTaxEvidenceV1,
+    TaxDeterminationComponentEvidenceV1,
+    TaxDeterminationLineEvidenceV1,
+    TaxDeterminationSetEvidenceV1,
+)
 
 __all__ = [
     "ConfirmedSettlementObservationV1",
@@ -283,6 +295,15 @@ __all__ = [
     "earmark_settlement",
     "get_funding_availability",
     "IssueRatedInvoiceV1",
+    "IssueRatedInvoiceV2",
+    "AcceptRatedObligationV2",
+    "InvoiceDocumentFactV2",
+    "StoredInvoiceDocumentFactV2",
+    "InvoiceTaxEvidenceV1",
+    "TaxDeterminationComponentEvidenceV1",
+    "TaxDeterminationLineEvidenceV1",
+    "TaxDeterminationSetEvidenceV1",
+    "get_invoice_document_fact_v2",
     "IssuedRatedInvoiceV1",
     "ObligationSourceRegistry",
     "NumberingProvider",

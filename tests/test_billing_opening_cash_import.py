@@ -16,6 +16,7 @@ from threading import Barrier, Thread
 from uuid import uuid4
 
 import pytest
+from alembic import command as alembic_command
 from dotmac_billing import models
 from dotmac_billing import opening_queries as q
 from dotmac_billing import service as s
@@ -59,11 +60,11 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from alembic import command as alembic_command
 from tests import billing_opening_window_fixtures as window_fixture
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as runtime
 from tests import test_billing_withholding_persistence as predecessor
+from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 from tests.unit import test_billing_opening_manifest as preflight
 
 REVISION = "bi_0007_opening_cash"
@@ -1529,7 +1530,7 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
         # Source-compatible predecessor fixture adaptations only. The new
         # runtime is not claimed to support arbitrary execution on old schema.
         # bi6 cannot contain an opening contribution; retain every V1-V3 guard.
-        with monkeypatch.context() as historical:
+        with predecessor_obligation_columns(), monkeypatch.context() as historical:
             historical.setattr(s, "_claim_cash_source", predecessor_claim)
             historical.setattr(
                 s, "resolve_receivable_backing", native_predecessor_backing
