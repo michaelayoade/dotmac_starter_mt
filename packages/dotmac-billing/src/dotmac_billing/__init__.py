@@ -254,6 +254,8 @@ from dotmac_billing.opening_window_queries import (
     get_opening_window_seal,
 )
 from dotmac_billing.queries import (
+    get_accounting_fact_v1,
+    get_allocation_accounting_fact_v1,
     get_billing_account_observation,
     get_current_cash_credit_draw,
     get_current_receivable_position,
@@ -277,6 +279,8 @@ from dotmac_billing.tax_evidence import (
 )
 
 __all__ = [
+    "get_accounting_fact_v1",
+    "get_allocation_accounting_fact_v1",
     "ConfirmedSettlementObservationV1",
     "GetConfirmedSettlementV1",
     "get_confirmed_settlement",

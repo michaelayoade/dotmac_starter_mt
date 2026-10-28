@@ -331,3 +331,9 @@ V1 commands and the V1-only reader retain their original contract. `bi_0012`
 adds immutable obligation JSON without rewriting historical evidence and refuses
 downgrade when successor evidence exists. Assemblies map public Tax results at
 the boundary; Billing imports no Tax implementation or sibling package.
+
+`get_accounting_fact_v1(db, scope=..., fact_id=...)` reads an exact historical
+V1 accounting fact and verifies its original payload, posting group and effect
+rows. Linked reversals leave the original fact readable. Assemblies can bind
+receipts to the original allocation without using mutable current capacity;
+this read authorizes no new financial movement.

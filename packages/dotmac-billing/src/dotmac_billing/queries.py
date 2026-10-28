@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from decimal import Decimal, DecimalException, localcontext
 from typing import Any, Literal, NoReturn, cast
 from uuid import UUID
@@ -19,6 +20,7 @@ from dotmac_billing._opening_values import cash_decimal_context
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
     DOCUMENT_FACT_V2_CONTRACT,
+    AccountingFactV1,
     BillingAccountObservationV1,
     CurrentCashCreditDrawV1,
     CurrentReceivablePositionV1,
@@ -37,6 +39,211 @@ from dotmac_billing.contracts import (
     WithholdingDischargeEffectV1,
 )
 from dotmac_billing.errors import BillingRuleViolation
+
+
+def get_accounting_fact_v1(
+    db: Session, *, scope: Scope, fact_id: UUID
+) -> AccountingFactV1:
+    """Read one original V1 accounting fact and its immutable posting evidence.
+
+    This is historical evidence, including after linked reversals/deallocations.
+    It does not observe current allocation capacity or authorize a new effect.
+    The caller owns the session and transaction; no locks or autoflush occur.
+    """
+    from dotmac_billing.opening_queries import _row, _scoped, _table
+
+    if not isinstance(scope, TenantScope | PlatformScope) or (
+        isinstance(scope, TenantScope) and not isinstance(scope.tenant_id, UUID)
+    ):
+        raise BillingRuleViolation(
+            "scope_mismatch", "accounting reads require explicit scope"
+        )
+    if not isinstance(fact_id, UUID):
+        raise BillingRuleViolation(
+            "invalid_fact_id", "accounting fact identity must be a UUID"
+        )
+    table = _table(scope, "accounting_facts")
+    with db.no_autoflush:
+        row = (
+            db.execute(
+                _scoped(
+                    select(table).where(
+                        table.c.id == fact_id,
+                        table.c.fact_version == 1,
+                    ),
+                    scope,
+                    table,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            raise BillingRuleViolation(
+                "not_found", "exact V1 accounting fact was not found"
+            )
+        try:
+            if fingerprint_of(row["fact_payload"]) != row["fact_digest"]:
+                raise ValueError("original accounting digest disagrees")
+            with localcontext(cash_decimal_context()):
+                fact = cast(
+                    AccountingFactV1, _decode(row["fact_payload"], AccountingFactV1)
+                )
+            if not (
+                fact.scope == scope
+                and fact.fact_id == row["id"]
+                and fact.fact_version == row["fact_version"] == 1
+                and fact.posting_group_id == row["posting_group_id"]
+                and fact.effect_kind == row["effect_kind"]
+                and fact.source_system == row["source_system"]
+                and fact.source_authority == row["source_authority"]
+                and fact.occurred_at == row["occurred_at"]
+                and fact.reverses_fact_id == row["reverses_fact_id"]
+            ):
+                raise ValueError("accounting envelope disagrees")
+            group = _row(db, scope, "posting_groups", fact.posting_group_id)
+            if not (
+                group["billing_account_id"] == fact.billing_account_id
+                and group["group_kind"] == fact.effect_kind
+                and group["source_ref"] == fact.source_ref
+                and group["occurred_at"] == fact.occurred_at
+            ):
+                raise ValueError("accounting posting group disagrees")
+            amounts = [item.amount_delta for item in fact.effects]
+            amounts.extend(item.amount_delta for item in fact.allocations)
+            for tax in fact.tax_snapshots:
+                amounts.extend((tax.taxable_basis, tax.tax_amount))
+            if any(
+                (amount.currency.code, amount.currency.minor_units)
+                != (group["currency"], group["minor_units"])
+                for amount in amounts
+            ):
+                raise ValueError("accounting money identity disagrees")
+            posting = _table(scope, "posting_effects")
+            postings = (
+                db.execute(
+                    _scoped(
+                        select(posting).where(
+                            posting.c.posting_group_id == fact.posting_group_id,
+                        ),
+                        scope,
+                        posting,
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            if Counter(
+                (
+                    item.lane,
+                    item.amount_delta.amount,
+                    item.amount_delta.currency.code,
+                    item.amount_delta.currency.minor_units,
+                    fact.billing_account_id,
+                )
+                for item in fact.effects
+            ) != Counter(
+                (
+                    item["lane"],
+                    item["amount_delta"],
+                    item["currency"],
+                    item["minor_units"],
+                    item["billing_account_id"],
+                )
+                for item in postings
+            ):
+                raise ValueError("accounting posting effects disagree")
+            allocation = _table(scope, "allocation_effects")
+            allocations = (
+                db.execute(
+                    _scoped(
+                        select(allocation).where(
+                            allocation.c.posting_group_id == fact.posting_group_id,
+                        ),
+                        scope,
+                        allocation,
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            if Counter(
+                (
+                    item.settlement_id,
+                    item.document_id,
+                    item.effect_kind,
+                    item.amount_delta.amount,
+                    item.amount_delta.currency.code,
+                    item.amount_delta.currency.minor_units,
+                    item.offsets_allocation_id,
+                    fact.billing_account_id,
+                )
+                for item in fact.allocations
+            ) != Counter(
+                (
+                    item["settlement_id"],
+                    item["document_id"],
+                    item["effect_kind"],
+                    item["amount_delta"],
+                    item["currency"],
+                    item["minor_units"],
+                    item["offsets_allocation_id"],
+                    item["billing_account_id"],
+                )
+                for item in allocations
+            ):
+                raise ValueError("accounting allocation effects disagree")
+            return fact
+        except (ValueError, TypeError, DecimalException, MoneyError) as exc:
+            raise BillingRuleViolation(
+                "accounting_fact_integrity", "stored V1 accounting evidence is invalid"
+            ) from exc
+
+
+def get_allocation_accounting_fact_v1(
+    db: Session, *, scope: Scope, posting_group_id: UUID
+) -> AccountingFactV1:
+    """Resolve an allocation receipt's original posting group to sealed V1 evidence.
+
+    The result remains historical after reversal/deallocation; it is not current
+    capacity or authority to allocate. No locks or autoflush are introduced.
+    """
+    from dotmac_billing.opening_queries import _scoped, _table
+
+    if not isinstance(scope, TenantScope | PlatformScope) or (
+        isinstance(scope, TenantScope) and not isinstance(scope.tenant_id, UUID)
+    ):
+        raise BillingRuleViolation(
+            "scope_mismatch", "accounting reads require explicit scope"
+        )
+    if not isinstance(posting_group_id, UUID):
+        raise BillingRuleViolation(
+            "invalid_posting_group_id", "posting group identity must be a UUID"
+        )
+    table = _table(scope, "accounting_facts")
+    with db.no_autoflush:
+        fact_id = db.execute(
+            _scoped(
+                select(table.c.id).where(
+                    table.c.posting_group_id == posting_group_id,
+                    table.c.fact_version == 1,
+                ),
+                scope,
+                table,
+            )
+        ).scalar_one_or_none()
+        if fact_id is None:
+            raise BillingRuleViolation(
+                "not_found", "exact allocation V1 accounting fact was not found"
+            )
+        fact = get_accounting_fact_v1(db, scope=scope, fact_id=fact_id)
+        # The exact getter also verifies original group_kind == effect_kind.
+        if fact.effect_kind != "allocation":
+            raise BillingRuleViolation(
+                "allocation_fact_kind_invalid",
+                "posting group must describe an original allocation",
+            )
+        return fact
 
 
 def get_billing_account_observation(
@@ -207,6 +414,8 @@ def _get_invoice_document_fact(
 
 
 __all__ = [
+    "get_accounting_fact_v1",
+    "get_allocation_accounting_fact_v1",
     "get_billing_account_observation",
     "get_current_settlement_allocation",
     "get_current_cash_credit_draw",

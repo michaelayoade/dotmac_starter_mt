@@ -12,6 +12,8 @@ All notable changes follow Semantic Versioning.
 - Add bi12 nullable immutable obligation JSON and final append-only guards.
   Predecessor V1 evidence is never rewritten. The successor public document
   reader verifies and decodes original V1 or V2 facts for presentation.
+- Add get_accounting_fact_v1 for scoped immutable original posting/allocation
+  evidence, including after linked reversals; no current capacity is inferred.
 - This is unpublished source preparation; hosted CI and release remain required.
 
 ## 0.1.0a8 — UNRELEASED

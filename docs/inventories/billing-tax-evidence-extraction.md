@@ -9,3 +9,10 @@ Expected withholding has its own explicit purpose and affects presentation only.
 Acceptance requires full exact-Money component/line roundtrip, fixed/progressive/multiple/zero results, tenant isolation, changed-input conflict, SQL mutation refusal, and populated bi11 predecessor upgrade/downgrade/reupgrade. Historical schema fixtures deliberately use predecessor-shaped mappings instead of current columns; current-schema acceptance must restore the new mapper. Tests are authored for hosted CI only.
 
 The dependent Sub native-issuance consumer must publish/verify Billing a9 before its exact pin and lock change. Native activation requires real matching Tax policy; package installation and source PRs do not claim that activation or a complete legacy billing authority switch.
+
+Native proof replay also needs the original allocation identity after reversal.
+The existing AccountingFactV1 DTO already carries that evidence, but its public
+historical reader was missing. The additive scoped get_accounting_fact_v1
+exposes verified immutable original evidence without owner-table reads in Sub
+or a mutable current-allocation dependency. Hosted both-plane canaries cover
+historical deallocation, isolation, discriminator and content integrity.
