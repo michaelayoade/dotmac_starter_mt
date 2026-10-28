@@ -137,12 +137,14 @@ class TaxDeterminationComponentEvidenceV1:
             not isinstance(line, TaxDeterminationLineEvidenceV1) for line in self.lines
         ):
             raise ValueError("Tax component requires typed lines")
-        for identity in (
+        for optional_identity in (
             self.party_classification_id,
             self.supply_classification_id,
             self.place_classification_id,
         ):
-            if identity is not None and not isinstance(identity, UUID):
+            if optional_identity is not None and not isinstance(
+                optional_identity, UUID
+            ):
                 raise ValueError("Tax classification identity must be an optional UUID")
         for category in (self.party_category, self.supply_category, self.place_code):
             if category is not None and not isinstance(category, str):

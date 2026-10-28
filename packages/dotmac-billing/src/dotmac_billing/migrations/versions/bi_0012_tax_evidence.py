@@ -61,20 +61,33 @@ def upgrade() -> None:
 def downgrade() -> None:
     for prefix in _prefixes():
         # Never discard original successor evidence, including empty V2 sets.
+        obligations = sa.table(
+            prefix + "rated_obligations",
+            sa.column("tax_evidence", sa.JSON()),
+            schema="mod_billing",
+        )
+        document_facts = sa.table(
+            prefix + "invoice_document_facts",
+            sa.column("contract_version", sa.String()),
+            schema="mod_billing",
+        )
         count = (
             op.get_bind()
             .execute(
-                sa.text(
-                    f"SELECT count(*) FROM mod_billing.{prefix}rated_obligations WHERE tax_evidence IS NOT NULL"
-                )
+                sa.select(sa.func.count())
+                .select_from(obligations)
+                .where(obligations.c.tax_evidence.is_not(None))
             )
             .scalar_one()
         )
         facts = (
             op.get_bind()
             .execute(
-                sa.text(
-                    f"SELECT count(*) FROM mod_billing.{prefix}invoice_document_facts WHERE contract_version = 'billing.invoice.document.fact.v2'"
+                sa.select(sa.func.count())
+                .select_from(document_facts)
+                .where(
+                    document_facts.c.contract_version
+                    == "billing.invoice.document.fact.v2"
                 )
             )
             .scalar_one()
