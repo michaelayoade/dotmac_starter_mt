@@ -683,6 +683,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
     }
     assert enabled == {
         "dotmac-connector-flutterwave",
+        "dotmac-connector-freeradius",
         "dotmac-connector-linkedin",
         "dotmac-connector-meta-social",
         "dotmac-connector-mono",
@@ -699,12 +700,14 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
                 "dotmac-integration-v0.1.0a11",
                 "dotmac-integration-v0.1.0a14",
                 "dotmac-integration-v0.1.0a18",
+                "dotmac-integration-v0.1.0a20",
             },
         )["connector_key"]
         for distribution in enabled
     }
     assert resolved_keys == {
         "dotmac-connector-flutterwave": "flutterwave",
+        "dotmac-connector-freeradius": "freeradius",
         "dotmac-connector-linkedin": "linkedin",
         "dotmac-connector-meta-social": "meta_social",
         "dotmac-connector-mono": "mono",
@@ -725,6 +728,24 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
         with pytest.raises(SystemExit) as refusal:
             gate.resolve(attempt, tags={"dotmac-integration-v0.1.0a10"})
         assert "not an allowlisted connector plugin" in str(refusal.value), attempt
+
+
+def test_freeradius_supply_release_requires_the_spi_17_successor_tag() -> None:
+    """The existing a19 tag cannot authorize the SPI 1.7 supply release."""
+    gate = _gate()
+    distribution = "dotmac-connector-freeradius"
+    entry = _policy()["connectors"][distribution]
+    assert entry["release_enabled"] is True
+    assert entry["integration_floor"] == "0.1.0a20"
+    with pytest.raises(SystemExit) as refusal:
+        gate.resolve(distribution, tags={"dotmac-integration-v0.1.0a19"})
+    assert "0.1.0a20" in str(refusal.value)
+    assert (
+        gate.resolve(distribution, tags={"dotmac-integration-v0.1.0a20"})[
+            "connector_key"
+        ]
+        == "freeradius"
+    )
 
 
 def test_the_real_entry_resolves_through_the_release_command(
