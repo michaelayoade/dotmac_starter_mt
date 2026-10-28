@@ -32,12 +32,13 @@ def _minor_units(amount: Decimal, currency: Currency) -> int:
         return 0
     shift = exponent + currency.minor_units
     if shift < 0:
-        divisor = 10 ** (-shift)
+        divisor: int = 10 ** (-shift)
         coefficient, remainder = divmod(coefficient, divisor)
         if remainder:
             raise PayrollTotalsViolation("payroll amounts exceed currency precision")
     else:
-        coefficient *= 10**shift
+        factor: int = 10**shift
+        coefficient *= factor
     return -coefficient if sign else coefficient
 
 
