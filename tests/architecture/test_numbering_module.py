@@ -448,17 +448,20 @@ def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     )["modules"]["dotmac-numbering"]
     assert entry["db_schema"] == models.SCHEMA
     assert entry["import_name"] == "dotmac_numbering"
-    assert entry["kernel_floor"] == "0.1.0a66"
+    assert entry["kernel_floor"] == "0.1.0a98"
     assert MIGRATION.name in " ".join(entry["wheel_contents"]["required"])
     assert REPLACEMENT_MIGRATION.name in " ".join(entry["wheel_contents"]["required"])
 
 
-def test_the_pinned_kernel_floor_is_the_release_that_named_the_ledger() -> None:
-    """a65 allocated `mod_numbering`; a66 published `idempotency_ledger.v1`.
-    The floor is the higher, because a65 cannot even import this manifest —
-    `validate_prerequisites` does not know the name."""
+def test_the_pinned_kernel_floor_includes_the_engine_free_transaction_seam() -> None:
+    """a66 named the ledger; a98 additionally publishes the safe savepoint seam.
+
+    Strict creation/enrollment imports dotmac_kernel.transactions rather than
+    building the reference assembly's database runtime through db.py.
+    The hosted kernel-floor lane proves a98 imports and a97 refuses.
+    """
     manifest = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))
-    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a66"
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a98"
 
 
 def test_the_dossier_records_no_adoption_yet() -> None:

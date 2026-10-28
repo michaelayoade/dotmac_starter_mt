@@ -4,6 +4,9 @@ All notable changes to the `dotmac-numbering` distribution.
 
 ## UNRELEASED — 0.1.0a4
 
+- Kernel floor is `>=0.1.0a98` for the public engine-free transaction seam;
+  a97 lacks that import surface. Historical a3/a2 floor facts below are unchanged.
+
 - Extend the existing numbering owner with strict immutable creation and
   explicit enrollment of existing series, immutable collision domains and
   exact-string claims across replacement codes, caller-transaction historical

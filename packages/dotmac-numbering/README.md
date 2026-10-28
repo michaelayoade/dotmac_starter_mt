@@ -7,7 +7,8 @@ allocation.
 `0.1.0a4` is an unpublished replacement-contract candidate. The retained a3
 release tag carries its own source/artifact evidence; this candidate does not
 reissue it. Hosted CI, publication/install-back verification, and consumer
-acceptance remain separate gates. Kernel floor remains `>=0.1.0a66`.
+acceptance remain separate gates. The a4 kernel floor is `>=0.1.0a98`, which publishes the engine-free
+transaction seam used by strict creation/enrollment.
 See [the changelog](CHANGELOG.md) and the
 [source audit](../../docs/inventories/numbering-replacement-sources-2026-10-28.md).
 

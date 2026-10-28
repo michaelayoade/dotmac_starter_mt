@@ -1562,7 +1562,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a66"
+dotmac-kernel = ">=0.1.0a98"
 sqlalchemy = "^2.0"
 
 [package.source]

@@ -13,6 +13,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
+from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -226,8 +227,6 @@ def create_series(
     domain: CollisionDomain,
 ) -> SeriesDefinition:
     """Create a strictly immutable series, atomically inside the caller transaction."""
-    from dotmac_kernel.transactions import conflict_savepoint
-
     with conflict_savepoint(db):
         return _create_series(
             db, scope=scope, configuration=configuration, domain=domain
@@ -242,8 +241,6 @@ def enroll_series(
     domain: CollisionDomain,
 ) -> SeriesDefinition:
     """Freeze the exact observed legacy identity, preserving its counters and format."""
-    from dotmac_kernel.transactions import conflict_savepoint
-
     with conflict_savepoint(db):
         return _enroll_series(
             db,

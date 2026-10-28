@@ -90,6 +90,11 @@ queried in this session; this inventory does not assert current installability.
 The a3 source changes typed ORM construction/results; it adds no cross-series
 claims, strict creation or new migration compared with a2.
 
+The a4 extension also raises its kernel floor to `>=0.1.0a98`: the retained
+a98 tag contains `dotmac_kernel/transactions.py` exporting `conflict_savepoint`,
+while a97 does not. Strict create/enroll uses that engine-free public seam.
+Hosted floor acceptance must prove the positive and previous-release refusal.
+
 The replacement contract uses a new declared version, not a reissue of a3.
 ERP may consume it only after exact artifact publication, hosted acceptance,
 and an updated immutable dependency pin/lock. No production enrollment,
