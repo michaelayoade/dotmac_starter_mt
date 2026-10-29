@@ -1415,7 +1415,59 @@ def _require_trusted_contract_sources(repository_root: Path) -> None:
 @dataclass(frozen=True)
 class _TrustedCatalogue:
     packages_root: Path
-    import_roots: Mapping[str, str]
+    import_roots: Mapping[str, str | tuple[str, ...]]
+
+    def __post_init__(self) -> None:
+        normalized = {
+            distribution: (roots,) if isinstance(roots, str) else tuple(roots)
+            for distribution, roots in self.import_roots.items()
+        }
+        _root_owners(normalized)
+        object.__setattr__(self, "import_roots", MappingProxyType(normalized))
+
+
+def _root_owners(
+    import_roots: Mapping[str, str | tuple[str, ...]],
+) -> Mapping[str, str]:
+    owners: dict[str, str] = {}
+    for distribution, declared in import_roots.items():
+        roots = (declared,) if isinstance(declared, str) else declared
+        if not roots or len(set(roots)) != len(roots):
+            raise GateConfigurationError(
+                f"{distribution}: empty or duplicate import roots"
+            )
+        for root in roots:
+            if not isinstance(root, str) or not root.isidentifier():
+                raise GateConfigurationError(
+                    f"{distribution}: unsafe import root {root!r}"
+                )
+            if root in owners:
+                raise GateConfigurationError(
+                    f"duplicate import root owner for {root!r}"
+                )
+            owners[root] = distribution
+    return MappingProxyType(owners)
+
+
+def _package_import_roots(
+    repository_root: Path, revision: str, distribution: str
+) -> tuple[str, ...]:
+    roots = tuple(
+        item.decode("utf-8")
+        for item in _git_bytes(
+            repository_root,
+            (
+                "ls-tree",
+                "-d",
+                "-z",
+                "--name-only",
+                f"{revision}:packages/{distribution}/src",
+            ),
+        ).split(b"\0")
+        if item and not item.decode("utf-8").endswith(".egg-info")
+    )
+    _root_owners({distribution: roots})
+    return roots
 
 
 @contextmanager
@@ -1457,7 +1509,7 @@ def _trusted_catalogue(
     with tempfile.TemporaryDirectory(prefix="kernel-composition-catalogue-") as raw:
         packages_root = Path(raw) / "packages"
         packages_root.mkdir()
-        roots: dict[str, str] = {}
+        roots: dict[str, tuple[str, ...]] = {}
         for distribution in names:
             if not _SAFE_COMPONENT.fullmatch(distribution):
                 raise GateConfigurationError(
@@ -1471,39 +1523,32 @@ def _trusted_catalogue(
                 f"packages/{distribution}/EXTRACTION.toml",
             )
             (package_dir / "EXTRACTION.toml").write_bytes(dossier)
-            source_roots = tuple(
-                item.decode("utf-8")
-                for item in _git_bytes(
-                    repository_root,
-                    (
-                        "ls-tree",
-                        "-d",
-                        "-z",
-                        "--name-only",
-                        f"{revision}:packages/{distribution}/src",
-                    ),
-                ).split(b"\0")
-                if item and not item.decode("utf-8").endswith(".egg-info")
+            source_roots = _package_import_roots(
+                repository_root, revision, distribution
             )
-            if len(source_roots) != 1 or not source_roots[0].isidentifier():
-                raise GateConfigurationError(
-                    f"{distribution}: expected one import package, got {source_roots!r}"
-                )
-            import_root = source_roots[0]
-            roots[distribution] = import_root
-            import_dir = package_dir / "src" / import_root
-            import_dir.mkdir(parents=True)
+            roots[distribution] = source_roots
+            for import_root in source_roots:
+                (package_dir / "src" / import_root).mkdir(parents=True)
             parsed = tomllib.loads(dossier.decode("utf-8"))
             if (
                 parsed.get("classification")
                 == PackageClassification.OPTIONAL_MODULE.value
             ):
+                # Pinned dimensional semantics locate the owner manifest by
+                # canonical distribution name, independently of sibling roots.
+                manifest_root = distribution.replace("-", "_")
+                if manifest_root not in source_roots:
+                    raise GateConfigurationError(
+                        f"{distribution}: canonical manifest import package is absent"
+                    )
                 manifest = _git_show(
                     repository_root,
                     revision,
-                    f"packages/{distribution}/src/{import_root}/manifest.py",
+                    f"packages/{distribution}/src/{manifest_root}/manifest.py",
                 )
-                (import_dir / "manifest.py").write_bytes(manifest)
+                (package_dir / "src" / manifest_root / "manifest.py").write_bytes(
+                    manifest
+                )
         catalogue = _TrustedCatalogue(packages_root, MappingProxyType(roots))
         # This independently re-reads every materialized dossier and refuses
         # any missing/unknown classification before product facts are derived.
@@ -2699,7 +2744,7 @@ def _decode(observations: Mapping[str, bytes], name: str) -> str:
 def _module_registrations(
     assembly_source: str,
     expression_source: str,
-    import_roots: Mapping[str, str],
+    import_roots: Mapping[str, str | tuple[str, ...]],
 ) -> frozenset[str]:
     try:
         tree = ast.parse(assembly_source)
@@ -2723,9 +2768,7 @@ def _module_registrations(
             target, value = statement.target, statement.value
         if isinstance(target, ast.Name) and value is not None:
             assignments[target.id] = value
-    root_to_distribution = {
-        root: distribution for distribution, root in import_roots.items()
-    }
+    root_to_distribution = _root_owners(import_roots)
     found: set[str] = set()
     resolving: set[str] = set()
 
@@ -2777,16 +2820,16 @@ def _module_registrations(
     return frozenset(found)
 
 
-def _migration_lineages(source: str, import_roots: Mapping[str, str]) -> frozenset[str]:
+def _migration_lineages(
+    source: str, import_roots: Mapping[str, str | tuple[str, ...]]
+) -> frozenset[str]:
     parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read_string(source)
         locations = parser.get("alembic", "version_locations", fallback="")
     except configparser.Error as exc:
         raise GateDerivationError("migration config does not parse") from exc
-    root_to_distribution = {
-        root: distribution for distribution, root in import_roots.items()
-    }
+    root_to_distribution = _root_owners(import_roots)
     lineages: set[str] = set()
     for token in locations.split():
         package, separator, resource = token.partition(":")
@@ -2898,7 +2941,22 @@ def _derive_records(
         configuration.published_sources,
         configuration.kernel_subject,
     )
-    published_index, _ = _published_python_index(repository_root, catalogue, effective)
+    published_index, published_owners = _published_python_index(
+        repository_root, catalogue, effective
+    )
+    runtime_root_owners = dict(_root_owners(catalogue.import_roots))
+    for module, owner in published_owners.items():
+        root = module.split(".")[0]
+        previous = runtime_root_owners.get(root)
+        if previous is not None and previous != owner.distribution:
+            raise GateDerivationError(f"published import root {root!r} changes owner")
+        runtime_root_owners[root] = owner.distribution
+    combined_roots = {
+        distribution: tuple(
+            root for root, owner in runtime_root_owners.items() if owner == distribution
+        )
+        for distribution in catalogue.import_roots
+    }
     reachability = _product_runtime_reachability(
         product=product,
         clone=clone,
@@ -2913,13 +2971,13 @@ def _derive_records(
         _module_registrations(
             _decode(observations, "product-assembly-source"),
             _decode(observations, "module-registration"),
-            catalogue.import_roots,
+            combined_roots,
         )
         if assembly_reached
         else frozenset()
     )
     lineages = _migration_lineages(
-        _decode(observations, "migration-config"), catalogue.import_roots
+        _decode(observations, "migration-config"), combined_roots
     )
     reached_roots = {name.split(".")[0] for name in reachability.external_modules}
     rows: list[CompositionRecord] = []
@@ -2961,7 +3019,10 @@ def _derive_records(
             ),
             "runtime_consumption": (
                 DimensionValue.TRUE
-                if catalogue.import_roots[dossier.distribution] in reached_roots
+                if any(
+                    runtime_root_owners.get(root) == dossier.distribution
+                    for root in reached_roots
+                )
                 else DimensionValue.FALSE
             ).value,
         }
@@ -3172,22 +3233,30 @@ def _published_python_index(
     index: dict[str, _GitPythonFile] = {}
     owners: dict[str, PublishedSource] = {}
     for distribution, source in sorted(sources.items()):
-        import_root = catalogue.import_roots[distribution]
-        prefix = f"packages/{distribution}/src/{import_root}"
-        package_index = _git_python_index(
-            repository_root, source.peeled_commit, prefix, module_prefix=import_root
-        )
-        if import_root not in package_index:
+        if distribution not in catalogue.import_roots:
             raise GateDerivationError(
-                f"{source.tag}: published import root {import_root!r} is missing"
+                f"published owner {distribution!r} is absent from catalogue"
             )
-        for module, entry in package_index.items():
-            if module in index:
+        # Historical source may add or retire roots independently of the current
+        # catalogue. Its complete immutable src tree owns the evaluated bytes.
+        for import_root in _package_import_roots(
+            repository_root, source.peeled_commit, distribution
+        ):
+            prefix = f"packages/{distribution}/src/{import_root}"
+            package_index = _git_python_index(
+                repository_root, source.peeled_commit, prefix, module_prefix=import_root
+            )
+            if import_root not in package_index:
                 raise GateDerivationError(
-                    f"published packages claim duplicate import module {module!r}"
+                    f"{source.tag}: published import root {import_root!r} is missing"
                 )
-            index[module] = entry
-            owners[module] = source
+            for module, entry in package_index.items():
+                if module in index:
+                    raise GateDerivationError(
+                        f"published packages claim duplicate import module {module!r}"
+                    )
+                index[module] = entry
+                owners[module] = source
     return MappingProxyType(index), MappingProxyType(owners)
 
 
@@ -3200,7 +3269,9 @@ def _reached_deferred_debt(
     sources: Mapping[str, PublishedSource],
 ) -> tuple[DeferredDebtReach, ...]:
     index, owners = _published_python_index(repository_root, catalogue, sources)
-    known_roots = set(catalogue.import_roots.values())
+    known_roots = set(_root_owners(catalogue.import_roots)) | {
+        module.split(".")[0] for module in index
+    }
     known_product_imports = {
         module
         for module in product_external_modules
@@ -3213,18 +3284,25 @@ def _reached_deferred_debt(
             f"{sorted(missing_modules)!r}"
         )
     roots = known_product_imports
-    roots.update(
-        catalogue.import_roots[record.distribution]
-        for record in records
-        if record.runtime_consumption is DimensionValue.TRUE
-    )
+    for record in records:
+        if (
+            record.runtime_consumption is DimensionValue.TRUE
+            and record.distribution not in sources
+        ):
+            raise GateDerivationError(
+                f"runtime owner {record.distribution!r} lacks published lock sources"
+            )
+    # Explicit imported modules seed traversal. Consuming one sibling package
+    # does not execute every other import package shipped by its distribution.
     reachability = _walk_import_graph(
         repository=repository_root,
         index=MappingProxyType(index),
         roots=tuple(sorted(roots)),
         include_package_parents=True,
     )
-    known_roots = set(catalogue.import_roots.values())
+    known_roots = set(_root_owners(catalogue.import_roots)) | {
+        module.split(".")[0] for module in index
+    }
     missing_roots = {
         module.split(".")[0] for module in reachability.external_modules
     } & known_roots

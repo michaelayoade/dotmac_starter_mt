@@ -400,3 +400,161 @@ def test_explicit_known_owner_module_missing_in_selected_release_refuses(
                 )
             },
         )
+
+
+def _multi_root_publication(tmp_path: Path):
+    distribution = "dotmac-learning"
+    primary = "dotmac_learning"
+    sibling = "dotmac_learning_bank_rules"
+    sibling_service = f"packages/{distribution}/src/{sibling}/service.py"
+    repo = _repo(
+        tmp_path,
+        {
+            f"packages/{distribution}/EXTRACTION.toml": (
+                'package = "dotmac-learning"\nclassification = "optional-module"\n'
+            ),
+            f"packages/{distribution}/pyproject.toml": (
+                '[project]\nname = "dotmac-learning"\nversion = "1.0"\n'
+            ),
+            f"packages/{distribution}/src/{primary}/__init__.py": "",
+            f"packages/{distribution}/src/{primary}/service.py": "",
+            f"packages/{distribution}/src/{primary}/manifest.py": "module = None\n",
+            f"packages/{distribution}/src/{sibling}/__init__.py": "",
+            sibling_service: "from dotmac_kernel.db import conflict_savepoint\n",
+        },
+    )
+    revision = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "tag", "dotmac-learning-v1.0")
+    _git(repo, "update-ref", "refs/remotes/origin/main", revision)
+    source = gate.PublishedSource(distribution, "1.0", "dotmac-learning-v1.0", revision)
+    catalogue = gate._TrustedCatalogue(
+        repo / "packages", {distribution: (primary, sibling)}
+    )
+    return repo, catalogue, source, sibling_service
+
+
+def test_catalogue_materializes_every_owner_import_package_and_canonical_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _, source, _ = _multi_root_publication(tmp_path)
+    monkeypatch.setattr(gate, "TRUSTED_CONTRACT_REVISION", source.peeled_commit)
+    with gate._trusted_catalogue(repo, source.peeled_commit) as catalogue:
+        assert catalogue.import_roots["dotmac-learning"] == (
+            "dotmac_learning",
+            "dotmac_learning_bank_rules",
+        )
+        assert (
+            catalogue.packages_root / "dotmac-learning/src/dotmac_learning_bank_rules"
+        ).is_dir()
+        assert (
+            catalogue.packages_root / "dotmac-learning/src/dotmac_learning/manifest.py"
+        ).read_text() == "module = None\n"
+
+
+def test_published_sibling_import_retains_its_owner_debt_without_inventing_reach(
+    tmp_path: Path,
+) -> None:
+    repo, catalogue, source, sibling_service = _multi_root_publication(tmp_path)
+    gate._verify_published_source(repo, source)
+
+    def measure(module):
+        return gate._reached_deferred_debt(
+            repository_root=repo,
+            records=(),
+            product_external_modules=frozenset({module}),
+            catalogue=catalogue,
+            sources={"dotmac-learning": source},
+        )
+
+    assert measure("dotmac_learning.service") == ()
+    assert measure("dotmac_learning_bank_rules.service") == (
+        gate.DeferredDebtReach(
+            "dotmac-learning", sibling_service, 1, "1.0", source.peeled_commit
+        ),
+    )
+
+
+def test_published_roots_are_discovered_at_the_actual_source_not_filtered_by_catalogue(
+    tmp_path: Path,
+) -> None:
+    repo, _, source, sibling_service = _multi_root_publication(tmp_path)
+    catalogue = gate._TrustedCatalogue(
+        repo / "packages", {"dotmac-learning": "dotmac_learning"}
+    )
+    debt = gate._reached_deferred_debt(
+        repository_root=repo,
+        records=(),
+        product_external_modules=frozenset({"dotmac_learning_bank_rules.service"}),
+        catalogue=catalogue,
+        sources={"dotmac-learning": source},
+    )
+    assert [(item.source_path, item.sites) for item in debt] == [(sibling_service, 1)]
+
+
+def test_missing_module_under_an_owner_sibling_root_refuses(tmp_path: Path) -> None:
+    repo, catalogue, source, _ = _multi_root_publication(tmp_path)
+    with pytest.raises(
+        gate.GateDerivationError, match="dotmac_learning_bank_rules.future"
+    ):
+        gate._reached_deferred_debt(
+            repository_root=repo,
+            records=(),
+            product_external_modules=frozenset({"dotmac_learning_bank_rules.future"}),
+            catalogue=catalogue,
+            sources={"dotmac-learning": source},
+        )
+
+
+def test_sibling_root_registration_and_lineage_resolve_to_the_same_owner() -> None:
+    roots = {"dotmac-learning": ("dotmac_learning", "dotmac_learning_bank_rules")}
+    assert gate._module_registrations(
+        "from dotmac_learning_bank_rules.manifest import module as sibling\n",
+        "(sibling,)",
+        roots,
+    ) == frozenset({"dotmac-learning"})
+    assert gate._migration_lineages(
+        "[alembic]\nversion_locations = "
+        "dotmac_learning_bank_rules.migrations:versions\n",
+        roots,
+    ) == frozenset({"dotmac-learning"})
+    with pytest.raises(
+        gate.GateConfigurationError, match="duplicate import root owner"
+    ):
+        gate._TrustedCatalogue(
+            Path("packages"),
+            {
+                "dotmac-learning": ("dotmac_learning", "dotmac_learning_bank_rules"),
+                "dotmac-other": "dotmac_learning_bank_rules",
+            },
+        )
+
+
+def test_catalogue_sibling_cannot_supply_a_package_missing_from_published_source(
+    tmp_path: Path,
+) -> None:
+    repo, catalogue, _, _ = _multi_root_publication(tmp_path)
+    sibling = repo / "packages/dotmac-learning/src/dotmac_learning_bank_rules"
+    (sibling / "service.py").unlink()
+    (sibling / "__init__.py").unlink()
+    (repo / "packages/dotmac-learning/pyproject.toml").write_text(
+        '[project]\nname = "dotmac-learning"\nversion = "2.0"\n'
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "publish layout without the sibling package")
+    _git(repo, "tag", "dotmac-learning-v2.0")
+    source = gate.PublishedSource(
+        "dotmac-learning",
+        "2.0",
+        "dotmac-learning-v2.0",
+        _git(repo, "rev-parse", "HEAD"),
+    )
+    gate._verify_published_source(repo, source)
+    with pytest.raises(gate.GateDerivationError, match="explicit product imports"):
+        gate._reached_deferred_debt(
+            repository_root=repo,
+            records=(),
+            product_external_modules=frozenset({"dotmac_learning_bank_rules.service"}),
+            catalogue=catalogue,
+            sources={"dotmac-learning": source},
+        )
