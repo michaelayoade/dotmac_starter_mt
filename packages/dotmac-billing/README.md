@@ -372,4 +372,34 @@ Nonempty Tax V2 evidence currently requires tenant scope, matching Tax's public
 contract. Empty V3 evidence and legacy facts remain supported in both Billing
 planes. V3 uses a versioned array envelope in bi12's existing immutable JSON
 column, including for empty evidence; no DDL or historical reinterpretation is
-needed. Billing a9 must be verified and released before integrating a10.
+needed. Billing a9 is an unpublished source allocation carried completely by a10;
+it is superseded rather than required as an intermediate publication.
+
+
+## Final release and adoption gates
+
+The final serial publication train is Payroll a2 → Tax a7 → Billing a10.
+Tax a6 and Billing a9 are unpublished source allocations superseded by a7 and
+a10 respectively; their complete source changes remain included in those final
+successors. The historical allocations are retained, not published as prerequisites.
+This source documentation establishes no artifact publication or consumer adoption.
+
+Full hosted CI must qualify the final head and current base. Migration acceptance
+must exercise the direct published Tax a4 / tx_0003 → head path through tx_0004
+and tx_0005, and published Billing a8 / bi11 → bi12 on both declared planes.
+Published Tax a4 and Billing bi1–bi11 migration bytes remain immutable; the
+existing bi12 source is preserved without a new DDL edit. V1/V2/V3 invoice and
+withholding evidence must retain exact historical decoding and replay compatibility.
+Old Tax policy writers require a maintenance fence before tx_0004; schema/API
+compatibility does not establish old-binary write compatibility. Restore or
+forward-recovery procedures must be rehearsed before any production authority
+change; populated-state downgrade refusal is not a rollback plan.
+
+Each final distribution still requires its separate verified published artifact,
+install-back verification, peeled tag and truthful release record under the
+release captain's freeze. Only then may consumers exact-pin those artifacts,
+regenerate locks and migration heads, and pass full hosted CI. Immutable-digest
+staging acceptance on Seabone remains required before any separately authorized
+production authority change. These gates activate no policy or writer. The native
+accepted-proof capability remains bounded to one pristine invoice proof lane;
+this release train does not complete the broader legacy billing cutover.

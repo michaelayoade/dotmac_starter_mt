@@ -17,9 +17,11 @@ All notable changes follow Semantic Versioning.
 - Reuse immutable bi12 JSON with an explicit versioned array envelope; no DDL.
   Prior audit results are not added to charged invoice tax. Legacy readers,
   evidence and all migration bytes remain unchanged. Tax V2 remains tenant-only.
-- Requires verified a9 publication before integration; no publication is claimed.
+- Includes the complete a9 evidence and bi12 source allocation. Full hosted CI,
+  direct published a8/bi11-to-bi12 migration qualification on both planes and
+  verified a10 publication precede adoption; no publication is claimed.
 
-## 0.1.0a9 — UNRELEASED
+## 0.1.0a9 — unpublished source allocation, superseded by a10
 
 - Add V2 rated invoice authoring and original document facts carrying complete
   Tax-authored determination sets, rule versions, source/result fingerprints,
@@ -31,7 +33,8 @@ All notable changes follow Semantic Versioning.
   reader verifies and decodes original V1 or V2 facts for presentation.
 - Add get_accounting_fact_v1 for scoped immutable original posting/allocation
   evidence, including after linked reversals; no current capacity is inferred.
-- This is unpublished source preparation; hosted CI and release remain required.
+- This allocation is carried completely by a10; hosted CI and the final a10
+  release remain required. It is not an intermediate publication prerequisite.
 
 ## 0.1.0a8 — UNRELEASED
 
