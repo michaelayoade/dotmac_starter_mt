@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import yaml  # type: ignore[import-untyped]
@@ -254,6 +255,8 @@ def test_main_checks_both_byte_pins_before_loading_and_parsing(
 
     def evaluate(bindings: object, **kwargs: object) -> SimpleNamespace:
         assert bindings is configuration
+        assert kwargs["repository_root"] != tmp_path
+        assert all(path.is_relative_to(tmp_path) for path in kwargs["clones"].values())
         events.append(("evaluate", None))
         return result
 
@@ -275,7 +278,18 @@ def test_main_checks_both_byte_pins_before_loading_and_parsing(
         lambda content, expected, **kwargs: events.append(("pin", content)),
     )
 
-    def load(*args: object, **kwargs: object) -> SimpleNamespace:
+    def materialize(
+        workspace: Path, view: Path, verifier: object, source: bytes
+    ) -> dict:
+        assert workspace == tmp_path
+        assert view != workspace
+        events.append(("view", None))
+        return {}
+
+    monkeypatch.setattr(runner, "_materialize_verified_view", materialize)
+
+    def load(view: Path, **kwargs: object) -> SimpleNamespace:
+        assert view != tmp_path
         events.append(("load", None))
         return gate
 
@@ -284,6 +298,7 @@ def test_main_checks_both_byte_pins_before_loading_and_parsing(
     assert events == [
         ("pin", b"compatibility_gate.py"),
         ("pin", b"compatibility_gate_bindings.json"),
+        ("view", None),
         ("load", None),
         ("parse", b"compatibility_gate_bindings.json"),
         ("evaluate", None),
@@ -389,6 +404,123 @@ def test_single_open_reader_refuses_symlinks_and_returns_captured_bytes(
     link.symlink_to(target)
     with pytest.raises(runner.TrustedRunnerAcquisitionError, match="unreadable"):
         runner._read_regular_file(link, label="link")
+
+
+def _view_repository(
+    tmp_path: Path,
+    runner: ModuleType,
+    verifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, dict[str, bytes]]:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    _git(repository, "config", "user.name", "Trust Test")
+    _git(repository, "config", "user.email", "trust@example.invalid")
+    _git(repository, "config", "commit.gpgsign", "false")
+    sources = {}
+    for relative in TRUSTED_PATHS:
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        sources[relative] = b"VALUE = 'pinned helper'\n"
+        path.write_bytes(sources[relative])
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-q", "-m", "pinned helper fixture")
+    revision = _git(repository, "rev-parse", "HEAD")
+    monkeypatch.setattr(runner, "TRUSTED_CONTRACT_REVISION", revision)
+    monkeypatch.setattr(verifier, "TRUSTED_CONTRACT_REVISION", revision)
+    for relative in TRUSTED_PATHS:
+        (repository / relative).write_text("raise AssertionError('mutable helper')\n")
+    for relative in ("tools/__init__.py", "tools/composition_contract/__init__.py"):
+        (repository / relative).write_text("raise AssertionError('candidate init')\n")
+    return repository, sources
+
+
+def test_runner_view_uses_git_helpers_and_captured_gate_for_foreign_children(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, verifier = _module("run_gate"), _module()
+    repository, sources = _view_repository(tmp_path, runner, verifier, monkeypatch)
+    view = tmp_path / "view"
+    view.mkdir()
+    gate_source = (
+        b"import sys\nfrom pathlib import Path\n"
+        b"if __name__ == '__main__':\n"
+        b"    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))\n"
+        b"from tools.composition_contract.composition_schema import VALUE\n"
+        b"if __name__ == '__main__':\n    print(VALUE)\n"
+    )
+    monkeypatch.setattr(runner, "GATE_SHA256", hashlib.sha256(gate_source).hexdigest())
+    captured = runner._materialize_verified_view(
+        repository, view, verifier, gate_source
+    )
+    assert captured == sources
+    assert verifier.read_verified_sources(view) == sources
+    assert _git(view, "rev-parse", "HEAD") == _git(repository, "rev-parse", "HEAD")
+    gate_path = view / runner.GATE_PATH
+    assert gate_path.is_file() and not gate_path.is_symlink()
+    assert gate_path.read_bytes() == gate_source
+    with patch.dict(sys.modules):
+        loaded = runner._load_verified_gate(
+            view, helper_sources=captured, gate_source=gate_source
+        )
+        assert loaded.VALUE == "pinned helper"
+        assert Path(loaded.__file__) == gate_path
+    child = subprocess.run(  # noqa: S603 - fixed captured hosted-canary source
+        [sys.executable, "-I", str(gate_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    assert child.stdout == "pinned helper\n"
+    for relative in TRUSTED_PATHS:
+        assert (
+            repository / relative
+        ).read_text() == "raise AssertionError('mutable helper')\n"
+
+
+def test_materialized_view_tampering_is_refused_by_existing_verifier(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, verifier = _module("run_gate"), _module()
+    repository, _ = _view_repository(tmp_path, runner, verifier, monkeypatch)
+    view = tmp_path / "view"
+    view.mkdir()
+    source = b"VALUE = 1\n"
+    monkeypatch.setattr(runner, "GATE_SHA256", hashlib.sha256(source).hexdigest())
+    original_verify = verifier.read_verified_sources
+
+    def tamper_then_verify(root: Path) -> object:
+        (root / TRUSTED_PATHS[0]).write_text("VALUE = 'tampered'\n")
+        return original_verify(root)
+
+    monkeypatch.setattr(verifier, "read_verified_sources", tamper_then_verify)
+    with pytest.raises(verifier.TrustedSourceDriftError, match="differs from"):
+        runner._materialize_verified_view(repository, view, verifier, source)
+
+
+def test_materialized_gate_bytes_must_retain_the_captured_pin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, verifier = _module("run_gate"), _module()
+    repository, _ = _view_repository(tmp_path, runner, verifier, monkeypatch)
+    view = tmp_path / "view"
+    view.mkdir()
+    source = b"VALUE = 1\n"
+    monkeypatch.setattr(runner, "GATE_SHA256", hashlib.sha256(source).hexdigest())
+    original_read = runner._read_regular_file
+
+    def tamper_then_read(path: Path, **kwargs: object) -> bytes:
+        path.write_bytes(b"raise AssertionError('tampered gate')\n")
+        return original_read(path, **kwargs)
+
+    monkeypatch.setattr(runner, "_read_regular_file", tamper_then_read)
+    with pytest.raises(runner.TrustedRunnerError, match="not the pinned candidate"):
+        runner._materialize_verified_view(repository, view, verifier, source)
 
 
 def test_action_detects_current_drift_against_one_git_coordinate(

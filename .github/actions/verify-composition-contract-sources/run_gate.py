@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
@@ -15,7 +17,7 @@ ACTION_ROOT: Final = Path(__file__).resolve().parent
 TRUSTED_CONTRACT_REVISION: Final = "8b4b6d4b42e650c47fe4c04a679a5ccb51c4b2cd"
 GATE_PATH: Final = "tools/composition_contract/compatibility_gate.py"
 BINDINGS_PATH: Final = "tests/architecture/compatibility_gate_bindings.json"
-GATE_SHA256: Final = "a2664790617ac6304255c36f268f8ac1058f29b852c7f60e785af98ba4de905a"
+GATE_SHA256: Final = "c37c85036e41f14b67786bcd5adc5e725b54e1944421425da7ac3ad8f958cfed"
 BINDINGS_SHA256: Final = (
     "ab018998a626bed8540a68de50c42e2485a867a2fe1421a6225d123fede84121"
 )
@@ -134,6 +136,68 @@ def _require_sha256(content: bytes, expected: str, *, label: str) -> None:
         )
 
 
+def _git_output(repository: Path, *arguments: str) -> bytes:
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["git", "-C", str(repository), *arguments],  # noqa: S607
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise TrustedRunnerAcquisitionError(
+            f"could not acquire Git source: {exc}"
+        ) from exc
+    if result.returncode:
+        raise TrustedRunnerAcquisitionError(
+            f"git {arguments[0]} failed: "
+            + result.stderr.decode("utf-8", errors="replace").strip()
+        )
+    if len(result.stdout) > 2 * 1024 * 1024:
+        raise TrustedRunnerAcquisitionError("Git source exceeds the 2097152-byte bound")
+    return result.stdout
+
+
+def _materialize_verified_view(
+    workspace: Path, view: Path, verifier: ModuleType, gate_source: bytes
+) -> Mapping[str, bytes]:
+    """Own a disposable Git-backed view of pinned semantics and captured gate."""
+
+    raw_directory = _git_output(workspace, "rev-parse", "--absolute-git-dir")
+    try:
+        git_directory = raw_directory.decode("utf-8").rstrip("\n")
+    except UnicodeDecodeError as exc:
+        raise TrustedRunnerAcquisitionError("Git directory is not UTF-8") from exc
+    if not Path(git_directory).is_absolute() or any(
+        character in git_directory for character in "\r\n"
+    ):
+        raise TrustedRunnerAcquisitionError("Git directory is not one absolute path")
+    try:
+        with (view / ".git").open("x", encoding="utf-8") as pointer:
+            pointer.write(f"gitdir: {git_directory}\n")
+        contract = view / "tools/composition_contract"
+        contract.mkdir(parents=True)
+        for _, filename in _HELPER_MODULES:
+            relative = f"tools/composition_contract/{filename}"
+            source = _git_output(
+                workspace, "show", f"{TRUSTED_CONTRACT_REVISION}:{relative}"
+            )
+            with (view / relative).open("xb") as target:
+                target.write(source)
+        with (view / GATE_PATH).open("xb") as target:
+            target.write(gate_source)
+    except OSError as exc:
+        raise TrustedRunnerAcquisitionError(
+            f"could not materialize trusted view: {exc}"
+        ) from exc
+    _require_sha256(
+        _read_regular_file(view / GATE_PATH, label="materialized compatibility gate"),
+        GATE_SHA256,
+        label="materialized compatibility gate",
+    )
+    return verifier.read_verified_sources(view)
+
+
 def _require_exact_bindings(gate: ModuleType, content: bytes) -> Any:
     """Parse captured, SHA-verified bytes using the safely loaded pinned gate."""
 
@@ -241,30 +305,34 @@ def main() -> int:
     try:
         workspace = _workspace()
         verifier = _load_verifier()
-        helper_sources = verifier.read_verified_sources(workspace)
         gate_path = workspace / GATE_PATH
         bindings_path = workspace / BINDINGS_PATH
         gate_source = _read_regular_file(gate_path, label="compatibility gate")
         bindings_source = _read_regular_file(bindings_path, label="bindings")
         _require_sha256(gate_source, GATE_SHA256, label="compatibility gate")
         _require_sha256(bindings_source, BINDINGS_SHA256, label="bindings")
-        gate = _load_verified_gate(
-            workspace,
-            helper_sources=helper_sources,
-            gate_source=gate_source,
-        )
-        clones = {
-            "academy": workspace / ".compat-gate-clones/dotmac_academy_app",
-            "erp": workspace / ".compat-gate-clones/dotmac_erp",
-            "sub": workspace / ".compat-gate-clones/dotmac_sub",
-        }
-        bindings = _require_exact_bindings(gate, bindings_source)
-        result = gate.evaluate_gate(
-            bindings,
-            clones=clones,
-            repository_root=workspace,
-        )
-        _report_and_require_expected_result(result)
+        with tempfile.TemporaryDirectory(prefix="trusted-composition-") as raw_view:
+            view = Path(raw_view)
+            helper_sources = _materialize_verified_view(
+                workspace, view, verifier, gate_source
+            )
+            gate = _load_verified_gate(
+                view,
+                helper_sources=helper_sources,
+                gate_source=gate_source,
+            )
+            clones = {
+                "academy": workspace / ".compat-gate-clones/dotmac_academy_app",
+                "erp": workspace / ".compat-gate-clones/dotmac_erp",
+                "sub": workspace / ".compat-gate-clones/dotmac_sub",
+            }
+            bindings = _require_exact_bindings(gate, bindings_source)
+            result = gate.evaluate_gate(
+                bindings,
+                clones=clones,
+                repository_root=view,
+            )
+            _report_and_require_expected_result(result)
     except TrustedRunnerAcquisitionError as exc:
         print(f"TRUSTED COMPATIBILITY ACQUISITION FAILED: {exc}")
         return 2
