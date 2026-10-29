@@ -1554,6 +1554,28 @@ map is
 | `dotmac-tax` | Tenant tax policy, determinations, statutory report snapshots, filing obligations and return lifecycle | ERP tax behavior; Sub supplies billing facts only |
 | `dotmac-work-orders` | Physical-work execution lifecycle and evidence | Sub internal-crew WorkOrder behavior |
 
+### Numbering replacement ownership (a4 source candidate)
+
+`dotmac-numbering` remains the sole series/format/counter/receipt/repair owner.
+Its replacement extension owns immutable domain policy (`NumberDomain`,
+`PlatformNumberDomain`) and exact rendered-number claims (`NumberClaim`,
+`PlatformNumberClaim`) in `number_domains`, `platform_number_domains`,
+`number_claims` and `platform_number_claims`, all in its existing declared
+`mod_numbering` lineage. Tenant tables require nonnull tenant identity and
+forced RLS; platform tables carry no tenant and are denied to tenant roles.
+Strict creation/enrollment freezes configuration before first issuance; legacy
+unenrolled behavior and fingerprints remain compatible. No ERP-specific series
+vocabulary or business activation decision belongs here.
+
+Products retain trusted document-type/domain/partition selection, business
+command identity, reference date and active-series binding. Claims and allocation
+join their document transaction; historical/external reservations preserve
+provenance without fabricated allocation receipts. See
+`docs/inventories/numbering-replacement-sources-2026-10-28.md` for the source
+inventory. This is an unpublished source candidate, not consumer adoption or
+production collision enrollment. The existing owner is extended rather than
+copied into ERP or a new generic registry.
+
 Every persisted class in this cohort has an explicit owner. Table names below
 are relative to the package's declared `mod_*` schema; every adopter owns its
 local copy and no cross-application or sibling-module foreign key is implied.

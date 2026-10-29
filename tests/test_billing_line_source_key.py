@@ -1,20 +1,21 @@
 """Real PostgreSQL provider-key probes; these are not a deployed Sub schema."""
 
-from __future__ import annotations
-
 # Identifiers below come only from the closed Billing plane selection.
 # ruff: noqa: S608
+
+from __future__ import annotations
+
 import os
 import uuid
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
+from alembic import command
+from alembic.config import Config
 from tests import test_billing_isolation as billing
 from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 

@@ -1999,8 +1999,9 @@ def test_expired_retry_record_cannot_free_receivable_or_historical_source_identi
 def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
     plane, monkeypatch
 ):
-    from alembic import command as alembic_command
     from dotmac_billing._receivable_backing import ReceivableBacking
+
+    from alembic import command as alembic_command
 
     selection = ModulePlane.TENANT if plane == "tenant" else ModulePlane.PLATFORM
     with b._scratch_database(

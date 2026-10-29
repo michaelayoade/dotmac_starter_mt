@@ -4,13 +4,15 @@ NULL denotes a predecessor V1 obligation. No issued evidence is backfilled or
 rerated. New JSON remains on the existing scoped, append-only parent rows.
 """
 
-from __future__ import annotations
-
 # Only closed Billing-owned plane/table identifiers are interpolated.
 # ruff: noqa: S608
+
+from __future__ import annotations
+
 import sqlalchemy as sa
-from alembic import op
 from dotmac_kernel.planes import ModulePlane, selected_module_planes
+
+from alembic import op
 
 revision = "bi_0012_tax_evidence"
 down_revision = "bi_0011_settlement_earmarks"
