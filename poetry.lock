@@ -667,7 +667,7 @@ url = "packages/dotmac-banking"
 
 [[package]]
 name = "dotmac-billing"
-version = "0.1.0a8"
+version = "0.1.0a10"
 description = "DotMac dual-plane operational receivables owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -677,6 +677,7 @@ develop = true
 
 [package.dependencies]
 alembic = ">=1.13"
+cryptography = ">=42"
 dotmac-kernel = ">=0.1.0a105"
 sqlalchemy = "^2.0"
 
@@ -774,6 +775,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-compliance-reporting"
+
+[[package]]
+name = "dotmac-config-layers"
+version = "0.1.0a1"
+description = "Generic layered configuration composition: weighted layers, deterministic merge, provenance, conflicts and dated exceptions"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+pydantic = ">=2.7.4,<3.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-config-layers"
 
 [[package]]
 name = "dotmac-connector-flutterwave"
@@ -1308,7 +1327,7 @@ url = "packages/dotmac-inbox-operations"
 
 [[package]]
 name = "dotmac-integration"
-version = "0.1.0a20"
+version = "0.1.0a21"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1390,7 +1409,7 @@ url = "packages/dotmac-kernel"
 
 [[package]]
 name = "dotmac-learning"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Reusable tenant learning results, progress, completion and certificates"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1643,7 +1662,7 @@ url = "packages/dotmac-payments"
 
 [[package]]
 name = "dotmac-payroll"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Composable data-driven payroll-calculation and employee-liability owner"
 optional = false
 python-versions = ">=3.12,<3.14"
@@ -1688,7 +1707,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a88"
+dotmac-kernel = ">=0.1.0a98"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -2124,7 +2143,7 @@ url = "packages/dotmac-surveys"
 
 [[package]]
 name = "dotmac-tax"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Composable tax determination, statutory reporting and return-lifecycle owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2181,7 +2200,7 @@ url = "packages/dotmac-ticketing"
 
 [[package]]
 name = "dotmac-ui"
-version = "0.1.0a8"
+version = "0.1.0a9"
 description = "DotMac shared UI design system — semantic design tokens and compiled, self-hosted, CSP-compatible assets (ADR-0006 U1)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -4486,4 +4505,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "c6c0e51740cca9d0a147c771655279c06199e04d40edae8459e3810b842e9444"
+content-hash = "26676828c047bb25fe437d4b588ed7f9a9ea91b4eec1e3932ecf0797931bfeef"

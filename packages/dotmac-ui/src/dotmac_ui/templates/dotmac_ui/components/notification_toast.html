@@ -1,0 +1,13 @@
+{# Lower-right notification. Host runtime reads the dismissal data hooks. #}
+{% macro notification_toast(title="", message="", action_label="", action_url="", dismiss_label="Dismiss notification", auto_dismiss_ms=8000) -%}
+<aside class="dmui-notification-toast" role="status" aria-live="polite" aria-atomic="true" data-dmui-notification-toast data-dmui-auto-dismiss-ms="{{ auto_dismiss_ms }}">
+  <div class="dmui-notification-toast__content">
+    <strong class="dmui-notification-toast__title">{{ title }}</strong>
+    {% if message %}<p class="dmui-notification-toast__message">{{ message }}</p>{% endif %}
+  </div>
+  <div class="dmui-notification-toast__actions">
+    {% if action_label and action_url %}<a class="dmui-notification-toast__action" href="{{ action_url }}">{{ action_label }}</a>{% endif %}
+    <button class="dmui-notification-toast__dismiss" type="button" aria-label="{{ dismiss_label }}" data-dmui-dismiss>&times;</button>
+  </div>
+</aside>
+{%- endmacro %}

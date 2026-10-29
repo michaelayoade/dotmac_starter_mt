@@ -84,7 +84,7 @@ the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
 The historical first release candidate is `0.1.0a1`; the current unreleased
-development successor is `0.1.0a8` and requires
+development successor is `0.1.0a10` and requires
 `dotmac-kernel>=0.1.0a105` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.
@@ -312,3 +312,94 @@ All writes participate in the caller's transaction. Source acceptance, published
 artifact verification, real Sub source-proof adapters, ERP mapping, other opening
 lanes and production cutover remain separate gates. This candidate has not been
 used to import operational balances.
+
+### Tax-authored invoice evidence
+
+`AcceptRatedObligationV2` and `IssueRatedInvoiceV2` reuse `issue_rated_invoice`.
+V2 supplies `tax_snapshots=()` and complete Billing-owned
+`InvoiceTaxEvidenceV1` copies of Tax's sealed public determination-set result.
+Each wrapper explicitly declares `invoice_tax` or `expected_withholding`.
+Invoice tax components sum to rated tax; expected withholding is display-only
+and never reduces accounting receivable or supplies discharge proof. Billing
+does not derive a base from subtotal or select/recalculate rates. The current
+Tax evidence contract is tenant-only and must match the routed tenant.
+
+`get_invoice_document_fact_v2` reads and verifies the exact original V1 or V2
+fact. V2 includes ordered `tax_evidence` and the original `expected_withholding`
+Money property; current balance remains the existing receivable-position owner.
+V1 commands and the V1-only reader retain their original contract. `bi_0012`
+adds immutable obligation JSON without rewriting historical evidence and refuses
+downgrade when successor evidence exists. Assemblies map public Tax results at
+the boundary; Billing imports no Tax implementation or sibling package.
+
+`get_accounting_fact_v1(db, scope=..., fact_id=...)` reads an exact historical
+V1 accounting fact and verifies its original payload, posting group and effect
+rows. Linked reversals leave the original fact readable. Assemblies can bind
+receipts to the original allocation without using mutable current capacity;
+this read authorizes no new financial movement.
+
+
+Dependency-aware Tax evidence uses `InvoiceTaxEvidenceV2` with complete public
+`TaxDeterminationSetEvidenceV2` results, including original commercial identity,
+complete prior references, selected dependency policies and component snapshots.
+Each wrapper retains its complete transitive prior results in
+`prior_determinations`; these audit results are not charged again. Assemblies must
+map evidence from trusted Tax public reads, which verify Tax's stored seals.
+Billing checks observable source/signature/currency/scope/reference bindings and
+arithmetic consistency, preserves Tax source fingerprints and `rv2:` result seals
+as opaque owner evidence, and binds every copied field in its own immutable
+original-fact digest and replay identity. The public DTO deliberately omits
+hidden Tax storage seal preimages; Billing does not verify those preimages or
+select policy, calculate rates, or reconstruct Tax source fingerprints.
+
+`AcceptRatedObligationV3` requires explicit typed `commercial_sources`: the unique
+exact set of principal Tax wrapper commercial identities, with no missing or
+surplus entries. Empty evidence uses `()`. Each wrapper and its complete prior
+lineage retains one original commercial identity and amount. Distinct line
+amounts retain distinct original source identities; the assembly supplies the
+original line source shared across its Tax purposes. Billing does not translate
+its opaque `source_fact_id` namespace into Tax identities. The set is retained in
+obligation JSON and original `InvoiceDocumentFactV3`, and participates in both
+replay digests. Multiline facts retain the union of their line source identities.
+Legacy V1 wrappers/sets reject successor sets/components before persistence;
+valid legacy evidence keeps its original format.
+`AcceptRatedObligationV3` / `IssueRatedInvoiceV3` write original
+`InvoiceDocumentFactV3`; `get_invoice_document_fact_v3` reads V1/V2/V3, while
+older readers retain their previous supported versions. `WithholdingTaxEvidenceV2`
+binds an exact retained V2 component and lineage to the existing discharge owner.
+Expected withholding alone remains presentation evidence and creates no discharge.
+Nonempty Tax V2 evidence currently requires tenant scope, matching Tax's public
+contract. Empty V3 evidence and legacy facts remain supported in both Billing
+planes. V3 uses a versioned array envelope in bi12's existing immutable JSON
+column, including for empty evidence; no DDL or historical reinterpretation is
+needed. Billing a9 is an unpublished source allocation carried completely by a10;
+it is superseded rather than required as an intermediate publication.
+
+
+## Final release and adoption gates
+
+The final serial publication train is Payroll a2 → Tax a7 → Billing a10.
+Tax a6 and Billing a9 are unpublished source allocations superseded by a7 and
+a10 respectively; their complete source changes remain included in those final
+successors. The historical allocations are retained, not published as prerequisites.
+This source documentation establishes no artifact publication or consumer adoption.
+
+Full hosted CI must qualify the final head and current base. Migration acceptance
+must exercise the direct published Tax a4 / tx_0003 → head path through tx_0004
+and tx_0005, and published Billing a8 / bi11 → bi12 on both declared planes.
+Published Tax a4 and Billing bi1–bi11 migration bytes remain immutable; the
+existing bi12 source is preserved without a new DDL edit. V1/V2/V3 invoice and
+withholding evidence must retain exact historical decoding and replay compatibility.
+Old Tax policy writers require a maintenance fence before tx_0004; schema/API
+compatibility does not establish old-binary write compatibility. Restore or
+forward-recovery procedures must be rehearsed before any production authority
+change; populated-state downgrade refusal is not a rollback plan.
+
+Each final distribution still requires its separate verified published artifact,
+install-back verification, peeled tag and truthful release record under the
+release captain's freeze. Only then may consumers exact-pin those artifacts,
+regenerate locks and migration heads, and pass full hosted CI. Immutable-digest
+staging acceptance on Seabone remains required before any separately authorized
+production authority change. These gates activate no policy or writer. The native
+accepted-proof capability remains bounded to one pristine invoice proof lane;
+this release train does not complete the broader legacy billing cutover.

@@ -1,5 +1,9 @@
 # dotmac-integration
 
+Source candidate: **0.1.0a21 is unpublished**. Published a20 remains the
+installation baseline. Dispatch-snapshot source preparation does not establish
+production credential custody, an accepting authority or consumer adoption.
+
 The external connector control plane (ADR-0024): installations, immutable
 configuration revisions, capability bindings, secret references, and a versioned
 connector SPI.

@@ -506,3 +506,35 @@ def test_detector_rejects_readmitting_or_unrecording_the_withdrawn_module() -> N
 def test_withdrawn_module_stays_frozen_in_packages() -> None:
     for name in WITHDRAWN_MODULES:
         assert (PACKAGES_DIR / name / "EXTRACTION.toml").is_file()
+
+
+def test_outside_suite_module_is_not_part_of_the_nine_module_cohort() -> None:
+    """ADR-0038's 2026-10-14 amendment: the tenth module stays out of the cohort."""
+
+    ledger = _load_ledger()
+    outside = ledger.get("outside_suite_modules", [])
+    assert [module["name"] for module in outside] == ["dotmac-network-config"]
+    for module in outside:
+        assert module["name"] not in EXPECTED_MODULES
+        assert module["name"] not in _module_map(ledger)
+        assert module["adoption_cohort"] == "none"
+        assert module["stateful"] is True
+        assert module["persistence_plane"] == "tenant"
+        assert (ROOT / module["adr"]).is_file()
+    contract_ledger = _load_contract_ledger()
+    assert "dotmac-network-config" not in {
+        module["name"] for module in contract_ledger.get("modules", [])
+    }
+    # The cohort check itself still sees exactly the approved nine.
+    _validate_ledger(ledger)
+
+
+def test_detector_rejects_the_tenth_module_joining_the_cohort() -> None:
+    """Sensitivity proof: moving it into `modules` breaks the approved set."""
+
+    ledger = copy.deepcopy(_load_ledger())
+    ledger["modules"].append(
+        {"name": "dotmac-network-config", "implementation_order": 10}
+    )
+    with pytest.raises(NetworkDecompositionError):
+        _validate_ledger(ledger)

@@ -77,7 +77,7 @@ from enum import Enum
 from typing import Final
 
 from ..errors import SpecError
-from ..spec import SCHEMA_V4, ProductDeploymentSpec
+from ..spec import SCHEMA_V4, SCHEMA_V5, ProductDeploymentSpec
 
 
 class Phase(str, Enum):
@@ -513,7 +513,7 @@ def build_plan(
         )
     )
 
-    if spec.descriptor_schema == SCHEMA_V4:
+    if spec.descriptor_schema in (SCHEMA_V4, SCHEMA_V5):
         steps.append(
             Step(
                 StepKind.VERIFY_POST_MIGRATION_MATERIALS,

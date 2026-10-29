@@ -106,6 +106,12 @@ jobs:
             "dotmac_ui/static/dotmac-ui/manifest.json" \
             "dotmac_ui/templates/dotmac_ui/components/empty_state.html" \
             "dotmac_ui/templates/dotmac_ui/components/map_frame.html" \
+            "dotmac_ui/templates/dotmac_ui/components/dashboard_grid.html" \
+            "dotmac_ui/templates/dotmac_ui/components/dashboard_panel.html" \
+            "dotmac_ui/templates/dotmac_ui/components/metric_card.html" \
+            "dotmac_ui/templates/dotmac_ui/components/notice_banner.html" \
+            "dotmac_ui/templates/dotmac_ui/components/dashboard_line_chart.html" \
+            "dotmac_ui/templates/dotmac_ui/components/notification_toast.html" \
             "dotmac_ui/py.typed" ; do
             grep -q "${required}" <<<"${CONTENTS}" \
               || { echo "::error::wheel is missing ${required}"; exit 1; }

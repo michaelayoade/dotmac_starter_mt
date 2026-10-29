@@ -1,0 +1,213 @@
+
+schema = "ProductDeploymentSpec.v4"
+product = "control"
+environment = "fixture"
+
+[assembly]
+manifest_path = "deploy/product-manifest.json"
+manifest_digest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+[image]
+reference = "registry.example.invalid/control@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+source_revision = "dddddddddddddddddddddddddddddddddddddddd"
+
+[runtime_materials]
+names = [
+  "DATABASE_URL", "PLATFORM_DATABASE_URL", "VENDOR_RELAY_DISPATCHER_DATABASE_URL",
+  "MIGRATION_DATABASE_URL", "BACKUP_DATABASE_URL",
+  "SIGNING_KEY_SOURCE", "SIGNING_KEY_TARGET"
+]
+
+[[roles]]
+code = "app"
+command = []
+materials = ["DATABASE_URL", "PLATFORM_DATABASE_URL"]
+[roles.resources]
+cpus = "1.0"
+memory = "512m"
+[roles.health.live]
+path = "/health"
+port = 8000
+
+[[roles]]
+code = "relay"
+command = ["dotmac-platform", "relay", "run", "--worker-id", "fixture-relay-1"]
+materials = [
+  "DATABASE_URL", "PLATFORM_DATABASE_URL",
+  "VENDOR_RELAY_DISPATCHER_DATABASE_URL",
+]
+[roles.resources]
+cpus = "0.5"
+memory = "256m"
+[roles.worker]
+kind = "custom"
+ping_command = [
+  "python", "-c",
+  "import json,subprocess,sys; p=subprocess.run(['dotmac-platform','--format','json','relay','health'],capture_output=True,text=True); sys.exit(0 if p.returncode == 0 and json.loads(p.stdout)['data']['verdict'] == 'relay_draining' else 1)",
+]
+heartbeat_max_age_seconds = 120
+max_backlog = 1000
+
+[migration]
+command = ["dotmac-platform", "admin", "migrate"]
+heads_command = ["dotmac-platform", "admin", "migrate", "--target", "current"]
+owner_material = "MIGRATION_DATABASE_URL"
+expected_heads = [
+  "0028_machine_attribution", "ap_0002_outbox_relay",
+  "dc_0002_canonical_plan_digest", "ea_0003_platform_audit_log",
+  "rl_0001_release_artifacts", "v019_relay_heartbeat",
+]
+compatibility = "maintenance_required"
+
+[backup]
+[[backup.datasets]]
+code = "primary"
+kind = "postgres"
+material = "BACKUP_DATABASE_URL"
+retention_days = 14
+
+[[external_dependencies]]
+code = "db"
+kind = "postgres"
+required_for = ["ready", "migrate", "backup"]
+material = "DATABASE_URL"
+image = "registry.example.invalid/postgres@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+health_probe = ["pg_isready"]
+[[external_dependencies.volumes]]
+name = "pgdata"
+target = "/var/lib/postgresql/data"
+
+[compose_topology]
+roles_depend_on_migrate = false
+
+[[compose_topology.networks]]
+code = "front"
+loopback_default = true
+
+[[compose_topology.networks]]
+code = "back"
+internal = true
+
+[[compose_topology.placements]]
+code = "db"
+networks = ["back"]
+[[compose_topology.placements.mounts]]
+kind = "repository"
+source = "deploy/postgres/init-roles.sh"
+source_digest = "sha256:b7efd5e61ac6eb9a7bfcbada718027e627383549e7be76f0e23a5464d4ae6f5a"
+target = "/docker-entrypoint-initdb.d/001-vendor-roles.sh"
+justification = "Install the reviewed first-cluster database roles script."
+approved_by = "deployment-owner"
+[[compose_topology.placements.mounts]]
+kind = "repository"
+source = "deploy/postgres/bootstrap-credential-function.sql"
+source_digest = "sha256:e04eaee30c2e86a4d7a18e9e8ed7eaa2e2c67ab2e74fd01557f760ba4ec4c58d"
+target = "/docker-entrypoint-initdb.d/002-bootstrap-credential-function.sql"
+justification = "Install the reviewed first-cluster credential function script."
+approved_by = "deployment-owner"
+
+[[compose_topology.placements]]
+code = "migrate"
+networks = ["back"]
+profiles = ["ops"]
+
+[[compose_topology.placements]]
+code = "app"
+networks = ["front", "back"]
+[[compose_topology.placements.mounts]]
+kind = "named"
+source = "manifests"
+target = "/run/dotmac/product-manifests"
+read_only = true
+[[compose_topology.placements.mounts]]
+kind = "host_material"
+source_material = "SIGNING_KEY_SOURCE"
+target_material = "SIGNING_KEY_TARGET"
+justification = "Mount the held signing material only into this process."
+approved_by = "security-owner"
+
+[[compose_topology.placements]]
+code = "relay"
+networks = ["back"]
+[[compose_topology.placements.mounts]]
+kind = "named"
+source = "manifests"
+target = "/run/dotmac/product-manifests"
+read_only = true
+[[compose_topology.placements.mounts]]
+kind = "host_material"
+source_material = "SIGNING_KEY_SOURCE"
+target_material = "SIGNING_KEY_TARGET"
+justification = "Mount the held signing material only into this process."
+approved_by = "security-owner"
+
+[[compose_topology.jobs]]
+code = "manifest-init"
+image_source = "dependency:db"
+command = ["/bin/sh", "-ec", "chown 10001:10001 /manifests && chmod 0750 /manifests"]
+verify_command = ["stat", "-c", "%u:%g:%a", "/manifests"]
+verify_stdout = "10001:10001:750"
+run_during_deploy = true
+profiles = ["ops"]
+network_mode = "none"
+root_justification = "One-shot volume ownership requires root at initialization."
+root_approved_by = "deployment-owner"
+[compose_topology.jobs.security]
+user = "0:0"
+[[compose_topology.jobs.security.exceptions]]
+kind = "capability"
+value = "CHOWN"
+justification = "Permit the one-shot volume ownership transition."
+approved_by = "deployment-owner"
+[[compose_topology.jobs.security.exceptions]]
+kind = "capability"
+value = "FOWNER"
+justification = "Permit the one-shot volume mode transition after ownership."
+approved_by = "deployment-owner"
+[[compose_topology.jobs.volumes]]
+name = "manifests"
+target = "/manifests"
+
+[[compose_topology.jobs]]
+code = "ops"
+image_source = "product"
+command = ["dotmac-platform", "diagnose", "self"]
+profiles = ["ops"]
+networks = ["back"]
+depends_on = ["db"]
+materials = ["DATABASE_URL", "PLATFORM_DATABASE_URL"]
+[[compose_topology.jobs.mounts]]
+kind = "named"
+source = "manifests"
+target = "/run/dotmac/product-manifests"
+read_only = false
+[[compose_topology.jobs.mounts]]
+kind = "host_material"
+source_material = "SIGNING_KEY_SOURCE"
+target_material = "SIGNING_KEY_TARGET"
+justification = "Mount the held signing material only into this process."
+approved_by = "security-owner"
+
+[[material_probes]]
+role = "app"
+phase = "pre_mutation"
+argv = ["/opt/venv/bin/python", "-m", "product.material_probe"]
+timeout_seconds = 30
+
+[[material_probes]]
+role = "app"
+phase = "post_migration"
+argv = ["/opt/venv/bin/python", "-m", "product.material_probe"]
+timeout_seconds = 30
+
+[[material_probes]]
+role = "relay"
+phase = "pre_mutation"
+argv = ["/opt/venv/bin/python", "-m", "product.material_probe"]
+timeout_seconds = 30
+
+[[material_probes]]
+role = "relay"
+phase = "post_migration"
+argv = ["/opt/venv/bin/python", "-m", "product.material_probe"]
+timeout_seconds = 30

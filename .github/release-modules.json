@@ -490,13 +490,19 @@
           "dotmac_billing/migrations/versions/bi_0009_opening_window.py",
           "dotmac_billing/migrations/versions/bi_0010_line_source_key.py",
           "dotmac_billing/migrations/versions/bi_0011_settlement_earmarks.py",
+          "dotmac_billing/migrations/versions/bi_0012_tax_evidence.py",
+          "dotmac_billing/tax_evidence.py",
+          "dotmac_billing/tax_dependency_evidence.py",
           "dotmac_billing/earmark_contracts.py",
           "dotmac_billing/earmark_authority.py",
           "dotmac_billing/earmarks.py",
           "dotmac_billing/opening_window_contracts.py",
           "dotmac_billing/opening_window_queries.py",
           "dotmac_billing/opening_rehearsal_contracts.py",
-          "dotmac_billing/opening_rehearsal.py"
+          "dotmac_billing/opening_rehearsal.py",
+          "dotmac_billing/opening_qualification.py",
+          "dotmac_billing/opening_verification_contracts.py",
+          "dotmac_billing/opening_verification.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -759,6 +765,58 @@
         "allowed_requires": [
           "dotmac-kernel",
           "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-config-layers": {
+      "$comment": [
+        "Generic layered-configuration composition engine (ADR-0074).",
+        "Stateless: db_schema null is an asserted release shape, exactly as for",
+        "dotmac-document-rendering. The engine imports only the standard library,",
+        "pydantic and itself; the manifest alone imports the kernel.",
+        "",
+        "kernel_floor a88 is the first kernel that registers a stateless manifest",
+        "(the dotmac-document-rendering a1 floor); the package consumes no later",
+        "kernel capability, and Sub pins a98, so adoption does not raise Sub's",
+        "kernel pin.",
+        "",
+        "Intended adopter: dotmac_sub. This row does not claim adoption, move",
+        "authority or retire a writer. Publication is a release-captain action",
+        "in a gap between billing releases, before dotmac-routeros-config."
+      ],
+      "package_dir": "packages/dotmac-config-layers",
+      "import_name": "dotmac_config_layers",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a88",
+      "db_schema": null,
+      "tag_prefix": "dotmac-config-layers-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_config_layers/__init__.py",
+          "dotmac_config_layers/compose.py",
+          "dotmac_config_layers/derive.py",
+          "dotmac_config_layers/document.py",
+          "dotmac_config_layers/drift.py",
+          "dotmac_config_layers/evaluate.py",
+          "dotmac_config_layers/exceptions.py",
+          "dotmac_config_layers/fields.py",
+          "dotmac_config_layers/layers.py",
+          "dotmac_config_layers/manifest.py",
+          "dotmac_config_layers/merge.py",
+          "dotmac_config_layers/plugin.py",
+          "dotmac_config_layers/py.typed",
+          "dotmac_config_layers/widening.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "pydantic",
           "python"
         ]
       }
@@ -1842,7 +1900,8 @@
           "dotmac_integration/migrations/versions/ig_0016_receipt_origin.py",
           "dotmac_integration/migrations/versions/ig_0017_provisioning.py",
           "dotmac_integration/provisioning.py",
-          "dotmac_integration/provision_contract.py"
+          "dotmac_integration/provision_contract.py",
+          "dotmac_integration/migrations/versions/ig_0018_dispatch_snapshot.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -1919,7 +1978,10 @@
           "dotmac_ipam/migrations/__init__.py",
           "dotmac_ipam/migrations/versions/ip_0001_ipam.py",
           "dotmac_ipam/migrations/versions/ip_0002_extracted.py",
+          "dotmac_ipam/migrations/versions/ip_0003_outbox_relay.py",
+          "dotmac_ipam/migrations/versions/ip_0004_import_idempotency.py",
           "dotmac_ipam/models.py",
+          "dotmac_ipam/outbox.py",
           "dotmac_ipam/pools.py",
           "dotmac_ipam/prefixes.py",
           "dotmac_ipam/queries.py",
@@ -2497,7 +2559,7 @@
       "package_dir": "packages/dotmac-platform-health",
       "import_name": "dotmac_platform_health",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a88",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_health",
       "tag_prefix": "dotmac-platform-health-v",
       "wheel_contents": {
@@ -2507,7 +2569,10 @@
           "dotmac_platform_health/migrations/__init__.py",
           "dotmac_platform_health/migrations/versions/ph_0001_platform_health.py",
           "dotmac_platform_health/evidence.py",
-          "dotmac_platform_health/migrations/versions/ph_0002_observation_freshness_snapshot.py"
+          "dotmac_platform_health/migrations/versions/ph_0002_observation_freshness_snapshot.py",
+          "dotmac_platform_health/admission.py",
+          "dotmac_platform_health/grants.py",
+          "dotmac_platform_health/migrations/versions/ph_0003_enrollment_grants.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -3159,6 +3224,8 @@
           "dotmac_tax/migrations/versions/tx_0002_multi_tax.py",
           "dotmac_tax/migrations/versions/tx_0003_result_fingerprint.py",
           "dotmac_tax/migrations/versions/tx_0004_rule_supersession.py",
+          "dotmac_tax/migrations/versions/tx_0005_tax_dependencies.py",
+          "dotmac_tax/_dependencies.py",
           "dotmac_tax/models.py",
           "dotmac_tax/service.py"
         ],

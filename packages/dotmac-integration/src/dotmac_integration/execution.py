@@ -407,6 +407,7 @@ def receive_verified(
             verification_origin.verification_mode if verification_origin else None
         ),
         state="verified",
+        delivery_snapshot_json={"schema_version": 1, "state": "unstarted"},
     )
     db.add(receipt)
     db.flush()

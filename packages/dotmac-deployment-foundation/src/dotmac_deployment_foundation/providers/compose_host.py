@@ -47,6 +47,7 @@ import json
 import os
 import re
 import selectors
+import stat
 import subprocess  # nosec B404 -- argv lists, shell=False; see the module docstring
 import tempfile
 import time
@@ -55,17 +56,29 @@ import urllib.request
 import uuid
 import zlib
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
-from typing import IO, Protocol
+from typing import IO, Protocol, TypedDict, cast
 
 from ..deployment_evidence import StepStanding
 from ..engine.run import BackupResult, CommandResult, RoleObservation
 from ..errors import PreconditionFailed, SpecError, StepFailed
 from ..evidence import SignedEvidenceEnvelope
 from ..execution_plan_v2 import PostgresPrincipalCredentialBootstrapV1
+from ..live_instance import (
+    CustodyMountReference,
+    LiveInstanceMeasurement,
+    LiveInstanceRefusal,
+    StartupAssignmentConfirmation,
+    StartupAssignmentCustody,
+    StartupAssignmentRequest,
+    StartupObservationContext,
+    _require_startup_recheck,
+    require_aware,
+)
 from ..material_readiness import (
     MATERIAL_PROBE_MAX_STDOUT_BYTES,
     MaterialProbeObservation,
@@ -78,7 +91,13 @@ from ..recovery import refuse_identity_stripping
 from ..render.compose import render_compose, render_compose_digest
 from ..render.nginx import _ingress_roles as _nginx_ingress_roles
 from ..render.nginx import handoff_contract_pattern, render_nginx
-from ..spec import BackupDataset, MaterialProbe, ProductDeploymentSpec
+from ..spec import (
+    SCHEMA_V5,
+    BackupDataset,
+    MaterialProbe,
+    ProductDeploymentSpec,
+    StartupMountClassification,
+)
 from ..toolchain import DEFAULT_TOOLS, require_absolute_tool
 
 __all__ = ["ComposeHostEffects", "NginxInstaller", "RetainedComposeAsset"]
@@ -90,6 +109,23 @@ class RetainedComposeAsset:
 
     path: Path
     digest: str
+
+
+class _StartupMount(TypedDict):
+    type: str
+    source: str
+    target: str
+    rw: bool
+
+
+class _StartupStructure(TypedDict):
+    id: str
+    running: bool
+    started: str
+    restarts: int
+    image: str
+    pid: int
+    mounts: list[_StartupMount]
 
 
 Runner = Callable[..., CommandResult]
@@ -376,6 +412,7 @@ class ComposeHostEffects:
         image_repository: str | None = None,
         prune_tag_pattern: str = r"^sha-[0-9a-f]+$",
         scheduler_tick_command: tuple[str, ...] | None = None,
+        startup_proc_root: Path | str = Path("/proc"),
         inspect_timeout_seconds: int = 30,
         manifest_inspect_timeout_seconds: int = 30,
         pull_timeout_seconds: int = 600,
@@ -483,6 +520,9 @@ class ComposeHostEffects:
         self._image_repository = image_repository or spec.image.rsplit("@", 1)[0]
         self._prune_tag_pattern = re.compile(prune_tag_pattern)
         self._scheduler_tick_command = scheduler_tick_command
+        self._startup_proc_root = Path(startup_proc_root)
+        if not self._startup_proc_root.is_absolute():
+            raise SpecError("startup proc root must be absolute")
         self._inspect_timeout_seconds = inspect_timeout_seconds
         self._manifest_inspect_timeout_seconds = manifest_inspect_timeout_seconds
         self._pull_timeout_seconds = pull_timeout_seconds
@@ -866,6 +906,523 @@ class ComposeHostEffects:
         except OSError:
             return ""
         return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+    def _startup_read(self, argv: Sequence[str]) -> str:
+        result = self._run(argv, timeout_seconds=self._inspect_timeout_seconds)
+        if not result.ok or len(result.stdout) > 131072:
+            raise LiveInstanceRefusal("unavailable")
+        return result.stdout.strip()
+
+    def _startup_structure(self, container_id: str) -> _StartupStructure:
+        # Docker evaluates this fixed projection; no Health, Config.Env,
+        # command arguments, labels, logs or raw inspect document crosses it.
+        template = (
+            '{"id":{{json .Id}},"running":{{json .State.Running}},'
+            '"started":{{json .State.StartedAt}},"restarts":{{json .RestartCount}},'
+            '"image":{{json .Image}},"pid":{{json .State.Pid}},'
+            '"mounts":[{{range $i,$m := .Mounts}}'
+            '{{if $i}},{{end}}{"type":{{json $m.Type}},"source":{{json $m.Source}},'
+            '"target":{{json $m.Destination}},"rw":{{json $m.RW}}}{{end}}]}'
+        )
+        data = json.loads(
+            self._startup_read(
+                [self._docker_bin, "inspect", "--format", template, container_id]
+            )
+        )
+        if type(data) is not dict or set(data) != {
+            "id",
+            "running",
+            "started",
+            "restarts",
+            "image",
+            "pid",
+            "mounts",
+        }:
+            raise LiveInstanceRefusal("unavailable")
+        if type(data["pid"]) is not int or data["pid"] < 1:
+            raise LiveInstanceRefusal("instance_changed")
+        if data["id"] != container_id or data["running"] is not True:
+            raise LiveInstanceRefusal("instance_changed")
+        if (
+            type(data["restarts"]) is not int
+            or data["restarts"] < 0
+            or type(data["started"]) is not str
+        ):
+            raise LiveInstanceRefusal("unavailable")
+        if type(data["mounts"]) is not list or len(data["mounts"]) > 128:
+            raise LiveInstanceRefusal("unsupported")
+        for mount in data["mounts"]:
+            if (
+                type(mount) is not dict
+                or set(mount) != {"type", "source", "target", "rw"}
+                or type(mount["rw"]) is not bool
+            ):
+                raise LiveInstanceRefusal("unavailable")
+        if type(data["image"]) is not str or not re.fullmatch(
+            r"sha256:[0-9a-f]{64}", data["image"]
+        ):
+            raise LiveInstanceRefusal("unavailable")
+        for mount in data["mounts"]:
+            if any(
+                type(mount[field]) is not str for field in ("type", "source", "target")
+            ):
+                raise LiveInstanceRefusal("unavailable")
+        return cast(_StartupStructure, data)
+
+    def _startup_environment(
+        self, container_id: str, role: str
+    ) -> tuple[tuple[str, str], ...]:
+        selected = self._spec.role(role)
+        # Only approved nonsecret literals enter the template. It emits fixed
+        # slot numbers and booleans, including U for any undeclared entry.
+        # Neither actual names nor actual values, including material values,
+        # ever enter stdout. Repeated slots remain visible and are refused.
+        clauses = []
+        expected = []
+        digests = []
+        for index, (name, value) in enumerate(selected.environment):
+            slot = f"E{index}"
+            literal = json.dumps(name + "=" + value)
+            clauses.append(
+                f'{{{{else if eq (index (split $entry "=") 0) '
+                f"{json.dumps(name)}}}}}{slot}:{{{{eq $entry {literal}}}}}\n"
+            )
+            expected.append(slot + ":true")
+            digests.append((name, value))
+        for index, name in enumerate(sorted(selected.materials)):
+            slot = f"M{index}"
+            clauses.append(
+                f'{{{{else if and (eq (index (split $entry "=") 0) '
+                f'{json.dumps(name)}) (ge (len (split $entry "=")) 2)}}}}'
+                f"{slot}:present\n"
+            )
+            expected.append(slot + ":present")
+        template = (
+            "{{range $entry := .Config.Env}}{{if false}}"
+            + "".join(clauses)
+            + "{{else}}U\n{{end}}{{end}}"
+        )
+        output = self._startup_read(
+            [self._docker_bin, "inspect", "--format", template, container_id]
+        )
+        if sorted(output.splitlines()) != sorted(expected):
+            raise LiveInstanceRefusal("mismatch")
+        return tuple(
+            (name, "sha256:" + hashlib.sha256(value.encode()).hexdigest())
+            for name, value in digests
+        )
+
+    @staticmethod
+    def _startup_stat(value: os.stat_result) -> tuple[int, ...]:
+        return (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+
+    def _startup_file(
+        self, relative: str, stack: ExitStack, *, namespace_root: Path | None = None
+    ) -> tuple[int, int, str, tuple[int, ...]]:
+        # Walk every component using directory descriptors with O_NOFOLLOW;
+        # resolving a Path then opening it would follow replacement symlinks.
+        root = self._deploy_dir.absolute() if namespace_root is None else namespace_root
+        # The only followed root is the kernel-owned /proc/<pinned PID>/root
+        # magic link. Every declared target component inside it is nofollow.
+        flags = os.O_RDONLY | os.O_DIRECTORY
+        if namespace_root is None:
+            flags |= os.O_NOFOLLOW
+        directory = os.open(root, flags)
+        stack.callback(os.close, directory)
+        parts = PurePosixPath(relative).parts
+        for part in parts[:-1]:
+            directory = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+            )
+            stack.callback(os.close, directory)
+        handle = os.open(
+            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+        )
+        stack.callback(os.close, handle)
+        before = os.fstat(handle)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 16 * 1024 * 1024:
+            raise LiveInstanceRefusal("unsupported")
+        identity = self._startup_stat(before)
+        if (
+            self._startup_stat(
+                os.stat(parts[-1], dir_fd=directory, follow_symlinks=False)
+            )
+            != identity
+        ):
+            raise LiveInstanceRefusal("instance_changed")
+        return handle, directory, parts[-1], identity
+
+    def preflight_live_instance(self, *, custody: StartupAssignmentCustody) -> None:
+        try:
+            if not isinstance(custody, StartupAssignmentCustody):
+                raise LiveInstanceRefusal("custody_missing")
+            declaration = self._spec.startup_config
+            if self._spec.descriptor_schema != SCHEMA_V5 or declaration is None:
+                raise LiveInstanceRefusal("unsupported")
+            declaration.require_profile(self._spec)
+            topology = self._spec.compose_topology
+            if topology is None:
+                raise LiveInstanceRefusal("unsupported")
+            self._retained_v3_compose(self._spec.image)
+            with ExitStack() as stack:
+                for role in declaration.roles:
+                    for mount in topology.placement(role.role).mounts:
+                        if mount.kind == "repository":
+                            self._startup_file(mount.source, stack)
+            return
+        except LiveInstanceRefusal as error:
+            reason = error.reason
+        except Exception:
+            reason = "unavailable"
+        raise LiveInstanceRefusal(reason)
+
+    def observe_live_instance(
+        self,
+        *,
+        role: str,
+        custody: StartupAssignmentCustody,
+        context: StartupObservationContext,
+    ) -> LiveInstanceMeasurement:
+        try:
+            return self._observe_startup(role=role, custody=custody, context=context)
+        except LiveInstanceRefusal as error:
+            reason = error.reason
+        except Exception:
+            reason = "unavailable"
+        # Raise outside the exception handler so even hidden exception context
+        # cannot retain raw custody or runner diagnostics.
+        raise LiveInstanceRefusal(reason)
+
+    def _observe_startup(
+        self,
+        *,
+        role: str,
+        custody: StartupAssignmentCustody,
+        context: StartupObservationContext,
+        pinned_container_id: str | None = None,
+    ) -> LiveInstanceMeasurement:
+        self.preflight_live_instance(custody=custody)
+        if (
+            context.descriptor_digest
+            != self._spec.to_canonical_document().sha256_digest()
+        ):
+            raise LiveInstanceRefusal("mismatch")
+        startup = self._spec.startup_config
+        topology = self._spec.compose_topology
+        if startup is None or topology is None:
+            raise LiveInstanceRefusal("unsupported")
+        declaration = next(row for row in startup.roles if row.role == role)
+        started = datetime.fromtimestamp(self._clock(), UTC)
+        # Selection occurs once, returns full IDs only, and includes stopped
+        # instances so an ambiguous replica is refused rather than filtered out.
+        if pinned_container_id is None:
+            output = self._startup_read(
+                [
+                    self._docker_bin,
+                    "ps",
+                    "--all",
+                    "--no-trunc",
+                    "--filter",
+                    "label=com.docker.compose.project=" + self._spec.product,
+                    "--filter",
+                    "label=com.docker.compose.service=" + role,
+                    "--format",
+                    "{{.ID}}",
+                ]
+            )
+            ids = output.splitlines()
+            if len(ids) != 1 or not re.fullmatch(r"[0-9a-f]{64}", ids[0]):
+                raise LiveInstanceRefusal("unavailable")
+            container_id = ids[0]
+        else:
+            container_id = pinned_container_id
+        initial = self._startup_structure(container_id)
+        process_started = datetime.fromisoformat(
+            initial["started"].replace("Z", "+00:00")
+        )
+        require_aware(process_started)
+        if process_started > started:
+            raise LiveInstanceRefusal("instance_changed")
+        # Inspect the exact approved reference, not an arbitrary first alias.
+        image = json.loads(
+            self._startup_read(
+                [
+                    self._docker_bin,
+                    "image",
+                    "inspect",
+                    "--format",
+                    '{"id":{{json .Id}},"refs":{{json .RepoDigests}}}',
+                    self._spec.image,
+                ]
+            )
+        )
+        if (
+            type(image) is not dict
+            or set(image) != {"id", "refs"}
+            or type(image["refs"]) is not list
+        ):
+            raise LiveInstanceRefusal("unavailable")
+        refs = image["refs"]
+        if any(type(ref) is not str for ref in refs):
+            raise LiveInstanceRefusal("unavailable")
+        repository = self._spec.image.split("@", 1)[0]
+        if [ref for ref in refs if ref.split("@", 1)[0] == repository] != [
+            self._spec.image
+        ]:
+            raise LiveInstanceRefusal("mismatch")
+        if (
+            len(refs) > 128
+            or len(set(refs)) != len(refs)
+            or refs.count(self._spec.image) != 1
+            or image["id"] != initial["image"]
+        ):
+            raise LiveInstanceRefusal("mismatch")
+        expected_mounts = topology.placement(role).mounts
+        actual_mounts = initial["mounts"]
+        if len(actual_mounts) != len(expected_mounts):
+            raise LiveInstanceRefusal("mismatch")
+        if len({mount["target"] for mount in actual_mounts}) != len(actual_mounts):
+            raise LiveInstanceRefusal("mismatch")
+        targets: list[PurePosixPath] = []
+        for actual_mount in actual_mounts:
+            if (
+                actual_mount["type"] != "bind"
+                or actual_mount["rw"] is not False
+                or type(actual_mount["target"]) is not str
+            ):
+                raise LiveInstanceRefusal("mismatch")
+            target = PurePosixPath(actual_mount["target"])
+            if (
+                not target.is_absolute()
+                or ".." in target.parts
+                or any(
+                    target == previous
+                    or target in previous.parents
+                    or previous in target.parents
+                    for previous in targets
+                )
+            ):
+                raise LiveInstanceRefusal("mismatch")
+            targets.append(target)
+        files = []
+        custody_refs = []
+        with ExitStack() as stack:
+            for reference, mount in zip(
+                declaration.mounts, expected_mounts, strict=True
+            ):
+                if reference.classification is StartupMountClassification.CUSTODY_FILE:
+                    # Private resolved path and file checks belong to custody.
+                    custody_refs.append(
+                        CustodyMountReference(
+                            reference.mount_index,
+                            mount.source_material,
+                            mount.target_material,
+                            mount.target,
+                        )
+                    )
+                    continue
+                actual = next(
+                    (item for item in actual_mounts if item["target"] == mount.target),
+                    None,
+                )
+                expected_source = str(self._deploy_dir.absolute() / mount.source)
+                if (
+                    actual is None
+                    or actual["type"] != "bind"
+                    or actual["source"] != expected_source
+                    or actual["rw"] is not False
+                ):
+                    raise LiveInstanceRefusal("mismatch")
+                handle, directory, name, identity = self._startup_file(
+                    mount.source, stack
+                )
+                namespace_root = self._startup_proc_root / str(initial["pid"]) / "root"
+                target_handle, target_directory, target_name, target_identity = (
+                    self._startup_file(
+                        mount.target.lstrip("/"), stack, namespace_root=namespace_root
+                    )
+                )
+                if target_identity != identity:
+                    raise LiveInstanceRefusal("mismatch")
+                content = bytearray()
+                while len(content) <= 16 * 1024 * 1024:
+                    block = os.read(target_handle, 65536)
+                    if not block:
+                        break
+                    content.extend(block)
+                if (
+                    "sha256:" + hashlib.sha256(content).hexdigest()
+                    != mount.source_digest
+                ):
+                    raise LiveInstanceRefusal("mismatch")
+                files.append(
+                    (
+                        reference.mount_index,
+                        mount.source_digest,
+                        handle,
+                        directory,
+                        name,
+                        identity,
+                        mount.source,
+                        target_handle,
+                        target_directory,
+                        target_name,
+                        mount.target,
+                    )
+                )
+            environment = self._startup_environment(container_id, role)
+            request = StartupAssignmentRequest(
+                role,
+                container_id,
+                initial["started"],
+                context,
+                declaration.material_names,
+                tuple(custody_refs),
+            )
+            confirmation = custody.confirm_startup_assignment(request)
+            if type(confirmation) is not StartupAssignmentConfirmation or (
+                confirmation.container_id != container_id
+                or confirmation.started_at != initial["started"]
+                or confirmation.material_names != request.material_names
+                or confirmation.custody_mounts != request.custody_mounts
+            ):
+                raise LiveInstanceRefusal("mismatch")
+            final_image = json.loads(
+                self._startup_read(
+                    [
+                        self._docker_bin,
+                        "image",
+                        "inspect",
+                        "--format",
+                        '{"id":{{json .Id}},"refs":{{json .RepoDigests}}}',
+                        self._spec.image,
+                    ]
+                )
+            )
+            if final_image != image:
+                raise LiveInstanceRefusal("instance_changed")
+            if (
+                self._startup_structure(container_id) != initial
+                or self._startup_environment(container_id, role) != environment
+            ):
+                raise LiveInstanceRefusal("instance_changed")
+            # Re-read each still-open file and compare bytes/digest plus fd and
+            # pathname identity: replacement and in-place modification refuse.
+            for (
+                _,
+                digest,
+                handle,
+                directory,
+                name,
+                identity,
+                source,
+                target_handle,
+                target_directory,
+                target_name,
+                target_text,
+            ) in files:
+                reopened, _, _, reopened_identity = self._startup_file(source, stack)
+                if (
+                    reopened_identity != identity
+                    or self._startup_stat(os.fstat(reopened)) != identity
+                ):
+                    raise LiveInstanceRefusal("instance_changed")
+                target_reopened, _, _, target_reopened_identity = self._startup_file(
+                    target_text.lstrip("/"),
+                    stack,
+                    namespace_root=self._startup_proc_root
+                    / str(initial["pid"])
+                    / "root",
+                )
+                if (
+                    target_reopened_identity != identity
+                    or self._startup_stat(os.fstat(target_reopened)) != identity
+                ):
+                    raise LiveInstanceRefusal("instance_changed")
+                os.lseek(target_handle, 0, os.SEEK_SET)
+                content = bytearray()
+                while len(content) <= 16 * 1024 * 1024:
+                    block = os.read(target_handle, 65536)
+                    if not block:
+                        break
+                    content.extend(block)
+                if (
+                    self._startup_stat(os.fstat(handle)) != identity
+                    or self._startup_stat(os.fstat(target_handle)) != identity
+                    or self._startup_stat(
+                        os.stat(
+                            target_name, dir_fd=target_directory, follow_symlinks=False
+                        )
+                    )
+                    != identity
+                    or self._startup_stat(
+                        os.stat(name, dir_fd=directory, follow_symlinks=False)
+                    )
+                    != identity
+                    or "sha256:" + hashlib.sha256(content).hexdigest() != digest
+                ):
+                    raise LiveInstanceRefusal("instance_changed")
+            final_image = json.loads(
+                self._startup_read(
+                    [
+                        self._docker_bin,
+                        "image",
+                        "inspect",
+                        "--format",
+                        '{"id":{{json .Id}},"refs":{{json .RepoDigests}}}',
+                        self._spec.image,
+                    ]
+                )
+            )
+            if (
+                final_image != image
+                or self._startup_structure(container_id) != initial
+                or self._startup_environment(container_id, role) != environment
+            ):
+                raise LiveInstanceRefusal("instance_changed")
+            finished = datetime.fromtimestamp(self._clock(), UTC)
+            return LiveInstanceMeasurement(
+                role,
+                container_id,
+                initial["started"],
+                initial["pid"],
+                initial["restarts"],
+                True,
+                initial["image"],
+                self._spec.image,
+                tuple((row[0], row[1]) for row in files),
+                environment,
+                started,
+                finished,
+                context,
+                confirmation,
+                tuple((row[0], row[5]) for row in files),
+            )
+
+    def recheck_live_instance(
+        self, measurement: LiveInstanceMeasurement, *, custody: StartupAssignmentCustody
+    ) -> LiveInstanceMeasurement:
+        try:
+            fresh = self._observe_startup(
+                role=measurement.role,
+                custody=custody,
+                context=measurement.context,
+                pinned_container_id=measurement.container_id,
+            )
+            _require_startup_recheck(measurement, fresh)
+            return fresh
+        except LiveInstanceRefusal as error:
+            reason = error.reason
+        except Exception:
+            reason = "unavailable"
+        raise LiveInstanceRefusal(reason)
 
     def observe_roles(self) -> Sequence[RoleObservation]:
         ps = self._run(

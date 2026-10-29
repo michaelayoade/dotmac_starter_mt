@@ -73,7 +73,7 @@ FLOOR_PYTHON="${FLOOR_PYTHON:-python3}"
 # manifest-only, exactly as before. A fourth field selects the closed mode
 # manifest|registry|tenant-audit. Learning requires actual default registration;
 # Fulfillment and Template Studio require tenant-audit API evidence only.
-MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service packages/dotmac-billing:dotmac_billing:dotmac_billing.service packages/dotmac-learning:dotmac_learning::registry packages/dotmac-fulfillment:dotmac_fulfillment::tenant-audit packages/dotmac-template-studio:dotmac_template_studio::tenant-audit}"
+MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files:dotmac_files.service packages/dotmac-billing:dotmac_billing:dotmac_billing.service packages/dotmac-platform-health:dotmac_platform_health:dotmac_platform_health.service,dotmac_platform_health.grants packages/dotmac-learning:dotmac_learning::registry packages/dotmac-fulfillment:dotmac_fulfillment::tenant-audit packages/dotmac-template-studio:dotmac_template_studio::tenant-audit}"
 
 # Overrides for a one-off investigation. Left unset in CI: a hand-set pair is
 # a claim about a module that the module itself can contradict, which is the

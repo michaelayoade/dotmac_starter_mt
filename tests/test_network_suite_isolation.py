@@ -136,6 +136,26 @@ def network_suite_database() -> Iterator[tuple[str, str]]:
         server.dispose()
 
 
+def test_fresh_combined_graph_reaches_import_idempotency_head(
+    network_suite_database,
+) -> None:
+    admin_url, _ = network_suite_database
+    engine = create_engine(admin_url)
+    with engine.connect() as connection:
+        heads = set(
+            connection.execute(
+                text("SELECT version_num FROM public.alembic_version")
+            ).scalars()
+        )
+        assert "ip_0004_import_idempotency" in heads
+        # This fixture ran one combined heads upgrade against an empty database.
+        # Both provider effects must actually exist, not merely carry a stamp.
+        from dotmac_kernel.migrations.verify import require_prerequisites
+
+        require_prerequisites(connection, ("outbox_relay.v1", "idempotency_ledger.v1"))
+    engine.dispose()
+
+
 def _insert_roots(
     connection: Connection, *, tenant_id: uuid.UUID, suffix: str
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:

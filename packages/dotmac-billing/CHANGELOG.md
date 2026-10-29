@@ -2,6 +2,40 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a10 — UNRELEASED
+
+- Retain complete public Tax V2 dependency evidence and opaque `rv2:` seals,
+  original commercial identity, prior references and selected component snapshots.
+  Trusted Tax public reads verify owner seals; Billing validates observable
+  bindings and includes all copied fields in its original-fact digest and replay.
+- Add rated V3 authoring/original facts and a V3 reader retaining V1/V2 support.
+  Explicit unique `commercial_sources` exactly match principal wrapper identities,
+  retaining distinct original line amounts and identities through obligation JSON,
+  multiline original facts and both replay identities. Reject successor
+  sets/components at legacy evidence boundaries before persistence.
+  Add lossless V2 withholding lineage to the existing discharge owner.
+- Reuse immutable bi12 JSON with an explicit versioned array envelope; no DDL.
+  Prior audit results are not added to charged invoice tax. Legacy readers,
+  evidence and all migration bytes remain unchanged. Tax V2 remains tenant-only.
+- Includes the complete a9 evidence and bi12 source allocation. Full hosted CI,
+  direct published a8/bi11-to-bi12 migration qualification on both planes and
+  verified a10 publication precede adoption; no publication is claimed.
+
+## 0.1.0a9 — unpublished source allocation, superseded by a10
+
+- Add V2 rated invoice authoring and original document facts carrying complete
+  Tax-authored determination sets, rule versions, source/result fingerprints,
+  ordered components, fixed/progressive lines and exact currency/scale.
+- Retain expected withholding solely as an expected display deduction, separate
+  from accepted withholding discharge proof and full accounting receivables.
+- Add bi12 nullable immutable obligation JSON and final append-only guards.
+  Predecessor V1 evidence is never rewritten. The successor public document
+  reader verifies and decodes original V1 or V2 facts for presentation.
+- Add get_accounting_fact_v1 for scoped immutable original posting/allocation
+  evidence, including after linked reversals; no current capacity is inferred.
+- This allocation is carried completely by a10; hosted CI and the final a10
+  release remain required. It is not an intermediate publication prerequisite.
+
 ## 0.1.0a8 — UNRELEASED
 
 - Require Kernel `>=0.1.0a105` for the public exact-root rollback-latch

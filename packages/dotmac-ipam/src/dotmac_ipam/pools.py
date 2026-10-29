@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ipaddress
+from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
+from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import delete, func, select
 from sqlalchemy.engine import CursorResult
@@ -14,13 +16,17 @@ from sqlalchemy.orm import Session
 
 from dotmac_ipam import _common as c
 from dotmac_ipam.contracts import (
+    EVENT_AGGREGATE_IMPORTED,
     AddBlock,
     AddressSnapshot,
     BlockSnapshot,
     CreatePool,
+    ImportedAggregate,
+    ImportedKind,
     PoolPurpose,
     PoolSnapshot,
     PruneUtilization,
+    RecordImported,
     RecordUtilization,
     ReservationKind,
     ReserveAddress,
@@ -38,6 +44,8 @@ from dotmac_ipam.models import (
     IpPoolUtilizationSnapshot,
     IPv4Address,
     IPv6Address,
+    Ipv6DelegatedPrefix,
+    SubscriberAdditionalRoute,
 )
 
 #: Integer column ceiling; IPv6 pools have astronomically large capacity.
@@ -484,6 +492,113 @@ def prune_utilization(
     return int(cast(CursorResult[Any], result).rowcount or 0)
 
 
+@command
+def record_imported(db: Session, *, tenant_id: UUID, command: RecordImported) -> int:
+    """W1 copy evidence: one ``AggregateImported`` event per aggregate.
+
+    Identity is ``(tenant_id, kind, id)`` in the Kernel idempotency ledger.
+    Source and digest fingerprint the provenance: exact replay returns zero;
+    changed provenance raises Kernel ``IdempotencyConflict``. The claim, evidence
+    and outbox commit or roll back together, including concurrent retries. A
+    conflicting item rolls back the entire batch, leaving the caller's outer
+    transaction and tenant context intact. ``occurred_at`` is delivery metadata,
+    not provenance, so changing it on replay cannot append another event.
+    """
+    source = c.clean(command.source_ref, "source_ref")
+    # Claims use a stable order across overlapping batches to avoid deadlocks.
+    # Keep duplicates: conflicting fingerprints within a batch must still fail.
+    items = sorted(
+        command.aggregates, key=lambda item: (item.kind.value, str(item.aggregate_id))
+    )
+    _require_present(db, tenant_id, items)
+    with conflict_savepoint(db):
+        written = sum(
+            _record_imported_one(db, tenant_id, source, item, command.occurred_at)
+            for item in items
+        )
+    return written
+
+
+def _record_imported_one(
+    db: Session,
+    tenant_id: UUID,
+    source: str,
+    item: ImportedAggregate,
+    occurred_at: datetime | None,
+) -> int:
+    ref = f"{item.kind.value}:{item.aggregate_id}"
+    payload: dict[str, Any] = {
+        "aggregate_kind": item.kind.value,
+        "aggregate_id": str(item.aggregate_id),
+        "source_ref": source,
+    }
+    if item.source_digest is not None:
+        payload["source_digest"] = item.source_digest
+
+    def append_pair(session: Session) -> None:
+        c.event(
+            session,
+            tenant_id=tenant_id,
+            aggregate_ref=ref,
+            event_type=EVENT_AGGREGATE_IMPORTED,
+            payload=payload,
+            occurred_at=occurred_at,
+            correlation_id=source,
+        )
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant_id,
+        scope="ipam.record_imported",
+        key=ref,
+        fingerprint=fingerprint_of(payload),
+        operation=append_pair,
+        correlation_id=source,
+    )
+    return int(not outcome.replayed)
+
+
+def _require_present(
+    db: Session, tenant_id: UUID, items: list[ImportedAggregate]
+) -> None:
+    """Refuse an import event for an id that is not in mod_ipam for this tenant."""
+    wanted: dict[ImportedKind, set[UUID]] = {}
+    for item in items:
+        wanted.setdefault(item.kind, set()).add(item.aggregate_id)
+    sources: dict[ImportedKind, list[Any]] = {
+        ImportedKind.POOL: [IpPool.id],
+        ImportedKind.ADDRESS: [IPv4Address.id, IPv6Address.id],
+        ImportedKind.SUBSCRIPTION: [
+            IPAssignment.subscription_id,
+            Ipv6DelegatedPrefix.subscription_id,
+            SubscriberAdditionalRoute.subscription_id,
+        ],
+        ImportedKind.PREFIX: [Ipv6DelegatedPrefix.id],
+        ImportedKind.ROUTED: [SubscriberAdditionalRoute.id],
+    }
+    missing: list[str] = []
+    for kind, ids in wanted.items():
+        found: set[UUID] = set()
+        id_list = sorted(ids, key=str)
+        for column in sources[kind]:
+            owner = column.class_
+            for start in range(0, len(id_list), 1000):
+                found.update(
+                    db.scalars(
+                        select(column).where(
+                            owner.tenant_id == tenant_id,
+                            column.in_(id_list[start : start + 1000]),
+                        )
+                    )
+                )
+        missing.extend(f"{kind.value}:{i}" for i in id_list if i not in found)
+    if missing:
+        raise IpamNotFound(
+            f"imported aggregates not present in mod_ipam: {sorted(missing)[:5]}",
+            code="ipam.import_unknown_aggregate",
+        )
+
+
 def utilization(
     db: Session, *, tenant_id: UUID, pool_id: UUID, limit: int = 365
 ) -> tuple[UtilizationSnapshot, ...]:
@@ -549,6 +664,7 @@ __all__ = [
     "create_pool",
     "live_pool_counts",
     "prune_utilization",
+    "record_imported",
     "record_utilization",
     "reserve_address",
     "retire_block",

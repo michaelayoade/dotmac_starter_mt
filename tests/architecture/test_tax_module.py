@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import re
 import tomllib
+from dataclasses import fields
 from pathlib import Path
 from typing import get_type_hints
 
@@ -48,7 +49,7 @@ MIGRATIONS = tuple(sorted((SOURCE / "migrations/versions").glob("tx_*.py")))
 
 def test_manifest_allocates_one_tenant_only_tax_lineage() -> None:
     assert module.code == "tax"
-    assert module.version == "0.1.0a6"
+    assert module.version == "0.1.0a7"
     assert module.short_code == "tax"
     assert module.migration_prefix == "tx"
     assert module.migration_branch == "tax"
@@ -73,7 +74,7 @@ def test_tax_publishes_an_orm_free_exact_money_determination_contract() -> None:
     }
     assert published_contracts <= set(contracts.__all__)
     assert published_contracts <= set(dotmac_tax.__all__)
-    assert set(TaxDeterminationSetV1.__dataclass_fields__) == {
+    assert {field.name for field in fields(TaxDeterminationSetV1)} == {
         "tenant_id",
         "determination_set_id",
         "jurisdiction_id",
@@ -96,7 +97,7 @@ def test_tax_publishes_an_orm_free_exact_money_determination_contract() -> None:
         "determined_at",
         "components",
     }
-    assert set(TaxDeterminationComponentV1.__dataclass_fields__) == {
+    assert {field.name for field in fields(TaxDeterminationComponentV1)} == {
         "determination_id",
         "determination_set_id",
         "component_sequence",
@@ -201,6 +202,29 @@ def test_tax_python_range_is_compatible_with_kernel_and_erp_first_adopter() -> N
 
 
 def test_every_tax_table_has_direct_tenant_identity() -> None:
+    associations = {
+        models.TaxRuleDependencyCode: (
+            ("tenant_id", "rule_id", "tax_code_id"),
+            {"rule_id": "tax_rules", "tax_code_id": "tax_codes"},
+        ),
+        models.TaxDeterminationPriorSet: (
+            ("tenant_id", "determination_set_id", "prior_set_id"),
+            {
+                "determination_set_id": "tax_determination_sets",
+                "prior_set_id": "tax_determination_sets",
+            },
+        ),
+        models.TaxDeterminationDependency: (
+            ("tenant_id", "determination_id", "prior_determination_id"),
+            {
+                "determination_id": "tax_determinations",
+                "prior_determination_id": "tax_determinations",
+                "prior_set_id": "tax_determination_sets",
+                "tax_code_id": "tax_codes",
+                "rule_id": "tax_rules",
+            },
+        ),
+    }
     for model in models.TENANT_MODELS:
         columns = model.__table__.columns
         assert "tenant_id" in columns, model.__name__
@@ -210,7 +234,30 @@ def test_every_tax_table_has_direct_tenant_identity() -> None:
             for constraint in model.__table__.constraints
             if constraint.__class__.__name__ == "UniqueConstraint"
         }
-        assert ("tenant_id", "id") in uniques, model.__name__
+        if model in associations:
+            primary_key, references = associations[model]
+            assert tuple(column.name for column in model.__table__.primary_key) == (
+                primary_key
+            ), model.__name__
+            composite_foreign_keys = {
+                (
+                    tuple(column.name for column in constraint.columns),
+                    tuple(element.target_fullname for element in constraint.elements),
+                    constraint.ondelete,
+                )
+                for constraint in model.__table__.foreign_key_constraints
+                if len(constraint.columns) > 1
+            }
+            assert composite_foreign_keys == {
+                (
+                    ("tenant_id", column),
+                    (f"mod_tax.{table}.tenant_id", f"mod_tax.{table}.id"),
+                    "RESTRICT",
+                )
+                for column, table in references.items()
+            }, model.__name__
+        else:
+            assert ("tenant_id", "id") in uniques, model.__name__
 
 
 def test_tax_members_rates_calendars_and_boxes_are_data_not_code() -> None:
@@ -284,6 +331,7 @@ def test_tax_migration_forces_rls_and_protects_filing_evidence() -> None:
         "tx_0002_multi_tax.py",
         "tx_0003_result_fingerprint.py",
         "tx_0004_rule_supersession.py",
+        "tx_0005_tax_dependencies.py",
     ]
     source = "\n".join(path.read_text(encoding="utf-8") for path in MIGRATIONS)
     compact = re.sub(r"\s+", " ", source)
@@ -391,7 +439,10 @@ def test_every_tax_determination_reader_crosses_the_sealed_projector() -> None:
         }
         if imported:
             importers[path.relative_to(SOURCE)] = imported
-    assert importers == {Path("service.py"): evidence_models}
+    assert importers == {
+        Path("service.py"): evidence_models,
+        Path("_dependencies.py"): {"TaxDetermination", "TaxDeterminationSet"},
+    }
 
     tree = ast.parse(
         (SOURCE / "service.py").read_text(encoding="utf-8"),
@@ -418,6 +469,7 @@ def test_every_tax_determination_reader_crosses_the_sealed_projector() -> None:
         "_determine_tax_set_row",
         "_verified_determination_contracts_for_period",
         "determine_tax",
+        "determine_tax_set_v2",
     }
     assert users("TaxDeterminationLine") == {"_build_tax_policy_result"}
     assert users("TaxDeterminationSet") == {
@@ -429,7 +481,45 @@ def test_every_tax_determination_reader_crosses_the_sealed_projector() -> None:
         "_validate_persisted_result_structure",
         "_verified_determination_contracts_for_period",
         "determine_tax",
+        "determine_tax_set_v2",
+        "get_tax_determination_set_v2",
     }
+
+    dependency_tree = ast.parse(
+        (SOURCE / "_dependencies.py").read_text(encoding="utf-8"),
+        filename=str(SOURCE / "_dependencies.py"),
+    )
+    dependency_functions = {
+        node.name: node
+        for node in ast.walk(dependency_tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    dependency_users = {
+        model_name: {
+            name
+            for name, node in dependency_functions.items()
+            if any(
+                isinstance(child, ast.Name) and child.id == model_name
+                for child in ast.walk(node)
+            )
+        }
+        for model_name in evidence_models
+    }
+    assert dependency_users == {
+        "TaxDetermination": {"attach_dependency_components"},
+        "TaxDeterminationLine": set(),
+        "TaxDeterminationSet": {
+            "attach_prior_results",
+            "resolve_prior_results",
+            "result_content_fingerprint_v2",
+        },
+    }
+    prior_reader_names = {
+        child.id
+        for child in ast.walk(dependency_functions["resolve_prior_results"])
+        if isinstance(child, ast.Name)
+    }
+    assert "_determination_set_contract" in prior_reader_names
     report = functions["generate_statutory_report"]
     report_names = {
         child.id for child in ast.walk(report) if isinstance(child, ast.Name)

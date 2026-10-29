@@ -640,6 +640,42 @@ class RoutedPrefixChanged:
     active: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AggregateImported:
+    """One per copied aggregate in the W1 legacy -> module copy (PLAN section 6)."""
+
+    aggregate_kind: str
+    aggregate_id: UUID
+    source_ref: str
+    source_digest: str | None = None
+
+
+class ImportedKind(StrEnum):
+    """Exactly the aggregate ref kinds the module already uses in ``ipam_events``."""
+
+    POOL = "pool"
+    ADDRESS = "address"
+    SUBSCRIPTION = "subscription"
+    PREFIX = "prefix"
+    ROUTED = "routed"
+
+
+@dataclass(frozen=True, slots=True)
+class ImportedAggregate:
+    kind: ImportedKind
+    aggregate_id: UUID
+    source_digest: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RecordImported:
+    """Write one ``AggregateImported`` event per aggregate (evidence + outbox)."""
+
+    source_ref: str
+    aggregates: tuple[ImportedAggregate, ...]
+    occurred_at: datetime | None = None
+
+
 EVENT_ADDRESS_ASSIGNED = "AddressAssigned"
 EVENT_ASSIGNMENT_RELEASED = "AssignmentReleased"
 EVENT_ASSIGNMENT_MOVED = "AssignmentMoved"
@@ -647,6 +683,7 @@ EVENT_PRIMARY_CHANGED = "PrimaryChanged"
 EVENT_ASSIGNMENT_REPAIRED = "AssignmentRepaired"
 EVENT_PREFIX_DELEGATED = "PrefixDelegated"
 EVENT_ROUTED_PREFIX_CHANGED = "RoutedPrefixChanged"
+EVENT_AGGREGATE_IMPORTED = "AggregateImported"
 
 EVENT_SCHEMAS: dict[str, type] = {
     EVENT_ADDRESS_ASSIGNED: AddressAssigned,
@@ -656,6 +693,20 @@ EVENT_SCHEMAS: dict[str, type] = {
     EVENT_ASSIGNMENT_REPAIRED: AssignmentRepaired,
     EVENT_PREFIX_DELEGATED: PrefixDelegated,
     EVENT_ROUTED_PREFIX_CHANGED: RoutedPrefixChanged,
+    EVENT_AGGREGATE_IMPORTED: AggregateImported,
+}
+
+#: Vocabulary event -> Kernel outbox routing code. Every vocabulary event is
+#: written to ``ipam_events`` AND enqueued, in the same transaction.
+OUTBOX_EVENT_TYPES: dict[str, str] = {
+    EVENT_ADDRESS_ASSIGNED: "ipam.address.assigned.v1",
+    EVENT_ASSIGNMENT_RELEASED: "ipam.assignment.released.v1",
+    EVENT_ASSIGNMENT_MOVED: "ipam.assignment.moved.v1",
+    EVENT_PRIMARY_CHANGED: "ipam.assignment.primary_changed.v1",
+    EVENT_ASSIGNMENT_REPAIRED: "ipam.assignment.repaired.v1",
+    EVENT_PREFIX_DELEGATED: "ipam.prefix.delegated.v1",
+    EVENT_ROUTED_PREFIX_CHANGED: "ipam.routed_prefix.changed.v1",
+    EVENT_AGGREGATE_IMPORTED: "ipam.aggregate.imported.v1",
 }
 
 __all__ = [
@@ -664,6 +715,7 @@ __all__ = [
     "AddressAssigned",
     "AddressFamily",
     "AddressSnapshot",
+    "AggregateImported",
     "AllocateAddress",
     "AllocateDelegatedPrefix",
     "AllocateManagementAddress",
@@ -685,6 +737,7 @@ __all__ = [
     "CreatePool",
     "DelegatedPrefixSnapshot",
     "EVENT_ADDRESS_ASSIGNED",
+    "EVENT_AGGREGATE_IMPORTED",
     "EVENT_ASSIGNMENT_MOVED",
     "EVENT_ASSIGNMENT_RELEASED",
     "EVENT_ASSIGNMENT_REPAIRED",
@@ -692,6 +745,8 @@ __all__ = [
     "EVENT_PRIMARY_CHANGED",
     "EVENT_ROUTED_PREFIX_CHANGED",
     "EventRecord",
+    "ImportedAggregate",
+    "ImportedKind",
     "LinkOutcome",
     "LinkPreview",
     "MarkPrimary",
@@ -703,6 +758,7 @@ __all__ = [
     "PrefixState",
     "PrimaryChanged",
     "PruneUtilization",
+    "RecordImported",
     "RecordUtilization",
     "ReleaseAssignment",
     "ReleaseDelegatedPrefix",

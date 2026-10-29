@@ -2,6 +2,14 @@
 
 from typing import TYPE_CHECKING
 
+from dotmac_platform_health.admission import (
+    AuthenticatedHealthSource,
+    EnrollmentAuthority,
+    EnrollmentProjection,
+    HealthAdmission,
+    HealthAdmissionError,
+    HealthEligibilityAssessment,
+)
 from dotmac_platform_health.contracts import (
     DEPLOYMENT_HEALTH_EVIDENCE_SCHEMA,
     ComponentEvidence,
@@ -66,6 +74,12 @@ def __getattr__(name: str) -> object:
 __version__ = "0.2.0a1"
 
 __all__ = [
+    "AuthenticatedHealthSource",
+    "EnrollmentAuthority",
+    "EnrollmentProjection",
+    "HealthAdmission",
+    "HealthAdmissionError",
+    "HealthEligibilityAssessment",
     "__version__",
     "DEPLOYMENT_HEALTH_EVIDENCE_SCHEMA",
     "ComponentEvidence",

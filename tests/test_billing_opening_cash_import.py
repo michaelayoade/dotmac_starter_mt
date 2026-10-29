@@ -4,10 +4,11 @@ These fixtures qualify trusted assembly ports; they are not production source
 attestations, migration authorization or a runtime import composition.
 """
 
-from __future__ import annotations
-
 # SQL identifiers are fixed Billing plane/model table names; values are bound.
 # ruff: noqa: S608
+
+from __future__ import annotations
+
 from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -64,6 +65,7 @@ from tests import billing_opening_window_fixtures as window_fixture
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as runtime
 from tests import test_billing_withholding_persistence as predecessor
+from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 from tests.unit import test_billing_opening_manifest as preflight
 
 REVISION = "bi_0007_opening_cash"
@@ -1529,7 +1531,7 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
         # Source-compatible predecessor fixture adaptations only. The new
         # runtime is not claimed to support arbitrary execution on old schema.
         # bi6 cannot contain an opening contribution; retain every V1-V3 guard.
-        with monkeypatch.context() as historical:
+        with predecessor_obligation_columns(), monkeypatch.context() as historical:
             historical.setattr(s, "_claim_cash_source", predecessor_claim)
             historical.setattr(
                 s, "resolve_receivable_backing", native_predecessor_backing

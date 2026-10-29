@@ -57,16 +57,37 @@ def test_platform_health_has_no_transport_deployment_or_transaction_owner() -> N
 
 
 def test_platform_health_migration_states_both_halves_of_platform_isolation() -> None:
-    source = MIGRATION.read_text(encoding="utf-8")
-    assert "GRANT USAGE ON SCHEMA mod_health TO platform_api, app_admin" in source
+    root_source = MIGRATION.read_text(encoding="utf-8")
+    assert "GRANT USAGE ON SCHEMA mod_health TO platform_api, app_admin" in root_source
+    migrations = tuple((ROOT / "migrations/versions").glob("ph_*.py"))
     for table in module.platform_tables:
-        grant = (
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON "
-            f"mod_health.{table} TO platform_api"
-        )
-        assert grant in source
-        assert f"REVOKE ALL ON mod_health.{table} FROM app_user" in source
-    assert "ROW LEVEL SECURITY" not in source
+        owners = [
+            path
+            for path in migrations
+            if any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "create_table"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == table
+                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            )
+        ]
+        assert len(owners) == 1, (table, owners)
+        source = owners[0].read_text(encoding="utf-8")
+        if owners[0] == MIGRATION:
+            assert (
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON "
+                f"mod_health.{table} TO platform_api" in source
+            )
+            assert f"REVOKE ALL ON mod_health.{table} FROM app_user" in source
+        else:
+            assert (
+                "GRANT SELECT, INSERT ON mod_health.{table} TO platform_api" in source
+            )
+            assert "REVOKE ALL ON mod_health.{table} FROM app_user" in source
+        assert "ROW LEVEL SECURITY" not in source
 
 
 def test_freshness_migration_preserves_unknown_legacy_provenance() -> None:
@@ -75,3 +96,20 @@ def test_freshness_migration_preserves_unknown_legacy_provenance() -> None:
     assert "freshness_seconds IS NULL OR freshness_seconds > 0" in source
     assert "UPDATE mod_health.health_observations" not in source
     assert "nullable=False" not in source
+
+
+def test_health_floor_artifact_probe_loads_both_transaction_consumers() -> None:
+    repository = Path(__file__).resolve().parents[2]
+    source = (repository / "scripts/module_floor_check.sh").read_text(encoding="utf-8")
+    assert (
+        "packages/dotmac-platform-health:dotmac_platform_health:"
+        "dotmac_platform_health.service,dotmac_platform_health.grants"
+    ) in source
+    # Shared hosted runner proves sufficiency at the declared floor and refusal
+    # at the immediately preceding published artifact, including these imports.
+    import tomllib
+
+    declaration = tomllib.loads((ROOT.parents[1] / "pyproject.toml").read_text())
+    assert (
+        declaration["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a98"
+    )

@@ -367,6 +367,7 @@ def test_assessment_and_cohort_commands_keep_their_public_owner():
         (
             cohort_contracts,
             (
+                "CohortIntakePatch",
                 "CreateCohortCommand",
                 "RemoveFacilitatorCommand",
             ),
@@ -375,6 +376,7 @@ def test_assessment_and_cohort_commands_keep_their_public_owner():
             cohorts,
             (
                 "create_cohort",
+                "patch_cohort_intake",
                 "remove_facilitator",
             ),
         ),

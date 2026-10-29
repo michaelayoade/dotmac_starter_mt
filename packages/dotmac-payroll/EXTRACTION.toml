@@ -3,8 +3,8 @@ package = "dotmac-payroll"
 classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
-owner = "Tenant payroll component policy, immutable structure revisions, employee calculation evidence, and employee/external liabilities"
-contract = "Configure component masters and typed structure rules; assign effective revisions to opaque employee references; calculate source-evidenced gross, deductions, net pay and employer liabilities; enforce run separation of duties; materialize liabilities; and record settlement observations. NOT employee identity/lifecycle, compensation authority, time/attendance, leave, statutory tax policy, bank/payment execution, GL accounts, journal entries, fiscal periods, provider exports, or remittance transport."
+owner = "Tenant payroll component policy, immutable structure revisions, employee calculation evidence, derived run totals/payment-total parity, and employee/external liabilities"
+contract = "Configure component masters and typed structure rules; assign effective revisions to opaque employee references; calculate source-evidenced gross, deductions, net pay and employer liabilities; enforce run separation of duties; materialize liabilities; record settlement observations; sum scalar calculation snapshots and validate net-only payment-item total parity. NOT employee identity/lifecycle, compensation authority, time/attendance, leave, statutory tax policy, bank/payment execution, GL accounts, journal entries, fiscal periods, provider exports, or remittance transport."
 source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_starter_mt"]
 source_revisions = [
   "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
@@ -14,17 +14,23 @@ source_revisions = [
 ]
 revalidation_revisions = [
   "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
-  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_erp:26b7ba81aea783fdbd4353076087173cd7004475",
   "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
 ]
 source_paths = [
   "dotmac_erp:app/models/people/payroll",
   "dotmac_erp:app/services/people/payroll",
   "dotmac_erp:tests/people/payroll",
+  "dotmac_erp:app/services/people/payroll/payroll_totals.py",
+  "dotmac_erp:app/services/people/payroll/payroll_service.py::_update_entry_totals",
+  "dotmac_erp:app/services/people/payroll/bank_payment_file.py::require_run_total_matches_items",
   "dotmac_starter_mt:packages/dotmac-payroll/src/dotmac_payroll/service.py",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_payroll_service.py",
+  "dotmac_starter_mt:tests/unit/test_payroll_run_totals.py",
+  "dotmac_erp:tests/people/payroll/test_payroll_entry_totals.py",
+  "dotmac_erp:tests/people/payroll/test_bank_payment_file.py",
   "dotmac_starter_mt:tests/architecture/test_payroll_module.py",
   "dotmac_starter_mt:tests/test_financial_modules_isolation.py",
 ]
@@ -35,7 +41,7 @@ inventory_evidence = ["docs/inventories/payroll-sources.md"]
 first_cutover = "ERP is the qualifying source and first payroll authority to retire after shared accounting and the employee-reference contract exist. Backfill structures/assignments, shadow exact calculations and liabilities read-only, seal one writer switch, and reduce ERP calculation/run/liability writers to zero. Backoffice is a later exact-pin consumer; package creation moves no authority."
 shadow_and_drift = "Compare structure revisions, effective assignments, source inputs, every component line, proration, gross/deduction/net/employer totals, run transitions, liability destinations, amounts and settlement coverage. Shadow is read-only and cannot create a second run or liability ledger."
 local_copy_retirement = "At sealed cutover disable ERP payroll calculation, approval/finalization and liability writers. Keep employee, attendance, tax, payment and journal owners separate behind versioned ports. Retire formula strings/eval, fixed component-code branches and provider/state exports from the domain owner; no fallback engine survives."
-next_action = "Complete the accounting and employee-reference adoption contracts, characterize remaining ERP proration/rounding/retroactive cases, and keep the package unreleased until the ERP cutover is ready. Rebase the provisional kernel allocation/version against concurrent alpha-train work before integration."
+next_action = "The declared 0.1.0a2 successor requires hosted CI and publication evidence before ERP may exact-pin its scalar totals/parity API. ERP reads persisted facts after flush; it retains its stateful writer until sealed cutover. The published 0.1.0a1 supply claim is recorded in CHANGELOG.md. Complete accounting/employee-reference contracts and characterize remaining proration/rounding/retroactive cases before stateful cutover."
 
 [[product_writers]]
 product = "dotmac_crm"
@@ -47,7 +53,7 @@ evidence_paths = ["docs/ARCHITECTURE.md"]
 product = "dotmac_erp"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+revision = "26b7ba81aea783fdbd4353076087173cd7004475"
 evidence_paths = ["app/models/people/payroll", "app/services/people/payroll"]
 [[product_writers]]
 product = "dotmac_sub"

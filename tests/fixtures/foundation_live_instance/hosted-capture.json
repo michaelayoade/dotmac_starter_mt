@@ -1,0 +1,11 @@
+{
+  "artifact_digest": "sha256:9d9101b2c5cfdf42423ac0df110855315c88d3b465df257d0a672538d96ef414",
+  "artifact_id": 12096505840,
+  "artifact_name": "foundation-legacy-goldens-1750e277",
+  "baseline_commit": "1750e2776d5f2374892761763067723ff27595f5",
+  "fixture_manifest_sha256": "5d1a6e7bf1b1a88593e3f3c8b73b740a30f21cd6b53e589bd48390ab6bb9531f",
+  "job_id": 117358178182,
+  "producer_commit": "f55fae85863eb321c8ebcaf9b5a8991b36d812a5",
+  "run_id": 39019458297,
+  "scope": "pure historical serialization capture; no runtime deployment proof"
+}

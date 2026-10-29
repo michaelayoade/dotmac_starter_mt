@@ -1,0 +1,181 @@
+# The Starter's own deployment descriptor — the MINIMAL reference adopter.
+#
+# ProductDeploymentSpec.v1. Everything a deployment of this repository needs is
+# rendered from this file by `dotmac-deploy render`; there is no second place to
+# edit. See docs/adr/0070-deployment-is-a-stateless-versioned-foundation.md.
+#
+# Minimal is the point. The Starter has one role, one database and no ingress
+# of its own, so this file shows the SMALLEST descriptor that is still complete
+# — a product adopting the facility can start here and add only what it has.
+
+schema = "ProductDeploymentSpec.v2"
+product = "dotmac_starter_mt"
+environment = "reference"
+
+[assembly]
+manifest_path = "deploy/product-manifest.json"
+# Placeholder until `dotmac-deploy` generates the manifest from the real
+# ProductAssemblySpec; the digest is checked for SHAPE here and for VALUE by the
+# drift command against a running deployment.
+manifest_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+[image]
+# A digest, never a tag. `docker compose up -d` against a mutable tag is how a
+# production deployment silently went five weeks backwards (inventory D5).
+reference = "ghcr.io/michaelayoade/dotmac_starter_mt@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+source_revision = "ac5e439e622ec5adba94cf52f4f961f2c39a2d30"
+
+[runtime_materials]
+names = ["DATABASE_URL", "SETTINGS_ENCRYPTION_KEY", "METRICS_TOKEN"]
+
+[[roles]]
+code = "app"
+# The product's own launcher, NOT `uvicorn --host 0.0.0.0 ...` spelled out here.
+# `build_canonical_document` refuses an address literal anywhere in a
+# descriptor, and rightly: the canonical document is what deployment control
+# binds its signed authorization to. `0.0.0.0` is not topology though — it is
+# how this process binds inside its own container, a build-time fact this line
+# had turned into a deployment-time one. `app/runtime.py` owns the bind, this
+# descriptor owns the launcher and the port, and the image digest above binds
+# which bytes `python -m app.runtime` runs. See that module's docstring.
+command = ["python", "-m", "app.runtime", "--port", "8000"]
+replicas = 1
+stop_grace_seconds = 30
+materials = ["DATABASE_URL", "SETTINGS_ENCRYPTION_KEY", "METRICS_TOKEN"]
+
+[roles.resources]
+cpus = "2.0"
+memory = "1g"
+pids = 256
+
+[roles.security]
+user = "10001:10001"
+read_only_root = true
+no_new_privileges = true
+cap_drop = ["ALL"]
+tmpfs = ["/tmp"]
+
+# Two probes, two paths, and they may not be the same one. `/health/live` must
+# not touch the database — a liveness probe that fails on a database blip
+# restarts a process that was fine. `/health/ready` must fail when a dependency
+# is down, or the warm-candidate gate degenerates into a timer.
+[roles.health.live]
+path = "/health/live"
+port = 8000
+interval_seconds = 10
+timeout_seconds = 3
+retries = 3
+start_period_seconds = 10
+
+[roles.health.ready]
+path = "/health/ready"
+port = 8000
+interval_seconds = 5
+timeout_seconds = 3
+retries = 6
+start_period_seconds = 15
+
+[migration]
+command = ["alembic", "upgrade", "heads"]
+# How to READ the heads the database is at. Declared rather than derived: the
+# read verb cannot be inferred from the upgrade command, and a provider that
+# guessed it by swapping `upgrade` for `current` is right for Alembic and wrong
+# for any product whose entry point is not Alembic-shaped.
+heads_command = ["alembic", "current"]
+owner_material = "MIGRATION_DATABASE_URL"
+expected_heads = ["a003"]
+compatibility = "online"
+lock_timeout_seconds = 300
+lock_retries = 4
+preflight_command = ["python", "-m", "app.verify_migration_role"]
+
+[backup]
+[[backup.datasets]]
+code = "primary"
+kind = "postgres"
+material = "BACKUP_DATABASE_URL"
+retention_days = 14
+checksum = "sha256"
+encryption = "none"
+restore_proof_max_age_days = 30
+# A SEPARATE control from the window above, stated rather than defaulted. This
+# one decides STALENESS (how often a backup is expected); the window decides
+# whether recovery has ever been demonstrated. A product taking hourly backups
+# nobody has restored passes the first and fails the second, so merging them
+# would delete the only control reporting the real problem.
+expected_backup_interval_seconds = 86400
+# Names the DATA, not the host it lives on or the party that holds it. Minted
+# once and never changed: a failover or a change of supplier must not orphan
+# every restore proof about this dataset.
+lineage = "starter-primary-9d41c6b2"
+# The four privilege verifications are what decide whether a restore is USABLE.
+# `recovery.py` has modelled all of them since the bundle contract landed; the
+# descriptor simply could not name them until now.
+#
+# `row_counts` was here and is REMOVED — a false claim retired, not a capability
+# given up. `CatalogEvidence` carries no row counts, nothing in the facility can
+# observe one, and `verify_recovery` never received this list in the first
+# place, so the check it named could not run. `spec.py` now refuses it at parse
+# for a dataset with no external executor. It becomes declarable again the day
+# this dataset names an executor whose signed receipt claims it.
+verify = [
+  "schema",
+  "migration_heads",
+  "roles",
+  "ownership",
+  "memberships",
+  "effective_privileges",
+]
+
+[telemetry]
+logs = true
+metrics = true
+traces = false
+app_direct_shipping = false
+deployment_annotations = true
+# Declaring the image is what turns "we render a collector configuration" into
+# "signals leave this host". Without it the rendered otel-collector/config.yaml sits
+# beside a deployment that runs no collector — a specification of what one would
+# need, in a place a reader reasonably takes for telemetry.
+# The INDEX digest of the 0.109.0 manifest list, not a per-architecture
+# manifest. `docker inspect` on a laptop hands you the arch-specific one,
+# which silently makes this descriptor architecture-specific and fails on a
+# host of another architecture for a reason invisible in the diff.
+collector_image = "otel/opentelemetry-collector-contrib@sha256:af0f72b2d2493fc17f06cf3bc136548240cd7ebb2c8b1c8a7be6f3eb03068389"
+
+[[external_dependencies]]
+code = "postgres"
+kind = "postgres"
+required_for = ["ready", "migrate", "backup"]
+material = "DATABASE_URL"
+
+[rollout]
+stability_window_seconds = 120
+rollback_images_retained = 2
+
+
+[database]
+postgres_major = 16
+expected_schemas = ["mod_deploy", "public"]
+tablespaces = "none"
+
+[[database.roles]]
+name = "app_admin"
+kind = "migration_owner"
+inherit = true
+login = true
+bypassrls = true
+member_of = []
+
+[[database.catalogs]]
+schema = "dotmac.product-database-catalog/v1"
+path = "catalogs/product-database.json"
+digest = "sha256:8243502320ed727ef30a701b6eee76495a5def7c83463291022ee2c6bd782355"
+scope = "product"
+complete_schemas = ["mod_deploy", "public"]
+
+[database.catalogs.product_identity]
+descriptor_product = "dotmac_starter_mt"
+catalog_product = "dotmac-starter-mt"
+catalog_version = "0.1.0"
+mapping_ref = "docs/adr/0070-deployment-is-a-stateless-versioned-foundation.md"

@@ -77,6 +77,11 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-billing": {
+      "declared": "0.1.0a10",
+      "reason": "UNPUBLISHED FINAL SUCCESSOR. a10 fully incorporates the a9 source-only Tax evidence allocation, immutable bi12, historical allocation getter and Tax V2 lineage through invoice V3/withholding V2. No verified a9 tag/release run or inspected consumer pin was found; do not publish a9 as an intermediate prerequisite. Last verified Billing baseline is a8. Hosted CI must qualify a8 bi11-to-bi12 on both planes, unchanged original V1/V2 reads, V3 graph replay and withholding evidence. Tax owns determination and opaque owner fingerprints; Billing binds all copied public content and original per-line commercial identities without sibling imports. Final serial publications are Payroll a2, Tax a7, Billing a10; exact verified artifact pins/locks and complete consumer CI precede staging. Source allocation grants no production authority. Remove only with verified a10 publication record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-collections": {
       "declared": "0.1.0a2",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 proposes a fresh modern-provenance build under a new version; runtime behavior, public API and migrations remain unchanged from the published a1 source, and the Kernel floor remains >=0.1.0a89. The legacy a1 release is not reissued or relabeled. Hold pending root review and Michael's source/release authorization, acceptance of the Kernel a105 publication record on main, and a refreshed tag/census check before integration. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due; this proposal does not switch product authority. Remove this row only with the verified a2 publication record.",
@@ -137,9 +142,14 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-payroll": {
+      "declared": "0.1.0a2",
+      "reason": "DECLARED SOURCE SUCCESSOR, NOT PUBLISHED. Extracts ERP PR761 scalar run totals and net-only payment parity into the Payroll owner; published a1 bytes and migration remain unchanged. Hosted acceptance and separately authorized publication/install-back/tag/record precede an ERP exact pin. Contract reuse does not transfer stateful payroll authority. Remove this row only with verified a2 publication evidence.",
+      "state": "declared-unpublished"
+    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication. The same unpublished successor also includes ph_0003 enrollment grants and caller-supplied admission/closure source from PR883; no live enrollment authority or credential custody is asserted.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {
@@ -153,8 +163,8 @@
       "state": "never-published"
     },
     "dotmac-tax": {
-      "declared": "0.1.0a6",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. Released a4 remains the adopter baseline. Candidate a6 includes a5 immutable rule supersession, sealed rule/band membership, bounded policy history and advisory preview; a6 adds caller-transaction exact catalog/rule authoring without internal savepoint completion, reusing Tax validation and replay comparators. The Sub owner must roll back and retry whole commands on unique insert contention. Sub policy UI requires a verified published successor and real owner/permission binding; no unpublished pin, financial writer or production authority is activated. Remove only through the exact authorized release record.",
+      "declared": "0.1.0a7",
+      "reason": "UNPUBLISHED FINAL SUCCESSOR. a7 carries the complete a5/a6 source-only authoring allocations and explicit Tax V2 dependency policy, original commercial identities, sealed prior references and tx_0005. No verified a6 tag/release run or inspected consumer pin was found; a6 publication is not a prerequisite. Last verified adopter baseline is a4. Preserve released tx1-tx3 bytes and qualify direct a4 tx3-to-head through tx4/tx5, including concurrency, replay and populated downgrade refusal on hosted CI. Final serial publications are Payroll a2, Tax a7 and Billing a10, each with exact protected source, built-once verified artifacts, install-back, tag and truthful release record; actual exact consumer pins and full consumer CI precede staging. Source allocation is not publication, policy activation or cutover. Remove only with the verified a7 publication record.",
       "state": "declared-unpublished"
     },
     "dotmac-usage": {
@@ -175,6 +185,26 @@
     "dotmac-ipam": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED EXTRACTION RE-CUT, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ipam-v0.1.0a1), with ip_0001_ipam byte-frozen; it is must-not-install (ruled N2, Michael 2026-10-26/27). 0.2.0a1 replaces the template behaviour with Sub's extracted IPAM code and adds the additive ip_0002_extracted revision, so src/ no longer matches the bytes the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Hosted acceptance, the protected release dispatch (Michael go, in a train gap), the exact Sub pin and the wave-1 cutover gates remain separate; allocation authorizes no tag, adoption or production migration. Remove this row only with the oracle-backed record of an authorized exact 0.2.0a1 publication.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-learning": {
+      "declared": "0.1.0a4",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a3 remains published and immutable (peeled dotmac-learning-v0.1.0a3 -> 7f8f1e6646e531154450370e51dbede46723cc60; verified release run 40484794529; wheel sha256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c). The additive typed cohort intake patch and same-tenant selected bank existence refusal require a new immutable distribution identity. Source allocation claims no a4 artifact, publication, installation, Academy adoption or writer retirement. Hosted qualification and exact protected-main release-module.yml publication/verification precede tagging and its generated release record. Remove this row only with that oracle-backed a4 release record; never edit the declared version down or republish a3.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-config-layers": {
+      "declared": "0.1.0a1",
+      "reason": "FIRST SOURCE, NOT YET PUBLISHED. 0.1.0a1 is the generic layered-composition engine ported from Dotmac Sub draft PR 3625 under ADR-0074 and the ADR-0017 owner-directed exception; it has no tag and no registry artifact. Publication is a release-captain action by Michael's go, in a gap between billing releases and before dotmac-routeros-config; no Sub pin, adoption or product writer change is claimed here. Remove this row only through the authorized release-record transition for dotmac-config-layers-v0.1.0a1.",
+      "state": "never-published"
+    },
+    "dotmac-ui": {
+      "declared": "0.1.0a9",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. The dashboard-primitives slice extends the a8 UI surface under the declared a9 identity. Hosted qualification, protected-main release authorization and an oracle-backed release record remain required. This row claims no artifact, publication, product adoption or writer retirement. Remove only through the authorized a9 release-record transition.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-integration": {
+      "declared": "0.1.0a21",
+      "reason": "ALLOCATED INTEGRATED DEVELOPMENT SOURCE, NOT PUBLISHED. Published a20 and ig_0017_provisioning remain immutable. The all-31 source integration adds PR883 dispatch snapshots as ig_0018, retained original context and grant-bound observations. No accepting production authority, startup credential-assignment producer, transport negotiation, enrollment or cutover is established. Remove only with the oracle-backed record of a verified authorized a21 publication.",
       "state": "declared-unpublished"
     }
   }
