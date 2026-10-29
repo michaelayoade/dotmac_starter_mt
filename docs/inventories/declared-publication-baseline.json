@@ -142,11 +142,6 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a3 remains published and immutable (peeled dotmac-learning-v0.1.0a3 -> 7f8f1e6646e531154450370e51dbede46723cc60; verified release run 40484794529; wheel sha256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c). The additive typed cohort intake patch and same-tenant selected bank existence refusal require a new immutable distribution identity. Source allocation claims no a4 artifact, publication, installation, Academy adoption or writer retirement. Hosted qualification and exact protected-main release-module.yml publication/verification precede tagging and its generated release record. Remove this row only with that oracle-backed a4 release record; never edit the declared version down or republish a3.",
       "state": "declared-unpublished"
     },
-    "dotmac-numbering": {
-      "declared": "0.1.0a4",
-      "reason": "ALLOCATED IMPLEMENTATION CANDIDATE, NOT PUBLISHED. a3 remains retained under dotmac-numbering-v0.1.0a3 with exact source/artifact release evidence. a4 extends the existing owner with strict creation/enrollment, cross-series collision domains/claims, read DTOs and additive nu_0002; released nu_0001 bytes remain unchanged. Hosted CI, independent review, exact publication and adopter acceptance are separate gates. ERP keeps its released pin until that publication is verified. Remove this row only with the oracle-backed a4 release record; this candidate authorizes no enrollment, backfill, repair or production switch.",
-      "state": "declared-unpublished"
-    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",
