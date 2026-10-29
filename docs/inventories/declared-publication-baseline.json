@@ -87,11 +87,6 @@
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
     },
-    "dotmac-connector-freeradius": {
-      "declared": "0.1.0a1",
-      "reason": "NEW CONNECTOR, NEVER PUBLISHED. Declared by the Integrator FreeRADIUS transport slice (ADR-0074): SPI 1.7 PROVISION/POLL over the FreeRADIUS SQL schema plus CoA-Disconnect against installation-bound fleet targets, built for Sub's network-suite-v1 adoption of dotmac-network-access. Supply-only release eligibility in .github/release-connectors.json requires the published dotmac-integration-v0.1.0a20 floor (SPI 1.7 and ig_0017); it is not a publication or activation claim. Retain this row until the connector workflow installs, verifies and tags 0.1.0a1 and its release record removes the row. Never merge an Integrator pin before that tag exists. Live shadow parity, assembly single-use secret-fetch binding and single-writer cutover with incumbent retirement remain separate activation gates.",
-      "state": "never-published"
-    },
     "dotmac-connector-meta-social": {
       "declared": "0.1.0a2",
       "reason": "DECLARED BY THE OUTBOUND MESSAGING SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-meta-social-v0.1.0a1 -> c1921f6c4b9360c8b0005bddbf85e04e86d29a73), and messaging.send.v1, the per-capability modes, three additional secret bindings, two Graph egress hosts and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 ingress manifest is preserved as INGRESS_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an Integrator pin before that tag exists.",
@@ -142,11 +137,6 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-ipam": {
-      "declared": "0.2.0a1",
-      "reason": "ALLOCATED EXTRACTION RE-CUT, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ipam-v0.1.0a1), with ip_0001_ipam byte-frozen; it is must-not-install (ruled N2, Michael 2026-10-26/27). 0.2.0a1 replaces the template behaviour with Sub's extracted IPAM code and adds the additive ip_0002_extracted revision, so src/ no longer matches the bytes the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Hosted acceptance, the protected release dispatch (Michael go, in a train gap), the exact Sub pin and the wave-1 cutover gates remain separate; allocation authorizes no tag, adoption or production migration. Remove this row only with the oracle-backed record of an authorized exact 0.2.0a1 publication.",
-      "state": "declared-unpublished"
-    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",
@@ -181,6 +171,11 @@
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named first intended consumer; ERP and CRM are later consumers under the dossier. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move workforce authority, or retire any Sub/ERP/CRM writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
+    },
+    "dotmac-ipam": {
+      "declared": "0.2.0a1",
+      "reason": "ALLOCATED EXTRACTION RE-CUT, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ipam-v0.1.0a1), with ip_0001_ipam byte-frozen; it is must-not-install (ruled N2, Michael 2026-10-26/27). 0.2.0a1 replaces the template behaviour with Sub's extracted IPAM code and adds the additive ip_0002_extracted revision, so src/ no longer matches the bytes the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Hosted acceptance, the protected release dispatch (Michael go, in a train gap), the exact Sub pin and the wave-1 cutover gates remain separate; allocation authorizes no tag, adoption or production migration. Remove this row only with the oracle-backed record of an authorized exact 0.2.0a1 publication.",
+      "state": "declared-unpublished"
     }
   }
 }

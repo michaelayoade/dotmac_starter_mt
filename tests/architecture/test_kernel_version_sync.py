@@ -299,8 +299,9 @@ CAPABILITY_RAISED_FLOORS = {
     # `ModuleManifest.__post_init__` -> `validate_prerequisites` raises
     # `UnknownPrerequisiteError` at manifest import, before the allocation check
     # is ever reached. The floor moved for a capability, so the row moved with
-    # it.
-    "dotmac-numbering": ("0.1.0a66", "0.1.0a65"),
+    # it. a4 additionally imports the engine-free transaction seam at package
+    # import for strict create/enroll. a98 publishes that surface; a97 does not.
+    "dotmac-numbering": ("0.1.0a98", "0.1.0a65"),
     # Integration held a58 — its own ledger row — through `0.1.0a1`, `0.1.0a2`
     # and `0.1.0a3`, all PUBLISHED. `0.1.0a4` declares `idempotency_ledger.v1`,
     # the a66 name for the at-most-once tables `run_effect_once` has been

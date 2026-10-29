@@ -1553,7 +1553,7 @@ url = "packages/dotmac-network-topology"
 
 [[package]]
 name = "dotmac-numbering"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "DotMac dual-plane document-series allocation with immutable receipts"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1562,7 +1562,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a66"
+dotmac-kernel = ">=0.1.0a98"
 sqlalchemy = "^2.0"
 
 [package.source]
