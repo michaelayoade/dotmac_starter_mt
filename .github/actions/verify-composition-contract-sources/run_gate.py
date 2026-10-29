@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import stat
 import sys
@@ -16,24 +15,27 @@ ACTION_ROOT: Final = Path(__file__).resolve().parent
 TRUSTED_CONTRACT_REVISION: Final = "8b4b6d4b42e650c47fe4c04a679a5ccb51c4b2cd"
 GATE_PATH: Final = "tools/composition_contract/compatibility_gate.py"
 BINDINGS_PATH: Final = "tests/architecture/compatibility_gate_bindings.json"
-GATE_SHA256: Final = "17e0cb944518309dc68636cda697c2f50b762e0a30cf87cd427a29cb9f1eee45"
+GATE_SHA256: Final = "a2664790617ac6304255c36f268f8ac1058f29b852c7f60e785af98ba4de905a"
 BINDINGS_SHA256: Final = (
-    "8467df2722106276159b97b7d2c4f4a9c86b25f9a9f8461e453911b5ff01e23e"
+    "ab018998a626bed8540a68de50c42e2485a867a2fe1421a6225d123fede84121"
 )
 EXPECTED_REVISIONS: Final = {
     "academy": "ca1f9058a6483fe52207556fa2d17c56b1e237c7",
-    "erp": "dca695a7d59179fe65577ba4e72a709ff0b32cde",
+    "erp": "134abce8a74a205bd9636cafcf232178acb70874",
     "sub": "272a897b778899b110c5790fcaf43bbb54efe27c",
 }
 EXPECTED_STATUS: Final = {
     "academy": "satisfied",
-    "erp": "deferred_runtime_debt",
+    "erp": "satisfied",
     "sub": "satisfied",
 }
-EXPECTED_ERP_DEBT: Final = {
-    ("packages/dotmac-files/src/dotmac_files/service.py", 1),
-    ("packages/dotmac-tax/src/dotmac_tax/service.py", 5),
-}
+EXPECTED_CATALOGUE_REVISION: Final = "8c12998b57a31b5cf4a3e296d092460f97e638ba"
+EXPECTED_KERNEL_SUBJECT: Final = (
+    "dotmac-kernel",
+    "0.1.0a107",
+    "dotmac-kernel-v0.1.0a107",
+    EXPECTED_CATALOGUE_REVISION,
+)
 _HELPER_MODULES: Final = (
     ("tools.composition_contract.composition_schema", "composition_schema.py"),
     ("tools.composition_contract.observations", "observations.py"),
@@ -132,44 +134,26 @@ def _require_sha256(content: bytes, expected: str, *, label: str) -> None:
         )
 
 
-def _strict_json(content: bytes) -> Mapping[str, object]:
-    def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in items:
-            if key in result:
-                raise TrustedRunnerError(f"bindings contain duplicate field {key!r}")
-            result[key] = value
-        return result
+def _require_exact_bindings(gate: ModuleType, content: bytes) -> Any:
+    """Parse captured, SHA-verified bytes using the safely loaded pinned gate."""
 
-    try:
-        value = json.loads(content, object_pairs_hook=pairs)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise TrustedRunnerError(f"bindings are not strict UTF-8 JSON: {exc}") from exc
-    if not isinstance(value, Mapping):
-        raise TrustedRunnerError("bindings root is not an object")
-    return value
-
-
-def _require_exact_bindings(content: bytes) -> None:
-    document = _strict_json(content)
-    if set(document) != {"schema", "bindings"}:
-        raise TrustedRunnerError("bindings have an unexpected top-level shape")
-    if document["schema"] != "kernel-composition-compatibility-bindings.v3":
-        raise TrustedRunnerError("bindings schema is not v3")
-    rows = document["bindings"]
-    if not isinstance(rows, Mapping) or set(rows) != set(EXPECTED_REVISIONS):
-        raise TrustedRunnerError("bindings do not name exactly the three products")
-    actual: dict[str, str] = {}
-    for product in EXPECTED_REVISIONS:
-        row = rows[product]
-        if not isinstance(row, Mapping) or set(row) != {"revision"}:
-            raise TrustedRunnerError(f"{product}: binding row is not closed")
-        revision = row["revision"]
-        if not isinstance(revision, str):
-            raise TrustedRunnerError(f"{product}: revision is not a string")
-        actual[product] = revision
+    configuration = gate.parse_bindings(content)
+    actual = {
+        product: binding.revision for product, binding in configuration.bindings.items()
+    }
     if actual != EXPECTED_REVISIONS:
         raise TrustedRunnerError(f"bindings changed: {actual!r}")
+    if configuration.catalogue_revision != EXPECTED_CATALOGUE_REVISION:
+        raise TrustedRunnerError("bindings changed the protected catalogue")
+    subject = configuration.kernel_subject
+    if (
+        subject.distribution,
+        subject.version,
+        subject.tag,
+        subject.peeled_commit,
+    ) != EXPECTED_KERNEL_SUBJECT:
+        raise TrustedRunnerError("bindings changed the prospective Kernel 107 subject")
+    return configuration
 
 
 def _safe_package(name: str, path: Path) -> None:
@@ -208,7 +192,9 @@ def _load_verified_gate(
 def _require_expected_result(result: Any) -> None:
     evaluations = tuple(result.evaluations)
     by_product = {item.product: item for item in evaluations}
-    if set(by_product) != set(EXPECTED_STATUS):
+    if len(evaluations) != len(EXPECTED_STATUS) or set(by_product) != set(
+        EXPECTED_STATUS
+    ):
         raise TrustedRunnerError(
             f"gate evaluated wrong product set: {sorted(by_product)!r}"
         )
@@ -221,18 +207,17 @@ def _require_expected_result(result: Any) -> None:
         raise TrustedRunnerError(
             f"gate compatibility statuses changed: {actual_status!r}"
         )
-    erp_debt = {
-        (item.source_path, item.sites) for item in by_product["erp"].deferred_debt
-    }
-    if erp_debt != EXPECTED_ERP_DEBT:
-        raise TrustedRunnerError(f"ERP deferred debt changed: {sorted(erp_debt)!r}")
+    if any(item.deferred_debt for item in evaluations):
+        raise TrustedRunnerError("a product retains deferred runtime debt")
     if any(
         item.runtime_exposure is None or item.runtime_exposure.unknown != 0
         for item in evaluations
     ):
         raise TrustedRunnerError("a product retains unknown runtime exposure")
-    if result.compatibility_satisfied:
-        raise TrustedRunnerError("the current gate must preserve reached ERP debt")
+    if not result.compatibility_satisfied:
+        raise TrustedRunnerError(
+            "gate did not establish compatibility for all products"
+        )
     if result.adoption_status != "not_evaluated":
         raise TrustedRunnerError("compatibility evaluation must not claim adoption")
 
@@ -263,7 +248,6 @@ def main() -> int:
         bindings_source = _read_regular_file(bindings_path, label="bindings")
         _require_sha256(gate_source, GATE_SHA256, label="compatibility gate")
         _require_sha256(bindings_source, BINDINGS_SHA256, label="bindings")
-        _require_exact_bindings(bindings_source)
         gate = _load_verified_gate(
             workspace,
             helper_sources=helper_sources,
@@ -274,10 +258,7 @@ def main() -> int:
             "erp": workspace / ".compat-gate-clones/dotmac_erp",
             "sub": workspace / ".compat-gate-clones/dotmac_sub",
         }
-        bindings = {
-            product: gate.ProductBinding(product, revision)
-            for product, revision in EXPECTED_REVISIONS.items()
-        }
+        bindings = _require_exact_bindings(gate, bindings_source)
         result = gate.evaluate_gate(
             bindings,
             clones=clones,
