@@ -8,7 +8,7 @@ contract = "Create address spaces and pools; reserve, assign and release address
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 
 source_revisions = [
-  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_sub:a7cc2e8ea4b79bebf50230af6f9bb14ccc70ea87",
   "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
 ]
 source_paths = [
@@ -16,6 +16,13 @@ source_paths = [
   "dotmac_sub:app/services/ip_assignment_lifecycle.py",
   "dotmac_sub:app/services/ipam_adapter.py",
   "dotmac_sub:app/services/network/ipam_scope.py",
+  "dotmac_sub:app/services/provisioning_helpers.py",
+  "dotmac_sub:app/services/ip_lifecycle.py",
+  "dotmac_sub:app/services/ipv6_pd.py",
+  "dotmac_sub:app/services/ip_pool_utilization_snapshot.py",
+  "dotmac_sub:app/services/ip_consistency_audit.py",
+  "dotmac_sub:app/services/network/ont_management_ipam.py",
+  "dotmac_sub:app/services/network/subscriber_wan_ipam.py",
   "dotmac_sub:docs/designs/IP_ASSIGNMENT_LIFECYCLE_SOT.md",
   "dotmac_starter_mt:packages/dotmac-ipam/src/dotmac_ipam",
 ]
@@ -23,7 +30,18 @@ preserved_tests = [
   "dotmac_sub:tests/test_ip_assignment_lifecycle.py",
   "dotmac_sub:tests/test_ip_assignment_repair.py",
   "dotmac_sub:tests/test_ipam_collision_prevention.py",
+  "dotmac_sub:tests/test_ip_assignment_ipv6_link_unlink.py",
+  "dotmac_sub:tests/test_ipv4_on_demand_allocator.py",
+  "dotmac_sub:tests/test_ipv4_primary_assignment_marker.py",
+  "dotmac_sub:tests/test_ipv6_pd_allocator.py",
+  "dotmac_sub:tests/test_ip_lifecycle.py",
+  "dotmac_sub:tests/test_ip_consistency_audit.py",
   "dotmac_sub:tests/architecture/test_ip_assignment_service_ownership.py",
+  "dotmac_starter_mt:tests/unit/test_ipam_allocator.py",
+  "dotmac_starter_mt:tests/unit/test_ipam_repair.py",
+  "dotmac_starter_mt:tests/unit/test_ipam_pools_prefixes_queries.py",
+  "dotmac_starter_mt:tests/unit/test_ipam_guard_and_schema.py",
+  "dotmac_starter_mt:tests/unit/test_ipam_extraction_migration.py",
   "dotmac_starter_mt:tests/architecture/test_network_module_suite.py",
   "dotmac_starter_mt:tests/test_network_suite_isolation.py",
 ]
@@ -39,7 +57,7 @@ composition_boundary = "Each adopter installs the tenant-only ipam lineage local
 first_cutover = "dotmac_sub in wave 1 of network-suite-v1: dotmac-ipam alone as the smallest closed writer set (ADR-0038 wave amendment, ruled by Michael 2026-10-26/27; in force on merge)."
 shadow_and_drift = "Backfill exact address/pool/assignment state, replay Sub lifecycle parity tests, compare full typed digests and collision outcomes, and prove repair is idempotent. Live exact-service and duplicate-login parity remain an adoption gate."
 local_copy_retirement = "After the sealed wave-1 cutover and rollback window, Sub removes local IPAM tables/writers and product adapters use only the pinned module surface. Subscriber/service correlation remains product-owned."
-next_action = "Re-cut as 0.2.0a1 extraction from current Sub (0.1.0a1 is must-not-install; its tag and lineage stay untouched) and pass the wave-1 gate (release and exact pin, pre-clean recount at zero, backfill/digest parity, staged rollback rehearsal, single-writer flip, writer retirement). Do not adopt before the wave-1 Sub gate has live IP parity evidence. (ADR-0038 wave amendment, ruled by Michael 2026-10-26/27; in force on merge.)"
+next_action = "2026-10-28: the 0.2.0a1 extraction re-cut is built from Sub main a7cc2e8ea (incl. #3812 IPv6 link/unlink) with additive ip_0002_extracted, the before_flush command-scope guard and moved parity tests on synthetic data; it is declared and UNPUBLISHED (no tag, no verification row). 0.1.0a1 is must-not-install; its tag and lineage stay untouched. Remaining gate: protected release, exact Sub pin, pre-clean recount at zero, backfill/digest parity, staged rollback rehearsal, single-writer flip, writer retirement. Do not adopt before the wave-1 Sub gate has live IP parity evidence. (ADR-0038 wave amendment, ruled by Michael 2026-10-26/27; in force on merge.)"
 [[product_writers]]
 product = "dotmac_erp"
 writer_state = "inventory_only"
@@ -50,5 +68,5 @@ evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
 product = "dotmac_sub"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+revision = "a7cc2e8ea4b79bebf50230af6f9bb14ccc70ea87"
 evidence_paths = ["app/models/network.py", "app/services/ip_assignment_lifecycle.py", "app/services/ipam_adapter.py", "app/services/network/ipam_scope.py"]

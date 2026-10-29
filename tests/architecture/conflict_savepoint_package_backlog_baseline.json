@@ -1,6 +1,6 @@
 {
   "_comment": "Frozen backlog of conflict_savepoint imports still reaching the eager dotmac_kernel.db module, package by package, site by site. #678 closes the eager-import chain app/assembly.py's load_manifests(FEATURE_MODULES) actually reaches -- the five app/features/*/service.py imports. FEATURE_MODULES names zero dotmac_ packages, so this backlog is NOT part of that chain and #678 does not migrate it. #678 closes Starter's eager-import chain, not fleet-wide package debt -- do not read a shrinking or steady total here as a completed migration. Retirement condition: migrate a package's imports to dotmac_kernel.transactions.conflict_savepoint when its cutover requires it. A package already published at its declared version must first allocate a successor or enter the complete PEP 440 local-development state; a tagless declared-unpublished package can take the repair without inventing another version transition; a real successor already in flight may carry the repair only as part of the same coherent release. Two-directional ratchet: fails if a file's count rises OR falls without this baseline being regenerated in the same change. Regenerate with generate_package_backlog_baseline() in this module; do not hand-edit.",
-  "total": 111,
+  "total": 107,
   "files": {
     "packages/dotmac-accounting/src/dotmac_accounting/service.py": 1,
     "packages/dotmac-analytics/src/dotmac_analytics/service.py": 2,
@@ -22,7 +22,6 @@
     "packages/dotmac-integration/src/dotmac_integration/execution.py": 1,
     "packages/dotmac-integration/src/dotmac_integration/polling.py": 1,
     "packages/dotmac-inventory/src/dotmac_inventory/service.py": 9,
-    "packages/dotmac-ipam/src/dotmac_ipam/service.py": 4,
     "packages/dotmac-network-access/src/dotmac_network_access/service.py": 4,
     "packages/dotmac-network-assurance/src/dotmac_network_assurance/service.py": 4,
     "packages/dotmac-network-control/src/dotmac_network_control/service.py": 3,
