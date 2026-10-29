@@ -48,14 +48,34 @@ drifts is the one nobody reads. One file, invoked twice, cannot.
 
 from __future__ import annotations
 
-import re
 import sys
 import sysconfig
 from hashlib import sha256
+from html.parser import HTMLParser
 from pathlib import Path
 
-#: Every `.dmui-*` class token the rendered markup emits.
-_CLASS_TOKEN = re.compile(r"\bdmui-[A-Za-z0-9_-]+")
+
+class _ComponentClassParser(HTMLParser):
+    """Read CSS classes without mistaking data hooks or text for classes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.classes: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for name, value in attrs:
+            if name == "class" and value is not None:
+                self.classes.update(
+                    token for token in value.split() if token.startswith("dmui-")
+                )
+
+
+def _component_classes(rendered: str) -> set[str]:
+    parser = _ComponentClassParser()
+    parser.feed(rendered)
+    parser.close()
+    return parser.classes
+
 
 #: Argument sets each component is rendered with. A component's declared class
 #: set is proved against the UNION of its renders, because state modifiers
@@ -245,7 +265,7 @@ def _assert_every_declared_component_renders(module: object) -> None:
             rendered = str(macro(**kwargs))
             if not rendered.strip():
                 _fail(f"{component.macro} rendered empty markup")
-            emitted |= set(_CLASS_TOKEN.findall(rendered))
+            emitted |= _component_classes(rendered)
 
         missing = set(component.classes) - emitted
         if missing:
