@@ -35,6 +35,7 @@ from uuid import uuid4
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
@@ -59,7 +60,7 @@ ModelSet = tuple[
     type[AllocationReceipt] | type[PlatformAllocationReceipt],
     type[SeriesRepair] | type[PlatformSeriesRepair],
 ]
-_Model = TypeVar("_Model")
+_Row = TypeVar("_Row", bound=tuple[Any, ...])
 
 MAX_VALUE: Final[int] = 10**15
 MAX_DIGITS: Final[int] = 18
@@ -111,6 +112,14 @@ class SeriesConfiguration:
             raise _error(
                 "invalid_series_code", "A series code is required, max 80 characters."
             )
+        for field, maximum in (("prefix", 32), ("suffix", 32), ("separator", 8)):
+            value = getattr(self, field)
+            if not isinstance(value, str) or len(value) > maximum or "\x00" in value:
+                raise _error(
+                    "invalid_format_field",
+                    "A format field exceeds its database contract.",
+                    field=field,
+                )
         if self.reset_policy not in RESET_POLICIES:
             raise _error(
                 "unknown_reset_policy",
@@ -254,6 +263,15 @@ def _assert_safe_transition(
     `start_value` is deliberately NOT frozen — it seeds counters for periods
     that have not begun, and cannot move one that has.
     """
+    if existing.strict_identity:
+        from dotmac_numbering.replacement import _configuration
+
+        if _configuration(existing) != configuration:
+            raise _error(
+                "immutable_series",
+                "A strict series identity is immutable from creation.",
+            )
+        return
     changed = [
         field
         for field in IDENTITY_SHAPING_FIELDS
@@ -361,9 +379,7 @@ def _models(scope: Scope) -> ModelSet:
     )
 
 
-def _tenant_filter(
-    stmt: Select[tuple[_Model]], scope: Scope, model: Any
-) -> Select[tuple[_Model]]:
+def _tenant_filter(stmt: Select[_Row], scope: Scope, model: Any) -> Select[_Row]:
     if isinstance(scope, TenantScope):
         return stmt.where(model.tenant_id == scope.tenant_id)
     return stmt
@@ -382,7 +398,7 @@ def _find_series(
     stmt = select(series_model).where(series_model.series_code == series_code)
     stmt = _tenant_filter(stmt, scope, series_model)
     if lock:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     return cast(SeriesRow | None, db.execute(stmt).scalar_one_or_none())
 
 
@@ -439,7 +455,9 @@ def _locked_counter(
         counter_model.period_key == period_key,
     )
     counter = db.execute(
-        _tenant_filter(stmt, scope, counter_model).with_for_update()
+        _tenant_filter(stmt, scope, counter_model)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     ).scalar_one()
     return cast(CounterRow, counter)
 
@@ -467,6 +485,50 @@ def allocate(
     reference_date: date,
     idempotency_key: str,
     allocated_by: str | None = None,
+    partition_key: str | None = None,
+    document_reference: str | None = None,
+) -> Allocation:
+    """Allocate atomically with a claim for an enrolled immutable series.
+
+    Legacy calls retain their a3 fingerprint, including replay after enrollment.
+    A fresh enrolled operation must supply document identity; kernel replay of
+    an old allocation returns before that first-execution requirement.
+    """
+    try:
+        return _allocate(
+            db,
+            scope=scope,
+            series_code=series_code,
+            reference_date=reference_date,
+            idempotency_key=idempotency_key,
+            allocated_by=allocated_by,
+            partition_key=partition_key,
+            document_reference=document_reference,
+        )
+    except IntegrityError as exc:
+        constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+        if constraint in (
+            "uq_number_claims_rendered",
+            "uq_number_claims_document",
+            "uq_platform_number_claims_rendered",
+            "uq_platform_number_claims_document",
+        ):
+            from dotmac_numbering.replacement import NumberCollision
+
+            raise NumberCollision() from exc
+        raise
+
+
+def _allocate(
+    db: Session,
+    *,
+    scope: Scope,
+    series_code: str,
+    reference_date: date,
+    idempotency_key: str,
+    allocated_by: str | None = None,
+    partition_key: str | None = None,
+    document_reference: str | None = None,
 ) -> Allocation:
     """Reserve the next value of a configured series for its period.
 
@@ -496,12 +558,24 @@ def allocate(
         fingerprint_of,
     )
 
-    fingerprint = fingerprint_of(
-        {
-            "series_code": series_code,
-            "reference_date": reference_date.isoformat(),
-        }
-    )
+    fingerprint_inputs: dict[str, object] = {
+        "series_code": series_code,
+        "reference_date": reference_date.isoformat(),
+    }
+    if partition_key is not None or document_reference is not None:
+        from dotmac_numbering.replacement import read_series
+
+        domain = read_series(db, scope=scope, series_code=series_code).domain
+        if domain is None:
+            raise _error(
+                "series_not_enrolled", "Claim arguments require an enrolled series."
+            )
+        fingerprint_inputs.update(
+            domain_code=domain.code,
+            partition_key=domain.partition_key(partition_key),
+            document_reference=document_reference,
+        )
+    fingerprint = fingerprint_of(fingerprint_inputs)
 
     def operation(session: Session) -> dict[str, object]:
         return _do_allocate(
@@ -511,6 +585,8 @@ def allocate(
             reference_date=reference_date,
             idempotency_key=idempotency_key,
             allocated_by=allocated_by,
+            partition_key=partition_key,
+            document_reference=document_reference,
         )
 
     if isinstance(scope, TenantScope):
@@ -568,6 +644,8 @@ def _do_allocate(
     reference_date: date,
     idempotency_key: str,
     allocated_by: str | None,
+    partition_key: str | None = None,
+    document_reference: str | None = None,
 ) -> dict[str, object]:
     # Series first, then the period counter. Without the series lock a first
     # allocation can read old configuration while a concurrent
@@ -587,6 +665,17 @@ def _do_allocate(
         )
 
     formatted = format_number(series, value=value, reference_date=reference_date)
+    from dotmac_numbering.replacement import _allocation_claim
+
+    _allocation_claim(
+        db,
+        scope=scope,
+        series=series,
+        formatted_number=formatted,
+        partition_key=partition_key,
+        document_reference=document_reference,
+        idempotency_key=idempotency_key,
+    )
     counter.next_value = value + 1
 
     _, _, receipt_model, _ = _models(scope)

@@ -7,9 +7,10 @@ Revises: tx_0004_rule_supersession
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
+
+from alembic import op
 
 revision = "tx_0005_tax_dependencies"
 down_revision = "tx_0004_rule_supersession"

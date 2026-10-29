@@ -87,11 +87,6 @@
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
     },
-    "dotmac-connector-freeradius": {
-      "declared": "0.1.0a1",
-      "reason": "NEW CONNECTOR, NEVER PUBLISHED. Declared by the Integrator FreeRADIUS transport slice (ADR-0074): SPI 1.7 PROVISION/POLL over the FreeRADIUS SQL schema plus CoA-Disconnect against installation-bound fleet targets, built for Sub's network-suite-v1 adoption of dotmac-network-access. Supply-only release eligibility in .github/release-connectors.json requires the published dotmac-integration-v0.1.0a20 floor (SPI 1.7 and ig_0017); it is not a publication or activation claim. Retain this row until the connector workflow installs, verifies and tags 0.1.0a1 and its release record removes the row. Never merge an Integrator pin before that tag exists. Live shadow parity, assembly single-use secret-fetch binding and single-writer cutover with incumbent retirement remain separate activation gates.",
-      "state": "never-published"
-    },
     "dotmac-connector-meta-social": {
       "declared": "0.1.0a2",
       "reason": "DECLARED BY THE OUTBOUND MESSAGING SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-meta-social-v0.1.0a1 -> c1921f6c4b9360c8b0005bddbf85e04e86d29a73), and messaging.send.v1, the per-capability modes, three additional secret bindings, two Graph egress hosts and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 ingress manifest is preserved as INGRESS_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an Integrator pin before that tag exists.",
@@ -140,6 +135,11 @@
     "dotmac-inbox-operations": {
       "declared": "0.1.0a5",
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-numbering": {
+      "declared": "0.1.0a4",
+      "reason": "ALLOCATED IMPLEMENTATION CANDIDATE, NOT PUBLISHED. a3 remains retained under dotmac-numbering-v0.1.0a3 with exact source/artifact release evidence. a4 extends the existing owner with strict creation/enrollment, cross-series collision domains/claims, read DTOs and additive nu_0002; released nu_0001 bytes remain unchanged. Hosted CI, independent review, exact publication and adopter acceptance are separate gates. ERP keeps its released pin until that publication is verified. Remove this row only with the oracle-backed a4 release record; this candidate authorizes no enrollment, backfill, repair or production switch.",
       "state": "declared-unpublished"
     },
     "dotmac-platform-health": {

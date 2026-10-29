@@ -9,7 +9,6 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from alembic import command as alembic_command
 from dotmac_kernel.money import Money
 from dotmac_tax import (
     ListTaxRuleHistoryV1,
@@ -51,6 +50,7 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from alembic import command as alembic_command
 from tests import test_tax_released_migration_upgrade as migration_helpers
 from tests.unit import test_tax_owner_authoring as owner_helpers
 from tests.unit import test_tax_service as helpers
@@ -394,7 +394,12 @@ def test_v1_reads_and_writer_refuse_dependency_policy(dependency_database):
     with _session(engine, tenant_id) as session:
         _, _, fact, _, target_rule, target_input = _fixture(session, tenant_id)
         with pytest.raises(TaxConflict, match="V2"):
-            get_tax_rule(session, tenant_id=tenant_id, rule_id=target_rule.rule_id)
+            get_tax_rule(
+                session,
+                tenant_id=tenant_id,
+                tax_code_id=target_input.tax_code_id,
+                version=target_rule.version,
+            )
         with pytest.raises(TaxConflict, match="V2"):
             list_tax_rule_history(
                 session,
@@ -519,7 +524,14 @@ def test_sealed_membership_tampering_and_populated_downgrade_refused(
                 {"tenant": tenant_id, "id": result.id},
             )
     with _session(engine, tenant_id) as session:
-        with pytest.raises(DBAPIError, match="append-only"):
+        # The application grant can reject UPDATE before the evidence trigger.
+        with pytest.raises(
+            DBAPIError,
+            match=(
+                "append-only|permission denied for table "
+                "tax_determination_dependencies"
+            ),
+        ):
             session.execute(
                 text(
                     "UPDATE mod_tax.tax_determination_dependencies "

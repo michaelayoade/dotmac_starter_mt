@@ -31,7 +31,7 @@ from dotmac_numbering.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="numbering",
-    version="0.1.0a3",
+    version="0.1.0a4",
     core=False,
     short_code="numbering",
     migration_prefix="nu",
