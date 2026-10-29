@@ -662,6 +662,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # was not -- and `dotmac_erp` pins a2 AND composes this lineage, so one
     # revision id named two file contents in a database this repository cannot
     # inspect. The file is restored to these bytes in the same change.
+    "dotmac-numbering-v0.1.0a4": (
+        "dotmac-numbering",
+        "f4c8c25f9647c2441ab06a0e588e1e51b6ed036c",
+        {
+            "nu_0001_numbering.py": (
+                "9c3079774b0db615ea5d4c6ca121a9ed43688236bbc5f0a0166a2906513da561"
+            ),
+            "nu_0002_replacement_domains.py": (
+                "6fe70ca0fdad6a23e6fdf8d29c9ce78d26968bd8be0a7f11271257272d9aa0cf"
+            ),
+        },
+    ),
     "dotmac-numbering-v0.1.0a3": (
         "dotmac-numbering",
         "62ecb6b0e198ba08bef9a096037194a9dfca4da0",
@@ -7919,7 +7931,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: example. The release lane does not wait for an open branch, which is why
 #: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-numbering": frozenset({"nu_0002_replacement_domains.py"}),
+    "dotmac-numbering": frozenset(),
     # `ap_0003` records approved-decision withdrawals; still editable until
     # `dotmac-approvals` 0.1.0a7 is tagged.
     "dotmac-approvals": frozenset(),
