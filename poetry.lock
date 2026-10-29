@@ -1345,7 +1345,7 @@ url = "packages/dotmac-inventory"
 
 [[package]]
 name = "dotmac-ipam"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant IP address-space, allocation, assignment, utilization and repair owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1354,7 +1354,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a83"
+dotmac-kernel = ">=0.1.0a98"
 sqlalchemy = "^2.0"
 
 [package.source]

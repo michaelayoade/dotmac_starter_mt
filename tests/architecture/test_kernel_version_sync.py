@@ -219,6 +219,12 @@ CAPABILITY_RAISED_FLOORS = {
     # kernel releases before a98 do not contain `dotmac_kernel.transactions`,
     # so allocation cannot remain the installable floor.
     "dotmac-tax": ("0.1.0a98", "0.1.0a85"),
+    # The 0.2.0a1 extraction re-cut raises flush-only conflicts through
+    # `dotmac_kernel.transactions.conflict_savepoint` (not the eager
+    # `dotmac_kernel.db` module, whose backlog entry this change retires). The
+    # transaction surface is first published in a98; a82 stays as the network
+    # cohort's namespace allocation coordinate.
+    "dotmac-ipam": ("0.1.0a98", "0.1.0a82"),
     # Allocated with the rest of the commerce cohort in a89, but guarded writes
     # consume the manifest-owned `charge_models` and `obligation_sources`
     # declarations that land in a94. The highest consumed capability wins, so
@@ -407,7 +413,6 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
     # gate passed.
     "dotmac-inventory": ("0.1.0a83", "0.1.0a82"),
     "dotmac-assets": ("0.1.0a83", "0.1.0a82"),
-    "dotmac-ipam": ("0.1.0a83", "0.1.0a82"),
     "dotmac-network-inventory": ("0.1.0a83", "0.1.0a82"),
     "dotmac-network-observability": ("0.1.0a83", "0.1.0a82"),
     "dotmac-network-topology": ("0.1.0a83", "0.1.0a82"),
