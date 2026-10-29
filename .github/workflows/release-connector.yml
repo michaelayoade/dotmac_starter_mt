@@ -93,6 +93,7 @@ on:
         type: choice
         options:
           - dotmac-connector-flutterwave
+          - dotmac-connector-freeradius
           - dotmac-connector-linkedin
           - dotmac-connector-meta-social
           - dotmac-connector-mono

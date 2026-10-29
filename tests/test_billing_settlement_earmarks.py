@@ -1,15 +1,15 @@
 """Hosted PostgreSQL proofs over real Billing migrations, roles and both planes."""
 
-from __future__ import annotations
-
 # SQL identifiers are closed test-owned table/function/role literals.
 # ruff: noqa: S608
+
+from __future__ import annotations
+
 from dataclasses import replace
 from threading import Barrier, Thread
 from uuid import uuid4
 
 import pytest
-from alembic import command as alembic_command
 from dotmac_billing import (
     CorrectSettlementEarmarkV1,
     EarmarkCorrectionVerificationV1,
@@ -42,6 +42,7 @@ from dotmac_kernel.planes import ModulePlane
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import DBAPIError
 
+from alembic import command as alembic_command
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as runtime
 from tests import test_billing_withholding_persistence as migration_fixture

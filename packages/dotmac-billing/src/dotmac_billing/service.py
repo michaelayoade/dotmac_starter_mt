@@ -1530,7 +1530,12 @@ def _decode_tax_evidence(
         is_v2 = _is_dependency_evidence_payload(payload)
         commercial_sources: tuple[TaxCommercialSourceEvidenceV1, ...] = ()
         if is_v2:
-            assert isinstance(payload, list) and isinstance(payload[0], dict)
+            if (
+                not isinstance(payload, list)
+                or len(payload) != 1
+                or not isinstance(payload[0], dict)
+            ):
+                raise ValueError("invalid Tax evidence envelope")
             if (
                 set(payload[0])
                 != {"contract_version", "evidence", "commercial_sources"}

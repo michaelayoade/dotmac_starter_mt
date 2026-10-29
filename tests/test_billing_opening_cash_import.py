@@ -4,10 +4,11 @@ These fixtures qualify trusted assembly ports; they are not production source
 attestations, migration authorization or a runtime import composition.
 """
 
-from __future__ import annotations
-
 # SQL identifiers are fixed Billing plane/model table names; values are bound.
 # ruff: noqa: S608
+
+from __future__ import annotations
+
 from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -16,7 +17,6 @@ from threading import Barrier, Thread
 from uuid import uuid4
 
 import pytest
-from alembic import command as alembic_command
 from dotmac_billing import models
 from dotmac_billing import opening_queries as q
 from dotmac_billing import service as s
@@ -60,6 +60,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from alembic import command as alembic_command
 from tests import billing_opening_window_fixtures as window_fixture
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as runtime
