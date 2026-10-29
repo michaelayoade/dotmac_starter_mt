@@ -512,6 +512,7 @@
         ],
         "allowed_requires": [
           "alembic",
+          "cryptography",
           "dotmac-kernel",
           "sqlalchemy",
           "python"

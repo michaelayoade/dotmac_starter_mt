@@ -204,7 +204,7 @@
     },
     "dotmac-integration": {
       "declared": "0.1.0a21",
-      "reason": "ALLOCATED INTEGRATED DEVELOPMENT SOURCE, NOT PUBLISHED. Published a20 and ig_0017_provisioning remain immutable. The all-31 source integration adds PR883 dispatch snapshots as ig_0018, retained original context and grant-bound observations. No accepting production authority, startup credential-assignment producer, transport negotiation, enrollment or cutover is established. Remove only with the oracle-backed record of a verified authorized a21 publication.",
+      "reason": "ALLOCATED INTEGRATED DEVELOPMENT SOURCE, NOT PUBLISHED. Published a20 and ig_0017_provisioning remain immutable. The all-31 source integration adds PR883 dispatch snapshots as ig_0018, retained original context and grant-bound observations. No accepting production authority, startup credential-assignment producer, transport negotiation, enrollment or cutover is established. Remove only with the oracle-backed record of a verified authorized a21 publication. The published a20 record is NOT to be repaired by editing the version; a21 is the distinct unpublished source successor.",
       "state": "declared-unpublished"
     }
   }

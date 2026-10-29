@@ -579,7 +579,7 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     for name, wheel in (
         ("module-dist", "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl"),
         ("kernel-dist", kernel_wheel),
-        ("first-party-dist", "dotmac_ui-0.1.0a8-py3-none-any.whl"),
+        ("first-party-dist", "dotmac_ui-0.1.0a9-py3-none-any.whl"),
     ):
         directory = tmp_path / name
         directory.mkdir()
@@ -621,7 +621,7 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     assert sorted(Path(arg).name for arg in wheels) == [
         "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl",
         kernel_wheel,
-        "dotmac_ui-0.1.0a8-py3-none-any.whl",
+        "dotmac_ui-0.1.0a9-py3-none-any.whl",
     ]
     assert provenance[1] == "-I"
     assert "direct_url.json" in provenance[3]
@@ -630,7 +630,7 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     assert recorded["schema"] == "SmokeDependencyWheels.v1"
     assert [w["filename"] for w in recorded["wheels"]] == [
         kernel_wheel,
-        "dotmac_ui-0.1.0a8-py3-none-any.whl",
+        "dotmac_ui-0.1.0a9-py3-none-any.whl",
     ]
     assert all(len(w["sha256"]) == 64 for w in recorded["wheels"])
 

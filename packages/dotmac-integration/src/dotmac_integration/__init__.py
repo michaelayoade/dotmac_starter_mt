@@ -603,7 +603,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a20"
+__version__ = "0.1.0a21"
 
 __all__ = [
     "ObservationRejected",

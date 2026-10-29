@@ -527,14 +527,14 @@ parity_tests = [
 entry_gate = "Inventory PON writers and provider clients, then separate product eligibility, fiber links, generic inventory, and provider I/O from the PON lifecycle."
 retirement_gate = "Sub requests provider-neutral PON outcomes only; module state has no commercial authority and Integrator plugins perform every external operation."
 
-# ADR-0038 amendment of 2026-10-14 (ADR-0074). A module recorded here is a
+# ADR-0038 amendment of 2026-10-14 (ADR-0078). A module recorded here is a
 # network module that is deliberately NOT part of the nine-module
 # `network-suite-v1` cohort above: it displaces no existing Sub writer, holds no
 # command state, and is adopted on its own timeline. It is not counted in
 # `implementation_order`, and the cohort set above does not change.
 [[outside_suite_modules]]
 name = "dotmac-network-config"
-adr = "docs/adr/0074-device-desired-configuration-is-composed-from-layered-documents.md"
+adr = "docs/adr/0078-device-desired-configuration-is-composed-from-layered-documents.md"
 adoption_cohort = "none"
 stateful = true
 persistence_plane = "tenant"

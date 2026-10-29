@@ -5,6 +5,10 @@ The integration merge base is `233e6cd579be7384f6e62ef3df4f0ab49e03762a`
 (tree `a99da0e5103878c621dfcc14f49a1e30e2a0282f`). Older source slices
 already present on that base are inherited rather than replayed over newer code.
 The working branch is `integration/all-starter-module-prs-20261029`.
+The refreshed merge base is `329a397bedd7de9f8583f648368b3ba3558a4191`
+(tree `1e1d9e2ef112f280d9f86a00f9ea0e1b976666f1`): #943 has since landed
+independently and is inherited. Its requirements-engine companion #911 remains
+part of this aggregate.
 This is source preparation, not publication, installation, adoption or deployment.
 
 | PR | Captured source | Disposition | Integration evidence / resolution |
@@ -38,7 +42,7 @@ This is source preparation, not publication, installation, adoption or deploymen
 | [#939](https://github.com/michaelayoade/dotmac_starter_mt/pull/939) | [`7d660766`](https://github.com/michaelayoade/dotmac_starter_mt/commit/7d66076652c0b0e7c6e0a8a4b9264217f0cd2ceb) | Included | Payroll a2 exact independent totals and net-only payment parity. |
 | [#940](https://github.com/michaelayoade/dotmac_starter_mt/pull/940) | [`3a8e1ac1`](https://github.com/michaelayoade/dotmac_starter_mt/commit/3a8e1ac1c3c59827bd58f0918d86c9fec0f9c907) | Superseded by #944 | The complete immutable Tax evidence scope is included in Billing a10. The source-only a9 allocation is not a separate release. |
 | [#942](https://github.com/michaelayoade/dotmac_starter_mt/pull/942) | [`b391df0f`](https://github.com/michaelayoade/dotmac_starter_mt/commit/b391df0fe83cc72e2db0c26a2d0064d8f7efc47a) | Included | Tax a7 dependency determinations and tx_0005, preserving published predecessors and source-only a6 history. |
-| [#943](https://github.com/michaelayoade/dotmac_starter_mt/pull/943) | [`9249d5ba`](https://github.com/michaelayoade/dotmac_starter_mt/commit/9249d5ba99cc577c1b5c6ed40f20ef26dabdc0bd) | Included | Learning a4 caller-owned cohort intake successor and installed-probe expectations. |
+| [#943](https://github.com/michaelayoade/dotmac_starter_mt/pull/943) | [`9249d5ba`](https://github.com/michaelayoade/dotmac_starter_mt/commit/9249d5ba99cc577c1b5c6ed40f20ef26dabdc0bd) | Inherited after refresh | Learning a4 caller-owned cohort intake successor and installed-probe expectations are now on main329. |
 | [#944](https://github.com/michaelayoade/dotmac_starter_mt/pull/944) | [`c716d304`](https://github.com/michaelayoade/dotmac_starter_mt/commit/c716d30415d22795e86ac18bad64c3a4c7ed7b0f) | Included | Complete Billing a10 Tax-owned invoice/dependency evidence, historical reads and bi_0012. |
 
 The added-path completeness audit found all 110 distinct added paths from the
@@ -64,7 +68,9 @@ authority digests are not authoritative. The final authority history starts from
 canonical main and appends only the combined candidate digest. Existing drift
 dispositions and released migration digests remain unchanged. The released-source
 census decreases for the five published declarations moved to unpublished
-successors (Payroll, Billing, Learning, UI and Integration).
+successors relative to the original base (Payroll, Billing, Learning, UI and Integration).
+After #943 landed, current main has census76; four further declaration transitions
+in this aggregate yield72. Both existing drift dispositions remain unchanged.
 
 ## Compatibility hold and merge acceptance
 
