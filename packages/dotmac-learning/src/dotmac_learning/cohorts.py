@@ -11,7 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import roster
-from .cohort_contracts import CreateCohortCommand, RemoveFacilitatorCommand
+from .cohort_contracts import (
+    CohortIntakePatch,
+    CreateCohortCommand,
+    RemoveFacilitatorCommand,
+)
+from .curriculum_models import QuestionBank
 from .participation_contracts import (
     EnrollmentFact,
     ParticipationForbidden,
@@ -73,3 +78,33 @@ def remove_facilitator(
     )
     _unchanged(db, boundary)
     return fact
+
+
+def patch_cohort_intake(db: Session, patch: CohortIntakePatch) -> None:
+    """Stage supplied intake fields in the existing caller transaction.
+
+    Normal lookup autoflush is preserved; there is no ending flush or commit.
+    Bank IDs retain their legacy logical-bank meaning, with tenant-bound
+    existence validation only. No bank version or admissions action is chosen.
+    """
+    boundary = _transaction(db)
+    cohort = db.scalar(
+        select(Cohort).where(
+            Cohort.tenant_id == patch.tenant_id, Cohort.id == patch.cohort_id
+        )
+    )
+    if cohort is None:
+        raise ParticipationNotFound("cohort not found for tenant")
+    supplied = patch.model_dump(exclude={"tenant_id", "cohort_id"}, exclude_unset=True)
+    if "entrance_bank_id" in supplied and patch.entrance_bank_id is not None:
+        bank = db.scalar(
+            select(QuestionBank.id).where(
+                QuestionBank.tenant_id == patch.tenant_id,
+                QuestionBank.id == patch.entrance_bank_id,
+            )
+        )
+        if bank is None:
+            raise ParticipationNotFound("entrance bank not found for tenant")
+    for name, value in supplied.items():
+        setattr(cohort, name, value)
+    _unchanged(db, boundary)

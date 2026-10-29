@@ -30,7 +30,7 @@ _RELATIVE = {
         "BankDocumentHeader",
     ],
 }
-_DUMMIES = [f"n{i}" for i in range(598 - 1 - len(_RELATIVE))]
+_DUMMIES = [f"n{i}" for i in range(600 - 1 - len(_RELATIVE))]
 
 
 def _load_module():
@@ -42,7 +42,7 @@ def _load_module():
 
 
 def _checkout(tmp_path: Path, *, bank_line: str) -> Path:
-    """A minimal checkout whose Learning root binds 598 exports."""
+    """A minimal checkout whose Learning root binds 600 exports."""
     root_init = tmp_path / "packages/dotmac-learning/src/dotmac_learning/__init__.py"
     root_init.parent.mkdir(parents=True)
     exports = ["__version__", *_RELATIVE, *_DUMMIES]
