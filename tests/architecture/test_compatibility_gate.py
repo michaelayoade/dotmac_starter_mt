@@ -55,14 +55,21 @@ def _empty_exposure() -> RuntimeExposureReport:
     return RuntimeExposureReport(0, 0, 0)
 
 
-def test_checked_in_bindings_are_closed_v3_coordinates() -> None:
+def test_checked_in_bindings_are_closed_v4_coordinates() -> None:
     bindings = gate.load_bindings()
 
+    assert bindings.catalogue_revision == "8c12998b57a31b5cf4a3e296d092460f97e638ba"
+    assert bindings.kernel_subject == gate.PublishedSource(
+        "dotmac-kernel",
+        "0.1.0a107",
+        "dotmac-kernel-v0.1.0a107",
+        "8c12998b57a31b5cf4a3e296d092460f97e638ba",
+    )
     assert set(bindings) == set(gate.PRODUCTS)
     assert all(re.fullmatch(r"[0-9a-f]{40}", row.revision) for row in bindings.values())
     assert {product: row.revision for product, row in bindings.items()} == {
         "academy": "ca1f9058a6483fe52207556fa2d17c56b1e237c7",
-        "erp": "dca695a7d59179fe65577ba4e72a709ff0b32cde",
+        "erp": "134abce8a74a205bd9636cafcf232178acb70874",
         "sub": "272a897b778899b110c5790fcaf43bbb54efe27c",
     }
 
@@ -84,7 +91,7 @@ def test_binding_loader_refuses_old_shape_extra_fields_and_duplicate_keys(
         gate.load_bindings(path)
 
     path.write_text(
-        '{"schema":"kernel-composition-compatibility-bindings.v3",'
+        '{"schema":"kernel-composition-compatibility-bindings.v4",'
         '"bindings":{},"satisfied":true}'
     )
     with pytest.raises(gate.GateConfigurationError, match="exactly schema"):
@@ -288,11 +295,17 @@ def test_keyword_and_relative_dynamic_imports_reach_trusted_deferred_debt(
         records=(record,),  # type: ignore[arg-type]
         product_external_modules=product_reach.external_modules,
         catalogue=catalogue,
-        debt=gate._load_debt(repo),
+        sources={
+            "dotmac-files": gate.PublishedSource(
+                "dotmac-files", "1.0", "dotmac-files-v1.0", revision
+            )
+        },
     )
 
     assert runtime_consumed
-    assert reached == (gate.DeferredDebtReach("dotmac-files", source_path, 1),)
+    assert reached == (
+        gate.DeferredDebtReach("dotmac-files", source_path, 1, "1.0", revision),
+    )
 
 
 @pytest.mark.parametrize(
@@ -474,7 +487,7 @@ def test_deferred_debt_uses_one_trusted_coordinate_and_refuses_drift(
 
     # Mutable checkout bytes cannot erase debt committed at the trusted object.
     (repo / debt_path).write_text(json.dumps({"total": 0, "files": {}}))
-    assert gate._load_debt(repo) == {source_path: 1}
+    assert gate._load_debt(repo, gate.TRUSTED_CONTRACT_REVISION) == {source_path: 1}
 
     # A trusted record and its trusted source must still agree in both directions.
     (repo / debt_path).write_text(json.dumps({"total": 2, "files": {source_path: 2}}))
@@ -484,7 +497,7 @@ def test_deferred_debt_uses_one_trusted_coordinate_and_refuses_drift(
         gate, "TRUSTED_CONTRACT_REVISION", _git(repo, "rev-parse", "HEAD")
     )
     with pytest.raises(gate.GateConfigurationError, match="disagrees with trusted"):
-        gate._load_debt(repo)
+        gate._load_debt(repo, gate.TRUSTED_CONTRACT_REVISION)
 
 
 def test_gate_refuses_semantic_helpers_that_drift_from_the_trusted_revision(
@@ -534,14 +547,35 @@ def test_real_coordinates_verify_evidence_and_preserve_runtime_debt() -> None:
 
     assert result.evidence_verified
     assert not result.compatibility_satisfied
-    assert by_product["academy"].compatibility_status == "satisfied"
-    assert by_product["sub"].compatibility_status == "satisfied"
+    assert set(by_product) == set(gate.PRODUCTS)
+    source_coordinates = {
+        (source.distribution, source.version): source.peeled_commit
+        for source in (
+            *gate.load_bindings().published_sources,
+            gate.load_bindings().kernel_subject,
+        )
+    }
+    assert result.kernel_subject == gate.load_bindings().kernel_subject
+    assert result.kernel_subject is not None
+    for evaluation in result.evaluations:
+        assert evaluation.kernel_subject == result.kernel_subject
+        observed = {
+            source.distribution: source for source in evaluation.observed_sources
+        }
+        assert observed["dotmac-kernel"].version != result.kernel_subject.version
+        assert evaluation.compatibility_status == (
+            "deferred_runtime_debt" if evaluation.deferred_debt else "satisfied"
+        )
+        for item in evaluation.deferred_debt:
+            assert (
+                source_coordinates[item.distribution, item.version]
+                == item.source_commit
+            )
     assert by_product["erp"].compatibility_status == "deferred_runtime_debt"
     assert {
         (item.source_path, item.sites) for item in by_product["erp"].deferred_debt
     } == {
-        ("packages/dotmac-files/src/dotmac_files/service.py", 1),
-        ("packages/dotmac-tax/src/dotmac_tax/service.py", 5),
+        ("packages/dotmac-accounting/src/dotmac_accounting/service.py", 1),
     }
     assert all(
         item.runtime_exposure is not None and item.runtime_exposure.unknown == 0

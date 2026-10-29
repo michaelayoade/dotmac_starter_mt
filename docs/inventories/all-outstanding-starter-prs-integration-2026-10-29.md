@@ -80,13 +80,21 @@ recorded six-site compatibility debt and returns a refusal. Running that workflo
 cannot establish a green compatibility result. No skip, continue-on-error,
 candidate-controlled replacement or false adoption claim resolves that condition.
 
-The canonical closure sequence requires protected-main ERP artifact repins and
-re-derived observations; reviewed final gate/bindings bytes; a protected trusted
-runner successor binding the gate digest, bindings digest, ERP revision, satisfied
-status and empty debt together; then a protected workflow/guard successor and the
-aggregate repin. Actual three-product compatibility must execute with adoption
-`not_evaluated`, followed by exact-head review and all required current-base CI.
-Only then may the sequencing hold be removed and this aggregate merge normally.
+ERP's protected revision `134abce8a74a205bd9636cafcf232178acb70874` already
+contains the published Files/Tax repins. Its nine product-owned observations
+reproduce byte-for-byte under their pinned `8b4b6d4` semantics, and all 15 checks
+on that revision passed. No ERP evidence refresh or credential ceremony is a
+prerequisite to using this existing proof.
+
+The remaining closure sequence requires reviewed final gate/bindings bytes that
+resolve actual published package sources; a protected trusted runner successor
+binding those digests and the current ERP revision; then a protected
+workflow/guard successor and the aggregate repin. The prospective Kernel subject
+is explicit and distinct from observed product lock versions. Actual
+three-product compatibility must execute with adoption `not_evaluated`; any
+reached package debt remains a refusal requiring its own repair. Exact-head
+review and every required current-base CI check must pass before the sequencing
+hold is removed and this aggregate merges normally.
 
 Other source reviews and static checks do not substitute for hosted tests. Tests
 and dependency installations were not run locally. No production credential

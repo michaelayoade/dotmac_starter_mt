@@ -3,9 +3,11 @@
 Products publish only v3 observation coordinates and digests.  This module
 owns the decisions: it loads each record from an immutable protected-main
 revision, re-derives every observation, derives the four dimensional facts,
-and intersects runtime-reached package modules with the Kernel's frozen
-``dotmac_kernel.db`` import debt.  Product-authored booleans are never an
-input.
+and measures runtime-reached ``dotmac_kernel.db`` import debt in the exact
+published source commits selected by verified product lock versions. Only
+Kernel is prospectively replaced by the separately frozen published subject;
+observed installation facts and adoption remain unchanged. Product-authored
+booleans are never an input.
 
 Compatibility and adoption are deliberately different outputs.  Incomplete
 evidence, an incoherent dimensional record, or reached deferred-import debt
@@ -76,7 +78,7 @@ from tools.composition_contract.observations import (
 )
 from tools.composition_contract.specs import PRODUCT_OBSERVATION_SPECS
 
-BINDINGS_SCHEMA: Final = "kernel-composition-compatibility-bindings.v3"
+BINDINGS_SCHEMA: Final = "kernel-composition-compatibility-bindings.v4"
 TRUSTED_CONTRACT_REVISION: Final = "8b4b6d4b42e650c47fe4c04a679a5ccb51c4b2cd"
 TRUSTED_SEMANTIC_PATHS: Final = (
     "tools/composition_contract/composition_schema.py",
@@ -1028,6 +1030,8 @@ class DeferredDebtReach:
     distribution: str
     source_path: str
     sites: int
+    version: str
+    source_commit: str
 
 
 @dataclass(frozen=True)
@@ -1039,6 +1043,8 @@ class ProductEvaluation:
     coverage: CompositionCoverageReport | None = None
     runtime_exposure: RuntimeExposureReport | None = None
     deferred_debt: tuple[DeferredDebtReach, ...] = ()
+    kernel_subject: PublishedSource | None = None
+    observed_sources: tuple[PublishedSource, ...] = ()
 
     @property
     def evidence_verified(self) -> bool:
@@ -1068,6 +1074,7 @@ class ProductEvaluation:
 @dataclass(frozen=True)
 class GateResult:
     evaluations: tuple[ProductEvaluation, ...]
+    kernel_subject: PublishedSource | None = None
 
     @property
     def evidence_verified(self) -> bool:
@@ -1104,8 +1111,16 @@ class GateResult:
             if self.compatibility_satisfied
             else "COMPATIBILITY REFUSED"
         )
+        subject = self.kernel_subject
+        subject_report = (
+            f"PROSPECTIVE KERNEL SUBJECT: {subject.distribution}=={subject.version} "
+            f"{subject.tag} @ {subject.peeled_commit}\n"
+            if subject is not None
+            else ""
+        )
         return (
-            f"{verdict}: {len(self.refusing)} of {len(self.evaluations)} product "
+            subject_report
+            + f"{verdict}: {len(self.refusing)} of {len(self.evaluations)} product "
             "evaluation(s) refused\n"
             + "\n".join(item.explain() for item in self.evaluations)
             + "\nADOPTION NOT EVALUATED"
@@ -1168,15 +1183,77 @@ def _strict_json(data: bytes, *, source: str) -> Mapping[str, object]:
     return value
 
 
-def load_bindings(path: Path = DEFAULT_BINDINGS_PATH) -> Mapping[str, ProductBinding]:
-    document = _strict_json(path.read_bytes(), source=str(path))
-    if set(document) != {"schema", "bindings"}:
+@dataclass(frozen=True)
+class PublishedSource:
+    distribution: str
+    version: str
+    tag: str
+    peeled_commit: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.distribution, str) or not re.fullmatch(
+            r"[a-z0-9]+(?:-[a-z0-9]+)*", self.distribution
+        ):
+            raise GateConfigurationError(
+                "published source distribution is not a safe canonical owner"
+            )
+        if not isinstance(self.version, str) or not re.fullmatch(
+            r"[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?",
+            self.version,
+        ):
+            raise GateConfigurationError(
+                "published source version is not an exact release version"
+            )
+        if self.tag != f"{self.distribution}-v{self.version}":
+            raise GateConfigurationError(
+                "published source tag must be derived from its owner and version"
+            )
+        if not isinstance(self.peeled_commit, str) or not IMMUTABLE_COMMIT.fullmatch(
+            self.peeled_commit
+        ):
+            raise GateConfigurationError(
+                "published source commit is not an immutable lowercase commit"
+            )
+
+
+@dataclass(frozen=True)
+class GateConfiguration(Mapping[str, ProductBinding]):
+    bindings: Mapping[str, ProductBinding]
+    catalogue_revision: str
+    published_sources: tuple[PublishedSource, ...]
+    kernel_subject: PublishedSource
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bindings", MappingProxyType(dict(self.bindings)))
+        object.__setattr__(self, "published_sources", tuple(self.published_sources))
+
+    def __getitem__(self, key: str) -> ProductBinding:
+        return self.bindings[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.bindings)
+
+    def __len__(self) -> int:
+        return len(self.bindings)
+
+
+def parse_bindings(
+    data: bytes, *, source: str = "captured bindings"
+) -> GateConfiguration:
+    """Parse the runner's digest-verified bytes once, freezing all coordinates."""
+    document = _strict_json(data, source=source)
+    if document.get("schema") != BINDINGS_SCHEMA:
+        raise GateConfigurationError(f"bindings schema must be {BINDINGS_SCHEMA!r}")
+    if set(document) != {
+        "schema",
+        "bindings",
+        "catalogue_revision",
+        "published_sources",
+        "kernel_subject",
+    }:
         raise GateConfigurationError(
-            "bindings must contain exactly schema and bindings"
-        )
-    if document["schema"] != BINDINGS_SCHEMA:
-        raise GateConfigurationError(
-            f"bindings schema must be {BINDINGS_SCHEMA!r}, got {document['schema']!r}"
+            "bindings must contain exactly schema, bindings, "
+            "catalogue_revision, published_sources, kernel_subject"
         )
     rows = document["bindings"]
     if not isinstance(rows, Mapping) or set(rows) != set(PRODUCTS):
@@ -1194,7 +1271,54 @@ def load_bindings(path: Path = DEFAULT_BINDINGS_PATH) -> Mapping[str, ProductBin
                 f"bindings[{product!r}].revision must be a string"
             )
         result[product] = ProductBinding(product, revision)
-    return MappingProxyType(result)
+    catalogue_revision = document["catalogue_revision"]
+    if not isinstance(catalogue_revision, str) or not IMMUTABLE_COMMIT.fullmatch(
+        catalogue_revision
+    ):
+        raise GateConfigurationError(
+            "catalogue_revision must be an immutable lowercase commit"
+        )
+    source_rows = document["published_sources"]
+    if not isinstance(source_rows, list) or not source_rows:
+        raise GateConfigurationError("published_sources must be a non-empty list")
+    sources: list[PublishedSource] = []
+    identities: set[tuple[str, str]] = set()
+    for row in source_rows:
+        source = _parse_published_source(row)
+        identity = (source.distribution, source.version)
+        if identity in identities:
+            raise GateConfigurationError(f"duplicate published source {identity!r}")
+        identities.add(identity)
+        sources.append(source)
+    subject = _parse_published_source(document["kernel_subject"])
+    if subject.distribution != "dotmac-kernel":
+        raise GateConfigurationError("kernel_subject must name dotmac-kernel")
+    return GateConfiguration(
+        MappingProxyType(result), catalogue_revision, tuple(sources), subject
+    )
+
+
+def _parse_published_source(row: object) -> PublishedSource:
+    if not isinstance(row, Mapping) or set(row) != {
+        "distribution",
+        "version",
+        "tag",
+        "peeled_commit",
+    }:
+        raise GateConfigurationError(
+            "published source must contain exactly distribution, version, "
+            "tag, peeled_commit"
+        )
+    typed_row: dict[str, str] = {}
+    for key, value in row.items():
+        if not isinstance(value, str):
+            raise GateConfigurationError(f"published source {key} must be a string")
+        typed_row[key] = value
+    return PublishedSource(**typed_row)
+
+
+def load_bindings(path: Path = DEFAULT_BINDINGS_PATH) -> GateConfiguration:
+    return parse_bindings(path.read_bytes(), source=str(path))
 
 
 def clone_paths_from_environment() -> Mapping[str, Path]:
@@ -1295,8 +1419,24 @@ class _TrustedCatalogue:
 
 
 @contextmanager
-def _trusted_catalogue(repository_root: Path) -> Iterator[_TrustedCatalogue]:
-    """Materialize only dossiers/manifests from the pinned contract commit."""
+def _trusted_catalogue(
+    repository_root: Path, revision: str
+) -> Iterator[_TrustedCatalogue]:
+    """Materialize the separately pinned protected catalogue, never historical debt."""
+
+    for ancestor, descendant in (
+        (TRUSTED_CONTRACT_REVISION, revision),
+        (revision, "refs/remotes/origin/main"),
+    ):
+        if (
+            _git_bytes(repository_root, ("merge-base", ancestor, descendant))
+            .strip()
+            .decode("ascii")
+            != ancestor
+        ):
+            raise GateConfigurationError(
+                f"catalogue {revision}: required protected ancestry is absent"
+            )
 
     names = tuple(
         item.decode("utf-8")
@@ -1307,7 +1447,7 @@ def _trusted_catalogue(repository_root: Path) -> Iterator[_TrustedCatalogue]:
                 "-d",
                 "-z",
                 "--name-only",
-                f"{TRUSTED_CONTRACT_REVISION}:packages",
+                f"{revision}:packages",
             ),
         ).split(b"\0")
         if item
@@ -1327,7 +1467,7 @@ def _trusted_catalogue(repository_root: Path) -> Iterator[_TrustedCatalogue]:
             package_dir.mkdir()
             dossier = _git_show(
                 repository_root,
-                TRUSTED_CONTRACT_REVISION,
+                revision,
                 f"packages/{distribution}/EXTRACTION.toml",
             )
             (package_dir / "EXTRACTION.toml").write_bytes(dossier)
@@ -1340,7 +1480,7 @@ def _trusted_catalogue(repository_root: Path) -> Iterator[_TrustedCatalogue]:
                         "-d",
                         "-z",
                         "--name-only",
-                        f"{TRUSTED_CONTRACT_REVISION}:packages/{distribution}/src",
+                        f"{revision}:packages/{distribution}/src",
                     ),
                 ).split(b"\0")
                 if item and not item.decode("utf-8").endswith(".egg-info")
@@ -1360,7 +1500,7 @@ def _trusted_catalogue(repository_root: Path) -> Iterator[_TrustedCatalogue]:
             ):
                 manifest = _git_show(
                     repository_root,
-                    TRUSTED_CONTRACT_REVISION,
+                    revision,
                     f"packages/{distribution}/src/{import_root}/manifest.py",
                 )
                 (import_dir / "manifest.py").write_bytes(manifest)
@@ -2461,6 +2601,7 @@ def _walk_import_graph(
     discover_imports: (
         Callable[[bytes, str, bool, str, frozenset[str]], frozenset[str]] | None
     ) = None,
+    include_package_parents: bool = False,
 ) -> _ImportReachability:
     """Walk the import graph, parsing each reachable module exactly once.
 
@@ -2468,6 +2609,8 @@ def _walk_import_graph(
     parsing and AST walking (see ``_product_runtime_reachability``). Its
     default preserves this function's host interpreter for trusted,
     Starter-owned sources such as the deferred-import-debt catalogue.
+    Published-package traversal opts into parent initializers, which Python
+    executes before a consumed submodule, including transitive package imports.
     """
 
     queue = deque(dict.fromkeys(roots))
@@ -2485,6 +2628,20 @@ def _walk_import_graph(
         module = queue.popleft()
         if module in visited:
             continue
+        if include_package_parents:
+            parts = module.split(".")
+            parents = [".".join(parts[:length]) for length in range(1, len(parts))]
+            unvisited_parents = [
+                parent
+                for parent in parents
+                if parent not in visited
+                and parent in index
+                and index[parent].path.endswith("/__init__.py")
+            ]
+            if unvisited_parents:
+                queue.appendleft(module)
+                queue.extendleft(reversed(unvisited_parents))
+                continue
         source_item = index.get(module)
         source_bytes = in_memory_sources.get(module)
         if source_bytes is None:
@@ -2649,6 +2806,7 @@ def _product_runtime_reachability(
     revision: str,
     observations: Mapping[str, bytes],
     pyproject: Mapping[str, object],
+    published_modules: frozenset[str] = frozenset(),
 ) -> _ImportReachability:
     spec = _DERIVATION_SPECS[product]
     clauses = _declared_python_requirement(pyproject, product=product)
@@ -2679,7 +2837,7 @@ def _product_runtime_reachability(
                 module=module,
                 path=path,
                 is_package=is_package,
-                available_modules=available_modules,
+                available_modules=available_modules | published_modules,
                 process=process,
             )
         except _ForeignSyntaxError as exc:
@@ -2695,6 +2853,7 @@ def _product_runtime_reachability(
             roots=spec.runtime_roots,
             in_memory_sources=MappingProxyType(extra_sources),
             discover_imports=discover_imports,
+            include_package_parents=True,
         )
 
 
@@ -2704,7 +2863,9 @@ def _derive_records(
     envelope: VerifiedObservationEnvelope,
     clone: Path,
     catalogue: _TrustedCatalogue,
-) -> tuple[tuple[CompositionRecord, ...], _ImportReachability]:
+    configuration: GateConfiguration,
+    repository_root: Path,
+) -> tuple[tuple[CompositionRecord, ...], _ImportReachability, Mapping[str, str]]:
     observations = _observation_bytes(envelope)
     try:
         pyproject = tomllib.loads(_decode(observations, "dependency-manifest"))
@@ -2720,12 +2881,31 @@ def _derive_records(
         raise GateDerivationError(f"production install recipe refused: {exc}") from exc
     membership = derive_lock_group_membership(lock)
     optionality = derive_group_optionality(pyproject)
+    dossiers = derive_distribution_universe(catalogue.packages_root)
+    installed = frozenset(
+        dossier.distribution
+        for dossier in dossiers
+        if derive_installation_dimension(
+            distribution=dossier.distribution,
+            lock_membership=membership,
+            recipes=(recipe,),
+            group_optionality=optionality,
+        )
+        is DimensionValue.TRUE
+    )
+    effective = _effective_published_sources(
+        _locked_versions(lock, installed),
+        configuration.published_sources,
+        configuration.kernel_subject,
+    )
+    published_index, _ = _published_python_index(repository_root, catalogue, effective)
     reachability = _product_runtime_reachability(
         product=product,
         clone=clone,
         revision=envelope.product_revision,
         observations=observations,
         pyproject=pyproject,
+        published_modules=frozenset(published_index),
     )
     derivation_spec = _DERIVATION_SPECS[product]
     assembly_reached = derivation_spec.assembly_module in reachability.visited
@@ -2742,7 +2922,6 @@ def _derive_records(
         _decode(observations, "migration-config"), catalogue.import_roots
     )
     reached_roots = {name.split(".")[0] for name in reachability.external_modules}
-    dossiers = derive_distribution_universe(catalogue.packages_root)
     rows: list[CompositionRecord] = []
     for dossier in dossiers:
         registration_applies = dossier.classification.module_registration_applies
@@ -2787,7 +2966,13 @@ def _derive_records(
             ).value,
         }
         rows.append(composition_record_from_payload(payload, catalogue.packages_root))
-    return tuple(rows), reachability
+    relevant = frozenset(
+        record.distribution
+        for record in rows
+        if record.installation is DimensionValue.TRUE
+        or record.runtime_consumption is DimensionValue.TRUE
+    )
+    return tuple(rows), reachability, _locked_versions(lock, relevant)
 
 
 def _deferred_import_sites(source: bytes, *, path: str) -> int:
@@ -2806,7 +2991,9 @@ def _deferred_import_sites(source: bytes, *, path: str) -> int:
     )
 
 
-def _derive_deferred_import_debt(repository_root: Path) -> Mapping[str, int]:
+def _derive_deferred_import_debt(
+    repository_root: Path, revision: str
+) -> Mapping[str, int]:
     raw = _git_bytes(
         repository_root,
         (
@@ -2815,14 +3002,14 @@ def _derive_deferred_import_debt(repository_root: Path) -> Mapping[str, int]:
             "-z",
             "--fixed-strings",
             "dotmac_kernel.db",
-            TRUSTED_CONTRACT_REVISION,
+            revision,
             "--",
             "packages",
         ),
         accepted=frozenset({0, 1}),
     )
     derived: dict[str, int] = {}
-    prefix = f"{TRUSTED_CONTRACT_REVISION}:".encode()
+    prefix = f"{revision}:".encode()
     for entry in (item for item in raw.split(b"\0") if item):
         try:
             if not entry.startswith(prefix):
@@ -2835,29 +3022,29 @@ def _derive_deferred_import_debt(repository_root: Path) -> Mapping[str, int]:
         if not path.endswith(".py"):
             continue
         count = _deferred_import_sites(
-            _git_show(repository_root, TRUSTED_CONTRACT_REVISION, path), path=path
+            _git_show(repository_root, revision, path), path=path
         )
         if count:
             derived[path] = count
     return MappingProxyType(derived)
 
 
-def _load_debt(repository_root: Path) -> Mapping[str, int]:
+def _load_debt(repository_root: Path, revision: str) -> Mapping[str, int]:
     document = _strict_json(
         _git_show(
             repository_root,
-            TRUSTED_CONTRACT_REVISION,
+            revision,
             DEFERRED_DEBT_RECORD_PATH,
         ),
-        source=f"{TRUSTED_CONTRACT_REVISION}:{DEFERRED_DEBT_RECORD_PATH}",
+        source=f"{revision}:{DEFERRED_DEBT_RECORD_PATH}",
     )
     files = document.get("files")
     total = document.get("total")
-    if not isinstance(files, Mapping) or not files:
-        raise GateConfigurationError("deferred-import debt files must be non-empty")
+    if not isinstance(files, Mapping):
+        raise GateConfigurationError("deferred-import debt files must be an object")
     parsed: dict[str, int] = {}
     for source_path, count in files.items():
-        if not isinstance(source_path, str) or not isinstance(count, int) or count <= 0:
+        if not isinstance(source_path, str) or type(count) is not int or count <= 0:
             raise GateConfigurationError("deferred-import debt has an invalid entry")
         parts = PurePosixPath(source_path).parts
         if len(parts) < 5 or parts[0] != "packages" or parts[2] != "src":
@@ -2865,9 +3052,9 @@ def _load_debt(repository_root: Path) -> Mapping[str, int]:
                 f"deferred-import debt path is outside package source: {source_path!r}"
             )
         parsed[source_path] = count
-    if total != sum(parsed.values()):
+    if type(total) is not int or total != sum(parsed.values()):
         raise GateConfigurationError("deferred-import debt total disagrees with files")
-    derived = _derive_deferred_import_debt(repository_root)
+    derived = _derive_deferred_import_debt(repository_root, revision)
     if parsed != derived:
         differences = [
             f"{path}: recorded {parsed.get(path, 0)}, derived {derived.get(path, 0)}"
@@ -2881,51 +3068,189 @@ def _load_debt(repository_root: Path) -> Mapping[str, int]:
     return MappingProxyType(parsed)
 
 
+def _locked_versions(
+    lock: Mapping[str, object], distributions: frozenset[str]
+) -> Mapping[str, str]:
+    packages = lock.get("package")
+    if not isinstance(packages, list):
+        raise GateDerivationError("lock must contain package rows")
+    versions: dict[str, str] = {}
+    for distribution in sorted(distributions):
+        rows = [
+            row
+            for row in packages
+            if isinstance(row, Mapping) and row.get("name") == distribution
+        ]
+        if (
+            len(rows) != 1
+            or not isinstance(rows[0].get("version"), str)
+            or not rows[0]["version"]
+        ):
+            raise GateDerivationError(
+                f"{distribution}: lock must resolve exactly one package row "
+                "and exact version"
+            )
+        versions[distribution] = rows[0]["version"]
+    return MappingProxyType(versions)
+
+
+def _select_published_sources(
+    versions: Mapping[str, str], published_sources: Sequence[PublishedSource]
+) -> Mapping[str, PublishedSource]:
+    indexed = {(row.distribution, row.version): row for row in published_sources}
+    selected: dict[str, PublishedSource] = {}
+    for distribution, version in versions.items():
+        source = indexed.get((distribution, version))
+        if source is None:
+            raise GateDerivationError(
+                f"{distribution}=={version}: missing published source"
+            )
+        selected[distribution] = source
+    return MappingProxyType(selected)
+
+
+def _verify_published_source(repository_root: Path, source: PublishedSource) -> None:
+    peeled = (
+        _git_bytes(
+            repository_root,
+            ("rev-parse", "--verify", f"refs/tags/{source.tag}^{{commit}}"),
+        )
+        .strip()
+        .decode("ascii")
+    )
+    if peeled != source.peeled_commit:
+        raise GateDerivationError(
+            f"{source.tag}: actual peeled commit {peeled} differs from "
+            f"{source.peeled_commit}"
+        )
+    try:
+        document = tomllib.loads(
+            _git_show(
+                repository_root,
+                source.peeled_commit,
+                f"packages/{source.distribution}/pyproject.toml",
+            ).decode("utf-8")
+        )
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise GateDerivationError(
+            f"{source.tag}: package metadata is not TOML"
+        ) from exc
+    metadata = document.get("project")
+    if metadata is None:
+        tool = document.get("tool")
+        metadata = tool.get("poetry") if isinstance(tool, Mapping) else None
+    if (
+        not isinstance(metadata, Mapping)
+        or metadata.get("name") != source.distribution
+        or metadata.get("version") != source.version
+    ):
+        raise GateDerivationError(
+            f"{source.tag}@{source.peeled_commit}: "
+            "published package name/version mismatch"
+        )
+
+
+def _effective_published_sources(
+    versions: Mapping[str, str],
+    published_sources: Sequence[PublishedSource],
+    kernel_subject: PublishedSource,
+) -> Mapping[str, PublishedSource]:
+    observed = dict(_select_published_sources(versions, published_sources))
+    # A prospective subject never supplies a missing installed dependency.
+    if "dotmac-kernel" in observed:
+        observed["dotmac-kernel"] = kernel_subject
+    return MappingProxyType(observed)
+
+
+def _published_python_index(
+    repository_root: Path,
+    catalogue: _TrustedCatalogue,
+    sources: Mapping[str, PublishedSource],
+) -> tuple[Mapping[str, _GitPythonFile], Mapping[str, PublishedSource]]:
+    # Index every relevant published package, including packages absent from the
+    # current backlog. Cross-package imports retain their own locked identities.
+    index: dict[str, _GitPythonFile] = {}
+    owners: dict[str, PublishedSource] = {}
+    for distribution, source in sorted(sources.items()):
+        import_root = catalogue.import_roots[distribution]
+        prefix = f"packages/{distribution}/src/{import_root}"
+        package_index = _git_python_index(
+            repository_root, source.peeled_commit, prefix, module_prefix=import_root
+        )
+        if import_root not in package_index:
+            raise GateDerivationError(
+                f"{source.tag}: published import root {import_root!r} is missing"
+            )
+        for module, entry in package_index.items():
+            if module in index:
+                raise GateDerivationError(
+                    f"published packages claim duplicate import module {module!r}"
+                )
+            index[module] = entry
+            owners[module] = source
+    return MappingProxyType(index), MappingProxyType(owners)
+
+
 def _reached_deferred_debt(
     *,
     repository_root: Path,
     records: Sequence[CompositionRecord],
     product_external_modules: frozenset[str],
     catalogue: _TrustedCatalogue,
-    debt: Mapping[str, int],
+    sources: Mapping[str, PublishedSource],
 ) -> tuple[DeferredDebtReach, ...]:
-    runtime_distributions = {
-        record.distribution
+    index, owners = _published_python_index(repository_root, catalogue, sources)
+    known_roots = set(catalogue.import_roots.values())
+    known_product_imports = {
+        module
+        for module in product_external_modules
+        if module.split(".")[0] in known_roots
+    }
+    missing_modules = known_product_imports - set(index)
+    if missing_modules:
+        raise GateDerivationError(
+            "explicit product imports are absent from evaluated published sources: "
+            f"{sorted(missing_modules)!r}"
+        )
+    roots = known_product_imports
+    roots.update(
+        catalogue.import_roots[record.distribution]
         for record in records
         if record.runtime_consumption is DimensionValue.TRUE
-    }
+    )
+    reachability = _walk_import_graph(
+        repository=repository_root,
+        index=MappingProxyType(index),
+        roots=tuple(sorted(roots)),
+        include_package_parents=True,
+    )
+    known_roots = set(catalogue.import_roots.values())
+    missing_roots = {
+        module.split(".")[0] for module in reachability.external_modules
+    } & known_roots
+    if missing_roots:
+        raise GateDerivationError(
+            "runtime package dependencies lack published lock sources: "
+            f"{sorted(missing_roots)!r}"
+        )
     result: list[DeferredDebtReach] = []
-    for distribution in sorted(runtime_distributions):
-        distribution_debt = {
-            path: sites
-            for path, sites in debt.items()
-            if PurePosixPath(path).parts[1] == distribution
-        }
-        if not distribution_debt:
-            continue
-        import_root = catalogue.import_roots[distribution]
-        prefix = f"packages/{distribution}/src/{import_root}"
-        index = _git_python_index(
-            repository_root,
-            TRUSTED_CONTRACT_REVISION,
-            prefix,
-            module_prefix=import_root,
+    for module in sorted(reachability.visited):
+        entry = index[module]
+        source = owners[module]
+        sites = _deferred_import_sites(
+            _git_blob(repository_root, entry.object_id, source=entry.path),
+            path=entry.path,
         )
-        roots = {import_root}
-        roots.update(
-            module
-            for module in product_external_modules
-            if module == import_root or module.startswith(f"{import_root}.")
-        )
-        reachability = _walk_import_graph(
-            repository=repository_root,
-            index=index,
-            roots=tuple(sorted(roots)),
-        )
-        for source_path, sites in sorted(distribution_debt.items()):
-            module = _module_name(source_path, prefix, import_root)
-            if module in reachability.visited:
-                result.append(DeferredDebtReach(distribution, source_path, sites))
+        if sites:
+            result.append(
+                DeferredDebtReach(
+                    source.distribution,
+                    entry.path,
+                    sites,
+                    source.version,
+                    source.peeled_commit,
+                )
+            )
     return tuple(result)
 
 
@@ -2935,9 +3260,10 @@ def _evaluate_product(
     clone: Path,
     repository_root: Path,
     catalogue: _TrustedCatalogue,
-    debt_inventory: Mapping[str, int],
+    configuration: GateConfiguration,
 ) -> ProductEvaluation:
     spec = PRODUCT_OBSERVATION_SPECS[binding.product]
+    observed_sources: Mapping[str, PublishedSource] = MappingProxyType({})
     try:
         document = read_checkout_json_document(clone, product_revision=binding.revision)
         envelope = verify_observation_envelope(
@@ -2947,21 +3273,29 @@ def _evaluate_product(
             product_revision=binding.revision,
             trusted_contract_revision=TRUSTED_CONTRACT_REVISION,
         )
-        records, reachability = _derive_records(
+        records, reachability, versions = _derive_records(
             product=binding.product,
             envelope=envelope,
             clone=clone,
             catalogue=catalogue,
+            configuration=configuration,
+            repository_root=repository_root,
         )
         states = tuple((record, derive_composition_state(record)) for record in records)
         coverage = build_coverage_report(records)
         exposure = build_runtime_exposure_report(records)
+        observed_sources = _select_published_sources(
+            versions, configuration.published_sources
+        )
+        sources = _effective_published_sources(
+            versions, configuration.published_sources, configuration.kernel_subject
+        )
         debt = _reached_deferred_debt(
             repository_root=repository_root,
             records=records,
             product_external_modules=reachability.external_modules,
             catalogue=catalogue,
-            debt=debt_inventory,
+            sources=sources,
         )
     except ObservationAcquisitionError as exc:
         raise GateAcquisitionError(f"{binding.product}: {exc}") from exc
@@ -2976,6 +3310,8 @@ def _evaluate_product(
             binding.revision,
             "evidence_refused",
             (str(exc),),
+            kernel_subject=configuration.kernel_subject,
+            observed_sources=tuple(observed_sources.values()),
         )
 
     incomplete = [
@@ -2983,13 +3319,24 @@ def _evaluate_product(
         for record, state in states
         if state in {CompositionState.EVIDENCE_INCOMPLETE, CompositionState.INVALID}
     ]
-    findings: list[str] = []
+    subject = configuration.kernel_subject
+    findings: list[str] = [
+        f"catalogue @ {configuration.catalogue_revision}",
+        f"prospective Kernel subject: {subject.distribution}=={subject.version} "
+        f"{subject.tag} @ {subject.peeled_commit}",
+    ]
+    findings.extend(
+        f"observed locked publication: {source.distribution}=={source.version} "
+        f"{source.tag} @ {source.peeled_commit}"
+        for source in observed_sources.values()
+    )
     if incomplete:
         findings.append(f"incomplete or invalid dimensional evidence: {incomplete!r}")
     if debt:
         findings.extend(
             f"reached deferred dotmac_kernel.db debt: {item.source_path} "
-            f"({item.sites} site(s))"
+            f"({item.sites} site(s); {item.distribution}=={item.version} "
+            f"@ {item.source_commit})"
             for item in debt
         )
     status = "satisfied"
@@ -3005,33 +3352,44 @@ def _evaluate_product(
         coverage,
         exposure,
         debt,
+        configuration.kernel_subject,
+        tuple(observed_sources.values()),
     )
 
 
 def evaluate_gate(
-    bindings: Mapping[str, ProductBinding],
+    bindings: GateConfiguration,
     *,
     clones: Mapping[str, Path],
     repository_root: Path = _HERE,
 ) -> GateResult:
+    if not isinstance(bindings, GateConfiguration):
+        raise GateConfigurationError("gate requires captured v4 configuration")
     if set(bindings) != set(PRODUCTS):
         raise GateConfigurationError(f"gate requires exactly {list(PRODUCTS)!r}")
     if set(clones) != set(PRODUCTS):
         raise GateAcquisitionError(f"clone map requires exactly {list(PRODUCTS)!r}")
     _require_trusted_contract_sources(repository_root)
-    debt = _load_debt(repository_root)
-    with _trusted_catalogue(repository_root) as catalogue:  # type: _TrustedCatalogue
+    _load_debt(repository_root, bindings.catalogue_revision)
+    with _trusted_catalogue(repository_root, bindings.catalogue_revision) as catalogue:  # type: _TrustedCatalogue
+        for source in (*bindings.published_sources, bindings.kernel_subject):
+            if source.distribution not in catalogue.import_roots:
+                raise GateConfigurationError(
+                    f"published source owner {source.distribution!r} is absent "
+                    "from the protected catalogue"
+                )
+            _verify_published_source(repository_root, source)
         evaluations = tuple(
             _evaluate_product(
                 binding=bindings[product],
                 clone=clones[product],
                 repository_root=repository_root,
                 catalogue=catalogue,
-                debt_inventory=debt,
+                configuration=bindings,
             )
             for product in PRODUCTS
         )
-    return GateResult(evaluations)
+    return GateResult(evaluations, bindings.kernel_subject)
 
 
 __all__ = [
@@ -3042,6 +3400,9 @@ __all__ = [
     "GateConfigurationError",
     "GateDerivationError",
     "GateResult",
+    "GateConfiguration",
+    "PublishedSource",
+    "parse_bindings",
     "ProductBinding",
     "ProductEvaluation",
     "TRUSTED_CONTRACT_REVISION",

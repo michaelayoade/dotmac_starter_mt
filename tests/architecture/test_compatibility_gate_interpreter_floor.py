@@ -740,3 +740,73 @@ def test_nonblocking_write_readiness_race_retries_within_the_deadline(
     finally:
         gate._stop_foreign_process(process)
     assert process.poll() == 0
+
+
+@requires_all_trusted
+@pytest.mark.parametrize("entry", ["parent", "fromlist", "attribute"])
+def test_product_parents_and_external_fromlists_use_the_foreign_interpreter(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    entry: str,
+) -> None:
+    from tests.architecture.test_compatibility_gate import _git, _repo
+
+    parent = "import dotmac_files.service\n" if entry == "parent" else ""
+    main = {
+        "parent": "",
+        "fromlist": "from dotmac_files import service\n",
+        "attribute": "from dotmac_files import PUBLIC_ATTRIBUTE\n",
+    }[entry]
+    repo = _repo(
+        tmp_path,
+        {
+            "app/__init__.py": parent,
+            "app/main.py": main,
+            "packages/dotmac-files/src/dotmac_files/__init__.py": (
+                "PUBLIC_ATTRIBUTE = 1\n"
+            ),
+            "packages/dotmac-files/src/dotmac_files/service.py": (
+                "from dotmac_kernel.db import conflict_savepoint\n"
+            ),
+        },
+    )
+    revision = _git(repo, "rev-parse", "HEAD")
+    source = gate.PublishedSource("dotmac-files", "1.0", "dotmac-files-v1.0", revision)
+    catalogue = gate._TrustedCatalogue(
+        repo / "packages", {"dotmac-files": "dotmac_files"}
+    )
+    index, _ = gate._published_python_index(repo, catalogue, {"dotmac-files": source})
+    original = gate._imports_under_interpreter
+    parsed_paths: list[str] = []
+
+    def record_foreign_parse(*args, **kwargs):
+        assert kwargs["interpreter"] == "python3.12"
+        parsed_paths.append(kwargs["path"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(gate, "_imports_under_interpreter", record_foreign_parse)
+    reached = gate._product_runtime_reachability(
+        product="academy",
+        clone=repo,
+        revision=revision,
+        observations={},
+        pyproject={"project": {"requires-python": ">=3.12,<3.14"}},
+        published_modules=frozenset(index),
+    )
+    assert "app/__init__.py" in parsed_paths
+    assert "app/main.py" in parsed_paths
+    debt = gate._reached_deferred_debt(
+        repository_root=repo,
+        records=(),
+        product_external_modules=reached.external_modules,
+        catalogue=catalogue,
+        sources={"dotmac-files": source},
+    )
+    if entry == "attribute":
+        assert "dotmac_files.PUBLIC_ATTRIBUTE" not in reached.external_modules
+        assert debt == ()
+    else:
+        assert "dotmac_files.service" in reached.external_modules
+        assert [(item.distribution, item.sites) for item in debt] == [
+            ("dotmac-files", 1)
+        ]
