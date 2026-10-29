@@ -63,6 +63,14 @@ MODULES = {
 }
 
 
+#: Opaque product-identity columns a module may CARRY (as plain UUIDs, never
+#: foreign keys). Ruled for the 0.2.0a1 extraction re-cut (N2): Sub's own column
+#: names are kept so readers only swap imports. The structural invariant this
+#: kit protects is "no foreign key to product tables", asserted below for these
+#: columns; every other module still bans the names outright.
+OPAQUE_PRODUCT_COLUMNS = {"dotmac-ipam": {"subscriber_id", "subscription_id"}}
+
+
 def _contracts() -> dict[str, dict[str, object]]:
     with CONTRACT_LEDGER.open("rb") as stream:
         ledger = tomllib.load(stream)
@@ -122,10 +130,16 @@ def test_suite_has_no_product_foreign_keys_or_sibling_provider_imports() -> None
         "routeros_api",
         "pysnmp",
     }
-    for _, (root, _, _, _) in MODULES.items():
+    for distribution, (root, _, _, _) in MODULES.items():
         models = importlib.import_module(f"{root}.models")
+        opaque = OPAQUE_PRODUCT_COLUMNS.get(distribution, set())
         for model in models.ALL_MODELS:
-            assert not (set(model.__table__.columns.keys()) & forbidden_columns)
+            columns = model.__table__.columns
+            assert not (set(columns.keys()) & (forbidden_columns - opaque))
+            for name in opaque & set(columns.keys()):
+                assert (
+                    not columns[name].foreign_keys
+                ), f"{model.__tablename__}.{name} is opaque and must carry no FK"
             for constraint in model.__table__.foreign_key_constraints:
                 local_tables = {item.column.table.name for item in constraint.elements}
                 if local_tables & set(models.TENANT_TABLES):
@@ -159,14 +173,77 @@ def test_every_lineage_exists_and_declares_forced_rls() -> None:
                 if (path / "src" / root).exists()
             )
         versions = package_root / "src" / root / "migrations" / "versions"
-        migrations = tuple(versions.glob(f"{prefix}_*.py"))
-        assert len(migrations) == 1, f"{root} needs one lineage root"
-        text = migrations[0].read_text(encoding="utf-8")
-        assert f'branch_labels = ("{owner_name}",)' in text
+        migrations = tuple(sorted(versions.glob(f"{prefix}_*.py")))
         schema = module_schema(short_code)
-        assert f"ALTER TABLE {schema}." in text
-        assert "ENABLE ROW LEVEL SECURITY" in text
-        assert "FORCE ROW LEVEL SECURITY" in text
+        links: dict[str, str | None] = {}
+        for path in migrations:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            facts = _revision_facts(tree)
+            assert facts["revision"], f"{path.name} declares no revision"
+            assert facts["revision"] not in links, f"{path.name} repeats a revision"
+            links[facts["revision"]] = facts["down_revision"]
+            if facts["down_revision"] is None:
+                assert facts["branch_labels"] == (owner_name,), path.name
+            _assert_forced_rls_per_created_table(path, tree, schema)
+        # One LINEAR chain: a single root, no fork, every revision reachable.
+        roots = [r for r, down in links.items() if down is None]
+        assert len(roots) == 1, f"{root} needs one lineage root"
+        children = [down for down in links.values() if down is not None]
+        assert len(children) == len(set(children)), f"{root} lineage forks"
+        assert set(children) <= set(links), f"{root} chains to a foreign revision"
+        reached, current = [], roots[0]
+        successors = {down: rev for rev, down in links.items() if down is not None}
+        while current:
+            reached.append(current)
+            current = successors.get(current)
+        assert set(reached) == set(links), f"{root} has an unreachable revision"
+
+
+def _revision_facts(tree: ast.Module) -> dict[str, object]:
+    facts: dict[str, object] = {
+        "revision": None,
+        "down_revision": "unset",
+        "branch_labels": None,
+    }
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name) and target.id in facts:
+                facts[target.id] = ast.literal_eval(node.value)
+    assert facts["down_revision"] != "unset", "migration declares no down_revision"
+    return facts
+
+
+def _assert_forced_rls_per_created_table(
+    path: Path, tree: ast.Module, schema: str
+) -> None:
+    """Each table a revision creates is ENABLEd and FORCEd for RLS in that file."""
+    created = [
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "create_table"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+    ]
+    if not created:
+        return
+    text = path.read_text(encoding="utf-8")
+    assert f"ALTER TABLE {schema}." in text, path.name
+    assert "ENABLE ROW LEVEL SECURITY" in text, path.name
+    assert "FORCE ROW LEVEL SECURITY" in text, path.name
+    constants = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    for table in created:
+        # named again outside create_table (the RLS loop's table tuple) or in an
+        # explicit ALTER literal
+        mentions = constants.count(table)
+        literal = any(f"ALTER TABLE {schema}.{table} " in value for value in constants)
+        assert mentions >= 2 or literal, f"{path.name}: {table} not RLS-enforced"
 
 
 def test_services_are_flush_only_and_return_no_orm_annotations() -> None:

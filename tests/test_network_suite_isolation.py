@@ -38,7 +38,7 @@ NETWORK_VERSION_LOCATIONS = tuple(
     for root in NETWORK_ROOTS
 )
 ROOT_SELECTS = (
-    ("mod_ipam.address_spaces", text("SELECT tenant_id FROM mod_ipam.address_spaces")),
+    ("mod_ipam.ip_pools", text("SELECT tenant_id FROM mod_ipam.ip_pools")),
     ("mod_netinv.sites", text("SELECT tenant_id FROM mod_netinv.sites")),
     (
         "mod_netobs.observations",
@@ -143,15 +143,15 @@ def _insert_roots(
     common = {"tenant": tenant_id, "suffix": suffix}
     connection.execute(
         text(
-            "INSERT INTO mod_ipam.address_spaces "
-            "(id, tenant_id, code, name, family, prefix) VALUES "
-            "(:id, :tenant, :code, 'Suite IPv4', 'ipv4', :prefix)"
+            "INSERT INTO mod_ipam.ip_pools "
+            "(id, tenant_id, name, ip_version, cidr, is_active, purpose) VALUES "
+            "(:id, :tenant, :name, 'ipv4', :cidr, true, 'infrastructure')"
         ),
         {
             **common,
             "id": uuid.uuid4(),
-            "code": f"space-{suffix}",
-            "prefix": f"10.{int(suffix[-2:], 16) % 250}.0.0/16",
+            "name": f"pool-{suffix}",
+            "cidr": f"10.{int(suffix[-2:], 16) % 250}.0.0/16",
         },
     )
     connection.execute(
@@ -608,7 +608,7 @@ def test_rls_canary_detects_a_disabled_network_guard(
     try:
         with admin.connect() as connection:
             connection.execute(
-                text("ALTER TABLE mod_ipam.address_spaces DISABLE ROW LEVEL SECURITY")
+                text("ALTER TABLE mod_ipam.ip_pools DISABLE ROW LEVEL SECURITY")
             )
         with online.connect() as connection:
             connection.execute(
@@ -616,9 +616,7 @@ def test_rls_canary_detects_a_disabled_network_guard(
                 {"tenant": str(seed.tenant_a)},
             )
             visible = (
-                connection.execute(
-                    text("SELECT tenant_id FROM mod_ipam.address_spaces")
-                )
+                connection.execute(text("SELECT tenant_id FROM mod_ipam.ip_pools"))
                 .scalars()
                 .all()
             )
@@ -627,10 +625,10 @@ def test_rls_canary_detects_a_disabled_network_guard(
     finally:
         with admin.connect() as connection:
             connection.execute(
-                text("ALTER TABLE mod_ipam.address_spaces ENABLE ROW LEVEL SECURITY")
+                text("ALTER TABLE mod_ipam.ip_pools ENABLE ROW LEVEL SECURITY")
             )
             connection.execute(
-                text("ALTER TABLE mod_ipam.address_spaces FORCE ROW LEVEL SECURITY")
+                text("ALTER TABLE mod_ipam.ip_pools FORCE ROW LEVEL SECURITY")
             )
         online.dispose()
         admin.dispose()
