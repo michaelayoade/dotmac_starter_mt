@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-ipam"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Tenant IP address-space, allocation, assignment, utilization and repair owner"
 authors = ["DotMac"]
 readme = "README.md"
@@ -12,7 +12,7 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a83"
+dotmac-kernel = ">=0.1.0a98"
 sqlalchemy = "^2.0"
 
 [build-system]
