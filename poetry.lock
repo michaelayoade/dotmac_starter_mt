@@ -1643,7 +1643,7 @@ url = "packages/dotmac-payments"
 
 [[package]]
 name = "dotmac-payroll"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Composable data-driven payroll-calculation and employee-liability owner"
 optional = false
 python-versions = ">=3.12,<3.14"

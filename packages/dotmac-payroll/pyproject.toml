@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-payroll"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Composable data-driven payroll-calculation and employee-liability owner"
 authors = ["DotMac"]
 readme = "README.md"
