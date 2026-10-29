@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_ipam.contracts import (
     EVENT_SCHEMAS,
+    OUTBOX_EVENT_TYPES,
     AddressSnapshot,
     AssignmentSnapshot,
     BlockSnapshot,
@@ -55,6 +56,7 @@ def event(
     event_type: str,
     payload: dict[str, Any],
     occurred_at: datetime | None = None,
+    correlation_id: str | None = None,
 ) -> None:
     schema = EVENT_SCHEMAS.get(event_type)
     if schema is not None:
@@ -65,15 +67,33 @@ def event(
                 f"{event_type} payload has undeclared keys: {sorted(unknown)}",
                 code="ipam.event_schema",
             )
+    when = occurred_at or now()
     db.add(
         IpamEvent(
             tenant_id=tenant_id,
             aggregate_ref=aggregate_ref,
             event_type=event_type,
             payload=payload,
-            occurred_at=occurred_at or now(),
+            occurred_at=when,
         )
     )
+    routing_code = OUTBOX_EVENT_TYPES.get(event_type)
+    if routing_code is not None:
+        # Same transaction as the state change: committed or rolled back with it.
+        # Function-local import: `dotmac_ipam.outbox` keeps this package
+        # importable where no database URL exists (see that module).
+        from dotmac_ipam.outbox import publish
+
+        publish(
+            db,
+            tenant_id=tenant_id,
+            routing_code=routing_code,
+            event_type=event_type,
+            aggregate_ref=aggregate_ref,
+            payload=payload,
+            occurred_at=when,
+            correlation_id=correlation_id,
+        )
 
 
 def clean(value: str, label: str) -> str:

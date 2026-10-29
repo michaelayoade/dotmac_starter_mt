@@ -29,6 +29,18 @@ tag, lineage and `ip_0001` bytes stay untouched).
   typed caller facts; the module reads no session, NAS, device or subscription.
 - Adds a `before_flush` write guard keyed on a command-scope contextvar and
   `dotmac_ipam.read_models` for same-database readers (explicit widening, N4).
+- Publishes every vocabulary event through the Kernel outbox in the same
+  transaction as the state change (`dotmac_ipam.outbox`, routing codes
+  `ipam.*.v1` declared on the manifest, `outbox_relay.v1` required and proven by
+  `ip_0003_outbox_relay`, no DDL), and adds the `AggregateImported` event plus
+  `record_imported` for the W1 copy (one event per aggregate, idempotent).
+- Adds verification-only `ip_0004_import_idempotency` after the relay revision:
+  proves the existing Kernel `idempotency_ledger.v1` used by `record_imported`.
+  Each prerequisite adds a serial migration join, including on a fresh combined
+  graph where both provider revisions belong to the same Kernel lineage.
+  Both revisions preserve all IPAM identity, evidence, outbox and claim rows on
+  upgrade and downgrade. The import key is tenant plus aggregate kind/id;
+  source or digest changes raise the Kernel's typed idempotency conflict.
 - Raises the kernel floor to `0.1.0a98` (`dotmac_kernel.transactions`).
 - No release, adoption or authority transfer is implied.
 

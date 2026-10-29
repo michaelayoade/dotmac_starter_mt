@@ -227,6 +227,7 @@ def test_event_payloads_are_checked_against_the_typed_schema() -> None:
         "AssignmentRepaired",
         "PrefixDelegated",
         "RoutedPrefixChanged",
+        "AggregateImported",
     }
     for schema in EVENT_SCHEMAS.values():
         assert dataclasses.is_dataclass(schema)
