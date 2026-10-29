@@ -113,6 +113,36 @@ selection. Applications submit the original commercial identity and immutable
 complete prior-set references; they never pre-add prior tax to a commercial base.
 V2 determination seals bind exact prior and selected component snapshots. V1
 meaning is unchanged. Billing must adopt a new evidence version before Sub can
-issue dependency-bearing invoices. Existing a6 release, independent review, hosted
-migration/concurrency qualification and exact consumer pins remain gates; this
-source candidate is not publication or writer cutover evidence.
+issue dependency-bearing invoices. The complete a6 authoring allocation is
+included in a7 and is superseded as an unpublished source allocation. Independent review, full hosted qualification and
+verified final releases before exact consumer pins remain gates; this source
+candidate is not publication or writer cutover evidence.
+
+
+## Final release and adoption gates
+
+The final serial publication train is Payroll a2 → Tax a7 → Billing a10.
+Tax a6 and Billing a9 are unpublished source allocations superseded by a7 and
+a10 respectively; their complete source changes remain included in those final
+successors. The historical allocations are retained, not published as prerequisites.
+This source documentation establishes no artifact publication or consumer adoption.
+
+Full hosted CI must qualify the final head and current base. Migration acceptance
+must exercise the direct published Tax a4 / tx_0003 → head path through tx_0004
+and tx_0005, and published Billing a8 / bi11 → bi12 on both declared planes.
+Published Tax a4 and Billing bi1–bi11 migration bytes remain immutable; the
+existing bi12 source is preserved without a new DDL edit. V1/V2/V3 invoice and
+withholding evidence must retain exact historical decoding and replay compatibility.
+Old Tax policy writers require a maintenance fence before tx_0004; schema/API
+compatibility does not establish old-binary write compatibility. Restore or
+forward-recovery procedures must be rehearsed before any production authority
+change; populated-state downgrade refusal is not a rollback plan.
+
+Each final distribution still requires its separate verified published artifact,
+install-back verification, peeled tag and truthful release record under the
+release captain's freeze. Only then may consumers exact-pin those artifacts,
+regenerate locks and migration heads, and pass full hosted CI. Immutable-digest
+staging acceptance on Seabone remains required before any separately authorized
+production authority change. These gates activate no policy or writer. The native
+accepted-proof capability remains bounded to one pristine invoice proof lane;
+this release train does not complete the broader legacy billing cutover.

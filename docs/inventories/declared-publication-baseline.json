@@ -137,11 +137,6 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-numbering": {
-      "declared": "0.1.0a4",
-      "reason": "ALLOCATED IMPLEMENTATION CANDIDATE, NOT PUBLISHED. a3 remains retained under dotmac-numbering-v0.1.0a3 with exact source/artifact release evidence. a4 extends the existing owner with strict creation/enrollment, cross-series collision domains/claims, read DTOs and additive nu_0002; released nu_0001 bytes remain unchanged. Hosted CI, independent review, exact publication and adopter acceptance are separate gates. ERP keeps its released pin until that publication is verified. Remove this row only with the oracle-backed a4 release record; this candidate authorizes no enrollment, backfill, repair or production switch.",
-      "state": "declared-unpublished"
-    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",
@@ -159,7 +154,7 @@
     },
     "dotmac-tax": {
       "declared": "0.1.0a7",
-      "reason": "ALLOCATED DEVELOPMENT SUCCESSOR, NOT YET PUBLISHED. Existing a6 source must first complete its independent protected-main release, verified install-back and truthful release record before a7 source integration. a7 adds explicit cross-purpose dependency policy, commercial source identity, sealed prior-set references and exact selected component evidence through additive V2 contracts and tx_0005; V1 calculations and seals remain unchanged. Source review and hosted migrated-PostgreSQL qualification are pending. Billing evidence and product authoring/issuance consumers require separately versioned adoption; no unpublished pin or financial authority switch. Remove only through the exact authorized a7 release record.",
+      "reason": "UNPUBLISHED FINAL SUCCESSOR. a7 carries the complete a5/a6 source-only authoring allocations and explicit Tax V2 dependency policy, original commercial identities, sealed prior references and tx_0005. No verified a6 tag/release run or inspected consumer pin was found; a6 publication is not a prerequisite. Last verified adopter baseline is a4. Preserve released tx1-tx3 bytes and qualify direct a4 tx3-to-head through tx4/tx5, including concurrency, replay and populated downgrade refusal on hosted CI. Final serial publications are Payroll a2, Tax a7 and Billing a10, each with exact protected source, built-once verified artifacts, install-back, tag and truthful release record; actual exact consumer pins and full consumer CI precede staging. Source allocation is not publication, policy activation or cutover. Remove only with the verified a7 publication record.",
       "state": "declared-unpublished"
     },
     "dotmac-usage": {

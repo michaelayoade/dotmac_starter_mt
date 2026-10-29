@@ -469,6 +469,7 @@ def test_every_tax_determination_reader_crosses_the_sealed_projector() -> None:
         "_determine_tax_set_row",
         "_verified_determination_contracts_for_period",
         "determine_tax",
+        "determine_tax_set_v2",
     }
     assert users("TaxDeterminationLine") == {"_build_tax_policy_result"}
     assert users("TaxDeterminationSet") == {

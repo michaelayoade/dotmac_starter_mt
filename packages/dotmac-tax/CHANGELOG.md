@@ -17,10 +17,11 @@
   taxation are explicitly unsupported.
 - Add exact tenant-scoped get_tax_determination_set_v2 for sealed historical
   dependency selection, with no mutable policy admission or autoflush.
-- Hosted CI qualification and a6 publication precede release/adoption.
+- Includes the complete a5/a6 source allocations. Hosted CI, direct published
+  a4 predecessor migration qualification and verified a7 publication precede adoption.
 
 
-## 0.1.0a6 — unreleased
+## 0.1.0a6 — unpublished source allocation, superseded by a7
 
 - Add typed `ensure_tax_*_in_transaction` APIs for authority, jurisdiction,
   code and immutable rule authoring under an adopter's transaction owner.
@@ -31,7 +32,7 @@
 - Add owner-event sensitivity, rollback, tenant and competing-author canary
   source. No schema change or Sub policy UI adoption is implied.
 
-## 0.1.0a5 — unreleased
+## 0.1.0a5 — unpublished source allocation, included in a7
 
 - Append evidenced effective-dated rule supersessions with exact source replay
   and tenant/code author serialization; keep sealed financial facts unchanged.
