@@ -337,6 +337,48 @@ jobs:
       - run: poetry install
       - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term --junitxml=identity-unit.xml
         id: identity_unit
+      # Ordinary unit/architecture collection does not include packages/*/tests.
+      - name: Test FreeRADIUS package (hermetic; no live provider)
+        id: freeradius_unit
+        run: poetry run pytest packages/dotmac-connector-freeradius/tests -q --junitxml=freeradius-unit.xml
+      - name: Require complete passing FreeRADIUS package collection
+        if: always()
+        env:
+          PACKAGE_OUTCOME: ${{ steps.freeradius_unit.outcome }}
+        run: |
+          python - <<'PYCODE'
+          import ast, json, os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          required = set()
+          for path in Path("packages/dotmac-connector-freeradius/tests").glob("test_*.py"):
+              required.update((path.stem, n.name) for n in ast.parse(path.read_text()).body
+                              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_"))
+          path = Path("freeradius-unit.xml")
+          cases = list(ET.parse(path).iter("testcase")) if path.exists() else []
+          collected = {(c.get("classname", "").rsplit(".", 1)[-1], c.get("name", "").split("[", 1)[0]) for c in cases}
+          refused = [c.get("name", "") for c in cases if any(c.find(k) is not None for k in ("skipped", "failure", "error"))]
+          missing = sorted(required - collected)
+          receipt = {
+              "status": "passed" if os.environ["PACKAGE_OUTCOME"] == "success" and required and not missing and not refused else "failed",
+              "package_outcome": os.environ["PACKAGE_OUTCOME"],
+              "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "source_sha": os.environ["GITHUB_SHA"],
+              "required_definition_count": len(required), "collected_case_count": len(cases),
+              "missing_definitions": missing, "refused_cases": refused,
+          }
+          Path("freeradius-unit-collection.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          if receipt["status"] != "passed":
+              raise SystemExit("Required FreeRADIUS package collection/pass evidence incomplete")
+          PYCODE
+      - name: Retain FreeRADIUS package test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: freeradius-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            freeradius-unit.xml
+            freeradius-unit-collection.json
       - name: Require eight Kernel identity and all changed Learning unit modules
         id: identity_unit_collection
         if: always()
