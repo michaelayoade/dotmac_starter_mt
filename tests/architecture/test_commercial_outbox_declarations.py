@@ -7,7 +7,11 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
-from dotmac_billing.contracts import DOCUMENT_FACT_CONTRACT
+from dotmac_billing.contracts import (
+    DOCUMENT_FACT_CONTRACT,
+    DOCUMENT_FACT_V2_CONTRACT,
+    DOCUMENT_FACT_V3_CONTRACT,
+)
 from dotmac_billing.manifest import module as billing_module
 from dotmac_collections.manifest import module as collections_module
 
@@ -65,7 +69,11 @@ def test_detector_rejects_an_undeclared_event_type(emitter: str) -> None:
 def test_billing_declares_exactly_the_events_its_module_emits() -> None:
     emitted = _emitted_event_types(
         _source("dotmac-billing"),
-        constants={"DOCUMENT_FACT_CONTRACT": DOCUMENT_FACT_CONTRACT},
+        constants={
+            "DOCUMENT_FACT_CONTRACT": DOCUMENT_FACT_CONTRACT,
+            "DOCUMENT_FACT_V2_CONTRACT": DOCUMENT_FACT_V2_CONTRACT,
+            "DOCUMENT_FACT_V3_CONTRACT": DOCUMENT_FACT_V3_CONTRACT,
+        },
     )
     assert (
         frozenset(billing_module.outbox_event_types)
@@ -80,6 +88,8 @@ def test_billing_declares_exactly_the_events_its_module_emits() -> None:
             "billing.document.artifact.recorded.v1",
             "billing.document.artifact.repaired.v1",
             "billing.invoice.document.fact.v1",
+            "billing.invoice.document.fact.v2",
+            "billing.invoice.document.fact.v3",
             "billing.obligation.accepted.v1",
             "billing.receivable.exposure.v1",
             "billing.receivable.position.v1",

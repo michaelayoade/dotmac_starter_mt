@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-billing"
-version = "0.1.0a8"
+version = "0.1.0a10"
 description = "DotMac dual-plane operational receivables owner"
 authors = ["DotMac"]
 readme = "README.md"
@@ -15,6 +15,7 @@ python = ">=3.11,<3.14"
 dotmac-kernel = ">=0.1.0a105"
 sqlalchemy = "^2.0"
 alembic = ">=1.13"
+cryptography = ">=42"
 
 [build-system]
 requires = ["poetry-core"]

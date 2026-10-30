@@ -45,6 +45,7 @@ from sqlalchemy.exc import DBAPIError
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as noncash
 from tests import test_billing_opening_cash_import as cash
+from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 from tests.unit import test_billing_opening_receivable_contracts as evidence
 
 
@@ -2073,7 +2074,7 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
                 )
                 is None
             )
-        with monkeypatch.context() as historical:
+        with predecessor_obligation_columns(), monkeypatch.context() as historical:
             # Source-compatibility for the verified bi7 fixture only. Its real
             # role, trust, money and existing SQL guards remain unchanged.
             historical.setattr(s, "_admit_opening_window", lambda *args, **kwargs: None)

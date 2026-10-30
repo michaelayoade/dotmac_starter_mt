@@ -10,19 +10,28 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.money import Currency, Money
 
 from dotmac_billing.errors import BillingRuleViolation
+from dotmac_billing.tax_dependency_evidence import (
+    InvoiceTaxEvidenceV2,
+    TaxCommercialSourceEvidenceV1,
+    TaxDeterminationSetEvidenceV2,
+    validate_commercial_source_binding,
+)
+from dotmac_billing.tax_evidence import InvoiceTaxEvidenceV1
 
 OBLIGATION_ACCEPT_CONTRACT = "billing.obligation.accept.v1"
 SETTLEMENT_CONTRACT = "billing.settlement.accept.v1"
 RECEIVABLE_POSITION_CONTRACT = "billing.receivable.position.v1"
 RECEIVABLE_EXPOSURE_CONTRACT = "billing.receivable.exposure.v1"
 DOCUMENT_FACT_CONTRACT = "billing.invoice.document.fact.v1"
+DOCUMENT_FACT_V2_CONTRACT = "billing.invoice.document.fact.v2"
+DOCUMENT_FACT_V3_CONTRACT = "billing.invoice.document.fact.v3"
 ACCOUNTING_FACT_CONTRACT = "billing.accounting.fact.v1"
 ARTIFACT_COMMAND_CONTRACT = "billing.document.artifact.record.v1"
 ARTIFACT_REPAIR_CONTRACT = "billing.document.artifact.repair.v1"
@@ -250,6 +259,20 @@ class AcceptRatedObligationV1:
     supersedes_obligation_id: UUID | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AcceptRatedObligationV2(AcceptRatedObligationV1):
+    """Accept lossless Tax-authored evidence instead of lossy rate snapshots.
+
+    Expected withholding never changes pre-tax, tax, total or receivable amounts.
+    V2 does not mix detailed evidence with V1 tax snapshots.
+    """
+
+    tax_evidence: tuple[InvoiceTaxEvidenceV1, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tax_evidence", tuple(self.tax_evidence))
+
+
 class ObligationSourceRegistry(Protocol):
     """Assembly-supplied registry of uniquely declared obligation sources."""
 
@@ -289,6 +312,11 @@ class IssueRatedInvoiceV1:
     actor_ref: str
     correlation_id: str
     party_tax_identities: tuple[PartyTaxIdentitySnapshotV1, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class IssueRatedInvoiceV2(IssueRatedInvoiceV1):
+    obligation: AcceptRatedObligationV2
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,6 +394,30 @@ class InvoiceDocumentFactV1:
     source_authority: Literal["internal", "provider_owned", "external_finance"]
     correlation_id: str
     presentation_model_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceDocumentFactV2(InvoiceDocumentFactV1):
+    tax_evidence: tuple[InvoiceTaxEvidenceV1, ...]
+
+    @property
+    def expected_withholding(self) -> Money:
+        """Original expected display deduction; never proof of discharge."""
+        from decimal import localcontext
+
+        with localcontext() as context:
+            context.prec = 60
+            return Money(
+                sum(
+                    (
+                        item.determination.tax_amount.amount
+                        for item in self.tax_evidence
+                        if item.purpose == "expected_withholding"
+                    ),
+                    Decimal(0),
+                ),
+                Currency(self.currency, self.minor_units),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -591,6 +643,14 @@ class StoredInvoiceDocumentFactV1:
     contract_version: Literal["billing.invoice.document.fact.v1"]
     recorded_at: datetime
     fact: InvoiceDocumentFactV1
+
+
+@dataclass(frozen=True, slots=True)
+class StoredInvoiceDocumentFactV2:
+    fact_id: UUID
+    contract_version: Literal["billing.invoice.document.fact.v2"]
+    recorded_at: datetime
+    fact: InvoiceDocumentFactV2
 
 
 @dataclass(frozen=True, slots=True)
@@ -922,6 +982,8 @@ class WithholdingTaxEvidenceV1:
     that the caller is authorized or that a certificate is valid.
     """
 
+    _fingerprint_prefix: ClassVar[str] = "rv1:"
+
     source_owner: str
     determination_ref: str
     source_version: str
@@ -966,7 +1028,7 @@ class WithholdingTaxEvidenceV1:
         if any(not isinstance(value, str) or not value.strip() for value in texts):
             raise ValueError("withholding Tax evidence requires complete provenance")
         if (
-            not self.result_fingerprint.startswith("rv1:")
+            not self.result_fingerprint.startswith(self._fingerprint_prefix)
             or len(self.result_fingerprint) != 68
             or any(c not in "0123456789abcdef" for c in self.result_fingerprint[4:])
         ):
@@ -1046,7 +1108,7 @@ class WithholdingDischargeEffectV1:
     claim_ref: str
     claimed_amount: Money
     accepted_delta: Money
-    tax_evidence: WithholdingTaxEvidenceV1
+    tax_evidence: WithholdingTaxEvidenceV1 | WithholdingTaxEvidenceV2
     authorization_actor_ref: str
     authorization_evidence_ref: str
     certificate_observation: WithholdingCertificateObservationV1 | None = None
@@ -1323,6 +1385,12 @@ class AccountingFactV3:
 
 
 __all__ = [
+    "DOCUMENT_FACT_V3_CONTRACT",
+    "AcceptRatedObligationV3",
+    "IssueRatedInvoiceV3",
+    "InvoiceDocumentFactV3",
+    "StoredInvoiceDocumentFactV3",
+    "WithholdingTaxEvidenceV2",
     "IssueRatedInvoiceV1",
     "IssuedRatedInvoiceV1",
     "ObligationSourceRegistry",
@@ -1354,6 +1422,11 @@ __all__ = [
     "ARTIFACT_COMMAND_CONTRACT",
     "ARTIFACT_REPAIR_CONTRACT",
     "DOCUMENT_FACT_CONTRACT",
+    "DOCUMENT_FACT_V2_CONTRACT",
+    "AcceptRatedObligationV2",
+    "IssueRatedInvoiceV2",
+    "InvoiceDocumentFactV2",
+    "StoredInvoiceDocumentFactV2",
     "OBLIGATION_ACCEPT_CONTRACT",
     "RECEIVABLE_EXPOSURE_CONTRACT",
     "RECEIVABLE_POSITION_CONTRACT",
@@ -1390,3 +1463,113 @@ __all__ = [
     "SettlementFundingLane",
     "StoredInvoiceDocumentFactV1",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptRatedObligationV3(AcceptRatedObligationV1):
+    tax_evidence: tuple[InvoiceTaxEvidenceV2, ...] = ()
+    commercial_sources: tuple[TaxCommercialSourceEvidenceV1, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tax_evidence", tuple(self.tax_evidence))
+        object.__setattr__(self, "commercial_sources", tuple(self.commercial_sources))
+        validate_commercial_source_binding(
+            self.tax_evidence, commercial_sources=self.commercial_sources
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class IssueRatedInvoiceV3(IssueRatedInvoiceV1):
+    obligation: AcceptRatedObligationV3
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceDocumentFactV3(InvoiceDocumentFactV1):
+    tax_evidence: tuple[InvoiceTaxEvidenceV2, ...]
+    commercial_sources: tuple[TaxCommercialSourceEvidenceV1, ...] = ()
+
+    @property
+    def expected_withholding(self) -> Money:
+        from dotmac_billing.tax_evidence import _total
+
+        return Money(
+            _total(
+                tuple(
+                    item.determination.tax_amount
+                    for item in self.tax_evidence
+                    if item.purpose == "expected_withholding"
+                )
+            ),
+            Currency(self.currency, self.minor_units),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StoredInvoiceDocumentFactV3:
+    fact_id: UUID
+    contract_version: Literal["billing.invoice.document.fact.v3"]
+    recorded_at: datetime
+    fact: InvoiceDocumentFactV3
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WithholdingTaxEvidenceV2(WithholdingTaxEvidenceV1):
+    _fingerprint_prefix: ClassVar[str] = "rv2:"
+    determination: TaxDeterminationSetEvidenceV2
+    prior_determinations: tuple[TaxDeterminationSetEvidenceV2, ...] = ()
+
+    def __post_init__(self) -> None:
+        WithholdingTaxEvidenceV1.__post_init__(self)
+        object.__setattr__(
+            self, "prior_determinations", tuple(self.prior_determinations)
+        )
+        result = self.determination
+        item = InvoiceTaxEvidenceV2(
+            "expected_withholding", result, self.prior_determinations
+        )
+        from dotmac_billing.tax_dependency_evidence import (
+            validate_invoice_tax_evidence_v2,
+        )
+
+        validate_invoice_tax_evidence_v2(
+            (item,),
+            scope=self.scope,
+            tax_amount=Money(Decimal(0), self.amount.currency),
+        )
+        matches = [
+            component
+            for component in result.components
+            if str(component.determination_id) == self.component_ref
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "withholding component does not belong to retained Tax result"
+            )
+        component = matches[0]
+        if (
+            self.result_fingerprint != result.result_fingerprint
+            or self.source_fingerprint != result.source_fingerprint
+            or self.determination_ref != str(result.determination_set_id)
+            or self.source_ref != result.source_ref
+            or self.source_version != result.source_version
+            or self.evidence_ref != result.evidence_ref
+            or self.recognition_basis_code != result.recognition_basis_code
+            or self.fact_kind != result.fact_kind
+            or self.transaction_side != result.transaction_side
+            or self.determined_at != result.determined_at
+            or self.rule_ref != str(component.rule_id)
+            or self.rule_version != str(component.rule_version)
+            or self.treatment_code != component.treatment_code
+            or self.calculation_base_code != component.calculation_base_code
+            or self.inclusive != component.inclusive
+            or self.taxable_basis != component.base_amount
+            or self.amount != component.tax_amount
+            or self.lines
+            != tuple(
+                WithholdingTaxLineV1(
+                    line.sequence, line.taxable_amount, line.rate, line.tax_amount
+                )
+                for line in component.lines
+            )
+        ):
+            raise ValueError("withholding evidence differs from retained Tax V2 result")

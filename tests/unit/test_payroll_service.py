@@ -13,6 +13,7 @@ from dotmac_payroll import (
     EmployeeComponentInput,
     PayComponentInput,
     PayrollConflict,
+    PayrollNotFound,
     PayrollRuleViolation,
     PayRuleInput,
     approve_payroll_run,
@@ -23,6 +24,7 @@ from dotmac_payroll import (
     create_payroll_run,
     finalize_payroll_run,
     publish_pay_structure_revision,
+    read_payroll_run_totals,
     record_liability_settlement,
     update_pay_component,
 )
@@ -214,6 +216,14 @@ def test_calculation_uses_typed_rules_and_snapshots_external_tax_input(
     assert calculation.gross_amount == Decimal("600.00")
     assert calculation.deduction_amount == Decimal("50.00")
     assert calculation.net_amount == Decimal("550.00")
+    totals = read_payroll_run_totals(db, tenant_id=tenant.id, run_id=run.id)
+    assert totals.calculation_count == 1
+    assert totals.gross_amount == calculation.gross_amount
+    assert totals.deduction_amount == calculation.deduction_amount
+    assert totals.net_amount == calculation.net_amount
+    other = _tenant(db)
+    with pytest.raises(PayrollNotFound):
+        read_payroll_run_totals(db, tenant_id=other.id, run_id=run.id)
     lines = db.scalars(
         select(PayrollCalculationLine)
         .where(PayrollCalculationLine.calculation_id == calculation.id)
@@ -366,3 +376,30 @@ def test_finalization_creates_employee_and_external_liabilities_and_settles_part
             recorded_by_id=uuid4(),
             recorded_at=NOW,
         )
+
+
+def test_run_totals_flush_pending_scalar_facts_with_autoflush_disabled(
+    db: Session,
+) -> None:
+    from dotmac_payroll.models import PayrollRun
+
+    tenant = _tenant(db)
+    run_id = uuid4()
+    db.add(
+        PayrollRun(
+            id=run_id,
+            tenant_id=tenant.id,
+            run_ref="pending-run",
+            period_start=date(2026, 7, 1),
+            period_end=date(2026, 7, 31),
+            currency_code=NGN.code,
+            minor_units=NGN.minor_units,
+            status="draft",
+            created_by_id=uuid4(),
+            created_at=NOW,
+        )
+    )
+    with db.no_autoflush:
+        totals = read_payroll_run_totals(db, tenant_id=tenant.id, run_id=run_id)
+    assert totals.calculation_count == 0
+    assert totals.net_amount == Decimal("0.00")

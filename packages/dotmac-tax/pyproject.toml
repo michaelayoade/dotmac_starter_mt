@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-tax"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Composable tax determination, statutory reporting and return-lifecycle owner"
 authors = ["DotMac"]
 readme = "README.md"

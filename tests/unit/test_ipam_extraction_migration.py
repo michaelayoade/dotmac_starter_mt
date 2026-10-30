@@ -209,3 +209,67 @@ def test_downgrade_restores_the_template_shape_when_empty(migration) -> None:
     first = _tables(buffer.getvalue())
     for table in TEMPLATE_TABLES:
         assert created[table] == first[table], table
+
+
+@pytest.mark.parametrize(
+    "revision,parent,requirement,provider",
+    [
+        (
+            "ip_0003_outbox_relay",
+            "ip_0002_extracted",
+            "outbox_relay.v1",
+            "0012_platform_outbox",
+        ),
+        (
+            "ip_0004_import_idempotency",
+            "ip_0003_outbox_relay",
+            "idempotency_ledger.v1",
+            "0018_idempotency_one_owner",
+        ),
+    ],
+)
+def test_import_revisions_require_and_verify_their_kernel_effect(
+    monkeypatch,
+    revision,
+    parent,
+    requirement,
+    provider,
+) -> None:
+    from dotmac_ipam import module
+    from dotmac_kernel.prerequisites import (
+        BINDINGS_ENV_VAR,
+        install_prerequisite_bindings,
+        installed_bindings,
+    )
+
+    from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
+    previous = installed_bindings()
+    try:
+        # Graph inspection runs without env.py; the module cannot choose providers.
+        with monkeypatch.context() as patch:
+            patch.delenv(BINDINGS_ENV_VAR, raising=False)
+            install_prerequisite_bindings(())
+            assert _load(revision).depends_on == ()
+        # Upgrade loads revisions after the assembly installs its provider bindings.
+        install_prerequisite_bindings(ASSEMBLY_PREREQUISITE_BINDINGS)
+        migration = _load(revision)
+    finally:
+        install_prerequisite_bindings(previous)
+    assert migration.REQUIRES == (requirement,)
+    assert {"outbox_relay.v1", "idempotency_ledger.v1"} <= set(module.requires)
+    assert migration.depends_on == (provider,)
+    assert migration.down_revision == parent
+    connection = object()
+    with (
+        mock.patch.object(migration.op, "get_bind", return_value=connection),
+        mock.patch.object(migration, "require_prerequisites") as verify,
+        mock.patch.object(migration.op, "execute") as execute,
+    ):
+        migration.upgrade()
+        verify.assert_called_once_with(connection, migration.REQUIRES)
+        execute.assert_not_called()
+        verify.side_effect = RuntimeError("required provider unavailable")
+        with pytest.raises(RuntimeError, match="required provider unavailable"):
+            migration.upgrade()
+        execute.assert_not_called()

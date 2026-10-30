@@ -55,6 +55,7 @@ from typing import (
 
 from ..authorization import ExecutionGrant
 from ..authorization_v3 import (
+    ExecutionContextV3,
     require_committed_consumption_v3,
     require_current_subject_v3,
 )
@@ -107,13 +108,22 @@ from ..host_source_admission import (
     HostSourceAdmissionProvider,
     HostSourceAdmissionTrace,
 )
+from ..live_instance import (
+    LiveInstanceMeasurement,
+    LiveInstanceObservationEffects,
+    LiveInstanceRefusal,
+    StartupAssignmentCustody,
+    StartupObservationContext,
+    _require_startup_recheck,
+    require_aware,
+)
 from ..material_readiness import (
     MaterialProbeObservation,
     MaterialProbePhase,
     MaterialProbeStatus,
 )
 from ..policy import build_firewall_plan
-from ..spec import SCHEMA_V4, MaterialProbe, ProductDeploymentSpec
+from ..spec import SCHEMA_V4, SCHEMA_V5, MaterialProbe, ProductDeploymentSpec
 from ..telemetry import Annotation
 from .lock import DeploymentLockHeld
 from .plan import (
@@ -377,6 +387,8 @@ class DeploymentOutcome:
     #: Deterministic Control ledger coordinate, set only after consume returns.
     control_consumption_ref: str = ""
     operation: str = ""
+    # Additive in-memory output; intentionally absent from as_evidence().
+    live_instance_observations: tuple[LiveInstanceMeasurement, ...] = ()
     #: The run's outcome as ONE CLOSED WORD, replacing the free-text `failure`
     #: field in the persisted record. `failure` still exists here, still holds
     #: `str(exc)`, and is still what the CLI prints — it simply no longer
@@ -516,6 +528,18 @@ def bind_authorized_effects(
         ) from exc
 
 
+@dataclass(frozen=True, slots=True)
+class _ConsumedStartupContinuation:
+    owner: object
+    token: object
+    lock: DeploymentLockHeld
+    facts: ExecutionContextV3
+    descriptor_digest: str
+    execution_plan_digest: str
+    dispatch_id: str
+    consumption_ref: str
+
+
 class Executor:
     """Runs a plan against an :class:`Effects` implementation.
 
@@ -541,6 +565,7 @@ class Executor:
         now_epoch: int = 0,
         exposure_effects: ExposureEffects | None = None,
         execution_plan: FoundationExecutionPlanV3,
+        startup_assignment_custody: StartupAssignmentCustody | None = None,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -552,6 +577,10 @@ class Executor:
         `ExecutionGrant` cannot be built outside `authorize_v3()` — so "execute on
         a flag" stops being expressible rather than merely being discouraged.
         """
+        self._startup_custody = startup_assignment_custody
+        self._startup_token: object | None = None
+        self._startup_continuation: _ConsumedStartupContinuation | None = None
+        self._startup_lock: DeploymentLockHeld | None = None
         self._spec = spec
         self._effects = effects
         self._grant = grant
@@ -772,6 +801,24 @@ class Executor:
     def run(
         self, plan: DeploymentPlan, *, lock: DeploymentLockHeld
     ) -> DeploymentOutcome:
+        if self._spec.descriptor_schema != SCHEMA_V5:
+            return self._run_consuming(plan, lock=lock)
+        if self._startup_token is not None:
+            raise LiveInstanceRefusal("unsupported")
+        self._startup_token = object()
+        self._startup_lock = lock
+        try:
+            return self._run_consuming(plan, lock=lock)
+        finally:
+            # Includes BaseException and all failures before the inner run try.
+            # The caller owns and releases the deployment lock.
+            self._startup_continuation = None
+            self._startup_token = None
+            self._startup_lock = None
+
+    def _run_consuming(
+        self, plan: DeploymentPlan, *, lock: DeploymentLockHeld
+    ) -> DeploymentOutcome:
         # THE LOCK, PROVEN RATHER THAN ASSUMED, and FIRST — before the grant,
         # before the plan digest, before `_bootstrap_principals`, before any
         # step. `_do_acquire_lock` used to return the sentence "held by the
@@ -813,6 +860,8 @@ class Executor:
             attempt_no=int(self._grant.attempt_no),
             operation="deploy",
         )
+        if self._spec.descriptor_schema == SCHEMA_V5:
+            self._preflight_startup_observation()
         digest, consumption_ref = self._require_execution_plan("deploy")
         outcome.execution_plan_digest = digest
         outcome.control_consumption_ref = consumption_ref
@@ -823,7 +872,7 @@ class Executor:
         # case with no marker at all.
         self._annotate("deployment.start", plan)
         try:
-            if self._spec.descriptor_schema == SCHEMA_V4:
+            if self._spec.descriptor_schema in (SCHEMA_V4, SCHEMA_V5):
                 boundary = next(
                     (index for index, step in enumerate(plan.steps) if step.mutates),
                     len(plan.steps),
@@ -839,6 +888,8 @@ class Executor:
             # `_do_switch` has already recreated, so reconciling before the
             # switch would open ports onto the outgoing image.
             self._reconcile_exposure(outcome)
+            if self._spec.descriptor_schema == SCHEMA_V5:
+                self._collect_startup_observations(outcome)
             outcome.succeeded = True
             outcome.standing = RunStanding.SUCCEEDED
         except DeploymentError:
@@ -1067,7 +1118,7 @@ class Executor:
                         "exposure reconciliation capability is absent"
                     )
         if (
-            spec.descriptor_schema == SCHEMA_V4
+            spec.descriptor_schema in (SCHEMA_V4, SCHEMA_V5)
             and any(
                 s.kind
                 in (StepKind.VERIFY_MATERIALS, StepKind.VERIFY_POST_MIGRATION_MATERIALS)
@@ -1210,13 +1261,167 @@ class Executor:
         # atomic dispatch consumption in its external transaction. It refuses
         # before COMMIT or returns normally after it. Every Foundation check
         # has already run; no fallible check follows before the first effect.
+        continuation_terms = None
+        if self._spec.descriptor_schema == SCHEMA_V5 and operation == "deploy":
+            token = self._startup_token
+            lock = self._startup_lock
+            if token is None or lock is None or self._startup_continuation is not None:
+                raise LiveInstanceRefusal("unsupported")
+            # These are data, not a witness. Capture immutable terms before
+            # handing control to the committing provider; no result claims
+            # consumption until its call below returns normally.
+            continuation_terms = (
+                token,
+                lock,
+                facts,
+                self._execution_plan.descriptor_digest,
+                digest,
+                self._grant.receipt.dispatch_id,
+            )
         consumption_ref = require_committed_consumption_v3(
             grant=self._grant,
             plan=self._execution_plan,
             facts=facts,
             trace=trace,
         )
+        if continuation_terms is not None:
+            # Mint only here, after the fixed provider's committed return.
+            # No fallible external check intervenes before the first effect.
+            self._startup_continuation = _ConsumedStartupContinuation(
+                self, *continuation_terms, consumption_ref
+            )
         return digest, consumption_ref
+
+    def _preflight_startup_observation(self) -> None:
+        if self._startup_token is None or self._startup_lock is None:
+            raise LiveInstanceRefusal("unsupported")
+        if not isinstance(self._startup_custody, StartupAssignmentCustody):
+            raise LiveInstanceRefusal("custody_missing")
+        if not isinstance(self._effects, LiveInstanceObservationEffects):
+            raise LiveInstanceRefusal("unsupported")
+        try:
+            declaration = self._spec.startup_config
+            if declaration is None:
+                raise LiveInstanceRefusal("unsupported")
+            declaration.require_profile(self._spec)
+            self._effects.preflight_live_instance(custody=self._startup_custody)
+            return
+        except Exception:
+            refusal = LiveInstanceRefusal("unavailable")
+        # Raise outside the handler so untrusted diagnostics are not retained
+        # in the refusal's exception context.
+        raise refusal
+
+    def _require_startup_continuation(self) -> _ConsumedStartupContinuation:
+        witness = self._startup_continuation
+        if (
+            type(witness) is not _ConsumedStartupContinuation
+            or witness.owner is not self
+            or witness.token is None
+            or witness.token is not self._startup_token
+            or witness.lock is not self._startup_lock
+            or witness.lock is None
+        ):
+            raise LiveInstanceRefusal("unsupported")
+        witness.lock.require_held(product=self._spec.product)
+        if self._execution_plan is None:
+            raise LiveInstanceRefusal("unsupported")
+        if (
+            witness.descriptor_digest != self._descriptor_digest()
+            or witness.execution_plan_digest != self._execution_plan.digest()
+            or witness.dispatch_id != self._grant.receipt.dispatch_id
+            or witness.consumption_ref != "control-dispatch:" + witness.dispatch_id
+        ):
+            raise LiveInstanceRefusal("mismatch")
+        self._grant.require(
+            operation="deploy", descriptor_digest=witness.descriptor_digest
+        )
+        if (
+            require_current_subject_v3(
+                plan=self._execution_plan, provider=self._grant.v3_provider
+            )
+            != witness.facts
+        ):
+            raise LiveInstanceRefusal("instance_changed")
+        self._grant.receipt._require_live(now=self._grant.v3_provider.now())
+        return witness
+
+    def _collect_startup_observations(self, outcome: DeploymentOutcome) -> None:
+        role = self._spec.roles[0].code
+        started = self._clock()
+        observations = []
+        try:
+            effects = self._effects
+            custody = self._startup_custody
+            declaration = self._spec.startup_config
+            if (
+                not isinstance(effects, LiveInstanceObservationEffects)
+                or not isinstance(custody, StartupAssignmentCustody)
+                or declaration is None
+            ):
+                raise LiveInstanceRefusal("unsupported")
+            witness = self._require_startup_continuation()
+            now = self._grant.v3_provider.now()
+            require_aware(now)
+            context = StartupObservationContext(
+                witness.facts,
+                witness.descriptor_digest,
+                witness.execution_plan_digest,
+                witness.consumption_ref,
+                now,
+            )
+            for role_declaration in declaration.roles:
+                role = role_declaration.role
+                observation = effects.observe_live_instance(
+                    role=role, custody=custody, context=context
+                )
+                if (
+                    type(observation) is not LiveInstanceMeasurement
+                    or observation.role != role
+                    or observation.context != context
+                    or observation.approved_image_ref != self._spec.image
+                    or observation.assignment.material_names
+                    != role_declaration.material_names
+                ):
+                    raise LiveInstanceRefusal("mismatch")
+                observations.append(observation)
+            rechecked = []
+            for observation in observations:
+                role = observation.role
+                fresh = effects.recheck_live_instance(observation, custody=custody)
+                _require_startup_recheck(observation, fresh)
+                rechecked.append(fresh)
+            observations = rechecked
+            self._require_startup_continuation()
+            finished = self._grant.v3_provider.now()
+            require_aware(finished)
+            if finished < now or any(
+                row.observation_finished_at > finished for row in observations
+            ):
+                raise LiveInstanceRefusal("instance_changed")
+            # All roles and both authority readings succeeded before publication.
+            outcome.live_instance_observations = tuple(observations)
+            self._startup_continuation = None
+            return
+        except Exception:
+            # An observation failure is after effects: FAILED even if a provider
+            # raised a precondition type. Do not retain its diagnostics/cause.
+            outcome.live_instance_observations = ()
+            outcome.failed_step = StepKind.VERIFY_ROLES
+            outcome.failure = "startup observation failed"
+            outcome.standing = RunStanding.FAILED
+            outcome.succeeded = False
+            outcome.records.append(
+                StepRecord(
+                    StepKind.VERIFY_ROLES,
+                    role,
+                    False,
+                    "startup observation failed",
+                    self._clock() - started,
+                    StepStanding.FAILED,
+                )
+            )
+        raise LiveInstanceRefusal("unavailable")
 
     def _bootstrap_principals(self, outcome: DeploymentOutcome) -> None:
         """Install the credentials this plan was authorized to install.
@@ -1780,7 +1985,7 @@ class Executor:
                     f"role {role.code!r} holds the migration owner material "
                     f"{self._spec.migration.owner_material!r}"
                 )
-        if self._spec.descriptor_schema == SCHEMA_V4:
+        if self._spec.descriptor_schema in (SCHEMA_V4, SCHEMA_V5):
             self._verify_candidate_materials(MaterialProbePhase.PRE_MUTATION, plan)
         return (
             f"{len(required)} material(s) resolve; "

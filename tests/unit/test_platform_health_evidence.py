@@ -42,6 +42,7 @@ from dotmac_kernel.models import Base
 from dotmac_platform_health import (
     ComponentEvidence,
     DeploymentHealthEvidence,
+    HealthAdmissionError,
     HealthError,
     HealthEvidenceError,
     HealthEvidenceSignature,
@@ -76,6 +77,77 @@ def db() -> Session:
     finally:
         session.close()
         engine.dispose()
+
+
+def _enroll(db: Session, codes: tuple[str, ...], at: datetime):
+    from dotmac_platform_health import (
+        AuthenticatedHealthSource,
+        EnrollmentProjection,
+        HealthAdmission,
+        HealthEligibilityAssessment,
+    )
+
+    projection = EnrollmentProjection(
+        "enrollment:test",
+        "installation:test",
+        "config:test",
+        "candidate:test",
+        "agent",
+        "account:test",
+        "transport:test",
+        "credential:test",
+        codes,
+        "runtime-proof:test",
+        "runtime-authority:test",
+        "credential-proof:test",
+        "credential-authority:test",
+        at - timedelta(hours=1),
+        at + timedelta(hours=1),
+        "eligible",
+    )
+
+    class TestAuthority:
+        def require_ready(self):
+            pass
+
+        def enrollment(self, ref):
+            assert ref == projection.enrollment_ref
+            return projection
+
+        def health_eligibility(self, ref):
+            return HealthEligibilityAssessment(
+                "assessment:test",
+                ref,
+                projection.identity_fingerprint,
+                at - timedelta(hours=1),
+                at - timedelta(hours=1),
+                at + timedelta(hours=1),
+                "eligible",
+                "runtime:current",
+                "runtime:authority",
+                "credential:current",
+                "credential:authority",
+            )
+
+    admission = HealthAdmission(TestAuthority())
+    grant = admission.create_grant(db, enrollment_ref=projection.enrollment_ref, at=at)
+    source = AuthenticatedHealthSource(
+        "installation:test",
+        "agent",
+        "account:test",
+        "transport:test",
+        "credential:test",
+        "config:test",
+    )
+    db.info["bound_health"] = (admission, grant, source)
+    return admission
+
+
+def _record_bound(db, command):
+    admission, grant, source = db.info["bound_health"]
+    return admission.record(
+        db, grant_id=grant.id, source=source, command=command, at=command.received_at
+    )
 
 
 # ── 1. The freshness-policy repair ──────────────────────────────────────────
@@ -172,7 +244,8 @@ def test_evidence_refuses_selected_projection_without_freshness_provenance(
 ) -> None:
     register_component(db, code="api", display_name="API", freshness_seconds=60)
     at, as_of = _evidence_now()
-    receipt = record_observation(
+    admission = _enroll(db, ("api",), at)
+    receipt = _record_bound(
         db,
         HealthObservationInput(
             "agent", "api:1", "api", HealthState.HEALTHY, at, at, "ok", {}
@@ -181,7 +254,9 @@ def test_evidence_refuses_selected_projection_without_freshness_provenance(
     receipt.observation.freshness_seconds = None
     db.flush()
     with pytest.raises(HealthError, match="freshness provenance"):
-        build_health_evidence(db, requested_components=("api",), evaluated_at=as_of)
+        build_health_evidence(
+            db, requested_components=("api",), evaluated_at=as_of, admission=admission
+        )
 
 
 def test_summary_hides_legacy_health_and_freshness(db: Session) -> None:
@@ -218,7 +293,7 @@ def test_legacy_signing_refusal_does_not_call_signer(db: Session) -> None:
         def sign_health_evidence(self, evidence, canonical_bytes):
             raise AssertionError("legacy evidence reached signer")
 
-    with pytest.raises(HealthError, match="freshness provenance"):
+    with pytest.raises(HealthAdmissionError, match="authority"):
         produce_signed_health_evidence(
             db,
             requested_components=("api",),
@@ -276,7 +351,8 @@ def test_newer_observation_repairs_legacy_provenance_refusal(db: Session) -> Non
     evidence = build_health_evidence(
         db, requested_components=("api",), evaluated_at=as_of
     )
-    assert evidence.components[0].freshness == "fresh"
+    assert evidence.components[0].freshness == "missing"
+    assert evidence.components[0].observation_id is None
 
 
 # ── 2. Canonical evidence: determinism, roster exactness, valid_until ──────
@@ -355,15 +431,19 @@ def test_valid_until_is_the_earliest_included_deadline(db: Session) -> None:
     register_component(db, code="api", display_name="API", freshness_seconds=100)
     register_component(db, code="worker", display_name="Worker", freshness_seconds=10)
     at, as_of = _evidence_now()
+    admission = _enroll(db, ("api", "worker"), at)
     for code in ("api", "worker"):
-        record_observation(
+        _record_bound(
             db,
             HealthObservationInput(
                 "agent", f"{code}:1", code, HealthState.HEALTHY, at, at, "ok", {}
             ),
         )
     evidence = build_health_evidence(
-        db, requested_components=("api", "worker"), evaluated_at=as_of
+        db,
+        requested_components=("api", "worker"),
+        evaluated_at=as_of,
+        admission=admission,
     )
     assert evidence.valid_until == at + timedelta(seconds=10)
 
@@ -447,7 +527,8 @@ def test_authoritative_signing_uses_durable_observations(db: Session) -> None:
     """The signer receives exact bytes built from durable state."""
     register_component(db, code="api", display_name="API", freshness_seconds=60)
     at, as_of = _evidence_now()
-    first = record_observation(
+    admission = _enroll(db, ("api",), at)
+    first = _record_bound(
         db,
         HealthObservationInput(
             "agent",
@@ -487,8 +568,9 @@ def test_authoritative_signing_uses_durable_observations(db: Session) -> None:
         requested_components=("api",),
         evaluated_at=as_of,
         signer=signer,
+        admission=admission,
     )
-    record_observation(
+    _record_bound(
         db,
         HealthObservationInput(
             "agent",
@@ -510,6 +592,7 @@ def test_authoritative_signing_uses_durable_observations(db: Session) -> None:
         requested_components=("api",),
         evaluated_at=as_of,
         signer=signer,
+        admission=admission,
     )
 
     # The signer received the ACTUAL canonical bytes of each document, not a
@@ -586,7 +669,8 @@ def test_produce_signed_health_evidence_refuses_without_a_signer(db: Session) ->
 def test_non_ed25519_signer_is_refused(db: Session) -> None:
     register_component(db, code="api", display_name="API", freshness_seconds=60)
     at, as_of = _evidence_now()
-    record_observation(
+    admission = _enroll(db, ("api",), at)
+    _record_bound(
         db,
         HealthObservationInput(
             "agent", "api:1", "api", HealthState.HEALTHY, at, at, "ok", {}
@@ -603,6 +687,7 @@ def test_non_ed25519_signer_is_refused(db: Session) -> None:
             requested_components=("api",),
             evaluated_at=as_of,
             signer=_WrongAlgorithm(),
+            admission=admission,
         )
 
 

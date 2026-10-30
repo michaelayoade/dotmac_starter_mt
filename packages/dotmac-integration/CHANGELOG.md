@@ -1,5 +1,14 @@
 # Changelog — dotmac-integration
 
+## 0.1.0a21 — unpublished integrated source
+
+Adds immutable dispatch snapshots and original receipt/credential-context retry
+checks from PR #883. The additive `ig_0018_dispatch_snapshot` follows released
+`ig_0017_provisioning`; published migrations and a20 remain unchanged. This
+source allocation supplies no production accepting authority, credential
+assignment producer, transport negotiation, consumer enrollment or cutover.
+Publication and installed consumer qualification remain separate gates.
+
 ## 0.1.0a20 — released 2026-10-28: durable PROVISION runtime and SPI 1.7 fleet targets
 
 Released from protected main `7a9bfbef6a24070bea97b4490d7e6074de714552` after the

@@ -26,6 +26,7 @@ a component to the contract fails this file until the release lane proves it.
 from __future__ import annotations
 
 import re
+import runpy
 from pathlib import Path
 
 import dotmac_ui
@@ -242,3 +243,20 @@ def test_the_pull_request_execution_guard_still_bites() -> None:
     weakened = ci_workflow.replace(VERIFIER_INVOCATION, "true")
     with pytest.raises(AssertionError, match="no pull-request job executes"):
         _assert_pull_requests_execute_the_proof(weakened)
+
+
+def test_component_class_proof_distinguishes_classes_from_data_hooks() -> None:
+    """Data hooks cannot create classes or conceal a real undeclared class."""
+    component_classes = runpy.run_path(str(VERIFIER))["_component_classes"]
+    rendered = """
+        <aside class="dmui-notice&#45;banner" data-dmui-dismissible
+               data-note="dmui-data-value-is-not-a-class">
+          dmui-copy-is-not-a-class
+          <button class='dmui-notice-banner__dismiss dmui-undeclared'
+                  data-dmui-dismiss title="dmui-title-is-not-a-class" />
+        </aside>
+    """
+    emitted = component_classes(rendered)
+    declared = {"dmui-notice-banner", "dmui-notice-banner__dismiss"}
+    assert emitted - declared == {"dmui-undeclared"}
+    assert declared - emitted == set()

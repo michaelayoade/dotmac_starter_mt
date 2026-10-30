@@ -123,6 +123,9 @@ class _ObligationColumns(_EvidenceTime):
     rated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     price_version_id: Mapped[str] = mapped_column(String(255), nullable=False)
     supersedes_obligation_id: Mapped[UUID | None] = mapped_column(Uuid())
+    tax_evidence: Mapped[list[dict[str, object]] | None] = mapped_column(
+        JSON(none_as_null=True)
+    )
 
 
 class RatedObligation(Base, _TenantRow, _ObligationColumns):

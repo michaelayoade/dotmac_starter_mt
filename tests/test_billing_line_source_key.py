@@ -1,9 +1,10 @@
 """Real PostgreSQL provider-key probes; these are not a deployed Sub schema."""
 
-from __future__ import annotations
-
 # Identifiers below come only from the closed Billing plane selection.
 # ruff: noqa: S608
+
+from __future__ import annotations
+
 import os
 import uuid
 
@@ -16,6 +17,7 @@ from sqlalchemy.exc import DBAPIError
 from alembic import command
 from alembic.config import Config
 from tests import test_billing_isolation as billing
+from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 
 REVISION = "bi_0010_line_source_key"
 PREDECESSOR = "bi_0009_opening_window"
@@ -254,7 +256,10 @@ def test_real_lineage_source_key_and_consumer_canary(planes, start):
     # Required PostgreSQL proof must fail setup rather than quietly skip.
     assert os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv("TEST_DATABASE_URL")
     target = REVISION if start == "fresh" else PREDECESSOR
-    with billing._scratch_database(planes, target_revision=target) as urls:
+    with (
+        predecessor_obligation_columns(),
+        billing._scratch_database(planes, target_revision=target) as urls,
+    ):
         config = _config(planes)
         sources = {plane: _seed(urls, plane) for plane in planes}
         engine = create_engine(urls[0])

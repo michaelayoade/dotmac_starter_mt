@@ -55,6 +55,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 from app.assembly import assembly
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -265,8 +267,14 @@ def test_every_composed_template_is_a_page_a_fragment_or_a_declared_non_page() -
         "packages/dotmac-kernel/src/dotmac_kernel/templates/components/sidebar.html",
         "packages/dotmac-kernel/src/dotmac_kernel/templates/components/table_macros.html",
         "packages/dotmac-kernel/src/dotmac_kernel/templates/components/topbar.html",
+        "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/dashboard_grid.html",
+        "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/dashboard_line_chart.html",
+        "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/dashboard_panel.html",
         "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/empty_state.html",
         "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/map_frame.html",
+        "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/metric_card.html",
+        "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/notice_banner.html",
+        "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/notification_toast.html",
     }, (
         "the set of templates that are neither a page nor a `_` fragment "
         "changed. A new entry must be an include/macro library that is never "
@@ -343,6 +351,53 @@ def test_non_page_templates_are_never_rendered_as_a_response() -> None:
         "they are include/macro libraries are in fact rendered as responses:\n"
         + "\n".join(offenders)
     )
+
+
+@pytest.mark.parametrize(
+    "component",
+    (
+        "dashboard_grid",
+        "dashboard_line_chart",
+        "dashboard_panel",
+        "metric_card",
+        "notice_banner",
+        "notification_toast",
+    ),
+)
+@pytest.mark.parametrize(
+    "render_call", ("render({name!r})", "templates.TemplateResponse(name={name!r})")
+)
+def test_ui_non_page_response_guard_rejects_direct_rendering(
+    component: str,
+    render_call: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A component declaration is safe; returning the same macro library is not.
+
+    Keep the real composed templates and inject only a product call site, so
+    the full AST scan, addressable-name matching and response guard must agree.
+    """
+    roots = composed_template_roots()
+    name = f"dotmac_ui/components/{component}.html"
+    assert any(root / name in non_page_templates() for root in roots)
+    source_dir = tmp_path / "app"
+    source_dir.mkdir()
+    source = source_dir / "web.py"
+    declaration = (
+        'render("ordinary-page.html")\n'
+        f"ComponentContract(template={name!r}, macro={component!r})\n"
+    )
+    source.write_text(declaration, encoding="utf-8")
+    monkeypatch.setitem(globals(), "PROJECT_ROOT", tmp_path)
+    monkeypatch.setitem(globals(), "composed_template_roots", lambda: roots)
+    test_non_page_templates_are_never_rendered_as_a_response()
+
+    source.write_text(
+        declaration + render_call.format(name=name) + "\n", encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match=re.escape(name)):
+        test_non_page_templates_are_never_rendered_as_a_response()
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ MIGRATION = SOURCE / "migrations/versions/py_0001_payroll.py"
 
 def test_manifest_allocates_one_tenant_only_payroll_lineage() -> None:
     assert module.code == "payroll"
-    assert module.version == "0.1.0a1"
+    assert module.version == "0.1.0a2"
     assert module.short_code == "payroll"
     assert module.migration_prefix == "py"
     assert module.migration_branch == "payroll"

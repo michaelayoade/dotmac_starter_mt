@@ -69,6 +69,7 @@ on:
           - dotmac-collections
           - dotmac-commercial-agreements
           - dotmac-compliance-reporting
+          - dotmac-config-layers
           - dotmac-content
           - dotmac-document-rendering
           - dotmac-documents

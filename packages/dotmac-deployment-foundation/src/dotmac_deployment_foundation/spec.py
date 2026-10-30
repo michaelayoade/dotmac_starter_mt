@@ -125,7 +125,8 @@ SCHEMA_V1: Final = "ProductDeploymentSpec.v1"
 SCHEMA_V2: Final = "ProductDeploymentSpec.v2"
 SCHEMA_V3: Final = "ProductDeploymentSpec.v3"
 SCHEMA_V4: Final = "ProductDeploymentSpec.v4"
-SCHEMAS: Final = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
+SCHEMA_V5: Final = "ProductDeploymentSpec.v5"
+SCHEMAS: Final = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5)
 # Backwards-compatible public name: existing callers importing SCHEMA mean the
 # schema their current descriptors use, not "whichever schema is newest".
 SCHEMA: Final = SCHEMA_V1
@@ -1835,7 +1836,7 @@ class DatabaseContract:
             IsolationInvariant.parse(item) for item in table.tables("isolation")
         )
         catalogs: tuple[DatabaseCatalogCoordinateV1, ...] = ()
-        if descriptor_schema in (SCHEMA_V2, SCHEMA_V3, SCHEMA_V4):
+        if descriptor_schema in (SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5):
             parsed_catalogs: list[DatabaseCatalogCoordinateV1] = []
             for catalog_table in table.tables("catalogs"):
                 try:
@@ -2630,6 +2631,152 @@ class MaterialProbe:
         return cls(role, phase, argv, timeout)
 
 
+class StartupMountClassification(str, Enum):
+    NONSECRET_FILE = "nonsecret_file"
+    CUSTODY_FILE = "custody_file"
+
+
+@dataclass(frozen=True, slots=True)
+class StartupMountConfig:
+    mount_index: int
+    classification: StartupMountClassification
+
+    @classmethod
+    def parse(cls, table: _Table) -> StartupMountConfig:
+        index = table.int_("mount_index", maximum=127)
+        try:
+            classification = StartupMountClassification(table.str_("classification"))
+        except ValueError:
+            raise SpecError("unsupported startup mount classification") from None
+        table.done()
+        return cls(index, classification)
+
+
+@dataclass(frozen=True, slots=True)
+class StartupRoleConfig:
+    role: str
+    environment_names: tuple[str, ...]
+    material_names: tuple[str, ...]
+    mounts: tuple[StartupMountConfig, ...]
+
+    @classmethod
+    def parse(cls, table: _Table) -> StartupRoleConfig:
+        role = table.str_("role", pattern=_CODE)
+        environment = table.str_list("environment_names", pattern=_ENV_NAME)
+        materials = table.str_list("material_names", pattern=_MATERIAL_NAME)
+        mounts = tuple(StartupMountConfig.parse(row) for row in table.tables("mounts"))
+        table.done()
+        for names in (environment, materials):
+            if len(names) > 128 or names != tuple(sorted(set(names))):
+                raise SpecError("startup names must be unique and sorted")
+        if set(environment) & set(materials):
+            raise SpecError("startup environment and material names overlap")
+        if len(mounts) > 128:
+            raise SpecError("too many startup mounts")
+        return cls(role, environment, materials, mounts)
+
+
+@dataclass(frozen=True, slots=True)
+class StartupConfig:
+    schema: str
+    complete: bool
+    binding: str
+    roles: tuple[StartupRoleConfig, ...]
+
+    @classmethod
+    def parse(cls, table: _Table) -> StartupConfig:
+        schema = table.str_("schema")
+        # A missing complete flag is never silently completed by a default.
+        if "complete" not in table.keys():
+            raise SpecError("startup complete is required")
+        complete = table.bool_("complete", default=False)
+        binding = table.str_("binding")
+        roles = tuple(
+            StartupRoleConfig.parse(row) for row in table.tables("roles", minimum=1)
+        )
+        table.done()
+        if (
+            schema != "StartupConfig.v1"
+            or complete is not True
+            or binding != "process_start"
+        ):
+            raise SpecError(
+                "startup config must declare complete process_start binding"
+            )
+        names = tuple(row.role for row in roles)
+        if len(roles) > 64 or names != tuple(sorted(set(names))):
+            raise SpecError("startup roles must be unique and sorted")
+        return cls(schema, complete, binding, roles)
+
+    def require_profile(self, spec: ProductDeploymentSpec) -> None:
+        if tuple(row.role for row in self.roles) != tuple(sorted(spec.role_codes)):
+            raise SpecError("startup config must cover every role exactly")
+        topology = spec.compose_topology
+        if topology is None:
+            raise SpecError("startup observation requires retained topology")
+        for declaration in self.roles:
+            role = spec.role(declaration.role)
+            if role.replicas != 1 or role.volumes:
+                raise SpecError(
+                    "startup profile requires one replica and no legacy volumes"
+                )
+            if declaration.environment_names != tuple(
+                key for key, _ in role.environment
+            ):
+                raise SpecError("startup environment roster differs from role")
+            if declaration.material_names != tuple(sorted(role.materials)) or len(
+                set(role.materials)
+            ) != len(role.materials):
+                raise SpecError("startup material roster differs from role")
+            if any("$" in value for _, value in role.environment):
+                raise SpecError(
+                    "startup environment must be literal without interpolation"
+                )
+            mounts = topology.placement(role.code).mounts
+            if tuple(row.mount_index for row in declaration.mounts) != tuple(
+                range(len(mounts))
+            ):
+                raise SpecError(
+                    "startup mount indexes must cover every placement mount in order"
+                )
+            targets: list[PurePosixPath] = []
+            for reference, mount in zip(declaration.mounts, mounts, strict=True):
+                if not mount.read_only or mount.kind not in (
+                    "repository",
+                    "host_material",
+                ):
+                    raise SpecError(
+                        "startup profile supports only read-only repository "
+                        "or custody files"
+                    )
+                if (
+                    reference.classification
+                    is StartupMountClassification.NONSECRET_FILE
+                ):
+                    if (
+                        mount.kind != "repository"
+                        or mount.source_material
+                        or mount.target_material
+                        or "$" in mount.target
+                        or "$" in mount.source
+                    ):
+                        raise SpecError(
+                            "nonsecret startup files need literal repository paths"
+                        )
+                elif mount.kind != "host_material":
+                    raise SpecError("custody startup file must reference host material")
+                if mount.target:
+                    path = PurePosixPath(mount.target)
+                    if any(
+                        path == previous
+                        or path in previous.parents
+                        or previous in path.parents
+                        for previous in targets
+                    ):
+                        raise SpecError("startup mount targets overlap")
+                    targets.append(path)
+
+
 @dataclass(frozen=True, slots=True)
 class ProductDeploymentSpec:
     """A strictly parsed ``ProductDeploymentSpec.v1`` or ``.v2`` document."""
@@ -2659,6 +2806,9 @@ class ProductDeploymentSpec:
     )
     material_probes: tuple[MaterialProbe, ...] = field(
         default=(), metadata={"descriptor_since": SCHEMA_V4}
+    )
+    startup_config: StartupConfig | None = field(
+        default=None, metadata={"descriptor_since": SCHEMA_V5}
     )
     source: str = field(default="", compare=False)
     descriptor_schema: str = field(
@@ -2722,9 +2872,12 @@ class ProductDeploymentSpec:
                 f"schema is {self.descriptor_schema!r}, this facility reads "
                 f"{list(SCHEMAS)!r}"
             )
-        if self.descriptor_schema != SCHEMA_V4 and self.material_probes:
+        if (
+            self.descriptor_schema not in (SCHEMA_V4, SCHEMA_V5)
+            and self.material_probes
+        ):
             raise SpecError("material_probes requires ProductDeploymentSpec.v4")
-        if self.descriptor_schema == SCHEMA_V4:
+        if self.descriptor_schema in (SCHEMA_V4, SCHEMA_V5):
             if (
                 not isinstance(self.material_probes, tuple)
                 or len(self.material_probes) > 128
@@ -2747,13 +2900,19 @@ class ProductDeploymentSpec:
                 raise SpecError(
                     "material probes must cover each active role in both phases"
                 )
+        if self.descriptor_schema == SCHEMA_V5:
+            if self.startup_config is None:
+                raise SpecError("v5 requires startup_config")
+            self.startup_config.require_profile(self)
+        elif self.startup_config is not None:
+            raise SpecError("startup_config requires ProductDeploymentSpec.v5")
         catalogs = self.database.catalogs if self.database is not None else ()
         if self.descriptor_schema == SCHEMA_V1 and catalogs:
             raise SpecError(
                 "ProductDeploymentSpec.v1 cannot carry database catalogs; use v2"
             )
         if (
-            self.descriptor_schema in (SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
+            self.descriptor_schema in (SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5)
             and self.database is not None
             and not catalogs
         ):
@@ -2761,7 +2920,7 @@ class ProductDeploymentSpec:
                 "ProductDeploymentSpec.v2/v3 [database] requires at least one "
                 "database catalog coordinate"
             )
-        if self.descriptor_schema not in (SCHEMA_V3, SCHEMA_V4) and any(
+        if self.descriptor_schema not in (SCHEMA_V3, SCHEMA_V4, SCHEMA_V5) and any(
             not role.command for role in self.roles
         ):
             raise SpecError(
@@ -2769,12 +2928,12 @@ class ProductDeploymentSpec:
                 "ProductDeploymentSpec.v3"
             )
         if (
-            self.descriptor_schema in (SCHEMA_V3, SCHEMA_V4)
+            self.descriptor_schema in (SCHEMA_V3, SCHEMA_V4, SCHEMA_V5)
             and self.compose_topology is None
         ):
             raise SpecError("ProductDeploymentSpec.v3 requires [compose_topology]")
         if (
-            self.descriptor_schema not in (SCHEMA_V3, SCHEMA_V4)
+            self.descriptor_schema not in (SCHEMA_V3, SCHEMA_V4, SCHEMA_V5)
             and self.compose_topology is not None
         ):
             raise SpecError("compose_topology requires ProductDeploymentSpec.v3")
@@ -3016,8 +3175,15 @@ class ProductDeploymentSpec:
 
         material_probes = (
             tuple(MaterialProbe.parse(item) for item in root.tables("material_probes"))
-            if declared == SCHEMA_V4
+            if declared in (SCHEMA_V4, SCHEMA_V5)
             else ()
+        )
+        startup_config = (
+            StartupConfig.parse(
+                root.table("startup_config") or _Table({}, "startup_config")
+            )
+            if declared == SCHEMA_V5
+            else None
         )
         root.done()
 
@@ -3044,6 +3210,7 @@ class ProductDeploymentSpec:
             rollback_images_retained=retained,
             compose_topology=compose_topology,
             material_probes=material_probes,
+            startup_config=startup_config,
             source=source,
             descriptor_schema=str(declared),
         )

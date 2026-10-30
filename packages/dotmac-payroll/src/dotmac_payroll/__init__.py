@@ -19,17 +19,30 @@ from dotmac_payroll.service import (
     create_payroll_run,
     finalize_payroll_run,
     publish_pay_structure_revision,
+    read_payroll_run_totals,
     record_liability_settlement,
     retire_pay_component,
     update_pay_component,
 )
+from dotmac_payroll.totals import (
+    PayrollAmountSnapshot,
+    PayrollRunTotals,
+    PayrollTotalsViolation,
+    aggregate_payroll_run_totals,
+    validate_payment_total,
+)
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "EmployeeComponentInput",
     "PayComponentInput",
     "PayRuleInput",
+    "PayrollAmountSnapshot",
+    "PayrollRunTotals",
+    "PayrollTotalsViolation",
+    "aggregate_payroll_run_totals",
+    "validate_payment_total",
     "PayrollConflict",
     "PayrollNotFound",
     "PayrollRuleViolation",
@@ -43,6 +56,7 @@ __all__ = [
     "finalize_payroll_run",
     "module",
     "publish_pay_structure_revision",
+    "read_payroll_run_totals",
     "record_liability_settlement",
     "retire_pay_component",
     "update_pay_component",

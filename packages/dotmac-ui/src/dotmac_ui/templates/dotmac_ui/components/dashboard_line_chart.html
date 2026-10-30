@@ -1,0 +1,42 @@
+{# Host-calculated SVG paths; this component owns chart presentation only. #}
+{% macro dashboard_line_chart(title="", description="", series=(), range_label="", filter_label="", filter_name="service_team", filter_options=()) -%}
+<section class="dmui-line-chart">
+  <header class="dmui-line-chart__header">
+    <div class="dmui-line-chart__heading">
+      <h3 class="dmui-line-chart__title">{{ title }}</h3>
+      {% if description %}<p class="dmui-line-chart__description">{{ description }}</p>{% endif %}
+    </div>
+    <div class="dmui-line-chart__toolbar">
+      {% if filter_label and filter_options %}
+      <label class="dmui-line-chart__filter">
+        <span class="dmui-line-chart__filter-label">{{ filter_label }}</span>
+        <select class="dmui-line-chart__select" name="{{ filter_name }}" data-dmui-chart-filter>
+          {% for option in filter_options %}
+          <option value="{{ option.value }}"{% if option.get("selected", false) %} selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      {% if range_label %}<span class="dmui-line-chart__range">{{ range_label }}</span>{% endif %}
+    </div>
+  </header>
+  <div class="dmui-line-chart__legend" aria-label="Chart legend">
+    {% for item in series %}
+    {% set series_tone = item.tone if item.tone in ("neutral", "positive", "info", "warning", "negative") else "neutral" %}
+    <span class="dmui-line-chart__legend-item">
+      <span class="dmui-line-chart__swatch dmui-line-chart__swatch--{{ series_tone }}" aria-hidden="true"></span>
+      {{ item.label }}
+    </span>
+    {% endfor %}
+  </div>
+  <figure class="dmui-line-chart__figure">
+    <svg class="dmui-line-chart__svg" viewBox="0 0 600 210" role="img" aria-label="{{ title }}" preserveAspectRatio="none">
+      <path class="dmui-line-chart__grid" d="M44 18H590 M44 74H590 M44 130H590 M44 186H590" />
+      {% for item in series %}
+      {% set series_tone = item.tone if item.tone in ("neutral", "positive", "info", "warning", "negative") else "neutral" %}
+      <path class="dmui-line-chart__series dmui-line-chart__series--{{ series_tone }}" d="{{ item.path }}" vector-effect="non-scaling-stroke" />
+      {% endfor %}
+    </svg>
+  </figure>
+</section>
+{%- endmacro %}

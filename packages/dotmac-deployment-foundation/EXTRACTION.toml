@@ -103,6 +103,7 @@ preserved_tests = [
   "dotmac_sub:tests/integration/test_deployment_secret_requirements_pg.py",
   "dotmac_sub:tests/integration/test_deployment_secret_schema_pg.py",
   "dotmac_starter_mt:tests/unit/test_deployment_foundation_material_readiness.py",
+  "dotmac_starter_mt:tests/unit/test_deployment_foundation_live_instance.py",
   "dotmac_integrator:scripts/audit_image.sh",
   "dotmac_integrator:tests/architecture/test_the_assembly_stays_thin.py",
   "dotmac_starter_mt:tests/unit/test_deployment_foundation_secrets_guard.py",
@@ -299,3 +300,14 @@ repository = "dotmac_erp"
 paths = ["pyproject.toml", "poetry.lock", ".github/workflows/deployment-conformance.yml"]
 field = "tool.poetry.group.dev.dependencies.dotmac-deployment-foundation.version"
 note = "ERP owns the consistency of its own two surfaces (the pin and the workflow's `with.foundation-version`). This dossier does not hold a third copy. Re-deriving the present tense from here is the scheduled external check that is NOT built."
+
+# Adopted immutable-startup source contract; no producer qualification or release.
+[startup_instance_source_contract]
+status = "source-only-unqualified"
+owner = "Foundation Executor and ComposeHostEffects; existing privileged custody provider"
+inventory = "docs/inventories/deployment-instance-credential-assignment.md"
+descriptor_schema = "ProductDeploymentSpec.v5"
+startup_schema = "StartupConfig.v1"
+binding = "process_start"
+authority = "private continuation of the same consuming Executor under the original deployment lock"
+qualification = "Hosted CI pending; no production custody implementation, enrollment join, signing authority, or admission claim"

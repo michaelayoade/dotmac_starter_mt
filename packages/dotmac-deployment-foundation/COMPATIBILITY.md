@@ -586,3 +586,23 @@ invalidated.
 Exact-pin it. A conformance gate resolving to "whatever is newest" cannot
 distinguish a product that drifted from a foundation that changed, and the
 reusable workflow refuses a range for that reason.
+
+## Unreleased source contract — ProductDeploymentSpec.v5
+
+V5 alone requires complete `StartupConfig.v1` process-start references and the
+bounded read-only startup profile. It inherits v4's candidate probe declarations
+without reclassifying their evidence. V1–v4 reject `startup_config`; its new
+model field is explicitly omitted from their canonical descriptor projection
+using `descriptor_since` metadata. Their renderer and execution order remain
+unchanged. The additive in-memory startup result is absent from existing
+`DeploymentEvidenceV1`/`V2` serializers.
+
+Startup observation is a private same-run continuation of the original
+consuming deploy Executor, after successful steps/postflight/exposure and under
+the original held lock. It does not add an authorized operation, consume again,
+install credentials, activate enrollment or produce authenticated evidence.
+Custody is explicit and must independently attest immutable assignment at
+process start. Control owns the subsequent expected-installation/version and
+committed-enrollment join. This section records source behavior only; no
+version allocation, release, production producer qualification or operational
+acceptance accompanies it.

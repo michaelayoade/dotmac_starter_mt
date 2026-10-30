@@ -85,3 +85,9 @@ moves no authority.
 The implementation branch's kernel allocation is provisional because concurrent
 alpha-train branches also target the next version. Integration must rebase and
 renumber before any release claim.
+
+## 2026-10-28 totals contract extraction
+
+ERP PR [#761](https://github.com/michaelayoade/dotmac_erp/pull/761), exact source `26b7ba81aea783fdbd4353076087173cd7004475`, supplies the run-total and export-parity behavior. Sessions disable autoflush, so a final slip assignment can otherwise be absent from the aggregate. The declared Payroll a2 successor owns exact scalar aggregation and net-only payment-total parity. Its own read service consumes that contract; the dependent ERP adapter flushes and reads persisted, tenant-scoped scalar values, preserving database precision rather than summing stale ORM instances.
+
+This is calculation-contract reuse, not the stateful Payroll writer switch. No shadow runs, calculations, liabilities, migration or payment settlement are created. ERP remains the incumbent writer. Package hosted acceptance and verified publication precede any product pin, lock update or adoption claim.

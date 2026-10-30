@@ -7,7 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
 from dotmac_kernel.money import Currency, Money
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from dotmac_payroll.contracts import (
@@ -27,6 +27,11 @@ from dotmac_payroll.models import (
     PayStructure,
     PayStructureRevision,
     PayStructureRule,
+)
+from dotmac_payroll.totals import (
+    PayrollAmountSnapshot,
+    PayrollRunTotals,
+    aggregate_payroll_run_totals,
 )
 
 
@@ -584,6 +589,49 @@ def calculate_employee_payroll(
     return calculation
 
 
+def read_payroll_run_totals(
+    db: Session, *, tenant_id: UUID, run_id: UUID
+) -> PayrollRunTotals:
+    """Read persisted scalar facts and delegate their totals to the pure owner.
+
+    Flush before reading so pending calculations are included even when the
+    assembly disables autoflush. This creates no stored total or shadow run.
+    """
+    db.flush()
+    run_currency = db.execute(
+        select(PayrollRun.currency_code, PayrollRun.minor_units).where(
+            PayrollRun.tenant_id == tenant_id, PayrollRun.id == run_id
+        )
+    ).one_or_none()
+    if run_currency is None:
+        raise PayrollNotFound("payroll run not found")
+    currency = Currency(run_currency.currency_code, run_currency.minor_units)
+    rows = db.execute(
+        select(
+            PayrollCalculation.id,
+            PayrollCalculation.gross_amount,
+            PayrollCalculation.deduction_amount,
+            PayrollCalculation.net_amount,
+        ).where(
+            PayrollCalculation.tenant_id == tenant_id,
+            PayrollCalculation.run_id == run_id,
+        )
+    )
+    return aggregate_payroll_run_totals(
+        currency=currency,
+        snapshots=(
+            PayrollAmountSnapshot(
+                str(row.id),
+                currency,
+                row.gross_amount,
+                row.deduction_amount,
+                row.net_amount,
+            )
+            for row in rows
+        ),
+    )
+
+
 def approve_payroll_run(
     db: Session,
     *,
@@ -597,15 +645,8 @@ def approve_payroll_run(
         raise PayrollConflict("only a draft payroll run can be approved")
     if run.created_by_id == approved_by_id:
         raise PayrollRuleViolation("payroll run creator cannot approve")
-    count = db.scalar(
-        select(func.count())
-        .select_from(PayrollCalculation)
-        .where(
-            PayrollCalculation.tenant_id == tenant_id,
-            PayrollCalculation.run_id == run.id,
-        )
-    )
-    if not count:
+    totals = read_payroll_run_totals(db, tenant_id=tenant_id, run_id=run.id)
+    if not totals.calculation_count:
         raise PayrollRuleViolation("payroll run has no calculations")
     run.status = "approved"
     run.approved_by_id = approved_by_id
@@ -778,6 +819,7 @@ __all__ = [
     "create_payroll_run",
     "finalize_payroll_run",
     "publish_pay_structure_revision",
+    "read_payroll_run_totals",
     "record_liability_settlement",
     "retire_pay_component",
     "update_pay_component",

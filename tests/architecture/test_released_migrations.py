@@ -7938,7 +7938,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ig_0017` adds the durable PROVISION runtime tables and the SPI 1.7
     # fleet-target revision column; still editable until the protected
     # release tags the integration version that carries it.
-    "dotmac-integration": frozenset(),
+    "dotmac-integration": frozenset({"ig_0018_dispatch_snapshot.py"}),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),
@@ -7946,7 +7946,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ph_0002` snapshots each observation's freshness policy at acceptance,
     # so a later policy change cannot reclassify an unchanged observation.
     # Still editable: `dotmac-platform-health` has no released tag carrying it.
-    "dotmac-platform-health": frozenset({"ph_0002_observation_freshness_snapshot.py"}),
+    "dotmac-platform-health": frozenset(
+        {"ph_0002_observation_freshness_snapshot.py", "ph_0003_enrollment_grants.py"}
+    ),
     "dotmac-support-access": frozenset(),
     "dotmac-remote-access": frozenset(),
     "dotmac-compliance-reporting": frozenset(),
@@ -7970,10 +7972,12 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
     "dotmac-subscriptions": frozenset(),
-    "dotmac-billing": frozenset(),
+    "dotmac-billing": frozenset({"bi_0012_tax_evidence.py"}),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
-    "dotmac-tax": frozenset({"tx_0004_rule_supersession.py"}),
+    "dotmac-tax": frozenset(
+        {"tx_0004_rule_supersession.py", "tx_0005_tax_dependencies.py"}
+    ),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
     "dotmac-fx-policy": frozenset(),
@@ -8008,7 +8012,13 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ip_0002_extracted` is the additive 0.2.0a1 extraction revision (refuses
     # to run over any 0.1 template row). Still editable: no released tag
     # carries it yet; `ip_0001_ipam.py` stays byte-frozen by the 0.1.0a1 entry.
-    "dotmac-ipam": frozenset({"ip_0002_extracted.py"}),
+    "dotmac-ipam": frozenset(
+        {
+            "ip_0002_extracted.py",
+            "ip_0003_outbox_relay.py",
+            "ip_0004_import_idempotency.py",
+        }
+    ),
     "dotmac-licensing": frozenset(),
     "dotmac-media-observations": frozenset(),
     "dotmac-network-access": frozenset(),

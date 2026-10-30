@@ -24,6 +24,8 @@ from dotmac_ipam.models import (
     IPv4Address,
     IPv6Address,
 )
+from dotmac_kernel.idempotency_models import IdempotencyRecord
+from dotmac_kernel.messaging.models import OutboxEvent
 from dotmac_kernel.models import Base, Tenant
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -37,7 +39,13 @@ def make_session() -> Session:
         execution_options={"schema_translate_map": {"mod_ipam": None}},
     )
     Base.metadata.create_all(
-        engine, tables=[Tenant.__table__, *(m.__table__ for m in ALL_MODELS)]
+        engine,
+        tables=[
+            Tenant.__table__,
+            OutboxEvent.__table__,
+            IdempotencyRecord.__table__,
+            *(m.__table__ for m in ALL_MODELS),
+        ],
     )
     return Session(engine)
 

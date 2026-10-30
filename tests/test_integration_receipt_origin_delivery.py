@@ -17,7 +17,7 @@ from dotmac_integration.execution import receive_verified
 from dotmac_integration.ingress import prepare_ingress, record_batch
 from dotmac_integration.models import ConnectorConfigRevision
 from dotmac_integration.receipt_delivery import (
-    DeliveryError,
+    DeliveryPreparationRefused,
     ProductAcceptance,
     ProductOutcome,
     ReceiptClaims,
@@ -126,6 +126,16 @@ def test_real_claim_retains_recorded_origin_across_configuration_rotation(
             registry=capabilities,
         )
     claims = ReceiptClaims(sessionmaker(bind=engine), registry=capabilities)
+    if not recorded_origin and wire_version == "v2":
+        with pytest.raises(
+            DeliveryPreparationRefused, match="dispatch_identity_conflict"
+        ):
+            claims.claim(receipt_id=receipt_id)
+        with Session(engine) as db:
+            assert db.get(InboxReceipt, receipt_id).state == "reconciliation_required"
+            assert resolve_receipt_origin_evidence(db, receipt_id=receipt_id) is None
+        engine.dispose()
+        return
     first = claims.claim(receipt_id=receipt_id)
     assert first is not None
     original = first.origin_evidence
@@ -133,13 +143,9 @@ def test_real_claim_retains_recorded_origin_across_configuration_rotation(
         assert original is None
         with Session(engine) as db:
             assert resolve_receipt_origin_evidence(db, receipt_id=receipt_id) is None
-        if wire_version == "v2":
-            with pytest.raises(DeliveryError, match="history is unknown"):
-                build_product_request(first)
-        else:
-            assert "receipt_origin" not in product_observation_document(
-                build_product_request(first)
-            )
+        assert "receipt_origin" not in product_observation_document(
+            build_product_request(first)
+        )
         engine.dispose()
         return
     assert original is not None

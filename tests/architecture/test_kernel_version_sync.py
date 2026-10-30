@@ -110,7 +110,6 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # CAPABILITY_RAISED_FLOORS.
     "dotmac-collections": "0.1.0a89",
     "dotmac-forms": "0.1.0a88",
-    "dotmac-platform-health": "0.1.0a88",
     "dotmac-support-access": "0.1.0a88",
     "dotmac-ai-operations": "0.1.0a88",
     "dotmac-compliance-reporting": "0.1.0a88",
@@ -193,6 +192,8 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # Grant-bound Health writers consume the engine-free a98 savepoint API.
+    "dotmac-platform-health": ("0.1.0a98", "0.1.0a88"),
     # Opening-window refusal recovery observes Kernel's exact-root rollback
     # latch. transactions.py existed in a98, but published a98-a104 export
     # only conflict_savepoint; the latch requires a105. a89 allocated Billing.
@@ -447,6 +448,11 @@ STATELESS_CAPABILITY_FLOORS: dict[str, str] = {
     # release. The latest capability floor is therefore a103, with no fake DB
     # namespace for this stateless module.
     "dotmac-document-rendering": "0.1.0a103",
+    # The engine consumes no kernel capability beyond registering a stateless
+    # ModuleManifest, which a88 already supports (the dotmac-document-rendering
+    # a1 floor). Sub pins a98, so adopting the engine never raises Sub's kernel
+    # pin. ADR-0074.
+    "dotmac-config-layers": "0.1.0a88",
 }
 
 
