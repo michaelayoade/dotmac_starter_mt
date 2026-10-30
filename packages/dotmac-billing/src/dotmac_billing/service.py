@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
-from datetime import UTC, datetime
-from decimal import Decimal, localcontext
+from datetime import UTC, date, datetime
+from decimal import Decimal, DecimalException, localcontext
 from enum import Enum
 from functools import wraps
 from typing import Any, Literal, ParamSpec, TypeVar, cast
@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, SessionTransaction
 
 from dotmac_billing import models
+from dotmac_billing._document_facts import _decode
 from dotmac_billing._opening_values import (
     cash_decimal_context,
     minor_units_of,
@@ -56,7 +57,9 @@ from dotmac_billing.commands import (
 )
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
+    DOCUMENT_FACT_V2_CONTRACT,
     AcceptRatedObligationV1,
+    AcceptRatedObligationV2,
     AcceptSettlementV1,
     AccountingAllocationEffectV1,
     AccountingEffectV1,
@@ -70,6 +73,7 @@ from dotmac_billing.contracts import (
     DueDateBasisV1,
     FinancialState,
     InvoiceDocumentFactV1,
+    InvoiceDocumentFactV2,
     InvoiceLineFactV1,
     IssuedRatedInvoiceV1,
     IssueRatedInvoiceV1,
@@ -203,6 +207,10 @@ from dotmac_billing.queries import (
     get_non_cash_credit_effect,
     get_non_cash_credit_grant,
     get_withholding_discharge,
+)
+from dotmac_billing.tax_evidence import (
+    InvoiceTaxEvidenceV1,
+    validate_invoice_tax_evidence,
 )
 
 _AccountingEffectKind = Literal[
@@ -390,7 +398,7 @@ def _wire_value(value: object) -> object:
         }
     if isinstance(value, Enum):
         return value.value
-    if isinstance(value, datetime):
+    if isinstance(value, date | datetime):
         return value.isoformat()
     if isinstance(value, UUID | Decimal):
         return str(value)
@@ -573,6 +581,23 @@ def _rated_obligation_natural_key(command: AcceptRatedObligationV1) -> str:
     return fingerprint_of(natural_payload)
 
 
+def _require_rated_tax_evidence(
+    command: AcceptRatedObligationV1, *, scope: Scope
+) -> None:
+    if isinstance(command, AcceptRatedObligationV2):
+        if command.tax_snapshots:
+            raise BillingRuleViolation(
+                "tax_evidence_mixed",
+                "V2 requires detailed Tax evidence without V1 snapshots",
+            )
+        try:
+            validate_invoice_tax_evidence(
+                command.tax_evidence, scope=scope, tax_amount=command.tax_amount
+            )
+        except (ValueError, TypeError) as exc:
+            raise BillingRuleViolation("tax_evidence_invalid", str(exc)) from exc
+
+
 def accept_rated_obligation(
     db: Session,
     *,
@@ -597,6 +622,7 @@ def accept_rated_obligation(
         raise BillingRuleViolation(
             "obligation_total_mismatch", "pre-tax plus tax must equal total"
         )
+    _require_rated_tax_evidence(command, scope=scope)
     plane = _models(scope)
     account = _one(
         db,
@@ -678,6 +704,9 @@ def accept_rated_obligation(
                     "rated_at": command.rated_at,
                     "price_version_id": command.price_version_id,
                     "supersedes_obligation_id": command.supersedes_obligation_id,
+                    "tax_evidence": _wire_value(command.tax_evidence)
+                    if isinstance(command, AcceptRatedObligationV2)
+                    else None,
                 },
             )
         )
@@ -887,6 +916,7 @@ def issue_rated_invoice(
             "invalid_scope", "an explicit Billing scope is required"
         )
     obligation_command = command.obligation
+    _require_rated_tax_evidence(obligation_command, scope=scope)
     _require_scope_matches(routed=scope, declared=obligation_command.scope)
     obligation_sources.require_obligation_source(obligation_command.source_kind)
     command.due_date_basis.require_collectible(native=True)
@@ -1458,6 +1488,22 @@ def _receivable_exposure(
     )
 
 
+def _decode_tax_evidence(
+    payload: object, *, scope: Scope, tax_amount: Money
+) -> tuple[InvoiceTaxEvidenceV1, ...]:
+    try:
+        evidence = cast(
+            tuple[InvoiceTaxEvidenceV1, ...],
+            _decode(payload, tuple[InvoiceTaxEvidenceV1, ...]),
+        )
+        validate_invoice_tax_evidence(evidence, scope=scope, tax_amount=tax_amount)
+        return evidence
+    except (ValueError, TypeError, DecimalException) as exc:
+        raise BillingRuleViolation(
+            "tax_evidence_invalid", "stored Tax evidence is invalid"
+        ) from exc
+
+
 def _require_obligation_taxes(
     db: Session,
     *,
@@ -1476,6 +1522,19 @@ def _require_obligation_taxes(
         ).scalars()
     )
     for obligation in obligations:
+        if obligation.tax_evidence is not None:
+            _decode_tax_evidence(
+                obligation.tax_evidence,
+                scope=scope,
+                tax_amount=_money(
+                    obligation.tax_amount, obligation.currency, obligation.minor_units
+                ),
+            )
+            if any(snapshot.obligation_id == obligation.id for snapshot in snapshots):
+                raise BillingRuleViolation(
+                    "tax_evidence_mixed", "V2 obligation cannot mix V1 tax snapshots"
+                )
+            continue
         matching = tuple(
             snapshot
             for snapshot in snapshots
@@ -2576,6 +2635,45 @@ def _document_fact(
         correlation_id=correlation_id,
         presentation_model_digest="",
     )
+    detailed: list[InvoiceTaxEvidenceV1] = []
+    has_detailed = False
+    for line in lines:
+        if line.obligation_id is None:
+            continue
+        obligation = _one(
+            db, scope=scope, model=plane.obligation, row_id=line.obligation_id
+        )
+        if obligation.tax_evidence is not None:
+            has_detailed = True
+            detailed.extend(
+                _decode_tax_evidence(
+                    obligation.tax_evidence,
+                    scope=scope,
+                    tax_amount=_money(
+                        obligation.tax_amount,
+                        obligation.currency,
+                        obligation.minor_units,
+                    ),
+                )
+            )
+    if has_detailed:
+        if tax_facts:
+            raise BillingRuleViolation(
+                "tax_evidence_mixed", "one document cannot mix V1 and V2 Tax evidence"
+            )
+        validate_invoice_tax_evidence(
+            tuple(detailed), scope=scope, tax_amount=provisional.tax_total
+        )
+        provisional = InvoiceDocumentFactV2(
+            **{
+                field.name: getattr(provisional, field.name)
+                for field in fields(InvoiceDocumentFactV1)
+            },
+            tax_evidence=tuple(detailed),
+        )
+    fact_contract = (
+        DOCUMENT_FACT_V2_CONTRACT if has_detailed else DOCUMENT_FACT_CONTRACT
+    )
     semantic_payload = _jsonable(provisional)
     semantic_payload.pop("presentation_model_digest")
     digest = fingerprint_of(semantic_payload)
@@ -2589,7 +2687,7 @@ def _document_fact(
                 "id": fact_id,
                 "document_id": document.id,
                 "fact_version": fact_version,
-                "contract_version": DOCUMENT_FACT_CONTRACT,
+                "contract_version": fact_contract,
                 "presentation_model_digest": digest,
                 "fact_payload": payload,
             },
@@ -2597,13 +2695,22 @@ def _document_fact(
     )
     db.add(fact)
     db.flush()
-    _emit(
-        db,
-        scope=scope,
-        event_type=DOCUMENT_FACT_CONTRACT,
-        payload={"fact_id": str(fact_id), **payload},
-        correlation_id=correlation_id,
-    )
+    if has_detailed:
+        _emit(
+            db,
+            scope=scope,
+            event_type=DOCUMENT_FACT_V2_CONTRACT,
+            payload={"fact_id": str(fact_id), **payload},
+            correlation_id=correlation_id,
+        )
+    else:
+        _emit(
+            db,
+            scope=scope,
+            event_type=DOCUMENT_FACT_CONTRACT,
+            payload={"fact_id": str(fact_id), **payload},
+            correlation_id=correlation_id,
+        )
     return cast(_DocumentFactRow, fact)
 
 

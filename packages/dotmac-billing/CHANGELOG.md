@@ -2,6 +2,20 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a9 — UNRELEASED
+
+- Add V2 rated invoice authoring and original document facts carrying complete
+  Tax-authored determination sets, rule versions, source/result fingerprints,
+  ordered components, fixed/progressive lines and exact currency/scale.
+- Retain expected withholding solely as an expected display deduction, separate
+  from accepted withholding discharge proof and full accounting receivables.
+- Add bi12 nullable immutable obligation JSON and final append-only guards.
+  Predecessor V1 evidence is never rewritten. The successor public document
+  reader verifies and decodes original V1 or V2 facts for presentation.
+- Add get_accounting_fact_v1 for scoped immutable original posting/allocation
+  evidence, including after linked reversals; no current capacity is inferred.
+- This is unpublished source preparation; hosted CI and release remain required.
+
 ## 0.1.0a8 — UNRELEASED
 
 - Require Kernel `>=0.1.0a105` for the public exact-root rollback-latch

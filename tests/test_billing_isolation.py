@@ -85,6 +85,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
+from tests.billing_predecessor_fixtures import predecessor_obligation_columns
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
     REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
@@ -2862,10 +2864,13 @@ def test_multiline_upgrade_backfills_historical_issued_lines_without_financial_e
 
     selection = ModulePlane.TENANT if plane == "tenant" else ModulePlane.PLATFORM
     prefix = "" if plane == "tenant" else "platform_"
-    with _scratch_database((selection,), target_revision="bi_0001_billing") as (
-        admin_url,
-        tenant_url,
-        platform_url,
+    with (
+        predecessor_obligation_columns(),
+        _scratch_database((selection,), target_revision="bi_0001_billing") as (
+            admin_url,
+            tenant_url,
+            platform_url,
+        ),
     ):
         scope = (
             TenantScope(_create_tenants(admin_url, 1)[0])

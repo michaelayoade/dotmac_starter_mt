@@ -84,7 +84,7 @@ the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
 The historical first release candidate is `0.1.0a1`; the current unreleased
-development successor is `0.1.0a8` and requires
+development successor is `0.1.0a9` and requires
 `dotmac-kernel>=0.1.0a105` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.
@@ -312,3 +312,28 @@ All writes participate in the caller's transaction. Source acceptance, published
 artifact verification, real Sub source-proof adapters, ERP mapping, other opening
 lanes and production cutover remain separate gates. This candidate has not been
 used to import operational balances.
+
+### Tax-authored invoice evidence
+
+`AcceptRatedObligationV2` and `IssueRatedInvoiceV2` reuse `issue_rated_invoice`.
+V2 supplies `tax_snapshots=()` and complete Billing-owned
+`InvoiceTaxEvidenceV1` copies of Tax's sealed public determination-set result.
+Each wrapper explicitly declares `invoice_tax` or `expected_withholding`.
+Invoice tax components sum to rated tax; expected withholding is display-only
+and never reduces accounting receivable or supplies discharge proof. Billing
+does not derive a base from subtotal or select/recalculate rates. The current
+Tax evidence contract is tenant-only and must match the routed tenant.
+
+`get_invoice_document_fact_v2` reads and verifies the exact original V1 or V2
+fact. V2 includes ordered `tax_evidence` and the original `expected_withholding`
+Money property; current balance remains the existing receivable-position owner.
+V1 commands and the V1-only reader retain their original contract. `bi_0012`
+adds immutable obligation JSON without rewriting historical evidence and refuses
+downgrade when successor evidence exists. Assemblies map public Tax results at
+the boundary; Billing imports no Tax implementation or sibling package.
+
+`get_accounting_fact_v1(db, scope=..., fact_id=...)` reads an exact historical
+V1 accounting fact and verifies its original payload, posting group and effect
+rows. Linked reversals leave the original fact readable. Assemblies can bind
+receipts to the original allocation without using mutable current capacity;
+this read authorizes no new financial movement.

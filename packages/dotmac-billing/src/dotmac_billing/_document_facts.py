@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import fields, is_dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, DecimalException, localcontext
 from enum import Enum
 from types import UnionType
@@ -17,8 +17,9 @@ from uuid import UUID
 
 from dotmac_kernel.money import Currency, Money, MoneyError
 
-from dotmac_billing.contracts import InvoiceDocumentFactV1
+from dotmac_billing.contracts import InvoiceDocumentFactV1, InvoiceDocumentFactV2
 from dotmac_billing.errors import BillingRuleViolation
+from dotmac_billing.tax_evidence import validate_invoice_tax_evidence
 
 
 def _object(value: object, names: set[str]) -> dict[str, object]:
@@ -137,6 +138,13 @@ def _decode(value: object, schema: Any) -> Any:
         return _money(value)
     if schema is Decimal:
         return _decimal(value)
+    if schema is date:
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value) is None
+        ):
+            raise ValueError("stored date must be exact ISO date text")
+        return date.fromisoformat(value)
     if schema is datetime:
         return _instant(value)
     if schema is UUID:
@@ -160,10 +168,21 @@ def _decode(value: object, schema: Any) -> Any:
     raise TypeError("unsupported invoice fact schema")
 
 
-def decode_invoice_document_fact(payload: object) -> InvoiceDocumentFactV1:
+def decode_invoice_document_fact(
+    payload: object, *, v2: bool = False
+) -> InvoiceDocumentFactV1 | InvoiceDocumentFactV2:
     """Decode only stored V1 evidence, with no defaults or lossy coercions."""
     try:
-        fact = cast(InvoiceDocumentFactV1, _decode(payload, InvoiceDocumentFactV1))
+        fact = cast(
+            InvoiceDocumentFactV1 | InvoiceDocumentFactV2,
+            _decode(payload, InvoiceDocumentFactV2 if v2 else InvoiceDocumentFactV1),
+        )
+        if isinstance(fact, InvoiceDocumentFactV2):
+            if fact.tax_snapshots:
+                raise ValueError("V2 fact cannot mix detailed and V1 tax evidence")
+            validate_invoice_tax_evidence(
+                fact.tax_evidence, scope=fact.scope, tax_amount=fact.tax_total
+            )
         if fact.fact_version < 1 or not 0 <= fact.minor_units <= 6:
             raise ValueError("invalid stored fact version or minor units")
         if re.fullmatch(r"[A-Z]{3}", fact.currency) is None:

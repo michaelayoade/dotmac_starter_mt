@@ -1,9 +1,10 @@
 """Hosted PostgreSQL proofs over real Billing migrations, roles and both planes."""
 
-from __future__ import annotations
-
 # SQL identifiers are closed test-owned table/function/role literals.
 # ruff: noqa: S608
+
+from __future__ import annotations
+
 from dataclasses import replace
 from threading import Barrier, Thread
 from uuid import uuid4
@@ -45,6 +46,7 @@ from alembic import command as alembic_command
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as runtime
 from tests import test_billing_withholding_persistence as migration_fixture
+from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 
 scratch = b.scratch
 
@@ -456,7 +458,10 @@ def test_migration_upgrade_real_predecessor_and_database_final_immutability(
     monkeypatch, plane
 ):
     planes = (ModulePlane.TENANT,) if plane == "tenant" else (ModulePlane.PLATFORM,)
-    with b._scratch_database(planes, target_revision="bi_0010_line_source_key") as urls:
+    with (
+        predecessor_obligation_columns(),
+        b._scratch_database(planes, target_revision="bi_0010_line_source_key") as urls,
+    ):
         monkeypatch.setenv("MIGRATION_DATABASE_URL", urls[0])
         alembic_command.upgrade(
             migration_fixture._config(planes), "bi_0011_settlement_earmarks"
