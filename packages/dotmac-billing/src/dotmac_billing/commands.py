@@ -27,6 +27,7 @@ from dotmac_billing.contracts import (
     PresentationAssetReferenceV1,
     WithholdingCertificateObservationV1,
     WithholdingTaxEvidenceV1,
+    WithholdingTaxEvidenceV2,
 )
 
 
@@ -181,7 +182,7 @@ class AcceptWithholdingDischarge:
     claim_ref: str
     claimed_amount: Money
     accepted_amount: Money
-    tax_evidence: WithholdingTaxEvidenceV1
+    tax_evidence: WithholdingTaxEvidenceV1 | WithholdingTaxEvidenceV2
     authorization_actor_ref: str
     authorization_evidence_ref: str
     occurred_at: datetime
