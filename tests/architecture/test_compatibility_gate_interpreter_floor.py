@@ -810,3 +810,85 @@ def test_product_parents_and_external_fromlists_use_the_foreign_interpreter(
         assert [(item.distribution, item.sites) for item in debt] == [
             ("dotmac-files", 1)
         ]
+
+
+@requires_all_trusted
+def test_v2_callable_facts_and_debt_cross_real_3_12_to_3_11_boundary():
+    source = (
+        "from importlib import import_module\n"
+        "def load[T](name: T):\n    import_module(name)\n"
+        "    from dotmac_kernel.db import conflict_savepoint\n"
+    )
+    probe = r"""
+import importlib.util
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(path.parents[2]))
+spec = importlib.util.spec_from_file_location("gate_v2_probe", path)
+gate = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = gate
+spec.loader.exec_module(gate)
+facts = gate._imports_under_interpreter(
+    sys.argv[3].encode(), executable=sys.argv[2], product="academy",
+    revision="a" * 40, interpreter="python3.12", module="pkg",
+    path="pkg/__init__.py", is_package=True, available_modules=frozenset({"pkg"}),
+    callable_facts=True,
+)
+gate._check_callable_demand({"pkg": facts}, production_modules=frozenset())
+assert facts["deferred_sites"] == 1
+try:
+    gate._check_callable_demand({"pkg": facts}, production_modules=frozenset({"pkg"}))
+except gate.GateDerivationError:
+    pass
+else:
+    raise AssertionError("demanded generic loader was admitted")
+print(json.dumps(facts))
+"""
+    result = subprocess.run(  # noqa: S603
+        [_PYTHON_3_11, "-I", "-c", probe, gate.__file__, _PYTHON_3_12, source],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deferred_sites"] == 1
+
+
+@requires_all_trusted
+@pytest.mark.parametrize(
+    "declaration, interpreter",
+    [
+        ("def f[T: load('x')]():\n    pass\n", "python3.12"),
+        ("class C[T: load('x')]:\n    pass\n", "python3.12"),
+        ("type Alias[T] = load('x')\n", "python3.12"),
+        ("def f[T = load('x')]():\n    pass\n", "python3.13"),
+        ("class C[T = load('x')]:\n    pass\n", "python3.13"),
+    ],
+)
+def test_v2_pep695_bounds_cannot_hide_loader_demand(declaration, interpreter):
+    sources = {
+        "app": "from pkg import load\n" + declaration,
+        "pkg": (
+            "from importlib import import_module\ndef load(name):\n"
+            "    import_module(name)\n"
+        ),
+    }
+    facts = {
+        module: gate._imports_under_interpreter(
+            source.encode(),
+            executable=interpreter,
+            product="academy",
+            revision="a" * 40,
+            interpreter=interpreter,
+            module=module,
+            path=f"{module}.py",
+            is_package=module == "pkg",
+            available_modules=frozenset(sources),
+            callable_facts=True,
+        )
+        for module, source in sources.items()
+    }
+    with pytest.raises(gate.GateDerivationError, match="dynamic import"):
+        gate._check_callable_demand(facts, production_modules=frozenset({"app"}))

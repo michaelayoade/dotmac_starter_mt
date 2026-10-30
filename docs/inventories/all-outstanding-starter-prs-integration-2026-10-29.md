@@ -47,9 +47,13 @@ This is source preparation, not publication, installation, adoption or deploymen
 
 The added-path completeness audit found all 110 distinct added paths from the
 superseded financial, Learning and prerequisite slices present in the integrated
-tree. Later tests and contract extensions are preserved. Individual PRs remain
-traceable; the aggregate must be accepted before unresolved slices are closed.
-Payroll #939's separate auto-merge has been disabled.
+tree. Later tests and contract extensions are preserved. On 2026-10-29, the
+unchanged captured heads of #640, #804, #805, #854, #855, #857, #858, #859,
+#860, #861, #862, #875, #878, #886, #887 and #888 were closed as already
+incorporated, superseded or consumed on protected main. Their obsolete branches
+were not merged. #943 had already merged independently. The aggregate must be
+accepted before the remaining unresolved slices are closed. Payroll #939's
+separate auto-merge has been disabled.
 
 ## Combined metadata and source identities
 

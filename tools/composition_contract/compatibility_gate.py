@@ -508,6 +508,7 @@ def _require_interpreter_available(name: str) -> str:
 
 
 _FOREIGN_IMPORT_PROTOCOL: Final = "foreign-import-analysis.v1"
+_FOREIGN_CALLABLE_PROTOCOL: Final = "foreign-import-analysis.v2"
 _FOREIGN_IMPORT_LIMIT: Final = 10_000
 _FOREIGN_RESPONSE_BYTE_LIMIT: Final = 1_000_000
 _FOREIGN_STDERR_BYTE_LIMIT: Final = 65_536
@@ -584,20 +585,32 @@ try:
         source = base64.b64decode(request["source_base64"], validate=True)
         available = request["available_modules"]
         if (
-            request["schema_version"] != "foreign-import-analysis.v1"
+            request["schema_version"] not in {
+                "foreign-import-analysis.v1", "foreign-import-analysis.v2"
+            }
             or not isinstance(request["is_package"], bool)
             or not isinstance(available, list)
             or available != sorted(set(available))
             or any(not isinstance(item, str) for item in available)
         ):
             raise ValueError("request values do not satisfy the closed protocol")
+        facts = None
         try:
-            imports = gate._import_edges_from_source(
-                source,
-                current_module=request["module"],
-                is_package=request["is_package"],
-                available_modules=frozenset(available),
-            )
+            if request["schema_version"] == "foreign-import-analysis.v2":
+                facts = gate._callable_facts_from_source(
+                    source,
+                    current_module=request["module"],
+                    is_package=request["is_package"],
+                    available_modules=frozenset(available),
+                )
+                imports = frozenset(facts["imports"])
+            else:
+                imports = gate._import_edges_from_source(
+                    source,
+                    current_module=request["module"],
+                    is_package=request["is_package"],
+                    available_modules=frozenset(available),
+                )
             status = "ok"
             error = None
         except (UnicodeDecodeError, SyntaxError) as exc:
@@ -621,6 +634,8 @@ try:
             "imports": sorted(imports),
             "error": error,
         }
+        if request["schema_version"] == "foreign-import-analysis.v2":
+            response["callable_facts"] = facts
         encoded = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
         if len(encoded) > 1000000:
             raise ValueError("response exceeds the protocol byte limit")
@@ -876,7 +891,8 @@ def _imports_under_interpreter(
     is_package: bool,
     available_modules: frozenset[str],
     process: subprocess.Popen[bytes] | None = None,
-) -> frozenset[str]:
+    callable_facts: bool = False,
+) -> frozenset[str] | dict:
     """Return import edges derived wholly under the selected interpreter.
 
     The transport is a closed JSON fact record, never a pickled AST.  The
@@ -886,7 +902,9 @@ def _imports_under_interpreter(
     """
 
     request = {
-        "schema_version": _FOREIGN_IMPORT_PROTOCOL,
+        "schema_version": _FOREIGN_CALLABLE_PROTOCOL
+        if callable_facts
+        else _FOREIGN_IMPORT_PROTOCOL,
         "product": product,
         "revision": revision,
         "interpreter": interpreter,
@@ -962,7 +980,10 @@ def _imports_under_interpreter(
         raise GateAcquisitionError(
             f"{executable}: foreign-source response is not strict JSON: {exc}"
         ) from exc
-    if not isinstance(response, dict) or set(response) != _FOREIGN_RESPONSE_KEYS:
+    expected_keys = _FOREIGN_RESPONSE_KEYS | (
+        {"callable_facts"} if callable_facts else set()
+    )
+    if not isinstance(response, dict) or set(response) != expected_keys:
         raise GateAcquisitionError(
             f"{executable}: foreign-source response does not have the closed shape"
         )
@@ -983,9 +1004,9 @@ def _imports_under_interpreter(
     imports = response["imports"]
     if (
         not isinstance(imports, list)
-        or imports != sorted(set(imports))
         or len(imports) > _FOREIGN_IMPORT_LIMIT
         or any(not isinstance(item, str) or not item for item in imports)
+        or imports != sorted(set(imports))
     ):
         raise GateAcquisitionError(
             f"{executable}: foreign-source response carries invalid import facts"
@@ -995,7 +1016,18 @@ def _imports_under_interpreter(
             raise GateAcquisitionError(
                 f"{executable}: successful foreign-source response carries an error"
             )
+        if callable_facts:
+            facts = _validate_callable_facts(response["callable_facts"])
+            if facts["imports"] != imports:
+                raise GateAcquisitionError(
+                    "foreign-source callable/import facts disagree"
+                )
+            return facts
         return frozenset(imports)
+    if callable_facts and response["callable_facts"] is not None:
+        raise GateAcquisitionError(
+            "refused foreign-source response carries callable facts"
+        )
     if not isinstance(error, str) or not error:
         raise GateAcquisitionError(
             f"{executable}: refused foreign-source response has no diagnostic"
@@ -1627,13 +1659,68 @@ def _resolve_relative(
     return ".".join(anchor) or None
 
 
-def _is_type_checking_test(node: ast.expr) -> bool:
-    return (isinstance(node, ast.Name) and node.id == "TYPE_CHECKING") or (
-        isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "typing"
-        and node.attr == "TYPE_CHECKING"
-    )
+def _is_type_checking_test(node: ast.expr, tree: ast.AST) -> bool:
+    """Skip only a proven immutable, unshadowed imported typing sentinel.
+
+    Attribute guards use a mutable namespace and are conservatively traversed.
+    A whole-tree binding/reflective-use check deliberately rejects ambiguous
+    cases; spelling alone can never remove executable source from the graph.
+    """
+    if not isinstance(node, ast.Name):
+        return False
+    name = node.id
+    imports = 0
+    for candidate in ast.walk(tree):
+        if isinstance(candidate, ast.Name):
+            if candidate.id == name and not isinstance(candidate.ctx, ast.Load):
+                return False
+            if candidate.id in {
+                "globals",
+                "locals",
+                "vars",
+                "eval",
+                "exec",
+                "__builtins__",
+            }:
+                return False
+        if isinstance(candidate, ast.Attribute) and candidate.attr == "__dict__":
+            return False
+        if isinstance(candidate, ast.arg) and candidate.arg == name:
+            return False
+        if (
+            isinstance(candidate, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+            and candidate.name == name
+        ):
+            return False
+        if isinstance(candidate, ast.ExceptHandler) and candidate.name == name:
+            return False
+        if (
+            isinstance(candidate, ast.MatchAs | ast.MatchStar)
+            and candidate.name == name
+        ):
+            return False
+        if isinstance(candidate, ast.MatchMapping) and candidate.rest == name:
+            return False
+        if (
+            type(candidate).__name__ in {"TypeVar", "TypeVarTuple", "ParamSpec"}
+            and getattr(candidate, "name", None) == name
+        ):
+            return False
+        if isinstance(candidate, ast.Import | ast.ImportFrom):
+            for alias in candidate.names:
+                if alias.name == "*":
+                    return False
+                if (alias.asname or alias.name.split(".")[0]) != name:
+                    continue
+                if not (
+                    isinstance(candidate, ast.ImportFrom)
+                    and candidate.level == 0
+                    and candidate.module == "typing"
+                    and alias.name == "TYPE_CHECKING"
+                ):
+                    return False
+                imports += 1
+    return imports == 1
 
 
 def _possible_import_strings(
@@ -2190,6 +2277,8 @@ def _guarded_namespace_import_strings(
 class _ImportReachability:
     visited: frozenset[str]
     external_modules: frozenset[str]
+    callable_facts: Mapping[str, dict] | None = None
+    interpreter: _SelectedInterpreter | None = None
 
 
 def _call_argument(
@@ -2264,12 +2353,14 @@ def _visit_imports(
     index: Mapping[str, _GitPythonFile],
     in_memory_sources: Mapping[str, bytes],
     enqueue: Callable[[str], None],
+    on_unresolved: Callable[[ast.Call, str], None] | None = None,
+    lexical_only: bool = False,
 ) -> None:
     importer_aliases = _dynamic_import_aliases(tree)
 
     class Visitor(ast.NodeVisitor):
         def visit_If(self, node: ast.If) -> None:
-            if _is_type_checking_test(node.test):
+            if _is_type_checking_test(node.test, tree):
                 for statement in node.orelse:
                     self.visit(statement)
                 return
@@ -2295,6 +2386,15 @@ def _visit_imports(
                         enqueue(candidate)
 
         def visit_Call(self, node: ast.Call) -> None:
+            try:
+                self.import_call(node)
+            except GateDerivationError as exc:
+                if on_unresolved is None:
+                    raise
+                on_unresolved(node, str(exc))
+            self.generic_visit(node)
+
+        def import_call(self, node: ast.Call) -> None:
             name = None
             if isinstance(node.func, ast.Name):
                 name = importer_aliases.get(node.func.id, node.func.id)
@@ -2317,23 +2417,43 @@ def _visit_imports(
                     assignments=assignments,
                     dictionary_values=dictionary_values,
                 )
-                if targets is None and isinstance(target_expression, ast.Name):
+                if (
+                    not lexical_only
+                    and targets is None
+                    and isinstance(target_expression, ast.Name)
+                ):
                     targets = _table_driven_import_strings(tree, target_expression.id)
-                if targets is None and isinstance(target_expression, ast.Name):
+                if (
+                    not lexical_only
+                    and targets is None
+                    and isinstance(target_expression, ast.Name)
+                ):
                     targets = _forwarded_literal_table_strings(
                         tree, target_expression.id
                     )
-                if targets is None and isinstance(target_expression, ast.Name):
+                if (
+                    not lexical_only
+                    and targets is None
+                    and isinstance(target_expression, ast.Name)
+                ):
                     targets = _mapping_tuple_import_strings(tree, target_expression.id)
-                if targets is None and isinstance(target_expression, ast.Name):
+                if (
+                    not lexical_only
+                    and targets is None
+                    and isinstance(target_expression, ast.Name)
+                ):
                     targets = _split_forwarded_import_strings(
                         tree, target_expression.id
                     )
-                if targets is None and isinstance(target_expression, ast.Name):
+                if (
+                    not lexical_only
+                    and targets is None
+                    and isinstance(target_expression, ast.Name)
+                ):
                     targets = _guarded_namespace_import_strings(
                         tree, target_expression.id, index
                     )
-                if targets is None and name == "find_spec":
+                if not lexical_only and targets is None and name == "find_spec":
                     targets = _runtime_manifest_import_strings(tree)
                 if targets is None:
                     raise GateDerivationError(
@@ -2511,7 +2631,6 @@ def _visit_imports(
                         f"{current_module}: autodiscover target is not "
                         "structurally resolvable"
                     )
-            self.generic_visit(node)
 
     Visitor().visit(tree)
 
@@ -2522,6 +2641,7 @@ def _import_edges_from_source(
     current_module: str,
     is_package: bool,
     available_modules: frozenset[str],
+    on_unresolved: Callable[[ast.Call, str], None] | None = None,
 ) -> frozenset[str]:
     """Parse one module and derive its import edges without executing it.
 
@@ -2633,8 +2753,798 @@ def _import_edges_from_source(
         index=available_index,  # type: ignore[arg-type]
         in_memory_sources=MappingProxyType({}),
         enqueue=edges.add,
+        on_unresolved=on_unresolved,
     )
     return frozenset(edges)
+
+
+# V2 retains every static/resolved import edge, but discharges an unresolved
+# dynamic import only after a closed lexical callable-demand fixed point.  The
+# child emits strings/lists/dicts only; none of Python's AST vocabulary crosses
+# interpreter versions.
+_CALLABLE_FACT_KEYS: Final = frozenset({"imports", "scopes", "deferred_sites"})
+_CALLABLE_SCOPE_KEYS: Final = frozenset(
+    {
+        "id",
+        "parent",
+        "kind",
+        "name",
+        "bindings",
+        "uses",
+        "eager",
+        "obligations",
+        "uncertainties",
+        "from_imports",
+    }
+)
+_DYNAMIC_IMPORT_SYMBOLS: Final = frozenset(
+    {"importlib.import_module", "importlib.util.find_spec", "builtins.__import__"}
+)
+
+
+def _validate_callable_facts(value: object) -> dict:
+    """Validate a bounded closed fact schema before trusting negative evidence."""
+
+    def refuse() -> None:
+        raise GateAcquisitionError(
+            "foreign-source callable facts have an invalid closed shape"
+        )
+
+    def strings(items: object, *, empty: bool = True) -> bool:
+        return (
+            isinstance(items, list)
+            and len(items) <= _FOREIGN_IMPORT_LIMIT
+            and (empty or bool(items))
+            and all(isinstance(item, str) and 0 < len(item) <= 4096 for item in items)
+        )
+
+    if not isinstance(value, dict) or set(value) != _CALLABLE_FACT_KEYS:
+        refuse()
+    imports = value["imports"]
+    scopes = value["scopes"]
+    if (
+        type(value["deferred_sites"]) is not int
+        or not 0 <= value["deferred_sites"] <= _FOREIGN_IMPORT_LIMIT
+    ):
+        refuse()
+    if not strings(imports) or imports != sorted(set(imports)):
+        refuse()
+    if not isinstance(scopes, list) or not 0 < len(scopes) <= _FOREIGN_IMPORT_LIMIT:
+        refuse()
+    seen: set[str] = set()
+    count = 0
+    for scope in scopes:
+        if not isinstance(scope, dict) or set(scope) != _CALLABLE_SCOPE_KEYS:
+            refuse()
+        if (
+            not isinstance(scope["id"], str)
+            or not scope["id"]
+            or scope["id"] in seen
+            or not isinstance(scope["kind"], str)
+            or scope["kind"]
+            not in {"module", "function", "class", "comprehension", "lambda"}
+            or not isinstance(scope["name"], str)
+            or not scope["name"]
+        ):
+            refuse()
+        if not seen:
+            if (
+                scope["id"] != "0"
+                or scope["kind"] != "module"
+                or scope["parent"] is not None
+            ):
+                refuse()
+        elif (
+            not isinstance(scope["parent"], str)
+            or scope["parent"] not in seen
+            or scope["kind"] == "module"
+        ):
+            refuse()
+        seen.add(scope["id"])
+        for key in ("eager", "obligations", "uncertainties"):
+            if not strings(scope[key]):
+                refuse()
+        from_imports = scope["from_imports"]
+        if (
+            not isinstance(from_imports, list)
+            or len(from_imports) > _FOREIGN_IMPORT_LIMIT
+            or any(
+                not strings(item, empty=False) or len(item) != 2
+                for item in from_imports
+            )
+        ):
+            refuse()
+        uses, bindings = scope["uses"], scope["bindings"]
+        if (
+            not isinstance(uses, list)
+            or not isinstance(bindings, list)
+            or len(uses) > _FOREIGN_IMPORT_LIMIT
+            or len(bindings) > _FOREIGN_IMPORT_LIMIT
+        ):
+            refuse()
+        if any(not strings(reference, empty=False) for reference in uses):
+            refuse()
+        for binding in bindings:
+            if not isinstance(binding, dict) or set(binding) != {
+                "name",
+                "kind",
+                "target",
+            }:
+                refuse()
+            if (
+                not isinstance(binding["name"], str)
+                or not binding["name"]
+                or not isinstance(binding["kind"], str)
+                or binding["kind"] not in {"reference", "symbol", "scope", "unknown"}
+                or not strings(binding["target"])
+                or (binding["kind"] == "unknown" and binding["target"])
+                or (binding["kind"] != "unknown" and not binding["target"])
+                or (
+                    binding["kind"] in {"symbol", "scope"}
+                    and len(binding["target"]) != 1
+                )
+            ):
+                refuse()
+        count += (
+            len(uses)
+            + len(bindings)
+            + len(from_imports)
+            + sum(len(scope[key]) for key in ("eager", "obligations", "uncertainties"))
+        )
+        if count > _FOREIGN_IMPORT_LIMIT:
+            refuse()
+    by_id = {scope["id"]: scope for scope in scopes}
+    for scope in scopes:
+        for target in scope["eager"]:
+            if (
+                target not in seen
+                or by_id[target]["parent"] != scope["id"]
+                or by_id[target]["kind"] not in {"class", "comprehension", "lambda"}
+            ):
+                refuse()
+        for binding in scope["bindings"]:
+            if binding["kind"] == "scope":
+                target = binding["target"][0]
+                if (
+                    target not in seen
+                    or by_id[target]["parent"] != scope["id"]
+                    or by_id[target]["name"] != binding["name"]
+                ):
+                    refuse()
+    return value
+
+
+def _callable_lexical_parent(scope: dict, scopes: Mapping[str, dict]) -> str | None:
+    """Class namespaces are attribute dictionaries, not enclosing closures."""
+    parent = scope["parent"]
+    while parent is not None and scopes[parent]["kind"] == "class":
+        parent = scopes[parent]["parent"]
+    return parent
+
+
+def _callable_facts_from_source(
+    source_bytes: bytes,
+    *,
+    current_module: str,
+    is_package: bool,
+    available_modules: frozenset[str],
+) -> dict:
+    tree = ast.parse(source_bytes.decode("utf-8"))
+    # Keep the previous graph's conservative resolved edges, including its
+    # specialized structural patterns. They never establish NON-use: the
+    # independent lexical obligations below are the authority for discharge.
+    legacy_obligations: dict[tuple[int, int], str] = {}
+    edges = set(
+        _import_edges_from_source(
+            source_bytes,
+            current_module=current_module,
+            is_package=is_package,
+            available_modules=available_modules,
+            on_unresolved=lambda node, error: legacy_obligations.setdefault(
+                (node.lineno, node.col_offset), error
+            ),
+        )
+    )
+    scopes: list[dict] = []
+    scope_nodes: dict[str, list[ast.AST]] = {}
+
+    def new_scope(name: str, kind: str, parent: str | None) -> dict:
+        scope = {
+            "id": str(len(scopes)),
+            "parent": parent,
+            "name": name,
+            "kind": kind,
+            "bindings": [],
+            "uses": [],
+            "eager": [],
+            "obligations": [],
+            "uncertainties": [],
+            "from_imports": [],
+        }
+        scopes.append(scope)
+        scope_nodes[scope["id"]] = []
+        return scope
+
+    def reference(node: ast.AST) -> list[str] | None:
+        if isinstance(node, ast.Name):
+            return [node.id]
+        if isinstance(node, ast.Attribute):
+            base = reference(node.value)
+            return [*base, node.attr] if base else None
+        return None
+
+    class Collector(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.scope = new_scope(current_module, "module", None)
+
+        def bind(self, name: str, kind: str, target: list[str]) -> None:
+            self.scope["bindings"].append(
+                {"name": name, "kind": kind, "target": target}
+            )
+
+        def visit(self, node: ast.AST) -> None:
+            scope_nodes[self.scope["id"]].append(node)
+            super().visit(node)
+
+        def visit_If(self, node: ast.If) -> None:
+            if _is_type_checking_test(node.test, tree):
+                for statement in node.orelse:
+                    self.visit(statement)
+            else:
+                self.generic_visit(node)
+
+        def visit_Import(self, node: ast.Import) -> None:
+            for alias in node.names:
+                self.bind(
+                    alias.asname or alias.name.split(".")[0],
+                    "symbol",
+                    [alias.name if alias.asname else alias.name.split(".")[0]],
+                )
+
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+            base = (
+                _resolve_relative(current_module, node, is_package)
+                if node.level
+                else node.module
+            )
+            if not base:
+                self.scope["uncertainties"].append("unresolved relative import")
+                return
+            for alias in node.names:
+                self.scope["from_imports"].append([base, alias.name])
+                if alias.name == "*":
+                    self.scope["uncertainties"].append(
+                        "star import makes lexical bindings uncertain"
+                    )
+                else:
+                    self.bind(
+                        alias.asname or alias.name, "symbol", [f"{base}.{alias.name}"]
+                    )
+
+        def assignment(self, targets: list[ast.expr], value: ast.expr | None) -> None:
+            ref = reference(value) if value is not None else None
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    self.bind(target.id, "reference" if ref else "unknown", ref or [])
+                else:
+                    self.visit(target)
+            if value is not None and (
+                ref is None
+                or any(not isinstance(target, ast.Name) for target in targets)
+            ):
+                self.visit(value)
+
+        def visit_Assign(self, node: ast.Assign) -> None:
+            self.assignment(node.targets, node.value)
+
+        def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+            self.assignment([node.target], node.value)
+            self.visit(node.annotation)
+
+        def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+            if self.scope["kind"] == "comprehension":
+                self.scope["uncertainties"].append(
+                    "comprehension assignment expression may bind an enclosing scope"
+                )
+            self.assignment([node.target], node.value)
+            # A named expression also yields its value to its enclosing use.
+            self.visit(node.value)
+
+        def visit_Name(self, node: ast.Name) -> None:
+            if isinstance(node.ctx, ast.Load):
+                if node.id == "__builtins__":
+                    self.scope["obligations"].append(
+                        "dynamic import through reflected builtins is not "
+                        "structurally resolvable"
+                    )
+                self.scope["uses"].append([node.id])
+            else:
+                self.bind(node.id, "unknown", [])
+
+        def visit_Attribute(self, node: ast.Attribute) -> None:
+            ref = reference(node)
+            if ref is not None and isinstance(node.ctx, ast.Load):
+                self.scope["uses"].append(ref)
+            else:
+                self.generic_visit(node)
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            outer = self.scope
+            inner = new_scope(
+                f"$lambda:{node.lineno}:{node.col_offset}", "lambda", outer["id"]
+            )
+            # A lambda is conservatively demanded even if the value is unused,
+            # but its arguments and walrus locals cannot bind enclosing names.
+            outer["eager"].append(inner["id"])
+            for default in (*node.args.defaults, *node.args.kw_defaults):
+                if default is not None:
+                    self.visit(default)
+            self.scope = inner
+            for argument in (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+                node.args.vararg,
+                node.args.kwarg,
+            ):
+                if argument is not None:
+                    self.bind(argument.arg, "unknown", [])
+            self.visit(node.body)
+            self.scope = outer
+
+        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+            if node.name is not None:
+                self.bind(node.name, "unknown", [])
+            self.generic_visit(node)
+
+        def visit_MatchAs(self, node: ast.MatchAs) -> None:
+            if node.name is not None:
+                self.bind(node.name, "unknown", [])
+            self.generic_visit(node)
+
+        def visit_MatchStar(self, node: ast.MatchStar) -> None:
+            if node.name is not None:
+                self.bind(node.name, "unknown", [])
+
+        def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+            if node.rest is not None:
+                self.bind(node.rest, "unknown", [])
+            self.generic_visit(node)
+
+        def comprehension(
+            self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
+        ) -> None:
+            outer = self.scope
+            inner = new_scope(
+                f"$comprehension:{node.lineno}:{node.col_offset}",
+                "comprehension",
+                outer["id"],
+            )
+            outer["eager"].append(inner["id"])
+            # The first iterable is evaluated outside the implicit scope.
+            # Generator bodies are conservatively demanded as well as eager
+            # comprehensions; this cannot establish a false non-use proof.
+            self.visit(node.generators[0].iter)
+            self.scope = inner
+            for position, generator in enumerate(node.generators):
+                if position:
+                    self.visit(generator.iter)
+                self.visit(generator.target)
+                for condition in generator.ifs:
+                    self.visit(condition)
+            if isinstance(node, ast.DictComp):
+                self.visit(node.key)
+                self.visit(node.value)
+            else:
+                self.visit(node.elt)
+            self.scope = outer
+
+        visit_ListComp = comprehension
+        visit_SetComp = comprehension
+        visit_DictComp = comprehension
+        visit_GeneratorExp = comprehension
+
+        def visit_Global(self, node: ast.Global) -> None:
+            self.scope["uncertainties"].append("global binding mutation")
+
+        def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+            self.scope["uncertainties"].append("nonlocal binding mutation")
+
+        def definition(
+            self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+        ) -> None:
+            outer = self.scope
+            kind = "class" if isinstance(node, ast.ClassDef) else "function"
+            inner = new_scope(node.name, kind, outer["id"])
+            self.bind(node.name, "scope", [inner["id"]])
+            # PEP 695/696 bounds and defaults can execute when inspected.
+            # Visit conservatively in the definition context under the child
+            # grammar, including fields unknown to a Python 3.11 host.
+            for parameter in getattr(node, "type_params", ()):
+                self.visit(parameter)
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            if node.decorator_list:
+                # A decorator receives the newly defined object as a value.
+                outer["uses"].append([node.name])
+            if isinstance(node, ast.ClassDef):
+                outer["eager"].append(inner["id"])
+                if node.bases or node.keywords:
+                    # Bases/metaclasses receive the new namespace during class
+                    # creation, before any ordinary use or instantiation.
+                    # Expose every binding to demand rather than interpreting
+                    # __init_subclass__/metaclass dispatch and namespace access.
+                    outer["uses"].append([node.name])
+                for base in node.bases:
+                    self.visit(base)
+                for keyword in node.keywords:
+                    self.visit(keyword.value)
+            else:
+                for default in (*node.args.defaults, *node.args.kw_defaults):
+                    if default is not None:
+                        self.visit(default)
+                for argument in (
+                    *node.args.posonlyargs,
+                    *node.args.args,
+                    *node.args.kwonlyargs,
+                    node.args.vararg,
+                    node.args.kwarg,
+                ):
+                    if argument is not None and argument.annotation is not None:
+                        self.visit(argument.annotation)
+                if node.returns is not None:
+                    self.visit(node.returns)
+            self.scope = inner
+            if not isinstance(node, ast.ClassDef):
+                for argument in (
+                    *node.args.posonlyargs,
+                    *node.args.args,
+                    *node.args.kwonlyargs,
+                    node.args.vararg,
+                    node.args.kwarg,
+                ):
+                    if argument is not None:
+                        self.bind(argument.arg, "unknown", [])
+            for statement in node.body:
+                self.visit(statement)
+            self.scope = outer
+
+        visit_FunctionDef = definition
+        visit_AsyncFunctionDef = definition
+        visit_ClassDef = definition
+
+    Collector().visit(tree)
+    by_id = {scope["id"]: scope for scope in scopes}
+
+    def resolve_local(
+        scope: dict, ref: list[str], seen: frozenset[tuple[str, str]] = frozenset()
+    ) -> set[str]:
+        if len(seen) > 128:
+            raise GateDerivationError("lexical alias resolution exceeds bounded depth")
+        key = (scope["id"], ref[0])
+        if key in seen:
+            return set()
+        result: set[str] = set()
+        if scope["kind"] == "class":
+            # LOAD_NAME can fall back after a conditional assignment, deletion
+            # or exception-target cleanup. A class-local declaration can also
+            # bypass a same-named enclosing function cell. Keep all candidates.
+            parents = {_callable_lexical_parent(scope, by_id), "0"} - {None}
+            for parent in sorted(parents):
+                result.update(resolve_local(by_id[parent], ref, seen | {key}))
+        bindings = [
+            binding for binding in scope["bindings"] if binding["name"] == ref[0]
+        ]
+        if not bindings:
+            if scope["kind"] == "class":
+                return result
+            if scope["parent"] is not None:
+                parent = _callable_lexical_parent(scope, by_id)
+                if parent is not None:
+                    return resolve_local(by_id[parent], ref, seen | {key})
+            return {"builtins.__import__"} if ref == ["__import__"] else set()
+        for binding in bindings:
+            if binding["kind"] == "symbol":
+                result.add(".".join([binding["target"][0], *ref[1:]]))
+            elif binding["kind"] == "reference":
+                result.update(
+                    resolve_local(scope, [*binding["target"], *ref[1:]], seen | {key})
+                )
+        return result
+
+    def importer_only(
+        scope: dict, ref: list[str], seen: frozenset[tuple[str, str]] = frozenset()
+    ) -> bool:
+        if scope["kind"] == "class":
+            # Dynamic class dictionaries cannot prove a unique callee owner.
+            return False
+        key = (scope["id"], ref[0])
+        if key in seen or len(seen) > 128:
+            return False
+        bindings = [
+            binding for binding in scope["bindings"] if binding["name"] == ref[0]
+        ]
+        if not bindings:
+            if scope["parent"] is not None:
+                parent = _callable_lexical_parent(scope, by_id)
+                if parent is not None:
+                    return importer_only(by_id[parent], ref, seen | {key})
+            return ref == ["__import__"]
+        if len(bindings) != 1:
+            return False
+        binding = bindings[0]
+        if binding["kind"] == "reference":
+            return importer_only(scope, [*binding["target"], *ref[1:]], seen | {key})
+        return (
+            binding["kind"] == "symbol"
+            and ".".join([binding["target"][0], *ref[1:]]) in _DYNAMIC_IMPORT_SYMBOLS
+        )
+
+    for scope in scopes:
+        nodes = scope_nodes[scope["id"]]
+        # Only a single lexical assignment can supply a literal. Parameters,
+        # rebinding, inner functions and same-spelled unrelated callers cannot.
+        assignments: dict[str, tuple[ast.expr, ...]] = {}
+        for node in nodes:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target, value = node.targets[0], node.value
+            elif isinstance(node, ast.AnnAssign):
+                target, value = node.target, node.value
+            else:
+                continue
+            if (
+                isinstance(target, ast.Name)
+                and value is not None
+                and sum(binding["name"] == target.id for binding in scope["bindings"])
+                == 1
+            ):
+                assignments[target.id] = (value,)
+        for node in nodes:
+            if not isinstance(node, ast.Call):
+                continue
+            ref = reference(node.func)
+            symbols = resolve_local(scope, ref) if ref else set()
+            if ref and ref[0] in {"eval", "exec", "globals", "locals", "vars"}:
+                scope["uncertainties"].append("reflective namespace access")
+            importer = next(
+                (
+                    symbol.rsplit(".", 1)[-1]
+                    for symbol in sorted(symbols & _DYNAMIC_IMPORT_SYMBOLS)
+                ),
+                None,
+            )
+            if (
+                importer is None
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr
+                in {"import_module", "find_spec", "__import__", "autodiscover_tasks"}
+            ):
+                importer = node.func.attr
+            if importer is None:
+                error = legacy_obligations.get((node.lineno, node.col_offset))
+                if error:
+                    scope["obligations"].append(error)
+                continue
+            canonical = ast.Call(
+                func=ast.Name(id=importer, ctx=ast.Load()),
+                args=node.args,
+                keywords=node.keywords,
+            )
+            # Remove the callee's ordinary value-use: the importer operation is
+            # accounted for here. Arguments (including callbacks) remain uses.
+            if ref in scope["uses"] and importer_only(scope, ref):
+                scope["uses"].remove(ref)
+            dynamic_edges: set[str] = set()
+            _visit_imports(
+                tree=ast.Expression(body=canonical),
+                current_module=current_module,
+                is_package=is_package,
+                assignments=assignments,
+                dictionary_values={},
+                index={module: None for module in available_modules},
+                in_memory_sources={},
+                enqueue=dynamic_edges.add,
+                on_unresolved=lambda call, error, scope=scope: scope[
+                    "obligations"
+                ].append(error),
+                lexical_only=True,
+            )
+            edges.update(dynamic_edges)
+            # A dynamically returned module is a namespace value, not just an
+            # import statement. Conservatively demand its callable exports.
+            for target in sorted(dynamic_edges):
+                name = f"$dynamic:{node.lineno}:{node.col_offset}:{target}"
+                scope["bindings"].append(
+                    {"name": name, "kind": "symbol", "target": [target]}
+                )
+                scope["uses"].append([name])
+    facts = {
+        "imports": sorted(edges),
+        "scopes": scopes,
+        "deferred_sites": _deferred_import_sites(source_bytes, path=current_module),
+    }
+    return _validate_callable_facts(facts)
+
+
+def _check_callable_demand(
+    facts: Mapping[str, dict], *, production_modules: frozenset[str]
+) -> None:
+    """Close uses/reexports/namespace escapes, then refuse demanded obligations.
+
+    Imports alone do not call reexports. Every production callable is a seed;
+    published bodies are seeded by use, escape, class use or definition effects.
+    Reflection/unknown binding effects cannot establish loader non-use.
+    """
+    if len(facts) > _FOREIGN_IMPORT_LIMIT:
+        raise GateDerivationError("callable module graph exceeds the protocol limit")
+    if not production_modules <= facts.keys():
+        raise GateDerivationError("callable demand is missing production source facts")
+    scopes = {
+        module: {
+            scope["id"]: scope for scope in _validate_callable_facts(value)["scopes"]
+        }
+        for module, value in facts.items()
+    }
+    demanded: set[tuple[str, str]] = set()
+    queue: deque[tuple[str, str]] = deque()
+    uncertain: list[str] = []
+    seen_symbols: set[str] = set()
+    expanded_classes: set[tuple[str, str]] = set()
+
+    def demand(module: str, scope_id: str, *, value_use: bool = False) -> None:
+        scope = scopes[module][scope_id]
+        key = (module, scope_id)
+        if key not in demanded:
+            demanded.add(key)
+            queue.append(key)
+        if value_use and scope["kind"] == "class" and key not in expanded_classes:
+            expanded_classes.add(key)
+            # Imported callable attributes also become methods/callbacks, and
+            # self/cls/__class__ attribute lookup must not hide their use.
+            for binding in scope["bindings"]:
+                resolve(module, scope_id, [binding["name"]], frozenset())
+            for child in scopes[module].values():
+                if child["parent"] == scope_id:
+                    demand(module, child["id"], value_use=True)
+
+    def symbol(target: str, seen: frozenset[tuple[str, str, str]]) -> None:
+        if target in _DYNAMIC_IMPORT_SYMBOLS or target in {
+            "importlib",
+            "importlib.util",
+            "builtins",
+            "importlib.__dict__",
+            "importlib.util.__dict__",
+            "builtins.__dict__",
+            "builtins.eval",
+            "builtins.exec",
+        }:
+            raise GateDerivationError(
+                f"{target}: dynamic import callable escapes bounded target analysis"
+            )
+        if target in {
+            "sys.modules",
+            "builtins.globals",
+            "builtins.locals",
+            "builtins.vars",
+        }:
+            uncertain.append(f"reflective namespace access through {target}")
+        if target in seen_symbols:
+            return
+        seen_symbols.add(target)
+        if target in scopes:
+            # A same-named package attribute can shadow its submodule. Follow
+            # BOTH possible owners; module-name equality is not callable proof.
+            parent, _, member = target.rpartition(".")
+            if parent in scopes and any(
+                binding["name"] == member for binding in scopes[parent]["0"]["bindings"]
+            ):
+                resolve(parent, "0", [member], seen)
+            # A module value escapes: all exports (including imported aliases)
+            # become callable demands. Namespace objects cannot prove non-use.
+            for binding in scopes[target]["0"]["bindings"]:
+                resolve(target, "0", [binding["name"]], seen)
+            return
+        candidates = [module for module in scopes if target.startswith(module + ".")]
+        if candidates:
+            owner = max(candidates, key=len)
+            member = target[len(owner) + 1 :].split(".")
+            if not any(
+                binding["name"] == member[0]
+                for binding in scopes[owner]["0"]["bindings"]
+            ):
+                uncertain.append(f"missing code for referenced symbol {target}")
+            resolve(owner, "0", member, seen)
+        elif target.split(".")[0] in {module.split(".")[0] for module in scopes}:
+            uncertain.append(f"missing code for referenced symbol {target}")
+
+    def resolve(
+        module: str,
+        scope_id: str,
+        ref: list[str],
+        seen: frozenset[tuple[str, str, str]],
+    ) -> None:
+        if len(seen) > 128:
+            raise GateDerivationError("callable alias resolution exceeds bounded depth")
+        key = (module, scope_id, ".".join(ref))
+        if key in seen:
+            return
+        seen = seen | {key}
+        scope = scopes[module][scope_id]
+        if scope["kind"] == "class":
+            # Preserve both lexical and module fallback independently of which
+            # class bindings happen to exist at the point of execution.
+            parents = {_callable_lexical_parent(scope, scopes[module]), "0"} - {None}
+            for parent in sorted(parents):
+                resolve(module, parent, ref, seen)
+        bindings = [
+            binding for binding in scope["bindings"] if binding["name"] == ref[0]
+        ]
+        if not bindings:
+            parent = _callable_lexical_parent(scope, scopes[module])
+            if parent is not None:
+                resolve(module, parent, ref, seen)
+            elif ref[0] in {"eval", "exec", "__import__"}:
+                raise GateDerivationError(
+                    f"dynamic import through {ref[0]} escapes bounded analysis"
+                )
+            elif ref[0] in {"globals", "locals", "vars"}:
+                uncertain.append(f"reflective namespace access through {ref[0]}")
+            elif ref[0] != "__getattr__" and any(
+                binding["name"] == "__getattr__" for binding in scope["bindings"]
+            ):
+                uncertain.append(f"{module}: dynamic module attribute {ref[0]}")
+                resolve(module, scope_id, ["__getattr__"], seen)
+            return
+        for binding in bindings:
+            kind, target = binding["kind"], binding["target"]
+            if kind == "scope":
+                demand(module, target[0], value_use=True)
+                if len(ref) > 1:
+                    resolve(module, target[0], ref[1:], seen)
+            elif kind == "symbol":
+                symbol(".".join([target[0], *ref[1:]]), seen)
+            elif kind == "reference":
+                resolve(module, scope_id, [*target, *ref[1:]], seen)
+
+    for module, module_scopes in scopes.items():
+        demand(module, "0")
+        if module in production_modules:
+            for scope_id in module_scopes:
+                demand(module, scope_id)
+    while queue:
+        module, scope_id = queue.popleft()
+        scope = scopes[module][scope_id]
+        if scope["obligations"]:
+            raise GateDerivationError(
+                f"{module}:{scope['name']}: {scope['obligations'][0]}"
+            )
+        uncertain.extend(
+            f"{module}:{scope['name']}: {item}" for item in scope["uncertainties"]
+        )
+        for child in scope["eager"]:
+            demand(module, child)
+        for imported_module, _member in scope["from_imports"]:
+            if imported_module in scopes and any(
+                binding["name"] == "__getattr__"
+                for binding in scopes[imported_module]["0"]["bindings"]
+            ):
+                # Import machinery may query __path__/__all__ as well as the
+                # member. Conservatively demand the hook even for an otherwise
+                # known export; importing alone can execute this callable.
+                resolve(imported_module, "0", ["__getattr__"], frozenset())
+        for ref in scope["uses"]:
+            resolve(module, scope_id, ref, frozenset())
+    remaining = [
+        f"{module}:{scope['name']}"
+        for module, module_scopes in scopes.items()
+        for scope in module_scopes.values()
+        if scope["obligations"] and (module, scope["id"]) not in demanded
+    ]
+    if uncertain and remaining:
+        raise GateDerivationError(
+            "callable demand cannot discharge dynamic import obligations "
+            f"{remaining[:5]!r}: {uncertain[0]}"
+        )
 
 
 def _walk_import_graph(
@@ -2863,6 +3773,8 @@ def _product_runtime_reachability(
         for module, observation_id in spec.extra_source_modules.items()
     }
 
+    collected_facts: dict[str, dict] = {}
+
     def discover_imports(
         source: bytes,
         module: str,
@@ -2871,7 +3783,7 @@ def _product_runtime_reachability(
         available_modules: frozenset[str],
     ) -> frozenset[str]:
         try:
-            return _imports_under_interpreter(
+            facts = _imports_under_interpreter(
                 source,
                 executable=executable,
                 product=product,
@@ -2882,7 +3794,11 @@ def _product_runtime_reachability(
                 is_package=is_package,
                 available_modules=available_modules | published_modules,
                 process=process,
+                callable_facts=True,
             )
+            assert isinstance(facts, dict)
+            collected_facts[module] = facts
+            return frozenset(facts["imports"])
         except _ForeignSyntaxError as exc:
             raise GateDerivationError(
                 f"{product}: {path}: source does not parse under interpreter "
@@ -2890,7 +3806,7 @@ def _product_runtime_reachability(
             ) from exc
 
     with _foreign_import_process(executable) as process:
-        return _walk_import_graph(
+        reached = _walk_import_graph(
             repository=clone,
             index=MappingProxyType(index),
             roots=spec.runtime_roots,
@@ -2898,6 +3814,12 @@ def _product_runtime_reachability(
             discover_imports=discover_imports,
             include_package_parents=True,
         )
+    return _ImportReachability(
+        reached.visited,
+        reached.external_modules,
+        MappingProxyType(collected_facts),
+        selected,
+    )
 
 
 def _derive_records(
@@ -3267,6 +4189,7 @@ def _reached_deferred_debt(
     product_external_modules: frozenset[str],
     catalogue: _TrustedCatalogue,
     sources: Mapping[str, PublishedSource],
+    product_reachability: _ImportReachability | None = None,
 ) -> tuple[DeferredDebtReach, ...]:
     index, owners = _published_python_index(repository_root, catalogue, sources)
     known_roots = set(_root_owners(catalogue.import_roots)) | {
@@ -3294,12 +4217,82 @@ def _reached_deferred_debt(
             )
     # Explicit imported modules seed traversal. Consuming one sibling package
     # does not execute every other import package shipped by its distribution.
-    reachability = _walk_import_graph(
-        repository=repository_root,
-        index=MappingProxyType(index),
-        roots=tuple(sorted(roots)),
-        include_package_parents=True,
-    )
+    if product_reachability is None:
+        # Legacy direct callers have supplied no lexical product evidence: keep
+        # their all-bodies refusal semantics, never infer non-use from absence.
+        reachability = _walk_import_graph(
+            repository=repository_root,
+            index=MappingProxyType(index),
+            roots=tuple(sorted(roots)),
+            include_package_parents=True,
+        )
+    else:
+        if (
+            product_reachability.callable_facts is None
+            or product_reachability.interpreter is None
+        ):
+            raise GateDerivationError(
+                "published callable demand lacks product lexical evidence"
+            )
+        selected = product_reachability.interpreter
+        facts = dict(product_reachability.callable_facts)
+
+        def discover_published(
+            source: bytes,
+            module: str,
+            is_package: bool,
+            path: str,
+            available: frozenset[str],
+        ) -> frozenset[str]:
+            try:
+                value = _imports_under_interpreter(
+                    source,
+                    executable=selected.executable,
+                    product="published-demand",
+                    revision=sources[owners[module].distribution].peeled_commit,
+                    interpreter=selected.name,
+                    module=module,
+                    path=path,
+                    is_package=is_package,
+                    available_modules=available,
+                    process=process,
+                    callable_facts=True,
+                )
+            except _ForeignSyntaxError as exc:
+                raise GateDerivationError(
+                    f"{module}: published source does not parse under "
+                    f"{selected.name}: {exc}"
+                ) from exc
+            assert isinstance(value, dict)
+            if module in facts:
+                raise GateDerivationError(
+                    f"product/published callable module collision: {module}"
+                )
+            facts[module] = value
+            return frozenset(value["imports"])
+
+        with _foreign_import_process(selected.executable) as process:
+            reachability = _walk_import_graph(
+                repository=repository_root,
+                index=MappingProxyType(index),
+                roots=tuple(sorted(roots)),
+                include_package_parents=True,
+                discover_imports=discover_published,
+            )
+        product_roots = {
+            module.split(".")[0] for module in product_reachability.visited
+        }
+        missing_product_code = {
+            module
+            for module in reachability.external_modules
+            if module.split(".")[0] in product_roots and module not in facts
+        }
+        if missing_product_code:
+            raise GateDerivationError(
+                "published imports require missing product callable source facts: "
+                f"{sorted(missing_product_code)!r}"
+            )
+        _check_callable_demand(facts, production_modules=product_reachability.visited)
     known_roots = set(_root_owners(catalogue.import_roots)) | {
         module.split(".")[0] for module in index
     }
@@ -3315,9 +4308,13 @@ def _reached_deferred_debt(
     for module in sorted(reachability.visited):
         entry = index[module]
         source = owners[module]
-        sites = _deferred_import_sites(
-            _git_blob(repository_root, entry.object_id, source=entry.path),
-            path=entry.path,
+        sites = (
+            facts[module]["deferred_sites"]
+            if product_reachability is not None
+            else _deferred_import_sites(
+                _git_blob(repository_root, entry.object_id, source=entry.path),
+                path=entry.path,
+            )
         )
         if sites:
             result.append(
@@ -3374,6 +4371,7 @@ def _evaluate_product(
             product_external_modules=reachability.external_modules,
             catalogue=catalogue,
             sources=sources,
+            product_reachability=reachability,
         )
     except ObservationAcquisitionError as exc:
         raise GateAcquisitionError(f"{binding.product}: {exc}") from exc
