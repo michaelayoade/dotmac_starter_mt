@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from typing import ClassVar, Literal
 from uuid import UUID
 
 from dotmac_kernel.money import Currency, Money
@@ -270,6 +271,8 @@ class TaxDeterminationComponentV1:
     non_recoverable_amount: Money
     lines: tuple[TaxDeterminationLineV1, ...]
 
+    _calculation_bases: ClassVar[frozenset[str]] = _KNOWN_CALCULATION_BASES
+
     def __post_init__(self) -> None:
         _require_positive_int(
             self.component_sequence, "determination component sequence"
@@ -279,7 +282,7 @@ class TaxDeterminationComponentV1:
             raise ValueError("determination component inclusive flag must be boolean")
         if self.treatment_code not in _KNOWN_TREATMENTS:
             raise ValueError(f"unknown tax treatment {self.treatment_code!r}")
-        if self.calculation_base_code not in _KNOWN_CALCULATION_BASES:
+        if self.calculation_base_code not in self._calculation_bases:
             raise ValueError(
                 f"unknown tax calculation base {self.calculation_base_code!r}"
             )
@@ -376,6 +379,8 @@ class TaxDeterminationSetV1:
     determined_at: datetime
     components: tuple[TaxDeterminationComponentV1, ...]
 
+    _fingerprint_prefix: ClassVar[str] = "rv1:"
+
     def __post_init__(self) -> None:
         for name in (
             "source_ref",
@@ -389,7 +394,7 @@ class TaxDeterminationSetV1:
                 raise ValueError(f"determination {name.replace('_', ' ')} is required")
         if (
             len(self.result_fingerprint) != 68
-            or not self.result_fingerprint.startswith("rv1:")
+            or not self.result_fingerprint.startswith(self._fingerprint_prefix)
             or any(
                 character not in "0123456789abcdef"
                 for character in self.result_fingerprint[4:]
@@ -567,4 +572,290 @@ __all__ = [
     "TaxRuleV1",
     "TaxSubjectClassificationInput",
     "TaxSubjectClassificationV1",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class TaxCommercialSourceV1:
+    source_ref: str
+    source_version: str
+
+    def __post_init__(self) -> None:
+        for value in (self.source_ref, self.source_version):
+            if (
+                not isinstance(value, str)
+                or not value.strip()
+                or value != value.strip()
+            ):
+                raise ValueError(
+                    "commercial source identity must be nonblank trimmed text"
+                )
+
+
+@dataclass(frozen=True, slots=True)
+class TaxFactSignatureV1:
+    jurisdiction_id: UUID
+    fact_kind: str
+    recognition_basis_code: str
+    transaction_side: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.jurisdiction_id, UUID):
+            raise ValueError("signature jurisdiction must be a UUID")
+        for value in (
+            self.fact_kind,
+            self.recognition_basis_code,
+            self.transaction_side,
+        ):
+            if (
+                not isinstance(value, str)
+                or not value.strip()
+                or value != value.strip()
+            ):
+                raise ValueError("signature values must be nonblank trimmed text")
+        if self.transaction_side not in {"input", "output", "withholding", "liability"}:
+            raise ValueError("unknown dependency signature transaction side")
+
+
+@dataclass(frozen=True, slots=True)
+class TaxBaseDependencyPolicyV1:
+    prior_signature: TaxFactSignatureV1
+    selection: Literal["all_prior", "tax_code_ids"]
+    tax_code_ids: tuple[UUID, ...] = ()
+
+    def __post_init__(self) -> None:
+        codes = tuple(self.tax_code_ids)
+        if not isinstance(self.prior_signature, TaxFactSignatureV1):
+            raise ValueError("dependency prior signature is required")
+        if self.selection not in {"all_prior", "tax_code_ids"}:
+            raise ValueError("unknown dependency selection")
+        if (
+            self.selection == "all_prior"
+            and codes
+            or self.selection == "tax_code_ids"
+            and not codes
+        ):
+            raise ValueError(
+                "selected-code policy requires codes; all-prior forbids codes"
+            )
+        if any(not isinstance(code, UUID) for code in codes) or len(codes) != len(
+            set(codes)
+        ):
+            raise ValueError("dependency code identities must be unique UUIDs")
+        object.__setattr__(self, "tax_code_ids", tuple(sorted(codes, key=str)))
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleInputV2(TaxRuleInput):
+    dependency_policy: TaxBaseDependencyPolicyV1 | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleV2(TaxRuleV1):
+    dependency_policy: TaxBaseDependencyPolicyV1 | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleSupersessionInputV2(TaxRuleSupersessionInput):
+    replacement: TaxRuleInputV2
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleSupersessionV2(TaxRuleSupersessionV1):
+    replacement: TaxRuleV2
+
+
+@dataclass(frozen=True, slots=True)
+class TaxPriorResultReferenceV1:
+    determination_set_id: UUID
+    source_ref: str
+    source_version: str
+    source_fingerprint: str
+    result_fingerprint: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.determination_set_id, UUID):
+            raise ValueError("prior determination identity must be a UUID")
+        TaxCommercialSourceV1(self.source_ref, self.source_version)
+        for value, prefix in (
+            (self.source_fingerprint, ""),
+            (self.result_fingerprint, "rv2:"),
+        ):
+            digest = value[len(prefix) :]
+            if (
+                not value.startswith(prefix)
+                or len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)
+            ):
+                raise ValueError("prior result requires exact V2 fingerprints")
+
+
+@dataclass(frozen=True, slots=True)
+class TaxFactV2:
+    fact: TaxFact
+    commercial_source: TaxCommercialSourceV1
+    prior_results: tuple[TaxPriorResultReferenceV1, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.fact, TaxFact) or not isinstance(
+            self.commercial_source, TaxCommercialSourceV1
+        ):
+            raise ValueError("V2 fact and commercial source are required")
+        refs = tuple(self.prior_results)
+        if any(not isinstance(ref, TaxPriorResultReferenceV1) for ref in refs):
+            raise ValueError("prior results must be exact result references")
+        if len({ref.determination_set_id for ref in refs}) != len(refs) or len(
+            {(ref.source_ref, ref.source_version) for ref in refs}
+        ) != len(refs):
+            raise ValueError("duplicate prior result reference")
+        object.__setattr__(
+            self,
+            "prior_results",
+            tuple(sorted(refs, key=lambda ref: str(ref.determination_set_id))),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TaxDependencyComponentV1:
+    determination_set_id: UUID
+    determination_id: UUID
+    tax_code_id: UUID
+    rule_id: UUID
+    rule_version: int
+    component_sequence: int
+    tax_amount: Money
+
+    def __post_init__(self) -> None:
+        _require_positive_int(self.rule_version, "dependency rule version")
+        _require_positive_int(self.component_sequence, "dependency component sequence")
+        _require_non_negative_money(self.tax_amount, "dependency tax amount")
+
+
+@dataclass(frozen=True, slots=True)
+class TaxDeterminationComponentV2(TaxDeterminationComponentV1):
+    selected_dependency_policy: TaxBaseDependencyPolicyV1 | None = None
+    dependency_components: tuple[TaxDependencyComponentV1, ...] = ()
+    _calculation_bases: ClassVar[frozenset[str]] = _KNOWN_CALCULATION_BASES | {
+        "source_plus_dependency_tax"
+    }
+
+    def __post_init__(self) -> None:
+        TaxDeterminationComponentV1.__post_init__(self)
+        snapshots = tuple(self.dependency_components)
+        object.__setattr__(self, "dependency_components", snapshots)
+        external = self.calculation_base_code == "source_plus_dependency_tax"
+        if external != (
+            self.selected_dependency_policy is not None
+        ) or external != bool(snapshots):
+            raise ValueError(
+                "dependency basis requires policy and selected component snapshots"
+            )
+        if external and self.inclusive:
+            raise ValueError("inclusive dependency tax is unsupported")
+        if any(
+            item.tax_amount.currency != self.tax_amount.currency for item in snapshots
+        ):
+            raise ValueError("dependency components must use the result currency")
+        identities = [
+            (item.determination_set_id, item.determination_id) for item in snapshots
+        ]
+        if len(identities) != len(set(identities)):
+            raise ValueError("duplicate dependency component")
+        if snapshots:
+            if len({item.determination_set_id for item in snapshots}) != 1:
+                raise ValueError("dependency components must belong to one prior set")
+            sequences = [item.component_sequence for item in snapshots]
+            if sequences != sorted(set(sequences)):
+                raise ValueError(
+                    "dependency components require strict ordered sequences"
+                )
+            codes = [item.tax_code_id for item in snapshots]
+            if len(codes) != len(set(codes)):
+                raise ValueError("dependency code identity is ambiguous")
+            policy = self.selected_dependency_policy
+            if (
+                policy is not None
+                and policy.selection == "tax_code_ids"
+                and set(codes) != set(policy.tax_code_ids)
+            ):
+                raise ValueError(
+                    "dependency snapshots differ from selected policy codes"
+                )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TaxDeterminationSetV2(TaxDeterminationSetV1):
+    commercial_source: TaxCommercialSourceV1
+    prior_results: tuple[TaxPriorResultReferenceV1, ...]
+    components: tuple[TaxDeterminationComponentV2, ...]
+    _fingerprint_prefix: ClassVar[str] = "rv2:"
+
+    def __post_init__(self) -> None:
+        TaxDeterminationSetV1.__post_init__(self)
+        if not isinstance(self.commercial_source, TaxCommercialSourceV1):
+            raise ValueError("V2 result requires commercial source identity")
+        if any(
+            not isinstance(item, TaxDeterminationComponentV2)
+            for item in self.components
+        ):
+            raise ValueError("V2 result requires V2 components")
+        refs = tuple(self.prior_results)
+        object.__setattr__(self, "prior_results", refs)
+        if any(not isinstance(ref, TaxPriorResultReferenceV1) for ref in refs):
+            raise ValueError("V2 result requires complete prior references")
+        if len({ref.determination_set_id for ref in refs}) != len(refs):
+            raise ValueError("duplicate prior result identity")
+        if len({(ref.source_ref, ref.source_version) for ref in refs}) != len(refs):
+            raise ValueError("duplicate prior source identity")
+        if [str(ref.determination_set_id) for ref in refs] != sorted(
+            str(ref.determination_set_id) for ref in refs
+        ):
+            raise ValueError("prior references require canonical ordering")
+        prior_ids = {ref.determination_set_id for ref in refs}
+        if any(
+            snapshot.determination_set_id not in prior_ids
+            for component in self.components
+            for snapshot in component.dependency_components
+        ):
+            raise ValueError("selected dependency has no complete prior reference")
+        if any(
+            component.calculation_base_code == "source_plus_dependency_tax"
+            for component in self.components
+        ) and any(
+            component.calculation_base_code == "source_plus_prior_tax"
+            or component.inclusive
+            for component in self.components
+        ):
+            raise ValueError(
+                "external dependency cannot combine with "
+                "local compound or inclusive bases"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class TaxPolicyPreviewComponentV2(TaxPolicyPreviewComponentV1):
+    selected_dependency_policy: TaxBaseDependencyPolicyV1 | None = None
+    dependency_components: tuple[TaxDependencyComponentV1, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TaxPolicyPreviewV2(TaxPolicyPreviewV1):
+    components: tuple[TaxPolicyPreviewComponentV2, ...]
+
+
+__all__ += [
+    "TaxCommercialSourceV1",
+    "TaxFactSignatureV1",
+    "TaxBaseDependencyPolicyV1",
+    "TaxRuleInputV2",
+    "TaxRuleV2",
+    "TaxRuleSupersessionInputV2",
+    "TaxRuleSupersessionV2",
+    "TaxPriorResultReferenceV1",
+    "TaxFactV2",
+    "TaxDependencyComponentV1",
+    "TaxDeterminationComponentV2",
+    "TaxDeterminationSetV2",
+    "TaxPolicyPreviewComponentV2",
+    "TaxPolicyPreviewV2",
 ]

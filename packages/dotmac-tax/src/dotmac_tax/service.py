@@ -16,24 +16,48 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_tax._dependencies import (
+    DEPENDENCY_BASE,
+    attach_dependency_components,
+    attach_prior_results,
+    dependency_component,
+    fact_fingerprint_v2,
+    policy_from_payload,
+    prior_reference,
+    resolve_prior_results,
+    result_content_fingerprint_v2,
+    rule_policy,
+    select_dependency_components,
+)
 from dotmac_tax.contracts import (
     StatutoryReportBoxInput,
     TaxAuthorityInput,
     TaxAuthorityV1,
     TaxCodeV1,
+    TaxCommercialSourceV1,
+    TaxDependencyComponentV1,
     TaxDeterminationComponentV1,
+    TaxDeterminationComponentV2,
     TaxDeterminationLineV1,
     TaxDeterminationSetV1,
+    TaxDeterminationSetV2,
     TaxFact,
+    TaxFactV2,
     TaxJurisdictionInput,
     TaxJurisdictionV1,
     TaxPolicyPreviewComponentV1,
+    TaxPolicyPreviewComponentV2,
     TaxPolicyPreviewV1,
+    TaxPolicyPreviewV2,
     TaxRuleBandV1,
     TaxRuleInput,
+    TaxRuleInputV2,
     TaxRuleSupersessionInput,
+    TaxRuleSupersessionInputV2,
     TaxRuleSupersessionV1,
+    TaxRuleSupersessionV2,
     TaxRuleV1,
+    TaxRuleV2,
     TaxSubjectClassificationInput,
     TaxSubjectClassificationV1,
 )
@@ -53,6 +77,7 @@ from dotmac_tax.models import (
     TaxReturnEvent,
     TaxRule,
     TaxRuleBand,
+    TaxRuleDependencyCode,
     TaxRuleSupersession,
     TaxSubjectClassification,
 )
@@ -194,13 +219,20 @@ def _exact_policy_money(amount: Decimal, *, currency: Currency) -> Money:
     return value
 
 
-def _rule_contract(db: Session, *, tenant_id: UUID, row: TaxRule) -> TaxRuleV1:
+def _rule_contract(
+    db: Session, *, tenant_id: UUID, row: TaxRule, _v2: bool = False
+) -> TaxRuleV1:
+    if not _v2 and row.dependency_selection is not None:
+        raise TaxConflict("dependency rule requires the V2 rule API")
     if row.is_published is False:
         raise TaxConflict("tax rule version is not published")
     code = _code(db, tenant_id, row.tax_code_id)
     jurisdiction = _jurisdiction(db, tenant_id, code.jurisdiction_id)
     currency = Currency(jurisdiction.currency_code, jurisdiction.minor_units)
-    return TaxRuleV1(
+    rule_type = TaxRuleV2 if _v2 else TaxRuleV1
+    extra = {"dependency_policy": rule_policy(row)} if _v2 else {}
+    return rule_type(
+        **extra,
         tenant_id=row.tenant_id,
         rule_id=row.id,
         tax_code_id=row.tax_code_id,
@@ -587,7 +619,7 @@ def _validate_persisted_result_structure(row: TaxDeterminationSet) -> None:
                 )
 
 
-def _sealed_result_fingerprint(row: TaxDeterminationSet) -> str:
+def _sealed_result_fingerprint(row: TaxDeterminationSet, *, _v2: bool = False) -> str:
     if row.result_seal_state != "sealed":
         if row.result_seal_state is None:
             raise TaxConflict(
@@ -600,7 +632,7 @@ def _sealed_result_fingerprint(row: TaxDeterminationSet) -> str:
         raise TaxConflict("persisted sealed determination has no result fingerprint")
     if (
         len(value) != 68
-        or not value.startswith("rv1:")
+        or not value.startswith("rv2:" if _v2 else "rv1:")
         or any(character not in "0123456789abcdef" for character in value[4:])
     ):
         raise TaxConflict("persisted determination result fingerprint is invalid")
@@ -621,11 +653,18 @@ def _exact_money(
     return value
 
 
-def _determination_set_contract(row: TaxDeterminationSet) -> TaxDeterminationSetV1:
+def _determination_set_contract(
+    row: TaxDeterminationSet, *, _v2: bool = False
+) -> TaxDeterminationSetV1:
     """Project persisted evidence into the public, ORM-free read contract."""
 
+    if (row.contract_version or 1) != (2 if _v2 else 1):
+        raise TaxConflict(
+            "determination contract version requires its matching read API"
+        )
     _validate_persisted_result_structure(row)
-    sealed_fingerprint = _sealed_result_fingerprint(row)
+    sealed_fingerprint = _sealed_result_fingerprint(row, _v2=_v2)
+    component_type = TaxDeterminationComponentV2 if _v2 else TaxDeterminationComponentV1
     currency = Currency(row.currency_code, row.minor_units)
     components: list[TaxDeterminationComponentV1] = []
     for component in row.components:
@@ -672,7 +711,22 @@ def _determination_set_contract(row: TaxDeterminationSet) -> TaxDeterminationSet
             for line in component.lines
         )
         components.append(
-            TaxDeterminationComponentV1(
+            component_type(
+                **(
+                    {
+                        "selected_dependency_policy": policy_from_payload(
+                            component.selected_dependency_policy
+                        )
+                        if component.selected_dependency_policy is not None
+                        else None,
+                        "dependency_components": tuple(
+                            dependency_component(item)
+                            for item in component.dependency_components
+                        ),
+                    }
+                    if _v2
+                    else {}
+                ),
                 determination_id=component.id,
                 determination_set_id=component.determination_set_id,
                 component_sequence=component.component_sequence,
@@ -711,7 +765,21 @@ def _determination_set_contract(row: TaxDeterminationSet) -> TaxDeterminationSet
                 lines=lines,
             )
         )
-    contract = TaxDeterminationSetV1(
+    contract_type: type[TaxDeterminationSetV1] = (
+        TaxDeterminationSetV2 if _v2 else TaxDeterminationSetV1
+    )
+    contract = contract_type(
+        **(
+            {
+                "commercial_source": TaxCommercialSourceV1(
+                    cast(str, row.commercial_source_ref),
+                    cast(str, row.commercial_source_version),
+                ),
+                "prior_results": tuple(prior_reference(ref) for ref in row.prior_sets),
+            }
+            if _v2
+            else {}
+        ),
         tenant_id=row.tenant_id,
         determination_set_id=row.id,
         jurisdiction_id=row.jurisdiction_id,
@@ -750,7 +818,9 @@ def _determination_set_contract(row: TaxDeterminationSet) -> TaxDeterminationSet
         determined_at=row.determined_at,
         components=tuple(components),
     )
-    expected_fingerprint = _result_content_fingerprint(row)
+    expected_fingerprint = (
+        result_content_fingerprint_v2(row) if _v2 else _result_content_fingerprint(row)
+    )
     if not hmac.compare_digest(sealed_fingerprint, expected_fingerprint):
         raise TaxConflict("persisted determination result fingerprint does not match")
     return contract
@@ -971,7 +1041,17 @@ def publish_tax_rule(
     tenant_id: UUID,
     command: TaxRuleInput,
     published_at: datetime | None = None,
+    _v2: bool = False,
 ) -> TaxRule:
+    dependency_policy = (
+        command.dependency_policy if isinstance(command, TaxRuleInputV2) else None
+    )
+    if not _v2 and dependency_policy is not None:
+        raise TaxRuleViolation("dependency policy requires V2 authoring")
+    if (command.calculation_base_code == DEPENDENCY_BASE) != (
+        dependency_policy is not None
+    ):
+        raise TaxRuleViolation("dependency base requires exactly one dependency policy")
     code = _code(db, tenant_id, command.tax_code_id)
     jurisdiction = _jurisdiction(db, tenant_id, code.jurisdiction_id)
     if code.status != "active" or jurisdiction.status != "active":
@@ -999,6 +1079,7 @@ def publish_tax_rule(
     if command.calculation_base_code not in {
         "source_amount",
         "source_plus_prior_tax",
+        *({DEPENDENCY_BASE} if _v2 else set()),
     }:
         raise TaxRuleViolation("unknown tax calculation base")
     if not 0 <= command.recoverable_rate <= 1:
@@ -1095,6 +1176,35 @@ def publish_tax_rule(
         calculation_base_code=command.calculation_base_code,
         published_at=published_at or datetime.now(UTC),
     )
+    if dependency_policy is not None:
+        prior_jurisdiction = _jurisdiction(
+            db, tenant_id, dependency_policy.prior_signature.jurisdiction_id
+        )
+        if prior_jurisdiction.authority_id != jurisdiction.authority_id:
+            raise TaxRuleViolation("dependency policy must use the same authority")
+        row.dependency_jurisdiction_id = (
+            dependency_policy.prior_signature.jurisdiction_id
+        )
+        row.dependency_fact_kind = dependency_policy.prior_signature.fact_kind
+        row.dependency_recognition_basis_code = (
+            dependency_policy.prior_signature.recognition_basis_code
+        )
+        row.dependency_transaction_side = (
+            dependency_policy.prior_signature.transaction_side
+        )
+        row.dependency_selection = dependency_policy.selection
+        for code_id in dependency_policy.tax_code_ids:
+            dependency_code = _code(db, tenant_id, code_id)
+            if (
+                dependency_code.jurisdiction_id
+                != dependency_policy.prior_signature.jurisdiction_id
+            ):
+                raise TaxRuleViolation(
+                    "selected dependency code uses a different jurisdiction"
+                )
+            row.dependency_codes.append(
+                TaxRuleDependencyCode(tenant_id=tenant_id, tax_code_id=code_id)
+            )
     row.bands.extend(
         TaxRuleBand(
             tenant_id=tenant_id,
@@ -1343,7 +1453,7 @@ def ensure_tax_code_in_transaction(
 
 
 def ensure_tax_rule_in_transaction(
-    db: Session, *, tenant_id: UUID, command: TaxRuleInput
+    db: Session, *, tenant_id: UUID, command: TaxRuleInput, _v2: bool = False
 ) -> TaxRuleV1:
     """Flush/publish or exact-replay one immutable published rule version.
 
@@ -1369,7 +1479,9 @@ def ensure_tax_rule_in_transaction(
     _jurisdiction(db, tenant_id, code.jurisdiction_id, refresh=True)
     if existing is None:
         try:
-            existing = publish_tax_rule(db, tenant_id=tenant_id, command=command)
+            existing = publish_tax_rule(
+                db, tenant_id=tenant_id, command=command, _v2=_v2
+            )
         except TaxConflict:
             # The helper's retired-parent/duplicate domain checks all precede
             # db.add/flush. A winner may now exist, and exact replay continues
@@ -1379,6 +1491,13 @@ def ensure_tax_rule_in_transaction(
             existing = db.scalar(identity)
             if existing is None:
                 raise
+    if _v2:
+        result = _rule_contract(db, tenant_id=tenant_id, row=existing, _v2=True)
+        if _rule_contract_content(result) != _rule_command_content(
+            command
+        ) or rule_policy(existing) != getattr(command, "dependency_policy", None):
+            raise TaxConflict("tax rule version has different content")
+        return result
     return _exact_rule_replay(db, tenant_id=tenant_id, row=existing, command=command)
 
 
@@ -1745,7 +1864,7 @@ def _exact_rule_replay(
 
 
 def _supersession_contract(
-    db: Session, *, tenant_id: UUID, row: TaxRuleSupersession
+    db: Session, *, tenant_id: UUID, row: TaxRuleSupersession, _v2: bool = False
 ) -> TaxRuleSupersessionV1:
     replacement = db.scalar(
         select(TaxRule).where(
@@ -1754,12 +1873,15 @@ def _supersession_contract(
     )
     if replacement is None:
         raise TaxConflict("supersession replacement is missing")
-    return TaxRuleSupersessionV1(
+    contract_type: type[TaxRuleSupersessionV1] = (
+        TaxRuleSupersessionV2 if _v2 else TaxRuleSupersessionV1
+    )
+    return contract_type(
         tenant_id,
         row.id,
         row.predecessor_rule_id,
         row.predecessor_version,
-        _rule_contract(db, tenant_id=tenant_id, row=replacement),
+        _rule_contract(db, tenant_id=tenant_id, row=replacement, _v2=_v2),
         row.effective_from,
         row.actor_id,
         row.published_by_ref,
@@ -1777,6 +1899,7 @@ def supersede_tax_rule(
     tenant_id: UUID,
     command: TaxRuleSupersessionInput,
     published_at: datetime | None = None,
+    _v2: bool = False,
 ) -> TaxRuleSupersessionV1:
     """Append one explicit replacement, flush only; caller owns rollback/retry.
 
@@ -1815,7 +1938,9 @@ def supersede_tax_rule(
         )
     )
     if existing is not None:
-        contract = _supersession_contract(db, tenant_id=tenant_id, row=existing)
+        contract = _supersession_contract(
+            db, tenant_id=tenant_id, row=existing, _v2=_v2
+        )
         if (
             contract.predecessor_rule_id != command.predecessor_rule_id
             or contract.predecessor_version != command.predecessor_version
@@ -1833,6 +1958,8 @@ def supersede_tax_rule(
             or contract.replacement.version != command.replacement.version
             or _rule_contract_content(contract.replacement)
             != _rule_command_content(command.replacement)
+            or getattr(contract.replacement, "dependency_policy", None)
+            != getattr(command.replacement, "dependency_policy", None)
         ):
             raise TaxConflict("supersession source identity has different content")
         return contract
@@ -1859,7 +1986,7 @@ def supersede_tax_rule(
         "supply_category",
         "place_code",
     )
-    old = _rule_contract(db, tenant_id=tenant_id, row=predecessor)
+    old = _rule_contract(db, tenant_id=tenant_id, row=predecessor, _v2=_v2)
     for name in identity:
         value = getattr(replacement, name)
         if isinstance(value, str):
@@ -1882,7 +2009,7 @@ def supersede_tax_rule(
     when = published_at or datetime.now(UTC)
     _require_aware_input(when)
     successor = publish_tax_rule(
-        db, tenant_id=tenant_id, command=replacement, published_at=when
+        db, tenant_id=tenant_id, command=replacement, published_at=when, _v2=_v2
     )
     row = TaxRuleSupersession(
         tenant_id=tenant_id,
@@ -1901,7 +2028,7 @@ def supersede_tax_rule(
     )
     db.add(row)
     db.flush()
-    return _supersession_contract(db, tenant_id=tenant_id, row=row)
+    return _supersession_contract(db, tenant_id=tenant_id, row=row, _v2=_v2)
 
 
 def _classification_command_content(
@@ -2391,8 +2518,29 @@ def _build_tax_policy_result(
     source_ref: str,
     source_version: str,
     fingerprint: str,
+    dependency_fact: TaxFactV2 | None = None,
 ) -> TaxDeterminationSet:
+    prior_results = (
+        resolve_prior_results(db, tenant_id=tenant_id, command=dependency_fact)
+        if dependency_fact is not None
+        else ()
+    )
     selected_rules = _applicable_rules(db, tenant_id, fact)
+    if dependency_fact is None and any(
+        item.rule.dependency_selection is not None for item in selected_rules
+    ):
+        raise TaxRuleViolation("dependency rule requires determine_tax_set_v2")
+    has_external = any(
+        item.rule.calculation_base_code == DEPENDENCY_BASE for item in selected_rules
+    )
+    if has_external and any(
+        item.rule.calculation_base_code == "source_plus_prior_tax"
+        or item.rule.inclusive
+        for item in selected_rules
+    ):
+        raise TaxRuleViolation(
+            "external dependency cannot combine with local compound or inclusive bases"
+        )
     determination_set_id = uuid4()
     source_amount = _round(fact.base_amount.amount, jurisdiction.minor_units)
     prior_tax = Decimal(0)
@@ -2403,6 +2551,19 @@ def _build_tax_policy_result(
         calculation_base = source_amount
         if rule.calculation_base_code == "source_plus_prior_tax":
             calculation_base += prior_tax
+        dependency_policy = rule_policy(rule)
+        snapshots: tuple[TaxDependencyComponentV1, ...] = ()
+        if rule.calculation_base_code == DEPENDENCY_BASE:
+            if dependency_policy is None:
+                raise TaxRuleViolation("dependency rule has no policy")
+            snapshots = select_dependency_components(dependency_policy, prior_results)
+            calculation_base += sum(
+                (item.tax_amount.amount for item in snapshots), Decimal(0)
+            )
+        elif dependency_policy is not None:
+            raise TaxRuleViolation(
+                "dependency policy has an incompatible calculation base"
+            )
         base, tax_amount, line_values = _calculate_rule(
             rule,
             calculation_base=calculation_base,
@@ -2462,6 +2623,8 @@ def _build_tax_policy_result(
             ),
             determined_at=determined_at,
         )
+        if dependency_policy is not None:
+            attach_dependency_components(component, dependency_policy, snapshots)
         component.lines.extend(
             TaxDeterminationLine(
                 id=uuid4(),
@@ -2501,6 +2664,7 @@ def _build_tax_policy_result(
         source_fingerprint=fingerprint,
         result_seal_state="building",
         result_fingerprint=None,
+        contract_version=2 if dependency_fact is not None else 1,
         evidence_ref=_clean(fact.evidence_ref, "evidence reference"),
         counterparty_ref=(
             fact.counterparty_ref.strip() if fact.counterparty_ref else None
@@ -2510,6 +2674,8 @@ def _build_tax_policy_result(
         determined_at=determined_at,
     )
     row.components.extend(components)
+    if dependency_fact is not None:
+        attach_prior_results(row, dependency_fact)
     _validate_persisted_result_structure(row)
     return row
 
@@ -2812,7 +2978,9 @@ def _verified_determination_contracts_for_period(
             TaxDeterminationSet.source_version,
         )
     ).all()
-    return tuple(_determination_set_contract(row) for row in rows)
+    return tuple(
+        _determination_set_contract(row, _v2=row.contract_version == 2) for row in rows
+    )
 
 
 def generate_statutory_report(
@@ -3243,4 +3411,210 @@ __all__ = [
     "update_tax_authority",
     "update_tax_code",
     "update_tax_jurisdiction",
+]
+
+
+def ensure_tax_rule_v2_in_transaction(
+    db: Session, *, tenant_id: UUID, command: TaxRuleInputV2
+) -> TaxRuleV2:
+    """Flush-only publication and exact replay of complete dependency policy."""
+    return cast(
+        TaxRuleV2,
+        ensure_tax_rule_in_transaction(
+            db, tenant_id=tenant_id, command=command, _v2=True
+        ),
+    )
+
+
+def supersede_tax_rule_v2(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    command: TaxRuleSupersessionInputV2,
+    published_at: datetime | None = None,
+) -> TaxRuleSupersessionV2:
+    return cast(
+        TaxRuleSupersessionV2,
+        supersede_tax_rule(
+            db,
+            tenant_id=tenant_id,
+            command=command,
+            published_at=published_at,
+            _v2=True,
+        ),
+    )
+
+
+def get_tax_determination_set_v2(
+    db: Session, *, tenant_id: UUID, determination_set_id: UUID
+) -> TaxDeterminationSetV2:
+    """Read one tenant-local sealed V2 result without mutable policy admission.
+
+    The caller owns the session and transaction. The owner verifies immutable
+    result content, including its bound source fingerprint, without recalculation.
+    V1 or unsealed evidence cannot be promoted to a V2 dependency reference.
+    """
+    if not isinstance(tenant_id, UUID) or not isinstance(determination_set_id, UUID):
+        raise TaxRuleViolation(
+            "tax result reads require UUID tenant and set identities"
+        )
+    with db.no_autoflush:
+        row = db.scalar(
+            select(TaxDeterminationSet).where(
+                TaxDeterminationSet.tenant_id == tenant_id,
+                TaxDeterminationSet.id == determination_set_id,
+                TaxDeterminationSet.contract_version == 2,
+            )
+        )
+        if row is None:
+            raise TaxNotFound("V2 tax determination set not found")
+        source_fingerprint = row.source_fingerprint
+        if (
+            not isinstance(source_fingerprint, str)
+            or len(source_fingerprint) != 64
+            or any(
+                character not in "0123456789abcdef" for character in source_fingerprint
+            )
+        ):
+            raise TaxConflict("persisted determination source fingerprint is invalid")
+        return cast(TaxDeterminationSetV2, _determination_set_contract(row, _v2=True))
+
+
+def determine_tax_set_v2(
+    db: Session, *, tenant_id: UUID, fact: TaxFactV2, determined_at: datetime
+) -> TaxDeterminationSetV2:
+    """Determine one purpose from original commercial facts and sealed references."""
+    _require_aware_input(determined_at)
+    # Tenant lookup establishes scope, while mutable currency/status admission
+    # is deferred until a canonical source identity has failed exact replay.
+    jurisdiction = _jurisdiction(db, tenant_id, fact.fact.jurisdiction_id)
+    source_ref = _clean(fact.fact.source_ref, "source reference")
+    source_version = _clean(fact.fact.source_version, "source version")
+    common = _fact_fingerprint(
+        fact.fact, source_ref=source_ref, source_version=source_version
+    )
+    fingerprint = fact_fingerprint_v2(fact, common_fingerprint=common)
+    existing = db.scalar(
+        select(TaxDeterminationSet).where(
+            TaxDeterminationSet.tenant_id == tenant_id,
+            TaxDeterminationSet.source_ref == source_ref,
+            TaxDeterminationSet.source_version == source_version,
+        )
+    )
+    if existing is not None:
+        if existing.source_fingerprint != fingerprint:
+            raise TaxConflict("tax source version was reused with different facts")
+        return cast(
+            TaxDeterminationSetV2, _determination_set_contract(existing, _v2=True)
+        )
+    legacy = db.scalar(
+        select(TaxDetermination.id).where(
+            TaxDetermination.tenant_id == tenant_id,
+            TaxDetermination.source_ref == source_ref,
+            TaxDetermination.source_version == source_version,
+            TaxDetermination.determination_set_id.is_(None),
+        )
+    )
+    if legacy is not None:
+        raise TaxConflict(
+            "tax source version already has legacy determination evidence"
+        )
+    _validate_tax_fact(db, tenant_id=tenant_id, fact=fact.fact)
+    if jurisdiction.status != "active":
+        raise TaxConflict("tax determination cannot use a retired jurisdiction")
+    row = _build_tax_policy_result(
+        db,
+        tenant_id=tenant_id,
+        fact=fact.fact,
+        determined_at=determined_at,
+        jurisdiction=jurisdiction,
+        source_ref=source_ref,
+        source_version=source_version,
+        fingerprint=fingerprint,
+        dependency_fact=fact,
+    )
+    db.add(row)
+    db.flush()
+    row.result_fingerprint = result_content_fingerprint_v2(row)
+    row.result_seal_state = "sealed"
+    db.flush()
+    return cast(TaxDeterminationSetV2, _determination_set_contract(row, _v2=True))
+
+
+def preview_tax_policy_v2(
+    db: Session, *, tenant_id: UUID, fact: TaxFactV2, determined_at: datetime
+) -> TaxPolicyPreviewV2:
+    """Advisory persisted-policy preview; no writes or durable financial evidence."""
+    _require_aware_input(determined_at)
+    with db.no_autoflush:
+        jurisdiction, source_ref, source_version, common = _validate_tax_fact(
+            db, tenant_id=tenant_id, fact=fact.fact
+        )
+        if jurisdiction.status != "active":
+            raise TaxConflict("tax preview cannot use a retired jurisdiction")
+        row = _build_tax_policy_result(
+            db,
+            tenant_id=tenant_id,
+            fact=fact.fact,
+            determined_at=determined_at,
+            jurisdiction=jurisdiction,
+            source_ref=source_ref,
+            source_version=source_version,
+            fingerprint=fact_fingerprint_v2(fact, common_fingerprint=common),
+            dependency_fact=fact,
+        )
+        currency = Currency(row.currency_code, row.minor_units)
+
+        def money(value: Decimal) -> Money:
+            return _exact_money(value, currency=currency, label="preview amount")
+
+        return TaxPolicyPreviewV2(
+            tenant_id,
+            row.jurisdiction_id,
+            row.occurred_on,
+            money(row.source_amount),
+            money(row.net_amount),
+            money(row.tax_amount),
+            money(row.gross_amount),
+            tuple(
+                TaxPolicyPreviewComponentV2(
+                    cast(int, item.component_sequence),
+                    item.tax_code_id,
+                    item.rule_id,
+                    item.rule_version,
+                    cast(str, item.treatment_code),
+                    cast(str, item.calculation_base_code),
+                    cast(bool, item.inclusive),
+                    money(item.base_amount),
+                    money(item.tax_amount),
+                    money(item.recoverable_amount),
+                    money(item.non_recoverable_amount),
+                    tuple(
+                        TaxDeterminationLineV1(
+                            line.sequence,
+                            money(line.taxable_amount),
+                            line.rate,
+                            money(line.tax_amount),
+                        )
+                        for line in item.lines
+                    ),
+                    policy_from_payload(item.selected_dependency_policy)
+                    if item.selected_dependency_policy
+                    else None,
+                    tuple(
+                        dependency_component(snapshot)
+                        for snapshot in item.dependency_components
+                    ),
+                )
+                for item in row.components
+            ),
+        )
+
+
+__all__ += [
+    "get_tax_determination_set_v2",
+    "determine_tax_set_v2",
+    "preview_tax_policy_v2",
+    "ensure_tax_rule_v2_in_transaction",
+    "supersede_tax_rule_v2",
 ]

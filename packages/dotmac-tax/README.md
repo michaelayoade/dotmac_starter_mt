@@ -93,3 +93,72 @@ rules after tx_0004, because they do not perform the required publication
 transition. Drain old tax-policy writers before migration and resume them only
 with a5. Public a4 service signatures and immutable `TaxRuleV1` remain available
 in a5; this is source API compatibility, not old-binary write compatibility.
+
+
+The unpublished a7 source adds `TaxFactV2(fact, commercial_source, prior_results)`
+and `determine_tax_set_v2`. `commercial_source` identifies the original commercial
+source independently of each purpose's determination source identity. Prior
+references carry exact result identities and expected fingerprints, never amounts.
+Only complete, verified V2 results from the same tenant and authority, commercial
+source/version, date, original source amount/currency, recognition basis and
+counterparty/supply/place references can supply a dependency.
+
+`TaxRuleInputV2.dependency_policy` authors a required prior fact signature and
+selects `all_prior` or an explicit tuple of tax code identities. Its calculation
+base must be `source_plus_dependency_tax`. Exactly one referenced complete result
+must match the signature, and every selected code must exist, including explicit
+zero components. Tax adds only the selected prior tax to the original source for
+this component's base. The new purpose's tax total contains its own components;
+prior tax is never added again to that total or to statutory report aggregation.
+External dependency bases cannot combine with `source_plus_prior_tax` or inclusive
+components. Existing basis meanings remain unchanged.
+
+`TaxDeterminationSetV2` retains commercial identity, every supplied prior reference,
+and ordered V2 components carrying selected policy and exact prior component
+snapshots. Its separate `rv2:` seal covers all common and V2 evidence. Exact replay
+precedes current policy selection; neither prior nor current historical evidence
+is rewritten. V1 readers refuse V2 results and dependency rules. Legacy V1 results
+cannot be assigned an invented commercial binding.
+
+`ensure_tax_rule_v2_in_transaction` and `supersede_tax_rule_v2` flush through the
+existing publication owner. `ListTaxRuleHistoryV2` / `list_tax_rule_history_v2`
+retain bounded cursor pagination, and `preview_tax_policy_v2` uses the same current
+persisted policy and dependency validation without storing financial evidence.
+The additive tx_0005 migration is a maintenance boundary for dependency writers:
+a6 writers cannot determine a dependency rule as a V1 source-only result. Downgrade
+refuses any populated V2 policy or evidence. This source is not publication,
+installation, policy activation or product adoption evidence.
+
+`get_tax_determination_set_v2` resolves one exact tenant-scoped sealed result
+for guided dependency selection. It verifies the original result seal and its
+bound source fingerprint without consulting current policy or creating evidence.
+Missing, V1, unsealed or corrupt results refuse; no result scan is exposed.
+
+
+## Final release and adoption gates
+
+The final serial publication train is Payroll a2 → Tax a7 → Billing a10.
+Tax a6 and Billing a9 are unpublished source allocations superseded by a7 and
+a10 respectively; their complete source changes remain included in those final
+successors. The historical allocations are retained, not published as prerequisites.
+This source documentation establishes no artifact publication or consumer adoption.
+
+Full hosted CI must qualify the final head and current base. Migration acceptance
+must exercise the direct published Tax a4 / tx_0003 → head path through tx_0004
+and tx_0005, and published Billing a8 / bi11 → bi12 on both declared planes.
+Published Tax a4 and Billing bi1–bi11 migration bytes remain immutable; the
+existing bi12 source is preserved without a new DDL edit. V1/V2/V3 invoice and
+withholding evidence must retain exact historical decoding and replay compatibility.
+Old Tax policy writers require a maintenance fence before tx_0004; schema/API
+compatibility does not establish old-binary write compatibility. Restore or
+forward-recovery procedures must be rehearsed before any production authority
+change; populated-state downgrade refusal is not a rollback plan.
+
+Each final distribution still requires its separate verified published artifact,
+install-back verification, peeled tag and truthful release record under the
+release captain's freeze. Only then may consumers exact-pin those artifacts,
+regenerate locks and migration heads, and pass full hosted CI. Immutable-digest
+staging acceptance on Seabone remains required before any separately authorized
+production authority change. These gates activate no policy or writer. The native
+accepted-proof capability remains bounded to one pristine invoice proof lane;
+this release train does not complete the broader legacy billing cutover.

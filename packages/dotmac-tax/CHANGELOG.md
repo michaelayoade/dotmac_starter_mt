@@ -1,6 +1,27 @@
 # Changelog — dotmac-tax
 
-## 0.1.0a6 — unreleased
+## 0.1.0a7 — source preparation, unpublished
+
+- Add V2 commercial source facts and prior sealed result references. Tax policy
+  selects all prior components or explicit code identities from exactly one
+  complete result matching its authored fact signature.
+- Reuse the selector and calculator for `source_plus_dependency_tax`; preserve
+  original source and separate-purpose own tax totals, policy and exact prior
+  component snapshots under an independent `rv2:` result seal.
+- Add additive tx_0005 dependency membership with tenant composite foreign keys,
+  forced RLS, parent locks, append-only evidence and populated downgrade refusal.
+  V1 APIs refuse dependency policy and V2 evidence. V1 fingerprint bytes remain
+  unchanged.
+- Add V2 flush-only rule authoring, supersession, bounded history and advisory
+  preview. External dependencies combined with local compounding or inclusive
+  taxation are explicitly unsupported.
+- Add exact tenant-scoped get_tax_determination_set_v2 for sealed historical
+  dependency selection, with no mutable policy admission or autoflush.
+- Includes the complete a5/a6 source allocations. Hosted CI, direct published
+  a4 predecessor migration qualification and verified a7 publication precede adoption.
+
+
+## 0.1.0a6 — unpublished source allocation, superseded by a7
 
 - Add typed `ensure_tax_*_in_transaction` APIs for authority, jurisdiction,
   code and immutable rule authoring under an adopter's transaction owner.
@@ -11,7 +32,7 @@
 - Add owner-event sensitivity, rollback, tenant and competing-author canary
   source. No schema change or Sub policy UI adoption is implied.
 
-## 0.1.0a5 — unreleased
+## 0.1.0a5 — unpublished source allocation, included in a7
 
 - Append evidenced effective-dated rule supersessions with exact source replay
   and tenant/code author serialization; keep sealed financial facts unchanged.
