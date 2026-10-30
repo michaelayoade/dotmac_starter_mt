@@ -142,7 +142,7 @@ EXTRACTED = {
 }
 
 
-def test_round_trip_ip_0001_ip_0002_ip_0001_ip_0002(monkeypatch) -> None:
+def test_round_trip_ip_0001_head_ip_0001_head(monkeypatch) -> None:
     from alembic import command
 
     with _database(monkeypatch) as db:
@@ -150,9 +150,13 @@ def test_round_trip_ip_0001_ip_0002_ip_0001_ip_0002(monkeypatch) -> None:
         assert _tables(db.admin_url) == TEMPLATE | {"ipam_events"}
         command.upgrade(db.config, "ip_0002_extracted")
         assert _tables(db.admin_url) == EXTRACTED | {"ipam_events"}
+        command.upgrade(db.config, "ip_0003_outbox_relay")  # relay-only compatibility
+        assert _tables(db.admin_url) == EXTRACTED | {"ipam_events"}
+        command.upgrade(db.config, "ip_0004_import_idempotency")
+        assert _tables(db.admin_url) == EXTRACTED | {"ipam_events"}
         command.downgrade(db.config, "ip_0001_ipam")
         assert _tables(db.admin_url) == TEMPLATE | {"ipam_events"}
-        command.upgrade(db.config, "ip_0002_extracted")
+        command.upgrade(db.config, "ip_0004_import_idempotency")
         assert _tables(db.admin_url) == EXTRACTED | {"ipam_events"}
 
 
@@ -267,7 +271,7 @@ def test_concurrent_allocations_get_distinct_addresses_without_deadlock(
     from alembic import command
 
     with _database(monkeypatch) as db:
-        command.upgrade(db.config, "ip_0002_extracted")
+        command.upgrade(db.config, "ip_0004_import_idempotency")
         tenant = _tenant(db.superuser_url)
         p1, p2 = _seed_estate(
             db, tenant, [("one", "192.0.2.0/28"), ("two", "198.51.100.0/28")]
@@ -319,7 +323,7 @@ def test_partial_unique_indexes_are_enforced(monkeypatch) -> None:
     from alembic import command
 
     with _database(monkeypatch) as db:
-        command.upgrade(db.config, "ip_0002_extracted")
+        command.upgrade(db.config, "ip_0004_import_idempotency")
         tenant = _tenant(db.superuser_url)
         (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/24")])
         engine = create_engine(db.admin_url)
@@ -368,7 +372,7 @@ def test_utilization_snapshots_are_append_only(monkeypatch) -> None:
     from alembic import command
 
     with _database(monkeypatch) as db:
-        command.upgrade(db.config, "ip_0002_extracted")
+        command.upgrade(db.config, "ip_0004_import_idempotency")
         tenant = _tenant(db.superuser_url)
         (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/24")])
         snap = uuid.uuid4()
@@ -420,7 +424,7 @@ def test_bulk_dml_outside_a_command_is_refused_on_postgres(monkeypatch) -> None:
     from alembic import command
 
     with _database(monkeypatch) as db:
-        command.upgrade(db.config, "ip_0002_extracted")
+        command.upgrade(db.config, "ip_0004_import_idempotency")
         tenant = _tenant(db.superuser_url)
         _seed_estate(db, tenant, [("p", "192.0.2.0/24")])
         engine = create_engine(db.admin_url)
@@ -443,7 +447,7 @@ def test_two_workers_allocating_for_one_service_get_one_assignment(
     from alembic import command
 
     with _database(monkeypatch) as db:
-        command.upgrade(db.config, "ip_0002_extracted")
+        command.upgrade(db.config, "ip_0004_import_idempotency")
         tenant = _tenant(db.superuser_url)
         (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/28")])
         subscription, subscriber = uuid.uuid4(), uuid.uuid4()
@@ -492,6 +496,85 @@ def test_two_workers_allocating_for_one_service_get_one_assignment(
         assert count == 1
 
 
+def test_outbox_rows_are_written_in_the_same_transaction(monkeypatch) -> None:
+    from dotmac_ipam import (
+        AllocateAddress,
+        ImportedAggregate,
+        ImportedKind,
+        RecordImported,
+        allocate_address,
+        record_imported,
+    )
+
+    from alembic import command
+
+    def pending(session: Session) -> list[str]:
+        return list(
+            session.execute(
+                text("SELECT event_type FROM public.outbox_events ORDER BY created_at")
+            ).scalars()
+        )
+
+    with _database(monkeypatch) as db:
+        command.upgrade(db.config, "ip_0004_import_idempotency")
+        tenant = _tenant(db.superuser_url)
+        (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/28")])
+        engine = create_engine(db.app_url)
+
+        def start(session: Session) -> None:
+            session.execute(
+                text("SELECT set_config('app.current_tenant', :t, true)"),
+                {"t": str(tenant)},
+            )
+
+        with Session(engine) as session:  # rolled back with the state change
+            start(session)
+            allocate_address(
+                session,
+                tenant_id=tenant,
+                command=AllocateAddress((pool,), uuid.uuid4(), uuid.uuid4()),
+            )
+            assert "ipam.address.assigned.v1" in pending(session)
+            session.rollback()
+        with Session(engine) as session:
+            start(session)
+            assert pending(session) == []
+            assert (
+                session.execute(
+                    text("SELECT count(*) FROM mod_ipam.ip_assignments")
+                ).scalar()
+                == 0
+            )
+
+        subject = uuid.uuid4()
+        with Session(engine) as session:  # committed with it
+            start(session)
+            allocate_address(
+                session,
+                tenant_id=tenant,
+                command=AllocateAddress((pool,), subject, uuid.uuid4()),
+            )
+            imported = record_imported(
+                session,
+                tenant_id=tenant,
+                command=RecordImported(
+                    "legacy:ip_pools", (ImportedAggregate(ImportedKind.POOL, pool),)
+                ),
+            )
+            assert imported == 1
+            session.commit()
+        with Session(engine) as session:
+            start(session)
+            codes = pending(session)
+            assert "ipam.address.assigned.v1" in codes
+            assert codes.count("ipam.aggregate.imported.v1") == 1
+            events = session.execute(
+                text("SELECT count(*) FROM mod_ipam.ipam_events")
+            ).scalar()
+            assert events and events >= len(codes)
+        engine.dispose()
+
+
 @pytest.mark.parametrize("operation", ["assign", "assign_inferred", "repair"])
 def test_explicit_assignment_and_reservation_lock_pool_before_address(
     monkeypatch, operation
@@ -514,7 +597,7 @@ def test_explicit_assignment_and_reservation_lock_pool_before_address(
     from alembic import command
 
     with _database(monkeypatch) as db:
-        command.upgrade(db.config, "ip_0002_extracted")
+        command.upgrade(db.config, "ip_0003_outbox_relay")
         tenant = _tenant(db.superuser_url)
         (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/28")])
         admin = create_engine(db.admin_url)
@@ -638,7 +721,7 @@ def test_duplicate_pool_rename_keeps_outer_work_and_tenant_context(monkeypatch) 
     from alembic import command
 
     with _database(monkeypatch) as db:
-        command.upgrade(db.config, "ip_0002_extracted")
+        command.upgrade(db.config, "ip_0003_outbox_relay")
         tenant = _tenant(db.superuser_url)
         first, _second = _seed_estate(
             db, tenant, [("first", "192.0.2.0/28"), ("second", "198.51.100.0/28")]
@@ -676,4 +759,320 @@ def test_duplicate_pool_rename_keeps_outer_work_and_tenant_context(monkeypatch) 
                 command=UpdatePool(first, notes="after conflict"),
             )
             session.commit()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_concurrent_import_replay_writes_exactly_one_evidence_outbox_pair(
+    monkeypatch,
+    batch_size,
+) -> None:
+    from dotmac_ipam import (
+        ImportedAggregate,
+        ImportedKind,
+        RecordImported,
+        pools,
+        record_imported,
+    )
+
+    from alembic import command
+
+    with _database(monkeypatch) as db:
+        command.upgrade(db.config, "ip_0004_import_idempotency")
+        tenant = _tenant(db.superuser_url)
+        pool_ids = _seed_estate(
+            db, tenant, [(f"p{i}", f"192.0.2.{i * 16}/28") for i in range(batch_size)]
+        )
+        items = tuple(
+            ImportedAggregate(ImportedKind.POOL, pool, "digest") for pool in pool_ids
+        )
+        requests = (
+            RecordImported("legacy", items),
+            RecordImported("legacy", tuple(reversed(items))),
+        )
+        barrier = threading.Barrier(2)
+        original_event = pools.c.event
+
+        def race_event(session, **kwargs):
+            # Both Kernel lookups must miss before either attempts the claim.
+            if kwargs["event_type"] == "AggregateImported" and not session.info.get(
+                "import_barrier_passed"
+            ):
+                session.info["import_barrier_passed"] = True
+                barrier.wait(timeout=30)
+            return original_event(session, **kwargs)
+
+        monkeypatch.setattr(pools.c, "event", race_event)
+        results: list[int] = []
+        errors: list[BaseException] = []
+
+        def run(request) -> None:
+            engine = create_engine(db.app_url)
+            try:
+                with Session(engine) as session:
+                    session.execute(
+                        text("SELECT set_config('app.current_tenant', :t, true)"),
+                        {"t": str(tenant)},
+                    )
+                    results.append(
+                        record_imported(session, tenant_id=tenant, command=request)
+                    )
+                    session.commit()
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                engine.dispose()
+
+        threads = [
+            threading.Thread(target=run, args=(request,)) for request in requests
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        assert not any(thread.is_alive() for thread in threads)
+        assert not errors, errors
+        assert sorted(results) == [0, batch_size]
+        engine = create_engine(db.app_url)
+        with Session(engine) as session:
+            session.execute(
+                text("SELECT set_config('app.current_tenant', :t, true)"),
+                {"t": str(tenant)},
+            )
+            assert (
+                session.execute(
+                    text(
+                        "SELECT count(*) FROM mod_ipam.ipam_events "
+                        "WHERE event_type = 'AggregateImported'"
+                    )
+                ).scalar_one()
+                == batch_size
+            )
+            assert (
+                session.execute(
+                    text(
+                        "SELECT count(*) FROM public.outbox_events "
+                        "WHERE event_type = 'ipam.aggregate.imported.v1'"
+                    )
+                ).scalar_one()
+                == batch_size
+            )
+            assert (
+                session.execute(
+                    text(
+                        "SELECT count(*) FROM public.idempotency_records "
+                        "WHERE scope = 'ipam.record_imported'"
+                    )
+                ).scalar_one()
+                == batch_size
+            )
+            assert record_imported(session, tenant_id=tenant, command=requests[0]) == 0
+        engine.dispose()
+
+
+def test_import_rollback_removes_claim_evidence_and_outbox(monkeypatch) -> None:
+    from dotmac_ipam import (
+        ImportedAggregate,
+        ImportedKind,
+        RecordImported,
+        pools,
+        record_imported,
+    )
+    from dotmac_kernel.idempotency import IdempotencyConflict
+
+    from alembic import command
+
+    with _database(monkeypatch) as db:
+        command.upgrade(db.config, "ip_0004_import_idempotency")
+        tenant = _tenant(db.superuser_url)
+        (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/28")])
+        request = RecordImported(
+            "legacy", (ImportedAggregate(ImportedKind.POOL, pool, "digest"),)
+        )
+        engine = create_engine(db.app_url)
+
+        def start(session):
+            session.execute(
+                text("SELECT set_config('app.current_tenant', :t, true)"),
+                {"t": str(tenant)},
+            )
+
+        def counts(session):
+            return tuple(
+                session.execute(text(sql)).scalar_one()
+                for sql in (
+                    "SELECT count(*) FROM mod_ipam.ipam_events "
+                    "WHERE event_type = 'AggregateImported'",
+                    "SELECT count(*) FROM public.outbox_events "
+                    "WHERE event_type = 'ipam.aggregate.imported.v1'",
+                    "SELECT count(*) FROM public.idempotency_records "
+                    "WHERE scope = 'ipam.record_imported'",
+                )
+            )
+
+        with Session(engine) as session:
+            start(session)
+            assert record_imported(session, tenant_id=tenant, command=request) == 1
+            assert counts(session) == (1, 1, 1)
+            session.rollback()
+        original_event = pools.c.event
+
+        def fail_after_pair(session, **kwargs):
+            original_event(session, **kwargs)
+            raise RuntimeError("injected after evidence and outbox flush")
+
+        with Session(engine) as session:
+            start(session)
+            assert counts(session) == (0, 0, 0)
+            # A failed operation must clean its SAVEPOINT without losing tenant context.
+            with monkeypatch.context() as patch:
+                patch.setattr(pools.c, "event", fail_after_pair)
+                with pytest.raises(RuntimeError, match="injected"):
+                    record_imported(session, tenant_id=tenant, command=request)
+            assert counts(session) == (0, 0, 0)
+            assert record_imported(session, tenant_id=tenant, command=request) == 1
+            session.commit()
+        with Session(engine) as session:
+            start(session)
+            assert record_imported(session, tenant_id=tenant, command=request) == 0
+            for source, digest in (
+                ("other", "digest"),
+                ("legacy", "changed"),
+                ("legacy", None),
+            ):
+                with pytest.raises(IdempotencyConflict):
+                    record_imported(
+                        session,
+                        tenant_id=tenant,
+                        command=RecordImported(
+                            source,
+                            (ImportedAggregate(ImportedKind.POOL, pool, digest),),
+                        ),
+                    )
+            assert counts(session) == (1, 1, 1)
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "table,revision",
+    [
+        ("outbox_events", "ip_0003_outbox_relay"),
+        ("idempotency_records", "ip_0004_import_idempotency"),
+    ],
+)
+def test_import_revision_refuses_a_missing_kernel_effect(
+    monkeypatch, table, revision
+) -> None:
+    from importlib import import_module
+
+    from dotmac_kernel.migrations.verify import PrerequisiteNotSatisfiedError
+
+    from alembic import command
+
+    with _database(monkeypatch) as db:
+        command.upgrade(db.config, "ip_0004_import_idempotency")
+        migration = import_module(f"dotmac_ipam.migrations.versions.{revision}")
+        engine = create_engine(db.admin_url)
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                monkeypatch.setattr(migration.op, "get_bind", lambda: connection)
+                migration.upgrade()  # real catalog satisfies the declared requirements
+                connection.execute(
+                    text(f"ALTER TABLE public.{table} RENAME TO missing_effect")
+                )
+                with pytest.raises(
+                    PrerequisiteNotSatisfiedError, match="does not exist"
+                ):
+                    migration.upgrade()
+            finally:
+                transaction.rollback()
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "starting_revision", ["ip_0002_extracted", "ip_0003_outbox_relay"]
+)
+def test_populated_import_prerequisite_upgrades_and_downgrades_preserve_rows(
+    monkeypatch,
+    starting_revision,
+) -> None:
+    from dotmac_ipam import (
+        AllocateAddress,
+        ImportedAggregate,
+        ImportedKind,
+        RecordImported,
+        allocate_address,
+        record_imported,
+    )
+    from dotmac_ipam.models import ALL_MODELS
+    from dotmac_kernel.idempotency_models import IdempotencyRecord
+    from dotmac_kernel.messaging.models import OutboxEvent
+    from sqlalchemy import select
+
+    from alembic import command
+
+    with _database(monkeypatch) as db:
+        command.upgrade(db.config, starting_revision)
+        tenant = _tenant(db.superuser_url)
+        (pool,) = _seed_estate(db, tenant, [("p", "192.0.2.0/28")])
+        engine = create_engine(db.app_url)
+        request = RecordImported(
+            "legacy", (ImportedAggregate(ImportedKind.POOL, pool, "digest"),)
+        )
+        with Session(engine) as session:
+            session.execute(
+                text("SELECT set_config('app.current_tenant', :t, true)"),
+                {"t": str(tenant)},
+            )
+            assigned = allocate_address(
+                session,
+                tenant_id=tenant,
+                command=AllocateAddress((pool,), uuid.uuid4(), uuid.uuid4()),
+            )
+            assert record_imported(session, tenant_id=tenant, command=request) == 1
+            session.commit()
+        engine.dispose()
+        inspector = create_engine(db.admin_url)
+
+        def state():
+            # Compare full rows, including UUIDs, provenance and delivery state.
+            models = (*ALL_MODELS, OutboxEvent, IdempotencyRecord)
+            with inspector.connect() as connection:
+                rows = {}
+                for model in models:
+                    schema = model.__table__.schema or "public"
+                    rows[f"{schema}.{model.__tablename__}"] = (
+                        connection.execute(select(model.__table__).order_by(model.id))
+                        .mappings()
+                        .all()
+                    )
+                return rows
+
+        before = state()
+        assert any(
+            str(row["id"]) == str(assigned.id)
+            for row in before["mod_ipam.ip_assignments"]
+        )
+        assert len(before["public.idempotency_records"]) == 1
+        assert before["public.outbox_events"]
+        command.upgrade(db.config, "ip_0004_import_idempotency")
+        assert state() == before
+        command.downgrade(db.config, "ip_0003_outbox_relay")
+        assert state() == before
+        command.downgrade(db.config, "ip_0002_extracted")
+        assert state() == before
+        command.upgrade(db.config, "ip_0004_import_idempotency")
+        assert state() == before
+        with pytest.raises(RuntimeError, match="holds data"):
+            command.downgrade(db.config, "ip_0001_ipam")
+        assert state() == before
+        inspector.dispose()
+        engine = create_engine(db.app_url)
+        with Session(engine) as session:
+            session.execute(
+                text("SELECT set_config('app.current_tenant', :t, true)"),
+                {"t": str(tenant)},
+            )
+            assert record_imported(session, tenant_id=tenant, command=request) == 0
         engine.dispose()
