@@ -62,8 +62,14 @@ from dotmac_ui.brand import (
 from dotmac_ui.color import OKLCH, ClampedColor, hex_to_oklch, oklch_to_hex
 from dotmac_ui.components import (
     COMPONENTS,
+    DASHBOARD_GRID,
+    DASHBOARD_LINE_CHART,
+    DASHBOARD_PANEL,
     EMPTY_STATE,
     MAP_FRAME,
+    METRIC_CARD,
+    NOTICE_BANNER,
+    NOTIFICATION_TOAST,
     TEMPLATE_NAMESPACE,
     ComponentContract,
     component_classes,
@@ -107,7 +113,7 @@ from dotmac_ui.tokens import (
 #: `test_declared_version_matches_pyproject` — `importlib.metadata` is not used
 #: because the package must be importable straight from a source checkout (an
 #: air-gapped or vendored consumer) where no distribution is installed.
-__version__: Final[str] = "0.1.0a8"
+__version__: Final[str] = "0.1.0a9"
 
 #: Public submodules. `from dotmac_ui.<module> import X` is supported for any
 #: `X` in that module's `__all__`.
@@ -143,6 +149,9 @@ __all__ = [
     "CLASS_PREFIX",
     "COMPONENTS",
     "CONTRAST_REQUIREMENTS",
+    "DASHBOARD_GRID",
+    "DASHBOARD_LINE_CHART",
+    "DASHBOARD_PANEL",
     "DARK_THEME_SELECTORS",
     "DATA_ATTRIBUTE_PREFIX",
     "DEFAULT_THEME",
@@ -151,7 +160,10 @@ __all__ = [
     "MANIFEST_RELPATH",
     "MODES",
     "MAP_FRAME",
+    "METRIC_CARD",
     "NON_TEXT_CONTRAST_MINIMUM",
+    "NOTICE_BANNER",
+    "NOTIFICATION_TOAST",
     "PUBLISHED_COMPONENT_CLASSES",
     "SEMANTIC_INTENTS",
     "STYLESHEET_RELPATH",

@@ -1,0 +1,18 @@
+{# Clickable when href is supplied; static otherwise. Values are host-owned. #}
+{% macro metric_card(label="", value="", primary_detail="", secondary_detail="", href="", tone="neutral") -%}
+{% set metric_tone = tone if tone in ("neutral", "positive", "info", "warning", "negative") else "neutral" %}
+{% if href %}
+<a class="dmui-metric-card dmui-metric-card--link dmui-metric-card--{{ metric_tone }}" href="{{ href }}">
+{% else %}
+<article class="dmui-metric-card dmui-metric-card--static dmui-metric-card--{{ metric_tone }}">
+{% endif %}
+  <div class="dmui-metric-card__heading">
+    <span class="dmui-metric-card__label">{{ label }}</span>
+  </div>
+  <strong class="dmui-metric-card__value">{{ value }}</strong>
+  <div class="dmui-metric-card__details">
+    {% if primary_detail %}<span class="dmui-metric-card__primary-detail">{{ primary_detail }}</span>{% endif %}
+    {% if secondary_detail %}<span class="dmui-metric-card__secondary-detail">{{ secondary_detail }}</span>{% endif %}
+  </div>
+{% if href %}</a>{% else %}</article>{% endif %}
+{%- endmacro %}

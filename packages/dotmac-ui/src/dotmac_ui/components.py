@@ -125,8 +125,159 @@ MAP_FRAME: Final[ComponentContract] = ComponentContract(
     ),
 )
 
+DASHBOARD_GRID: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/dashboard_grid.html",
+    macro="dashboard_grid",
+    parameters=("label",),
+    classes=frozenset({"dmui-dashboard-grid"}),
+)
+
+DASHBOARD_PANEL: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/dashboard_panel.html",
+    macro="dashboard_panel",
+    parameters=("title", "description", "action_label", "action_url", "span"),
+    classes=frozenset(
+        {
+            "dmui-dashboard-panel",
+            "dmui-dashboard-panel--half",
+            "dmui-dashboard-panel--full",
+            "dmui-dashboard-panel__header",
+            "dmui-dashboard-panel__heading",
+            "dmui-dashboard-panel__title",
+            "dmui-dashboard-panel__description",
+            "dmui-dashboard-panel__action",
+            "dmui-dashboard-panel__body",
+        }
+    ),
+)
+
+METRIC_CARD: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/metric_card.html",
+    macro="metric_card",
+    parameters=(
+        "label",
+        "value",
+        "primary_detail",
+        "secondary_detail",
+        "href",
+        "tone",
+    ),
+    classes=frozenset(
+        {
+            "dmui-metric-card",
+            "dmui-metric-card--link",
+            "dmui-metric-card--static",
+            "dmui-metric-card--neutral",
+            "dmui-metric-card--positive",
+            "dmui-metric-card--info",
+            "dmui-metric-card--warning",
+            "dmui-metric-card--negative",
+            "dmui-metric-card__heading",
+            "dmui-metric-card__label",
+            "dmui-metric-card__value",
+            "dmui-metric-card__details",
+            "dmui-metric-card__primary-detail",
+            "dmui-metric-card__secondary-detail",
+        }
+    ),
+)
+
+NOTICE_BANNER: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/notice_banner.html",
+    macro="notice_banner",
+    parameters=("title", "message", "dismiss_label"),
+    classes=frozenset(
+        {
+            "dmui-notice-banner",
+            "dmui-notice-banner__content",
+            "dmui-notice-banner__indicator",
+            "dmui-notice-banner__title",
+            "dmui-notice-banner__message",
+            "dmui-notice-banner__dismiss",
+        }
+    ),
+)
+
+DASHBOARD_LINE_CHART: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/dashboard_line_chart.html",
+    macro="dashboard_line_chart",
+    parameters=(
+        "title",
+        "description",
+        "series",
+        "range_label",
+        "filter_label",
+        "filter_name",
+        "filter_options",
+    ),
+    classes=frozenset(
+        {
+            "dmui-line-chart",
+            "dmui-line-chart__header",
+            "dmui-line-chart__heading",
+            "dmui-line-chart__title",
+            "dmui-line-chart__description",
+            "dmui-line-chart__toolbar",
+            "dmui-line-chart__filter",
+            "dmui-line-chart__filter-label",
+            "dmui-line-chart__select",
+            "dmui-line-chart__range",
+            "dmui-line-chart__legend",
+            "dmui-line-chart__legend-item",
+            "dmui-line-chart__swatch",
+            "dmui-line-chart__swatch--neutral",
+            "dmui-line-chart__swatch--positive",
+            "dmui-line-chart__swatch--info",
+            "dmui-line-chart__swatch--warning",
+            "dmui-line-chart__swatch--negative",
+            "dmui-line-chart__figure",
+            "dmui-line-chart__svg",
+            "dmui-line-chart__grid",
+            "dmui-line-chart__series",
+            "dmui-line-chart__series--neutral",
+            "dmui-line-chart__series--positive",
+            "dmui-line-chart__series--info",
+            "dmui-line-chart__series--warning",
+            "dmui-line-chart__series--negative",
+        }
+    ),
+)
+
+NOTIFICATION_TOAST: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/notification_toast.html",
+    macro="notification_toast",
+    parameters=(
+        "title",
+        "message",
+        "action_label",
+        "action_url",
+        "dismiss_label",
+        "auto_dismiss_ms",
+    ),
+    classes=frozenset(
+        {
+            "dmui-notification-toast",
+            "dmui-notification-toast__content",
+            "dmui-notification-toast__title",
+            "dmui-notification-toast__message",
+            "dmui-notification-toast__actions",
+            "dmui-notification-toast__action",
+            "dmui-notification-toast__dismiss",
+        }
+    ),
+)
+
 #: Every component this contract version publishes.
-COMPONENTS: Final[tuple[ComponentContract, ...]] = (EMPTY_STATE, MAP_FRAME)
+COMPONENTS: Final[tuple[ComponentContract, ...]] = (
+    EMPTY_STATE,
+    MAP_FRAME,
+    DASHBOARD_GRID,
+    DASHBOARD_PANEL,
+    METRIC_CARD,
+    NOTICE_BANNER,
+    DASHBOARD_LINE_CHART,
+    NOTIFICATION_TOAST,
+)
 
 
 @lru_cache(maxsize=1)
@@ -147,8 +298,14 @@ def component_classes() -> frozenset[str]:
 
 __all__ = [
     "COMPONENTS",
+    "DASHBOARD_GRID",
+    "DASHBOARD_LINE_CHART",
+    "DASHBOARD_PANEL",
     "EMPTY_STATE",
     "MAP_FRAME",
+    "METRIC_CARD",
+    "NOTICE_BANNER",
+    "NOTIFICATION_TOAST",
     "TEMPLATE_NAMESPACE",
     "ComponentContract",
     "component_classes",
