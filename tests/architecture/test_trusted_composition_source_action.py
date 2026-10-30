@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import json
 import py_compile
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import yaml  # type: ignore[import-untyped]
@@ -65,12 +65,12 @@ def test_action_owns_a_closed_nonempty_trust_anchor() -> None:
     runner = _module("run_gate")
     assert runner.EXPECTED_STATUS == {
         "academy": "satisfied",
-        "erp": "deferred_runtime_debt",
+        "erp": "satisfied",
         "sub": "satisfied",
     }
     assert runner.EXPECTED_REVISIONS == {
         "academy": "ca1f9058a6483fe52207556fa2d17c56b1e237c7",
-        "erp": "dca695a7d59179fe65577ba4e72a709ff0b32cde",
+        "erp": "134abce8a74a205bd9636cafcf232178acb70874",
         "sub": "272a897b778899b110c5790fcaf43bbb54efe27c",
     }
 
@@ -136,62 +136,218 @@ def test_expected_result_is_reported_exactly_once(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     runner = _module("run_gate")
-    exposure = SimpleNamespace(unknown=0)
-    evaluations = (
-        SimpleNamespace(
-            product="academy",
-            compatibility_status="satisfied",
-            deferred_debt=(),
-            runtime_exposure=exposure,
+    result = _satisfied_result()
+    runner._report_and_require_expected_result(result)
+    assert capsys.readouterr().out == "expected product detail\n"
+
+
+def _satisfied_result() -> SimpleNamespace:
+    return SimpleNamespace(
+        evaluations=tuple(
+            SimpleNamespace(
+                product=product,
+                compatibility_status="satisfied",
+                deferred_debt=(),
+                runtime_exposure=SimpleNamespace(unknown=0),
+            )
+            for product in ("academy", "erp", "sub")
         ),
-        SimpleNamespace(
-            product="erp",
-            compatibility_status="deferred_runtime_debt",
-            deferred_debt=tuple(
-                SimpleNamespace(source_path=path, sites=sites)
-                for path, sites in runner.EXPECTED_ERP_DEBT
-            ),
-            runtime_exposure=exposure,
-        ),
-        SimpleNamespace(
-            product="sub",
-            compatibility_status="satisfied",
-            deferred_debt=(),
-            runtime_exposure=exposure,
-        ),
-    )
-    result = SimpleNamespace(
-        evaluations=evaluations,
         evidence_verified=True,
-        compatibility_satisfied=False,
+        compatibility_satisfied=True,
         adoption_status="not_evaluated",
         explain=lambda: "expected product detail",
     )
 
-    runner._report_and_require_expected_result(result)
 
-    assert capsys.readouterr().out == "expected product detail\n"
+@pytest.mark.parametrize("product", ("academy", "erp", "sub"))
+@pytest.mark.parametrize("violation", ("debt", "status", "unknown", "missing_exposure"))
+def test_every_product_must_be_satisfied_without_debt_or_unknowns(
+    product: str,
+    violation: str,
+) -> None:
+    runner = _module("run_gate")
+    result = _satisfied_result()
+    evaluation = next(item for item in result.evaluations if item.product == product)
+    if violation == "debt":
+        evaluation.deferred_debt = (SimpleNamespace(source_path="reached.py", sites=1),)
+    elif violation == "status":
+        evaluation.compatibility_status = "deferred_runtime_debt"
+    elif violation == "unknown":
+        evaluation.runtime_exposure.unknown = 1
+    else:
+        evaluation.runtime_exposure = None
+    with pytest.raises(runner.TrustedRunnerError):
+        runner._require_expected_result(result)
 
 
-def test_runner_refuses_any_binding_other_than_the_three_pinned_revisions(
+@pytest.mark.parametrize("violation", ("duplicate", "incompatible", "adoption"))
+def test_clean_result_cannot_mask_duplicate_products_incompatibility_or_adoption(
+    violation: str,
+) -> None:
+    runner = _module("run_gate")
+    result = _satisfied_result()
+    if violation == "duplicate":
+        result.evaluations += (result.evaluations[0],)
+    elif violation == "incompatible":
+        result.compatibility_satisfied = False
+    else:
+        result.adoption_status = "adopted"
+    with pytest.raises(runner.TrustedRunnerError):
+        runner._require_expected_result(result)
+
+
+def _configuration(runner: ModuleType) -> SimpleNamespace:
+    return SimpleNamespace(
+        bindings={
+            product: SimpleNamespace(revision=revision)
+            for product, revision in runner.EXPECTED_REVISIONS.items()
+        },
+        catalogue_revision="8c12998b57a31b5cf4a3e296d092460f97e638ba",
+        kernel_subject=SimpleNamespace(
+            distribution="dotmac-kernel",
+            version="0.1.0a107",
+            tag="dotmac-kernel-v0.1.0a107",
+            peeled_commit="8c12998b57a31b5cf4a3e296d092460f97e638ba",
+        ),
+        published_sources=(object(),),
+    )
+
+
+def test_runner_passes_captured_bytes_to_parser_and_retains_configuration() -> None:
+    runner = _module("run_gate")
+    configuration = _configuration(runner)
+    captured = b"captured v4 configuration"
+    calls = []
+    gate = SimpleNamespace(
+        parse_bindings=lambda content: calls.append(content) or configuration,
+    )
+    assert runner._require_exact_bindings(gate, captured) is configuration
+    assert calls == [captured]
+
+
+@pytest.mark.parametrize("violation", ("revision", "catalogue", "subject"))
+def test_runner_refuses_changed_closed_v4_coordinates(violation: str) -> None:
+    runner = _module("run_gate")
+    configuration = _configuration(runner)
+    if violation == "revision":
+        configuration.bindings["erp"].revision = "a" * 40
+    elif violation == "catalogue":
+        configuration.catalogue_revision = "a" * 40
+    else:
+        configuration.kernel_subject.version = "0.1.0a106"
+    gate = SimpleNamespace(parse_bindings=lambda content: configuration)
+    with pytest.raises(runner.TrustedRunnerError):
+        runner._require_exact_bindings(gate, b"captured")
+
+
+def test_main_checks_both_byte_pins_before_loading_and_parsing(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     runner = _module("run_gate")
-    path = tmp_path / "bindings.json"
-    document = {
-        "schema": "kernel-composition-compatibility-bindings.v3",
-        "bindings": {
-            product: {"revision": revision}
-            for product, revision in runner.EXPECTED_REVISIONS.items()
-        },
-    }
-    path.write_text(json.dumps(document))
-    runner._require_exact_bindings(path.read_bytes())
+    events = []
+    configuration = _configuration(runner)
+    result = _satisfied_result()
 
-    document["bindings"]["erp"]["revision"] = "a" * 40
-    path.write_text(json.dumps(document))
-    with pytest.raises(runner.TrustedRunnerError, match="bindings changed"):
-        runner._require_exact_bindings(path.read_bytes())
+    def parse(content: bytes) -> SimpleNamespace:
+        events.append(("parse", content))
+        return configuration
+
+    def evaluate(bindings: object, **kwargs: object) -> SimpleNamespace:
+        assert bindings is configuration
+        assert kwargs["repository_root"] != tmp_path
+        assert all(path.is_relative_to(tmp_path) for path in kwargs["clones"].values())
+        events.append(("evaluate", None))
+        return result
+
+    gate = SimpleNamespace(parse_bindings=parse, evaluate_gate=evaluate)
+    monkeypatch.setattr(runner, "_workspace", lambda: tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "_load_verifier",
+        lambda: SimpleNamespace(
+            read_verified_sources=lambda workspace: {},
+        ),
+    )
+    monkeypatch.setattr(
+        runner, "_read_regular_file", lambda path, **kwargs: path.name.encode()
+    )
+    monkeypatch.setattr(
+        runner,
+        "_require_sha256",
+        lambda content, expected, **kwargs: events.append(("pin", content)),
+    )
+
+    def materialize(
+        workspace: Path, view: Path, verifier: object, source: bytes
+    ) -> dict:
+        assert workspace == tmp_path
+        assert view != workspace
+        events.append(("view", None))
+        return {}
+
+    monkeypatch.setattr(runner, "_materialize_verified_view", materialize)
+
+    def load(view: Path, **kwargs: object) -> SimpleNamespace:
+        assert view != tmp_path
+        events.append(("load", None))
+        return gate
+
+    monkeypatch.setattr(runner, "_load_verified_gate", load)
+    assert runner.main() == 0
+    assert events == [
+        ("pin", b"compatibility_gate.py"),
+        ("pin", b"compatibility_gate_bindings.json"),
+        ("view", None),
+        ("load", None),
+        ("parse", b"compatibility_gate_bindings.json"),
+        ("evaluate", None),
+    ]
+
+
+@pytest.mark.parametrize("failed_label", ("compatibility gate", "bindings"))
+def test_main_refuses_bad_byte_pins_before_candidate_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failed_label: str,
+) -> None:
+    runner = _module("run_gate")
+    monkeypatch.setattr(runner, "_workspace", lambda: tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "_load_verifier",
+        lambda: SimpleNamespace(
+            read_verified_sources=lambda workspace: {},
+            TrustedSourceAcquisitionError=OSError,
+        ),
+    )
+    monkeypatch.setattr(
+        runner, "_read_regular_file", lambda path, **kwargs: b"captured"
+    )
+    loaded = []
+    monkeypatch.setattr(
+        runner, "_load_verified_gate", lambda *args, **kwargs: loaded.append(True)
+    )
+
+    def require(content: bytes, expected: str, *, label: str) -> None:
+        if label == failed_label:
+            raise runner.TrustedRunnerError("changed pinned bytes")
+
+    monkeypatch.setattr(runner, "_require_sha256", require)
+    assert runner.main() == 1
+    assert loaded == []
+
+
+def test_v4_parser_refusal_is_not_replaced_with_reconstructed_bindings() -> None:
+    runner = _module("run_gate")
+
+    def refuse(content: bytes) -> None:
+        raise ValueError("closed v4 schema refused")
+
+    with pytest.raises(ValueError, match="closed v4 schema refused"):
+        runner._require_exact_bindings(
+            SimpleNamespace(parse_bindings=refuse), b"captured"
+        )
 
 
 def test_explicit_loader_never_executes_candidate_package_initializers(
@@ -248,6 +404,123 @@ def test_single_open_reader_refuses_symlinks_and_returns_captured_bytes(
     link.symlink_to(target)
     with pytest.raises(runner.TrustedRunnerAcquisitionError, match="unreadable"):
         runner._read_regular_file(link, label="link")
+
+
+def _view_repository(
+    tmp_path: Path,
+    runner: ModuleType,
+    verifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, dict[str, bytes]]:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    _git(repository, "config", "user.name", "Trust Test")
+    _git(repository, "config", "user.email", "trust@example.invalid")
+    _git(repository, "config", "commit.gpgsign", "false")
+    sources = {}
+    for relative in TRUSTED_PATHS:
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        sources[relative] = b"VALUE = 'pinned helper'\n"
+        path.write_bytes(sources[relative])
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-q", "-m", "pinned helper fixture")
+    revision = _git(repository, "rev-parse", "HEAD")
+    monkeypatch.setattr(runner, "TRUSTED_CONTRACT_REVISION", revision)
+    monkeypatch.setattr(verifier, "TRUSTED_CONTRACT_REVISION", revision)
+    for relative in TRUSTED_PATHS:
+        (repository / relative).write_text("raise AssertionError('mutable helper')\n")
+    for relative in ("tools/__init__.py", "tools/composition_contract/__init__.py"):
+        (repository / relative).write_text("raise AssertionError('candidate init')\n")
+    return repository, sources
+
+
+def test_runner_view_uses_git_helpers_and_captured_gate_for_foreign_children(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, verifier = _module("run_gate"), _module()
+    repository, sources = _view_repository(tmp_path, runner, verifier, monkeypatch)
+    view = tmp_path / "view"
+    view.mkdir()
+    gate_source = (
+        b"import sys\nfrom pathlib import Path\n"
+        b"if __name__ == '__main__':\n"
+        b"    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))\n"
+        b"from tools.composition_contract.composition_schema import VALUE\n"
+        b"if __name__ == '__main__':\n    print(VALUE)\n"
+    )
+    monkeypatch.setattr(runner, "GATE_SHA256", hashlib.sha256(gate_source).hexdigest())
+    captured = runner._materialize_verified_view(
+        repository, view, verifier, gate_source
+    )
+    assert captured == sources
+    assert verifier.read_verified_sources(view) == sources
+    assert _git(view, "rev-parse", "HEAD") == _git(repository, "rev-parse", "HEAD")
+    gate_path = view / runner.GATE_PATH
+    assert gate_path.is_file() and not gate_path.is_symlink()
+    assert gate_path.read_bytes() == gate_source
+    with patch.dict(sys.modules):
+        loaded = runner._load_verified_gate(
+            view, helper_sources=captured, gate_source=gate_source
+        )
+        assert loaded.VALUE == "pinned helper"
+        assert Path(loaded.__file__) == gate_path
+    child = subprocess.run(  # noqa: S603 - fixed captured hosted-canary source
+        [sys.executable, "-I", str(gate_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    assert child.stdout == "pinned helper\n"
+    for relative in TRUSTED_PATHS:
+        assert (
+            repository / relative
+        ).read_text() == "raise AssertionError('mutable helper')\n"
+
+
+def test_materialized_view_tampering_is_refused_by_existing_verifier(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, verifier = _module("run_gate"), _module()
+    repository, _ = _view_repository(tmp_path, runner, verifier, monkeypatch)
+    view = tmp_path / "view"
+    view.mkdir()
+    source = b"VALUE = 1\n"
+    monkeypatch.setattr(runner, "GATE_SHA256", hashlib.sha256(source).hexdigest())
+    original_verify = verifier.read_verified_sources
+
+    def tamper_then_verify(root: Path) -> object:
+        (root / TRUSTED_PATHS[0]).write_text("VALUE = 'tampered'\n")
+        return original_verify(root)
+
+    monkeypatch.setattr(verifier, "read_verified_sources", tamper_then_verify)
+    with pytest.raises(verifier.TrustedSourceDriftError, match="differs from"):
+        runner._materialize_verified_view(repository, view, verifier, source)
+
+
+def test_materialized_gate_bytes_must_retain_the_captured_pin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, verifier = _module("run_gate"), _module()
+    repository, _ = _view_repository(tmp_path, runner, verifier, monkeypatch)
+    view = tmp_path / "view"
+    view.mkdir()
+    source = b"VALUE = 1\n"
+    monkeypatch.setattr(runner, "GATE_SHA256", hashlib.sha256(source).hexdigest())
+    original_read = runner._read_regular_file
+
+    def tamper_then_read(path: Path, **kwargs: object) -> bytes:
+        path.write_bytes(b"raise AssertionError('tampered gate')\n")
+        return original_read(path, **kwargs)
+
+    monkeypatch.setattr(runner, "_read_regular_file", tamper_then_read)
+    with pytest.raises(runner.TrustedRunnerError, match="not the pinned candidate"):
+        runner._materialize_verified_view(repository, view, verifier, source)
 
 
 def test_action_detects_current_drift_against_one_git_coordinate(
