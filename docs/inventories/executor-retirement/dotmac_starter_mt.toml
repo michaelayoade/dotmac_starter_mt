@@ -220,25 +220,6 @@ and reaches no host.
 """
 
 [[entrypoint]]
-name = "workflow:composition-compatibility-diagnostic"
-family = "workflow"
-path = ".github/workflows/composition-compatibility-diagnostic.yml"
-trigger = "pull_request (main), push (integration/all-starter-module-prs-20261029)"
-credential = "GITHUB_TOKEN(contents:read); no user-provisioned repository secret"
-disposition = "not_an_executor"
-premise = """
-Measures candidate compatibility against three immutable public product
-checkouts on an ephemeral GitHub-hosted runner and preserves a diagnostic JSON
-artifact even on refusal. Every checkout sets persist-credentials: false; the
-measurement runs in an empty environment with an isolated temporary HOME.
-It installs no product dependencies, invokes no deployment or publication verb,
-reaches no host or declared production target, and changes no operational state.
-The artifact always declares diagnostic_only=true and trusted_acceptance=false;
-this workflow neither supplies nor replaces the separately pinned compatibility
-acceptance requirement and grants no adoption or deployment authority.
-"""
-
-[[entrypoint]]
 name = "workflow:deployment-adopter"
 family = "workflow"
 path = ".github/workflows/deployment-adopter.yml"

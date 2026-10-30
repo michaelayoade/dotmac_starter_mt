@@ -437,12 +437,6 @@ jobs:
             identity-unit-collection.json
 
 
-  # The immutable reviewed workflow owns the real three-product compatibility
-  # evaluation. Its recorded ERP debt is deliberately refusing; preserve the
-  # sequencing hold until the separately governed trusted successor is green.
-  compatibility-gate:
-    uses: michaelayoade/dotmac_starter_mt/.github/workflows/composition-compatibility.yml@883c0928c3fe75397b59cc3f72c427bb9f3b27aa
-
   integration:
     runs-on: ubuntu-latest
     # Single source of truth for the disposable CI Postgres. `make test-db-up`

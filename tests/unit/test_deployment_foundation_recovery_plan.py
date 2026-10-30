@@ -716,12 +716,6 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "candidate_source_binding.py": 4,
     "collect_github_release_artifact.py": 1,
     "collect_private_registry_files.py": 1,
-    # kernel-compatibility-diagnostic.v1 measurement JSON is owned by this
-    # candidate diagnostic script. Its one sorted JSON encoding writes the
-    # requested hosted artifact and stdout, always marked diagnostic_only and
-    # trusted_acceptance=false; it writes no Foundation plan, lease, release,
-    # attestation or package-owned store record and confers no acceptance.
-    "compatibility_diagnostic.py": 1,
     "credential_lifecycle_sweep.py": 1,
     "declared_publication_sweep.py": 1,
     "executor_retirement.py": 2,

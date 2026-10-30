@@ -1,6 +1,7 @@
-# All 31 outstanding Starter PRs: integrated source
+# Outstanding Starter PRs: integrated source (30 of 31; #682 deferred)
 
 Scope authorized by Michael on 2026-10-29: all 31 open PRs in the captured inventory.
+Narrowed by Michael on 2026-10-30 (option C): #682, the three-product compatibility gate, is removed from this aggregate and follows as its own PR; the other 30 land here.
 The integration merge base is `233e6cd579be7384f6e62ef3df4f0ab49e03762a`
 (tree `a99da0e5103878c621dfcc14f49a1e30e2a0282f`). Older source slices
 already present on that base are inherited rather than replayed over newer code.
@@ -14,7 +15,7 @@ This is source preparation, not publication, installation, adoption or deploymen
 | PR | Captured source | Disposition | Integration evidence / resolution |
 | --- | --- | --- | --- |
 | [#640](https://github.com/michaelayoade/dotmac_starter_mt/pull/640) | [`8f02124f`](https://github.com/michaelayoade/dotmac_starter_mt/commit/8f02124f1f534bd427b84e3062312fc2f0c779ea) | Inherited | Main contains the implementation, golden fixture and stronger revision-8 design/tests; preserve those newer files. |
-| [#682](https://github.com/michaelayoade/dotmac_starter_mt/pull/682) | [`f4f704ce`](https://github.com/michaelayoade/dotmac_starter_mt/commit/f4f704cea24e644f3806b249a6529fa13a3e96e1) | Included — sequencing hold | Exact compatibility source and the existing immutable workflow pin are included. The trusted runner deliberately refuses recorded ERP debt; the protected successor chain and actual 3/3 proof remain required. |
+| [#682](https://github.com/michaelayoade/dotmac_starter_mt/pull/682) | [`f4f704ce`](https://github.com/michaelayoade/dotmac_starter_mt/commit/f4f704cea24e644f3806b249a6529fa13a3e96e1) | Deferred — split out per Michael 2026-10-30 (option C); follows as its own PR | The gate, its bindings, tests, ci.yml job and diagnostic workflow/script are not part of this aggregate. #682 stays open as the source for the successor. |
 | [#780](https://github.com/michaelayoade/dotmac_starter_mt/pull/780) | [`4e40b54e`](https://github.com/michaelayoade/dotmac_starter_mt/commit/4e40b54ea8915c40e627cac0595882cea39f8bbf) | Included | Historical B5 scheduling evidence and the unadopted N3 proposal; current topology and admission restrictions are preserved. |
 | [#804](https://github.com/michaelayoade/dotmac_starter_mt/pull/804) | [`872108ab`](https://github.com/michaelayoade/dotmac_starter_mt/commit/872108ab5aa10bf2556b9c02d13cb9b391f245d6) | Inherited | Current Billing/Payments source and retained multiline migration already incorporate the settlement and confirmation work. |
 | [#805](https://github.com/michaelayoade/dotmac_starter_mt/pull/805) | [`293ed7e3`](https://github.com/michaelayoade/dotmac_starter_mt/commit/293ed7e348ce9523adc397e79a76e5e34e592da6) | Inherited | Current immutable settlement account/funding binding supersedes this earlier source slice. |
@@ -76,29 +77,15 @@ successors relative to the original base (Payroll, Billing, Learning, UI and Int
 After #943 landed, current main has census76; four further declaration transitions
 in this aggregate yield72. Both existing drift dispositions remain unchanged.
 
-## Compatibility hold and merge acceptance
+## Compatibility gate deferred (option C)
 
-The aggregate retains `hold:sequencing` from #682. Its existing pinned workflow
-calls the independently protected trusted runner, which explicitly expects ERP's
-recorded six-site compatibility debt and returns a refusal. Running that workflow
-cannot establish a green compatibility result. No skip, continue-on-error,
-candidate-controlled replacement or false adoption claim resolves that condition.
-
-ERP's protected revision `134abce8a74a205bd9636cafcf232178acb70874` already
-contains the published Files/Tax repins. Its nine product-owned observations
-reproduce byte-for-byte under their pinned `8b4b6d4` semantics, and all 15 checks
-on that revision passed. No ERP evidence refresh or credential ceremony is a
-prerequisite to using this existing proof.
-
-The remaining closure sequence requires reviewed final gate/bindings bytes that
-resolve actual published package sources; a protected trusted runner successor
-binding those digests and the current ERP revision; then a protected
-workflow/guard successor and the aggregate repin. The prospective Kernel subject
-is explicit and distinct from observed product lock versions. Actual
-three-product compatibility must execute with adoption `not_evaluated`; any
-reached package debt remains a refusal requiring its own repair. Exact-head
-review and every required current-base CI check must pass before the sequencing
-hold is removed and this aggregate merges normally.
+Michael ruled on 2026-10-30 that #682's three-product compatibility gate is split
+out of this aggregate. This branch adds no compatibility job, diagnostic workflow,
+diagnostic script, gate module or bindings, and main's workflows and guards are
+unchanged in that respect. The gate follows as its own PR (the #682 successor),
+together with the trusted-runner activation chain tracked there. The aggregate
+keeps `hold:sequencing` and draft state until Michael removes them after
+exact-head review and all required current-base CI checks pass.
 
 Other source reviews and static checks do not substitute for hosted tests. Tests
 and dependency installations were not run locally. No production credential
