@@ -187,11 +187,6 @@
       "reason": "ALLOCATED EXTRACTION RE-CUT, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ipam-v0.1.0a1), with ip_0001_ipam byte-frozen; it is must-not-install (ruled N2, Michael 2026-10-26/27). 0.2.0a1 replaces the template behaviour with Sub's extracted IPAM code and adds the additive ip_0002_extracted revision, so src/ no longer matches the bytes the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Hosted acceptance, the protected release dispatch (Michael go, in a train gap), the exact Sub pin and the wave-1 cutover gates remain separate; allocation authorizes no tag, adoption or production migration. Remove this row only with the oracle-backed record of an authorized exact 0.2.0a1 publication.",
       "state": "declared-unpublished"
     },
-    "dotmac-learning": {
-      "declared": "0.1.0a4",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a3 remains published and immutable (peeled dotmac-learning-v0.1.0a3 -> 7f8f1e6646e531154450370e51dbede46723cc60; verified release run 40484794529; wheel sha256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c). The additive typed cohort intake patch and same-tenant selected bank existence refusal require a new immutable distribution identity. Source allocation claims no a4 artifact, publication, installation, Academy adoption or writer retirement. Hosted qualification and exact protected-main release-module.yml publication/verification precede tagging and its generated release record. Remove this row only with that oracle-backed a4 release record; never edit the declared version down or republish a3.",
-      "state": "declared-unpublished"
-    },
     "dotmac-config-layers": {
       "declared": "0.1.0a1",
       "reason": "FIRST SOURCE, NOT YET PUBLISHED. 0.1.0a1 is the generic layered-composition engine ported from Dotmac Sub draft PR 3625 under ADR-0074 and the ADR-0017 owner-directed exception; it has no tag and no registry artifact. Publication is a release-captain action by Michael's go, in a gap between billing releases and before dotmac-routeros-config; no Sub pin, adoption or product writer change is claimed here. Remove this row only through the authorized release-record transition for dotmac-config-layers-v0.1.0a1.",
