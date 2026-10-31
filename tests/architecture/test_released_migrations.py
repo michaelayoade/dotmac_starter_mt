@@ -2030,6 +2030,27 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-tax ──
+    "dotmac-tax-v0.1.0a7": (
+        "dotmac-tax",
+        "6e0a0078012da45782d800aee1ef9f720376fde3",
+        {
+            "tx_0001_tax.py": (
+                "bf3091556eb5eac401e64cfe342a2d59c17b7d511c0c772aef034340b07012ab"
+            ),
+            "tx_0002_multi_tax.py": (
+                "9b78094519fe8d0785735f3a4e3a37dacdb9901b88eda25c90cdb167474abde0"
+            ),
+            "tx_0003_result_fingerprint.py": (
+                "dd9751218ce7e27922a6ae4a869f6b25061dfa4bb93e0db7e152ea834579d4b3"
+            ),
+            "tx_0004_rule_supersession.py": (
+                "ddc3936779fc94812a2363da2141e0c7419a63f65b634b7868c420993b8be773"
+            ),
+            "tx_0005_tax_dependencies.py": (
+                "4caafaefc697548388dfe4b3b0a96ded14c86f1554816d5836c88c92df9bdb2f"
+            ),
+        },
+    ),
     "dotmac-tax-v0.1.0a4": (
         "dotmac-tax",
         "fb7fb252c6fba8e15d7c39ed18f8057057adfbab",
@@ -8020,9 +8041,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-billing": frozenset({"bi_0012_tax_evidence.py"}),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
-    "dotmac-tax": frozenset(
-        {"tx_0004_rule_supersession.py", "tx_0005_tax_dependencies.py"}
-    ),
+    "dotmac-tax": frozenset(),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
     "dotmac-fx-policy": frozenset(),

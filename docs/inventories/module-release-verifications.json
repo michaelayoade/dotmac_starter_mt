@@ -709,6 +709,28 @@
           "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-tax",
+      "version": "0.1.0a7",
+      "tag": "dotmac-tax-v0.1.0a7",
+      "tag_object": "5f719b8b21751e315f0fab223c3919fec57d2a5c",
+      "peeled_commit": "6e0a0078012da45782d800aee1ef9f720376fde3",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_tax-0.1.0a7-py3-none-any.whl": "0dc42a4a085303f53a77510f397bbbfe44abbc7f1cf87f313b3ebd9ea6ccd6ff"
+      },
+      "verification_run_id": "41233699619",
+      "source_run_id": "41233699619",
+      "release_authority_digest": "sha256:a3fc728bea077107e8284acd30bcfd8a0216dd46aed432e2423926dce07bb106",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
     }
   ]
 }
