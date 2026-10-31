@@ -214,7 +214,7 @@ dotmac-document-rendering = { path = "packages/dotmac-document-rendering", devel
 # machine over an injected channel, and limiter policy over an injected lock
 # store. Installed for verification here; no transport, credential or I/O.
 dotmac-device-cli = { path = "packages/dotmac-device-cli", develop = true }
-# Stateless layered-configuration composition engine (ADR-0074). Installed for
+# Stateless layered-configuration composition engine (ADR-0078). Installed for
 # verification here; this assembly does not compose it.
 dotmac-config-layers = { path = "packages/dotmac-config-layers", develop = true }
 dotmac-fulfillment = { path = "packages/dotmac-fulfillment", develop = true }
