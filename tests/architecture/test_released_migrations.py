@@ -7469,6 +7469,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payroll ──
+    "dotmac-payroll-v0.1.0a2": (
+        "dotmac-payroll",
+        "9ee4bdb4707ae250a7e64e3beb53c8e7aa17c0fa",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+        },
+    ),
     "dotmac-payroll-v0.1.0a1": (
         "dotmac-payroll",
         "20d24703e70e4d361de2f406165df4b36cbee507",
