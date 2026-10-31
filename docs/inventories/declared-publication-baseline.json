@@ -177,11 +177,6 @@
       "reason": "FIRST SOURCE, NOT YET PUBLISHED. 0.1.0a1 is the generic layered-composition engine ported from Dotmac Sub draft PR 3625 under ADR-0074 and the ADR-0017 owner-directed exception; it has no tag and no registry artifact. Publication is a release-captain action by Michael's go, in a gap between billing releases and before dotmac-routeros-config; no Sub pin, adoption or product writer change is claimed here. Remove this row only through the authorized release-record transition for dotmac-config-layers-v0.1.0a1.",
       "state": "never-published"
     },
-    "dotmac-ui": {
-      "declared": "0.1.0a9",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. The dashboard-primitives slice extends the a8 UI surface under the declared a9 identity. Hosted qualification, protected-main release authorization and an oracle-backed release record remain required. This row claims no artifact, publication, product adoption or writer retirement. Remove only through the authorized a9 release-record transition.",
-      "state": "declared-unpublished"
-    },
     "dotmac-integration": {
       "declared": "0.1.0a21",
       "reason": "ALLOCATED INTEGRATED DEVELOPMENT SOURCE, NOT PUBLISHED. Published a20 and ig_0017_provisioning remain immutable. The all-31 source integration adds PR883 dispatch snapshots as ig_0018, retained original context and grant-bound observations. No accepting production authority, startup credential-assignment producer, transport negotiation, enrollment or cutover is established. Remove only with the oracle-backed record of a verified authorized a21 publication. The published a20 record is NOT to be repaired by editing the version; a21 is the distinct unpublished source successor.",
