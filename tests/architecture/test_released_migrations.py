@@ -1949,6 +1949,48 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-billing ──
+    "dotmac-billing-v0.1.0a10": (
+        "dotmac-billing",
+        "6005ead65713a422271b68beea6a0da7c7c766a3",
+        {
+            "bi_0001_billing.py": (
+                "f82a962e7c0745cf11e2c8187042a5af412dd80a254be5b2e0975d0c7aa36373"
+            ),
+            "bi_0002_multiline.py": (
+                "08fd8d9e2c4f5586180066a831df93dc61b153178e61b7c07aa41aac8ea019c9"
+            ),
+            "bi_0003_issued_line_freeze.py": (
+                "ffcd0231cce9a4c7a0b1db668b258e8728d44e74a63d876ff5bbd9c574ed6f8f"
+            ),
+            "bi_0004_withholding_discharge.py": (
+                "348eb9a16c9eb84dca542a3ab004445d1ff52c3a74f5ef4427d073cdfb9fc9a3"
+            ),
+            "bi_0005_non_cash_credit.py": (
+                "2179d2fc20f2ea24378255f70d4da21223dcf9d2b3dc12b738334c483c338c3f"
+            ),
+            "bi_0006_cash_source_claim.py": (
+                "a9d26132d0825532831d463e5f0a661a866780c68ec6f69c7b307e4b7f0acff5"
+            ),
+            "bi_0007_opening_cash.py": (
+                "5e1cba7a3674fb03d6ed0b349c04a992e03a1bc9230ddcd44c004484b172f654"
+            ),
+            "bi_0008_opening_receivables.py": (
+                "d9b70b73c1265e1f9713c0751bbedbade65b0a26702ec1c162149f4e0d133ba1"
+            ),
+            "bi_0009_opening_window.py": (
+                "04e32fd5fa1e90ebf98c50d577349aa82feb4bf2453cd3b3dcc79ad3d9cd7f47"
+            ),
+            "bi_0010_line_source_key.py": (
+                "1ebbc2ef6ffc34abfb9789f51230321dc2ca977f1643f58de4cf2203c8d8a4fe"
+            ),
+            "bi_0011_settlement_earmarks.py": (
+                "0ce8eea45e33d38267884a860ae9550cc72f170dd71972385d2fe549e9bb1913"
+            ),
+            "bi_0012_tax_evidence.py": (
+                "47b6becfaa74ce741d31e453a036f54734f737284aadee8ec2aadca709d00ab8"
+            ),
+        },
+    ),
     "dotmac-billing-v0.1.0a8": (
         "dotmac-billing",
         "76c18287626ff6005b3b55bff41dd996800ffd03",
@@ -8038,7 +8080,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
     "dotmac-subscriptions": frozenset(),
-    "dotmac-billing": frozenset({"bi_0012_tax_evidence.py"}),
+    "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),

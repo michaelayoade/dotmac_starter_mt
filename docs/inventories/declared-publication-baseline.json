@@ -77,11 +77,6 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
-    "dotmac-billing": {
-      "declared": "0.1.0a10",
-      "reason": "UNPUBLISHED FINAL SUCCESSOR. a10 fully incorporates the a9 source-only Tax evidence allocation, immutable bi12, historical allocation getter and Tax V2 lineage through invoice V3/withholding V2. No verified a9 tag/release run or inspected consumer pin was found; do not publish a9 as an intermediate prerequisite. Last verified Billing baseline is a8. Hosted CI must qualify a8 bi11-to-bi12 on both planes, unchanged original V1/V2 reads, V3 graph replay and withholding evidence. Tax owns determination and opaque owner fingerprints; Billing binds all copied public content and original per-line commercial identities without sibling imports. Final serial publications are Payroll a2, Tax a7, Billing a10; exact verified artifact pins/locks and complete consumer CI precede staging. Source allocation grants no production authority. Remove only with verified a10 publication record.",
-      "state": "declared-unpublished"
-    },
     "dotmac-collections": {
       "declared": "0.1.0a2",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 proposes a fresh modern-provenance build under a new version; runtime behavior, public API and migrations remain unchanged from the published a1 source, and the Kernel floor remains >=0.1.0a89. The legacy a1 release is not reissued or relabeled. Hold pending root review and Michael's source/release authorization, acceptance of the Kernel a105 publication record on main, and a refreshed tag/census check before integration. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due; this proposal does not switch product authority. Remove this row only with the verified a2 publication record.",
