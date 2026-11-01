@@ -1501,6 +1501,170 @@ def resolve_lineage_inputs(
     return package_dir, resolved_import, digests
 
 
+def require_artifact_declaration(
+    *,
+    distribution: str,
+    tag: str,
+    artifact_dir: str | None,
+    expected_run_id: str | None,
+    expected_commit: str | None,
+    governed_modules: set[str],
+    legacy_module_tags: set[str],
+) -> None:
+    """Caller-input checks on the artifact declaration. Needs no tag, no git.
+
+    Shared by `write_record` and `preflight_record` so the two cannot drift.
+    """
+    if distribution in governed_modules and artifact_dir is None:
+        raise ReleaseRecordError(
+            f"{distribution} is a governed module: --artifact-dir with the "
+            "retained, registry-compared wheel is mandatory"
+        )
+    if artifact_dir is not None and distribution not in governed_modules:
+        raise ReleaseRecordError(
+            f"{distribution} is not governed by the module release lane"
+        )
+    if artifact_dir is not None and tag in legacy_module_tags:
+        raise ReleaseRecordError(
+            f"{tag} is frozen as pre-cutover unverified history; "
+            "do not relabel it as a verified new release"
+        )
+    if distribution in governed_modules and artifact_dir is not None:
+        if expected_run_id is None or expected_commit is None:
+            raise ReleaseRecordError(
+                f"{distribution} is a governed module: --expected-run-id and "
+                "--expected-commit are both mandatory so the record can only "
+                "bind to the tag this run itself created"
+            )
+
+
+#: What a pre-tag preflight cannot establish, printed so a green preflight is
+#: never read as more than it is.
+PREFLIGHT_SKIPPED = (
+    "tag existence and peeled commit (the tag is created after publication)",
+    "annotated-tag evidence (ModuleReleaseTagEvidence) vs the retained wheel",
+    "published-source census render from the tagged tree",
+    "kernel authorization (not a module-lane record)",
+)
+
+
+def preflight_record(
+    *,
+    distribution: str,
+    version: str,
+    tag: str,
+    package_dir: str | None,
+    import_name: str | None,
+    no_lineage: bool = False,
+    artifact_dir: str | None = None,
+    expected_run_id: str | None = None,
+    expected_commit: str | None = None,
+) -> list[str]:
+    """Run every record refusal that does not need the tag. Writes nothing.
+
+    The record step runs AFTER publish and tag; a refusal there leaves a tag
+    with no record and turns main red. Everything that can be decided from the
+    declaration, the tree and the built wheel is decided here, BEFORE publish.
+    `expected_commit` (the SHA that will be tagged) stands in for the tag when
+    reading the lineage from git: the tag will point at exactly that commit.
+    Returns the list of checks that passed; raises ReleaseRecordError otherwise.
+    """
+    expected_tag = f"{distribution}-v{version}"
+    if tag != expected_tag:
+        raise ReleaseRecordError(
+            f"tag/version identity mismatch: expected {expected_tag!r}, got {tag!r}"
+        )
+    if distribution == "dotmac-kernel":
+        raise ReleaseRecordError(
+            "preflight covers the module release lane only, not dotmac-kernel"
+        )
+    if expected_commit is None:
+        raise ReleaseRecordError(
+            "preflight needs --expected-commit: the SHA that will be tagged, "
+            "used to read the lineage in place of the tag that does not exist yet"
+        )
+    module_text = RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+    ledger_text = LEDGER.read_text(encoding="utf-8")
+    governed_modules = module_release_targets()
+    recorded_rows = parse_module_release_verifications(
+        MODULE_RELEASE_VERIFICATIONS.read_text(encoding="utf-8"),
+        targets=governed_modules,
+    )
+    for recorded in recorded_rows.values():
+        if recorded["tag"] == tag or (
+            recorded["distribution"],
+            recorded["version"],
+        ) == (distribution, version):
+            raise ReleaseRecordError(
+                f"a verification row for {distribution} {version} / {tag} already "
+                "exists; add_module_release_verification would refuse the record "
+                "after tagging"
+            )
+    legacy_module_tags = parse_legacy_module_tags(
+        MODULE_RELEASE_LEGACY.read_text(encoding="utf-8"), targets=governed_modules
+    )
+    resolved_dir, resolved_import, digests = resolve_lineage_inputs(
+        distribution=distribution,
+        tag=expected_commit,
+        package_dir=package_dir,
+        import_name=import_name,
+        no_lineage=no_lineage,
+        module_text=module_text,
+    )
+    passed = ["lineage declaration agrees with the tree and RELEASED_TAGS"]
+    if resolved_dir and resolved_import and digests:
+        # The oracle's history is the tags that already exist plus this release
+        # at the SHA it will be tagged on, so add_released_tag's refusals are
+        # knowable now. Run in memory; the returned text is discarded.
+        history: dict[str, tuple[str, dict[str, str]]] = {
+            existing_tag: (
+                tag_commit(existing_tag),
+                migration_digests(existing_tag, resolved_dir, resolved_import),
+            )
+            for existing_tag in _git(
+                "tag", "--list", "--sort=-version:refname", f"{distribution}-v*"
+            ).splitlines()
+            if existing_tag != tag
+        }
+        history[tag] = (expected_commit, digests)
+        add_released_tag(
+            module_text,
+            tag,
+            distribution,
+            expected_commit,
+            digests,
+            package_dir=resolved_dir,
+            import_name=resolved_import,
+            historical_releases=history,
+        )
+        passed.append(
+            "RELEASED_TAGS reconciliation simulated in memory against existing "
+            "tags plus this release at the commit to be tagged"
+        )
+    require_artifact_declaration(
+        distribution=distribution,
+        tag=tag,
+        artifact_dir=artifact_dir,
+        expected_run_id=expected_run_id,
+        expected_commit=expected_commit,
+        governed_modules=governed_modules,
+        legacy_module_tags=legacy_module_tags,
+    )
+    passed.append("artifact declaration (governed, run id, commit, not legacy)")
+    row = json.loads(ledger_text)["unpublished"].get(distribution)
+    if row is not None and row.get("declared") != version:
+        raise ReleaseRecordError(
+            f"the ledger excuses {distribution} at {row.get('declared')!r} but "
+            f"{version!r} would be published; the row describes a different "
+            "version and removing it would erase a live exemption"
+        )
+    passed.append("publication-ledger row matches the version")
+    if artifact_dir is not None:
+        module_wheel_digest(artifact_dir, distribution=distribution, version=version)
+        passed.append("exactly one wheel binding the distribution and version")
+    return passed
+
+
 def write_record(
     *,
     distribution: str,
@@ -1565,32 +1729,21 @@ def write_record(
     # a state problem. Checking it before the ledger read means the refusal
     # names the actual mistake instead of surfacing whatever unrelated ledger
     # bookkeeping happens to run first for this distribution.
-    if distribution in governed_modules and artifact_dir is None:
-        raise ReleaseRecordError(
-            f"{distribution} is a governed module: --artifact-dir with the "
-            "retained, registry-compared wheel is mandatory"
-        )
-    if artifact_dir is not None and distribution not in governed_modules:
-        raise ReleaseRecordError(
-            f"{distribution} is not governed by the module release lane"
-        )
-    if artifact_dir is not None and tag in legacy_module_tags:
-        raise ReleaseRecordError(
-            f"{tag} is frozen as pre-cutover unverified history; "
-            "do not relabel it as a verified new release"
-        )
+    require_artifact_declaration(
+        distribution=distribution,
+        tag=tag,
+        artifact_dir=artifact_dir,
+        expected_run_id=expected_run_id,
+        expected_commit=expected_commit,
+        governed_modules=governed_modules,
+        legacy_module_tags=legacy_module_tags,
+    )
     # A governed module's recorder must bind to the tag ITS OWN run created —
     # not any pre-existing tag whose evidence happens to match the wheel. The
     # tag-refusal step upstream stops a foreign push from landing the tag, but
     # `if: always()` means this step still runs after that refusal, and would
     # otherwise silently record whatever tag already exists at this name.
     if distribution in governed_modules and artifact_dir is not None:
-        if expected_run_id is None or expected_commit is None:
-            raise ReleaseRecordError(
-                f"{distribution} is a governed module: --expected-run-id and "
-                "--expected-commit are both mandatory so the record can only "
-                "bind to the tag this run itself created"
-            )
         if commit != expected_commit:
             raise ReleaseRecordError(
                 f"{tag} points at commit {commit}, not the expected "
@@ -1797,6 +1950,12 @@ def main(argv: list[str] | None = None) -> int:
         "mandatory for a governed module with --artifact-dir",
     )
     parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="validate every refusal that does not need the tag, write nothing, "
+        "touch no git state; requires --expected-commit (the SHA to be tagged)",
+    )
+    parser.add_argument(
         "--adopting-run-id",
         default=None,
         help="recovery only: this recovery run's id when it ADOPTED a tag the "
@@ -1809,6 +1968,29 @@ def main(argv: list[str] | None = None) -> int:
     import_name = args.import_name
     if args.package_dir and not import_name:
         import_name = args.package_dir.rstrip("/").rsplit("/", 1)[-1].replace("-", "_")
+
+    if args.preflight:
+        try:
+            passed = preflight_record(
+                distribution=args.distribution,
+                version=args.version,
+                tag=args.tag,
+                package_dir=args.package_dir,
+                import_name=import_name,
+                no_lineage=args.no_lineage,
+                artifact_dir=args.artifact_dir,
+                expected_run_id=args.expected_run_id,
+                expected_commit=args.expected_commit,
+            )
+        except ReleaseRecordError as failure:
+            print(f"release record preflight REFUSED: {failure}", file=sys.stderr)
+            return 1
+        for line in passed:
+            print(f"  ok: {line}")
+        for line in PREFLIGHT_SKIPPED:
+            print(f"  SKIPPED (needs the tag): {line}")
+        print(f"release record preflight for {args.tag} passed; nothing written")
+        return 0
 
     try:
         changed = write_record(
