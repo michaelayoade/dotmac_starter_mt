@@ -329,7 +329,8 @@ git push --force-with-lease origin "${BRANCH}" --quiet \
 # CLOSED one that used the same branch name, so no new PR was created and the
 # auto-merge below then targeted the closed PR.
 PR_NUMBER="$(gh pr list --head "${BRANCH}" --state open \
-  --json number --jq '.[0].number // empty')" \
+  --json number,isCrossRepository \
+  --jq 'map(select(.isCrossRepository|not))|.[0].number // empty')" \
   || give_up "could not look up open pull requests for ${BRANCH}"
 
 if [ -z "${PR_NUMBER}" ]; then
@@ -349,7 +350,8 @@ This bookkeeping pull request is configured to squash-merge automatically as
 soon as every protected-main check is green." \
     || give_up "could not open the pull request (branch ${BRANCH} is pushed)"
   PR_NUMBER="$(gh pr list --head "${BRANCH}" --state open \
-    --json number --jq '.[0].number // empty')" \
+    --json number,isCrossRepository \
+    --jq 'map(select(.isCrossRepository|not))|.[0].number // empty')" \
     || give_up "could not look up the pull request just opened for ${BRANCH}"
   [ -n "${PR_NUMBER}" ] \
     || give_up "could not determine the number of the pull request opened for ${BRANCH}"
@@ -357,7 +359,8 @@ else
   echo "pull request #${PR_NUMBER} for ${BRANCH} already exists — updated it"
 fi
 
-# By NUMBER, never by branch name.
+# By NUMBER, never by branch name. Fork PRs are excluded above (isCrossRepository):
+# a fork can carry the same branch name and must never be auto-merged here.
 gh pr merge "${PR_NUMBER}" --auto --squash \
   || give_up "could not enable auto-merge for #${PR_NUMBER} (${BRANCH})"
 

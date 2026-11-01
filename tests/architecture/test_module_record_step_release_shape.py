@@ -78,3 +78,14 @@ def test_record_script_uses_open_pr_lookup_and_merges_by_number() -> None:
     assert 'gh pr merge "${BRANCH}"' not in script
     # the number is re-read after create and the script fails closed without it
     assert "could not determine the number of the pull request" in script
+
+
+def test_record_script_excludes_fork_prs_in_every_lookup() -> None:
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "open_release_record_pr.sh"
+    ).read_text(encoding="utf-8")
+    lookups = script.count("gh pr list --head")
+    assert lookups == 2  # initial lookup and the re-read after create
+    assert script.count("--json number,isCrossRepository") == lookups
+    assert script.count("map(select(.isCrossRepository|not))") == lookups
+    assert "--json number --jq" not in script
