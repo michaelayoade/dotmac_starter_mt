@@ -789,6 +789,66 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-integration-v0.1.0a21": (
+        "dotmac-integration",
+        "ff54fffa569e4f0319d87025276c67ca97c0accc",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+            "ig_0008_platform_audit_log.py": (
+                "1e2cb215be0e71edf1af33b41cd53630ba9583168c2ff270c568483fdff15825"
+            ),
+            "ig_0009_product_port_descriptors.py": (
+                "f95ec953d0ec9d561b5d7d438d1865e817fc4d15b2178c87e5f67350a07ab2d9"
+            ),
+            "ig_0010_shadow_evidence.py": (
+                "eb897df97435c63ec4844753d8afa497391fa2eabfa0673312725995c231b4ed"
+            ),
+            "ig_0011_replay_retention.py": (
+                "96336372ac879518ad46f6657b8c81cf60afd133d500c4bc6310017f94c59b42"
+            ),
+            "ig_0012_delivery_evidence.py": (
+                "61ef4e096dae74b7646608257614f4497af125edda63a6c270e402a63c2cfdd3"
+            ),
+            "ig_0013_delivery_result.py": (
+                "28dfc210785c3c22a8d883239fe37727cbf14dc80e7e26058df4d32f387f14ea"
+            ),
+            "ig_0014_polling_evidence.py": (
+                "07dea79c6650aefd205bb67500abf08cb9f0464766d470bb218ec181302549be"
+            ),
+            "ig_0015_descriptor_contract.py": (
+                "ea7f03fcd60eee9688846f67934b9d56a5451020e46514ad8a379bd8e8b85503"
+            ),
+            "ig_0016_receipt_origin.py": (
+                "4ecc59c0ddb4a7d38595088f378515d8d2ca53565439f71d04378844e5f0a6a1"
+            ),
+            "ig_0017_provisioning.py": (
+                "76357d8b1b78895cd2538899edbc5fc622ced9c00ee569eef0dba95b16b8c4a0"
+            ),
+            "ig_0018_dispatch_snapshot.py": (
+                "dbcb771d26d2e7328738dd429c2c010b10d0b87815fcddb0412bf09a3a504f60"
+            ),
+        },
+    ),
     "dotmac-integration-v0.1.0a20": (
         "dotmac-integration",
         "7a9bfbef6a24070bea97b4490d7e6074de714552",
@@ -1759,6 +1819,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         {
             "wr_0001_runtime.py": (
                 "f959ef451f951e8c1bf314f8e1e4438731685f5aaf040c8a01bae4da3bb8311f"
+            ),
+        },
+    ),
+    "dotmac-platform-health-v0.2.0a1": (
+        "dotmac-platform-health",
+        "a0446cb76fd665cbd43aab5d9cec3502e6cd9874",
+        {
+            "ph_0001_platform_health.py": (
+                "ed2be6b9a295f0e5a25f45c8d32e4168a33a25ecc4a59a69b0633606c1d52b9e"
+            ),
+            "ph_0002_observation_freshness_snapshot.py": (
+                "9bdeef0f88564bb427495e8cc61f85e7af9c8e644b6bc034883d5167299d9536"
+            ),
+            "ph_0003_enrollment_grants.py": (
+                "72f461ff42575dac6907c87a99b6fd8f4dfab6bbbb0dfb9eff8a7e123f6565b3"
             ),
         },
     ),
@@ -7395,6 +7470,24 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-ipam ──
+    "dotmac-ipam-v0.2.0a1": (
+        "dotmac-ipam",
+        "72e62c67c6b2dc803db4fbc86a1345d725c6449c",
+        {
+            "ip_0001_ipam.py": (
+                "ac7292ca9cf580d5a9d00f56160e15482dc57ce3491940559f76056c987e5198"
+            ),
+            "ip_0002_extracted.py": (
+                "a94bb987107c1a8e63050031cad46772e930e9970924a1ece8cd07aa5b8d2d44"
+            ),
+            "ip_0003_outbox_relay.py": (
+                "8a37994ee1177532824cf03d83ac81884cdf35ca9c291ae72fdab2faefeb288f"
+            ),
+            "ip_0004_import_idempotency.py": (
+                "4d19fe4d92ad63184290b80e6cd127bd88fd7481670090aa48ed5c09648f6ca3"
+            ),
+        },
+    ),
     "dotmac-ipam-v0.1.0a1": (
         "dotmac-ipam",
         "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
@@ -8046,7 +8139,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ig_0017` adds the durable PROVISION runtime tables and the SPI 1.7
     # fleet-target revision column; still editable until the protected
     # release tags the integration version that carries it.
-    "dotmac-integration": frozenset({"ig_0018_dispatch_snapshot.py"}),
+    "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),
@@ -8054,9 +8147,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ph_0002` snapshots each observation's freshness policy at acceptance,
     # so a later policy change cannot reclassify an unchanged observation.
     # Still editable: `dotmac-platform-health` has no released tag carrying it.
-    "dotmac-platform-health": frozenset(
-        {"ph_0002_observation_freshness_snapshot.py", "ph_0003_enrollment_grants.py"}
-    ),
+    "dotmac-platform-health": frozenset(),
     "dotmac-support-access": frozenset(),
     "dotmac-remote-access": frozenset(),
     "dotmac-compliance-reporting": frozenset(),
@@ -8118,13 +8209,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ip_0002_extracted` is the additive 0.2.0a1 extraction revision (refuses
     # to run over any 0.1 template row). Still editable: no released tag
     # carries it yet; `ip_0001_ipam.py` stays byte-frozen by the 0.1.0a1 entry.
-    "dotmac-ipam": frozenset(
-        {
-            "ip_0002_extracted.py",
-            "ip_0003_outbox_relay.py",
-            "ip_0004_import_idempotency.py",
-        }
-    ),
+    "dotmac-ipam": frozenset(),
     "dotmac-licensing": frozenset(),
     "dotmac-media-observations": frozenset(),
     "dotmac-network-access": frozenset(),

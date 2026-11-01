@@ -775,6 +775,72 @@
           "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-integration",
+      "version": "0.1.0a21",
+      "tag": "dotmac-integration-v0.1.0a21",
+      "tag_object": "fc4787c729c40c40ebd5b4c56dd92f4ffbbd1ded",
+      "peeled_commit": "ff54fffa569e4f0319d87025276c67ca97c0accc",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_integration-0.1.0a21-py3-none-any.whl": "deff40c8837b252fcab21f1444b54151cdc70c42ff14436d97527017ec74fe2b"
+      },
+      "verification_run_id": "41320250563",
+      "source_run_id": "41320250563",
+      "release_authority_digest": "sha256:f3e8ede667530922296b29ff8f6ab49f22fb3270a7e9abffe00682c19c8a0af8",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-platform-health",
+      "version": "0.2.0a1",
+      "tag": "dotmac-platform-health-v0.2.0a1",
+      "tag_object": "f2489559882be51c602c75ac4e94d7956e1d23b5",
+      "peeled_commit": "a0446cb76fd665cbd43aab5d9cec3502e6cd9874",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_platform_health-0.2.0a1-py3-none-any.whl": "2e8e8a48f0e6b991f7a9f9db8c6cc07d9c8447095b0c3baca8e19f89f22faf7b"
+      },
+      "verification_run_id": "41327347935",
+      "source_run_id": "41327347935",
+      "release_authority_digest": "sha256:f3e8ede667530922296b29ff8f6ab49f22fb3270a7e9abffe00682c19c8a0af8",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-ipam",
+      "version": "0.2.0a1",
+      "tag": "dotmac-ipam-v0.2.0a1",
+      "tag_object": "797bdbe1f4a90ed6ea1b3eb8a465086208c3e42e",
+      "peeled_commit": "72e62c67c6b2dc803db4fbc86a1345d725c6449c",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_ipam-0.2.0a1-py3-none-any.whl": "d3c919a1253b5304b0927d93d032735bae2f109b37d0b1446b17da336659d944"
+      },
+      "verification_run_id": "41335852057",
+      "source_run_id": "41335852057",
+      "release_authority_digest": "sha256:f3e8ede667530922296b29ff8f6ab49f22fb3270a7e9abffe00682c19c8a0af8",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
     }
   ]
 }
