@@ -1543,8 +1543,6 @@ def require_artifact_declaration(
 PREFLIGHT_SKIPPED = (
     "tag existence and peeled commit (the tag is created after publication)",
     "annotated-tag evidence (ModuleReleaseTagEvidence) vs the retained wheel",
-    "tag oracle: published_release_history / RELEASED_TAGS reconciliation "
-    "for a stateful first enrolment",
     "published-source census render from the tagged tree",
     "kernel authorization (not a module-lane record)",
 )
@@ -1588,14 +1586,24 @@ def preflight_record(
     module_text = RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
     ledger_text = LEDGER.read_text(encoding="utf-8")
     governed_modules = module_release_targets()
-    parse_module_release_verifications(
+    recorded_rows = parse_module_release_verifications(
         MODULE_RELEASE_VERIFICATIONS.read_text(encoding="utf-8"),
         targets=governed_modules,
     )
+    for recorded in recorded_rows.values():
+        if recorded["tag"] == tag or (
+            recorded["distribution"],
+            recorded["version"],
+        ) == (distribution, version):
+            raise ReleaseRecordError(
+                f"a verification row for {distribution} {version} / {tag} already "
+                "exists; add_module_release_verification would refuse the record "
+                "after tagging"
+            )
     legacy_module_tags = parse_legacy_module_tags(
         MODULE_RELEASE_LEGACY.read_text(encoding="utf-8"), targets=governed_modules
     )
-    resolve_lineage_inputs(
+    resolved_dir, resolved_import, digests = resolve_lineage_inputs(
         distribution=distribution,
         tag=expected_commit,
         package_dir=package_dir,
@@ -1604,6 +1612,35 @@ def preflight_record(
         module_text=module_text,
     )
     passed = ["lineage declaration agrees with the tree and RELEASED_TAGS"]
+    if resolved_dir and resolved_import and digests:
+        # The oracle's history is the tags that already exist plus this release
+        # at the SHA it will be tagged on, so add_released_tag's refusals are
+        # knowable now. Run in memory; the returned text is discarded.
+        history: dict[str, tuple[str, dict[str, str]]] = {
+            existing_tag: (
+                tag_commit(existing_tag),
+                migration_digests(existing_tag, resolved_dir, resolved_import),
+            )
+            for existing_tag in _git(
+                "tag", "--list", "--sort=-version:refname", f"{distribution}-v*"
+            ).splitlines()
+            if existing_tag != tag
+        }
+        history[tag] = (expected_commit, digests)
+        add_released_tag(
+            module_text,
+            tag,
+            distribution,
+            expected_commit,
+            digests,
+            package_dir=resolved_dir,
+            import_name=resolved_import,
+            historical_releases=history,
+        )
+        passed.append(
+            "RELEASED_TAGS reconciliation simulated in memory against existing "
+            "tags plus this release at the commit to be tagged"
+        )
     require_artifact_declaration(
         distribution=distribution,
         tag=tag,
