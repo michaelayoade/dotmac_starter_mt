@@ -1822,6 +1822,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-platform-health-v0.2.0a1": (
+        "dotmac-platform-health",
+        "a0446cb76fd665cbd43aab5d9cec3502e6cd9874",
+        {
+            "ph_0001_platform_health.py": (
+                "ed2be6b9a295f0e5a25f45c8d32e4168a33a25ecc4a59a69b0633606c1d52b9e"
+            ),
+            "ph_0002_observation_freshness_snapshot.py": (
+                "9bdeef0f88564bb427495e8cc61f85e7af9c8e644b6bc034883d5167299d9536"
+            ),
+            "ph_0003_enrollment_grants.py": (
+                "72f461ff42575dac6907c87a99b6fd8f4dfab6bbbb0dfb9eff8a7e123f6565b3"
+            ),
+        },
+    ),
     "dotmac-platform-health-v0.1.0a1": (
         "dotmac-platform-health",
         "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
@@ -8114,9 +8129,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ph_0002` snapshots each observation's freshness policy at acceptance,
     # so a later policy change cannot reclassify an unchanged observation.
     # Still editable: `dotmac-platform-health` has no released tag carrying it.
-    "dotmac-platform-health": frozenset(
-        {"ph_0002_observation_freshness_snapshot.py", "ph_0003_enrollment_grants.py"}
-    ),
+    "dotmac-platform-health": frozenset(),
     "dotmac-support-access": frozenset(),
     "dotmac-remote-access": frozenset(),
     "dotmac-compliance-reporting": frozenset(),
