@@ -139,7 +139,7 @@ def test_workflow_lineage_declaration_is_valid_for_the_tree(
         version=version,
         tag=f"{distribution}-v{version}",
         package_dir=args.get("--package-dir"),
-        import_name=facts["import_name"] if args else None,
+        import_name=None,  # derived from package_dir, as the workflow does
         no_lineage="--no-lineage" in flags,
         artifact_dir=str(dist),
         expected_run_id="1",

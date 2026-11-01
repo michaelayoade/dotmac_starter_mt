@@ -217,15 +217,66 @@ def test_release_module_preflights_in_build_before_any_publish() -> None:
         if s.get("name", "").startswith("Preflight")
     )
     assert "if" not in step, "preflight must not be skippable"
+    assert "continue-on-error" not in step, "preflight must not be advisory"
     assert "--preflight" in step["run"]
     assert "FORGEJO" not in str(step), "the build job holds no registry credential"
 
 
 def test_recovery_preflights_before_it_tags() -> None:
-    names = [s.get("name") for s in _steps("recover-module-release.yml")]
+    steps = _steps("recover-module-release.yml")
+    names = [s.get("name") for s in steps]
     assert names.index("Preflight the release record") < names.index(
         "Tag the recovered release"
     )
+    step = steps[names.index("Preflight the release record")]
+    assert "if" not in step, "recovery preflight must not be skippable"
+    assert "continue-on-error" not in step, "preflight must not be advisory"
+
+
+def _anchored(writer) -> str:
+    return sorted(
+        writer.anchored_distributions(
+            writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+        )
+        & writer.module_release_targets()
+    )[0]
+
+
+def test_preflight_simulates_the_tag_oracle_reconciliation(tmp_path) -> None:
+    writer = _writer()
+    kwargs = _inputs(writer, tmp_path, _anchored(writer))
+    kwargs["package_dir"] = f"packages/{kwargs['distribution']}"
+    passed = writer.preflight_record(**kwargs)
+    assert any("RELEASED_TAGS reconciliation simulated" in line for line in passed)
+    assert not any("oracle" in line for line in writer.PREFLIGHT_SKIPPED)
+
+
+def test_preflight_refuses_a_changed_historical_record(tmp_path, monkeypatch) -> None:
+    """A recorded tag whose coordinates differ from the oracle is refused before
+    publication, not after tagging."""
+    writer = _writer()
+    distribution = _anchored(writer)
+    text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+    releases = writer._released_tags(text)
+    commit = next(c for o, c, _ in releases.values() if o == distribution)
+    tampered = tmp_path / "released_tags.py"
+    tampered.write_text(text.replace(commit, "f" * 40), encoding="utf-8")
+    monkeypatch.setattr(writer, "RELEASED_TAGS_MODULE", tampered)
+    kwargs = _inputs(writer, tmp_path, distribution)
+    kwargs["package_dir"] = f"packages/{distribution}"
+    with pytest.raises(writer.ReleaseRecordError, match="already recorded"):
+        writer.preflight_record(**kwargs)
+
+
+def test_preflight_refuses_an_existing_verification_row(tmp_path) -> None:
+    writer = _writer()
+    row = json.loads(writer.MODULE_RELEASE_VERIFICATIONS.read_text("utf-8"))[
+        "releases"
+    ][0]
+    kwargs = _inputs(writer, tmp_path, row["distribution"])
+    kwargs.update(version=row["version"], tag=row["tag"], no_lineage=True)
+    with pytest.raises(writer.ReleaseRecordError, match="verification row"):
+        writer.preflight_record(**kwargs)
 
 
 def test_preflight_and_record_steps_declare_the_same_lineage() -> None:
