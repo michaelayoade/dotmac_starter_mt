@@ -272,6 +272,34 @@ jobs:
             --kernel "${COMPOSE_KERNEL}" \
             "${PINS[@]}"
 
+      # Record preflight, before the tag exists: every record refusal that does
+      # not need the tag surfaces here instead of after it (a tag without a
+      # record turns main red). Same lineage declaration as the record step;
+      # non-mutating; tag-dependent checks are reported as SKIPPED.
+      - name: Preflight the release record
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          PACKAGE_DIR: ${{ steps.target.outputs.package_dir }}
+          RELEASE_SHAPE: ${{ steps.target.outputs.release_shape }}
+          ORIGIN_SHA: ${{ steps.origin.outputs.sha }}
+        run: |
+          case "$RELEASE_SHAPE" in
+            stateless) LINEAGE=(--no-lineage) ;;
+            stateful)  LINEAGE=(--package-dir "$PACKAGE_DIR") ;;
+            *)
+              echo "release record preflight REFUSED: release_shape='${RELEASE_SHAPE}' is neither stateless nor stateful; not guessing lineage" >&2
+              exit 1
+              ;;
+          esac
+          python scripts/write_release_record.py --preflight \
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            "${LINEAGE[@]}" \
+            --artifact-dir "$RECOVERED_DIST" \
+            --expected-run-id "$RUN_ID" \
+            --expected-commit "${ORIGIN_SHA}"
+
       # Only after every check: write the tag the failed run never wrote, on the
       # ORIGINAL SHA. Same canonical `ModuleReleaseTagEvidence.v1` evidence and
       # fail-closed refusal as an ordinary release — no separate "RECOVERED"

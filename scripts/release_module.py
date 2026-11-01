@@ -500,6 +500,11 @@ def local_first_party_dependencies(entry: dict) -> list[Path]:
     return [found[name] for name in sorted(found)]
 
 
+def release_shape(entry: dict) -> str:
+    """`stateless` when the allowlist db_schema is null, else `stateful`."""
+    return "stateless" if entry["db_schema"] is None else "stateful"
+
+
 def cmd_resolve(args: argparse.Namespace) -> None:
     entry = resolve(args.distribution)
     manifest = _declared(entry)
@@ -551,10 +556,8 @@ def cmd_resolve(args: argparse.Namespace) -> None:
         "tag_prefix",
     ):
         print(f"{key}={entry[key]}")
-    if entry["db_schema"] is None:
-        print("release_shape=stateless")
-    else:
-        print("release_shape=stateful")
+    print(f"release_shape={release_shape(entry)}")
+    if entry["db_schema"] is not None:
         print(f"db_schema={entry['db_schema']}")
     print(f"version={manifest['version']}")
     print(f"tag={entry['tag_prefix']}{manifest['version']}")
