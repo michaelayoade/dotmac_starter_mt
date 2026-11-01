@@ -325,7 +325,14 @@ publication, which is exactly what the immutability gate exists to refuse." \
 git push --force-with-lease origin "${BRANCH}" --quiet \
   || give_up "could not push ${BRANCH}"
 
-if ! gh pr view "${BRANCH}" --json number >/dev/null 2>&1; then
+# Only an OPEN pull request counts. a by-branch view also resolves a
+# CLOSED one that used the same branch name, so no new PR was created and the
+# auto-merge below then targeted the closed PR.
+PR_NUMBER="$(gh pr list --head "${BRANCH}" --state open \
+  --json number --jq '.[0].number // empty')" \
+  || give_up "could not look up open pull requests for ${BRANCH}"
+
+if [ -z "${PR_NUMBER}" ]; then
   gh pr create \
     --base main \
     --head "${BRANCH}" \
@@ -341,11 +348,17 @@ Both edits are mechanical. The publication-ledger row is removed as *text*, so t
 This bookkeeping pull request is configured to squash-merge automatically as
 soon as every protected-main check is green." \
     || give_up "could not open the pull request (branch ${BRANCH} is pushed)"
+  PR_NUMBER="$(gh pr list --head "${BRANCH}" --state open \
+    --json number --jq '.[0].number // empty')" \
+    || give_up "could not look up the pull request just opened for ${BRANCH}"
+  [ -n "${PR_NUMBER}" ] \
+    || give_up "could not determine the number of the pull request opened for ${BRANCH}"
 else
-  echo "a pull request for ${BRANCH} already exists — updated it"
+  echo "pull request #${PR_NUMBER} for ${BRANCH} already exists — updated it"
 fi
 
-gh pr merge "${BRANCH}" --auto --squash \
-  || give_up "could not enable auto-merge for ${BRANCH}"
+# By NUMBER, never by branch name.
+gh pr merge "${PR_NUMBER}" --auto --squash \
+  || give_up "could not enable auto-merge for #${PR_NUMBER} (${BRANCH})"
 
 echo "post-release record opened with auto-merge enabled for ${TAG}"

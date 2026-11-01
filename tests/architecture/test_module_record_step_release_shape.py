@@ -65,3 +65,16 @@ def test_release_module_carries_shape_from_resolver() -> None:
 def test_recover_carries_shape_from_target_step() -> None:
     step = _record_step("recover-module-release.yml")
     assert step["env"]["RELEASE_SHAPE"] == "${{ steps.target.outputs.release_shape }}"
+
+
+def test_record_script_uses_open_pr_lookup_and_merges_by_number() -> None:
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "open_release_record_pr.sh"
+    ).read_text(encoding="utf-8")
+    # a closed PR with the same branch name must never be adopted
+    assert "gh pr view" not in script
+    assert "gh pr list --head" in script and "--state open" in script
+    assert 'gh pr merge "${PR_NUMBER}" --auto --squash' in script
+    assert 'gh pr merge "${BRANCH}"' not in script
+    # the number is re-read after create and the script fails closed without it
+    assert "could not determine the number of the pull request" in script
