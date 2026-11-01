@@ -215,6 +215,37 @@ jobs:
           python scripts/release_module.py inspect "$MODULE" \
             --dist "$PACKAGE_DIR/dist"
 
+      # Record preflight. The record step runs AFTER publish and tag; a refusal
+      # there leaves a tag with no record and turns main's `unit` red, which
+      # blocks every PR including the fix (dotmac-config-layers 0.1.0a1). Run
+      # the writer's tag-independent validation here, with the SAME lineage
+      # declaration the record step will pass, against the just-built dist.
+      # Non-mutating; the tag oracle and tag evidence cannot be checked before
+      # the tag exists and are reported as SKIPPED. No registry credential.
+      - name: Preflight the release record
+        env:
+          PACKAGE_DIR: ${{ steps.resolve.outputs.package_dir }}
+          RELEASE_SHAPE: ${{ steps.resolve.outputs.release_shape }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          case "$RELEASE_SHAPE" in
+            stateless) LINEAGE=(--no-lineage) ;;
+            stateful)  LINEAGE=(--package-dir "$PACKAGE_DIR") ;;
+            *)
+              echo "release record preflight REFUSED: release_shape='${RELEASE_SHAPE}' is neither stateless nor stateful; not guessing lineage" >&2
+              exit 1
+              ;;
+          esac
+          python scripts/write_release_record.py --preflight \
+            --distribution "$MODULE" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            "${LINEAGE[@]}" \
+            --artifact-dir "$PACKAGE_DIR/dist" \
+            --expected-run-id "$RUN_ID" \
+            --expected-commit "${GITHUB_SHA}"
+
       # The smoke needs a kernel ARTIFACT. The module floors at the release
       # that allocated its schema, and that kernel may not be published yet —
       # this step runs before any publication. Building it here keeps the smoke
