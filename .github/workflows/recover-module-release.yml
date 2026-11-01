@@ -334,6 +334,7 @@ jobs:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.target.outputs.tag }}
           PACKAGE_DIR: ${{ steps.target.outputs.package_dir }}
+          RELEASE_SHAPE: ${{ steps.target.outputs.release_shape }}
           ORIGIN_SHA: ${{ steps.origin.outputs.sha }}
         run: |
           # An adopted tag was written by the ORIGINAL run; this recovery run is
@@ -345,11 +346,22 @@ jobs:
             EXPECTED_RUN="$RUN_ID"
             ADOPTING=()
           fi
+          # Lineage flag follows the resolver's release_shape, never inferred
+          # from the tree: a stateless distribution carries no migration, so
+          # --package-dir would be refused as UNREADABLE lineage.
+          case "$RELEASE_SHAPE" in
+            stateless) LINEAGE=(--no-lineage) ;;
+            stateful)  LINEAGE=(--package-dir "$PACKAGE_DIR") ;;
+            *)
+              echo "release record REFUSED: release_shape='${RELEASE_SHAPE}' is neither stateless nor stateful; not guessing lineage" >&2
+              exit 1
+              ;;
+          esac
           bash scripts/open_release_record_pr.sh \
             --distribution "$MODULE" \
             --version "$VERSION" \
             --tag "$TAG" \
-            --package-dir "$PACKAGE_DIR" \
+            "${LINEAGE[@]}" \
             --artifact-dir "$RECOVERED_DIST" \
             --expected-run-id "$EXPECTED_RUN" \
             "${ADOPTING[@]}" \

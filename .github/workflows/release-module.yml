@@ -167,6 +167,7 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       package_dir: ${{ steps.resolve.outputs.package_dir }}
+      release_shape: ${{ steps.resolve.outputs.release_shape }}
       tag: ${{ steps.resolve.outputs.tag }}
       kernel_floor: ${{ steps.resolve.outputs.kernel_floor }}
     env:
@@ -477,6 +478,7 @@ jobs:
       VERSION: ${{ inputs.version }}
       TAG: ${{ needs.build.outputs.tag }}
       PACKAGE_DIR: ${{ needs.build.outputs.package_dir }}
+      RELEASE_SHAPE: ${{ needs.build.outputs.release_shape }}
       RUN_ID: ${{ github.run_id }}
       COMPOSE_WITH: ${{ inputs.compose_with }}
       COMPOSE_KERNEL: ${{ inputs.compose_kernel }}
@@ -641,11 +643,22 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
+          # Lineage flag follows the resolver's release_shape, never inferred
+          # from the tree: a stateless distribution carries no migration, so
+          # --package-dir would be refused as UNREADABLE lineage.
+          case "$RELEASE_SHAPE" in
+            stateless) LINEAGE=(--no-lineage) ;;
+            stateful)  LINEAGE=(--package-dir "$PACKAGE_DIR") ;;
+            *)
+              echo "release record REFUSED: release_shape='${RELEASE_SHAPE}' is neither stateless nor stateful; not guessing lineage" >&2
+              exit 1
+              ;;
+          esac
           bash scripts/open_release_record_pr.sh \
             --distribution "$MODULE" \
             --version "$VERSION" \
             --tag "$TAG" \
-            --package-dir "$PACKAGE_DIR" \
+            "${LINEAGE[@]}" \
             --artifact-dir "${ARTIFACT_DIR}" \
             --expected-run-id "$RUN_ID" \
             --expected-commit "${GITHUB_SHA}"

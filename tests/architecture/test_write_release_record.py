@@ -931,13 +931,14 @@ def test_kernel_evidence_and_general_record_are_staged_before_one_commit() -> No
 
 def _record_auto_merge_problems(script: str) -> list[str]:
     problems: list[str] = []
-    command = 'gh pr merge "${BRANCH}" --auto --squash'
+    command = 'gh pr merge "${PR_NUMBER}" --auto --squash'
     if command not in script:
         problems.append("the record PR must enable squash auto-merge")
         return problems
     if script.index(command) < script.index("gh pr create"):
         problems.append("auto-merge is enabled before the record PR is opened")
-    if 'give_up "could not enable auto-merge for ${BRANCH}"' not in script:
+    refusal = 'give_up "could not enable auto-merge for #${PR_NUMBER} (${BRANCH})"'
+    if refusal not in script:
         problems.append("an auto-merge refusal must fail the release loudly")
     return problems
 
@@ -956,8 +957,8 @@ def test_record_auto_merge_guard_detects_a_manual_merge_regression() -> None:
         encoding="utf-8"
     )
     planted = script.replace(
-        'gh pr merge "${BRANCH}" --auto --squash',
-        'gh pr merge "${BRANCH}" --squash',
+        'gh pr merge "${PR_NUMBER}" --auto --squash',
+        'gh pr merge "${PR_NUMBER}" --squash',
     )
     assert _record_auto_merge_problems(planted) == [
         "the record PR must enable squash auto-merge"
