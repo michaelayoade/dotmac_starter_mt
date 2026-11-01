@@ -819,6 +819,28 @@
           "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-ipam",
+      "version": "0.2.0a1",
+      "tag": "dotmac-ipam-v0.2.0a1",
+      "tag_object": "797bdbe1f4a90ed6ea1b3eb8a465086208c3e42e",
+      "peeled_commit": "72e62c67c6b2dc803db4fbc86a1345d725c6449c",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_ipam-0.2.0a1-py3-none-any.whl": "d3c919a1253b5304b0927d93d032735bae2f109b37d0b1446b17da336659d944"
+      },
+      "verification_run_id": "41335852057",
+      "source_run_id": "41335852057",
+      "release_authority_digest": "sha256:f3e8ede667530922296b29ff8f6ab49f22fb3270a7e9abffe00682c19c8a0af8",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
     }
   ]
 }
