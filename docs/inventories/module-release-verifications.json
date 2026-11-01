@@ -797,6 +797,28 @@
           "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-platform-health",
+      "version": "0.2.0a1",
+      "tag": "dotmac-platform-health-v0.2.0a1",
+      "tag_object": "f2489559882be51c602c75ac4e94d7956e1d23b5",
+      "peeled_commit": "a0446cb76fd665cbd43aab5d9cec3502e6cd9874",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_platform_health-0.2.0a1-py3-none-any.whl": "2e8e8a48f0e6b991f7a9f9db8c6cc07d9c8447095b0c3baca8e19f89f22faf7b"
+      },
+      "verification_run_id": "41327347935",
+      "source_run_id": "41327347935",
+      "release_authority_digest": "sha256:f3e8ede667530922296b29ff8f6ab49f22fb3270a7e9abffe00682c19c8a0af8",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
     }
   ]
 }
