@@ -665,6 +665,94 @@
           "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-learning",
+      "version": "0.1.0a4",
+      "tag": "dotmac-learning-v0.1.0a4",
+      "tag_object": "91b5de63e0fc6653e09ff506b352d0046188e880",
+      "peeled_commit": "ccf6e02934b80a818192ffd6a2071447187a62d3",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_learning-0.1.0a4-py3-none-any.whl": "3708695ab4dab884665ec7e190b71da960a55571a17e049c0b691aa29e9435dc"
+      },
+      "verification_run_id": "41219986345",
+      "source_run_id": "41219986345",
+      "release_authority_digest": "sha256:a3fc728bea077107e8284acd30bcfd8a0216dd46aed432e2423926dce07bb106",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-payroll",
+      "version": "0.1.0a2",
+      "tag": "dotmac-payroll-v0.1.0a2",
+      "tag_object": "fdd148e4e2b7f4091a8d1cf10bdfc7da9c57457f",
+      "peeled_commit": "9ee4bdb4707ae250a7e64e3beb53c8e7aa17c0fa",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_payroll-0.1.0a2-py3-none-any.whl": "ae059ee2a6095d7964a49a50fa92abc0d7a95e5b7bf888f062bacbd4373821cb"
+      },
+      "verification_run_id": "41226687556",
+      "source_run_id": "41226687556",
+      "release_authority_digest": "sha256:a3fc728bea077107e8284acd30bcfd8a0216dd46aed432e2423926dce07bb106",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-tax",
+      "version": "0.1.0a7",
+      "tag": "dotmac-tax-v0.1.0a7",
+      "tag_object": "5f719b8b21751e315f0fab223c3919fec57d2a5c",
+      "peeled_commit": "6e0a0078012da45782d800aee1ef9f720376fde3",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_tax-0.1.0a7-py3-none-any.whl": "0dc42a4a085303f53a77510f397bbbfe44abbc7f1cf87f313b3ebd9ea6ccd6ff"
+      },
+      "verification_run_id": "41233699619",
+      "source_run_id": "41233699619",
+      "release_authority_digest": "sha256:a3fc728bea077107e8284acd30bcfd8a0216dd46aed432e2423926dce07bb106",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-billing",
+      "version": "0.1.0a10",
+      "tag": "dotmac-billing-v0.1.0a10",
+      "tag_object": "718341944f149edc83cd0e753a86fd2aed3b54b6",
+      "peeled_commit": "6005ead65713a422271b68beea6a0da7c7c766a3",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_billing-0.1.0a10-py3-none-any.whl": "1015392d43a8828ea463bb252ba0fa63cbe50fe036b532097b48612c5a609bde"
+      },
+      "verification_run_id": "41240156443",
+      "source_run_id": "41240156443",
+      "release_authority_digest": "sha256:a3fc728bea077107e8284acd30bcfd8a0216dd46aed432e2423926dce07bb106",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
     }
   ]
 }
