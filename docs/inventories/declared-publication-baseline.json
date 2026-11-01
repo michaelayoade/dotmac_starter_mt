@@ -161,11 +161,6 @@
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named first intended consumer; ERP and CRM are later consumers under the dossier. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move workforce authority, or retire any Sub/ERP/CRM writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
-    },
-    "dotmac-ipam": {
-      "declared": "0.2.0a1",
-      "reason": "ALLOCATED EXTRACTION RE-CUT, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ipam-v0.1.0a1), with ip_0001_ipam byte-frozen; it is must-not-install (ruled N2, Michael 2026-10-26/27). 0.2.0a1 replaces the template behaviour with Sub's extracted IPAM code and adds the additive ip_0002_extracted revision, so src/ no longer matches the bytes the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Hosted acceptance, the protected release dispatch (Michael go, in a train gap), the exact Sub pin and the wave-1 cutover gates remain separate; allocation authorizes no tag, adoption or production migration. Remove this row only with the oracle-backed record of an authorized exact 0.2.0a1 publication.",
-      "state": "declared-unpublished"
     }
   }
 }

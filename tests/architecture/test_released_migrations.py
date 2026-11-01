@@ -7470,6 +7470,24 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-ipam ──
+    "dotmac-ipam-v0.2.0a1": (
+        "dotmac-ipam",
+        "72e62c67c6b2dc803db4fbc86a1345d725c6449c",
+        {
+            "ip_0001_ipam.py": (
+                "ac7292ca9cf580d5a9d00f56160e15482dc57ce3491940559f76056c987e5198"
+            ),
+            "ip_0002_extracted.py": (
+                "a94bb987107c1a8e63050031cad46772e930e9970924a1ece8cd07aa5b8d2d44"
+            ),
+            "ip_0003_outbox_relay.py": (
+                "8a37994ee1177532824cf03d83ac81884cdf35ca9c291ae72fdab2faefeb288f"
+            ),
+            "ip_0004_import_idempotency.py": (
+                "4d19fe4d92ad63184290b80e6cd127bd88fd7481670090aa48ed5c09648f6ca3"
+            ),
+        },
+    ),
     "dotmac-ipam-v0.1.0a1": (
         "dotmac-ipam",
         "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
@@ -8191,13 +8209,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `ip_0002_extracted` is the additive 0.2.0a1 extraction revision (refuses
     # to run over any 0.1 template row). Still editable: no released tag
     # carries it yet; `ip_0001_ipam.py` stays byte-frozen by the 0.1.0a1 entry.
-    "dotmac-ipam": frozenset(
-        {
-            "ip_0002_extracted.py",
-            "ip_0003_outbox_relay.py",
-            "ip_0004_import_idempotency.py",
-        }
-    ),
+    "dotmac-ipam": frozenset(),
     "dotmac-licensing": frozenset(),
     "dotmac-media-observations": frozenset(),
     "dotmac-network-access": frozenset(),
