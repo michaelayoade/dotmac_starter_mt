@@ -57,8 +57,7 @@ def test_release_module_carries_shape_from_resolver() -> None:
     ]
     assert len(verify) == 1
     assert (
-        verify[0]["env"]["RELEASE_SHAPE"]
-        == "${{ needs.build.outputs.release_shape }}"
+        verify[0]["env"]["RELEASE_SHAPE"] == "${{ needs.build.outputs.release_shape }}"
     )
 
 

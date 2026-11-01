@@ -937,7 +937,8 @@ def _record_auto_merge_problems(script: str) -> list[str]:
         return problems
     if script.index(command) < script.index("gh pr create"):
         problems.append("auto-merge is enabled before the record PR is opened")
-    if 'give_up "could not enable auto-merge for #${PR_NUMBER} (${BRANCH})"' not in script:
+    refusal = 'give_up "could not enable auto-merge for #${PR_NUMBER} (${BRANCH})"'
+    if refusal not in script:
         problems.append("an auto-merge refusal must fail the release loudly")
     return problems
 
