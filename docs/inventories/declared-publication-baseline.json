@@ -171,11 +171,6 @@
       "declared": "0.2.0a1",
       "reason": "ALLOCATED EXTRACTION RE-CUT, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ipam-v0.1.0a1), with ip_0001_ipam byte-frozen; it is must-not-install (ruled N2, Michael 2026-10-26/27). 0.2.0a1 replaces the template behaviour with Sub's extracted IPAM code and adds the additive ip_0002_extracted revision, so src/ no longer matches the bytes the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Hosted acceptance, the protected release dispatch (Michael go, in a train gap), the exact Sub pin and the wave-1 cutover gates remain separate; allocation authorizes no tag, adoption or production migration. Remove this row only with the oracle-backed record of an authorized exact 0.2.0a1 publication.",
       "state": "declared-unpublished"
-    },
-    "dotmac-integration": {
-      "declared": "0.1.0a21",
-      "reason": "ALLOCATED INTEGRATED DEVELOPMENT SOURCE, NOT PUBLISHED. Published a20 and ig_0017_provisioning remain immutable. The all-31 source integration adds PR883 dispatch snapshots as ig_0018, retained original context and grant-bound observations. No accepting production authority, startup credential-assignment producer, transport negotiation, enrollment or cutover is established. Remove only with the oracle-backed record of a verified authorized a21 publication. The published a20 record is NOT to be repaired by editing the version; a21 is the distinct unpublished source successor.",
-      "state": "declared-unpublished"
     }
   }
 }
