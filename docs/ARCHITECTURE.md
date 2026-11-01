@@ -1473,7 +1473,7 @@ packages/dotmac-pon-access/      network-suite-v1: OLT/ONT commissioning,
                  opaquely. BUILT AND TESTED HERE AS ONE COHORT, NOT COMPOSED
                  by this reference assembly and not released before Sub's
                  first-authority cutover (ADR-0038).
-packages/dotmac-config-layers/   optional STATELESS composition engine (ADR-0074)
+packages/dotmac-config-layers/   optional STATELESS composition engine (ADR-0078)
   src/dotmac_config_layers/      weighted, tiered layers merged into one
                  effective state with per-leaf provenance, typed conflicts,
                  dated exceptions and widening classification, through a

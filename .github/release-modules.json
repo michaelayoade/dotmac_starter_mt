@@ -772,7 +772,7 @@
     },
     "dotmac-config-layers": {
       "$comment": [
-        "Generic layered-configuration composition engine (ADR-0074).",
+        "Generic layered-configuration composition engine (ADR-0078).",
         "Stateless: db_schema null is an asserted release shape, exactly as for",
         "dotmac-document-rendering. The engine imports only the standard library,",
         "pydantic and itself; the manifest alone imports the kernel.",
