@@ -11,13 +11,13 @@ import hashlib
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal, DecimalException
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.money import Currency, Money, MoneyError
-from sqlalchemy import select
+from sqlalchemy import literal, select, tuple_
 from sqlalchemy.orm import Session
 
 from dotmac_billing._document_facts import _decode
@@ -366,14 +366,40 @@ class ListAccountingFactsV1:
 
 @dataclass(frozen=True, slots=True)
 class AccountingFactIndexPageV1:
-    """One page plus the count and digest of the WHOLE window.
+    """One page of the window, in a total order independent of commit timing.
 
-    ``digest`` chains every fact of the window in order (not only this page), so
-    a consumer that paged through the window can prove completeness by comparing
-    its own running count and digest. The order is ``occurred_at``, account,
-    posting-group source version, fact version, fact id: total and independent of
-    commit timing. A window that is still open can still gain facts; the pair is
-    only a completeness proof for a window whose end is in the past.
+    The order is ``occurred_at``, account, posting-group source version, fact
+    version, fact id. Paging is keyset: the cost of a page does not grow with the
+    window. Completeness is proved by ``summarize_accounting_fact_window``, not
+    here.
+    """
+
+    scope: Scope
+    occurred_from: datetime
+    occurred_to: datetime
+    entries: tuple[AccountingFactIndexEntryV1, ...]
+    next_cursor: AccountingFactCursorV1 | None
+    contract_version: Literal["billing.accounting.fact.index.v1"] = (
+        "billing.accounting.fact.index.v1"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SummarizeAccountingFactWindowV1:
+    scope: Scope
+    occurred_from: datetime
+    occurred_to: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AccountingFactWindowSummaryV1:
+    """Count and chained digest of every fact in a window, in the page order.
+
+    ``occurred_at`` is a business time, so a fact committed late can still land
+    inside a window already paged. A consumer closes a window only after taking
+    this summary at least one settle interval after ``occurred_to``, and compares
+    it with its own running count and digest (``fact_index_line``); a mismatch
+    means re-page, not a partial acceptance.
     """
 
     scope: Scope
@@ -381,10 +407,8 @@ class AccountingFactIndexPageV1:
     occurred_to: datetime
     count: int
     digest: str
-    entries: tuple[AccountingFactIndexEntryV1, ...]
-    next_cursor: AccountingFactCursorV1 | None
-    contract_version: Literal["billing.accounting.fact.index.v1"] = (
-        "billing.accounting.fact.index.v1"
+    contract_version: Literal["billing.accounting.fact.window.v1"] = (
+        "billing.accounting.fact.window.v1"
     )
 
 
@@ -397,17 +421,12 @@ def fact_index_digest_seed() -> hashlib._Hash:
     return hashlib.sha256(f"{FACT_INDEX_DIGEST_DOMAIN}\n".encode())
 
 
-def list_accounting_facts(
-    db: Session, *, scope: Scope, request: ListAccountingFactsV1
-) -> AccountingFactIndexPageV1:
-    """Page the ordered accounting facts of a window, with window count and digest.
-
-    Read-only and lock-free; the caller owns the transaction. Every fact in the
-    window is verified against its own stored digest, so a corrupt row refuses
-    the whole answer instead of being skipped.
-    """
+def _window(scope: Scope, request: object) -> tuple[datetime, datetime]:
     _require_scope(scope)
-    if not isinstance(request, ListAccountingFactsV1) or request.scope != scope:
+    if (
+        not isinstance(request, ListAccountingFactsV1 | SummarizeAccountingFactWindowV1)
+        or request.scope != scope
+    ):
         raise BillingRuleViolation(
             "scope_mismatch", "the request scope must equal the routed scope"
         )
@@ -422,14 +441,10 @@ def list_accounting_facts(
         raise BillingRuleViolation(
             "invalid_window", "an aware, non-empty half-open window is required"
         )
-    if (
-        not isinstance(request.limit, int)
-        or isinstance(request.limit, bool)
-        or not 1 <= request.limit <= MAX_FACT_INDEX_PAGE
-    ):
-        raise BillingRuleViolation(
-            "invalid_limit", "page limit is outside the supported range"
-        )
+    return start, end
+
+
+def _window_select(scope: Scope, start: datetime, end: datetime) -> Any:
     facts = _table(scope, "accounting_facts")
     groups = _table(scope, "posting_groups")
     join = facts.c.posting_group_id == groups.c.id
@@ -442,7 +457,7 @@ def list_accounting_facts(
         facts.c.fact_version,
         facts.c.id,
     )
-    base = (
+    statement = (
         select(
             facts.c.id,
             facts.c.fact_version,
@@ -458,81 +473,118 @@ def list_accounting_facts(
         )
         .select_from(facts.join(groups, join))
         .where(facts.c.occurred_at >= start, facts.c.occurred_at < end)
-        .order_by(*order)
     )
-    base = _scoped(base, scope, facts)
+    return _scoped(statement, scope, facts), order
+
+
+def _verify(row: Any) -> None:
+    try:
+        if fingerprint_of(row["fact_payload"]) != row["fact_digest"]:
+            raise ValueError("accounting fact digest disagrees")
+    except (ValueError, TypeError, DecimalException) as exc:
+        raise BillingRuleViolation(
+            "accounting_fact_integrity", "stored accounting evidence is invalid"
+        ) from exc
+
+
+def list_accounting_facts(
+    db: Session, *, scope: Scope, request: ListAccountingFactsV1
+) -> AccountingFactIndexPageV1:
+    """Return one keyset page of a window's ordered accounting facts.
+
+    Read-only and lock-free; the caller owns the transaction. Only the rows of
+    the page are read and digest-verified, so the cost is bounded by ``limit``.
+    """
+    start, end = _window(scope, request)
+    if (
+        not isinstance(request.limit, int)
+        or isinstance(request.limit, bool)
+        or not 1 <= request.limit <= MAX_FACT_INDEX_PAGE
+    ):
+        raise BillingRuleViolation(
+            "invalid_limit", "page limit is outside the supported range"
+        )
+    statement, order = _window_select(scope, start, end)
     cursor = request.after
     if cursor is not None:
         if not isinstance(cursor, AccountingFactCursorV1):
             raise BillingRuleViolation(
                 "invalid_cursor", "the cursor must be a Billing fact cursor"
             )
+        statement = statement.where(
+            tuple_(*order)
+            > tuple_(
+                *(
+                    literal(value, column.type)
+                    for column, value in zip(
+                        order,
+                        (
+                            cursor.occurred_at,
+                            cursor.billing_account_id,
+                            cursor.source_version,
+                            cursor.fact_version,
+                            cursor.fact_id,
+                        ),
+                        strict=True,
+                    )
+                )
+            )
+        )
     with db.no_autoflush:
-        digest = fact_index_digest_seed()
-        count = 0
-        entries: list[AccountingFactIndexEntryV1] = []
-        more: AccountingFactCursorV1 | None = None
-        stream = db.execute(base.execution_options(yield_per=1000)).mappings()
-        for row in stream:
-            try:
-                if fingerprint_of(row["fact_payload"]) != row["fact_digest"]:
-                    raise ValueError("accounting fact digest disagrees")
-            except (ValueError, TypeError, DecimalException) as exc:
-                raise BillingRuleViolation(
-                    "accounting_fact_integrity",
-                    "stored accounting evidence is invalid",
-                ) from exc
+        rows = (
+            db.execute(statement.order_by(*order).limit(request.limit + 1))
+            .mappings()
+            .all()
+        )
+    entries: list[AccountingFactIndexEntryV1] = []
+    for row in rows[: request.limit]:
+        _verify(row)
+        entries.append(
+            AccountingFactIndexEntryV1(
+                AccountingFactCursorV1(
+                    row["occurred_at"],
+                    row["billing_account_id"],
+                    row["source_version"],
+                    row["fact_version"],
+                    row["id"],
+                ),
+                row["posting_group_id"],
+                row["effect_kind"],
+                row["source_system"],
+                row["source_ref"],
+                row["fact_digest"],
+            )
+        )
+    return AccountingFactIndexPageV1(
+        scope,
+        start,
+        end,
+        tuple(entries),
+        entries[-1].cursor if len(rows) > request.limit else None,
+    )
+
+
+def summarize_accounting_fact_window(
+    db: Session, *, scope: Scope, request: SummarizeAccountingFactWindowV1
+) -> AccountingFactWindowSummaryV1:
+    """Count and chain every fact of a window, verifying each row's digest.
+
+    Meant to be called once per window close, not per page.
+    """
+    start, end = _window(scope, request)
+    statement, order = _window_select(scope, start, end)
+    digest = fact_index_digest_seed()
+    count = 0
+    with db.no_autoflush:
+        for row in db.execute(
+            statement.order_by(*order).execution_options(yield_per=1000)
+        ).mappings():
+            _verify(row)
             digest.update(
                 fact_index_line(row["id"], row["fact_version"], row["fact_digest"])
             )
             count += 1
-            position = AccountingFactCursorV1(
-                row["occurred_at"],
-                row["billing_account_id"],
-                row["source_version"],
-                row["fact_version"],
-                row["id"],
-            )
-            if cursor is not None and not _after(position, cursor):
-                continue
-            if len(entries) < request.limit:
-                entries.append(
-                    AccountingFactIndexEntryV1(
-                        position,
-                        row["posting_group_id"],
-                        row["effect_kind"],
-                        row["source_system"],
-                        row["source_ref"],
-                        row["fact_digest"],
-                    )
-                )
-            elif more is None:
-                more = entries[-1].cursor
-    return AccountingFactIndexPageV1(
-        scope=scope,
-        occurred_from=start,
-        occurred_to=end,
-        count=count,
-        digest=digest.hexdigest(),
-        entries=tuple(entries),
-        next_cursor=more,
-    )
-
-
-def _after(position: AccountingFactCursorV1, cursor: AccountingFactCursorV1) -> bool:
-    return (
-        position.occurred_at,
-        str(position.billing_account_id),
-        position.source_version,
-        position.fact_version,
-        str(position.fact_id),
-    ) > (
-        cursor.occurred_at,
-        str(cursor.billing_account_id),
-        cursor.source_version,
-        cursor.fact_version,
-        str(cursor.fact_id),
-    )
+    return AccountingFactWindowSummaryV1(scope, start, end, count, digest.hexdigest())
 
 
 __all__ = [
@@ -540,9 +592,12 @@ __all__ = [
     "AccountingFactIndexEntryV1",
     "AccountingFactIndexPageV1",
     "DocumentWithholdingEvidenceV1",
+    "AccountingFactWindowSummaryV1",
     "ListAccountingFactsV1",
+    "SummarizeAccountingFactWindowV1",
     "exposure_state_fingerprint",
     "get_document_exposure",
     "get_document_withholding_evidence",
     "list_accounting_facts",
+    "summarize_accounting_fact_window",
 ]

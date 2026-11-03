@@ -39,7 +39,9 @@ class NumberingProvider(Protocol):
     document id; a credit note uses its command-stable correlation identity,
     never a per-execution random value). A locked or enrolled series requires it
     to bind the claim to the document; the adapter decides whether to forward it
-    for a series that does not accept it. Billing always supplies it.
+    for a series that does not accept it. Billing always supplies it. A number
+    collision should be raised by the adapter as
+    ``BillingRuleViolation("document_number_collision")`` and must not be retried.
     """
 
     def allocate(

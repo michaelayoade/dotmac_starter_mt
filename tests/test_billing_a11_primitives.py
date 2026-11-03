@@ -15,10 +15,12 @@ from dotmac_billing import (
     AcceptRatedObligationV3,
     GetInvoiceDocumentFactV1,
     ListAccountingFactsV1,
+    SummarizeAccountingFactWindowV1,
     get_document_exposure,
     get_document_withholding_evidence,
     get_invoice_document_fact_v3,
     list_accounting_facts,
+    summarize_accounting_fact_window,
 )
 from dotmac_billing import service as svc
 from dotmac_billing.commands import (
@@ -495,18 +497,17 @@ def test_document_withholding_evidence_lists_only_that_document(scratch, plane):
 
 
 def _walk(session, scope, start, end, limit):
-    """Page the whole window; return (count, digest, ordered fact ids)."""
-    seen, cursor, last = [], None, None
+    """Page the whole window; return every entry in page order."""
+    seen, cursor = [], None
     while True:
         page = list_accounting_facts(
             session,
             scope=scope,
             request=ListAccountingFactsV1(scope, start, end, cursor, limit),
         )
-        seen.extend(entry for entry in page.entries)
-        last = page
+        seen.extend(page.entries)
         if page.next_cursor is None:
-            return last, seen
+            return seen
         cursor = page.next_cursor
 
 
@@ -533,18 +534,18 @@ def test_ordered_fact_query_is_total_complete_and_digest_checkable(scratch, plan
         )
         session.commit()
     with b._session(url, scope) as session:
-        whole = list_accounting_facts(
+        summary = summarize_accounting_fact_window(
             session,
             scope=scope,
-            request=ListAccountingFactsV1(scope, start, end, None, 1000),
+            request=SummarizeAccountingFactWindowV1(scope, start, end),
         )
-        assert whole.count >= 3 and len(whole.entries) == whole.count
+        whole = _walk(session, scope, start, end, 1000)
+        assert summary.count >= 3 and len(whole) == summary.count
         if plane == "tenant":
-            assert whole.count == 3
+            assert summary.count == 3
         # Paging one at a time visits the same total order with no gap or repeat.
-        last, entries = _walk(session, scope, start, end, 1)
-        assert (last.count, last.digest) == (whole.count, whole.digest)
-        assert entries == list(whole.entries)
+        assert _walk(session, scope, start, end, 1) == whole
+        assert _walk(session, scope, start, end, 2) == whole
         keys = [
             (
                 e.cursor.occurred_at,
@@ -553,33 +554,32 @@ def test_ordered_fact_query_is_total_complete_and_digest_checkable(scratch, plan
                 e.cursor.fact_version,
                 str(e.cursor.fact_id),
             )
-            for e in entries
+            for e in whole
         ]
         assert keys == sorted(keys)
         # A consumer proves completeness with its own running chain.
         chain = fact_index_digest_seed()
-        for entry in entries:
+        for entry in whole:
             chain.update(
                 fact_index_line(
                     entry.cursor.fact_id, entry.cursor.fact_version, entry.fact_digest
                 )
             )
-        assert chain.hexdigest() == whole.digest
-        # Stable on repeat; empty windows are an honest zero.
-        assert (
-            list_accounting_facts(
-                session, scope=scope, request=ListAccountingFactsV1(scope, start, end)
-            ).digest
-            == whole.digest
-        )
-        later = list_accounting_facts(
+        assert chain.hexdigest() == summary.digest
+        again = summarize_accounting_fact_window(
             session,
             scope=scope,
-            request=ListAccountingFactsV1(
+            request=SummarizeAccountingFactWindowV1(scope, start, end),
+        )
+        assert again == summary
+        later = summarize_accounting_fact_window(
+            session,
+            scope=scope,
+            request=SummarizeAccountingFactWindowV1(
                 scope, b.NOW.replace(year=2030), b.NOW.replace(year=2031)
             ),
         )
-        assert (later.count, later.entries) == (0, ())
+        assert later.count == 0
         for bad in (
             ListAccountingFactsV1(scope, end, start),
             ListAccountingFactsV1(scope, start.replace(tzinfo=None), end),
@@ -589,6 +589,12 @@ def test_ordered_fact_query_is_total_complete_and_digest_checkable(scratch, plan
         ):
             with pytest.raises(BillingRuleViolation):
                 list_accounting_facts(session, scope=scope, request=bad)
+        with pytest.raises(BillingRuleViolation):
+            summarize_accounting_fact_window(
+                session,
+                scope=scope,
+                request=SummarizeAccountingFactWindowV1(scope, end, start),
+            )
     assert isinstance(AccountingFactCursorV1, type)
 
 
@@ -602,7 +608,7 @@ def test_ordered_fact_query_does_not_leak_across_tenants(scratch):
         page = list_accounting_facts(
             session, scope=other, request=ListAccountingFactsV1(other, start, end)
         )
-        assert page.count == 0
+        assert page.entries == ()
 
 
 # --- (6) one service per collectible document ----------------------------

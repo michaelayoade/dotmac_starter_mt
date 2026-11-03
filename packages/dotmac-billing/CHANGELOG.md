@@ -20,21 +20,27 @@ All notable changes follow Semantic Versioning.
 - Add `get_document_exposure` (latest sealed per-document exposure, re-verified
   against receivable resolution; imported items return the opening-owned V2),
   `get_document_withholding_evidence`, and `list_accounting_facts`: a
-  total-ordered, paged accounting-fact index whose count and chained digest
-  cover the whole window.
+  total-ordered keyset-paged accounting-fact index, and
+  `summarize_accounting_fact_window`, the separate once-per-window-close count
+  and chained digest. A consumer closes a window only after a summary taken at
+  least one settle interval after its end, because `occurred_at` is business time.
 - Refuse a document whose lines carry different `service_ref` with
   `exposure_service_ambiguous` at drafting, issuing and exposure derivation,
   because exposure is anchored to the first line.
+- An unlinked taxed credit needs no new code: a credit note always requires an
+  issued invoice and non-cash grants carry no tax.
+- Adapters should raise a number collision as
+  `BillingRuleViolation("document_number_collision")`; Billing does not import
+  Numbering and does not map it.
 - Write-off needs no new command: it is a `grant_non_cash_credit` whose
   classification category is a policy value, restricted to the document and
   applied on issue. Choosing credit note or grant is the caller's policy.
 - Not changed: a credit note larger than the open receivable is still refused
-  (`credit_exceeds_receivable`). A released trigger pins a credit-note posting
-  group to one receivable effect equal to its total, so excess-to-available-credit
-  needs a ruling and a migration; it is not part of this change.
+  (`credit_exceeds_receivable`). Excess is composed above Billing (unapply prior
+  discharges, then issue the full credit note); Billing gains no excess path.
 - Source preparation only; hosted CI and publication remain required.
 
-## 0.1.0a10 — UNRELEASED
+## 0.1.0a10 — released
 
 - Retain complete public Tax V2 dependency evidence and opaque `rv2:` seals,
   original commercial identity, prior references and selected component snapshots.
