@@ -198,4 +198,4 @@ def test_distribution_runtime_and_greenfield_dossier_versions_agree() -> None:
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "greenfield-after-inventory"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == ["dotmac_cloud", "dotmac_sub"]
+    assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_cloud"]
