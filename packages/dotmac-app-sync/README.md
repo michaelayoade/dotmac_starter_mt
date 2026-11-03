@@ -16,7 +16,7 @@ eligibility observations, and Academy → ERP completion observations. These are
 reusable flow shapes, not pairwise runtime branches.
 
 Sub → ERP billing observations are **not** a flow for this package. Since
-2026-11-03 (ADR-0020 amendment of that date, proposed), Billing's accounting
+2026-11-03 (ADR-0020 amendment of that date), Billing's accounting
 facts reach ERP through an Integrator connector on the `dotmac-integration`
 SPI and ERP's ProductObservation receiver. One flow has one envelope.
 

@@ -1,7 +1,7 @@
 # ADR 0020 — Billing owns operational receivables; commercial modules stay separate
 
 **Status:** Accepted. Amended 2026-08-14, 2026-10-15, and 2026-11-03
-(proposed; wording only, see the end of this record)
+(wording only, approved by Michael; see the end of this record)
 **Date:** 2026-08-12
 **Decision owner:** Michael
 **Extends:** ADR-0003's commercial-module boundary, ADR-0006's extraction and
@@ -498,8 +498,8 @@ writer change or authority switch.
 
 ## Amendment, 2026-11-03: accounting transport through the Integrator, and backtest instead of shadow
 
-**Status of this amendment:** Proposed. It takes effect when Michael approves
-this text at merge. It changes wording only. It changes no owner, no authority
+**Status of this amendment:** Accepted 2026-11-03, approved by Michael. It
+changes wording only. It changes no owner, no authority
 and no sequence step, and it authorizes no writer change.
 
 **1. The ERP accounting transport is an Integrator connector.** A7's "Billing
@@ -509,10 +509,12 @@ durable outbox → idempotent ERP inbox" is read as follows from this date:
   ordered fact query with a count and a digest.
 - An Integrator connector on the `dotmac-integration` SPI (ADR-0024 §§ 6–7)
   polls that query. The Integrator engine owns the cursor, retry and receipts.
-- The connector delivers to ERP's ProductObservation receiver. ERP posts
-  idempotently through its own posting package (ADR-0024 § 14.6). ERP remains
-  the GL and statutory-accounting authority (§ 2), and installs no Billing
-  module (A6).
+- The facts travel as Billing's published, versioned accounting-fact message
+  schema (ADR-0024 § 14.6). The connector delivers them to ERP's
+  ProductObservation receiver. ERP posts idempotently through its own posting
+  package, which validates against that pinned schema. ERP remains the GL and
+  statutory-accounting authority (§ 2), and never installs the `dotmac-billing`
+  distribution (A6).
 - There is one envelope for this flow. `dotmac-app-sync` is not the Sub → ERP
   billing transport.
 - Until the connector delivers, committed facts stay queued in Billing's own

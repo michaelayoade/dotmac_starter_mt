@@ -8,11 +8,10 @@ canonical schema belongs to the domain contract, a published version is
 succeeded rather than redefined, and a capability exposes product meaning
 rather than provider workflow), and 2026-08-26 (§ 13 below, caller-path parity:
 an independently released caller binds to a pinned published contract, with a
-non-vacuous binding). The 2026-11-03 amendment (§ 14 below, a bounded
-exception to § 2 for two named composition packages) is proposed and takes
-effect only on Michael's approval of its text. Every amendment is a dated
-addition; no earlier text is rewritten, and where a later section supersedes
-an earlier framing it says so by name.
+non-vacuous binding), and 2026-11-03 (§ 14 below, a bounded exception to § 2
+for two named composition packages; approved by Michael). Every amendment
+is a dated addition; no earlier text is rewritten, and where a later section
+supersedes an earlier framing it says so by name.
 **Date:** 2026-08-13
 **Decision owner:** Michael
 **Scope:** FLEET-WIDE. Applies to every Dotmac application and installable
@@ -743,8 +742,9 @@ The qualifying-source and greenfield findings are recorded in
 
 ## Decision amendment — 2026-11-03 (§ 2 bounded ruling: composition packages)
 
-**Status of this amendment:** Proposed. It takes effect only when Michael
-approves this text at merge. Until then § 2 stands unwidened.
+**Status of this amendment:** Accepted 2026-11-03. Michael approved this text
+on 2026-11-03, with the S15 posting package consuming Billing's facts as a
+message schema (14.6).
 
 **Scope — this is the ruling, not a summary of it.** § 2 says a module "never
 imports the consuming assembly or another business module". This amendment
@@ -845,19 +845,38 @@ list, needs a new dated amendment to this ADR.
 | Composition package | Deployment boundary | Named owner list (public surface only) |
 |---|---|---|
 | **Flows package** (proposed name `dotmac-money-flows`) | The Sub deployment | `dotmac-billing`, `dotmac-payments`, `dotmac-approvals`, `dotmac-collections` (contracts only), `dotmac-service-access-policy` (contracts only), `dotmac-durable-timers`, `dotmac-fulfillment`, `dotmac-imports` |
-| **S15 posting package** (name not yet allocated) | The ERP deployment | `dotmac-billing` (accounting-fact contracts only), `dotmac-accounting` |
+| **S15 posting package** (name not yet allocated) | The ERP deployment | `dotmac-accounting`. **No `dotmac-billing` import.** Billing's facts are consumed only as Billing's published accounting-fact **message schema**, pinned by capability id and contract digest (below) |
 
 For the flows package, "contracts only" means the package may use that owner's
 published contract types but not call its services. Collections remains the
 dunning owner and receives observations; only the access owner changes service
 access (Service Access Policy signals, Sub enforcement).
 
-For the S15 posting package, `dotmac-billing` is limited to the published
-accounting-fact contract types that arrive as Integrator observations. ERP
-composes **no** Billing manifest, schema, lineage or service; ADR-0020 A6 ("ERP
-installs none of the three") stands. Billing facts reach ERP only through an
-Integrator connector on the `dotmac-integration` SPI (§§ 6–7), never through a
-second envelope.
+For the S15 posting package, Billing is **not** on the import list, and ERP
+never installs the `dotmac-billing` distribution, as code or as a composed
+module. ADR-0020 A6 ("ERP installs none of the three") stands. Billing's facts
+cross to ERP as a message, as § 3 requires:
+
+- **Owner of the schema.** Billing owns the meaning of an accounting fact, so
+  Billing authors the schema (§ 10.1). It is published as the
+  `observation_schema` of a domain-owned `CapabilityContract` with a canonical
+  contract digest (§ 10.2). The application where Billing is installed declares
+  that contract to the Integrator through its product port. A connector claims
+  the digest and never defines the schema (§ 10.3).
+- **Versioning.** The capability id carries the version (`.vN`). A published
+  version is never redefined; a schema change is a new `.vN` id, succeeded
+  under § 11.
+- **Transport.** A connector on the `dotmac-integration` SPI polls Billing's
+  public ordered fact query (§§ 6–7). The Integrator validates every
+  observation against the schema before recording it (§ 10.4, item 4), and
+  delivers it to ERP's ProductObservation receiver. There is no second
+  envelope.
+- **ERP side.** The posting package pins the exact capability id and contract
+  digest it was built against (§ 13). It validates each received observation
+  against that pinned schema before its own state machine accepts it. It holds
+  the pinned schema as data, never as a Billing Python type. A parity test
+  compares the pinned schema and digest with Billing's published contract and
+  fails on any difference (§ 13, non-vacuous binding).
 
 **14.7 What this amendment does not do.** It creates no package, namespace,
 lineage, release, pin or adoption. It changes no owner's authority. It does not
