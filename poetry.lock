@@ -912,7 +912,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a11"
+dotmac-integration = ">=0.1.0a14"
 httpx = ">=0.27,<1.0"
 
 [package.source]

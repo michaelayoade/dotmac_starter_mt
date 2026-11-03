@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0a3 — unreleased
+## 0.1.0a3 — 2026-11-03
 
 Declared as a3, not folded into a2. a2 IS published (peeled tag
 `dotmac-connector-paystack-v0.1.0a2` points at commit
@@ -15,6 +15,15 @@ binding enabled against the a2 digest unidentifiable.
   `73ffecb65880c6b8bf5dec78ae33839f08f44bd4adcab061915727716a906c7a` resolves to
   a known contract. `docs/inventories/released-manifest-digests.json` records
   that digest and `make manifest-digest-check` fails if it ever moves.
+- Raises the `dotmac-integration` dependency floor from `>=0.1.0a11` to
+  `>=0.1.0a14` (the first release with SPI 1.4; it matches
+  `integration_floor` in `.github/release-connectors.json` and the sibling
+  connectors). Release prep only; no runtime change.
+- Release scope, verified against tag `dotmac-connector-paystack-v0.1.0a2`:
+  `payments.refund.v1` is NOT the only unreleased change. The whole outbound
+  slice below is unreleased, including the intent, payout and customer
+  capabilities and the nine commands; see the PR description for the review
+  note. Nothing was removed for this release.
 - Adds OUTBOUND provider I/O in DELIVERY mode: nine provider-neutral commands
   (initialize payment, charge a saved authorization, refund, resolve a bank
   account, create a transfer recipient, initiate a transfer, and customer

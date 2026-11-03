@@ -1,6 +1,6 @@
 # Compatibility
 
-`dotmac-connector-paystack 0.1.0a2` implements dotmac-integration SPI
+`dotmac-connector-paystack 0.1.0a3` implements dotmac-integration SPI
 `>=1.4,<2.0` under connector key `paystack`, in INGRESS, POLL and DELIVERY
 modes. The floor is 1.4 rather than 1.3 because each capability declares its
 OWN mode set; without that a settlement observer's binding would carry the
@@ -18,7 +18,10 @@ delivery-only contract.
 It declares required `webhook_signing_secret` and optional
 `webhook_signing_previous_secret` bindings plus optional `api_secret_key`,
 which is required whenever a POLL or DELIVERY capability is bound. Egress is
-exactly `api.paystack.co`; the a1 manifest stays adoptable.
+exactly `api.paystack.co`; the a1 and a2 manifests stay adoptable (a2 is preserved as `SETTLEMENT_MANIFEST`).
+
+The `dotmac-integration` floor is `>=0.1.0a14`, the first release carrying SPI 1.4;
+the a2 floor of `>=0.1.0a11` (SPI 1.3) cannot load this manifest.
 
 Every DELIVERY capability takes the same configuration and REQUIRES
 `timeout_seconds` (1–60). A hidden default on a money path is a deployment
