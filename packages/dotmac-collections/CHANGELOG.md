@@ -16,6 +16,16 @@ or published.
   and accepted release record remain required before a2 can be adopted as a
   published release. This proposal does not establish a product authority
   switch.
+- Scheduled as the Collections constituent (ST-7) of the cutover-release-1
+  aggregate. The Kernel a105 publication record is on main
+  (`docs/inventories/kernel-release-verifications/0.1.0a105.json`).
+- Test-only addition, outside the package tree: an X1 conformance fixture
+  (`tests/unit/test_collections_x1_unknown_due_conformance.py`) drives a
+  Billing `ReceivableExposureV1` with an UNKNOWN due date through the
+  assembly map into `CollectionCaseService.assess` and proves it stays
+  fail-closed (`due_date_unverified`; no case, timer, notice or action
+  request) on first read and on replay until Billing publishes a verified
+  due-date basis.
 
 ## 0.1.0a1 - Unreleased
 
