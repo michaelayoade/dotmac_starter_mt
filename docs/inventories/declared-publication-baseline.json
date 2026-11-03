@@ -147,6 +147,11 @@
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
     },
+    "dotmac-service-access-policy": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET RELEASED. Published 0.1.0a1 (tag dotmac-service-access-policy-v0.1.0a1) and its sap_0001 migration remain immutable. 0.1.0a2 adds RecordAccessInputV2 with stale refusal, a pure public ordering helper and migration sap_0002_input_versions (ST-8), landing through the cutover-release-1 aggregate. Kernel floor unchanged (>=0.1.0a91). No publication, tag, Sub adoption, enforcement switch or writer retirement is claimed; release is a separate dispatch.",
+      "state": "declared-unpublished"
+    },
     "dotmac-usage": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill, dedupe proof and aggregate shadow; it does not compose the module, move usage authority, or retire Sub's writer. Raw AAA, rating, billing and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
