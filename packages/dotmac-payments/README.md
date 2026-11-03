@@ -34,7 +34,11 @@ may not exceed the confirmation's cash less prior and in-flight refunds; a refun
 observed to have failed releases its hold. `observe_cash_outcome` records
 `REFUND_COMPLETED`, `REFUND_FAILED`, `CHARGEBACK`, `BOUNCE` or `ADMIN_CORRECTION`;
 an outcome that cannot be matched is stored as `ATTENTION_REQUIRED` with a reason,
-never dropped. There is no provider fee and no saved-payment mandate here.
+never dropped. Chargebacks, bounces and admin corrections returning cash reduce
+the refundable amount like refunds; an `ADMIN_CORRECTION` names a closed direction
+and its approval reference. An attention row is immutable evidence: its resolution
+lives in the owning flow's instance state keyed by the outcome id, and a parked
+`REFUND_FAILED` keeps the cash held. There is no provider fee and no saved-payment mandate here.
 
 The tenant-only `pm` lineage owns `mod_payments`.
 

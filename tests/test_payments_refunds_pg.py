@@ -18,6 +18,7 @@ import pytest
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.money import Money, currency
 from dotmac_payments.contracts import (
+    AdminCorrectionDirection,
     AttentionReason,
     CashOutcomeKind,
     CashOutcomeState,
@@ -82,6 +83,10 @@ def _refund_command(confirmation_id, amount, request_id=None):
 def _outcome_command(confirmation_id, kind, amount, **kwargs):
     if kind is CashOutcomeKind.ADMIN_CORRECTION:
         kwargs.setdefault("correction_id", uuid.uuid4())
+        kwargs.setdefault(
+            "direction", AdminCorrectionDirection.CASH_RETURNED_TO_CUSTOMER
+        )
+        kwargs.setdefault("approval_ref", "approval:1")
     else:
         kwargs.setdefault("provider_type", "paystack")
         kwargs.setdefault("outcome_reference", f"out-{uuid.uuid4()}")
@@ -615,3 +620,274 @@ def test_upgrade_preserves_a_populated_predecessor_and_can_refund_its_cash(migra
             scope, row.request_id
         )
         session.commit()
+
+
+# ----------------------------------- reversals: concurrency and the DB outcome guard
+
+
+def test_concurrent_chargeback_and_refund_never_oversubscribe(migrated):
+    scope, _, confirmation_id = _confirmed_ids(migrated)
+
+    def chargeback(session):
+        return observe_cash_outcome(
+            session,
+            scope=scope,
+            command=_outcome_command(
+                confirmation_id, CashOutcomeKind.CHARGEBACK, "15000.00"
+            ),
+        ).state
+
+    results, errors = _race(
+        migrated[1], scope, [chargeback, _instruct(scope, confirmation_id, "15000.00")]
+    )
+    assert all(isinstance(e, RefundExceedsConfirmedCash) for e in errors), errors
+    assert len(results) + len(errors) == 2
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        view = get_refundable_cash_v1(
+            session, scope=scope, query=GetRefundableCashV1(confirmation_id)
+        )
+        assert Decimal(0) <= view.committed.amount <= CASH
+        applied = sum(
+            (
+                row.amount
+                for row in session.scalars(select(PaymentCashOutcome)).all()
+                if row.state is CashOutcomeState.OBSERVED
+            ),
+            Decimal(0),
+        )
+        assert (
+            applied
+            + sum(
+                (r.amount for r in session.scalars(select(RefundInstruction)).all()),
+                Decimal(0),
+            )
+            <= CASH
+        )
+
+
+def test_concurrent_chargebacks_apply_at_most_the_cash(migrated):
+    scope, _, confirmation_id = _confirmed_ids(migrated)
+
+    def chargeback(session):
+        return observe_cash_outcome(
+            session,
+            scope=scope,
+            command=_outcome_command(
+                confirmation_id, CashOutcomeKind.CHARGEBACK, "9000.00"
+            ),
+        ).state
+
+    results, errors = _race(migrated[1], scope, [chargeback] * 3)
+    assert not errors, errors
+    assert sorted(s.value for s in results) == [
+        "ATTENTION_REQUIRED",
+        "ATTENTION_REQUIRED",
+        "OBSERVED",
+    ]
+    assert _held(migrated[1], scope, confirmation_id) == Decimal("9000.00")
+
+
+def _insert_outcome(connection, scope, confirmation_id, **overrides):
+    values = {
+        "id": uuid.uuid4(),
+        "tenant_id": scope.tenant_id,
+        "kind": "CHARGEBACK",
+        "state": "OBSERVED",
+        "attention_reason": None,
+        "claimed_confirmation_id": confirmation_id,
+        "confirmation_id": confirmation_id,
+        "instruction_id": None,
+        "provider_type": "PAYSTACK",
+        "outcome_reference": f"forged-{uuid.uuid4()}",
+        "correction_id": None,
+        "refund_reference": None,
+        "direction": None,
+        "approval_ref": None,
+        "currency_code": "NGN",
+        "minor_units": 2,
+        "amount": Decimal("100.00"),
+        "request_fingerprint": "0" * 64,
+        "observed_at": NOW,
+        "recorded_at": NOW,
+    }
+    values.update(overrides)
+    connection.execute(
+        text(
+            "INSERT INTO mod_payments.payment_cash_outcomes (id, tenant_id, kind,"
+            " state, attention_reason, claimed_confirmation_id, confirmation_id,"
+            " instruction_id, provider_type, outcome_reference, correction_id,"
+            " refund_reference, direction, approval_ref, currency_code, minor_units,"
+            " amount, request_fingerprint, observed_at, recorded_at) VALUES (:id,"
+            " :tenant_id, :kind, :state, :attention_reason,"
+            " :claimed_confirmation_id, :confirmation_id, :instruction_id,"
+            " :provider_type, :outcome_reference, :correction_id,"
+            " :refund_reference, :direction, :approval_ref, :currency_code,"
+            " :minor_units, :amount, :request_fingerprint, :observed_at,"
+            " :recorded_at)"
+        ),
+        values,
+    )
+
+
+def _refused(connection, **call):
+    with pytest.raises(DBAPIError) as refused, connection.begin_nested():
+        _insert_outcome(connection, **call)
+    assert refused.value.orig.sqlstate in {"23001", "23514", "23503"}
+
+
+def test_a_forged_refund_failed_cannot_free_cash_for_a_second_refund(migrated):
+    scope, intent_id, confirmation_id = _confirmed_ids(migrated)
+    with _tenant_session(migrated[1], scope.tenant_id) as session:
+        held = instruct_refund(
+            session, scope=scope, command=_refund_command(confirmation_id, "15000.00")
+        )
+        reference, instruction_id = held.provider_reference, held.id
+        session.commit()
+    engine, connection, transaction = _app_connection(migrated[1], scope.tenant_id)
+    try:
+        forged = {
+            "kind": "REFUND_FAILED",
+            "refund_reference": reference,
+        }
+        # No such instruction, wrong amount, wrong reference, wrong provider.
+        _refused(
+            connection,
+            scope=scope,
+            confirmation_id=confirmation_id,
+            instruction_id=uuid.uuid4(),
+            **forged,
+        )
+        _refused(
+            connection,
+            scope=scope,
+            confirmation_id=confirmation_id,
+            instruction_id=instruction_id,
+            amount=Decimal("1.00"),
+            **forged,
+        )
+        _refused(
+            connection,
+            scope=scope,
+            confirmation_id=confirmation_id,
+            instruction_id=instruction_id,
+            **{**forged, "refund_reference": "rf1-" + "b" * 32},
+        )
+        _refused(
+            connection,
+            scope=scope,
+            confirmation_id=confirmation_id,
+            instruction_id=instruction_id,
+            provider_type="OTHER",
+            amount=Decimal("15000.00"),
+            **forged,
+        )
+        # Nothing was freed: a second refund is still refused at the database.
+        with pytest.raises(DBAPIError), connection.begin_nested():
+            _insert_instruction(
+                connection,
+                scope,
+                confirmation_id,
+                intent_id,
+                amount=Decimal("100.00"),
+            )
+        # The genuine failure is accepted, and exactly once.
+        _insert_outcome(
+            connection,
+            scope,
+            confirmation_id,
+            instruction_id=instruction_id,
+            amount=Decimal("15000.00"),
+            **forged,
+        )
+        _refused(
+            connection,
+            scope=scope,
+            confirmation_id=confirmation_id,
+            instruction_id=instruction_id,
+            amount=Decimal("15000.00"),
+            **{**forged, "kind": "REFUND_COMPLETED"},
+        )
+    finally:
+        transaction.rollback()
+        connection.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "case", ["over_cash", "unknown_confirmation", "wrong_currency", "wrong_provider"]
+)
+def test_the_outcome_trigger_refuses_unbacked_applied_rows(migrated, case):
+    scope, _, confirmation_id = _confirmed_ids(migrated)
+    engine, connection, transaction = _app_connection(migrated[1], scope.tenant_id)
+    try:
+        call = {
+            "over_cash": {"amount": Decimal("15000.01")},
+            "unknown_confirmation": {
+                "confirmation_id": None,
+                "claimed_confirmation_id": uuid.uuid4(),
+            },
+            "wrong_currency": {"currency_code": "USD"},
+            "wrong_provider": {"provider_type": "OTHER"},
+        }[case]
+        call.setdefault("confirmation_id", confirmation_id)
+        _refused(connection, scope=scope, **call)
+    finally:
+        transaction.rollback()
+        connection.close()
+        engine.dispose()
+
+
+def test_the_outcome_trigger_applies_cumulative_reversal_bounds_for_a_forger(migrated):
+    scope, intent_id, confirmation_id = _confirmed_ids(migrated)
+    engine, connection, transaction = _app_connection(migrated[1], scope.tenant_id)
+    try:
+        _insert_instruction(
+            connection, scope, confirmation_id, intent_id, amount=Decimal("6000.00")
+        )
+        _insert_outcome(connection, scope, confirmation_id, amount=Decimal("9000.00"))
+        _refused(
+            connection,
+            scope=scope,
+            confirmation_id=confirmation_id,
+            amount=Decimal("0.01"),
+        )
+        # A parked row asserts nothing and is always admissible.
+        _insert_outcome(
+            connection,
+            scope,
+            None,
+            state="ATTENTION_REQUIRED",
+            attention_reason="EXCEEDS_CONFIRMED_CASH",
+            claimed_confirmation_id=confirmation_id,
+            amount=Decimal("99999.00"),
+        )
+        # And chargebacks now block the instruction trigger too.
+        with pytest.raises(DBAPIError), connection.begin_nested():
+            _insert_instruction(
+                connection, scope, confirmation_id, intent_id, amount=Decimal("0.01")
+            )
+    finally:
+        transaction.rollback()
+        connection.close()
+        engine.dispose()
+
+
+def test_sensitivity_without_the_outcome_trigger_a_forged_failure_is_admitted(migrated):
+    scope, _, confirmation_id = _confirmed_ids(migrated)
+    admin = create_engine(migrated[0])
+    with admin.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE mod_payments.payment_cash_outcomes "
+                "DISABLE TRIGGER cash_outcome_insert"
+            )
+        )
+    admin.dispose()
+    engine, connection, transaction = _app_connection(migrated[1], scope.tenant_id)
+    try:
+        # Row-shape checks cannot see the bound; only the trigger does.
+        _insert_outcome(connection, scope, confirmation_id, amount=Decimal("15000.01"))
+    finally:
+        transaction.rollback()
+        connection.close()
+        engine.dispose()

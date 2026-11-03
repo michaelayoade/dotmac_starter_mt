@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_payments.contracts import (
     REFUND_OUTCOME_KINDS,
+    AdminCorrectionDirection,
     AttentionReason,
     CashOutcomeKind,
     CashOutcomeState,
@@ -58,6 +59,11 @@ from dotmac_payments.service import (
 _REFERENCE_DOMAIN = "payment-refund-reference-v1"
 _REFERENCE_PREFIX = "rf1-"
 _OUTCOME_DOMAIN = "payment-cash-outcome-v1"
+_REVERSING_KINDS = (
+    CashOutcomeKind.CHARGEBACK,
+    CashOutcomeKind.BOUNCE,
+    CashOutcomeKind.ADMIN_CORRECTION,
+)
 
 
 def derive_refund_provider_reference(scope: TenantScope, request_id: UUID) -> str:
@@ -112,7 +118,13 @@ def _confirmation_money(row: PaymentConfirmation) -> Money:
 
 
 def _committed(db: Session, tenant_id: UUID, confirmation_id: UUID) -> Decimal:
-    """Total held by instructions that have not been observed to fail."""
+    """Cash already spoken for on one confirmation.
+
+    Refund instructions not observed to fail (in flight and completed), plus
+    applied chargebacks, bounces and admin corrections by direction. Parked
+    outcomes assert nothing and never count. Mirrors
+    `mod_payments.cash_reversal_total`.
+    """
     failed = exists().where(
         PaymentCashOutcome.tenant_id == RefundInstruction.tenant_id,
         PaymentCashOutcome.instruction_id == RefundInstruction.id,
@@ -126,7 +138,37 @@ def _committed(db: Session, tenant_id: UUID, confirmation_id: UUID) -> Decimal:
             ~failed,
         )
     ).all()
-    return sum(amounts, Decimal(0))
+    total = sum(amounts, Decimal(0))
+    for amount, direction in db.execute(
+        select(PaymentCashOutcome.amount, PaymentCashOutcome.direction).where(
+            PaymentCashOutcome.tenant_id == tenant_id,
+            PaymentCashOutcome.confirmation_id == confirmation_id,
+            PaymentCashOutcome.state == CashOutcomeState.OBSERVED,
+            PaymentCashOutcome.kind.in_(_REVERSING_KINDS),
+        )
+    ):
+        total += (
+            -amount if direction is AdminCorrectionDirection.CASH_RESTORED else amount
+        )
+    return total
+
+
+def _returned_by_correction(
+    db: Session, tenant_id: UUID, confirmation_id: UUID
+) -> Decimal:
+    net = Decimal(0)
+    for amount, direction in db.execute(
+        select(PaymentCashOutcome.amount, PaymentCashOutcome.direction).where(
+            PaymentCashOutcome.tenant_id == tenant_id,
+            PaymentCashOutcome.confirmation_id == confirmation_id,
+            PaymentCashOutcome.state == CashOutcomeState.OBSERVED,
+            PaymentCashOutcome.kind == CashOutcomeKind.ADMIN_CORRECTION,
+        )
+    ):
+        net += (
+            -amount if direction is AdminCorrectionDirection.CASH_RESTORED else amount
+        )
+    return net
 
 
 def _same_money(
@@ -246,7 +288,9 @@ class _Shape:
 
     __slots__ = (
         "amount",
+        "approval_ref",
         "correction_id",
+        "direction",
         "fingerprint",
         "kind",
         "outcome_reference",
@@ -270,13 +314,30 @@ class _Shape:
                 raise ValueError(
                     "an admin correction is identified by its correction id alone"
                 )
+            if not isinstance(command.direction, AdminCorrectionDirection):
+                raise ValueError("an admin correction requires a direction")
+            if command.approval_ref is None:
+                raise ValueError("an admin correction requires its approval reference")
+            self.direction: AdminCorrectionDirection | None = command.direction
+            self.approval_ref: str | None = _required(
+                command.approval_ref, "approval reference"
+            )
             self.correction_id: UUID | None = command.correction_id
             self.provider_type: str | None = None
             self.outcome_reference: str | None = None
             self.refund_reference: str | None = None
         else:
-            if command.correction_id is not None:
-                raise ValueError("only an admin correction carries a correction id")
+            if (
+                command.correction_id is not None
+                or command.direction is not None
+                or command.approval_ref is not None
+            ):
+                raise ValueError(
+                    "only an admin correction carries a correction id, "
+                    "direction and approval reference"
+                )
+            self.direction = None
+            self.approval_ref = None
             if command.provider_type is None or command.outcome_reference is None:
                 raise ValueError("an outcome requires a provider type and reference")
             if refund != (command.refund_reference is not None):
@@ -307,6 +368,8 @@ class _Shape:
                 self.outcome_reference or "",
                 self.correction_id or "",
                 self.refund_reference or "",
+                self.direction or "",
+                self.approval_ref or "",
             ]
         )
 
@@ -362,6 +425,16 @@ def _attention(
     if shape.amount.amount > confirmed.amount:
         return AttentionReason.EXCEEDS_CONFIRMED_CASH, None
     if shape.kind not in REFUND_OUTCOME_KINDS:
+        if shape.direction is AdminCorrectionDirection.CASH_RESTORED:
+            if shape.amount.amount > _returned_by_correction(
+                db, tenant_id, confirmation.id
+            ):
+                return AttentionReason.EXCEEDS_CONFIRMED_CASH, None
+        elif (
+            _committed(db, tenant_id, confirmation.id) + shape.amount.amount
+            > confirmed.amount
+        ):
+            return AttentionReason.EXCEEDS_CONFIRMED_CASH, None
         return None, None
     instruction = db.scalar(
         select(RefundInstruction)
@@ -446,6 +519,8 @@ def observe_cash_outcome(
         outcome_reference=shape.outcome_reference,
         correction_id=shape.correction_id,
         refund_reference=shape.refund_reference,
+        direction=shape.direction,
+        approval_ref=shape.approval_ref,
         currency_code=shape.amount.currency.code,
         minor_units=shape.amount.currency.minor_units,
         amount=shape.amount.amount,

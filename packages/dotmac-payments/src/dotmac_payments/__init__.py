@@ -10,6 +10,7 @@ from dotmac_payments.cash_qualification import (
 from dotmac_payments.contracts import (
     REFUND_OUTCOME_KINDS,
     AcceptMerchantContextV1,
+    AdminCorrectionDirection,
     AttentionReason,
     AuthorizedMerchantReviewV1,
     AuthorizedProviderCashV1,
@@ -85,6 +86,7 @@ from dotmac_payments.service import (
 
 __version__ = "0.1.0a4"
 __all__ = [
+    "AdminCorrectionDirection",
     "REFUND_OUTCOME_KINDS",
     "AttentionReason",
     "CashOutcomeKind",

@@ -35,6 +35,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from dotmac_payments.contracts import (
     REFUND_OUTCOME_KINDS,
+    AdminCorrectionDirection,
     AttentionReason,
     CashOutcomeKind,
     CashOutcomeState,
@@ -541,9 +542,11 @@ class PaymentCashOutcome(Base):
         CheckConstraint("amount > 0", name="ck_cash_outcomes_amount_positive"),
         CheckConstraint(
             "(kind = 'ADMIN_CORRECTION' AND correction_id IS NOT NULL "
+            "AND direction IS NOT NULL AND approval_ref IS NOT NULL "
             "AND provider_type IS NULL AND outcome_reference IS NULL "
             "AND refund_reference IS NULL) OR "
             "(kind <> 'ADMIN_CORRECTION' AND correction_id IS NULL "
+            "AND direction IS NULL AND approval_ref IS NULL "
             "AND provider_type IS NOT NULL AND outcome_reference IS NOT NULL "
             f"AND ((kind IN ({_REFUND_KIND_VALUES})) "
             "= (refund_reference IS NOT NULL)))",
@@ -588,6 +591,10 @@ class PaymentCashOutcome(Base):
     outcome_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
     correction_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
     refund_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    direction: Mapped[AdminCorrectionDirection | None] = mapped_column(
+        _enum(AdminCorrectionDirection, "cash_outcome_direction"), nullable=True
+    )
+    approval_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
     minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)

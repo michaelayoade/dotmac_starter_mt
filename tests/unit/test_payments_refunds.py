@@ -17,6 +17,7 @@ from dotmac_kernel.models import Tenant
 from dotmac_kernel.money import Money, currency
 from dotmac_payments import models
 from dotmac_payments.contracts import (
+    AdminCorrectionDirection,
     AttentionReason,
     CashOutcomeKind,
     CashOutcomeState,
@@ -332,6 +333,8 @@ def test_admin_correction_is_identified_by_its_correction_id_alone(db):
         kind=CashOutcomeKind.ADMIN_CORRECTION,
         amount=Money.of(Decimal("50.00"), NGN),
         correction_id=correction,
+        direction=AdminCorrectionDirection.CASH_RETURNED_TO_CUSTOMER,
+        approval_ref="approval:1",
     )
     row = observe_cash_outcome(db, scope=SCOPE, command=command)
     assert row.state is CashOutcomeState.OBSERVED
@@ -347,7 +350,25 @@ def test_admin_correction_is_identified_by_its_correction_id_alone(db):
         {
             "kind": CashOutcomeKind.ADMIN_CORRECTION,
             "correction_id": uuid.uuid4(),
+            "approval_ref": "approval:1",
+        },  # no direction
+        {
+            "kind": CashOutcomeKind.ADMIN_CORRECTION,
+            "correction_id": uuid.uuid4(),
+            "direction": AdminCorrectionDirection.CASH_RESTORED,
+        },  # no approval
+        {
+            "kind": CashOutcomeKind.ADMIN_CORRECTION,
+            "correction_id": uuid.uuid4(),
+            "direction": AdminCorrectionDirection.CASH_RESTORED,
+            "approval_ref": "approval:1",
             "provider_type": "gateway",
+        },
+        {
+            "kind": CashOutcomeKind.BOUNCE,
+            "provider_type": "gateway",
+            "outcome_reference": "x",
+            "direction": AdminCorrectionDirection.CASH_RESTORED,
         },
         {
             "kind": CashOutcomeKind.CHARGEBACK,
@@ -648,3 +669,103 @@ def test_outcome_state_shape_check_refuses_an_unreasoned_parked_row(db):
     )
     with pytest.raises(IntegrityError):
         db.flush()
+
+
+# ------------------------------------- chargebacks and bounces consume the cash
+
+
+@pytest.mark.parametrize("kind", [CashOutcomeKind.CHARGEBACK, CashOutcomeKind.BOUNCE])
+def test_a_charged_back_payment_cannot_be_refunded_again(db, kind):
+    confirmation = _confirmed(db)
+    _outcome(db, confirmation.id, kind, "10000.00")
+    assert _refundable(db, confirmation) == Decimal("0.00")
+    with pytest.raises(RefundExceedsConfirmedCash):
+        _refund(db, confirmation, "0.01")
+
+
+def test_partial_chargeback_leaves_only_the_remainder_refundable(db):
+    confirmation = _confirmed(db)
+    _outcome(db, confirmation.id, CashOutcomeKind.CHARGEBACK, "4000.00")
+    with pytest.raises(RefundExceedsConfirmedCash):
+        _refund(db, confirmation, "6000.01")
+    _refund(db, confirmation, "6000.00")
+
+
+def test_reversals_are_bounded_cumulatively_against_cash_net_of_refunds(db):
+    confirmation = _confirmed(db)
+    _refund(db, confirmation, "6000.00")  # in flight counts
+    first = _outcome(db, confirmation.id, CashOutcomeKind.CHARGEBACK, "4000.00")
+    second = _outcome(db, confirmation.id, CashOutcomeKind.BOUNCE, "0.01")
+    assert first.state is CashOutcomeState.OBSERVED
+    assert second.state is CashOutcomeState.ATTENTION_REQUIRED
+    assert second.attention_reason is AttentionReason.EXCEEDS_CONFIRMED_CASH
+    assert second.confirmation_id == confirmation.id  # recorded, not dropped
+
+
+def test_two_chargebacks_on_one_payment_park_the_second(db):
+    confirmation = _confirmed(db)
+    one = _outcome(db, confirmation.id, CashOutcomeKind.CHARGEBACK, "10000.00")
+    two = _outcome(db, confirmation.id, CashOutcomeKind.CHARGEBACK, "10000.00")
+    assert one.state is CashOutcomeState.OBSERVED
+    assert two.attention_reason is AttentionReason.EXCEEDS_CONFIRMED_CASH
+
+
+def test_a_parked_chargeback_does_not_consume_cash(db):
+    confirmation = _confirmed(db)
+    _outcome(db, confirmation.id, CashOutcomeKind.CHARGEBACK, "10000.01")
+    assert _refundable(db, confirmation) == Decimal("10000.00")
+
+
+def _correction(db, confirmation, direction, amount, **kw):
+    return observe_cash_outcome(
+        db,
+        scope=SCOPE,
+        command=ObserveCashOutcome(
+            confirmation_id=confirmation.id,
+            kind=CashOutcomeKind.ADMIN_CORRECTION,
+            amount=Money.of(Decimal(amount), NGN),
+            correction_id=uuid.uuid4(),
+            direction=direction,
+            approval_ref="approval:7",
+            **kw,
+        ),
+    )
+
+
+def test_admin_correction_enters_the_arithmetic_by_direction(db):
+    confirmation = _confirmed(db)
+    out = AdminCorrectionDirection.CASH_RETURNED_TO_CUSTOMER
+    back = AdminCorrectionDirection.CASH_RESTORED
+    assert _correction(db, confirmation, out, "3000.00").state is (
+        CashOutcomeState.OBSERVED
+    )
+    assert _refundable(db, confirmation) == Decimal("7000.00")
+    # Restoring more than was returned is parked, not applied.
+    over = _correction(db, confirmation, back, "3000.01")
+    assert over.attention_reason is AttentionReason.EXCEEDS_CONFIRMED_CASH
+    assert _correction(db, confirmation, back, "1000.00").state is (
+        CashOutcomeState.OBSERVED
+    )
+    assert _refundable(db, confirmation) == Decimal("8000.00")
+
+
+def test_replay_refuses_a_changed_correction_direction_or_approval(db):
+    confirmation = _confirmed(db)
+    correction = uuid.uuid4()
+    base = {
+        "confirmation_id": confirmation.id,
+        "kind": CashOutcomeKind.ADMIN_CORRECTION,
+        "amount": Money.of(Decimal("5.00"), NGN),
+        "correction_id": correction,
+        "direction": AdminCorrectionDirection.CASH_RETURNED_TO_CUSTOMER,
+        "approval_ref": "approval:7",
+    }
+    observe_cash_outcome(db, scope=SCOPE, command=ObserveCashOutcome(**base))
+    for change in (
+        {"approval_ref": "approval:8"},
+        {"direction": AdminCorrectionDirection.CASH_RESTORED},
+    ):
+        with pytest.raises(Conflict):
+            observe_cash_outcome(
+                db, scope=SCOPE, command=ObserveCashOutcome(**{**base, **change})
+            )

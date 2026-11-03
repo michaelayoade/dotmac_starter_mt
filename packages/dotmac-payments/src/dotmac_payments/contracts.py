@@ -190,6 +190,13 @@ REFUND_OUTCOME_KINDS = frozenset(
 )
 
 
+class AdminCorrectionDirection(enum.StrEnum):
+    """Which way an admin correction moved cash. Closed; never inferred."""
+
+    CASH_RETURNED_TO_CUSTOMER = "CASH_RETURNED_TO_CUSTOMER"
+    CASH_RESTORED = "CASH_RESTORED"
+
+
 class CashOutcomeState(enum.StrEnum):
     OBSERVED = "OBSERVED"
     ATTENTION_REQUIRED = "ATTENTION_REQUIRED"
@@ -259,7 +266,11 @@ class ObserveCashOutcome:
     `ADMIN_CORRECTION`. The two shapes are exclusive. A refund outcome names the
     derived provider reference it answers in `refund_reference`. An outcome that
     cannot be matched is stored in `ATTENTION_REQUIRED` with a reason; it is
-    never discarded. Replay returns the stored row; changed evidence conflicts.
+    never discarded. An `ADMIN_CORRECTION` also names its closed `direction` and
+    the maker-checker `approval_ref` that authorised it; no other kind may.
+    Chargebacks, bounces and `CASH_RETURNED_TO_CUSTOMER` corrections reduce the
+    refundable cash exactly as refunds do. Replay returns the stored row;
+    changed evidence conflicts.
     An omitted `observed_at` means now for new evidence and the stored instant
     on replay.
     """
@@ -271,10 +282,13 @@ class ObserveCashOutcome:
     outcome_reference: str | None = None
     correction_id: UUID | None = None
     refund_reference: str | None = None
+    direction: AdminCorrectionDirection | None = None
+    approval_ref: str | None = None
     observed_at: datetime | None = None
 
 
 __all__ = [
+    "AdminCorrectionDirection",
     "AttentionReason",
     "CashOutcomeKind",
     "CashOutcomeState",

@@ -44,6 +44,7 @@ _REASONS = (
     "TERMINAL_CONFLICT",
 )
 _REFUND_KINDS = "'REFUND_COMPLETED', 'REFUND_FAILED'"
+_DIRECTIONS = ("CASH_RETURNED_TO_CUSTOMER", "CASH_RESTORED")
 
 
 def _in_list(column: str, values: tuple[str, ...]) -> str:
@@ -132,6 +133,8 @@ def upgrade() -> None:
         sa.Column("outcome_reference", sa.String(160), nullable=True),
         sa.Column("correction_id", sa.Uuid(), nullable=True),
         sa.Column("refund_reference", sa.String(64), nullable=True),
+        sa.Column("direction", sa.String(32), nullable=True),
+        sa.Column("approval_ref", sa.String(160), nullable=True),
         sa.Column("currency_code", sa.String(3), nullable=False),
         sa.Column("minor_units", sa.Integer(), nullable=False),
         sa.Column("amount", _MONEY, nullable=False),
@@ -178,6 +181,10 @@ def upgrade() -> None:
             name="ck_cash_outcomes_reason",
         ),
         sa.CheckConstraint(
+            f"direction IS NULL OR {_in_list('direction', _DIRECTIONS)}",
+            name="ck_cash_outcomes_direction",
+        ),
+        sa.CheckConstraint(
             "currency_code ~ '^[A-Z]{3}$'", name="ck_cash_outcomes_currency"
         ),
         sa.CheckConstraint(
@@ -189,9 +196,11 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "(kind = 'ADMIN_CORRECTION' AND correction_id IS NOT NULL "
+            "AND direction IS NOT NULL AND approval_ref IS NOT NULL "
             "AND provider_type IS NULL AND outcome_reference IS NULL "
             "AND refund_reference IS NULL) OR "
             "(kind <> 'ADMIN_CORRECTION' AND correction_id IS NULL "
+            "AND direction IS NULL AND approval_ref IS NULL "
             "AND provider_type IS NOT NULL AND outcome_reference IS NOT NULL "
             f"AND ((kind IN ({_REFUND_KINDS})) = (refund_reference IS NOT NULL)))",
             name="ck_cash_outcomes_identity",
@@ -265,6 +274,113 @@ def upgrade() -> None:
             )
 
     op.execute("""
+        CREATE FUNCTION mod_payments.cash_reversal_total(t uuid, c uuid) RETURNS numeric
+        LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+        DECLARE total numeric;
+        BEGIN
+            -- Cash already spoken for: refunds not observed to fail (in flight
+            -- and completed), applied chargebacks and bounces, and admin
+            -- corrections by direction. Parked rows never count.
+            SELECT COALESCE(sum(i.amount), 0) INTO total
+                FROM mod_payments.refund_instructions i
+                WHERE i.tenant_id = t AND i.confirmation_id = c
+                  AND NOT EXISTS (
+                      SELECT 1 FROM mod_payments.payment_cash_outcomes o
+                      WHERE o.tenant_id = i.tenant_id AND o.instruction_id = i.id
+                        AND o.state = 'OBSERVED' AND o.kind = 'REFUND_FAILED');
+            RETURN total + (
+                SELECT COALESCE(sum(CASE WHEN o.direction = 'CASH_RESTORED'
+                                         THEN -o.amount ELSE o.amount END), 0)
+                FROM mod_payments.payment_cash_outcomes o
+                WHERE o.tenant_id = t AND o.confirmation_id = c
+                  AND o.state = 'OBSERVED'
+                  AND o.kind IN ('CHARGEBACK', 'BOUNCE', 'ADMIN_CORRECTION'));
+        END $$
+    """)
+    op.execute("""
+        CREATE FUNCTION mod_payments.check_cash_outcome_insert() RETURNS trigger
+        LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+        DECLARE
+            conf mod_payments.payment_confirmations%ROWTYPE;
+            ins mod_payments.refund_instructions%ROWTYPE;
+            intent_id uuid;
+            returned numeric;
+        BEGIN
+            -- A parked row asserts nothing and never counts toward any bound.
+            IF NEW.state <> 'OBSERVED' THEN RETURN NEW; END IF;
+            IF current_setting('transaction_isolation') <> 'read committed'
+                OR current_setting('transaction_read_only') <> 'off' THEN
+                RAISE EXCEPTION 'cash outcome requires READ WRITE READ COMMITTED'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+            SELECT * INTO conf FROM mod_payments.payment_confirmations
+                WHERE tenant_id = NEW.tenant_id AND id = NEW.confirmation_id;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'applied cash outcome needs an existing confirmation'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+            -- Same serialization point as the instruction trigger and service.
+            SELECT id INTO intent_id FROM mod_payments.payment_intents
+                WHERE tenant_id = NEW.tenant_id AND id = conf.intent_id FOR UPDATE;
+            IF conf.currency_code <> NEW.currency_code
+                OR conf.minor_units IS DISTINCT FROM NEW.minor_units
+                OR NEW.amount > conf.confirmed_amount
+                OR (NEW.provider_type IS NOT NULL
+                    AND NEW.provider_type <> conf.provider_type) THEN
+                RAISE EXCEPTION 'cash outcome does not match its confirmation'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+            IF NEW.kind IN ('REFUND_COMPLETED', 'REFUND_FAILED') THEN
+                SELECT * INTO ins FROM mod_payments.refund_instructions
+                    WHERE tenant_id = NEW.tenant_id AND id = NEW.instruction_id;
+                IF NOT FOUND
+                    OR ins.confirmation_id <> conf.id
+                    OR ins.provider_type <> NEW.provider_type
+                    OR ins.provider_reference <> NEW.refund_reference
+                    OR ins.amount <> NEW.amount
+                    OR ins.currency_code <> NEW.currency_code
+                    OR EXISTS (
+                        SELECT 1 FROM mod_payments.payment_cash_outcomes o
+                        WHERE o.tenant_id = NEW.tenant_id
+                          AND o.instruction_id = ins.id AND o.state = 'OBSERVED'
+                          AND o.kind IN ('REFUND_COMPLETED', 'REFUND_FAILED')) THEN
+                    RAISE EXCEPTION 'refund outcome does not match one open instruction'
+                        USING ERRCODE = 'restrict_violation';
+                END IF;
+            ELSIF NEW.direction = 'CASH_RESTORED' THEN
+                SELECT COALESCE(sum(o.amount), 0) INTO returned
+                    FROM mod_payments.payment_cash_outcomes o
+                    WHERE o.tenant_id = NEW.tenant_id AND o.confirmation_id = conf.id
+                      AND o.state = 'OBSERVED' AND o.kind = 'ADMIN_CORRECTION'
+                      AND o.direction = 'CASH_RETURNED_TO_CUSTOMER';
+                returned := returned - COALESCE((
+                    SELECT sum(o.amount) FROM mod_payments.payment_cash_outcomes o
+                    WHERE o.tenant_id = NEW.tenant_id AND o.confirmation_id = conf.id
+                      AND o.state = 'OBSERVED' AND o.kind = 'ADMIN_CORRECTION'
+                      AND o.direction = 'CASH_RESTORED'), 0);
+                IF NEW.amount > returned THEN
+                    RAISE EXCEPTION 'restored cash exceeds cash returned'
+                        USING ERRCODE = 'restrict_violation';
+                END IF;
+            ELSIF mod_payments.cash_reversal_total(NEW.tenant_id, conf.id)
+                    + NEW.amount > conf.confirmed_amount THEN
+                RAISE EXCEPTION 'cash outcome exceeds confirmed cash less prior reversals'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+            RETURN NEW;
+        END $$
+    """)
+    op.execute(
+        "CREATE TRIGGER cash_outcome_insert BEFORE INSERT "
+        f"ON {_SCHEMA}.payment_cash_outcomes FOR EACH ROW "
+        "EXECUTE FUNCTION mod_payments.check_cash_outcome_insert()"
+    )
+    op.execute(
+        f"ALTER TABLE {_SCHEMA}.payment_cash_outcomes "
+        "ENABLE ALWAYS TRIGGER cash_outcome_insert"
+    )
+
+    op.execute("""
         CREATE FUNCTION mod_payments.check_refund_instruction_insert() RETURNS trigger
         LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
         DECLARE
@@ -302,16 +418,9 @@ def upgrade() -> None:
                 RAISE EXCEPTION 'refund provider reference is not derived from its request'
                     USING ERRCODE = 'restrict_violation';
             END IF;
-            SELECT COALESCE(sum(i.amount), 0) INTO committed
-                FROM mod_payments.refund_instructions i
-                WHERE i.tenant_id = NEW.tenant_id
-                  AND i.confirmation_id = NEW.confirmation_id
-                  AND NOT EXISTS (
-                      SELECT 1 FROM mod_payments.payment_cash_outcomes o
-                      WHERE o.tenant_id = i.tenant_id AND o.instruction_id = i.id
-                        AND o.state = 'OBSERVED' AND o.kind = 'REFUND_FAILED');
+            committed := mod_payments.cash_reversal_total(NEW.tenant_id, NEW.confirmation_id);
             IF committed + NEW.amount > conf.confirmed_amount THEN
-                RAISE EXCEPTION 'refund exceeds confirmed cash less prior refunds'
+                RAISE EXCEPTION 'refund exceeds confirmed cash less prior refunds and reversals'
                     USING ERRCODE = 'restrict_violation';
             END IF;
             RETURN NEW;
@@ -348,4 +457,6 @@ def downgrade() -> None:
     op.drop_table("payment_cash_outcomes", schema=_SCHEMA)
     op.drop_table("refund_instructions", schema=_SCHEMA)
     op.execute("DROP FUNCTION mod_payments.check_refund_instruction_insert()")
+    op.execute("DROP FUNCTION mod_payments.check_cash_outcome_insert()")
+    op.execute("DROP FUNCTION mod_payments.cash_reversal_total(uuid, uuid)")
     op.execute("DROP FUNCTION mod_payments.refuse_refund_outcome_mutation()")

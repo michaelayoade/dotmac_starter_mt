@@ -20,6 +20,15 @@
   `ATTENTION_REQUIRED` with a reason and is never dropped. Replay is idempotent
   (a parked outcome stays parked); changed evidence conflicts. Exactly one
   terminal refund outcome is applied per instruction.
+- Chargebacks, bounces and admin corrections (closed `direction`, required
+  `approval_ref`) count against refundable cash, in the module and in the
+  database (`cash_reversal_total`). A reversal beyond confirmed cash less prior
+  refunds and reversals is parked as `EXCEEDS_CONFIRMED_CASH`.
+- A `BEFORE INSERT` trigger guards applied outcomes: the confirmation must
+  exist and match, a refund outcome must reference one open instruction of the
+  same confirmation, provider, reference and amount (at most one terminal), and
+  reversals obey the cumulative bound under the intent-row lock. A forged
+  `REFUND_FAILED` can no longer free held cash.
 - Add `pm_0007_refund_outcomes`: append-only `refund_instructions` and
   `payment_cash_outcomes`, forced RLS, `SELECT, INSERT` grants only, mutation and
   TRUNCATE refusal, and an insert trigger that repeats the over-refund bound
