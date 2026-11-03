@@ -30,6 +30,7 @@ from dotmac_imports.partition_manifest import (
     ManifestVersionUnsupported,
     load_partition_manifest,
     parse_partition_manifest,
+    parse_partition_manifest_unpinned,
     register_manifest_plan,
     render_partition_manifest,
     verify_manifest_partitions,
@@ -146,7 +147,7 @@ def test_render_and_parse_round_trip_the_plan() -> None:
     descriptors, _ = _plan(source)
     rendered = render_partition_manifest(source, descriptors)
     assert render_partition_manifest(source, descriptors) == rendered
-    manifest = parse_partition_manifest(rendered)
+    manifest = parse_partition_manifest_unpinned(rendered)
     assert manifest.version == 1
     assert manifest.source_file_id == source.file_id
     assert manifest.partitions == tuple(descriptors)
@@ -159,13 +160,15 @@ def test_the_file_loader_reads_a_bounded_file(tmp_path: Path) -> None:
     descriptors, _ = _plan(source)
     path = tmp_path / "opening.manifest.json"
     path.write_bytes(render_partition_manifest(source, descriptors))
-    assert load_partition_manifest(path).partitions == tuple(descriptors)
+    assert load_partition_manifest(
+        path, expected_sha256=_document(path.read_bytes())["manifest_sha256"]
+    ).partitions == tuple(descriptors)
     with pytest.raises(ManifestError) as missing:
-        load_partition_manifest(tmp_path / "absent.json")
+        load_partition_manifest(tmp_path / "absent.json", expected_sha256="0" * 64)
     assert str(tmp_path) not in str(missing.value)
     path.write_bytes(b"x" * (MAX_MANIFEST_BYTES + 1))
     with pytest.raises(ManifestError, match="size ceiling"):
-        load_partition_manifest(path)
+        load_partition_manifest(path, expected_sha256="0" * 64)
 
 
 @pytest.mark.parametrize("version", [0, 2, "1", True, None, 1.5])
@@ -175,7 +178,7 @@ def test_an_unknown_version_is_refused_even_if_resealed(version: object) -> None
     document = _document(render_partition_manifest(source, descriptors))
     document["version"] = version
     with pytest.raises(ManifestVersionUnsupported):
-        parse_partition_manifest(_reseal(document))
+        parse_partition_manifest_unpinned(_reseal(document))
 
 
 def test_an_unknown_format_is_refused() -> None:
@@ -184,7 +187,7 @@ def test_an_unknown_format_is_refused() -> None:
     document = _document(render_partition_manifest(source, descriptors))
     document["format"] = "something.else"
     with pytest.raises(ManifestVersionUnsupported):
-        parse_partition_manifest(_reseal(document))
+        parse_partition_manifest_unpinned(_reseal(document))
 
 
 def test_a_digest_mismatch_is_refused() -> None:
@@ -193,7 +196,7 @@ def test_a_digest_mismatch_is_refused() -> None:
     document = _document(render_partition_manifest(source, descriptors))
     document["partitions"][0]["row_count"] += 1  # edited, digest NOT recomputed
     with pytest.raises(ManifestDigestMismatch):
-        parse_partition_manifest(json.dumps(document).encode())
+        parse_partition_manifest_unpinned(json.dumps(document).encode())
 
 
 def test_an_out_of_band_digest_catches_a_recomputed_forgery() -> None:
@@ -205,7 +208,7 @@ def test_an_out_of_band_digest_catches_a_recomputed_forgery() -> None:
     document = _document(rendered)
     document["partitions"][1]["checksum_sha256"] = "0" * 64
     forged = _reseal(document)
-    assert parse_partition_manifest(forged)  # self-digest alone cannot tell
+    assert parse_partition_manifest_unpinned(forged)  # self-digest alone cannot tell
     with pytest.raises(ManifestDigestMismatch):
         parse_partition_manifest(forged, expected_sha256=pinned)
     with pytest.raises(ValueError):
@@ -220,19 +223,19 @@ def test_duplicate_partitions_are_refused() -> None:
     same_ordinal = json.loads(json.dumps(base))
     same_ordinal["partitions"][1]["ordinal"] = 0
     with pytest.raises(ManifestError, match="twice"):
-        parse_partition_manifest(_reseal(same_ordinal))
+        parse_partition_manifest_unpinned(_reseal(same_ordinal))
 
     same_file = json.loads(json.dumps(base))
     same_file["partitions"][1]["file_id"] = same_file["partitions"][0]["file_id"]
     with pytest.raises(ManifestError, match="twice"):
-        parse_partition_manifest(_reseal(same_file))
+        parse_partition_manifest_unpinned(_reseal(same_file))
 
     repeated_key = b'{"format":"%s","format":"%s","version":1}' % (
         MANIFEST_FORMAT.encode(),
         MANIFEST_FORMAT.encode(),
     )
     with pytest.raises(ManifestError, match="repeats"):
-        parse_partition_manifest(repeated_key)
+        parse_partition_manifest_unpinned(repeated_key)
 
 
 @pytest.mark.parametrize(
@@ -261,7 +264,7 @@ def test_malformed_members_are_refused_even_if_resealed(mutate) -> None:  # type
     document = _document(render_partition_manifest(source, descriptors))
     mutate(document)
     with pytest.raises(PartitionPlanInvalid):
-        parse_partition_manifest(_reseal(document))
+        parse_partition_manifest_unpinned(_reseal(document))
 
 
 @pytest.mark.parametrize(
@@ -269,13 +272,15 @@ def test_malformed_members_are_refused_even_if_resealed(mutate) -> None:  # type
 )
 def test_non_manifests_are_refused(raw: bytes) -> None:
     with pytest.raises(ManifestError):
-        parse_partition_manifest(raw)
+        parse_partition_manifest_unpinned(raw)
 
 
 def test_verification_streams_each_object_against_its_digest() -> None:
     source = _source()
     descriptors, stored = _plan(source)
-    manifest = parse_partition_manifest(render_partition_manifest(source, descriptors))
+    manifest = parse_partition_manifest_unpinned(
+        render_partition_manifest(source, descriptors)
+    )
     verify_manifest_partitions(
         manifest, open_partition=lambda file_id: io.BytesIO(stored[file_id])
     )
@@ -314,7 +319,9 @@ def test_registration_is_idempotent_and_a_different_plan_is_refused(
 ) -> None:
     source = _source()
     descriptors, _ = _plan(source)
-    manifest = parse_partition_manifest(render_partition_manifest(source, descriptors))
+    manifest = parse_partition_manifest_unpinned(
+        render_partition_manifest(source, descriptors)
+    )
     run = _run(db, source)
     first = register_manifest_plan(
         db, tenant_id=TENANT, run_id=run.id, source=source, manifest=manifest
@@ -326,7 +333,9 @@ def test_registration_is_idempotent_and_a_different_plan_is_refused(
     assert len(db.scalars(select(ImportPartition)).all()) == len(descriptors)
 
     other, _ = _plan(source, partition_rows=1)
-    other_manifest = parse_partition_manifest(render_partition_manifest(source, other))
+    other_manifest = parse_partition_manifest_unpinned(
+        render_partition_manifest(source, other)
+    )
     with pytest.raises(PartitionPlanInvalid, match="immutable"):
         register_manifest_plan(
             db,
@@ -341,7 +350,9 @@ def test_registration_is_idempotent_and_a_different_plan_is_refused(
 def test_a_manifest_for_another_source_or_run_state_is_refused(db: Session) -> None:
     source = _source()
     descriptors, _ = _plan(source)
-    manifest = parse_partition_manifest(render_partition_manifest(source, descriptors))
+    manifest = parse_partition_manifest_unpinned(
+        render_partition_manifest(source, descriptors)
+    )
     other_source = SourceDocument(
         file_id=uuid.uuid4(), checksum_sha256=source.checksum_sha256
     )
@@ -366,7 +377,9 @@ def test_a_manifest_plan_drives_the_existing_lease_checkpoint_and_applier_port(
 ) -> None:
     source = _source()
     descriptors, stored = _plan(source)
-    manifest = parse_partition_manifest(render_partition_manifest(source, descriptors))
+    manifest = parse_partition_manifest_unpinned(
+        render_partition_manifest(source, descriptors)
+    )
     run = _run(db, source)
     register_manifest_plan(
         db, tenant_id=TENANT, run_id=run.id, source=source, manifest=manifest
@@ -400,3 +413,13 @@ def test_a_manifest_plan_drives_the_existing_lease_checkpoint_and_applier_port(
     db.refresh(applied)
     assert applied.status == RunStatus.COMPLETED
     assert sorted(applier.calls) == ["R-1", "R-2", "R-3"]
+
+
+def test_the_pin_is_a_required_argument() -> None:
+    source = _source()
+    descriptors, _ = _plan(source)
+    rendered = render_partition_manifest(source, descriptors)
+    with pytest.raises(TypeError):
+        parse_partition_manifest(rendered)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        load_partition_manifest("x.json")  # type: ignore[call-arg]

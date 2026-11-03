@@ -118,7 +118,7 @@ file instead of calling `iter_csv_partitions`. The loader turns it into the same
 `PartitionDescriptor` plan:
 
 ```python
-manifest = load_partition_manifest(path, expected_sha256=pinned_digest)
+manifest = load_partition_manifest(path, expected_sha256=pinned_digest)  # required
 verify_manifest_partitions(manifest, open_partition=open_by_file_id)  # no session
 register_manifest_plan(db, tenant_id=t, run_id=run.id, source=source, manifest=manifest)
 db.commit()
@@ -153,6 +153,13 @@ Format `dotmac.imports.partition-manifest`, version 1, UTF-8 JSON:
   (`ManifestError`, `ManifestVersionUnsupported`, `ManifestDigestMismatch`).
   Version 1 never gains members; a new shape is a new version this release
   would refuse.
+- `expected_sha256` is REQUIRED (keyword-only) on `parse_partition_manifest` and
+  `load_partition_manifest`: the digest the operator approved, obtained out of
+  band. `parse_partition_manifest_unpinned` exists for generators and tests only.
+- `register_manifest_plan` does NOT stream-verify the stored objects. Run
+  `verify_manifest_partitions` first for an early, whole-plan check; independently,
+  `read_claimed_partition` re-verifies each partition's byte size and SHA-256 before
+  decoding it, so a tampered object can never be validated or applied.
 - The manifest's `source` must equal the run's source document. Registration
   stores nothing new: the plan is the existing immutable partition rows, so
   redelivering the same manifest is a no-op and a different plan is refused.

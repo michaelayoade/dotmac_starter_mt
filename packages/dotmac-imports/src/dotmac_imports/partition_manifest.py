@@ -25,7 +25,9 @@ Format `dotmac.imports.partition-manifest`, version 1 (UTF-8 JSON object)::
 insignificant whitespace, ASCII-escaped, UTF-8) of every other member.  It
 detects corruption and partial edits.  It does not authenticate the producer,
 because anyone able to edit the file can recompute it: a caller that needs
-tamper evidence passes `expected_sha256`, a digest obtained out of band.
+tamper evidence passes `expected_sha256`, a digest obtained out of band. It is
+a REQUIRED argument of `parse_partition_manifest` and `load_partition_manifest`;
+the self-digest-only form is the explicitly named `parse_partition_manifest_unpinned`.
 
 Parsing is closed.  An unknown format or version, an unknown member, a duplicate
 JSON key, a duplicate partition (ordinal or file id), a non-canonical UUID or
@@ -161,9 +163,21 @@ def _object(value: object, what: str, allowed: frozenset[str]) -> dict[str, Any]
     return value
 
 
-def parse_partition_manifest(
-    data: bytes, *, expected_sha256: str | None = None
-) -> PartitionManifest:
+def parse_partition_manifest(data: bytes, *, expected_sha256: str) -> PartitionManifest:
+    """Parse manifest bytes against a digest pinned OUT OF BAND (required).
+
+    The self-digest cannot authenticate a manifest, so there is no default: a
+    consumer that acts on a manifest must say which digest it approved.
+    """
+    return _parse(data, expected_sha256)
+
+
+def parse_partition_manifest_unpinned(data: bytes) -> PartitionManifest:
+    """Parse with the self-digest only; for generators and tests, never for intake."""
+    return _parse(data, None)
+
+
+def _parse(data: bytes, expected_sha256: str | None) -> PartitionManifest:
     """Parse and fully verify manifest bytes; never touches storage or a database."""
     if expected_sha256 is not None and not _is_sha256(expected_sha256):
         raise ValueError("expected_sha256 must be a lowercase SHA-256 hex digest")
@@ -251,7 +265,7 @@ def parse_partition_manifest(
 
 
 def load_partition_manifest(
-    path: str | os.PathLike[str], *, expected_sha256: str | None = None
+    path: str | os.PathLike[str], *, expected_sha256: str
 ) -> PartitionManifest:
     """Read a manifest file (bounded) and parse it; the path is never echoed."""
     try:
@@ -259,7 +273,7 @@ def load_partition_manifest(
             data = stream.read(MAX_MANIFEST_BYTES + 1)
     except OSError:
         raise ManifestError("manifest file could not be read") from None
-    return parse_partition_manifest(data, expected_sha256=expected_sha256)
+    return _parse(data, expected_sha256)
 
 
 def render_partition_manifest(
@@ -288,7 +302,7 @@ def render_partition_manifest(
     }
     document["manifest_sha256"] = _digest_of(document)
     rendered = _canonical(document)
-    parse_partition_manifest(rendered)
+    _parse(rendered, None)
     return rendered
 
 
@@ -360,6 +374,7 @@ __all__ = [
     "PartitionManifest",
     "load_partition_manifest",
     "parse_partition_manifest",
+    "parse_partition_manifest_unpinned",
     "register_manifest_plan",
     "render_partition_manifest",
     "verify_manifest_partitions",

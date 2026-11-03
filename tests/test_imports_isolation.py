@@ -596,11 +596,11 @@ def test_postgres_concurrent_manifest_registration_is_idempotent(
     the loser sees the winner's plan and returns it; exactly one plan exists."""
     import threading
 
-    from dotmac_imports import parse_partition_manifest, register_manifest_plan
+    from dotmac_imports import parse_partition_manifest_unpinned, register_manifest_plan
 
     admin_url, app_user_url = migrated_scratch
     tenant_id, source, _stored, rendered = _manifest_fixture(admin_url)
-    manifest = parse_partition_manifest(rendered)
+    manifest = parse_partition_manifest_unpinned(rendered)
     engine = create_engine(app_user_url)
     try:
         with Session(engine) as setup:
@@ -670,7 +670,7 @@ def test_postgres_manifest_plan_is_immutable_and_drives_claims_and_apply(
         PartitionPlanInvalid,
         apply_claimed_partition,
         claim_partition,
-        parse_partition_manifest,
+        parse_partition_manifest_unpinned,
         read_claimed_partition,
         register_manifest_plan,
         validate_claimed_partition,
@@ -687,7 +687,7 @@ def test_postgres_manifest_plan_is_immutable_and_drives_claims_and_apply(
 
     admin_url, app_user_url = migrated_scratch
     tenant_id, source, stored, rendered = _manifest_fixture(admin_url)
-    manifest = parse_partition_manifest(rendered)
+    manifest = parse_partition_manifest_unpinned(rendered)
     verify_manifest_partitions(
         manifest, open_partition=lambda file_id: io.BytesIO(stored[file_id])
     )
@@ -727,7 +727,7 @@ def test_postgres_manifest_plan_is_immutable_and_drives_claims_and_apply(
                     tenant_id=tenant_id,
                     run_id=run_id,
                     source=source,
-                    manifest=parse_partition_manifest(
+                    manifest=parse_partition_manifest_unpinned(
                         _resplit(source, manifest.partitions)
                     ),
                 )
