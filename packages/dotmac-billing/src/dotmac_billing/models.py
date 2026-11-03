@@ -2509,6 +2509,68 @@ class PlatformOpeningWindowSeal(Base, _SealColumns):
     )
 
 
+class _HoldAdmissionColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    disposition_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    maker_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    approval_request_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    approver_refs: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class OpeningHoldAdmission(Base, _WindowTenantRow, _HoldAdmissionColumns):
+    __tablename__ = "opening_hold_admissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "billing_account_id", name="uq_hold_admission_account"
+        ),
+        UniqueConstraint("tenant_id", "receipt_id", name="uq_hold_admission_receipt"),
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "receipt_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.opening_import_receipts.tenant_id",
+                f"{SCHEMA}.opening_import_receipts.id",
+                f"{SCHEMA}.opening_import_receipts.billing_account_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningHoldAdmission(Base, _HoldAdmissionColumns):
+    __tablename__ = "platform_opening_hold_admissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "billing_account_id", name="uq_platform_hold_admission_account"
+        ),
+        UniqueConstraint("receipt_id", name="uq_platform_hold_admission_receipt"),
+        ForeignKeyConstraint(
+            ["window_id"],
+            [f"{SCHEMA}.platform_opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["receipt_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.platform_opening_import_receipts.id",
+                f"{SCHEMA}.platform_opening_import_receipts.billing_account_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
 class _SettlementEarmarkColumns(_EvidenceTime):
     id: Mapped[UUID] = uuid_pk()
     billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
@@ -2674,6 +2736,7 @@ TENANT_TABLES = (
     "opening_windows",
     "opening_window_admissions",
     "opening_window_seals",
+    "opening_hold_admissions",
     "receivable_source_claims",
     "opening_receivable_bases",
     "opening_historical_discharge_claims",
@@ -2712,6 +2775,7 @@ PLATFORM_TABLES = (
     "platform_opening_windows",
     "platform_opening_window_admissions",
     "platform_opening_window_seals",
+    "platform_opening_hold_admissions",
     "platform_receivable_source_claims",
     "platform_opening_receivable_bases",
     "platform_opening_historical_discharge_claims",

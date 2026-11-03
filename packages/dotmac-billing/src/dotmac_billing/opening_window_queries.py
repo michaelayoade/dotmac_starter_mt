@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from dotmac_kernel.cache import Scope
 from dotmac_kernel.fingerprints import fingerprint_of
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_billing.opening_contracts import OpeningManifestV1
+from dotmac_billing.opening_hold_contracts import OpeningHoldAdmissionV1
 from dotmac_billing.opening_queries import _decode_row, _require, _scoped, _table
 from dotmac_billing.opening_receivable_contracts import OpeningManifestV2
 from dotmac_billing.opening_receivable_validation import opening_manifest_fingerprint_v2
@@ -124,3 +127,45 @@ def get_opening_window_seal(db: Session, *, scope: Scope) -> OpeningWindowSealV1
         )
     )
     return seal
+
+
+def get_opening_hold_list(db: Session, *, scope: Scope) -> tuple[UUID, ...]:
+    """The sealed hold list; empty before the seal and for a seal with no holds."""
+    seal = get_opening_window_seal(db, scope=scope)
+    return () if seal is None else seal.command.held_account_ids
+
+
+def get_opening_hold_admissions(
+    db: Session, *, scope: Scope
+) -> tuple[OpeningHoldAdmissionV1, ...]:
+    """Audit query: every post-seal held-partition admission, verified on read."""
+    table = _table(scope, "opening_hold_admissions")
+    with db.no_autoflush:
+        rows = (
+            db.execute(
+                _scoped(
+                    select(table).order_by(table.c.created_at, table.c.id), scope, table
+                )
+            )
+            .mappings()
+            .all()
+        )
+    held = set(get_opening_hold_list(db, scope=scope))
+    result = []
+    for row in rows:
+        item = _decode_row(row, OpeningHoldAdmissionV1)
+        _require(
+            item.scope == scope
+            and item.admission_id == row["id"]
+            and item.window_id == row["window_id"]
+            and item.billing_account_id == row["billing_account_id"]
+            and item.receipt_id == row["receipt_id"]
+            and item.billing_account_id in held
+            and item.disposition.disposition_digest == row["disposition_digest"]
+            and item.maker_ref == row["maker_ref"]
+            and item.approval.request_id == row["approval_request_id"]
+            and list(item.approval.approver_refs) == list(row["approver_refs"])
+            and item.maker_ref not in item.approval.approver_refs
+        )
+        result.append(item)
+    return tuple(result)

@@ -164,6 +164,17 @@ from dotmac_billing.opening_contracts import (
     OpeningVerificationUnavailable,
     OpeningVerificationV1,
 )
+from dotmac_billing.opening_hold_contracts import (
+    HOLD_APPROVAL_SUBJECT_TYPE,
+    AdmitHeldOpeningAccountV2,
+    HeldOpeningHoldApprovalV1,
+    OpeningHoldAdmissionV1,
+    OpeningHoldApprovalPort,
+    OpeningHoldDispositionV1,
+    opening_hold_content_digest,
+    opening_hold_subject_id,
+    require_hold_maker_checker,
+)
 from dotmac_billing.opening_qualification import (
     OpeningImportGrantProviderV2,
     OpeningImportGrantV2,
@@ -278,6 +289,8 @@ from dotmac_billing.opening_verification_contracts import (
     SignedOpeningSourceAttestationV1,
 )
 from dotmac_billing.opening_window_contracts import (
+    OpeningAuthoritySwitchContextV1,
+    OpeningAuthoritySwitchParticipant,
     OpeningWindowAdmissionV1,
     OpeningWindowProvisionVerificationRequestV1,
     OpeningWindowProvisionVerificationV1,
@@ -422,6 +435,17 @@ __all__ = [
     "opening_source_attestation_digest_v1",
     "opening_source_attestation_signing_input_v1",
     "required_opening_evidence_v1",
+    "HOLD_APPROVAL_SUBJECT_TYPE",
+    "AdmitHeldOpeningAccountV2",
+    "HeldOpeningHoldApprovalV1",
+    "OpeningHoldAdmissionV1",
+    "OpeningHoldApprovalPort",
+    "OpeningHoldDispositionV1",
+    "opening_hold_content_digest",
+    "opening_hold_subject_id",
+    "require_hold_maker_checker",
+    "OpeningAuthoritySwitchContextV1",
+    "OpeningAuthoritySwitchParticipant",
     "OpeningWindowAdmissionV1",
     "OpeningWindowProvisionVerificationRequestV1",
     "OpeningWindowProvisionVerificationV1",
