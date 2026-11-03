@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-durable-timers"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
 authors = ["DotMac"]
 readme = "README.md"
