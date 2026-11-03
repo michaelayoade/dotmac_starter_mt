@@ -710,3 +710,9 @@ staging, unset, blank, and unknown values hide browser documentation and protect
 ## License
 
 TBD.
+
+The repository-wide license and legal owner confirmation remain pending.
+Third-party components retain their own terms: see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled notices and
+[the licensing review](docs/LICENSING_REVIEW.md) for unresolved ownership,
+provenance, dependency, and distribution checks.
