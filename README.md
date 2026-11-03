@@ -167,14 +167,16 @@ git clone <this-repo> my-app && cd my-app
 
 Then, in order:
 
-1. **Pick your features.** Seven ship today: `tenants`, `auth`, `parties`,
-   `rbac`, `settings`, `custom_fields`, `web` (see "What's in this template"
+1. **Pick your features.** Nine assembly features ship today: `tenants`, `auth`,
+   `parties`, `rbac`, `settings`, `presentation`, `custom_fields`, `licensing`,
+   `web`. The assembly also composes the Template Studio and Ticketing modules
+   (see `app/assembly.py` and "What's in this template"
    below). Disable what you don't need via `DISABLED_FEATURES` (fast — see
    "Disabling a feature" below), or delete the package under
    `app/features/` and remove it from `FEATURE_MODULES` in
    `app/features/__init__.py` plus the import-linter independence contract
-   in `pyproject.toml` (permanent). Either way, run `make test-unit`
-   afterward — `tests/architecture/test_feature_manifests.py` fails if the
+   in `pyproject.toml` (permanent). Submit the change to Git-hosted PR CI —
+   `tests/architecture/test_feature_manifests.py` fails if the
    registry, the import-linter contract, and the `app/features/` directory
    drift apart.
 2. **Register your own entities.** `Party` (person/organization) is the
@@ -201,11 +203,9 @@ Then, in order:
    `/branding/theme.css` route, never as tenant-authored raw CSS (see "Admin
    portal" below).
 
-To run the app locally, see **Quickstart (dev)** below. To run the
-integration test suite, use `make test-db-up` to start a disposable
-Postgres, `make test-integration` to run tests, then `make test-db-down` to
-tear it down — that test DB is separate from the persistent dev database
-used for running the app.
+To run the app locally, see **Quickstart (dev)** below. Tests run only on
+Git-hosted CI; see **Testing and validation** below. The CI test databases
+are separate from the dev database used for running the app.
 
 ## What's in this template
 
@@ -264,12 +264,13 @@ productionize further, port what your project needs:
   the field vocabulary, validation and mutation).
   This reference assembly deliberately composes neither (ADR-0022, ADR-0023,
   ADR-0025).
-- Manifest-owned declaration catalogues for settings, typed feature flags,
-  entity types, and jobs, plus runtime migration-current/health evidence and
+- Manifest-owned declaration catalogues for entity types and jobs, plus
+  runtime migration-current/health evidence and
   the effective-capability admin UI described by the module control-plane
   directive. The validating module, permission, and audit-action registries,
   per-module schema/migration ownership gates, tenant-local entitlement grants,
-  and their explainable evaluator already exist in the kernel.
+  and their explainable evaluator already exist in the kernel. Manifest-owned
+  setting domains and typed feature-flag declarations also exist.
 - Runtime selection/wiring of the typed deployment-profile contracts, plus a
   provider registry for SaaS, dedicated, on-premise/air-gapped, OEM, and
   API-only packaging
@@ -315,9 +316,9 @@ productionize further, port what your project needs:
   contracts, the reference receiver, and tenant-local entitlements exist, but
   they do not imply those optional commercial modules.
 - Profile generator, deployment-specific packaging, and CI profile matrix
-- A self-service (non-admin) portal surface — today every `/admin/*` page
-  requires the `admin` role; see `dotmac_kernel.web_deps.require_web_auth`'s
-  docstring for the phase-3 loosening plan
+- A self-service portal facet. The current staff facet requires
+  `web.portal.staff.access`; the assembly grants it to `admin` by default.
+  Authentication itself no longer hardcodes a role.
 
 Each port follows the pattern already established: add `tenant_id`, write
 the cross-tenant isolation test first, port the code, watch the test go
@@ -325,14 +326,30 @@ green.
 
 ## Quickstart (dev)
 
+Prerequisites for running the application from this checkout:
+
+- Python 3.12 or 3.13 (3.12 matches the production image) and Poetry **2.4.1**,
+  as pinned in `pyproject.toml`.
+- Rust **1.90.0**, Cargo, and the platform's native compiler/linker tools.
+  Several editable path dependencies build native extensions during install;
+  their build hooks enforce the Rust version. Python build dependencies are
+  declared by the packages; there is no silent Python fallback.
+- Docker with Compose v2 for Postgres, Node.js/npm for the Tailwind build
+  (the Docker build uses Node 20), and GNU Make for the convenience targets.
+- A Bash-compatible shell for the commands below; on Windows, use an
+  appropriate Bash environment. The HTTP examples also use `curl` and `jq`.
+
+Install runtime dependencies only on a workstation. Test/development dependency
+installation and test execution belong to Git-hosted CI (`CONTRIBUTING.md`).
+
 `docker-compose.yml` is prod-only (requires a published `APP_IMAGE`, no `db`
 service) — for local dev, run just the Postgres service from the dev overlay
 (`docker-compose.dev.yml`), migrate against it, then run the app directly
 with `--reload`:
 
 ```bash
-poetry install
-docker compose -f docker-compose.dev.yml up -d postgres   # DEV_DB_PORT/DEV_POSTGRES_*/DEV_*_PASSWORD overridable
+poetry install --only main
+docker compose -f docker-compose.dev.yml up -d --wait postgres   # DEV_DB_PORT/DEV_POSTGRES_*/DEV_*_PASSWORD overridable
 # The dev Postgres init hook (scripts/dev-db-init.sh, runs once per fresh
 # volume) creates the SAME three roles production uses — app_user (requests,
 # RLS-enforced), platform_api (platform routes), app_admin (migrations,
@@ -340,10 +357,21 @@ docker compose -f docker-compose.dev.yml up -d postgres   # DEV_DB_PORT/DEV_POST
 export DATABASE_URL=postgresql+psycopg://app_user:app_user@localhost:5432/starter
 export PLATFORM_DATABASE_URL=postgresql+psycopg://platform_api:platform_api@localhost:5432/starter
 export MIGRATION_DATABASE_URL=postgresql+psycopg://app_admin:app_admin@localhost:5432/starter
-poetry run alembic upgrade head
-make css-build   # builds static/css/main.css (Tailwind v4) — gitignored, build-only; re-run after editing static/css/src/main.css, or use `make css-watch` while iterating
+export ENVIRONMENT=dev
+poetry run alembic upgrade heads
+make css-build   # builds packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css
 make dev   # or: poetry run uvicorn app.main:app --reload --port 8000
 ```
+
+Use `heads` (plural): the reference assembly composes kernel, assembly,
+Template Studio, and Ticketing migration lineages. `make migrate` runs the
+same upgrade. Export the migration URL explicitly; an explicitly blank
+`MIGRATION_DATABASE_URL` is rejected. Migrations use the owner role, while
+the running application uses the tenant and platform roles above.
+
+The compiled Tailwind CSS is gitignored. Rebuild after editing
+`packages/dotmac-kernel/src/dotmac_kernel/static/css/src/main.css`, or use
+`make css-watch`. The separate `dotmac-ui` package ships committed assets.
 
 Row-Level Security is ENFORCED in this flow — `make dev` runs with the same
 tenant isolation as production (`tests/test_rls_catalog.py` audits the live
@@ -398,7 +426,7 @@ migrated, at least one tenant provisioned):
 
 ```bash
 npm ci                 # installs the Tailwind v4 CLI (devDependency, pinned via package-lock.json)
-make css-build          # -> static/css/main.css (gitignored — rebuild after editing static/css/src/main.css)
+make css-build          # -> packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css (gitignored)
 make dev                # poetry run uvicorn app.main:app --reload --port 8000
 ```
 
@@ -411,9 +439,8 @@ Then, in a browser (dev resolves `*.localhost` automatically, so no
    (`/auth/register`) is policy-closed by default (`auth.registration_policy`
    setting; a registered user is a plain user with no roles either way).
 2. Visit `http://acme.localhost:8000/admin/login` and sign in with the
-   owner email/password. The login form is HTMX (`hx-post`) with the CSRF
-   header-bridge (`static/js/csrf.js`) wired automatically — nothing to
-   configure.
+   owner email/password. The native login form carries a hidden CSRF token;
+   later HTMX mutations use the CSRF header-bridge (`static/js/csrf.js`).
 3. Land on `http://acme.localhost:8000/admin` — the dashboard, showing
    party/role/active-session counts for this tenant.
 4. From the sidebar: **Parties** (list/create/edit/detail, with a
@@ -492,8 +519,8 @@ set — its routers (both JSON `routers` and HTML `web_routers`, see below)
 are never mounted, so its endpoints simply don't exist (404, not a guard
 failure). This is the fast path for "starting a project from this template"
 step 1 above; delete the package under `app/features/` only once you're
-sure you'll never want the feature back (`make test-unit` will tell you if
-the registry and import-linter contract still agree with what's on disk).
+sure you'll never want the feature back (Git-hosted unit/architecture CI checks
+whether the registry and import-linter contract agree with what's on disk).
 
 Each feature's `FeatureManifest` (`app/features/<name>/feature.py`)
 declares TWO separate router groups — `routers` (its JSON API) and
@@ -536,7 +563,7 @@ entirely).
 | `POST/GET /platform/tenants`, `GET /platform/tenants/{id}` | `tenants` | Platform-root-domain only, `require_platform_admin` (see ADR-0004); `POST` provisions tenant + owner atomically. |
 | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` | `auth` | Tenant-scoped JWT flows. |
 | `POST /parties/people`, `POST /parties/organizations`, `GET /parties`, `GET /parties/{id}`, `DELETE /parties/{id}` | `parties` | Identity CRUD for both party types. |
-| `POST/GET /rbac/roles`, `POST /rbac/role-grants`, `GET /rbac/audit-events` | `rbac` | Roles, grants, audit read — `require_role("admin")`. |
+| `POST/GET /rbac/roles`, `POST /rbac/role-grants`, `GET /rbac/audit-events` | `rbac` | Granular `rbac.roles.manage`, `rbac.roles.read`, `rbac.grants.manage`, and `rbac.audit.read` permissions; mapped to `admin` by the assembly. |
 | `GET /settings/{domain}`, `PUT /settings/{domain}/{key}` | `settings` | Tenant settings admin API — `require_role("admin")`. |
 | `POST/GET /custom-fields/definitions`, `GET/PATCH/DELETE /custom-fields/definitions/{id}`, `GET/PUT /custom-fields/{entity_type}/{entity_id}/values` | `custom_fields` | Field definitions CRUD + values — `require_role("admin")`. |
 
@@ -560,28 +587,82 @@ not owned by Template Studio.
 | `GET /admin/settings`, `GET`/`POST /admin/settings/{domain}/{key}/edit`, `GET`/`POST /admin/settings/branding` | `settings` | Generic per-key editor + friendly branding editor. |
 | `GET`/`POST /admin/custom-fields`, `/create`, `GET`/`POST /admin/custom-fields/{id}/edit`, `POST /admin/custom-fields/{id}/deactivate`, `GET`/`POST /admin/custom-fields/party/{id}/values-panel` | `custom_fields` | Definitions CRUD + the values-panel fragment `parties/detail.html` embeds. |
 
-Every `/admin/*` route (except the login and logout routes) carries
-`require_web_auth`, which also requires the `admin` role — see
-`dotmac_kernel.web_deps`.
+Authenticated staff pages receive the facet's declared cookie-authentication
+profile and `web.portal.staff.access` admission permission. Contract-v1 routes
+use `require_web_auth` for the party/roles mapping; that helper no longer
+requires a hardcoded role. V2 routes retain their own granular permissions.
+See `app/assembly.py` and `dotmac_kernel.web_deps`.
 
-## Run the cross-tenant tests
+## Testing and validation
+
+Tests and test/development dependency installation run only on Git-hosted CI,
+not on workstations or named test hosts. Push a branch and inspect the PR's
+checks. Local read-only inspection, editing, formatting, and already-available
+pinned static checks are allowed; they do not replace hosted test evidence.
+See `CONTRIBUTING.md` and `AGENTS.md` § "Validation before any commit".
+
+The hosted workflow `.github/workflows/ci.yml` owns setup and execution:
+
+- Unit and architecture tests cover behavior and structural contracts; SQLite
+  tests cannot prove PostgreSQL Row-Level Security.
+- Integration tests use disposable, migrated Postgres databases and separate
+  tenant, platform, and migration connections. Cross-tenant canaries exercise
+  API and browser isolation.
+- `make test-integration` requires `CI=true`, `IDENTITY_REFERENCE_DATABASE_URL`,
+  and `IDENTITY_GRAPH_DATABASE_URL`; starting `make test-db-up` alone is
+  insufficient. The hosted workflow provisions the additional databases and
+  supplies these values. Do not set `CI=true` locally to bypass this boundary.
+- Direct pytest invocation without `TEST_DATABASE_URL` can skip database tests;
+  skipped tests are not isolation evidence. Use the hosted workflow's complete
+  configuration rather than copying an isolated command.
+
+CI also runs the `make check` quality targets, allocation and release-provenance
+gates, consumer/artifact and native-compute checks, and a Docker build/health
+gate. The workflows are the source of truth for the current job inventory.
+All required checks for the current head/base must be green before merge.
+
+## Deployment
+
+Production uses a published image and an external PostgreSQL database.
+`docker-compose.yml` supplies no database service and performs no host build.
+The image starts `python -m app.runtime --port ...`; startup does not migrate.
+
+On the deployment host, provide Docker Compose v2, Bash, `curl`, PostgreSQL
+`pg_dump` compatible with the server, `gzip`, and the shell utilities used by
+`scripts/deploy.sh`. Authenticate Docker to the image registry first. Create
+the database and the required roles/grants, and make it reachable from both
+the host (backup) and the application container. See the dev init script for
+the local three-role bootstrap; do not use its development passwords in prod.
+
+Prepare a repository-root `.env` using `.env.example` as a reference. Set
+`ENVIRONMENT=prod`, all three database URLs, a real `PLATFORM_ROOT_DOMAIN`,
+`TRUSTED_HOSTS`, and real `JWT_SECRET`, `SESSION_HASH_SECRET`, and `CSRF_SECRET`
+values. The CSRF secret must contain at least 32 bytes and differ from the
+other two. Supply an initial `APP_IMAGE` pin and the registry-qualified
+`IMAGE_NAME`. Use shell-compatible assignments: the deploy script sources
+this file. It overrides same-named exported variables when sourced.
 
 ```bash
-poetry run pytest \
-    tests/test_cross_tenant_isolation.py \
-    tests/test_auth_tenant_claim.py \
-    tests/test_rbac_audit_isolation.py \
-    tests/test_security_middleware.py \
-    tests/test_party_isolation.py \
-    tests/test_settings_isolation.py \
-    tests/test_custom_fields_isolation.py \
-    tests/test_web_auth_isolation.py \
-    tests/test_admin_portal_e2e.py \
-    -v
+./scripts/deploy.sh <published-image-tag>
 ```
 
-These tests require a migrated disposable Postgres database because SQLite
-cannot enforce RLS (`make test-db-up` first).
+The script verifies the image, writes a compressed `pg_dump` backup, updates
+the image pin, pulls, runs `alembic upgrade heads` in a one-off container, and
+recreates the app. A failed HTTP health gate restores the previous image when
+one was recorded. It does not undo migrations or automatically restore a
+backup, so migrations must remain compatible with the previous application.
+`/health` is liveness only: success does not prove database readiness or tenant
+workflows. Verify those separately after deployment.
+
+Use the default root `.env` with the supplied Compose file. Although the script
+accepts `ENV_FILE`, Compose still declares `env_file: .env`, and the script
+does not pass `--env-file`; that override alone does not select the container's
+configuration. An alternate setup needs its Compose configuration aligned too.
+
+The service publishes on host loopback. Configure your TLS reverse proxy,
+tenant DNS, and trusted forwarding headers separately; the supplied Compose
+file does not provision DNS or certificates. `APP_PORT` must agree with the
+container listener and health probe (default 8000).
 
 ## DB roles
 
@@ -596,21 +677,35 @@ app_admin     — Alembic migrations and offline maintenance only. Bypasses RLS.
 The `DATABASE_URL` env var should use `app_user`. `PLATFORM_DATABASE_URL`
 should use `platform_api`. Migrations use `MIGRATION_DATABASE_URL`
 connecting as `app_admin`. Settings are loaded from the environment and from
-a local `.env` file — see `.env.example` for every knob, including
-`SEED_ON_STARTUP` (idempotent platform-setting-default seeding on boot; set
-`false` on a read replica or when a separate deploy step seeds instead).
+a local `.env` file through `dotmac_kernel.config.Settings`. This process
+configuration differs from domain settings: those resolve from database rows,
+assembly profile defaults, and spec fallbacks. A domain spec's `env_var` only
+seeds an absent row at startup; changing the environment later does not rotate
+or override an existing setting.
+
+See `.env.example` for configuration, including `SEED_ON_STARTUP` (idempotent
+feature seeding on boot). Set it `false` when another deployment step runs the
+feature seeds. Required-setting validation still calls `seed_settings_from_env`,
+so this switch does not make startup read-only. Export `ENVIRONMENT` explicitly
+for the API-documentation policy, which reads the process environment directly:
+dev/development/local and test/testing/ci publish documentation; production,
+staging, unset, blank, and unknown values hide browser documentation and protect
+`/openapi.json` with the platform bearer guard on the platform host.
 
 ## Middleware notes
 
-- Rate limiting is process-local in this template. It is keyed by
-  `tenant_id/client_ip/path`, but it does not aggregate across Gunicorn
-  workers and keys live for the process lifetime. Port the same key shape
-  to Redis with TTLs for production.
+- Rate limiting is process-local and LRU-bounded by `RATE_LIMIT_MAX_KEYS`.
+  Keys include tenant, client IP, and route template (or a fixed hash bucket
+  for unmatched paths). Separate workers/nodes do not share counters; provide
+  a shared `RateLimitStore` implementation for aggregate limits. Setting
+  `RATE_LIMIT_REDIS_URL` alone does not install one.
 - Inbound `X-Request-ID` is ignored by default to prevent log poisoning. Set
   `TRUST_INBOUND_REQUEST_ID=true` only behind a trusted proxy that
   normalizes that header.
-- CSRF uses a double-submit cookie/header check. Origin/Referer validation
-  is deferred; add it before relying on browser-cookie auth in production.
+- Browser CSRF protection uses signed, expiring, session-bound double-submit
+  tokens, supports headers and hidden form fields, and rejects explicit
+  cross-site Origin/Referer and Fetch Metadata. Production requires enabled
+  CSRF protection and a dedicated strong secret. See `docs/SECURITY.md`.
 
 ## License
 
