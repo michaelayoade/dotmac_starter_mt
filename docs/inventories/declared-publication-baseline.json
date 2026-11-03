@@ -77,6 +77,11 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-billing": {
+      "declared": "0.1.0a11",
+      "reason": "UNPUBLISHED SUCCESSOR OF PUBLISHED a10 (cutover-release-1, ST-2 with ST-3 and ST-4). a11 adds the numbering document_reference, discount snapshots on the V3 rated intake, the per-document exposure and withholding evidence queries, the ordered accounting-fact query with count and digest, and the exposure_service_ambiguous refusal. No DDL and no migration change; published bi1-bi12 bytes are untouched. Source preparation only: full hosted CI, a verified a11 publication, install-back, canonical tag and a truthful release record remain due, and nothing here grants production authority. Remove only with the verified a11 publication record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-collections": {
       "declared": "0.1.0a2",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 proposes a fresh modern-provenance build under a new version; runtime behavior, public API and migrations remain unchanged from the published a1 source, and the Kernel floor remains >=0.1.0a89. The legacy a1 release is not reissued or relabeled. Hold pending root review and Michael's source/release authorization, acceptance of the Kernel a105 publication record on main, and a refreshed tag/census check before integration. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due; this proposal does not switch product authority. Remove this row only with the verified a2 publication record.",

@@ -2,6 +2,38 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a11 — UNRELEASED
+
+- Breaking for adapters: `NumberingProvider.allocate` now also receives a
+  required `document_reference`, the stable identity of the document being
+  numbered (an invoice: `billing:<document id>`; a credit note: the
+  command-stable `billing:credit:<correlation id>`, never a per-execution
+  value). A locked or enrolled Numbering series requires it; the adapter decides
+  whether to forward it for a series that does not accept it.
+- Add `discounts` (`DiscountSnapshotV1`) to the one rated intake Sub uses,
+  `AcceptRatedObligationV3`; no other intake version changes. `pre_tax_amount`
+  is the net taxable base and the gross is net plus discounts. Discounts are
+  retained in the existing immutable obligation envelope (only when present, so
+  a10 bytes and replay fingerprints are unchanged; no DDL). Issued line facts
+  carry the real `discount_total` and snapshots. Malformed or duplicate
+  discounts, and Tax determined on a base larger than the net, are refused.
+- Add `get_document_exposure` (latest sealed per-document exposure, re-verified
+  against receivable resolution; imported items return the opening-owned V2),
+  `get_document_withholding_evidence`, and `list_accounting_facts`: a
+  total-ordered, paged accounting-fact index whose count and chained digest
+  cover the whole window.
+- Refuse a document whose lines carry different `service_ref` with
+  `exposure_service_ambiguous` at drafting, issuing and exposure derivation,
+  because exposure is anchored to the first line.
+- Write-off needs no new command: it is a `grant_non_cash_credit` whose
+  classification category is a policy value, restricted to the document and
+  applied on issue. Choosing credit note or grant is the caller's policy.
+- Not changed: a credit note larger than the open receivable is still refused
+  (`credit_exceeds_receivable`). A released trigger pins a credit-note posting
+  group to one receivable effect equal to its total, so excess-to-available-credit
+  needs a ruling and a migration; it is not part of this change.
+- Source preparation only; hosted CI and publication remain required.
+
 ## 0.1.0a10 — UNRELEASED
 
 - Retain complete public Tax V2 dependency evidence and opaque `rv2:` seals,
