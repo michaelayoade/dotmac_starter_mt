@@ -10,6 +10,11 @@
   product principals or provider transport part of Inbox authority.
 - Adds typed tenant-scoped conversation and message reads with closed filters,
   bounded opaque keyset cursors, and deterministic UUID tie-break ordering.
+- Adds a separate recent-message read that returns the newest bounded page and
+  walks toward older messages with a scope-bound `before_cursor`, while keeping
+  every returned page in ascending display order.
+- Records indexed message-content search as an adoption gate rather than
+  shipping an unindexed cross-product scan; contact search remains product-owned.
 
 ## 0.1.0a2 — 2026-08-23
 

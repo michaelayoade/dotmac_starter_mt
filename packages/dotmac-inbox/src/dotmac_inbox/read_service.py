@@ -22,6 +22,7 @@ from dotmac_inbox.read import (
     CursorKind,
     MessagePage,
     MessageView,
+    RecentMessagePage,
 )
 from dotmac_inbox.service import ConversationNotFound
 
@@ -159,6 +160,21 @@ def get_conversation(
     return _conversation_view(row)
 
 
+def _require_conversation(
+    db: Session, *, tenant_id: UUID, conversation_id: UUID
+) -> None:
+    if (
+        db.scalar(
+            select(Conversation.id).where(
+                Conversation.tenant_id == tenant_id,
+                Conversation.id == conversation_id,
+            )
+        )
+        is None
+    ):
+        raise ConversationNotFound("conversation not found")
+
+
 def list_conversations(
     db: Session,
     *,
@@ -225,15 +241,7 @@ def list_messages(
 ) -> MessagePage:
     size = _limit(limit)
     scope = _scope("message-list", str(tenant_id), str(conversation_id))
-    if (
-        db.scalar(
-            select(Conversation.id).where(
-                Conversation.tenant_id == tenant_id, Conversation.id == conversation_id
-            )
-        )
-        is None
-    ):
-        raise ConversationNotFound("conversation not found")
+    _require_conversation(db, tenant_id=tenant_id, conversation_id=conversation_id)
     statement: Select[tuple[Message]] = select(Message).where(
         Message.tenant_id == tenant_id, Message.conversation_id == conversation_id
     )
@@ -262,4 +270,62 @@ def list_messages(
     return MessagePage(tuple(_message_view(row) for row in rows), next_cursor)
 
 
-__all__ = ["MAX_LIMIT", "get_conversation", "list_conversations", "list_messages"]
+def list_recent_messages(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    before_cursor: str | None = None,
+    limit: int = 10,
+) -> RecentMessagePage:
+    """Return the newest bounded page, then walk toward older messages.
+
+    Items remain ascending inside each page so a product can prepend an older
+    page without reordering it. The opaque cursor is bound to the tenant,
+    conversation, and this traversal direction; it cannot be reused with the
+    forward timeline read.
+    """
+
+    size = _limit(limit)
+    scope = _scope("recent-message-list", str(tenant_id), str(conversation_id))
+    _require_conversation(db, tenant_id=tenant_id, conversation_id=conversation_id)
+    statement: Select[tuple[Message]] = select(Message).where(
+        Message.tenant_id == tenant_id, Message.conversation_id == conversation_id
+    )
+    if before_cursor is not None:
+        at, row_id = _decode(before_cursor, CursorKind.RECENT_MESSAGES, scope)
+        if at is None:
+            raise ValueError("invalid cursor")
+        statement = statement.where(
+            or_(
+                Message.occurred_at < at,
+                and_(Message.occurred_at == at, Message.id < row_id),
+            )
+        )
+    statement = statement.order_by(Message.occurred_at.desc(), Message.id.desc())
+    rows = list(db.scalars(statement.limit(size + 1)))
+    has_older = len(rows) > size
+    rows = rows[:size]
+    before = None
+    if has_older:
+        oldest = rows[-1]
+        before = _cursor(
+            CursorKind.RECENT_MESSAGES,
+            (_cursor_time(oldest.occurred_at), str(oldest.id)),
+            scope,
+        )
+    rows.reverse()
+    return RecentMessagePage(
+        items=tuple(_message_view(row) for row in rows),
+        before_cursor=before,
+        has_older_messages=has_older,
+    )
+
+
+__all__ = [
+    "MAX_LIMIT",
+    "get_conversation",
+    "list_conversations",
+    "list_messages",
+    "list_recent_messages",
+]
