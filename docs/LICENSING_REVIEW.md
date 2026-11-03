@@ -30,6 +30,12 @@ mpdecimal notices are indexed in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES
 The notice additions repair missing standalone notices; they do not prove
 historical compliance, exact asset provenance, or release-artifact coverage.
 
+The kernel now declares `0.1.0a107+dev`: these added package-data files differ
+from the published `0.1.0a107` source. The development marker preserves that
+release's immutable identity without allocating or authorizing a new public
+version. Only version metadata changes in the exported Python surface; no
+application behavior changes. Published artifacts remain unchanged.
+
 ## Open questions and closure evidence
 
 The owner roles below identify who should resolve each question; they do not
