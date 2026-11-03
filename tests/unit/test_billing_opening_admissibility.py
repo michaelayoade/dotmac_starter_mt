@@ -294,13 +294,16 @@ def test_a_settlement_id_resolves_to_its_closed_invoice():
     assert only(run(c)).admitted
 
 
-def test_held_partitions_leave_no_unclassified_invoice():
+def test_held_partitions_leave_the_population_with_one_recorded_reason():
     held = run(classes=a10(("a", "opening_gap_other", "match")))
+    decision = only(held)
+    assert (decision.admitted, decision.reason) == (False, "a10_opening_not_exact")
+    # the hold list is the decision record; nothing of the account stays in the
+    # population the import validators see
+    for section in ("invoices", "controls", "lanes", "blocking_exceptions"):
+        assert held.census[section] == [], section
     assert held.census["eligible_invoice_ids"] == []
-    rows = {r["source_id"]: r["code"] for r in held.census["blocking_exceptions"]}
-    assert rows == {uid("i-open"): "a10_opening_not_exact"}
-    ctl = held.census["controls"][0]
-    assert (ctl["eligible_count"], ctl["eligible_residual"]) == (0, "0.00")
+    assert held.counts()["hold:a10_opening_not_exact"] == 1
 
 
 def test_lane_receivable_must_equal_the_admitted_residual():
@@ -321,10 +324,26 @@ def test_drafts_are_excluded_and_archived_and_never_eligible():
     c = census()
     c["invoices"].append(inv("d-1", "a", "draft", residual="30.00"))
     c["exclusions"] = [{"source_id": uid("d-1"), "reason": "draft"}]
+    c["controls"] = [control("a", 3, "90.00")]
+    c["controls"][0].update(excluded_count=1, original_total="300.00")
+    c["controls"][0]["canonical_discharge"] = "170.00"
     result = run(c)
     assert uid("d-1") not in result.census["eligible_invoice_ids"]
     assert result.archived_drafts == (uid("d-1"),)
     assert only(result).admitted
+    # removed from the population; the source control is reduced by exactly it
+    assert {x["invoice_id"] for x in result.census["invoices"]} == {
+        uid("i-open"),
+        uid("i-closed"),
+    }
+    assert result.census["exclusions"] == []
+    ctl = result.census["controls"][0]
+    assert (ctl["invoice_count"], ctl["excluded_count"]) == (2, 0)
+    assert (ctl["original_total"], ctl["canonical_discharge"], ctl["residual"]) == (
+        "200.00",
+        "100.00",
+        "60.00",
+    )
     # even without a Sub exclusion row a draft is never a candidate
     c["exclusions"] = []
     assert uid("d-1") not in run(c).census["eligible_invoice_ids"]
@@ -495,3 +514,16 @@ def test_a10_input_carries_no_amounts_and_refuses_duplicates():
     with pytest.raises(AdmissibilityError) as info:
         a10(EXACT, EXACT)
     assert info.value.code == "duplicate_a10_account"
+
+
+def test_a_relaxed_excluded_residue_is_not_carried_but_others_still_block():
+    c = census()
+    c["invoices"].append(inv("v-1", "a", "void", residual="5.00"))
+    c["exclusions"] = [{"source_id": uid("v-1"), "reason": "void"}]
+    c["blocking_exceptions"] = [exc("a", "excluded_nonzero_residue", "v-1")]
+    result = run(c)
+    assert only(result).admitted
+    assert result.uncarried_residue == frozenset({UUID(uid("v-1"))})
+    # without the exception nothing is declared uncarried: the validators block
+    c["blocking_exceptions"] = []
+    assert run(c).uncarried_residue == frozenset()

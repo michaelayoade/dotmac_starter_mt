@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import sys
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,6 +39,14 @@ from dotmac_billing.contracts import (
     DueDateBasisV1,
     ServicePeriodEvidenceV1,
     ServicePeriodStatus,
+)
+from dotmac_billing.opening_admissibility import (
+    AdmissibilityError,
+    parse_a10_classes,
+    parse_admissibility_rules,
+    parse_reseller_map,
+    project_census,
+    render_admissibility_decisions,
 )
 from dotmac_billing.opening_contracts import (
     OpeningBlockerV1,
@@ -59,9 +68,9 @@ from dotmac_billing.opening_receivable_contracts import (
     OpeningReceivableItemV1,
 )
 from dotmac_billing.opening_receivable_validation import (
-    opening_account_import_blockers_v2,
     opening_manifest_fingerprint_v2,
-    preview_opening_account_import_v2,
+    opening_validation_scope,
+    preview_opening_account_import_batch_v2,
 )
 from dotmac_billing.opening_rehearsal import (
     opening_rehearsal_assembly_digest,
@@ -91,6 +100,7 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningRehearsalCensusSidecarV1,
     OpeningRehearsalCensusUnmappedV1,
     OpeningRehearsalCensusV1,
+    OpeningRehearsalDeltaV1,
     OpeningRehearsalDischargeMappingV1,
     OpeningRehearsalInvoiceMappingV1,
     OpeningRehearsalMappingV1,
@@ -617,17 +627,19 @@ class _AssemblyOutcome:
     adapter_blockers: tuple[tuple[str, str, str | None], ...]
     unmapped: Mapping[str, tuple[str, ...]]
     raw_blockers: tuple[tuple[OpeningPartitionV1, tuple[OpeningBlockerV1, ...]], ...]
+    # Complete-manifest findings, reported once for the run, never per partition.
+    manifest_blockers: tuple[OpeningBlockerV1, ...] = ()
 
 
 def _collection_evidence(
-    assembly: AssemblyInputs, pointer: str
+    assembly: AssemblyInputs, pointer: str, service_ref: str | None = None
 ) -> OpeningCollectionEvidenceV1:
     # The only honest form available from today's evidence: unknown and
     # unverified, with a source-row pointer labelled as a pointer, not proof.
     return OpeningCollectionEvidenceV1(
         "unknown_unverified",
         None,
-        None,
+        service_ref,
         None,
         ServicePeriodEvidenceV1(ServicePeriodStatus.UNKNOWN_UNVERIFIED),
         None,
@@ -648,6 +660,33 @@ def _assemble(
     historical_discharges: tuple[
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
+    service_refs: Mapping[UUID, str] | None = None,
+    uncarried_residue: frozenset[UUID] = frozenset(),
+) -> _AssemblyOutcome:
+    # F2: the shared manifest is qualified once; the per-partition commands and
+    # the run built around it must not re-walk it (O(N), not O(P x N)).
+    with opening_validation_scope():
+        return _assemble_run(
+            obs,
+            sidecar,
+            assembly,
+            original_documents,
+            historical_discharges,
+            service_refs,
+            uncarried_residue,
+        )
+
+
+def _assemble_run(
+    obs: OpeningSubObservationV2,
+    sidecar: V3Sidecar,
+    assembly: AssemblyInputs,
+    original_documents: tuple[tuple[UUID, OpeningOriginalDocumentV1], ...] = (),
+    historical_discharges: tuple[
+        tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
+    ] = (),
+    service_refs: Mapping[UUID, str] | None = None,
+    uncarried_residue: frozenset[UUID] = frozenset(),
 ) -> _AssemblyOutcome:
     precisions = {row.currency: row.precision for row in obs.currency_precisions}
     partition_by_source = {
@@ -671,6 +710,7 @@ def _assemble(
     # history from mutable observations or treat this mapping as qualification.
     originals: dict[UUID, OpeningOriginalDocumentV1] = {}
     invoices = {row.invoice_id: row for row in obs.invoices}
+    invoice_occurrences = Counter(row.invoice_id for row in obs.invoices)
     if type(original_documents) is not tuple:
         raise _malformed("original_document_mapping_invalid")
     for entry in original_documents:
@@ -686,7 +726,7 @@ def _assemble(
         if (
             invoice_id in originals
             or invoice is None
-            or sum(row.invoice_id == invoice_id for row in obs.invoices) != 1
+            or invoice_occurrences[invoice_id] != 1
             or invoice_id not in eligible_ids
             or invoice_id not in invoice_mappings
             or invoice_id in exclusion_reasons
@@ -706,6 +746,20 @@ def _assemble(
     # independent verifier to qualify; no source namespace is invented here.
     histories: dict[UUID, tuple[OpeningHistoricalDischargeV1, ...]] = {}
     used_references: set[str] = set()
+    # One pass over the declaration and the observation: the per-effect
+    # lookups below are dictionary reads, not rescans (O(N), not O(E x N)).
+    mappings_by_reference: dict[str, list[OpeningRehearsalDischargeMappingV1]] = {}
+    mapping_keys: Counter[tuple[str, UUID]] = Counter()
+    for declared in assembly.discharge_mappings:
+        mappings_by_reference.setdefault(declared.historical_reference, []).append(
+            declared
+        )
+        mapping_keys[(declared.settlement_kind, declared.settlement_id)] += 1
+    observed_by_key: dict[tuple[str, UUID], list[OpeningObservedSettlementV1]] = {}
+    for observed_row in obs.settlements:
+        observed_by_key.setdefault((observed_row.kind, observed_row.id), []).append(
+            observed_row
+        )
     if type(historical_discharges) is not tuple:
         raise _malformed("historical_discharge_mapping_invalid")
     for entry in historical_discharges:
@@ -723,29 +777,15 @@ def _assemble(
         for effect in effects:
             if type(effect) is not OpeningHistoricalDischargeV1:
                 raise _malformed("historical_discharge_mapping_invalid")
-            mappings = [
-                row
-                for row in assembly.discharge_mappings
-                if row.historical_reference == effect.reference
-            ]
+            mappings = mappings_by_reference.get(effect.reference, [])
             if len(mappings) != 1 or effect.reference in used_references:
                 raise _malformed("historical_discharge_mapping_invalid")
             mapping = mappings[0]
-            if (
-                sum(
-                    (row.settlement_kind, row.settlement_id)
-                    == (mapping.settlement_kind, mapping.settlement_id)
-                    for row in assembly.discharge_mappings
-                )
-                != 1
-            ):
+            if mapping_keys[(mapping.settlement_kind, mapping.settlement_id)] != 1:
                 raise _malformed("historical_discharge_mapping_invalid")
-            observed = [
-                row
-                for row in obs.settlements
-                if (row.kind, row.id)
-                == (mapping.settlement_kind, mapping.settlement_id)
-            ]
+            observed = observed_by_key.get(
+                (mapping.settlement_kind, mapping.settlement_id), []
+            )
             if len(observed) != 1:
                 raise _malformed("historical_discharge_mapping_invalid")
             settlement = observed[0]
@@ -809,6 +849,10 @@ def _assemble(
                 )
                 disposition, reason = "blocking", "currency_precision_mismatch"
                 residual_minor = 0  # blocked placeholder; never a rounded value
+            if disposition == "excluded" and invoice.invoice_id in uncarried_residue:
+                # M8 (recorded widening): the rules declared this closed
+                # invoice's residue informational, so it is not carried.
+                residual_minor = 0
             if partition is None:
                 continue
             mapping = invoice_mappings.get(invoice.invoice_id)
@@ -844,7 +888,11 @@ def _assemble(
                     originals.get(invoice.invoice_id),
                     histories.get(invoice.invoice_id, ()),
                     residual_minor,
-                    _collection_evidence(assembly, pointer),
+                    _collection_evidence(
+                        assembly,
+                        pointer,
+                        (service_refs or {}).get(invoice.invoice_id),
+                    ),
                     assembly.receivable_mapping_version,
                     assembly.tax_mapping_version,
                     assembly.source_resolver_version,
@@ -962,7 +1010,6 @@ def _assemble(
     except OpeningEvidenceError:
         raise _malformed("malformed_assembly") from None
     commands: list[ImportOpeningAccountV2] = []
-    previews = []
     raw_blockers: list[tuple[OpeningPartitionV1, tuple[OpeningBlockerV1, ...]]] = []
     for partition in distinct_partitions:
         target = targets.get(partition)
@@ -989,8 +1036,15 @@ def _assemble(
         except OpeningEvidenceError:
             raise _malformed("malformed_assembly") from None
         commands.append(command)
-        raw_blockers.append((partition, opening_account_import_blockers_v2(command)))
-        previews.append(preview_opening_account_import_v2(command))
+    # The complete-manifest validators run once for the shared manifest, then
+    # only the per-partition checks run (F2: O(N + P), not O(P x N)).
+    previews = []
+    batch = preview_opening_account_import_batch_v2(commands)
+    for command, item in zip(commands, batch.items, strict=True):
+        raw_blockers.append(
+            (command.partition, item.partition_blockers + item.verification_blockers)
+        )
+        previews.append(item.preview)
     settlements_by_key = {(row.kind, row.id): row for row in obs.settlements}
     used_discharge_mappings = tuple(
         mapping
@@ -1020,7 +1074,13 @@ def _assemble(
         "invoices": tuple(sorted(unmapped_invoices)),
         "settlements": tuple(sorted(unmapped_settlements)),
     }
-    return _AssemblyOutcome(run, tuple(adapter_blockers), unmapped, tuple(raw_blockers))
+    return _AssemblyOutcome(
+        run,
+        tuple(adapter_blockers),
+        unmapped,
+        tuple(raw_blockers),
+        batch.manifest_blockers,
+    )
 
 
 def assemble_rehearsal_run(
@@ -1125,6 +1185,8 @@ def rehearsal_census(
     historical_discharges: tuple[
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
+    service_refs: Mapping[UUID, str] | None = None,
+    uncarried_residue: frozenset[UUID] = frozenset(),
 ) -> OpeningRehearsalCensusV1:
     """Run the census, preserving independently supplied typed originals.
 
@@ -1134,7 +1196,13 @@ def rehearsal_census(
     """
     obs, sidecar = load_sub_observation(payload)
     outcome = _assemble(
-        obs, sidecar, assembly, original_documents, historical_discharges
+        obs,
+        sidecar,
+        assembly,
+        original_documents,
+        historical_discharges,
+        service_refs,
+        uncarried_residue,
     )
     run = outcome.run
     report = report_opening_rehearsal(run)
@@ -1150,6 +1218,9 @@ def rehearsal_census(
             global_blockers.append((code, (reference,)))
         else:
             scoped_blockers.setdefault(partition_key, []).append((code, (reference,)))
+    deltas_by_partition: dict[OpeningPartitionV1, list[OpeningRehearsalDeltaV1]] = {}
+    for delta in report.deltas:
+        deltas_by_partition.setdefault(delta.partition, []).append(delta)
     partitions: list[OpeningRehearsalCensusPartitionV1] = []
     for partition in sorted(
         {mapping.partition for mapping in run.mappings},
@@ -1157,8 +1228,6 @@ def rehearsal_census(
     ):
         preview = previews.get(partition)
         rows: list[tuple[str, Sequence[str]]] = []
-        if preview is not None:
-            rows.extend((row.code, row.references) for row in preview.blockers)
         rows.extend(
             (row.code, row.references) for row in raw_by_partition.get(partition, ())
         )
@@ -1181,8 +1250,7 @@ def rehearsal_census(
                         delta.preview_minor,
                         delta.unclassified_delta_minor,
                     )
-                    for delta in report.deltas
-                    if delta.partition == partition
+                    for delta in deltas_by_partition.get(partition, ())
                 ),
             )
         )
@@ -1197,6 +1265,9 @@ def rehearsal_census(
     for entry in partitions:
         for blocker in entry.blockers:
             blocked_by_reason[blocker.code] = blocked_by_reason.get(blocker.code, 0) + 1
+    global_blockers.extend(
+        (row.code, row.references) for row in outcome.manifest_blockers
+    )
     report_blockers = _grouped_blockers(
         [(row.code, row.references) for row in report.blockers]
     )
@@ -1301,6 +1372,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Optional V1 original evidence aligned to census bytes and assembly",
     )
     parser.add_argument("--out", help="Write the artifact here instead of stdout")
+    parser.add_argument(
+        "--rules", help="Reviewed admissibility rules JSON (D-2 digest); needs --a10"
+    )
+    parser.add_argument("--a10", help="A10 per-account classes JSON; needs --rules")
+    parser.add_argument("--reseller-map", help="Reseller option A map JSON")
+    parser.add_argument(
+        "--decisions-out",
+        help="Write the per-partition admissibility decisions here (needs --rules)",
+    )
     args = parser.parse_args(argv)
     try:
         census_bytes, census_payload = _read_census(Path(args.census))
@@ -1320,12 +1400,50 @@ def main(argv: Sequence[str] | None = None) -> int:
                 (row.source_invoice_id, row.historical_discharges)
                 for row in evidence.invoices
             )
+        if bool(args.rules) != bool(args.a10) or (
+            (args.reseller_map or args.decisions_out) and not args.rules
+        ):
+            raise _malformed("rules_and_a10_required_together")
+        payload: Mapping[str, object] = census_payload
+        service_refs: Mapping[UUID, str] | None = None
+        projection = None
+        if args.rules:
+            try:
+                reseller = None
+                if args.reseller_map:
+                    reseller = parse_reseller_map(
+                        _read_json(Path(args.reseller_map), "malformed_reseller_map")
+                    )
+                projection = project_census(
+                    census_payload,
+                    rules=parse_admissibility_rules(
+                        _read_json(Path(args.rules), "malformed_rules")
+                    ),
+                    a10=parse_a10_classes(
+                        _read_json(Path(args.a10), "malformed_a10_classes")
+                    ),
+                    reseller=reseller,
+                    # D-3: only a supplied, aligned original counts.
+                    original_invoice_ids=frozenset(row[0] for row in originals),
+                )
+            except AdmissibilityError as exc:
+                raise _malformed(exc.code) from None
+            payload = projection.census
+            service_refs = projection.service_refs
         artifact = rehearsal_census(
-            census_payload,
+            payload,
             assembly=assembly,
             original_documents=originals,
             historical_discharges=histories,
+            service_refs=service_refs,
+            uncarried_residue=(
+                projection.uncarried_residue if projection else frozenset()
+            ),
         )
+        if projection is not None and args.decisions_out:
+            Path(args.decisions_out).write_text(
+                render_admissibility_decisions(projection), encoding="utf-8"
+            )
     except AdapterInputError as exc:
         print(render_opening_rehearsal_refusal(exc.code))
         return 2

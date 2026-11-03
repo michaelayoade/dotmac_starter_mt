@@ -472,6 +472,7 @@ class AdmissibilityProjection:
     census: dict[str, object]
     decisions: tuple[PartitionDecision, ...]
     service_refs: dict[UUID, str]
+    uncarried_residue: frozenset[UUID]
     archived_drafts: tuple[str, ...]
     informational: dict[str, int]
     unattributed_controls: int
@@ -621,6 +622,7 @@ def project_census(
 
     # --- exceptions by partition -------------------------------------------
     informational: Counter[str] = Counter()
+    relaxed_residue_sources: set[UUID] = set()
     blocking_codes: dict[PKey, set[str]] = {}
     kept_exceptions: list[tuple[PKey | None, Mapping[str, object]]] = []
     for exc in exceptions_in:
@@ -637,6 +639,8 @@ def project_census(
         )
         if relaxed:
             informational[code] += 1
+            if code == "excluded_nonzero_residue" and source is not None:
+                relaxed_residue_sources.add(_uuid(source))
         else:
             blocking_codes.setdefault(pkey, set()).add(code)
         kept_exceptions.append((pkey, exc))
@@ -758,22 +762,62 @@ def project_census(
                 tuple(sorted(str(m) for m in member_accounts if m != account)),
             )
         )
-    hold_reason = {
-        (d.account_id, d.currency): d.reason for d in decisions if not d.admitted
-    }
-
     # --- projected census --------------------------------------------------
+    # Held partitions leave the opening population entirely: the import
+    # validators check the complete manifest, so a held account's blocking rows
+    # would make every admitted account unimportable. They live on in the
+    # decision record (the hold list) with their single reason. Drafts are
+    # removed and archived (X1); controls are reduced by exactly what was
+    # removed, so the source's own control totals stay an independent check.
     out: dict[str, object] = dict(census)
+    kept_ids: set[UUID] = set()
     new_invoices: list[dict[str, object]] = []
+    draft_by_partition: dict[PKey, list[UUID]] = {}
     for row in invoices_in:
+        invoice_id = _uuid(row.get("invoice_id"))
+        pkey = invoice_partition[invoice_id]
+        if pkey not in admitted:
+            continue
+        if row.get("status") == rules.draft_status:
+            draft_by_partition.setdefault(pkey, []).append(invoice_id)
+            continue
         copy = dict(row)
-        folded_to = folded.get(_uuid(row.get("account_id")))
-        if folded_to is not None:
-            copy["account_id"] = str(folded_to)
+        copy["account_id"] = str(pkey[0])
         new_invoices.append(copy)
+        kept_ids.add(invoice_id)
     out["invoices"] = new_invoices
-    eligible_ids = sorted(str(i) for i in admitted_candidates)
-    out["eligible_invoice_ids"] = eligible_ids
+    out["eligible_invoice_ids"] = sorted(str(i) for i in admitted_candidates)
+    out["exclusions"] = [
+        x
+        for x in map(_obj, _list(census.get("exclusions")))
+        if _uuid(x.get("source_id")) in kept_ids
+    ]
+    out["settlements"] = [
+        x for x in settlements_in if _uuid(x["invoice_id"]) in kept_ids
+    ]
+    if isinstance(documentary, Mapping):
+        out["documentary_observations"] = {
+            **documentary,
+            **{
+                name: [
+                    x
+                    for x in map(_obj, _list(documentary.get(name, [])))
+                    if _uuid(x.get("invoice_id")) in kept_ids
+                ]
+                for name in (
+                    "current_invoices",
+                    "current_lines",
+                    "unavailable_original_evidence",
+                )
+                if name in documentary
+            },
+        }
+    if census.get("lines"):
+        out["lines"] = [
+            x
+            for x in map(_obj, _list(census.get("lines")))
+            if x.get("invoice_id") is None or _uuid(x["invoice_id"]) in kept_ids
+        ]
 
     elig_count: Counter[PKey] = Counter()
     elig_residual: dict[PKey, Decimal] = {}
@@ -783,8 +827,10 @@ def project_census(
         elig_residual[pkey] = elig_residual.get(pkey, Decimal(0)) + _dec(
             by_id[invoice_id].get("residual")
         )
+    removed = {
+        pkey: [by_id[i] for i in ids] for pkey, ids in draft_by_partition.items()
+    }
 
-    # controls: fold, then restate eligibility under the rules
     folded_controls: dict[PKey, dict[str, object]] = {}
     other_controls: list[dict[str, object]] = []
     with localcontext() as ctx:
@@ -795,6 +841,8 @@ def project_census(
                 continue
             account, currency = _uuid(control["account_id"]), _str(control["currency"])
             pkey = (key_of(account), currency)
+            if pkey not in admitted:
+                continue
             if pkey not in folded_controls:
                 base = dict(control)
                 base["account_id"] = str(pkey[0])
@@ -805,18 +853,26 @@ def project_census(
                 target[name] = _int(target[name]) + _int(control[name])
             for name in _CONTROL_MONEY:
                 target[name] = _fmt(_dec(target[name]) + _dec(control[name]))
-            target["eligible_count"] = 0
-            target["eligible_residual"] = _fmt(Decimal(0), target["residual"])
         for pkey, row in folded_controls.items():
-            if pkey in admitted:
-                row["eligible_count"] = elig_count[pkey]
-                row["eligible_residual"] = _fmt(
-                    elig_residual.get(pkey, Decimal(0)), row["residual"]
+            for draft in removed.get(pkey, ()):
+                row["invoice_count"] = _int(row["invoice_count"]) - 1
+                if _uuid(draft.get("invoice_id")) in exclusions:
+                    row["excluded_count"] = _int(row["excluded_count"]) - 1
+                row["original_total"] = _fmt(
+                    _dec(row["original_total"]) - _dec(draft.get("total"))
                 )
-                row["exception_count"] = 0
-            else:
-                row["eligible_count"] = 0
-                row["eligible_residual"] = _fmt(Decimal(0), row["residual"])
+                row["canonical_discharge"] = _fmt(
+                    _dec(row["canonical_discharge"])
+                    - _dec(draft.get("canonical_discharge"))
+                )
+                row["residual"] = _fmt(
+                    _dec(row["residual"]) - _dec(draft.get("residual"))
+                )
+            row["eligible_count"] = elig_count[pkey]
+            row["eligible_residual"] = _fmt(
+                elig_residual.get(pkey, Decimal(0)), row["residual"]
+            )
+            row["exception_count"] = 0
         out["controls"] = [
             folded_controls[k]
             for k in sorted(folded_controls, key=lambda k: (str(k[0]), k[1]))
@@ -827,11 +883,11 @@ def project_census(
             lane_rows.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])
         )
         for (account, currency), lane in ordered_lanes:
-            if key_of(account) == account:  # an account's own lane is the base
+            if key_of(account) == account and (account, currency) in admitted:
                 new_lanes[(account, currency)] = dict(lane)
         for (account, currency), lane in ordered_lanes:
             pkey = (key_of(account), currency)
-            if pkey[0] == account:
+            if pkey[0] == account or pkey not in admitted:
                 continue
             target = new_lanes[pkey]  # folded only when the reseller lane exists
             for name in _LANE_MONEY:
@@ -843,44 +899,21 @@ def project_census(
             new_lanes[k] for k in sorted(new_lanes, key=lambda k: (str(k[0]), k[1]))
         ]
 
-    # exceptions: admitted partitions keep none (all informational); held keep
-    # theirs; every invoice of a held partition gets one row carrying the single
-    # hold reason unless it already has its own, so none is "unclassified".
-    projected_exceptions: list[dict[str, object]] = []
-    invoices_with_row: set[str] = set()
-    for exc_key, exc in kept_exceptions:
-        if exc_key is not None and exc_key in admitted:
-            continue
-        row = dict(exc)
-        if exc_key is not None:
-            row["account_id"] = str(exc_key[0])
-        projected_exceptions.append(row)
-        if row.get("source_id") is not None:
-            invoices_with_row.add(str(row["source_id"]))
-    for invoice_id, pkey in sorted(
-        invoice_partition.items(), key=lambda kv: str(kv[0])
-    ):
-        reason = hold_reason.get((str(pkey[0]), pkey[1]))
-        row_status = by_id[invoice_id].get("status")
-        if (
-            reason is None
-            or str(invoice_id) in invoices_with_row
-            or row_status == rules.draft_status
-            or invoice_id in exclusions
-        ):
-            continue
-        if _dec(by_id[invoice_id].get("residual")) <= 0:
-            continue
-        projected_exceptions.append(
-            {
-                "account_id": str(pkey[0]),
-                "code": reason,
-                "currency": pkey[1],
-                "detail": "admissibility_hold",
-                "source_id": str(invoice_id),
-            }
-        )
-    out["blocking_exceptions"] = projected_exceptions
+    # Informational findings on admitted partitions are dropped (counted above);
+    # a finding about nobody in particular stays visible for the manual review.
+    out["blocking_exceptions"] = [
+        dict(exc) for pkey, exc in kept_exceptions if pkey is None
+    ]
+    # M8: an excluded closed invoice's relaxed residue is not carried into the
+    # manifest. Only invoices the rules relaxed qualify; any other excluded
+    # invoice with a residue still reaches the validators and blocks.
+    uncarried = frozenset(
+        i
+        for i in kept_ids
+        if i in exclusions
+        and _dec(by_id[i].get("residual")) != 0
+        and i in relaxed_residue_sources
+    )
 
     unused = len(set(a10_by_account) - {k[0] for k in members} - set(folded))
     digests = {
@@ -892,7 +925,10 @@ def project_census(
     return AdmissibilityProjection(
         census=out,
         decisions=tuple(decisions),
-        service_refs=service_refs,
+        service_refs={
+            i: r for i, r in service_refs.items() if i in admitted_candidates
+        },
+        uncarried_residue=uncarried,
         archived_drafts=tuple(sorted(drafts)),
         informational=dict(informational),
         unattributed_controls=unattributed,
