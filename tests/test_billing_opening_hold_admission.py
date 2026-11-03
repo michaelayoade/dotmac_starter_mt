@@ -17,7 +17,9 @@ from dotmac_billing.opening_lane import (
     import_opening_lane_partition,
     seal_opening_lane,
 )
+from dotmac_billing.opening_window_contracts import OpeningAuthoritySwitchReceiptV1
 from dotmac_billing.opening_window_queries import (
+    get_opening_authority_switch_receipt,
     get_opening_hold_admissions,
     get_opening_hold_list,
     get_opening_window_admissions,
@@ -384,6 +386,9 @@ def test_database_refuses_maker_as_checker_even_if_service_check_is_bypassed(
 class Switch:
     def __init__(self, fail=None):
         self.fail, self.calls, self.seen = fail, 0, None
+        self.receipt = OpeningAuthoritySwitchReceiptV1(
+            "fixture:d1-participant", "v1", "starter", "state:" + "d" * 8
+        )
 
     def switch_authority(self, session, context):
         self.calls += 1
@@ -391,6 +396,7 @@ class Switch:
         session.execute(text("SELECT set_config('billing.test_switch', 'on', true)"))
         if self.fail is not None:
             raise self.fail
+        return self.receipt
 
 
 def _marker(session):
@@ -521,3 +527,104 @@ def test_lane_port_requires_trusted_authority_and_drives_the_whole_lane(scratch)
             )
         session.commit()
         assert result.billing_account_id == _held_id(held)
+
+
+def test_switch_receipt_is_stored_with_the_seal_and_replay_returns_it(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as session:
+        admitted, held = _two_partitions(session, scope)
+        _import(session, scope, admitted)
+        session.commit()
+        window = session.info["opening_scratch"].windows[scope]
+        fixed = replace(
+            window_fixture._seal_command(session, scope, window),
+            held_account_ids=(_held_id(held),),
+        )
+        assert get_opening_authority_switch_receipt(session, scope=scope) is None
+        participant = Switch()
+        _seal(session, scope, held=[], participant=participant, prebuilt=fixed)
+        session.commit()
+        assert (
+            get_opening_authority_switch_receipt(session, scope=scope)
+            == participant.receipt
+        )
+        _seal(session, scope, held=[], participant=Switch(), prebuilt=fixed)
+        assert (
+            get_opening_authority_switch_receipt(session, scope=scope)
+            == participant.receipt
+        )
+        # Append-only: no rewrite or delete, even by the owner role.
+        for statement in (
+            "UPDATE mod_billing.opening_authority_switch_receipts SET state_digest='x'",
+            "DELETE FROM mod_billing.opening_authority_switch_receipts",
+        ):
+            with pytest.raises(DBAPIError):
+                session.execute(text(statement))
+            session.rollback()
+
+
+@pytest.mark.parametrize("bad", [None, "not a receipt"])
+def test_missing_or_invalid_switch_receipt_rolls_the_seal_back(scratch, bad):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as session:
+        admitted, held = _two_partitions(session, scope)
+        _import(session, scope, admitted)
+        session.commit()
+        participant = Switch()
+        participant.receipt = bad
+        with pytest.raises(BillingRuleViolation) as refused:
+            _seal(session, scope, held=[_held_id(held)], participant=participant)
+        assert refused.value.code == "billing.opening_authority_switch_failed"
+        session.rollback()
+        assert get_opening_window_seal(session, scope=scope) is None
+        assert get_opening_authority_switch_receipt(session, scope=scope) is None
+
+
+def test_failed_participant_leaves_no_receipt_row(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as session:
+        admitted, held = _two_partitions(session, scope)
+        _import(session, scope, admitted)
+        session.commit()
+        with pytest.raises(BillingRuleViolation):
+            _seal(
+                session,
+                scope,
+                held=[_held_id(held)],
+                participant=Switch(RuntimeError("x")),
+            )
+        session.commit()
+        assert get_opening_authority_switch_receipt(session, scope=scope) is None
+        assert get_opening_window_seal(session, scope=scope) is None
+
+
+def test_database_refuses_commit_of_post_seal_import_without_hold_record(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as session:
+        admitted, held = _two_partitions(session, scope)
+        _import(session, scope, admitted)
+        session.commit()
+        _seal(session, scope, held=[_held_id(held)])
+        session.commit()
+        # Planted bypass: the writer without the audit hook, as a raw caller of
+        # the opening principal could do. The deferred trigger refuses the commit.
+        with cash._as_opening_principal(session):
+            s._import_opening_account_v2(
+                session,
+                scope=scope,
+                command=held,
+                verifier=evidence.TrustedVerifier(),
+                operation_scope="billing.opening.bypass",
+                fingerprint=None,
+                admit=lambda sess, verified: None,
+                after_import=None,
+            )
+        with pytest.raises(DBAPIError) as refused:
+            session.commit()
+        assert refused.value.orig.sqlstate == "23514"
+        session.rollback()
+        assert get_opening_hold_admissions(session, scope=scope) == ()
+        # The audited route still works afterwards: nothing was left behind.
+        _admit(session, scope, held)
+        session.commit()
+        assert len(get_opening_hold_admissions(session, scope=scope)) == 1

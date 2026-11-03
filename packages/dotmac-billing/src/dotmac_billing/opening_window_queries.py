@@ -16,9 +16,11 @@ from dotmac_billing.opening_receivable_contracts import OpeningManifestV2
 from dotmac_billing.opening_receivable_validation import opening_manifest_fingerprint_v2
 from dotmac_billing.opening_validation import opening_manifest_fingerprint
 from dotmac_billing.opening_window_contracts import (
+    OpeningAuthoritySwitchReceiptV1,
     OpeningWindowAdmissionV1,
     OpeningWindowSealV1,
     OpeningWindowV1,
+    StoredOpeningAuthoritySwitchReceiptV1,
     StoredOpeningWindowV1,
     opening_admission_population_digest,
 )
@@ -169,3 +171,22 @@ def get_opening_hold_admissions(
         )
         result.append(item)
     return tuple(result)
+
+
+def get_opening_authority_switch_receipt(
+    db: Session, *, scope: Scope
+) -> OpeningAuthoritySwitchReceiptV1 | None:
+    """The receipt stored with the seal by its authority-switch participant."""
+    table = _table(scope, "opening_authority_switch_receipts")
+    with db.no_autoflush:
+        row = db.execute(_scoped(select(table), scope, table)).mappings().one_or_none()
+    if row is None:
+        return None
+    stored = _decode_row(row, StoredOpeningAuthoritySwitchReceiptV1)
+    _require(
+        stored.window_id == row["window_id"]
+        and stored.receipt.participant_ref == row["participant_ref"]
+        and stored.receipt.state_digest == row["state_digest"]
+        and get_opening_window_seal(db, scope=scope) is not None
+    )
+    return stored.receipt

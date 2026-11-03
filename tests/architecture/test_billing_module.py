@@ -96,6 +96,7 @@ _INTERNAL_RELATIONS = (
     ),
     ("opening_window_seals", ("window_id",), "opening_windows", ("id",)),
     ("opening_hold_admissions", ("window_id",), "opening_windows", ("id",)),
+    ("opening_authority_switch_receipts", ("window_id",), "opening_windows", ("id",)),
     (
         "opening_hold_admissions",
         ("receipt_id", "billing_account_id"),

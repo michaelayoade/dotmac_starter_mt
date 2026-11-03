@@ -189,6 +189,23 @@ class OpeningWindowSealV1(_ClosedEvidence):
 
 
 @dataclass(frozen=True, slots=True)
+class OpeningAuthoritySwitchReceiptV1(_ClosedEvidence):
+    """What the participant switched, persisted append-only with the seal."""
+
+    participant_ref: str
+    participant_version: str
+    switched_to: str
+    state_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoredOpeningAuthoritySwitchReceiptV1(_ClosedEvidence):
+    window_id: UUID
+    receipt: OpeningAuthoritySwitchReceiptV1
+    recorded_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class OpeningAuthoritySwitchContextV1(_ClosedEvidence):
     """What a participant may observe: the seal it is switching authority with."""
 
@@ -204,8 +221,18 @@ class OpeningAuthoritySwitchParticipant(Protocol):
     exception rolls the seal back with every other effect of the operation; a
     participant that returns normally has switched authority atomically with
     the seal. It is not run on an idempotent replay of an already-stored seal.
+
+    It must return an ``OpeningAuthoritySwitchReceiptV1``; ``None`` or any other
+    value counts as failure and rolls the seal back. Billing stores the receipt
+    append-only in the same transaction (one per window).
+
+    Privilege note (SUB-13): the seal runs as the restricted opening principal,
+    so the participant writes as that principal. A product participant needs a
+    narrow product-owned grant (for example EXECUTE on one SECURITY DEFINER
+    switch function); that widens the principal's privilege closure and must be
+    provisioned and read back effective (ADR 0031 section 4).
     """
 
     def switch_authority(
         self, session: Session, context: OpeningAuthoritySwitchContextV1
-    ) -> None: ...
+    ) -> OpeningAuthoritySwitchReceiptV1: ...

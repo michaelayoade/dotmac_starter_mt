@@ -202,6 +202,7 @@ from dotmac_billing.opening_validation import (
 from dotmac_billing.opening_window_contracts import (
     OpeningAuthoritySwitchContextV1,
     OpeningAuthoritySwitchParticipant,
+    OpeningAuthoritySwitchReceiptV1,
     OpeningWindowProvisionVerificationRequestV1,
     OpeningWindowProvisionVerificationV1,
     OpeningWindowProvisionVerifier,
@@ -212,6 +213,7 @@ from dotmac_billing.opening_window_contracts import (
     OpeningWindowV1,
     ProvisionOpeningWindowV1,
     SealOpeningWindowV1,
+    StoredOpeningAuthoritySwitchReceiptV1,
     StoredOpeningWindowV1,
     opening_admission_population_digest,
 )
@@ -6348,9 +6350,36 @@ def seal_opening_window(
         session.flush()
         if authority_switch is not None:
             try:
-                authority_switch.switch_authority(
+                receipt = authority_switch.switch_authority(
                     session, OpeningAuthoritySwitchContextV1(scope, seal)
                 )
+                if type(receipt) is not OpeningAuthoritySwitchReceiptV1:
+                    raise BillingRuleViolation(
+                        "opening_authority_switch_failed",
+                        "participant returned no receipt",
+                    )
+                stored = StoredOpeningAuthoritySwitchReceiptV1(
+                    window.window_id, receipt, datetime.now(UTC)
+                )
+                receipt_evidence = _jsonable(stored)
+                receipt_values = {
+                    "id": uuid4(),
+                    "window_id": window.window_id,
+                    "participant_ref": receipt.participant_ref,
+                    "participant_version": receipt.participant_version,
+                    "switched_to": receipt.switched_to,
+                    "state_digest": receipt.state_digest,
+                    "evidence": receipt_evidence,
+                    "evidence_digest": fingerprint_of(receipt_evidence),
+                }
+                if isinstance(scope, TenantScope):
+                    receipt_values["tenant_id"] = scope.tenant_id
+                session.execute(
+                    insert(_table(scope, "opening_authority_switch_receipts")).values(
+                        **receipt_values
+                    )
+                )
+                session.flush()
             except Exception as exc:
                 raise BillingRuleViolation(
                     "opening_authority_switch_failed",

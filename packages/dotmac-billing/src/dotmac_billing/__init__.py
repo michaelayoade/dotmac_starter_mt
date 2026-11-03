@@ -291,6 +291,7 @@ from dotmac_billing.opening_verification_contracts import (
 from dotmac_billing.opening_window_contracts import (
     OpeningAuthoritySwitchContextV1,
     OpeningAuthoritySwitchParticipant,
+    OpeningAuthoritySwitchReceiptV1,
     OpeningWindowAdmissionV1,
     OpeningWindowProvisionVerificationRequestV1,
     OpeningWindowProvisionVerificationV1,
@@ -446,6 +447,7 @@ __all__ = [
     "require_hold_maker_checker",
     "OpeningAuthoritySwitchContextV1",
     "OpeningAuthoritySwitchParticipant",
+    "OpeningAuthoritySwitchReceiptV1",
     "OpeningWindowAdmissionV1",
     "OpeningWindowProvisionVerificationRequestV1",
     "OpeningWindowProvisionVerificationV1",

@@ -13,6 +13,10 @@ entry guard consults ``touch_*opening_window_held`` only once a seal exists; an
 account not on the hold list, or already admitted, is refused exactly as before.
 The restricted opening principal needs INSERT on ``opening_hold_admissions`` in
 addition to the bi_0009 closure; product-owned explicit provisioning grants it.
+A deferred constraint trigger makes the audit row mandatory: a post-seal import
+receipt without its hold row cannot commit. ``opening_authority_switch_receipts``
+holds the one append-only receipt the seal's authority-switch participant returns,
+written in the seal transaction. The principal also needs INSERT on that table.
 No downgrade: custody cannot be reopened.
 """
 
@@ -104,6 +108,60 @@ def _table(platform: bool) -> None:
     )
 
 
+def _receipt_table(platform: bool) -> None:
+    prefix = "platform_" if platform else ""
+    scope = [] if platform else ["tenant_id"]
+    table = prefix + "opening_authority_switch_receipts"
+    columns: list[SchemaItem] = [
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        *(sa.Column(key, sa.Uuid(), nullable=False) for key in scope),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column("window_id", sa.Uuid(), nullable=False),
+        sa.Column("participant_ref", sa.String(255), nullable=False),
+        sa.Column("participant_version", sa.String(255), nullable=False),
+        sa.Column("switched_to", sa.String(255), nullable=False),
+        sa.Column("state_digest", sa.String(255), nullable=False),
+        sa.Column("evidence", sa.JSON(), nullable=False),
+        sa.Column("evidence_digest", sa.String(64), nullable=False),
+        sa.UniqueConstraint(*scope, "window_id", name=f"uq_{prefix}switch_receipt"),
+        sa.ForeignKeyConstraint(
+            [*scope, "window_id"],
+            [f"{_SCHEMA}.{prefix}opening_windows.{k}" for k in (*scope, "id")],
+            ondelete="RESTRICT",
+        ),
+    ]
+    if not platform:
+        columns.append(
+            sa.ForeignKeyConstraint(
+                ["tenant_id"], ["public.tenants.id"], ondelete="RESTRICT"
+            )
+        )
+    op.create_table(table, *columns, schema=_SCHEMA)
+    if platform:
+        op.execute(
+            f"REVOKE ALL ON mod_billing.{table} FROM PUBLIC, app_user, platform_api;"
+        )
+    else:
+        op.execute(f"""
+            ALTER TABLE mod_billing.{table} ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE mod_billing.{table} FORCE ROW LEVEL SECURITY;
+            CREATE POLICY tenant_isolation ON mod_billing.{table}
+              USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
+              WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
+            REVOKE ALL ON mod_billing.{table} FROM PUBLIC, app_user, platform_api;
+        """)
+    online = "platform_api" if platform else "app_user"
+    op.execute(f"GRANT SELECT ON mod_billing.{table} TO {online};")
+    op.execute(
+        f"CREATE TRIGGER {table}_append_only BEFORE UPDATE OR DELETE ON mod_billing.{table} FOR EACH ROW EXECUTE FUNCTION mod_billing.refuse_mutation();"
+    )
+
+
 def _guards(platform: bool) -> None:
     p = "platform_" if platform else ""
     scope = "" if platform else " AND w.tenant_id = tenant"
@@ -113,6 +171,10 @@ def _guards(platform: bool) -> None:
     new_scope = "" if platform else " AND x.tenant_id = NEW.tenant_id"
     seal_scope = "" if platform else " WHERE s.tenant_id = NEW.tenant_id"
     receipt_scope = "" if platform else " AND r.tenant_id = NEW.tenant_id"
+    seal_scope_new = "" if platform else " WHERE s.tenant_id = NEW.tenant_id"
+    a_scope = "" if platform else " AND a.tenant_id = NEW.tenant_id"
+    h_scope = "" if platform else " AND h.tenant_id = NEW.tenant_id"
+    s_scope = "" if platform else " AND s.tenant_id = NEW.tenant_id"
     scope_json = (
         "'{}'::jsonb"
         if platform
@@ -219,6 +281,40 @@ def _guards(platform: bool) -> None:
     CREATE TRIGGER opening_hold_admission_guard BEFORE INSERT ON mod_billing.{p}opening_hold_admissions
       FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{p}opening_hold_admission();
 
+    CREATE FUNCTION mod_billing.require_{p}hold_admission_row() RETURNS trigger
+    LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+    BEGIN
+      -- A receipt with no window-admission row was written after the seal: it
+      -- is a held-partition admission and must carry exactly one audit row.
+      IF NEW.receipt_kind = 'import'
+        AND EXISTS (SELECT 1 FROM mod_billing.{p}opening_window_seals s{seal_scope_new})
+        AND NOT EXISTS (SELECT 1 FROM mod_billing.{p}opening_window_admissions a WHERE a.receipt_id = NEW.id{a_scope})
+        AND (SELECT count(*) FROM mod_billing.{p}opening_hold_admissions h WHERE h.receipt_id = NEW.id{h_scope}) <> 1
+      THEN RAISE EXCEPTION 'post-seal opening import requires its hold admission record' USING ERRCODE = '23514'; END IF;
+      RETURN NULL;
+    END $$;
+    CREATE CONSTRAINT TRIGGER opening_hold_admission_required AFTER INSERT ON mod_billing.{p}opening_import_receipts
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION mod_billing.require_{p}hold_admission_row();
+
+    CREATE FUNCTION mod_billing.guard_{p}opening_switch_receipt() RETURNS trigger
+    LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+    DECLARE ev jsonb;
+    BEGIN
+      ev := NEW.evidence::jsonb;
+      IF NOT EXISTS (SELECT 1 FROM mod_billing.{p}opening_window_seals s WHERE s.window_id = NEW.window_id{s_scope})
+        OR nullif(trim(NEW.participant_ref),'') IS NULL OR nullif(trim(NEW.participant_version),'') IS NULL
+        OR nullif(trim(NEW.switched_to),'') IS NULL OR nullif(trim(NEW.state_digest),'') IS NULL
+        OR ev->>'window_id' IS DISTINCT FROM NEW.window_id::text
+        OR ev->'receipt'->>'participant_ref' IS DISTINCT FROM NEW.participant_ref
+        OR ev->'receipt'->>'participant_version' IS DISTINCT FROM NEW.participant_version
+        OR ev->'receipt'->>'switched_to' IS DISTINCT FROM NEW.switched_to
+        OR ev->'receipt'->>'state_digest' IS DISTINCT FROM NEW.state_digest
+      THEN RAISE EXCEPTION 'switch receipt requires a sealed window and exact evidence' USING ERRCODE = '23514'; END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER opening_switch_receipt_guard BEFORE INSERT ON mod_billing.{p}opening_authority_switch_receipts
+      FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{p}opening_switch_receipt();
+
     CREATE OR REPLACE FUNCTION mod_billing.guard_{p}opening_seal() RETURNS trigger
     LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
     DECLARE bound record; identity uuid; command jsonb; proof jsonb;
@@ -290,6 +386,7 @@ def upgrade() -> None:
         if plane in selected_module_planes("billing"):
             platform = plane is ModulePlane.PLATFORM
             _table(platform)
+            _receipt_table(platform)
             _guards(platform)
 
 

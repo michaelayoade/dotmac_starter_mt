@@ -2571,6 +2571,43 @@ class PlatformOpeningHoldAdmission(Base, _HoldAdmissionColumns):
     )
 
 
+class _SwitchReceiptColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    participant_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    participant_version: Mapped[str] = mapped_column(String(255), nullable=False)
+    switched_to: Mapped[str] = mapped_column(String(255), nullable=False)
+    state_digest: Mapped[str] = mapped_column(String(255), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class OpeningAuthoritySwitchReceipt(Base, _WindowTenantRow, _SwitchReceiptColumns):
+    __tablename__ = "opening_authority_switch_receipts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "window_id", name="uq_switch_receipt"),
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningAuthoritySwitchReceipt(Base, _SwitchReceiptColumns):
+    __tablename__ = "platform_opening_authority_switch_receipts"
+    __table_args__ = (
+        UniqueConstraint("window_id", name="uq_platform_switch_receipt"),
+        ForeignKeyConstraint(
+            ["window_id"],
+            [f"{SCHEMA}.platform_opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
 class _SettlementEarmarkColumns(_EvidenceTime):
     id: Mapped[UUID] = uuid_pk()
     billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
@@ -2737,6 +2774,7 @@ TENANT_TABLES = (
     "opening_window_admissions",
     "opening_window_seals",
     "opening_hold_admissions",
+    "opening_authority_switch_receipts",
     "receivable_source_claims",
     "opening_receivable_bases",
     "opening_historical_discharge_claims",
@@ -2776,6 +2814,7 @@ PLATFORM_TABLES = (
     "platform_opening_window_admissions",
     "platform_opening_window_seals",
     "platform_opening_hold_admissions",
+    "platform_opening_authority_switch_receipts",
     "platform_receivable_source_claims",
     "platform_opening_receivable_bases",
     "platform_opening_historical_discharge_claims",

@@ -96,6 +96,7 @@ def _principal(scratch, plane):
         "opening_window_admissions",
         "opening_window_seals",
         "opening_hold_admissions",
+        "opening_authority_switch_receipts",
     }
     with engine.begin() as connection:
         connection.execute(
