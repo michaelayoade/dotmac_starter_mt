@@ -512,9 +512,7 @@ def test_supplied_bound_original_satisfies_documentary_evidence_m8_minimal():
 
 def test_missing_original_stays_documentary_evidence_unavailable():
     run = _run()
-    items = tuple(
-        replace(item, original=None) for item in run.manifest.receivables
-    )
+    items = tuple(replace(item, original=None) for item in run.manifest.receivables)
     changed = replace(run, manifest=replace(run.manifest, receivables=items))
     assert "original_documentary_evidence_unavailable" in _codes(changed)
 

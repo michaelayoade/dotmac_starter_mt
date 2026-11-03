@@ -2,6 +2,38 @@
 
 All notable changes follow Semantic Versioning.
 
+## ST-4 opening drafter/adapter and verifier profile — UNRELEASED
+
+Carried by the next billing release (the version bump belongs to ST-2).
+
+- Opening admissibility as data (`opening_admissibility`): a reviewed rules
+  document (digest-identified, closed schema) plus the A10 account classes
+  decide account-level admissibility (A10 `opening_exact` and post-cutover
+  `match`; D-2). Census blocking codes stay blocking unless the rules name them;
+  the M8 relaxations (`settlement_provenance`, `excluded_nonzero_residue` on
+  closed invoices) are an explicit, counted widening. Every held partition has
+  exactly one reason from a closed, rules-ordered set and leaves the opening
+  population (the hold list is `admissibility.json`). Drafts are excluded and
+  archived (X1; accounts whose A10 cause is a draft allocation are held), V1
+  gates only status-open documents, D-3 needs a supplied original for each,
+  and reseller option A re-keys a managed subscriber's invoices and wallet
+  lanes to the reseller account with one `service_ref` per document.
+- Scale (F2): the complete-manifest validators run once per run
+  (`preview_opening_account_import_batch_v2`, `opening_validation_scope`), the
+  rehearsal reporter indexes instead of rescanning, and a manifest-wide
+  finding is reported once, not once per partition. Single-command validators
+  keep their results and ordering.
+- Land Gap A: a supplied, bound original satisfies the M8-minimal documentary
+  check (commit c15afa28).
+- D-8 Starter-native verifier production profile: `OpeningVerifierProfileV1`
+  pins scope, installation, audience, both public-key fingerprints and
+  validity/revocation ceilings; `ProfileBoundAuthorityReaderV1` refuses any
+  policy outside the pin (unavailable, never verified);
+  `build_starter_native_opening_import_verifier_v2` composes the signed a10
+  providers. Rehearsal and production audiences are disjoint namespaces.
+  Import reversal is never granted. Provision/seal verifiers and Gap C
+  (cash lots) are not part of this change.
+
 ## 0.1.0a10 — UNRELEASED
 
 - Retain complete public Tax V2 dependency evidence and opaque `rv2:` seals,

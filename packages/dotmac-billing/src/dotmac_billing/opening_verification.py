@@ -31,9 +31,13 @@ from dotmac_billing.opening_contracts import (
 from dotmac_billing.opening_qualification import (
     OpeningImportGrantV2,
     OpeningSourceEvidenceV2,
+    qualify_opening_account_import_v2,
 )
 from dotmac_billing.opening_receivable_contracts import (
+    OpeningImportReversalVerificationRequestV2,
+    OpeningImportReversalVerificationV2,
     OpeningImportVerificationRequestV2,
+    OpeningImportVerificationV2,
 )
 from dotmac_billing.opening_receivable_validation import (
     opening_account_command_digest_v2,
@@ -56,6 +60,7 @@ from dotmac_billing.opening_verification_contracts import (
     OpeningSignedGrantReaderV1,
     OpeningSignedSourceReaderV1,
     OpeningVerificationClockV1,
+    OpeningVerifierProfileV1,
     OpeningWindowIdentityReaderV1,
     OpeningWindowIdentityV1,
     SignedOpeningCommandGrantV1,
@@ -649,3 +654,163 @@ class SignedOpeningImportGrantProviderV2:
         return OpeningImportGrantV2(
             _IMPORT, command, value.migration_authority_proof_ref, source_digest
         )
+
+
+# --------------------------------------------------------------------------
+# D-8: Starter-native verifier, production profile
+# --------------------------------------------------------------------------
+
+_REHEARSAL_AUDIENCE_PREFIX: Final = "rehearsal:"
+
+
+def _is_sha256_hex(value: str) -> bool:
+    return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def opening_verifier_profile_v1(
+    *,
+    name: str,
+    scope: Scope,
+    installation_id: str,
+    audience: str,
+    source_key_fingerprint: str,
+    grant_key_fingerprint: str,
+    max_validity_seconds: int,
+    max_revocation_age_seconds: int,
+) -> OpeningVerifierProfileV1:
+    """Build a profile; every value is explicit and the namespaces cannot mix."""
+    if name not in ("rehearsal", "production"):
+        raise OpeningEvidenceError("unknown opening verifier profile")
+    profile = OpeningVerifierProfileV1(
+        name,  # type: ignore[arg-type]
+        scope,
+        installation_id,
+        audience,
+        source_key_fingerprint,
+        grant_key_fingerprint,
+        max_validity_seconds,
+        max_revocation_age_seconds,
+    )
+    if (
+        not _is_sha256_hex(source_key_fingerprint)
+        or not _is_sha256_hex(grant_key_fingerprint)
+        or source_key_fingerprint == grant_key_fingerprint
+        or max_validity_seconds <= 0
+        or max_revocation_age_seconds <= 0
+        or audience.startswith(_REHEARSAL_AUDIENCE_PREFIX) != (name == "rehearsal")
+    ):
+        raise OpeningEvidenceError("invalid opening verifier profile")
+    return profile
+
+
+class ProfileBoundAuthorityReaderV1:
+    """Refuse any policy that is not exactly the deployment's pinned profile.
+
+    Wraps a trusted ``OpeningAuthorityReaderV1``. The wrapped reader may be
+    backed by mutable storage; the profile may not. A mismatch is configuration
+    drift or a foreign/rehearsal authority, so it is reported as unavailable
+    (fail closed, retriable after repair), never as a successful verification.
+    """
+
+    def __init__(
+        self, inner: OpeningAuthorityReaderV1, profile: OpeningVerifierProfileV1
+    ) -> None:
+        _validate_closed(profile, OpeningVerifierProfileV1)
+        self._inner, self._profile = inner, profile
+
+    def current_policy(
+        self, *, scope: Scope, installation_id: str
+    ) -> OpeningAuthorityPolicyV1 | None:
+        profile = self._profile
+        if scope != profile.scope or installation_id != profile.installation_id:
+            raise OpeningVerificationUnavailable(
+                "opening verifier profile does not cover this scope or installation"
+            )
+        policy = self._inner.current_policy(
+            scope=scope, installation_id=installation_id
+        )
+        if policy is None:
+            return None
+        _validate_closed(policy, OpeningAuthorityPolicyV1)
+        if (
+            policy.scope != profile.scope
+            or policy.installation_id != profile.installation_id
+            or policy.audience != profile.audience
+            or policy.source_key.public_key_fingerprint
+            != profile.source_key_fingerprint
+            or policy.grant_key.public_key_fingerprint != profile.grant_key_fingerprint
+            or policy.max_validity_seconds > profile.max_validity_seconds
+            or policy.max_revocation_age_seconds > profile.max_revocation_age_seconds
+        ):
+            raise OpeningVerificationUnavailable(
+                "opening authority policy does not match the verifier profile"
+            )
+        return policy
+
+    def current_revocations(
+        self, *, scope: Scope, installation_id: str, policy_id: str
+    ) -> OpeningRevocationStateV1 | None:
+        profile = self._profile
+        if scope != profile.scope or installation_id != profile.installation_id:
+            raise OpeningVerificationUnavailable(
+                "opening verifier profile does not cover this scope or installation"
+            )
+        return self._inner.current_revocations(
+            scope=scope, installation_id=installation_id, policy_id=policy_id
+        )
+
+
+class StarterNativeOpeningImportVerifierV2:
+    """``OpeningAccountImportVerifierV2`` over the signed a10 providers.
+
+    Composition only: the providers authenticate signatures, custody, expiry and
+    revocation; the qualification owner binds them to the exact command. Import
+    reversal has its own fresh authority and is never granted here.
+    """
+
+    def __init__(
+        self,
+        *,
+        source_provider: SignedOpeningSourceEvidenceProviderV2,
+        grant_provider: SignedOpeningImportGrantProviderV2,
+    ) -> None:
+        self._source, self._grant = source_provider, grant_provider
+
+    def verify_import_v2(
+        self, request: OpeningImportVerificationRequestV2
+    ) -> OpeningImportVerificationV2 | None:
+        return qualify_opening_account_import_v2(
+            request, source_provider=self._source, grant_provider=self._grant
+        )
+
+    def verify_import_reversal_v2(
+        self, request: OpeningImportReversalVerificationRequestV2
+    ) -> OpeningImportReversalVerificationV2 | None:
+        return None
+
+
+def build_starter_native_opening_import_verifier_v2(
+    *,
+    profile: OpeningVerifierProfileV1,
+    authority: OpeningAuthorityReaderV1,
+    source: OpeningSignedSourceReaderV1,
+    custody: OpeningImmutableCustodyReaderV1,
+    grants: OpeningSignedGrantReaderV1,
+    windows: OpeningWindowIdentityReaderV1,
+    clock: OpeningVerificationClockV1,
+) -> StarterNativeOpeningImportVerifierV2:
+    """Compose the verifier for one profile (D-8: Starter-native, no Sub logic).
+
+    Every trust input is a constructor argument held by trusted composition; a
+    request cannot select a profile, key, reader or clock. The authority reader
+    is wrapped so that a policy outside the pinned profile is refused.
+    """
+    bound = ProfileBoundAuthorityReaderV1(authority, profile)
+    return StarterNativeOpeningImportVerifierV2(
+        source_provider=SignedOpeningSourceEvidenceProviderV2(
+            authority=bound, source=source, custody=custody, clock=clock
+        ),
+        grant_provider=SignedOpeningImportGrantProviderV2(
+            authority=bound, source=source, grants=grants, windows=windows, clock=clock
+        ),
+    )

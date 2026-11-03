@@ -57,6 +57,28 @@ class OpeningTrustKeyV1(OpeningCashValue):
 
 
 @dataclass(frozen=True, slots=True)
+class OpeningVerifierProfileV1(OpeningCashValue):
+    """The deployment-pinned trust profile an opening verifier is composed with.
+
+    Pins, not requests, decide what is trusted: the scope and installation, the
+    audience, and the fingerprints of the exact source and grant public keys.
+    The two ceilings bound what a policy may grant; they are required values
+    entered by the deployment, never defaults. ``rehearsal`` and ``production``
+    differ by audience namespace (``rehearsal:`` prefix) as well as by pins, so
+    a rehearsal-signed statement can never verify under the production profile.
+    """
+
+    name: Literal["rehearsal", "production"]
+    scope: Scope
+    installation_id: str
+    audience: str
+    source_key_fingerprint: str
+    grant_key_fingerprint: str
+    max_validity_seconds: int
+    max_revocation_age_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
 class OpeningAuthorityPolicyV1(OpeningCashValue):
     policy_id: str
     scope: Scope
