@@ -741,5 +741,6 @@ def preview_opening_account_import_batch_v2(
                 ),
             )
         )
-    assert analysis is not None
+    if analysis is None:  # unreachable: commands is non-empty
+        raise OpeningEvidenceError("a batch needs at least one command")
     return OpeningImportBatchV2(analysis.manifest_blockers, tuple(items))
