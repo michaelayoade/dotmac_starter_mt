@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import threading
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, fields
+from uuid import UUID
 
 from dotmac_kernel.fingerprints import fingerprint_of
 
@@ -31,7 +32,11 @@ from dotmac_billing.opening_receivable_contracts import (
     OpeningManifestV2,
     OpeningReplayBindingV1,
 )
-from dotmac_billing.opening_validation import _CashManifestAnalysis, _payload
+from dotmac_billing.opening_validation import (
+    HELD_REASON_PREFIX,
+    _CashManifestAnalysis,
+    _payload,
+)
 
 #: Public handle for the identity-scoped validation memo (see
 #: ``_opening_values.validation_memo``): assembly tools that build one command
@@ -684,14 +689,77 @@ def _freeze(failures: dict[str, list[str]]) -> tuple[OpeningBlockerV1, ...]:
     )
 
 
+def opening_manifest_held_residuals(manifest: OpeningManifestV2) -> dict[UUID, int]:
+    """Open residual (minor units) of each held-marked partition, by account id.
+
+    A partition is held when its open dispositions carry the digest-bound
+    ``held:`` marker. The same set must be the sealed hold list.
+    """
+    held: dict[UUID, int] = {}
+    for item in manifest.dispositions:
+        if item.disposition == "blocking" and item.reason.startswith(
+            HELD_REASON_PREFIX
+        ):
+            account = item.partition.account_id
+            held[account] = held.get(account, 0) + item.residual_minor
+    return held
+
+
+def require_hold_list_matches_manifest(
+    manifest: OpeningManifestV2, held_account_ids: Collection[UUID]
+) -> None:
+    """Refuse a seal whose hold list is not exactly the manifest's held set.
+
+    An admissible partition must not be put on the hold list to skip the
+    opening, and a held-marked partition must not be left off it.
+    """
+    marked = set(opening_manifest_held_residuals(manifest))
+    listed = set(held_account_ids)
+    if len(listed) != len(held_account_ids) or listed != marked:
+        raise OpeningEvidenceError(
+            "sealed hold list differs from the manifest's held-marked partitions"
+        )
+
+
 def opening_account_import_blockers_v2(
     command: ImportOpeningAccountV2,
     *,
+    admitting_held_partition: UUID | None = None,
+    sealed_hold_list: Collection[UUID] = (),
     _analysis: _ReceivableManifestAnalysis | None = None,
 ) -> tuple[OpeningBlockerV1, ...]:
-    """Validate the complete manifest, including partitions not selected here."""
+    """Validate the complete manifest, including partitions not selected here.
+
+    ``admitting_held_partition`` is for the post-seal admission path ONLY. It
+    drops exactly the ``partition_held`` blocker, only for the partition being
+    admitted, and only if that partition is the command's own and is on the
+    sealed hold list (supplied by the caller from the recorded seal; the caller
+    must already have checked that the window is sealed). Every other blocker
+    still applies.
+    """
     analysis = _analysis if _analysis is not None else _analysis_of(command.manifest)
-    return _freeze(_blockers_from(analysis, command))
+    blockers = _freeze(_blockers_from(analysis, command))
+    if admitting_held_partition is None:
+        return blockers
+    if (
+        admitting_held_partition != command.partition.account_id
+        or admitting_held_partition not in set(sealed_hold_list)
+        or admitting_held_partition
+        not in opening_manifest_held_residuals(command.manifest)
+    ):
+        raise OpeningEvidenceError(
+            "held admission needs the command's own sealed, held-marked partition"
+        )
+    key = command.partition.source_account_key
+    kept = []
+    for blocker in blockers:
+        if blocker.code == "partition_held":
+            refs = tuple(r for r in blocker.references if r != key)
+            if refs:
+                kept.append(OpeningBlockerV1(blocker.code, len(refs), refs))
+            continue
+        kept.append(blocker)
+    return tuple(kept)
 
 
 def _verification_blockers(
