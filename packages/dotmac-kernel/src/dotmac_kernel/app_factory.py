@@ -24,12 +24,16 @@ import asyncio
 import inspect
 import logging
 import re
-from collections.abc import Mapping, Sequence, Set
-from contextlib import asynccontextmanager
+from collections.abc import Callable, Iterator, Mapping, Sequence, Set
+from contextlib import asynccontextmanager, contextmanager
+from functools import wraps
+from threading import RLock
 
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from dotmac_kernel.api_documentation import (
     ApiDocumentationPolicyViolation,
@@ -120,6 +124,72 @@ from dotmac_kernel.web_surfaces import (
 
 logger = logging.getLogger(__name__)
 
+# Registry installation is process-scoped. A stale app must not serve using
+# another assembly's catalogues, and a running one must not be recomposed.
+_composition_lock = RLock()
+_composed_assembly: ProductAssemblySpec | None = None
+_serving_assembly: ProductAssemblySpec | None = None
+_serving_count = 0
+
+
+class _AssemblyLeaseError(RuntimeError):
+    pass
+
+
+def _serialized_composition(
+    build: Callable[[ProductAssemblySpec], FastAPI],
+) -> Callable[[ProductAssemblySpec], FastAPI]:
+    @wraps(build)
+    def compose(spec: ProductAssemblySpec) -> FastAPI:
+        with _composition_lock:
+            return build(spec)
+
+    return compose
+
+
+@contextmanager
+def _assembly_lease(spec: ProductAssemblySpec) -> Iterator[None]:
+    global _serving_assembly, _serving_count
+    with _composition_lock:
+        if _composed_assembly is not spec:
+            raise _AssemblyLeaseError(
+                "This application was superseded by another assembly"
+            )
+        if _serving_assembly is not None and _serving_assembly is not spec:
+            raise _AssemblyLeaseError("Only one assembly may serve in a process")
+        _serving_assembly = spec
+        _serving_count += 1
+    try:
+        yield
+    finally:
+        with _composition_lock:
+            _serving_count -= 1
+            if not _serving_count:
+                _serving_assembly = None
+
+
+class _AssemblyOwnershipMiddleware:
+    def __init__(self, app: ASGIApp, *, spec: ProductAssemblySpec) -> None:
+        self.app = app
+        self.spec = spec
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in {"http", "websocket"}:
+            await self.app(scope, receive, send)
+            return
+        try:
+            # Hold through the complete ASGI response, including streaming.
+            with _assembly_lease(self.spec):
+                await self.app(scope, receive, send)
+        except _AssemblyLeaseError:
+            if scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 1013})
+                return
+            await JSONResponse({"status": "unavailable"}, status_code=503)(
+                scope, receive, send
+            )
+
+
 _PLATFORM_COMPATIBILITY_PROFILE = AuthenticationProfileBinding(
     code="kernel_platform_session",
     provider=PLATFORM_COOKIE_AUTHENTICATION,
@@ -155,10 +225,11 @@ class LayeredStaticFiles(StaticFiles):
 
 async def _run_enabled_seeds(
     manifests: Sequence[AnyManifest], disabled: Set[str]
-) -> None:
+) -> bool:
     """Run each enabled manifest's seed hook off the event loop. DEFERRED,
     NON-FATAL: a failed seed (e.g. an unreachable DATABASE_URL) must never stop
     the app from serving — `/health` stays DB-free and the next boot retries."""
+    successful = True
     for manifest in manifests:
         if manifest.name in disabled or not manifest.enabled_by_default:
             continue
@@ -166,7 +237,11 @@ async def _run_enabled_seeds(
             try:
                 await asyncio.to_thread(manifest.seed)
             except Exception as exc:  # swallow: seed failure never downs startup
-                logger.warning("Feature %s seed skipped: %s", manifest.name, exc)
+                successful = False
+                logger.warning(
+                    "Feature %s seed failed (%s)", manifest.name, type(exc).__name__
+                )
+    return successful
 
 
 def _tenancy_errors() -> list[str]:
@@ -510,6 +585,7 @@ def _install_profile_defaults(defaults: Mapping[str, object]) -> None:
     install_setting_defaults(defaults)
 
 
+@_serialized_composition
 def create_app(spec: ProductAssemblySpec) -> FastAPI:
     """Compose a FastAPI application for `spec`. Behavior is identical to the
     pre-Task-3 `app/main.py` when given the reference spec; the spec's
@@ -523,6 +599,13 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     Raises `dotmac_kernel.modules.ModuleRegistryError` (a `ValueError`) if the
     module set is incoherent."""
+    global _composed_assembly
+    with _composition_lock:
+        if _serving_assembly is not None:
+            raise RuntimeError("Cannot compose another assembly while one is serving")
+        # A failed construction may already have installed some registries.
+        # Invalidate the old graph before mutation, never let it serve afterward.
+        _composed_assembly = None
     # FIRST, before anything else can read it: seal this process's database
     # runtime binding (kernel-runtime-composition-seam). A spec declaring
     # `database_runtime` makes every kernel-owned path — the startup checks
@@ -689,28 +772,38 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        startup_valid = True
         for err in validate_settings(settings):
+            startup_valid = False
             if settings.is_production:
                 raise RuntimeError(f"Configuration error: {err}")
             logger.warning("Config: %s", err)
         for err in _product_startup_errors(spec):
+            startup_valid = False
             if settings.is_production:
                 raise RuntimeError(f"Product configuration error: {err}")
             logger.warning("Product config: %s", err)
         await _run_product_startup_hooks(spec.startup_hooks)
         if settings.seed_on_startup:
-            await _run_enabled_seeds(enabled_manifests, disabled)
+            seeded = await _run_enabled_seeds(enabled_manifests, disabled)
+            startup_valid = seeded and startup_valid
         for err in await asyncio.to_thread(_required_setting_errors):
+            startup_valid = False
             if settings.is_production:
                 raise RuntimeError(f"Configuration error: {err}")
             logger.warning("Config: %s", err)
         # After the seeds, so a deployment that seeds its first tenant on boot
         # is counted once that has happened rather than before it.
         for err in await asyncio.to_thread(_tenancy_errors):
+            startup_valid = False
             if settings.is_production:
                 raise RuntimeError(f"Tenancy error: {err}")
             logger.warning("Tenancy: %s", err)
-        yield
+        app.state.startup_ready = startup_valid
+        try:
+            yield
+        finally:
+            app.state.startup_ready = False
 
     # Who may read this assembly's API documentation is DECLARED, never
     # inherited. FastAPI mounts /docs, /docs/oauth2-redirect, /redoc and
@@ -733,11 +826,18 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         )
     documentation_policy = spec.api_documentation
 
+    @asynccontextmanager
+    async def guarded_lifespan(application: FastAPI):
+        with _assembly_lease(spec):
+            async with lifespan(application):
+                yield
+
     app = FastAPI(
         title=spec.name,
-        lifespan=lifespan,
+        lifespan=guarded_lifespan,
         **documentation_arguments(documentation_policy),
     )
+    app.state.startup_ready = False
     # FastAPI can only mount the document unguarded, so a bearer-protected
     # document is suppressed above and mounted here behind the platform guard.
     # Nothing is deleted: the guarded route is the only one that ever exists.
@@ -770,6 +870,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         requests=settings.rate_limit_requests,
         window_seconds=settings.rate_limit_window_seconds,
         max_keys=settings.rate_limit_max_keys,
+        store=spec.rate_limit_store,
     )
     if spec.request_evidence is not None:
         # Inside the tenant resolver's BaseHTTPMiddleware task boundary, so
@@ -799,7 +900,8 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     _validate_content_security_policy_override(
         configured_csp, surface_registry.browser_security_requirements
     )
-    # OUTERMOST: security headers + CSP on every response.
+    # Ownership is checked before tenant lookup; security headers remain outermost.
+    app.add_middleware(_AssemblyOwnershipMiddleware, spec=spec)
     app.add_middleware(
         SecurityHeadersMiddleware,
         enabled=settings.security_headers_enabled,
@@ -842,9 +944,28 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         app.mount("/static", static, name="static")
 
     @app.get("/health")
+    @app.get("/health/live")
     def health() -> dict[str, str]:
         """Liveness — does not touch DB."""
         return {"status": "ok"}
+
+    if spec.readiness_checks:
+
+        @app.get("/health/ready")
+        def readiness() -> JSONResponse:
+            # FastAPI runs this synchronous endpoint in its worker pool. This
+            # infrastructure probe deliberately reveals no diagnostic details.
+            ready = app.state.startup_ready
+            if ready:
+                try:
+                    ready = all(not check() for check in spec.readiness_checks)
+                except Exception:
+                    ready = False
+            return JSONResponse(
+                {"status": "ready" if ready else "not_ready"},
+                status_code=200 if ready else 503,
+                headers={"Cache-Control": "no-store"},
+            )
 
     # Platform auth mounts DIRECTLY (not a feature manifest) — the platform
     # control plane must exist even with every feature disabled.
@@ -880,6 +1001,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             "declared policy forbids: " + "; ".join(documentation_violations)
         )
 
+    _composed_assembly = spec
     return app
 
 

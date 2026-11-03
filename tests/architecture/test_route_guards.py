@@ -20,6 +20,11 @@ ALLOWLIST = {
     # tenant is known) — carries zero require_* dependencies, confirmed by
     # inspecting app.routes.
     ("GET", "/health"),
+    # The deployment descriptor's liveness spelling shares the DB-free handler.
+    ("GET", "/health/live"),
+    # Minimal infrastructure probe: no tenant or principal exists. Its public
+    # payload is only ready/not_ready; unit canaries reject detail disclosure.
+    ("GET", "/health/ready"),
     # NOTE: POST /auth/login is intentionally NOT here — it is mounted under
     # `app.features.auth.router`, whose router-level
     # `dependencies=[Depends(require_tenant)]` already appears in its

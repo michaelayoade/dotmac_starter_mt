@@ -68,6 +68,7 @@ from dotmac_kernel.web_surfaces import (
 
 from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
+from app.readiness import readiness_errors
 
 
 def _staff_landing_route(disabled_modules: frozenset[str]) -> WebRouteRef | None:
@@ -122,6 +123,7 @@ _DISABLED_MODULES = frozenset(settings.disabled_feature_set)
 
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
+    readiness_checks=(readiness_errors,),
     # The assembly's own features, plus every INSTALLED MODULE it composes.
     #
     # `dotmac_template_studio.module` is a `ModuleManifest`, not a

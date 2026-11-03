@@ -24,9 +24,11 @@ from __future__ import annotations
 import hashlib
 import time
 from collections import OrderedDict, deque
+from threading import Lock
 from typing import Protocol
 
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.routing import Match
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -57,8 +59,15 @@ class MemoryStore:
     def __init__(self, *, max_keys: int = 10_000) -> None:
         self.max_keys = max_keys
         self._hits: OrderedDict[str, deque[float]] = OrderedDict()
+        self._lock = Lock()
 
     def hit(
+        self, key: str, now: float, *, window_seconds: int, limit: int
+    ) -> tuple[int, int]:
+        with self._lock:
+            return self._hit(key, now, window_seconds=window_seconds, limit=limit)
+
+    def _hit(
         self, key: str, now: float, *, window_seconds: int, limit: int
     ) -> tuple[int, int]:
         hits = self._hits.get(key)
@@ -106,12 +115,17 @@ class RateLimitMiddleware:
             return
 
         request = Request(scope, receive)
-        if not self.enabled or request.url.path == "/health":
+        if not self.enabled or request.url.path in {
+            "/health",
+            "/health/live",
+            "/health/ready",
+        }:
             await self.app(scope, receive, send)
             return
 
         key = _rate_limit_key(request)
-        count, retry_after = self.store.hit(
+        count, retry_after = await run_in_threadpool(
+            self.store.hit,
             key,
             time.monotonic(),
             window_seconds=self.window_seconds,

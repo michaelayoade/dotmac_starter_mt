@@ -33,6 +33,7 @@ from contextlib import AbstractContextManager
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
@@ -45,7 +46,7 @@ from dotmac_kernel.tenancy import single_tenant_binding
 
 logger = logging.getLogger(__name__)
 
-_HEALTH_PATHS = frozenset({"/health", "/health/ready"})
+_HEALTH_PATHS = frozenset({"/health", "/health/live", "/health/ready"})
 _STATIC_PATH = "/static"
 _STATIC_PATH_PREFIX = "/static/"
 
@@ -87,10 +88,9 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         host = (request.headers.get("host") or "").split(":")[0].lower()
 
-        # Liveness/readiness checks must not touch the DB (they run before a
-        # DB may even be reachable — container smoke tests, orchestrator
-        # health probes). Short-circuit before resolution, per the /health
-        # route's "does not touch DB" contract in app/main.py.
+        # Infrastructure probes have no tenant. Liveness stays DB-free;
+        # readiness performs its own dependency observations in its handler.
+        # Neither probe may first depend on tenant resolution succeeding.
         if request.url.path in _HEALTH_PATHS:
             request.state.tenant = None
             return await call_next(request)
@@ -103,7 +103,9 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
             request.state.tenant = None
             return await call_next(request)
 
-        request.state.tenant = self._allow(self._resolve(host))
+        # Open, query, detach and close the resolver session on one worker;
+        # no live session crosses back to the event loop.
+        request.state.tenant = self._allow(await run_in_threadpool(self._resolve, host))
 
         # Platform paths are allowed without a tenant.
         if request.state.tenant is None and not _is_platform_path(

@@ -119,7 +119,7 @@ def _recording_resolver() -> tuple[Callable[..., object], dict[str, int]]:
     return _factory, calls
 
 
-@pytest.mark.parametrize("path", ["/health", "/health/ready"])
+@pytest.mark.parametrize("path", ["/health", "/health/live", "/health/ready"])
 def test_health_paths_bypass_tenant_resolution_without_db_access(
     monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:

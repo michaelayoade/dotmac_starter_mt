@@ -199,9 +199,10 @@ def mount_features(
                 for router in manifest.web_routers:
                     app.include_router(router)
         except Exception:
-            if manifest.core:
-                raise
-            logger.exception("Optional feature %s failed to mount", manifest.name)
+            # Optional means the assembly may omit the module. Once selected,
+            # partial router inclusion must never produce a serving app.
+            logger.exception("Selected feature %s failed to mount", manifest.name)
+            raise
 
 
 __all__ = [

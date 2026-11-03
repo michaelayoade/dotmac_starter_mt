@@ -873,12 +873,12 @@ jobs:
           echo "the engine on this runner accepts the rendered project"
 
       - run: docker build --build-arg APP_PORT=${{ env.APP_PORT }} -t ${{ env.IMAGE_TAG }} .
-      - name: Verify final runtime entrypoints and native closure
+      - name: Verify final runtime entrypoints and selected package closure
         env:
           NATIVE_IMAGE: ${{ env.IMAGE_TAG }}
         run: |
           docker run --rm "$NATIVE_IMAGE" alembic --version
-          docker run --rm "$NATIVE_IMAGE" python -c 'import dotmac_positioning._native, dotmac_network_topology._native, dotmac_fiber_plant._native, dotmac_media_observations._native, dotmac_imports._native, dotmac_web_analytics._native, dotmac_forms._native, dotmac_surveys._native, dotmac_inventory._native, dotmac_finance._native'
+          docker run --rm "$NATIVE_IMAGE" python -c 'import importlib.metadata as m,json; p=json.load(open("/srv/app/runtime-inventory.json")); actual={d.metadata["Name"].lower().replace("_","-") for d in m.distributions() if d.metadata["Name"].lower().startswith("dotmac")}; assert actual==set(p["local"]); import dotmac_kernel, dotmac_ui, dotmac_template_studio, dotmac_ticketing'
       - run: |
           docker run -d --name ${{ env.SMOKE_CONTAINER }} -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
             -e DATABASE_URL=postgresql+psycopg://x:x@localhost/x ${{ env.IMAGE_TAG }}

@@ -102,10 +102,16 @@ pins the no-external-origins property.
 `dotmac_kernel/middleware/rate_limit.py` defines the `RateLimitStore` protocol;
 the shipped `MemoryStore` is process-local and LRU-bounded
 (`RATE_LIMIT_MAX_KEYS`). A multi-process/multi-node deployment provides a
-Redis-backed implementation of the same `hit()` contract and passes it to
-`RateLimitMiddleware`; the `RATE_LIMIT_REDIS_URL` knob is reserved for that
+shared implementation of the same `hit()` contract through
+`ProductAssemblySpec.rate_limit_store`; the `RATE_LIMIT_REDIS_URL` knob is reserved for that
 wiring. No redis dependency ships with the starter
 (contracts-not-implementations).
+
+Store calls execute in a worker thread. Shared backends must use atomic backend
+operations and a cross-host clock; MemoryStore's process-monotonic `now` value
+is not a distributed timestamp. An unavailable shared backend's failure policy
+belongs to its explicitly selected implementation; no silent Redis fallback is
+added here. Minimal readiness responses expose no dependency diagnostics.
 
 ## Reporting
 

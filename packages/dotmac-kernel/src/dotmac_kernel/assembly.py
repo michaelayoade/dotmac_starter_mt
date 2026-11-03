@@ -26,6 +26,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from dotmac_kernel.api_documentation import ApiDocumentationPolicy
+from dotmac_kernel.middleware.rate_limit import RateLimitStore
 from dotmac_kernel.modules import AnyManifest
 from dotmac_kernel.permission_provisioning import RoleDefinition, RoleGrantProfile
 from dotmac_kernel.planes import (
@@ -236,6 +237,12 @@ class ProductAssemblySpec:
     # errors and follows the kernel's existing environment policy: warnings in
     # development, fatal startup errors in production.
     startup_checks: Sequence[StartupCheck] = ()
+    # Read-only product dependency checks for the minimal infrastructure probe.
+    # Supplying none leaves /health/ready unmounted; liveness remains separate.
+    readiness_checks: Sequence[StartupCheck] = field(default=(), kw_only=True)
+    # Bind an existing store (for example an adopter's shared backend) without
+    # introducing another limiter or interpreting a Redis URL in the kernel.
+    rate_limit_store: RateLimitStore | None = field(default=None, kw_only=True)
     # Product initialization that belongs inside the FastAPI lifespan (for
     # example telemetry/error tracking). Hooks run in declaration order after
     # configuration checks; sync and async callables are both accepted, and an
@@ -292,6 +299,12 @@ class ProductAssemblySpec:
     assembly_migrations: Path | None = None
 
     def __post_init__(self) -> None:
+        if any(not callable(check) for check in self.readiness_checks):
+            raise TypeError("readiness_checks must contain callables")
+        if self.rate_limit_store is not None and not callable(
+            getattr(self.rate_limit_store, "hit", None)
+        ):
+            raise TypeError("rate_limit_store must implement hit")
         if self.request_evidence is not None and not isinstance(
             self.request_evidence, RequestEvidenceConfigurationV1
         ):
@@ -312,6 +325,7 @@ class ProductAssemblySpec:
         object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
         object.__setattr__(self, "disabled_modules", frozenset(self.disabled_modules))
         object.__setattr__(self, "startup_checks", tuple(self.startup_checks))
+        object.__setattr__(self, "readiness_checks", tuple(self.readiness_checks))
         object.__setattr__(self, "startup_hooks", tuple(self.startup_hooks))
         object.__setattr__(self, "web_facets", tuple(self.web_facets))
         object.__setattr__(

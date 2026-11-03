@@ -1,5 +1,61 @@
 # Architecture
 
+## Operational boundaries — source hardening, 2026-11-03
+
+The source changes below extend the existing owners; hosted qualification and
+release are separate gates. Product-first observations and adaptation scope
+are recorded in [the source inventory](inventories/architecture-hardening-sources.md).
+
+- **Readiness:** the reference assembly declares read-only `readiness_checks`.
+  The kernel mounts `/health/ready` only when checks are supplied, returning
+  minimal `ready`/`not_ready` with HTTP 200/503 and `Cache-Control: no-store`.
+  It requires completed startup, successful enabled seed hooks and current
+  dependency checks. It exposes no exceptions, module inventory or settings.
+  `/health` and `/health/live` remain DB-free liveness. `app/readiness.py`
+  observes both online database roles, the tenant catalogue, platform-required
+  settings and, for single tenancy, the actual startup binding. An unbound
+  single-tenant process stays unready until a successful restart. These checks
+  do not certify every table, permission or module migration: the migration
+  and live-catalog gates remain necessary. Deploy's acceptance probe is readiness;
+  container restart health remains liveness. Probe duration still depends on
+  the runtime's connection/pool settings; the deploy client has a bounded timeout.
+- **Scheduling:** tenant resolution opens, queries, detaches and closes its
+  resolver session inside a worker thread. Rate-store calls also run off the
+  event loop, and the process-local MemoryStore serializes updates with a lock.
+  Tenant lookup still precedes the tenant-aware rate limiter; upstream request
+  protection and connection limits remain relevant under hostile host traffic.
+- **Composition:** process registries still have one owner. Construction is
+  serialized and refused while an assembly is serving through its lifespan.
+  An inactive application superseded by another composition cannot start;
+  failed construction invalidates the earlier composition too. ASGI lifespan
+  must remain enabled. This is a process constraint, not support for distinct
+  independently configured apps in the same interpreter. Tests restore their
+  prior composition owner between isolated cases; running-assembly guards remain
+  exercised by unit canaries.
+- **Selected modules:** failure to include a selected module's router aborts
+  construction. Optional means a module may be omitted explicitly, not that a
+  partial router graph may serve silently.
+- **Rate limiting:** `ProductAssemblySpec.rate_limit_store` binds the existing
+  `RateLimitStore` contract. The default remains bounded process-local memory.
+  No Redis client is added. A shared backend must supply atomic shared-window
+  behavior and a cross-host clock; the `now` argument used by MemoryStore is
+  process-monotonic, not a portable distributed timestamp. A URL alone grants
+  no distributed protection.
+- **Runtime packaging:** `deploy/runtime-packages.json` explicitly selects the
+  reference assembly's local distributions and required extras. The builder
+  retains the existing source-development install, then `scripts/runtime_bundle.py`
+  follows installed dependency metadata (including extras) into a fresh runtime
+  bundle. The final image receives only that closure and the selected local
+  package trees, plus the Python base image. `/srv/app/runtime-inventory.json`
+  records the closure; Docker CI verifies the local package population and
+  boots the actual app. Native-package build qualification remains separate;
+  uncomposed native modules are not imported as reference runtime dependencies.
+  This reduces deployed breadth, not the source builder's installation cost.
+
+Regression coverage is authored in `tests/unit/test_architecture_hardening.py`
+and `tests/unit/test_runtime_bundle.py`; existing Postgres tenant-isolation
+canaries must also pass. No local test run or production adoption is claimed.
+
 ## Native domain computation candidates (2026-10-15)
 
 The Rust implementation branch introduces private `_native` extensions owned by
@@ -3001,13 +3057,11 @@ API routers, and `mount_web_surfaces(...)` mounts the validated browser graph.
 `/health` is a liveness check that must not touch the database (container
 orchestrators probe it before a DB may even be reachable).
 `TenantResolverMiddleware._HEALTH_PATHS` is a frozenset containing `/health`
-and `/health/ready`; both are short-circuited before any tenant resolution
-(no DB query at all). Today only `/health` is mounted as a route; `/health/ready`
-is pre-listed for a future readiness endpoint and currently returns 404 at the
-router after bypassing tenant resolution. `/health` is the only route in
-`tests/architecture/test_route_guards.py::ALLOWLIST` permitted to carry zero
-`require_*` guards. Every other route either carries a `require_*` dependency
-or fails the architecture test.
+and `/health/live` and `/health/ready`; all bypass tenant resolution. The
+reference assembly's readiness handler then runs its own dependency checks;
+the resolver bypass itself does no DB work. Minimal infrastructure probes
+are explicitly allowlisted in `tests/architecture/test_route_guards.py`;
+readiness disclosure and unavailable-state behavior have unit canaries.
 
 ### Static-asset bypass
 
@@ -3457,9 +3511,9 @@ the strict rules; no existing revision was renamed.
    `mount_web_surfaces` mounts every legacy-adapted and contract-2 browser route
    with request-scoped state. `WEB_ENABLED=false` omits the entire browser graph
    and static assets while leaving APIs intact.
-5. Mount failures in a `core: True` feature re-raise (fails startup); a
-   failure in a non-core feature is logged and skipped (fault isolation) —
-   the app still boots without it.
+5. A router mount failure in any selected feature re-raises and aborts
+   construction. An optional feature may be explicitly disabled; a selected
+   feature must mount completely rather than serve a partial graph.
 6. `tests/architecture/test_feature_manifests.py` guarantees every package
    under `app/features/` on disk is registered in `FEATURE_MODULES` and that
    each manifest's `name` matches its package name — so a feature can never
@@ -3470,8 +3524,8 @@ the strict rules; no existing revision was renamed.
    each enabled manifest's optional `seed` hook is dispatched via
    `asyncio.to_thread` (it does sync DB I/O); a seed is DEFERRED and
    NON-FATAL — a failure is caught, logged (`Feature %s seed skipped: %s`),
-   and swallowed rather than propagated, so an unreachable DB at boot can
-   never take startup down (seeds are idempotent; the next boot retries).
+   and swallowed rather than propagated. Liveness can still run, but a failed
+   seed keeps this process unready (seeds are idempotent; the next boot retries).
 
 After every router is mounted, the permission and capability declaration
 validators walk each route's effective dependency tree. FastAPI through 0.115

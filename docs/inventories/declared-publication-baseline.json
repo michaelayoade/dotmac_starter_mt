@@ -139,7 +139,7 @@
     },
     "dotmac-kernel": {
       "declared": "0.1.0a107+dev",
-      "reason": "DEVELOPMENT MARKER, NOT A PUBLIC RELEASE ALLOCATION. The published dotmac-kernel-v0.1.0a107 tag remains immutable. Bundled Alpine, HTMX, Outfit and Plus Jakarta Sans license notices and their provenance index change the packaged static tree, so this checkout must not claim the published bytes. The +dev identity records post-release development and grants no publication authority. Retire this row only through the separately authorized kernel release transition and oracle-backed release record; never remove the marker to quiet a gate.",
+      "reason": "DEVELOPMENT MARKER, NOT A PUBLIC RELEASE ALLOCATION. The published dotmac-kernel-v0.1.0a107 tag remains immutable. Bundled Alpine, HTMX, Outfit and Plus Jakarta Sans license notices and their provenance index change the packaged static tree, so this checkout must not claim the published bytes. The +dev identity records post-release development and grants no publication authority. Retire this row only through the separately authorized kernel release transition and oracle-backed release record; never remove the marker to quiet a gate. Subsequent architecture hardening also changes readiness, scheduling, selected-router failure behavior and process composition guards; these remain development source pending hosted qualification and the same separately authorized release transition.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {

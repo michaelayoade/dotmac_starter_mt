@@ -80,6 +80,9 @@ RUN python scripts/check_poetry_toolchain.py --bootstrap poetry-requirements.txt
 # dependency cache still keys on pyproject/lock.
 COPY packages ./packages
 RUN poetry install --only main --no-root --no-interaction
+COPY deploy/runtime-packages.json ./deploy/runtime-packages.json
+COPY scripts/runtime_bundle.py ./scripts/runtime_bundle.py
+RUN python scripts/runtime_bundle.py --output /runtime
 
 # The final image receives installed dependencies and editable module sources,
 # never cargo, rustc, gcc or the build-stage OS packages.
@@ -89,9 +92,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     APP_PORT=${APP_PORT}
 WORKDIR /srv/app
-COPY --from=dependency-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=dependency-builder /usr/local/bin /usr/local/bin
-COPY --from=dependency-builder /srv/app/packages ./packages
+COPY --from=dependency-builder /runtime/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=dependency-builder /runtime/bin /usr/local/bin
+COPY --from=dependency-builder /runtime/packages ./packages
+COPY --from=dependency-builder /runtime/runtime-inventory.json ./runtime-inventory.json
 
 COPY app ./app
 COPY alembic ./alembic

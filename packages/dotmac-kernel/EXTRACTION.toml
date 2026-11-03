@@ -9,6 +9,7 @@ contract = "Universal assembly facilities and versioned cross-product contracts"
 source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub", "dotmac_academy_app"]
 
 source_revisions = [
+  "dotmac_erp:c3d6a20d571829958e9b512b82fbe34d1ae6f704",
   "dotmac_academy_app:a5ffe6316e97bf33e17ef9c1f00788796f5e5a5a",
   "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
   "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
@@ -167,6 +168,7 @@ source_paths = [
   "dotmac_sub:app/services/audit_helpers.py",
 ]
 preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_architecture_hardening.py",
   "dotmac_academy_app:tests/services/test_canonical_identity_store.py",
   "dotmac_academy_app:tests/services/test_kernel_identity_storage.py",
   "dotmac_starter_mt:tests/test_identity_storage.py",
@@ -260,6 +262,7 @@ candidate_consumers = [
   "dotmac_academy_app",
 ]
 inventory_evidence = [
+  "docs/inventories/architecture-hardening-sources.md",
   "packages/dotmac-kernel/COMPATIBILITY.md",
   "docs/inventories/kernel-migration-configuration-sources.md",
   "docs/inventories/kernel-conflict-savepoint-composition.md",
