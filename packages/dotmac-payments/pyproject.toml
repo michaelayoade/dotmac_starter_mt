@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-payments"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Payment intent and confirmation correlation"
 authors = ["DotMac"]
 readme = "README.md"

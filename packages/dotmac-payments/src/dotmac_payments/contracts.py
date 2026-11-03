@@ -175,7 +175,115 @@ class RecordConfirmation:
     observed_at: datetime | None = None
 
 
+class CashOutcomeKind(enum.StrEnum):
+    """What happened to cash after it was confirmed."""
+
+    REFUND_COMPLETED = "REFUND_COMPLETED"
+    REFUND_FAILED = "REFUND_FAILED"
+    CHARGEBACK = "CHARGEBACK"
+    BOUNCE = "BOUNCE"
+    ADMIN_CORRECTION = "ADMIN_CORRECTION"
+
+
+REFUND_OUTCOME_KINDS = frozenset(
+    {CashOutcomeKind.REFUND_COMPLETED, CashOutcomeKind.REFUND_FAILED}
+)
+
+
+class CashOutcomeState(enum.StrEnum):
+    OBSERVED = "OBSERVED"
+    ATTENTION_REQUIRED = "ATTENTION_REQUIRED"
+
+
+class AttentionReason(enum.StrEnum):
+    """Why an observed outcome was parked instead of applied.
+
+    The outcome is a fact that already happened at the provider or with staff.
+    It is stored, never dropped and never guessed into a match; a reviewer or the
+    owning flow resolves it.
+    """
+
+    UNKNOWN_CONFIRMATION = "UNKNOWN_CONFIRMATION"
+    UNKNOWN_REFUND_INSTRUCTION = "UNKNOWN_REFUND_INSTRUCTION"
+    CONFIRMATION_MISMATCH = "CONFIRMATION_MISMATCH"
+    PROVIDER_MISMATCH = "PROVIDER_MISMATCH"
+    CURRENCY_MISMATCH = "CURRENCY_MISMATCH"
+    AMOUNT_MISMATCH = "AMOUNT_MISMATCH"
+    EXCEEDS_CONFIRMED_CASH = "EXCEEDS_CONFIRMED_CASH"
+    TERMINAL_CONFLICT = "TERMINAL_CONFLICT"
+
+
+class RefundExceedsConfirmedCash(Conflict):
+    """A refund instruction would take more than confirmed cash less prior refunds."""
+
+
+@dataclass(frozen=True, slots=True)
+class InstructRefund:
+    """Instruct one refund of confirmed cash.
+
+    `request_id` is the idempotency key. The provider reference is DERIVED from
+    it (`derive_refund_provider_reference`), never chosen by the caller, so a
+    retry can never create a second provider-side refund. The amount may not
+    exceed the confirmation's cash minus every earlier instruction that has not
+    failed, in-flight ones included. This records and bounds the instruction; the
+    connector performs provider I/O and Billing decides what the refund means.
+    """
+
+    request_id: UUID
+    confirmation_id: UUID
+    amount: Money
+    instructed_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GetRefundableCashV1:
+    confirmation_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class RefundableCashObservationV1:
+    """Confirmed cash, what refunds already hold, and what may still be refunded."""
+
+    scope: TenantScope
+    confirmation_id: UUID
+    confirmed: Money
+    committed: Money
+    refundable: Money
+
+
+@dataclass(frozen=True, slots=True)
+class ObserveCashOutcome:
+    """Record an outcome observed after confirmation.
+
+    Identity is `(provider_type, outcome_reference)`, or `correction_id` alone for
+    `ADMIN_CORRECTION`. The two shapes are exclusive. A refund outcome names the
+    derived provider reference it answers in `refund_reference`. An outcome that
+    cannot be matched is stored in `ATTENTION_REQUIRED` with a reason; it is
+    never discarded. Replay returns the stored row; changed evidence conflicts.
+    An omitted `observed_at` means now for new evidence and the stored instant
+    on replay.
+    """
+
+    confirmation_id: UUID
+    kind: CashOutcomeKind
+    amount: Money
+    provider_type: str | None = None
+    outcome_reference: str | None = None
+    correction_id: UUID | None = None
+    refund_reference: str | None = None
+    observed_at: datetime | None = None
+
+
 __all__ = [
+    "AttentionReason",
+    "CashOutcomeKind",
+    "CashOutcomeState",
+    "GetRefundableCashV1",
+    "InstructRefund",
+    "ObserveCashOutcome",
+    "REFUND_OUTCOME_KINDS",
+    "RefundExceedsConfirmedCash",
+    "RefundableCashObservationV1",
     "MerchantReviewOperation",
     "MerchantTransportContextV1",
     "MerchantConfigurationV1",

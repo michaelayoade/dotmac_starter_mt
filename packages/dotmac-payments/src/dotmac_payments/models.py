@@ -29,10 +29,15 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     event,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dotmac_payments.contracts import (
+    REFUND_OUTCOME_KINDS,
+    AttentionReason,
+    CashOutcomeKind,
+    CashOutcomeState,
     ConfirmationSource,
     Conflict,
     PaymentIntentStatus,
@@ -411,6 +416,198 @@ def _reject_provider_cash_mutation(*_args: object) -> None:
     raise Conflict("provider cash qualifications are append-only")
 
 
+class RefundInstruction(Base):
+    """Append-only instruction to return confirmed cash; never the provider call.
+
+    Whether it still holds cash back is derived: an instruction releases its
+    amount only once a `REFUND_FAILED` outcome has been observed for it. Nothing
+    here is updated, so there is no status to drift.
+    """
+
+    __tablename__ = "refund_instructions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_refund_instructions_tenant_id"),
+        UniqueConstraint(
+            "tenant_id", "request_id", name="uq_refund_instructions_request"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "provider_type",
+            "provider_reference",
+            name="uq_refund_instructions_provider_reference",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "confirmation_id"],
+            [
+                f"{SCHEMA}.payment_confirmations.tenant_id",
+                f"{SCHEMA}.payment_confirmations.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_refund_instructions_confirmation",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "intent_id"],
+            [f"{SCHEMA}.payment_intents.tenant_id", f"{SCHEMA}.payment_intents.id"],
+            ondelete="RESTRICT",
+            name="fk_refund_instructions_intent",
+        ),
+        CheckConstraint(
+            "length(currency_code) = 3", name="ck_refund_instructions_currency"
+        ),
+        CheckConstraint(
+            "minor_units BETWEEN 0 AND 6", name="ck_refund_instructions_minor_units"
+        ),
+        CheckConstraint("amount > 0", name="ck_refund_instructions_amount_positive"),
+        Index(
+            "ix_refund_instructions_tenant_confirmation",
+            "tenant_id",
+            "confirmation_id",
+        ),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="RESTRICT"), nullable=False
+    )
+    request_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    confirmation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    intent_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    provider_reference: Mapped[str] = mapped_column(String(64), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    instructed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+_REFUND_KIND_VALUES = ", ".join(
+    f"'{value}'" for value in sorted(kind.value for kind in REFUND_OUTCOME_KINDS)
+)
+
+
+class PaymentCashOutcome(Base):
+    """Append-only outcome observed after confirmation, matched or parked."""
+
+    __tablename__ = "payment_cash_outcomes"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_cash_outcomes_tenant_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "provider_type",
+            "outcome_reference",
+            name="uq_cash_outcomes_provider_reference",
+        ),
+        UniqueConstraint(
+            "tenant_id", "correction_id", name="uq_cash_outcomes_correction"
+        ),
+        # One applied terminal outcome per instruction, enforced by the index so
+        # that a completed and a failed observation cannot both be applied.
+        Index(
+            "uq_cash_outcomes_one_terminal",
+            "tenant_id",
+            "instruction_id",
+            unique=True,
+            postgresql_where=text(
+                "state = 'OBSERVED' AND kind IN ('REFUND_COMPLETED', 'REFUND_FAILED')"
+            ),
+            sqlite_where=text(
+                "state = 'OBSERVED' AND kind IN ('REFUND_COMPLETED', 'REFUND_FAILED')"
+            ),
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "confirmation_id"],
+            [
+                f"{SCHEMA}.payment_confirmations.tenant_id",
+                f"{SCHEMA}.payment_confirmations.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_cash_outcomes_confirmation",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "instruction_id"],
+            [
+                f"{SCHEMA}.refund_instructions.tenant_id",
+                f"{SCHEMA}.refund_instructions.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_cash_outcomes_instruction",
+        ),
+        CheckConstraint("length(currency_code) = 3", name="ck_cash_outcomes_currency"),
+        CheckConstraint(
+            "minor_units BETWEEN 0 AND 6", name="ck_cash_outcomes_minor_units"
+        ),
+        CheckConstraint("amount > 0", name="ck_cash_outcomes_amount_positive"),
+        CheckConstraint(
+            "(kind = 'ADMIN_CORRECTION' AND correction_id IS NOT NULL "
+            "AND provider_type IS NULL AND outcome_reference IS NULL "
+            "AND refund_reference IS NULL) OR "
+            "(kind <> 'ADMIN_CORRECTION' AND correction_id IS NULL "
+            "AND provider_type IS NOT NULL AND outcome_reference IS NOT NULL "
+            f"AND ((kind IN ({_REFUND_KIND_VALUES})) "
+            "= (refund_reference IS NOT NULL)))",
+            name="ck_cash_outcomes_identity",
+        ),
+        CheckConstraint(
+            "(state = 'OBSERVED' AND attention_reason IS NULL "
+            "AND confirmation_id IS NOT NULL "
+            "AND confirmation_id = claimed_confirmation_id "
+            f"AND ((kind IN ({_REFUND_KIND_VALUES})) "
+            "= (instruction_id IS NOT NULL))) OR "
+            "(state = 'ATTENTION_REQUIRED' AND attention_reason IS NOT NULL)",
+            name="ck_cash_outcomes_state",
+        ),
+        Index(
+            "ix_cash_outcomes_tenant_confirmation",
+            "tenant_id",
+            "claimed_confirmation_id",
+        ),
+        Index("ix_cash_outcomes_tenant_state", "tenant_id", "state"),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="RESTRICT"), nullable=False
+    )
+    kind: Mapped[CashOutcomeKind] = mapped_column(
+        _enum(CashOutcomeKind, "cash_outcome_kind"), nullable=False
+    )
+    state: Mapped[CashOutcomeState] = mapped_column(
+        _enum(CashOutcomeState, "cash_outcome_state"), nullable=False
+    )
+    attention_reason: Mapped[AttentionReason | None] = mapped_column(
+        _enum(AttentionReason, "cash_outcome_attention_reason"), nullable=True
+    )
+    # What the observer claimed, always kept; `confirmation_id` is set only when
+    # that claim resolved to a confirmation in this tenant.
+    claimed_confirmation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    confirmation_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    instruction_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    provider_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    outcome_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    correction_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    refund_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+@event.listens_for(RefundInstruction, "before_update")
+@event.listens_for(RefundInstruction, "before_delete")
+@event.listens_for(PaymentCashOutcome, "before_update")
+@event.listens_for(PaymentCashOutcome, "before_delete")
+def _reject_refund_outcome_mutation(*_args: object) -> None:
+    raise Conflict("refund instructions and cash outcomes are append-only")
+
+
 TENANT_TABLES = (
     "payment_intents",
     "payment_transfer_proofs",
@@ -418,6 +615,8 @@ TENANT_TABLES = (
     "merchant_contexts",
     "merchant_context_ends",
     "provider_cash_qualifications",
+    "refund_instructions",
+    "payment_cash_outcomes",
 )
 _TABLES: dict[str, sa.Table] = {
     model.__tablename__: cast(sa.Table, model.__table__)
@@ -428,6 +627,8 @@ _TABLES: dict[str, sa.Table] = {
         MerchantContext,
         MerchantContextEnd,
         ProviderCashQualification,
+        RefundInstruction,
+        PaymentCashOutcome,
     )
 }
 
@@ -437,6 +638,8 @@ def metadata_table(name: str) -> sa.Table:
 
 
 __all__ = [
+    "PaymentCashOutcome",
+    "RefundInstruction",
     "ProviderCashQualification",
     "MerchantContext",
     "MerchantContextEnd",

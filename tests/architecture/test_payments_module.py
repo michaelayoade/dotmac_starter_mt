@@ -17,6 +17,7 @@ ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/pm_0001_payment_intents.py"
 MERCHANT_MIGRATION = ROOT / "migrations/versions/pm_0005_merchant_context.py"
 CASH_MIGRATION = ROOT / "migrations/versions/pm_0006_cash_qualification.py"
+REFUND_MIGRATION = ROOT / "migrations/versions/pm_0007_refund_outcomes.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -35,6 +36,8 @@ def test_manifest_and_tenant_plane_are_exact() -> None:
         "merchant_contexts",
         "merchant_context_ends",
         "provider_cash_qualifications",
+        "refund_instructions",
+        "payment_cash_outcomes",
     )
     assert module.platform_tables == ()
     for name in module.tables:
@@ -97,8 +100,15 @@ def test_the_module_holds_no_receivable_or_bank_state() -> None:
         "provider_fee",
         "refunded_amount",
         "settlement_id",
+        # B5: provider fees and autopay mandates are dropped, not deferred.
+        "fee",
+        "fee_amount",
+        "mandate",
+        "mandate_reference",
+        "saved_instrument_reference",
     }
     assert not forbidden & columns
+    assert not {c for c in columns if "fee" in c or "mandate" in c}
 
 
 def test_confirmations_are_append_only_at_the_orm() -> None:
@@ -131,6 +141,7 @@ def test_root_migration_is_a_forced_rls_lineage_and_passes_the_gate() -> None:
     source = MIGRATION.read_text(encoding="utf-8")
     merchant_source = MERCHANT_MIGRATION.read_text(encoding="utf-8")
     cash_source = CASH_MIGRATION.read_text(encoding="utf-8")
+    refund_source = REFUND_MIGRATION.read_text(encoding="utf-8")
     creation_sources = {
         "payment_intents": source,
         "payment_transfer_proofs": source,
@@ -138,6 +149,8 @@ def test_root_migration_is_a_forced_rls_lineage_and_passes_the_gate() -> None:
         "merchant_contexts": merchant_source,
         "merchant_context_ends": merchant_source,
         "provider_cash_qualifications": cash_source,
+        "refund_instructions": refund_source,
+        "payment_cash_outcomes": refund_source,
     }
     assert set(creation_sources) == set(module.tables)
     for table, creation_source in creation_sources.items():
@@ -163,6 +176,14 @@ def test_root_migration_is_a_forced_rls_lineage_and_passes_the_gate() -> None:
         )
         assert "mod_payments.{table} TO app_user" in migration_source
 
+    assert "for table in _TABLES:" in refund_source
+    assert "ALTER TABLE {_SCHEMA}.{table} ENABLE ROW LEVEL SECURITY" in refund_source
+    assert "ALTER TABLE {_SCHEMA}.{table} FORCE ROW LEVEL SECURITY" in refund_source
+    assert (
+        "CREATE POLICY {table}_tenant_isolation ON {_SCHEMA}.{table}" in refund_source
+    )
+    assert "GRANT SELECT, INSERT ON {_SCHEMA}.{table} TO app_user" in refund_source
+
     assert '_SCHEMA = "mod_payments"' in cash_source
     assert "ALTER TABLE {_SCHEMA}.{_TABLE} ENABLE ROW LEVEL SECURITY" in cash_source
     assert "ALTER TABLE {_SCHEMA}.{_TABLE} FORCE ROW LEVEL SECURITY" in cash_source
@@ -185,3 +206,33 @@ def test_root_migration_is_a_forced_rls_lineage_and_passes_the_gate() -> None:
         bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     )
     assert report.ok, report.violations
+
+
+def test_refund_and_outcome_code_names_no_provider_and_no_fee_or_mandate() -> None:
+    """P3/P4 stay provider-neutral: a provider is data, never a literal."""
+    providers = ("paystack", "flutterwave", "stripe", "monnify", "remita", "paypal")
+    for path in (
+        ROOT / "refunds.py",
+        ROOT / "migrations/versions/pm_0007_refund_outcomes.py",
+    ):
+        source = path.read_text(encoding="utf-8").lower()
+        for provider in providers:
+            assert provider not in source, (path.name, provider)
+    contracts = (ROOT / "contracts.py").read_text(encoding="utf-8").lower()
+    for command in ("instructrefund", "observecashoutcome"):
+        block = contracts.split(f"class {command}", 1)[1].split("\n\n\n", 1)[0]
+        assert "fee" not in block.replace("referenc", "") and "mandate" not in block
+
+
+def test_refund_service_serializes_on_the_intent_row_and_derives_the_reference() -> (
+    None
+):
+    source = (ROOT / "refunds.py").read_text(encoding="utf-8")
+    assert "_intent(db, tenant_id, confirmation.intent_id)" in source
+    assert "derive_refund_provider_reference(scope, command.request_id)" in source
+    migration = (ROOT / "migrations/versions/pm_0007_refund_outcomes.py").read_text(
+        encoding="utf-8"
+    )
+    assert "FOR UPDATE" in migration
+    assert "payment-refund-reference-v1" in migration
+    assert "READ COMMITTED" in migration
