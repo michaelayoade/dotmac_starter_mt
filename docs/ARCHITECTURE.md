@@ -6,6 +6,12 @@ The source changes below extend the existing owners; hosted qualification and
 release are separate gates. Product-first observations and adaptation scope
 are recorded in [the source inventory](inventories/architecture-hardening-sources.md).
 
+| Boundary | Existing owner extended | Authority retained |
+| --- | --- | --- |
+| Readiness decision and observations | `dotmac_kernel.app_factory` and assembly `app/readiness.py` | Kernel owns the minimal HTTP decision; the assembly declares dependencies and uses existing session boundaries. No migration or provisioning authority. |
+| Process composition and middleware scheduling | `dotmac_kernel.app_factory`, `middleware.tenant`, `middleware.rate_limit` | One process catalogue; existing tenant resolver and rate store remain the behavior owners. |
+| Final image dependency closure | Assembly `Dockerfile`, `deploy/runtime-packages.json`, `scripts/runtime_bundle.py` | Assembly selects local distributions; locked installed metadata supplies transitive dependencies. No package publication or product adoption claim. |
+
 - **Readiness:** the reference assembly declares read-only `readiness_checks`.
   The kernel mounts `/health/ready` only when checks are supplied, returning
   minimal `ready`/`not_ready` with HTTP 200/503 and `Cache-Control: no-store`.
@@ -25,10 +31,11 @@ are recorded in [the source inventory](inventories/architecture-hardening-source
   Tenant lookup still precedes the tenant-aware rate limiter; upstream request
   protection and connection limits remain relevant under hostile host traffic.
 - **Composition:** process registries still have one owner. Construction is
-  serialized and refused while an assembly is serving through its lifespan.
-  An inactive application superseded by another composition cannot start;
-  failed construction invalidates the earlier composition too. ASGI lifespan
-  must remain enabled. This is a process constraint, not support for distinct
+  serialized and refused while an assembly holds a lifespan or request lease.
+  An inactive application superseded by another composition cannot start or
+  serve HTTP/WebSocket traffic; failed construction invalidates the earlier
+  composition too. ASGI lifespan must remain enabled for startup validation.
+  This is a process constraint, not support for distinct
   independently configured apps in the same interpreter. Tests restore their
   prior composition owner between isolated cases; running-assembly guards remain
   exercised by unit canaries.
@@ -98,7 +105,8 @@ Hosted native qualification is a dependency of image construction. It verifies
 the generated inputs, builds and installs retained wheels, reconstructs wheels
 from extracted source archives, exercises the owning module suites, and records
 artifact hashes. The runtime image preserves Python console entrypoints and
-compiled modules while excluding the Rust compiler/toolchain. The existing
+compiled dependencies in the selected assembly closure while excluding the Rust
+compiler/toolchain. The existing
 release facilities retain all publication, registry read-back and trust authority.
 
 The initial binary release target is CPython 3.12 on Linux x86_64, qualified by
