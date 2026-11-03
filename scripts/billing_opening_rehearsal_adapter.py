@@ -662,6 +662,7 @@ def _assemble(
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
     uncarried_residue: frozenset[UUID] = frozenset(),
+    held_reasons: Mapping[UUID, str] | None = None,
 ) -> _AssemblyOutcome:
     # F2: the shared manifest is qualified once; the per-partition commands and
     # the run built around it must not re-walk it (O(N), not O(P x N)).
@@ -674,6 +675,7 @@ def _assemble(
             historical_discharges,
             service_refs,
             uncarried_residue,
+            held_reasons,
         )
 
 
@@ -687,6 +689,7 @@ def _assemble_run(
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
     uncarried_residue: frozenset[UUID] = frozenset(),
+    held_reasons: Mapping[UUID, str] | None = None,
 ) -> _AssemblyOutcome:
     precisions = {row.currency: row.precision for row in obs.currency_precisions}
     partition_by_source = {
@@ -823,7 +826,12 @@ def _assemble_run(
     try:
         for invoice in obs.invoices:
             # Precedence: blocking > excluded > eligible > blocking(unclassified).
-            if invoice.invoice_id in blocking_codes:
+            if held_reasons and invoice.invoice_id in held_reasons:
+                # Held by the admissibility rules: kept in the manifest with a
+                # digest-bound marker, importable only after the seal.
+                disposition = "blocking"
+                reason = held_reasons[invoice.invoice_id]
+            elif invoice.invoice_id in blocking_codes:
                 disposition = "blocking"
                 reason = sorted(blocking_codes[invoice.invoice_id])[0]
             elif invoice.invoice_id in exclusion_reasons:
@@ -1092,6 +1100,9 @@ def assemble_rehearsal_run(
     historical_discharges: tuple[
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
+    service_refs: Mapping[UUID, str] | None = None,
+    uncarried_residue: frozenset[UUID] = frozenset(),
+    held_reasons: Mapping[UUID, str] | None = None,
 ) -> OpeningRehearsalRunV1:
     """Build a candidate run, preserving only explicitly supplied typed originals.
 
@@ -1105,7 +1116,14 @@ def assemble_rehearsal_run(
     blocking (unclassified) dispositions and remain counted blockers.
     """
     return _assemble(
-        obs, sidecar or V3Sidecar(), assembly, original_documents, historical_discharges
+        obs,
+        sidecar or V3Sidecar(),
+        assembly,
+        original_documents,
+        historical_discharges,
+        service_refs,
+        uncarried_residue,
+        held_reasons,
     ).run
 
 
@@ -1187,6 +1205,7 @@ def rehearsal_census(
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
     uncarried_residue: frozenset[UUID] = frozenset(),
+    held_reasons: Mapping[UUID, str] | None = None,
 ) -> OpeningRehearsalCensusV1:
     """Run the census, preserving independently supplied typed originals.
 
@@ -1203,6 +1222,7 @@ def rehearsal_census(
         historical_discharges,
         service_refs,
         uncarried_residue,
+        held_reasons,
     )
     run = outcome.run
     report = report_opening_rehearsal(run)
@@ -1439,6 +1459,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             uncarried_residue=(
                 projection.uncarried_residue if projection else frozenset()
             ),
+            held_reasons=projection.held_invoice_reasons if projection else None,
         )
         if projection is not None and args.decisions_out:
             Path(args.decisions_out).write_text(

@@ -663,10 +663,6 @@ class SignedOpeningImportGrantProviderV2:
 _REHEARSAL_AUDIENCE_PREFIX: Final = "rehearsal:"
 
 
-def _is_sha256_hex(value: str) -> bool:
-    return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
-
-
 def opening_verifier_profile_v1(
     *,
     name: str,
@@ -691,15 +687,6 @@ def opening_verifier_profile_v1(
         max_validity_seconds,
         max_revocation_age_seconds,
     )
-    if (
-        not _is_sha256_hex(source_key_fingerprint)
-        or not _is_sha256_hex(grant_key_fingerprint)
-        or source_key_fingerprint == grant_key_fingerprint
-        or max_validity_seconds <= 0
-        or max_revocation_age_seconds <= 0
-        or audience.startswith(_REHEARSAL_AUDIENCE_PREFIX) != (name == "rehearsal")
-    ):
-        raise OpeningEvidenceError("invalid opening verifier profile")
     return profile
 
 

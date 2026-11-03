@@ -25,6 +25,11 @@ from dotmac_billing.opening_contracts import (
 
 _OPERATION = "billing.opening.preview.v1"
 
+#: A blocking disposition whose reason starts with this prefix marks a held
+#: partition (reviewed, digest-bound with the manifest). It is not a manifest-wide
+#: blocker; the partition just cannot be imported before the seal.
+HELD_REASON_PREFIX = "held:"
+
 
 def _payload(value: object) -> object:
     # Shape mapping only: the qualified Kernel helper owns wire encoding.
@@ -71,6 +76,7 @@ class _CashManifestAnalysis:
         "manifest",
         "failures",
         "attributed",
+        "held_partitions",
         "partitions",
         "eligible",
         "lot_identities",
@@ -175,6 +181,8 @@ class _CashManifestAnalysis:
             if len(source_values) != 1:
                 block("account_mapping_ambiguous", str(source_coordinate))
         ctx[0] = None
+        held_partitions: set[OpeningPartitionV1] = set()
+        self.held_partitions = held_partitions
         for item in manifest.dispositions:
             ctx[0] = item.partition
             if item.partition not in partitions:
@@ -184,7 +192,12 @@ class _CashManifestAnalysis:
             if item.disposition == "excluded" and item.residual_minor != 0:
                 block("excluded_nonzero_residue", item.identity.key)
             if item.disposition == "blocking":
-                block("source_blocking_disposition", item.identity.key)
+                if item.reason.startswith(HELD_REASON_PREFIX):
+                    # A digest-bound hold marker: the partition stays in the
+                    # frozen manifest but cannot be imported before the seal.
+                    held_partitions.add(item.partition)
+                else:
+                    block("source_blocking_disposition", item.identity.key)
 
         source_keys: Counter[tuple[str, str, str]] = Counter()
         lot_ids: Counter[str] = Counter()
@@ -299,6 +312,8 @@ class _CashManifestAnalysis:
             block("target_binding_mismatch", "target")
         if self.partitions[selected] != 1:
             block("partition_missing", selected.source_account_key)
+        if selected in self.held_partitions:
+            block("partition_held", selected.source_account_key)
         for control in self.controls_by_partition.get(selected, ()):
             for field in fields(control):  # type: ignore[arg-type]
                 if field.name not in {"partition", "available_cash_credit_minor"}:

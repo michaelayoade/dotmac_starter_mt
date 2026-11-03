@@ -81,7 +81,25 @@ HOLD_REASONS: Final = frozenset(
         "reseller_mapping_unavailable",
     }
 )
-_POLICIES: Final = frozenset({"blocking", "informational_on_closed_invoice"})
+_POLICIES: Final = frozenset(
+    {
+        "blocking",
+        "informational_on_closed_invoice",
+        # D2 widening (named, off unless the rules list it): informational only
+        # when every member account is A10 exact+match AND the lane equals the
+        # sum of the imported residuals.
+        "informational_when_a10_exact",
+    }
+)
+# A held partition stays in the frozen manifest (route: post_seal_admission)
+# unless it fails structurally; those have only a governed correction route.
+STRUCTURAL_HOLDS: Final = frozenset(
+    {
+        "reseller_mapping_unavailable",
+        "status_residual_conflict",
+        "lane_control_mismatch",
+    }
+)
 _LANE_MONEY: Final = (
     "collectible_receivable",
     "unapplied_customer_credit",
@@ -465,6 +483,10 @@ class PartitionDecision:
     detail: tuple[str, ...]
     eligible_invoices: int
     member_accounts: tuple[str, ...]  # reseller-managed subscribers folded in
+    route: str = "import"  # import | post_seal_admission | governed_correction
+    relaxed: tuple[tuple[str, int], ...] = ()  # informational findings, by code
+    held_evidence: tuple[tuple[str, int], ...] = ()  # census codes of a held one
+    dropped_residue: str = "0"  # M8: excluded closed residue not carried
 
 
 @dataclass(slots=True)
@@ -473,7 +495,9 @@ class AdmissibilityProjection:
     decisions: tuple[PartitionDecision, ...]
     service_refs: dict[UUID, str]
     uncarried_residue: frozenset[UUID]
+    held_invoice_reasons: dict[UUID, str]
     archived_drafts: tuple[str, ...]
+    archived_draft_total: str
     informational: dict[str, int]
     unattributed_controls: int
     a10_accounts_unused: int
@@ -493,6 +517,12 @@ class AdmissibilityProjection:
             "eligible_invoices": len(self.eligible_invoice_ids),
             "archived_drafts": len(self.archived_drafts),
             "unattributed_controls": self.unattributed_controls,
+            "route:post_seal_admission": sum(
+                1 for d in self.decisions if d.route == "post_seal_admission"
+            ),
+            "route:governed_correction": sum(
+                1 for d in self.decisions if d.route == "governed_correction"
+            ),
             "a10_accounts_unused": self.a10_accounts_unused,
         }
         for reason in sorted(HOLD_REASONS):
@@ -622,8 +652,11 @@ def project_census(
 
     # --- exceptions by partition -------------------------------------------
     informational: Counter[str] = Counter()
-    relaxed_residue_sources: set[UUID] = set()
+    relaxed_by_partition: dict[PKey, Counter[str]] = {}
+    relaxed_residue_sources: dict[UUID, PKey] = {}
+    census_codes: dict[PKey, Counter[str]] = {}
     blocking_codes: dict[PKey, set[str]] = {}
+    conditional: dict[PKey, list[tuple[str, UUID | None]]] = {}
     kept_exceptions: list[tuple[PKey | None, Mapping[str, object]]] = []
     for exc in exceptions_in:
         code = _str(exc.get("code"))
@@ -631,16 +664,25 @@ def project_census(
             kept_exceptions.append((None, exc))
             continue
         pkey = (key_of(_uuid(exc["account_id"])), _str(exc["currency"]))
-        source = exc.get("source_id")
-        relaxed = (
-            rules.policy_of(code) == "informational_on_closed_invoice"
+        census_codes.setdefault(pkey, Counter())[code] += 1
+        source = _uuid(exc["source_id"]) if exc.get("source_id") is not None else None
+        policy = rules.policy_of(code)
+        if policy == "informational_when_a10_exact":
+            conditional.setdefault(pkey, []).append((code, source))
+        elif (
+            policy == "informational_on_closed_invoice"
             and source is not None
-            and closed_source(_uuid(source))
-        )
-        if relaxed:
-            informational[code] += 1
-            if code == "excluded_nonzero_residue" and source is not None:
-                relaxed_residue_sources.add(_uuid(source))
+            and closed_source(source)
+            # a negative residue is never relaxed (negative_residual stays)
+            and not (
+                code == "excluded_nonzero_residue"
+                and source in by_id
+                and _dec(by_id[source].get("residual")) < 0
+            )
+        ):
+            relaxed_by_partition.setdefault(pkey, Counter())[code] += 1
+            if code == "excluded_nonzero_residue":
+                relaxed_residue_sources[source] = pkey
         else:
             blocking_codes.setdefault(pkey, set()).add(code)
         kept_exceptions.append((pkey, exc))
@@ -700,38 +742,70 @@ def project_census(
             lane.get("collectible_receivable")
         )
 
+    dropped_by_partition: dict[PKey, Decimal] = {}
+    for source_id, source_key in relaxed_residue_sources.items():
+        if source_id in by_id and source_id in exclusions:
+            dropped_by_partition[source_key] = dropped_by_partition.get(
+                source_key, Decimal(0)
+            ) + _dec(by_id[source_id].get("residual"))
+
     # --- decide ------------------------------------------------------------
     decisions: list[PartitionDecision] = []
     admitted_candidates: set[UUID] = set()
     admitted: set[PKey] = set()
+    held_in: set[PKey] = set()
     for pkey in sorted(members, key=lambda k: (str(k[0]), k[1])):
         account, currency = pkey
         triggered: dict[str, tuple[str, ...]] = {}
         member_accounts = members[pkey]
-        a10_row = a10_by_account.get(account)
-        if a10_row is None:
-            triggered["a10_missing"] = ()
-        else:
+        # Every member account (a reseller's folded subscribers included) must
+        # pass the A10 rule; the failing member is named in the detail.
+        a10_detail: dict[str, list[str]] = {}
+        for member in sorted(member_accounts, key=str):
+            a10_row = a10_by_account.get(member)
+            if a10_row is None:
+                a10_detail.setdefault("a10_missing", []).append(str(member))
+                continue
             if a10_row.post_cause in rules.draft_allocation_post_causes:
-                triggered["draft_allocation"] = (a10_row.post_cause,)
+                a10_detail.setdefault("draft_allocation", []).append(
+                    f"{member}:{a10_row.post_cause}"
+                )
             if a10_row.opening_class != rules.exact_opening_class:
-                triggered["a10_opening_not_exact"] = (a10_row.opening_class,)
+                a10_detail.setdefault("a10_opening_not_exact", []).append(
+                    f"{member}:{a10_row.opening_class}"
+                )
             if (
                 a10_row.post_cause != rules.matching_post_cause
-                and "draft_allocation" not in triggered
+                and a10_row.post_cause not in rules.draft_allocation_post_causes
             ):
-                triggered["a10_post_cutover_drift"] = (a10_row.post_cause,)
-        if blocking_codes.get(pkey):
-            triggered["census_blocking_exception"] = tuple(sorted(blocking_codes[pkey]))
+                a10_detail.setdefault("a10_post_cutover_drift", []).append(
+                    f"{member}:{a10_row.post_cause}"
+                )
+        for reason_code, detail in a10_detail.items():
+            triggered[reason_code] = tuple(detail)
         cands = candidates.get(pkey, [])
         if status_conflicts.get(pkey):
             triggered["status_residual_conflict"] = tuple(
                 sorted(status_conflicts[pkey])
             )
-        if pkey not in lane_present or lane_total.get(pkey, Decimal(0)) != _zero_like(
-            _dec(by_id[i].get("residual")) for i in cands
-        ):
+        lane_ok = pkey in lane_present and lane_total.get(
+            pkey, Decimal(0)
+        ) == _zero_like(_dec(by_id[i].get("residual")) for i in cands)
+        if not lane_ok:
             triggered["lane_control_mismatch"] = ()
+        # D2 (only if the rules name it): the A10 result replaces the census
+        # code when every member is A10 exact+match and the lane equals the
+        # imported residuals; otherwise it stays blocking.
+        blocking = set(blocking_codes.get(pkey, ()))
+        a10_clean = not a10_detail
+        relaxed_here = Counter(relaxed_by_partition.get(pkey, Counter()))
+        for code, _source in conditional.get(pkey, ()):
+            if a10_clean and lane_ok:
+                relaxed_here[code] += 1
+            else:
+                blocking.add(code)
+        if blocking:
+            triggered["census_blocking_exception"] = tuple(sorted(blocking))
         if rules.v1_require_lines is not None:
             missing = sorted(str(i) for i in cands if v1_missing(i))
             if missing:
@@ -751,6 +825,15 @@ def project_census(
         if reason is None:
             admitted.add(pkey)
             admitted_candidates.update(cands)
+            route = "import"
+        elif reason in STRUCTURAL_HOLDS or pkey not in lane_present:
+            route = "governed_correction"  # outside the manifest (D-5)
+        else:
+            route = "post_seal_admission"  # in the frozen manifest, marked held
+            held_in.add(pkey)
+        if reason is None:
+            for code, n in relaxed_here.items():
+                informational[code] += n
         decisions.append(
             PartitionDecision(
                 str(account),
@@ -760,15 +843,29 @@ def project_census(
                 () if reason is None else triggered[reason][:20],
                 len(cands) if reason is None else 0,
                 tuple(sorted(str(m) for m in member_accounts if m != account)),
+                route,
+                tuple(sorted(relaxed_here.items())) if reason is None else (),
+                tuple(sorted(census_codes.get(pkey, Counter()).items()))
+                if route == "post_seal_admission"
+                else (),
+                _fmt(dropped_by_partition.get(pkey, Decimal(0)))
+                if reason is None
+                else "0",
             )
         )
     # --- projected census --------------------------------------------------
-    # Held partitions leave the opening population entirely: the import
-    # validators check the complete manifest, so a held account's blocking rows
-    # would make every admitted account unimportable. They live on in the
-    # decision record (the hold list) with their single reason. Drafts are
-    # removed and archived (X1); controls are reduced by exactly what was
-    # removed, so the source's own control totals stay an independent check.
+    # Held partitions that did not fail structurally stay in the frozen
+    # manifest, marked ``held:<reason>`` on their open dispositions (digest-bound
+    # with the manifest), so the post-seal admission route can admit them later.
+    # Their census exceptions are carried as evidence in the decision record, not
+    # as manifest blockers; the validators refuse their import before the seal.
+    # Structural failures stay out (governed correction). Drafts are removed and
+    # archived (X1); controls are reduced by exactly what was removed, so the
+    # source's own control totals stay an independent check.
+    kept = admitted | held_in
+    hold_reason = {
+        (UUID(d.account_id), d.currency): d.reason for d in decisions if not d.admitted
+    }
     out: dict[str, object] = dict(census)
     kept_ids: set[UUID] = set()
     new_invoices: list[dict[str, object]] = []
@@ -776,7 +873,7 @@ def project_census(
     for row in invoices_in:
         invoice_id = _uuid(row.get("invoice_id"))
         pkey = invoice_partition[invoice_id]
-        if pkey not in admitted:
+        if pkey not in kept:
             continue
         if row.get("status") == rules.draft_status:
             draft_by_partition.setdefault(pkey, []).append(invoice_id)
@@ -841,7 +938,7 @@ def project_census(
                 continue
             account, currency = _uuid(control["account_id"]), _str(control["currency"])
             pkey = (key_of(account), currency)
-            if pkey not in admitted:
+            if pkey not in kept:
                 continue
             if pkey not in folded_controls:
                 base = dict(control)
@@ -883,11 +980,11 @@ def project_census(
             lane_rows.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])
         )
         for (account, currency), lane in ordered_lanes:
-            if key_of(account) == account and (account, currency) in admitted:
+            if key_of(account) == account and (account, currency) in kept:
                 new_lanes[(account, currency)] = dict(lane)
         for (account, currency), lane in ordered_lanes:
             pkey = (key_of(account), currency)
-            if pkey[0] == account or pkey not in admitted:
+            if pkey[0] == account or pkey not in kept:
                 continue
             target = new_lanes[pkey]  # folded only when the reseller lane exists
             for name in _LANE_MONEY:
@@ -911,11 +1008,12 @@ def project_census(
         i
         for i in kept_ids
         if i in exclusions
-        and _dec(by_id[i].get("residual")) != 0
-        and i in relaxed_residue_sources
+        and _dec(by_id[i].get("residual")) > 0
+        and relaxed_residue_sources.get(i) in admitted
     )
 
-    unused = len(set(a10_by_account) - {k[0] for k in members} - set(folded))
+    all_members = {m for ms in members.values() for m in ms}
+    unused = len(set(a10_by_account) - all_members)
     digests = {
         "rules": admissibility_rules_digest(rules),
         "a10_classes": a10_classes_digest(sorted(a10, key=lambda r: str(r.account_id))),
@@ -929,6 +1027,14 @@ def project_census(
             i: r for i, r in service_refs.items() if i in admitted_candidates
         },
         uncarried_residue=uncarried,
+        held_invoice_reasons={
+            i: f"held:{hold_reason[invoice_partition[i]]}"
+            for i in kept_ids
+            if invoice_partition[i] in held_in and i in candidate_ids
+        },
+        archived_draft_total=_fmt(
+            sum((_dec(by_id[UUID(d)].get("total")) for d in drafts), Decimal(0))
+        ),
         archived_drafts=tuple(sorted(drafts)),
         informational=dict(informational),
         unattributed_controls=unattributed,
@@ -939,13 +1045,19 @@ def project_census(
 
 
 def render_admissibility_decisions(projection: AdmissibilityProjection) -> str:
-    """Deterministic decision record: ids, reasons and counts only, no amounts."""
+    """Deterministic decision record: ids, reasons, routes, relaxed counts and the
+    exact dropped/archived totals Finance attests."""
     document = {
         "schema": _DECISIONS_SCHEMA,
         "digests": projection.digests,
         "originals_evaluated": projection.originals_evaluated,
         "counts": projection.counts(),
         "archived_drafts": list(projection.archived_drafts),
+        # Finance attestation figures (X1 and the M8 widening): exact decimals.
+        "archived_draft_total": projection.archived_draft_total,
+        "dropped_residue_total": _fmt(
+            sum((Decimal(d.dropped_residue) for d in projection.decisions), Decimal(0))
+        ),
         "decisions": [
             {
                 "account_id": d.account_id,
@@ -955,6 +1067,10 @@ def render_admissibility_decisions(projection: AdmissibilityProjection) -> str:
                 "detail": list(d.detail),
                 "eligible_invoices": d.eligible_invoices,
                 "member_accounts": list(d.member_accounts),
+                "route": d.route,
+                "relaxed": dict(d.relaxed),
+                "held_evidence": dict(d.held_evidence),
+                "dropped_residue": d.dropped_residue,
             }
             for d in projection.decisions
         ],

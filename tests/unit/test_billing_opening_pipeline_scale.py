@@ -123,7 +123,12 @@ def test_drafter_and_adapter_are_byte_identical_across_runs(tmp_path):
     receivable = [p for p in first["partitions"] if p["receivable_residual_minor"]]
     assert receivable, "admitted accounts with status-open documents are imported"
     held = json.loads((tmp_path / "one" / "admissibility.json").read_text())
-    assert len(first["partitions"]) == held["counts"]["admitted"]
+    counts = held["counts"]
+    # admitted plus held-but-in-the-frozen-manifest (post-seal route)
+    assert (
+        len(first["partitions"])
+        == counts["admitted"] + counts["route:post_seal_admission"]
+    )
 
 
 def test_manifest_wide_findings_are_not_replayed_per_partition(tmp_path):
@@ -294,3 +299,110 @@ def test_full_scale_fixture_meets_the_phase_b_entry_budget(tmp_path):
         )
         print(f"scale run {run}: {elapsed:.1f}s peak {peak_bytes / 1024**3:.2f}GiB")
     assert digests[0] == digests[1]
+
+
+def _run_for(partitions: int, invoices: int, tmp_path: Path):
+    from dotmac_billing.opening_admissibility import (
+        parse_a10_classes,
+        parse_admissibility_rules,
+        project_census,
+    )
+
+    data = fixture.build_scale_inputs(partitions, invoices)
+    projection = project_census(
+        data["census"],
+        rules=parse_admissibility_rules(data["rules"]),
+        a10=parse_a10_classes(data["a10"]),
+        original_invoice_ids=None,
+    )
+    draft = drafter.draft_assembly(
+        data["census"], data["target_state"], admissibility=projection
+    )
+    obs, sidecar = adapter.load_sub_observation(projection.census)
+    run = adapter.assemble_rehearsal_run(
+        obs,
+        assembly=adapter.load_assembly(draft.assembly),
+        sidecar=sidecar,
+        held_reasons=projection.held_invoice_reasons,
+    )
+    return projection, run
+
+
+def test_held_partitions_stay_in_the_manifest_without_blocking_the_others(tmp_path):
+    projection, run = _run_for(200, 1578, tmp_path)
+    held = {
+        (d.account_id) for d in projection.decisions if d.route == "post_seal_admission"
+    }
+    assert held, "the fixture must hold some non-structural partitions"
+    batch = preview_opening_account_import_batch_v2(list(run.commands))
+    codes = {b.code for b in batch.manifest_blockers}
+    assert "source_blocking_disposition" not in codes
+    refused = {
+        item.preview.partition.source_account_key
+        for item in batch.items
+        if any(b.code == "partition_held" for b in item.partition_blockers)
+    }
+    # a held partition with open residual is marked; one with nothing to
+    # admit later has no marker and simply recognizes no backing
+    expected = {
+        d.partition.source_account_key
+        for d in run.manifest.dispositions
+        if d.disposition == "blocking" and d.reason.startswith("held:")
+    }
+    assert expected and refused == expected
+    # held open invoices carry the digest-bound marker as their disposition
+    marked = {
+        d.reason
+        for d in run.manifest.dispositions
+        if d.disposition == "blocking" and d.reason.startswith("held:")
+    }
+    assert marked and all(
+        r in {f"held:{x.reason}" for x in projection.decisions} for r in marked
+    )
+
+
+def test_import_cost_does_not_depend_on_manifest_size_per_command(
+    tmp_path, monkeypatch
+):
+    from dotmac_billing.opening_receivable_validation import (
+        opening_account_command_digest_v2,
+    )
+
+    _projection, run = _run_for(200, 1578, tmp_path)
+    builds = []
+    original = validation._ReceivableManifestAnalysis.__init__
+
+    def counting(self, manifest):
+        builds.append(1)
+        original(self, manifest)
+
+    monkeypatch.setattr(validation._ReceivableManifestAnalysis, "__init__", counting)
+    digests = set()
+    for command in run.commands:
+        opening_account_import_blockers_v2(command)  # as service.import does
+        digests.add(opening_account_command_digest_v2(command))
+    assert len(builds) <= 1  # one analysis for the shared manifest object
+    assert len(digests) == len(run.commands)  # still partition-specific
+
+
+@pytest.mark.slow
+def test_full_scale_import_validation_pass_is_linear(tmp_path):
+    """A 15,293-command import pass: the per-command validation + digest cost."""
+    from dotmac_billing.opening_receivable_validation import (
+        opening_account_command_digest_v2,
+    )
+
+    _projection, run = _run_for(
+        fixture.FULL_PARTITIONS, fixture.FULL_INVOICES, tmp_path
+    )
+    commands = list(run.commands)
+    assert len(commands) > 13_000
+    started = time.monotonic()
+    digests = set()
+    for command in commands:
+        opening_account_import_blockers_v2(command)
+        digests.add(opening_account_command_digest_v2(command))
+    elapsed = time.monotonic() - started
+    print(f"import pass: {len(commands)} commands in {elapsed:.1f}s")
+    assert len(digests) == len(commands)
+    assert elapsed <= 300, elapsed  # the quadratic path needs hours

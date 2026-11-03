@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, fields
@@ -38,19 +39,71 @@ from dotmac_billing.opening_validation import _CashManifestAnalysis, _payload
 opening_validation_scope = validation_memo
 
 
+class _ManifestEntry:
+    """One manifest's cached identity and analysis (frozen value, held by id)."""
+
+    __slots__ = ("manifest", "fingerprint", "analysis")
+
+    def __init__(self, manifest: OpeningManifestV2) -> None:
+        self.manifest = manifest  # strong ref: the id cannot be recycled
+        self.fingerprint: str | None = None
+        self.analysis: object | None = None
+
+
+_CACHE_LOCK = threading.Lock()
+_CACHE: list[_ManifestEntry] = []
+_CACHE_SIZE = 2
+
+
+def _entry(manifest: OpeningManifestV2) -> _ManifestEntry:
+    """Per-process identity cache: a Step 6 import pass reuses one manifest
+    object for every partition, so its digest and analysis are computed once."""
+    with _CACHE_LOCK:
+        for index, entry in enumerate(_CACHE):
+            if entry.manifest is manifest:
+                _CACHE.insert(0, _CACHE.pop(index))
+                return entry
+        entry = _ManifestEntry(manifest)
+        _CACHE.insert(0, entry)
+        del _CACHE[_CACHE_SIZE:]
+        return entry
+
+
 def opening_manifest_fingerprint_v2(manifest: OpeningManifestV2) -> str:
     if type(manifest) is not OpeningManifestV2:
         raise OpeningEvidenceError("expected OpeningManifestV2")
-    return fingerprint_of(
-        {"domain": "billing.opening.manifest.v2", "candidate": _payload(manifest)}
-    )
+    entry = _entry(manifest)
+    if entry.fingerprint is None:
+        entry.fingerprint = fingerprint_of(
+            {"domain": "billing.opening.manifest.v2", "candidate": _payload(manifest)}
+        )
+    return entry.fingerprint
 
 
 def opening_account_command_digest_v2(command: ImportOpeningAccountV2) -> str:
+    """Digest of the command's own fields plus the manifest's fingerprint.
+
+    The manifest body is bound by its fingerprint (computed once per manifest),
+    not re-serialised per partition, so the cost is independent of manifest size.
+    """
     if type(command) is not ImportOpeningAccountV2:
         raise OpeningEvidenceError("expected ImportOpeningAccountV2")
+    own = {
+        field.name: _payload(getattr(command, field.name))
+        for field in fields(command)
+        if field.name != "manifest"
+    }
     return fingerprint_of(
-        {"domain": "billing.opening.account.command.v2", "command": _payload(command)}
+        {
+            "domain": "billing.opening.account.command.v2",
+            "command": {
+                "type": type(command).__name__,
+                "fields": own,
+                "manifest_fingerprint": opening_manifest_fingerprint_v2(
+                    command.manifest
+                ),
+            },
+        }
     )
 
 
@@ -495,7 +548,10 @@ class _ReceivableManifestAnalysis:
         for key, count in history_keys.items():
             if count != 1:
                 block("historical_discharge_duplicate", str(key))
+        held = self.cash.held_partitions
         for control in manifest.controls:
+            if control.partition in held:
+                continue  # held: no receivable is imported; routed post-seal
             ctx[0] = control.partition
             key = control.partition.source_account_key
             if (
@@ -528,6 +584,19 @@ class _ReceivableManifestAnalysis:
                 )
             except OpeningEvidenceError:
                 block("currency_precision_invalid", key)
+
+
+def _analysis_of(manifest: OpeningManifestV2) -> _ReceivableManifestAnalysis:
+    """The manifest's complete-partition analysis, built once per manifest object."""
+    entry = _entry(manifest)
+    with _CACHE_LOCK:
+        cached = entry.analysis
+    if isinstance(cached, _ReceivableManifestAnalysis):
+        return cached
+    built = _ReceivableManifestAnalysis(manifest)
+    with _CACHE_LOCK:
+        entry.analysis = built
+    return built
 
 
 def _command_stages(
@@ -621,11 +690,7 @@ def opening_account_import_blockers_v2(
     _analysis: _ReceivableManifestAnalysis | None = None,
 ) -> tuple[OpeningBlockerV1, ...]:
     """Validate the complete manifest, including partitions not selected here."""
-    analysis = (
-        _analysis
-        if _analysis is not None
-        else _ReceivableManifestAnalysis(command.manifest)
-    )
+    analysis = _analysis if _analysis is not None else _analysis_of(command.manifest)
     return _freeze(_blockers_from(analysis, command))
 
 
@@ -674,7 +739,7 @@ def preview_opening_account_import_v2(
 ) -> OpeningImportPreviewV2:
     if type(command) is not ImportOpeningAccountV2:
         raise OpeningEvidenceError("expected ImportOpeningAccountV2")
-    analysis = _ReceivableManifestAnalysis(command.manifest)
+    analysis = _analysis_of(command.manifest)
     raw = _freeze(_blockers_from(analysis, command))
     return _preview_from(analysis, command, raw, verifier)
 
@@ -721,7 +786,7 @@ def preview_opening_account_import_batch_v2(
         if command.manifest is not first.manifest:
             raise OpeningEvidenceError("a batch shares exactly one manifest object")
         if analysis is None:
-            analysis = _ReceivableManifestAnalysis(command.manifest)
+            analysis = _analysis_of(command.manifest)
         scoped, full = _split_blockers(analysis, command)
         verification = _verification_blockers(command, verifier)
         blockers = (*full, *verification)

@@ -57,12 +57,17 @@ def rules_doc(**over):
                 "policy": "informational_on_closed_invoice",
             },
         ],
-        "closed_invoice_statuses": ["paid", "void"],
+        "closed_invoice_statuses": ["paid", "written_off", "void"],
         "open_invoice_statuses": ["issued", "overdue", "partially_paid"],
         "drafts": {"draft_status": "draft"},
         "v1_gate": {
             "require_lines": True,
-            "line_tax_snapshot_fields": ["tax_rate_snapshot_version"],
+            "line_tax_snapshot_fields": [
+                "tax_rate_code_snapshot",
+                "tax_rate_percent_snapshot",
+                "tax_rate_snapshot_version",
+                "tax_application",
+            ],
         },
         "originals": {"require_for_open_documents": True},
         "hold_precedence": PRECEDENCE,
@@ -150,6 +155,9 @@ def census(**over):
                 {
                     "invoice_id": uid("i-open"),
                     "tax_rate_snapshot_version": "v1",
+                    "tax_rate_code_snapshot": "VAT",
+                    "tax_rate_percent_snapshot": "7.50",
+                    "tax_application": "exclusive",
                 }
             ],
             "current_invoices": [],
@@ -294,16 +302,34 @@ def test_a_settlement_id_resolves_to_its_closed_invoice():
     assert only(run(c)).admitted
 
 
-def test_held_partitions_leave_the_population_with_one_recorded_reason():
+def test_a_held_partition_stays_in_the_manifest_marked_held_with_one_reason():
     held = run(classes=a10(("a", "opening_gap_other", "match")))
     decision = only(held)
     assert (decision.admitted, decision.reason) == (False, "a10_opening_not_exact")
-    # the hold list is the decision record; nothing of the account stays in the
-    # population the import validators see
-    for section in ("invoices", "controls", "lanes", "blocking_exceptions"):
-        assert held.census[section] == [], section
+    assert decision.route == "post_seal_admission"
     assert held.census["eligible_invoice_ids"] == []
-    assert held.counts()["hold:a10_opening_not_exact"] == 1
+    assert held.held_invoice_reasons == {
+        UUID(uid("i-open")): "held:a10_opening_not_exact"
+    }
+    # still in the population, with its census exceptions out of the blockers
+    assert {x["invoice_id"] for x in held.census["invoices"]} == {
+        uid("i-open"),
+        uid("i-closed"),
+    }
+    assert held.census["blocking_exceptions"] == []
+    ctl = held.census["controls"][0]
+    assert (ctl["eligible_count"], ctl["eligible_residual"]) == (0, "0.00")
+    assert held.counts()["route:post_seal_admission"] == 1
+
+
+def test_a_structural_hold_stays_out_with_a_governed_correction_route():
+    held = run(census(lanes=[lane("a", "59.00")]))
+    decision = only(held)
+    assert (decision.reason, decision.route) == (
+        "lane_control_mismatch",
+        "governed_correction",
+    )
+    assert held.census["invoices"] == []
 
 
 def test_lane_receivable_must_equal_the_admitted_residual():
@@ -527,3 +553,64 @@ def test_a_relaxed_excluded_residue_is_not_carried_but_others_still_block():
     # without the exception nothing is declared uncarried: the validators block
     c["blocking_exceptions"] = []
     assert run(c).uncarried_residue == frozenset()
+
+
+def test_every_member_of_a_reseller_partition_must_pass_a10():
+    mapping = reseller_map()
+    ok = run(reseller_census(), classes=RES_CLASSES, reseller=mapping)
+    assert [d.admitted for d in ok.decisions] == [True]
+    bad = a10(("a", "opening_gap_other", "match"), ("r", "opening_exact", "match"))
+    held = run(reseller_census(), classes=bad, reseller=mapping)
+    decision = only(held)
+    assert (decision.account_id, decision.reason) == (uid("r"), "a10_opening_not_exact")
+    assert decision.detail == (f"{uid('a')}:opening_gap_other",)
+    missing = a10(("r", "opening_exact", "match"))
+    decision = only(run(reseller_census(), classes=missing, reseller=mapping))
+    assert (decision.reason, decision.detail) == ("a10_missing", (uid("a"),))
+    # a reseller's folded subscribers are not "unused" A10 accounts
+    assert ok.a10_accounts_unused == 0
+
+
+def _d2_rules():
+    return rules(
+        code_policies=[
+            *rules_doc()["code_policies"],
+            {"code": "residual_mismatch", "policy": "informational_when_a10_exact"},
+        ]
+    )
+
+
+def test_residual_mismatch_blocks_by_default_and_is_a10_gated_when_named():
+    mismatch = census(blocking_exceptions=[exc("a", "residual_mismatch", "i-open")])
+    assert only(run(mismatch)).reason == "census_blocking_exception"  # default
+    named = run(mismatch, r=_d2_rules())
+    assert only(named).admitted
+    assert only(named).relaxed == (("residual_mismatch", 1),)
+    assert named.counts()["informational:residual_mismatch"] == 1
+    # not A10 exact+match: stays blocking (here the A10 reason ranks first)
+    drift = a10(("a", "opening_exact", "other"))
+    assert only(run(mismatch, r=_d2_rules(), classes=drift)).admitted is False
+    # lane must equal the imported residuals
+    lane_off = census(
+        lanes=[lane("a", "59.00")],
+        blocking_exceptions=[exc("a", "residual_mismatch", "i-open")],
+    )
+    held = only(run(lane_off, r=_d2_rules()))
+    assert (held.reason, held.relaxed) == ("census_blocking_exception", ())
+
+
+def test_negative_excluded_residue_is_never_relaxed_and_dropped_amount_is_recorded():
+    c = census()
+    c["invoices"].append(inv("v-neg", "a", "void", residual="-5.00"))
+    c["exclusions"] = [{"source_id": uid("v-neg"), "reason": "void"}]
+    c["blocking_exceptions"] = [exc("a", "excluded_nonzero_residue", "v-neg")]
+    assert only(run(c)).reason == "census_blocking_exception"
+    c = census()
+    c["invoices"].append(inv("v-1", "a", "void", residual="5.00"))
+    c["exclusions"] = [{"source_id": uid("v-1"), "reason": "void"}]
+    c["blocking_exceptions"] = [exc("a", "excluded_nonzero_residue", "v-1")]
+    result = run(c)
+    assert only(result).dropped_residue == "5.00"
+    record = render_admissibility_decisions(result)
+    assert '"dropped_residue_total": "5.00"' in record
+    assert '"relaxed": {\n        "excluded_nonzero_residue": 1' in record

@@ -12,12 +12,23 @@ Carried by the next billing release (the version bump belongs to ST-2).
   `match`; D-2). Census blocking codes stay blocking unless the rules name them;
   the M8 relaxations (`settlement_provenance`, `excluded_nonzero_residue` on
   closed invoices) are an explicit, counted widening. Every held partition has
-  exactly one reason from a closed, rules-ordered set and leaves the opening
-  population (the hold list is `admissibility.json`). Drafts are excluded and
+  exactly one reason from a closed, rules-ordered set. Every member account of a reseller partition must
+  pass A10. A held partition that did not fail structurally stays in the frozen
+  manifest with a digest-bound `held:<reason>` disposition marker (validators
+  refuse its import with `partition_held`, never block the others; it is
+  admitted only post-seal); structural failures stay out (governed correction).
+  `admissibility.json` records the route, relaxed counts and exact dropped /
+  archived totals. A named `informational_when_a10_exact` policy (off unless the
+  rules list it, e.g. for `residual_mismatch`) needs every member A10 exact+match
+  and lane = imported residuals. Drafts are excluded and
   archived (X1; accounts whose A10 cause is a draft allocation are held), V1
   gates only status-open documents, D-3 needs a supplied original for each,
   and reseller option A re-keys a managed subscriber's invoices and wallet
   lanes to the reseller account with one `service_ref` per document.
+- Import cost: the command digest binds the manifest by its fingerprint (not its
+  body) and the fingerprint/analysis are cached per manifest object, so
+  `import_opening_account_v2` validation no longer scales with manifest size
+  (15,293 commands: 28 s). The a11 command digest therefore differs from a10's.
 - Scale (F2): the complete-manifest validators run once per run
   (`preview_opening_account_import_batch_v2`, `opening_validation_scope`), the
   rehearsal reporter indexes instead of rescanning, and a manifest-wide
