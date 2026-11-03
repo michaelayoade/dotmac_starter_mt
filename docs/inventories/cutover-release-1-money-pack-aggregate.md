@@ -21,7 +21,7 @@ PR links are filled in on the aggregate PR description as constituents open.
 | ST-2 | dotmac-billing | a11 primitives: credit-note excess, discounts, write-off as policy, per-document exposure and withholding queries, ordered accounting-fact query, mixed `service_ref` refusal | TBD | planned |
 | ST-3 | dotmac-billing | a11 opening authority: held-account admission, seal authority-switch participant, opening-lane assembly authority port | TBD | planned |
 | ST-4 | dotmac-billing | a11 opening drafter and adapter: rules as data, reseller account mapping, draft handling, verification gate, O(N) adapter, Starter-native verifier | TBD | planned |
-| ST-5 | dotmac-payments | a4: refund instruction and cash-outcome observation, with migration | TBD | planned |
+| ST-5 | dotmac-payments | a4: refund instruction and cash-outcome observation, with migration | TBD | draft |
 | ST-6 | dotmac-durable-timers | a2 fresh build: changelog, adoption plan rewritten to saved tests plus backtest, PostgreSQL proofs re-run; no runtime change | TBD | draft |
 | ST-7 | dotmac-collections | a2 fresh build per the existing proposal (kernel floor a89, no runtime change) plus an X1 unknown-due-date conformance fixture | TBD | draft |
 | ST-8 | dotmac-service-access-policy | a2: versioned access input and stale-input refusal, with a pure public comparison helper | TBD | planned |
