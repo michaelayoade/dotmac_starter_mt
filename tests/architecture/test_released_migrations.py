@@ -8181,7 +8181,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-qualification": frozenset(),
     "dotmac-response-obligations": frozenset(),
     "dotmac-sales": frozenset(),
-    "dotmac-service-access-policy": frozenset(),
+    # `sap_0002` adds the source/policy version columns; still editable until
+    # `dotmac-service-access-policy` 0.1.0a2 is tagged.
+    "dotmac-service-access-policy": frozenset({"sap_0002_input_versions.py"}),
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),

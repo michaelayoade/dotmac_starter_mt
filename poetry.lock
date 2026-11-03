@@ -1981,7 +1981,7 @@ url = "packages/dotmac-sales"
 
 [[package]]
 name = "dotmac-service-access-policy"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Per-service desired network-access policy decisions"
 optional = false
 python-versions = ">=3.11,<3.14"

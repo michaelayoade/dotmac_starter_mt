@@ -1554,8 +1554,10 @@
           "dotmac_service_access_policy/manifest.py",
           "dotmac_service_access_policy/migrations/__init__.py",
           "dotmac_service_access_policy/migrations/versions/sap_0001_access_policy.py",
+          "dotmac_service_access_policy/migrations/versions/sap_0002_input_versions.py",
           "dotmac_service_access_policy/models.py",
-          "dotmac_service_access_policy/service.py"
+          "dotmac_service_access_policy/service.py",
+          "dotmac_service_access_policy/versioning.py"
         ],
         "forbidden_prefixes": [
           "app/",
