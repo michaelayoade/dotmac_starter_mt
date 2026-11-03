@@ -1111,7 +1111,7 @@ url = "packages/dotmac-documents"
 
 [[package]]
 name = "dotmac-durable-timers"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
 optional = false
 python-versions = ">=3.11,<3.14"
