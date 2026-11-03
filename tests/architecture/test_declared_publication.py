@@ -282,10 +282,11 @@ def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> No
 def test_imports_release_lane_names_erp_without_claiming_adoption() -> None:
     """The existing allowlist and ERP candidate survive the native successor.
 
-    The native candidate remains deliberately unpublished pending qualification.
-    Neither the allowlist nor the repository's declaration proves publication
-    or product adoption. Before a verified tag the candidate needs its recorded
-    disposition; after publication that row must disappear.
+    0.2.0a1 (the native candidate) is released; 0.2.0a2 is an allocated,
+    unpublished successor with a recorded disposition. Neither the allowlist
+    nor the repository's declaration proves publication or product adoption.
+    Before a verified tag the candidate needs its recorded disposition; after
+    publication that row must disappear.
     """
     sweep, survey = _survey()
     allowlist = json.loads(
@@ -295,7 +296,7 @@ def test_imports_release_lane_names_erp_without_claiming_adoption() -> None:
     package = PROJECT_ROOT / "packages" / "dotmac-imports"
     assert (package / "pyproject.toml").is_file()
     finding = survey["distributions"]["dotmac-imports"]
-    assert finding["declared"] == "0.2.0a1"
+    assert finding["declared"] == "0.2.0a2"
 
     dossier = tomllib.loads((package / "EXTRACTION.toml").read_text(encoding="utf-8"))
     assert dossier["status"] == "audit-complete"
@@ -307,8 +308,11 @@ def test_imports_release_lane_names_erp_without_claiming_adoption() -> None:
     assert published != recorded
     if recorded:
         reason = _ledger()["dotmac-imports"]["reason"]
-        assert "INTENDED NATIVE IMPLEMENTATION CANDIDATE" in reason
-        assert "0.2.0a1" in reason
+        # 0.2.0a1 (the native candidate) is released; 0.2.0a2 is the allocated
+        # successor carrying the partition-manifest loader (ST-9).
+        assert "ALLOCATED SUCCESSOR, NOT YET RELEASED" in reason
+        assert "dotmac-imports-v0.2.0a1" in reason
+        assert "0.2.0a2" in reason
 
 
 def test_imports_allowlist_history_and_reauthorization_are_both_explained() -> None:

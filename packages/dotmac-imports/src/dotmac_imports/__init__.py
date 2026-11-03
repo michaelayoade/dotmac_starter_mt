@@ -31,6 +31,19 @@ from dotmac_imports.contracts import (
 from dotmac_imports.manifest import module
 from dotmac_imports.migrations import versions_dir
 from dotmac_imports.models import ImportPartition, ImportRun, ImportRunRow
+from dotmac_imports.partition_manifest import (
+    MANIFEST_FORMAT,
+    SUPPORTED_MANIFEST_VERSIONS,
+    ManifestDigestMismatch,
+    ManifestError,
+    ManifestVersionUnsupported,
+    PartitionManifest,
+    load_partition_manifest,
+    parse_partition_manifest,
+    register_manifest_plan,
+    render_partition_manifest,
+    verify_manifest_partitions,
+)
 from dotmac_imports.partitioning import (
     DEFAULT_LEASE_SECONDS,
     DEFAULT_PARTITION_BYTES,
@@ -71,7 +84,7 @@ from dotmac_imports.tabular import (
     preview,
 )
 
-__version__ = "0.2.0a1"
+__version__ = "0.2.0a2"
 
 __all__ = [
     "DEFAULT_CHUNK_SIZE",
@@ -79,8 +92,10 @@ __all__ = [
     "DEFAULT_MAX_ROWS",
     "DEFAULT_PARTITION_BYTES",
     "DEFAULT_PARTITION_ROWS",
+    "MANIFEST_FORMAT",
     "MAX_SAFE_ERROR_MESSAGE",
     "PREVIEW_ROWS",
+    "SUPPORTED_MANIFEST_VERSIONS",
     "ColumnMapping",
     "FieldDeclarationError",
     "FieldSet",
@@ -94,10 +109,14 @@ __all__ = [
     "ImportsError",
     "InvalidRunState",
     "MalformedSource",
+    "ManifestDigestMismatch",
+    "ManifestError",
+    "ManifestVersionUnsupported",
     "PartitionClaim",
     "PartitionClaimLost",
     "PartitionDescriptor",
     "PartitionError",
+    "PartitionManifest",
     "PartitionPayload",
     "PartitionPlanInvalid",
     "PartitionProgress",
@@ -128,7 +147,12 @@ __all__ = [
     "get_run_outcomes",
     "finalize_partitioned_run",
     "iter_csv_partitions",
+    "load_partition_manifest",
+    "parse_partition_manifest",
     "read_claimed_partition",
+    "register_manifest_plan",
+    "render_partition_manifest",
+    "verify_manifest_partitions",
     "mapped_rows",
     "mark_failed",
     "module",
