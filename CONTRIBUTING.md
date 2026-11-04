@@ -14,10 +14,18 @@ Local static checks are allowed. Git-hosted PR CI is the merge owner
 # Local: pinned static checks only, without installing test dependencies.
 # Git-hosted PR CI runs make check and make test-unit.
 # For models, migrations, guards, or tenancy, CI also runs:
-# make test-db-up && make test-integration && make test-db-down
+# Postgres setup, additional identity/reference database preparation,
+# make test-integration, and cleanup (see .github/workflows/ci.yml).
 ```
 
 All relevant Git-hosted CI gates must be green before merge.
+
+`make test-integration` requires hosted `CI=true` plus
+`IDENTITY_REFERENCE_DATABASE_URL` and `IDENTITY_GRAPH_DATABASE_URL`; starting
+the disposable Postgres alone does not provide the complete environment.
+Do not set `CI=true` locally to bypass the hosted-only policy. Direct pytest
+invocation without `TEST_DATABASE_URL` may skip integration tests; skipped
+tests do not prove isolation.
 
 ## Test-first expectations
 
@@ -39,6 +47,8 @@ All relevant Git-hosted CI gates must be green before merge.
   (`tests/test_rls_catalog.py`) fails otherwise.
 - Migrations run as `app_admin` (`MIGRATION_DATABASE_URL`), never on
   container boot; `scripts/deploy.sh` is the only production migration path.
+  Apply all composed lineages with `alembic upgrade heads` (`make migrate`),
+  not singular `head`. Export a nonblank migration URL explicitly.
   New revisions stay backward-compatible with the previous release
   (deploy rolls the app back, not the schema).
 

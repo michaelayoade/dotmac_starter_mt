@@ -6,6 +6,13 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased — post-0.1.0a107 development
+
+- Add bundled third-party static-asset notices and their provenance index.
+- Mark the changed package contents as `0.1.0a107+dev` across version metadata.
+  The published `0.1.0a107` tag remains immutable; this development identity
+  allocates no successor release and grants no publication authorization.
+
 ## 0.1.0a107 — Release inventory
 
 This inventories the proposed identity-lifecycle and account-writer successor

@@ -2173,8 +2173,8 @@ resolves it to a `Party` — both the JSON API's bearer `Authorization`
 header and the portal's cookie flow call it, so a security fix to token
 validation lands once and covers both surfaces:
 
-1. **Login** (`POST /admin/login`, `app.features.auth.web`) — a plain HTML
-   form POST (via `hx-post`, see the CSRF section below), calling
+1. **Login** (`POST /admin/login`, `app.features.auth.web`) — a native HTML
+   form POST with a hidden CSRF token (see the CSRF section below), calling
    `auth_service.web_login` (same credential-check path `POST /auth/login`
    uses for the JSON API) and, on success, setting an `access_token` cookie
    (`HttpOnly`, `SameSite=Lax`, `Secure` iff `is_secure_request()`) instead
@@ -3276,14 +3276,13 @@ by `tests/architecture/test_permission_seam_is_single.py` (exactly one
 code→roles binding) and `tests/unit/test_permission_seam.py` (a foreign cookie
 reaches the decision a bearer header reaches).
 
-`web_deps.require_web_auth`'s hardcoded `"admin"` role is UNCHANGED and remains
-the phase-3 item its docstring records — this seam is what a fix will be built
-on, not the fix itself. ADR-0006's 2026-08-25 amendment now decides the SHAPE of
-that fix: authentication (a facet-declared profile) separates from facet
-admission (a declared permission evaluated here) from route authorization (the
-module's own guards), and the role leaves the authentication layer entirely. Not
-implemented — see that amendment and
-`docs/inventories/facet-composition-blast-radius-2026-08-25.md`.
+`web_deps.require_web_auth` is now a contract-v1 adapter over
+`require_web_party`: it returns the party/roles mapping without hardcoding an
+`admin` role. The composed facet declares its authentication profile and broad
+admission permission (`web.portal.staff.access` in this assembly), while v2
+routes keep their granular permission guards. This implements the separation
+described by ADR-0006's 2026-08-25 amendment; the dated blast-radius inventory
+records the earlier state, not the current implementation.
 
 ### Release-bound product manifests
 
@@ -3932,8 +3931,14 @@ ADR-0069), and DEVICE/SERVICE credentials — `AccessCredential` and
 
 ## Testing model
 
+Tests and installation of test/development dependencies run only on Git-hosted
+CI (`AGENTS.md` § "Validation before any commit", `CONTRIBUTING.md`). The
+commands below describe hosted targets, not a workstation procedure. Local
+inspection, editing, formatting, and pinned static checks are allowed; static
+checks are not hosted test evidence.
+
 - **Unit** (`tests/unit/`, `tests/architecture/`) — in-memory SQLite, no
-  network, no RLS. Fast; run with `make test-unit`. Covers CRUD/query
+  network, no RLS. The hosted target is `make test-unit`. Covers CRUD/query
   helpers, error envelopes, feature registry, logging, tenant middleware
   logic, and the static architecture governance checks (thin routers, route
   guards including the tiered auth-guard test, feature registration, web
@@ -3957,22 +3962,28 @@ ADR-0069), and DEVICE/SERVICE credentials — `AccessCredential` and
   it also proves logout only revokes the calling tenant's own session.
   `test_admin_portal_e2e.py::test_admin_portal_end_to_end_canary` is the
   phase's proof canary — one test function drives the ENTIRE portal purely
-  through cookies/HTML forms (register → cookie login with the CSRF header
-  bridge → create a party → define + set a custom field via the
+  through cookies/HTML forms (provision owner → cookie login with a hidden
+  CSRF proof → create a party using the CSRF header bridge → define + set a
+  custom field via the
   values-panel → view settings → a second tenant's cookie jar confirms RLS
   isolation holds across every one of those pages, not just the API layer →
-  logout revokes the session server-side, not just the client cookie). Run
-  with `make test-db-up && make test-integration && make test-db-down`
-  (disposable Postgres via `docker-compose.test.yml`, trust auth,
-  localhost-only, throwaway). `TEST_DB_PORT` (and the other `TEST_DB_*`
-  Make vars) are `?=`-overridable if the default port is taken.
-- **CI** (`.github/workflows/ci.yml`) — four jobs: `quality` (matrix over
-  lint/lint-imports/type-check/security, `fail-fast: false`), `unit`
-  (`tests/unit` + `tests/architecture` with coverage), `integration` (drives
-  `docker-compose.test.yml` directly rather than a `services:` block,
-  because the `env:` context isn't available there), and `docker-build`
-  (builds the prod image, boots it with a deliberately unreachable
-  `DATABASE_URL`, and health-gates `/health`).
+  logout revokes the session server-side, not just the client cookie). The
+  hosted integration job starts disposable Postgres via
+  `docker-compose.test.yml`, migrates all composed heads, and prepares
+  additional identity/reference databases. `make test-integration` refuses
+  without `CI=true`, `IDENTITY_REFERENCE_DATABASE_URL`, and
+  `IDENTITY_GRAPH_DATABASE_URL`; `make test-db-up` alone is insufficient.
+  It supplies `TEST_DATABASE_URL`, `TEST_PLATFORM_DATABASE_URL`, and
+  `TEST_MIGRATION_DATABASE_URL` from the `TEST_DB_*` configuration. Direct
+  pytest calls without the database URLs can skip database tests and are not
+  proof of RLS. Do not bypass the hosted boundary by setting `CI=true` locally.
+- **CI** — `.github/workflows/ci.yml` is the current job inventory. Its quality
+  matrix matches `make check` prerequisites; additional jobs cover allocation,
+  candidate windows, release append-only/provenance checks, unit/architecture
+  and Postgres integration tests, consumer boot, UI and host-attester artifacts,
+  kernel floors, native computation, and Docker build/health. Other workflows,
+  including the pinned engineering-standards workflow, add required checks.
+  All required contexts must be green for the current head/base before merge.
 
 ## Deploy
 
@@ -4051,6 +4062,25 @@ image on registry → `pg_dump` backup → pin `APP_IMAGE` in `.env` → pull �
 (retries/interval/timeout all config knobs) → auto-rollback to the previous
 pin on health-gate failure (migrations are not auto-reverted; new revisions
 must stay backward-compatible with the previous release).
+
+The host needs Docker Compose v2, Bash, registry access, `curl`, a compatible
+PostgreSQL `pg_dump`, `gzip`, and the script's standard shell utilities. The
+external database must be reachable from the host for backup and from the
+container for migrations/runtime. Configure the tenant, platform, and owner
+URLs separately. Set production hosts and secrets as described in the README
+and `dotmac_kernel.config.validate_settings`; the image launcher is
+`python -m app.runtime`, and container startup never applies migrations.
+
+With the supplied Compose file, use the root `.env`: `deploy.sh` sources its
+selected `ENV_FILE`, so assignments there override exported variables, but
+Compose independently declares `env_file: .env` and the script supplies no
+`--env-file`. Selecting a different `ENV_FILE` alone does not redirect container
+configuration. Alternate files require an aligned Compose configuration too.
+The health gate is HTTP liveness only; database readiness and tenant workflows
+need separate post-deploy verification. The previous image can be restored on
+health failure, but migrations and backups are not automatically restored.
+The host port is loopback-only; TLS proxy, DNS and certificates are configured
+outside this Compose stack. See README § "Deployment" for the operator steps.
 
 Lane 3's product-owned private-topology I/O adapter is
 `scripts/lane3_openbao_topology.py`, composed explicitly by
