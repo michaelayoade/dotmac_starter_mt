@@ -102,7 +102,9 @@ def test_seed_failure_blocks_readiness_but_preserves_liveness(startup) -> None:
         raise RuntimeError("missing bootstrap dependency")
 
     module = FeatureManifest(name="bootstrap_dependency", seed=seed)
-    app = app_factory.create_app(_spec(modules=(module,), readiness_checks=(lambda: [],)))
+    app = app_factory.create_app(
+        _spec(modules=(module,), readiness_checks=(lambda: [],))
+    )
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
         assert client.get("/health/ready").status_code == 503
@@ -178,6 +180,7 @@ def test_selected_optional_mount_failure_aborts_construction(monkeypatch) -> Non
 
 def test_tenant_resolution_runs_outside_the_event_loop(monkeypatch) -> None:
     from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
+
     from tests.unit.test_tenant_middleware import _drive, _ok_inner_app
 
     event_loop_thread = threading.get_ident()

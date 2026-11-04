@@ -55,11 +55,12 @@ def bundle(root: Path, output: Path) -> None:
         for name, value in dependencies.items()
         if isinstance(value, dict) and "path" in value
     }
-    if (
-        len(selected_names) != len(set(selected_names))
-        or not set(selected_names) <= set(local)
-    ):
-        raise ValueError("runtime profile must uniquely name declared path distributions")
+    if len(selected_names) != len(set(selected_names)) or not set(
+        selected_names
+    ) <= set(local):
+        raise ValueError(
+            "runtime profile must uniquely name declared path distributions"
+        )
     roots = list(selected)
     for name, declaration in dependencies.items():
         if name == "python" or canonicalize_name(name) in local:
@@ -90,7 +91,9 @@ def bundle(root: Path, output: Path) -> None:
             elif any(source.is_relative_to(path) for path in selected_sources.values()):
                 continue
             else:
-                raise ValueError(f"distribution file lies outside runtime roots: {name}")
+                raise ValueError(
+                    f"distribution file lies outside runtime roots: {name}"
+                )
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
     for source in selected_sources.values():

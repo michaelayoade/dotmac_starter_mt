@@ -56,9 +56,17 @@ def _restore_composition_owner() -> Iterator[None]:
     """
     from dotmac_kernel import app_factory
 
+    from app.assembly import assembly
+
     previous = app_factory._composed_assembly
-    yield
-    app_factory._composed_assembly = previous
+    # Collection also builds isolated test apps. Re-establish the reference
+    # graph for each test instead of inheriting whichever collector ran last.
+    # Tests may still compose another graph and exercise supersession normally.
+    app_factory._composed_assembly = assembly
+    try:
+        yield
+    finally:
+        app_factory._composed_assembly = previous
 
 
 #: What the test fleet is allowed to attribute things to. Named here rather

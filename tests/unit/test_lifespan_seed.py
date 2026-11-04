@@ -151,7 +151,9 @@ def test_lifespan_seed_failure_is_deferred_non_fatal_and_health_still_serves(cap
     with caplog.at_level(logging.WARNING):
         with TestClient(main_module.app) as client:
             response = client.get("/health")
+            assert main_module.app.state.startup_ready is False
+            assert client.get("/health/ready").status_code == 503
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-    assert any("seed skipped" in record.getMessage() for record in caplog.records)
+    assert any("seed failed" in record.getMessage() for record in caplog.records)
