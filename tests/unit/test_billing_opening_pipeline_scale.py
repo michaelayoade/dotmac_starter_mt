@@ -416,52 +416,23 @@ def _held_command(tmp_path):
     return run, command, marked
 
 
-def test_post_seal_admission_drops_only_partition_held_for_its_own_partition(tmp_path):
+def test_the_seal_hold_list_must_cover_the_manifests_held_set(tmp_path):
     from dotmac_billing.opening_contracts import OpeningEvidenceError
 
     run, command, marked = _held_command(tmp_path)
-    account = command.partition.account_id
-    plain = opening_account_import_blockers_v2(command)
-    assert "partition_held" in {b.code for b in plain}  # refused before the seal
-    admitted = opening_account_import_blockers_v2(
-        command, admitting_held_partition=account, sealed_hold_list=tuple(marked)
-    )
-    assert {b.code for b in plain} - {b.code for b in admitted} == {"partition_held"}
-    assert [b for b in plain if b.code != "partition_held"] == list(admitted)
-    # not on the sealed hold list, or not the command's own partition: refused
-    with pytest.raises(OpeningEvidenceError):
-        opening_account_import_blockers_v2(
-            command, admitting_held_partition=account, sealed_hold_list=()
-        )
-    other = UUID(int=1)
-    with pytest.raises(OpeningEvidenceError):
-        opening_account_import_blockers_v2(
-            command, admitting_held_partition=other, sealed_hold_list=tuple(marked)
-        )
-    # an admissible (unmarked) partition cannot use the bypass
-    free = next(c for c in run.commands if c.partition.account_id not in marked)
-    with pytest.raises(OpeningEvidenceError):
-        opening_account_import_blockers_v2(
-            free,
-            admitting_held_partition=free.partition.account_id,
-            sealed_hold_list=(free.partition.account_id,),
-        )
-
-
-def test_the_seal_hold_list_must_equal_the_manifests_held_set(tmp_path):
-    from dotmac_billing.opening_contracts import OpeningEvidenceError
-
-    run, _command, marked = _held_command(tmp_path)
-    require = validation.require_hold_list_matches_manifest
-    require(run.manifest, sorted(marked, key=str))  # exact set passes
-    admissible = next(
+    require = validation.require_hold_list_covers_manifest
+    require(run.manifest, sorted(marked, key=str))  # exactly the marked set
+    unmarked = next(
         c.partition.account_id
         for c in run.commands
         if c.partition.account_id not in marked
     )
-    with pytest.raises(OpeningEvidenceError):
-        require(run.manifest, [*marked, admissible])  # skipping the opening
+    # an unmarked positive partition is a legitimate operational hold
+    require(run.manifest, [*marked, unmarked])
     with pytest.raises(OpeningEvidenceError):
         require(run.manifest, [])  # a held partition left off
     with pytest.raises(OpeningEvidenceError):
+        require(run.manifest, [unmarked])  # marked-minus-one
+    with pytest.raises(OpeningEvidenceError):
         require(run.manifest, [*marked, next(iter(marked))])  # duplicate
+    assert command.partition.account_id in marked

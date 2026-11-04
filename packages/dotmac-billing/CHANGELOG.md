@@ -51,19 +51,21 @@ All notable changes follow Semantic Versioning.
 - ST-4: opening admissibility as data (`opening_admissibility`): a reviewed rules
   document (digest-identified, closed schema) plus the A10 account classes
   decide account-level admissibility (A10 `opening_exact` and post-cutover
-  `match`; D-2). Census blocking codes stay blocking unless the rules name them;
-  Every held partition has
-  exactly one reason from a closed, rules-ordered set. Every member account of a reseller partition must
-  pass A10. A held partition that did not fail structurally stays in the frozen
-  manifest with a digest-bound `held:<reason>` disposition marker (validators
-  refuse its import with `partition_held`, never block the others; it is
-  admitted only post-seal); structural failures stay out (governed correction).
-  `admissibility.json` records the route and exact dropped /
-  archived totals. Drafts are excluded and
-  archived (X1; accounts whose A10 cause is a draft allocation are held), V1
-  gates only status-open documents, D-3 needs a supplied original for each,
-  and reseller option A re-keys a managed subscriber's invoices and wallet
-  lanes to the reseller account with one `service_ref` per document.
+  `match`; D-2). Every census blocking code is blocking: no rule relaxes,
+  drops or carries a finding, and an unlisted code is blocking. Every held
+  partition has exactly one reason from a closed, rules-ordered set. Every
+  member account of a reseller partition must pass A10. A held partition that
+  did not fail structurally stays in the frozen manifest with a digest-bound
+  `held:<reason>` disposition marker (validators refuse its import with
+  `partition_held`, never block the others); structural failures stay out
+  (governed correction). `admissibility.json` records the route and the exact
+  archived totals. A manifest with held-marked partitions cannot be sealed
+  until the variance ledger (ST-4c): the seal refuses a hold list that omits a
+  held-marked partition or repeats one (`opening_hold_list_invalid`). Drafts
+  are excluded and archived (X1; accounts whose A10 cause is a draft allocation
+  are held), V1 gates only status-open documents, D-3 needs a supplied original
+  for each, and reseller option A re-keys a managed subscriber's invoices and
+  wallet lanes to the reseller account with one `service_ref` per document.
 - ST-4: import cost: the command digest binds the manifest by its fingerprint (not its
   body) and the fingerprint/analysis are cached per manifest object, so
   `import_opening_account_v2` validation no longer scales with manifest size

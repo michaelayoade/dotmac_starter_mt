@@ -147,6 +147,7 @@ from dotmac_billing.opening_commands import (
     ReverseOpeningAccountImportV1,
 )
 from dotmac_billing.opening_contracts import (
+    OpeningEvidenceError,
     OpeningManifestV1,
     OpeningPreviewRequestV1,
     OpeningVerificationUnavailable,
@@ -192,6 +193,7 @@ from dotmac_billing.opening_receivable_validation import (
     _opening_replay_identity,
     opening_account_command_digest_v2,
     opening_account_import_blockers_v2,
+    require_hold_list_covers_manifest,
     opening_manifest_fingerprint_v2,
     opening_withholding_component_identity,
     verify_opening_account_import_v2,
@@ -6516,6 +6518,16 @@ def seal_opening_window(
                 "opening_hold_list_invalid",
                 "held partitions must come from the frozen manifest population",
             )
+        if window.manifest_version == 2:
+            try:
+                require_hold_list_covers_manifest(
+                    window.manifest, command.held_account_ids
+                )
+            except OpeningEvidenceError as exc:
+                raise BillingRuleViolation(
+                    "opening_hold_list_invalid",
+                    "sealed hold list must cover every held-marked partition once",
+                ) from exc
         expected = positive - held
         if {item.billing_account_id for item in actual} != expected or len(
             actual
